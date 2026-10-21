@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.opsweave.dev/log-event.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "streamId",
+    "streamEpoch",
+    "sequence",
+    "observedAt",
+    "nodeId",
+    "instanceId",
+    "channel",
+    "level",
+    "message",
+    "truncated"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "streamId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "streamEpoch": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "occurredAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nodeId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "instanceId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "channel": {
+      "enum": [
+        "stdout",
+        "stderr",
+        "runtime"
+      ]
+    },
+    "level": {
+      "enum": [
+        "TRACE",
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR",
+        "UNKNOWN"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

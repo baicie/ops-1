@@ -1,0 +1,15 @@
+{
+  "version": "1",
+  "assets": [
+    {
+      "path": "frontend/remoteEntry.js",
+      "size": 4096,
+      "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "path": "frontend/assets/app-7df3.js",
+      "size": 8192,
+      "sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ]
+}

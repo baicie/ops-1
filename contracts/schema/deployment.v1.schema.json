@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.opsweave.dev/deployment.v1.schema.json",
+  "title": "Plugin Deployment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "deploymentId",
+    "pluginId",
+    "pluginVersion",
+    "desiredReplicas",
+    "generation",
+    "placement",
+    "resourceLimits"
+  ],
+  "properties": {
+    "deploymentId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "pluginId": {
+      "type": "string",
+      "minLength": 3
+    },
+    "pluginVersion": {
+      "type": "string",
+      "minLength": 5
+    },
+    "desiredReplicas": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeSelector",
+        "maxInstancesPerNode"
+      ],
+      "properties": {
+        "nodeSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "maxInstancesPerNode": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      }
+    },
+    "resourceLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuMillis",
+        "memoryMiB"
+      ],
+      "properties": {
+        "cpuMillis": {
+          "type": "integer",
+          "minimum": 100
+        },
+        "memoryMiB": {
+          "type": "integer",
+          "minimum": 64
+        }
+      }
+    }
+  }
+}

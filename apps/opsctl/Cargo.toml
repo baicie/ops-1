@@ -1,0 +1,22 @@
+[package]
+name = "opsweave-opsctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opsctl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+hex.workspace = true
+opsweave-bundle = { path = "../../crates/bundle" }
+opsweave-contracts = { path = "../../crates/contracts" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true

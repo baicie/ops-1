@@ -1,0 +1,32 @@
+# Local dependency plane for OpsWeave 0.0.1.
+# The Kernel and Node runtimes are host processes in development so their logs
+# and Docker sockets are explicit; production Node deployment uses systemd.
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: opsweave
+      POSTGRES_USER: opsweave
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-only}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - opsweave-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opsweave -d opsweave"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5001:5000"
+    volumes:
+      - opsweave-registry:/var/lib/registry
+
+volumes:
+  opsweave-pg:
+  opsweave-registry:

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.1",
+  "id": "dev.opsweave.hello",
+  "version": "0.0.1",
+  "publisher": "trusted-team",
+  "compatibility": { "kernelApiMajor": 1, "webSdkMajor": 1 },
+  "artifactDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "frontend": {
+    "remoteEntry": "frontend/remoteEntry.js",
+    "remoteEntryDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "assetIndex": "frontend/asset-index.json",
+    "assetIndexDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "contributions": [
+      { "kind": "route.page.v1", "id": "hello-page", "path": "/ext/trusted-team/hello" },
+      { "kind": "navigation.item.v1", "id": "hello-nav", "path": "/ext/trusted-team/hello" },
+      { "kind": "settings.section.v1", "id": "hello-settings", "path": "/ext/trusted-team/hello/settings" }
+    ]
+  },
+  "backend": {
+    "runtime": "oci",
+    "imageRef": "localhost:5001/opsweave/hello-ts@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "protocol": { "name": "http-json", "version": "1", "containerPort": 8080 },
+    "health": {
+      "readinessPath": "/_opsweave/health/ready",
+      "livenessPath": "/_opsweave/health/live",
+      "startupPath": "/_opsweave/health/startup"
+    },
+    "apiPrefix": "/api/hello"
+  },
+  "provides": [{ "name": "sample.hello.v1", "major": 1 }],
+  "requires": [],
+  "permissions": ["sample.hello.read", "sample.hello.echo"],
+  "resources": { "cpuMillis": 500, "memoryMiB": 128 }
+}

@@ -1,0 +1,4 @@
+packages:
+  - "apps/platform-web"
+  - "plugins/hello-ops/web"
+  - "tests/ui"

@@ -1,0 +1,117 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Platform Kernel API (proposed)
+  version: 0.0.1-draft
+  description: Design-only subset, MUST be revalidated against running system.
+servers:
+  - url: /api/v1
+security:
+  - cookieSession: []
+paths:
+  /health:
+    get:
+      summary: Authorized overview of platform health
+      responses:
+        '200': {description: Health summary}
+        '401': {description: Not authenticated}
+  /plugins:
+    get:
+      summary: Installed trusted plugins
+      responses:
+        '200': {description: Plugin list}
+        '403': {description: Forbidden}
+  /plugins/packages:
+    post:
+      summary: Upload and verify signed plugin package (staging only)
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 8, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '202': {description: Verification accepted, not activated}
+        '400': {description: Invalid archive or schema}
+        '403': {description: Untrusted publisher or permission denied}
+        '409': {description: Digest/version conflict}
+  /plugins/{pluginId}/activations:
+    post:
+      summary: Activate staged plugin version after readiness and policy checks
+      parameters:
+        - {$ref: '#/components/parameters/pluginId'}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 8}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, expectedRevision]
+              properties:
+                version: {type: string}
+                expectedRevision: {type: integer, minimum: 0}
+      responses:
+        '202': {description: Activation workflow accepted, not immediately successful}
+        '403': {description: Forbidden}
+        '409': {description: Incompatible revision or dependency}
+  /nodes:
+    get:
+      summary: Authorized node list
+      responses:
+        '200': {description: Nodes with observedAt and status}
+        '403': {description: Forbidden}
+  /nodes/{nodeId}:
+    get:
+      summary: One node detail
+      parameters:
+        - {$ref: '#/components/parameters/nodeId'}
+      responses:
+        '200': {description: Node observation including stale status}
+        '404': {description: Not found in caller scope}
+  /instances/{instanceId}/logs/live:
+    get:
+      summary: SSE tail of one authorized instance
+      parameters:
+        - {$ref: '#/components/parameters/instanceId'}
+        - name: cursor
+          in: query
+          required: false
+          schema: {type: string, maxLength: 1024}
+      responses:
+        '200':
+          description: Event stream with log/status/gap/heartbeat events
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '403': {description: Not authorized to read log stream}
+        '410': {description: Cursor expired; client must acknowledge gap}
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: opsweave_session
+  parameters:
+    pluginId:
+      name: pluginId
+      in: path
+      required: true
+      schema: {type: string, minLength: 3}
+    nodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    instanceId:
+      name: instanceId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}

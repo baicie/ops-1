@@ -1,0 +1,24 @@
+[Unit]
+Description=OpsWeave Node Runtime (Rootless Docker reference adapter)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opsweave-node
+Group=opsweave-node
+EnvironmentFile=/etc/opsweave/node.env
+ExecStart=/opt/opsweave/bin/opsweave-node
+Restart=on-failure
+RestartSec=3
+# Rootless Docker socket for this dedicated account; never the system socket.
+Environment=OPSWEAVE_DOCKER_HOST=unix:///run/user/%U/docker.sock
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/opsweave-node /var/log/opsweave
+StandardOutput=append:/var/log/opsweave/node.log
+StandardError=append:/var/log/opsweave/node.log
+
+[Install]
+WantedBy=multi-user.target

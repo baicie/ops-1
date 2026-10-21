@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.opsweave.dev/plugin-manifest.v1.schema.json",
+  "title": "OpsWeave Plugin Manifest v1.1 (language-agnostic OCI runtime)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "version",
+    "publisher",
+    "compatibility",
+    "artifactDigest",
+    "frontend",
+    "backend",
+    "provides",
+    "requires",
+    "permissions",
+    "resources"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.-]{2,100}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 96
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kernelApiMajor",
+        "webSdkMajor"
+      ],
+      "properties": {
+        "kernelApiMajor": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "webSdkMajor": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "artifactDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "frontend": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "remoteEntry",
+        "remoteEntryDigest",
+        "assetIndex",
+        "assetIndexDigest",
+        "contributions"
+      ],
+      "properties": {
+        "remoteEntry": {
+          "type": "string",
+          "pattern": "^frontend/[A-Za-z0-9_./-]+\\.js$"
+        },
+        "remoteEntryDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "assetIndex": {
+          "type": "string",
+          "const": "frontend/asset-index.json"
+        },
+        "assetIndexDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "contributions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id",
+              "path"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "route.page.v1",
+                  "navigation.item.v1",
+                  "settings.section.v1"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^/(?:[A-Za-z0-9_./:-]+)?$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "backend": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "runtime",
+        "imageRef",
+        "protocol",
+        "health",
+        "apiPrefix"
+      ],
+      "properties": {
+        "runtime": {
+          "const": "oci"
+        },
+        "imageRef": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._:/-]+/[a-zA-Z0-9._/-]+@sha256:[a-f0-9]{64}$"
+        },
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version",
+            "containerPort"
+          ],
+          "properties": {
+            "name": {
+              "const": "http-json"
+            },
+            "version": {
+              "const": "1"
+            },
+            "containerPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        "health": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "readinessPath",
+            "livenessPath"
+          ],
+          "properties": {
+            "readinessPath": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9_/-]+$"
+            },
+            "livenessPath": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9_/-]+$"
+            },
+            "startupPath": {
+              "type": "string",
+              "pattern": "^/[A-Za-z0-9_/-]+$"
+            }
+          }
+        },
+        "apiPrefix": {
+          "type": "string",
+          "pattern": "^/api/[a-z0-9/-]+$"
+        }
+      }
+    },
+    "provides": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/capabilityRef"
+      }
+    },
+    "requires": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/capabilityRef"
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9.:/-]{2,100}$"
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpuMillis",
+        "memoryMiB"
+      ],
+      "properties": {
+        "cpuMillis": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 16000
+        },
+        "memoryMiB": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 65536
+        }
+      }
+    }
+  },
+  "$defs": {
+    "capabilityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "major"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.]+$"
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  },
+  "description": "Manifest v1.1 is a design contract; signatures and OCI digest must be verified at installation. Either frontend or backend may be null; both null is semantically forbidden.",
+  "anyOf": [
+    {
+      "properties": {
+        "frontend": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "properties": {
+        "backend": {
+          "type": "object"
+        }
+      }
+    }
+  ]
+}

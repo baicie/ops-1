@@ -1,0 +1,7 @@
+{
+  "pluginId": "dev.opsweave.hello",
+  "version": "0.0.1",
+  "runtimeProtocol": "http-json-v1",
+  "capabilityDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "buildDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

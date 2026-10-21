@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.opsweave.dev/plugin-runtime-info.v1.schema.json",
+  "title": "Plugin Runtime Info v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pluginId",
+    "version",
+    "runtimeProtocol",
+    "capabilityDigest",
+    "buildDigest"
+  ],
+  "properties": {
+    "pluginId": {
+      "type": "string",
+      "minLength": 3
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "runtimeProtocol": {
+      "const": "http-json-v1"
+    },
+    "capabilityDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "buildDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

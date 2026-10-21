@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.opsweave.dev/node-observation.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "nodeId",
+    "generation",
+    "observedAt",
+    "status",
+    "resourceSnapshot",
+    "instances"
+  ],
+  "properties": {
+    "nodeId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "enum": [
+        "READY",
+        "DEGRADED",
+        "UNREACHABLE",
+        "UNKNOWN"
+      ]
+    },
+    "resourceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampledAt",
+        "cpuUtilization",
+        "memoryUsedBytes",
+        "memoryTotalBytes"
+      ],
+      "properties": {
+        "sampledAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "cpuUtilization": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "memoryUsedBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "memoryTotalBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "instances": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instanceId",
+          "deploymentId",
+          "state",
+          "observedAt"
+        ],
+        "properties": {
+          "instanceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deploymentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "enum": [
+              "STARTING",
+              "READY",
+              "UNHEALTHY",
+              "UNREACHABLE",
+              "STOPPED",
+              "UNKNOWN"
+            ]
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

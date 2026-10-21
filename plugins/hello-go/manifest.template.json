@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.1",
+  "id": "dev.opsweave.hello-go",
+  "version": "0.0.1",
+  "publisher": "trusted-team",
+  "compatibility": { "kernelApiMajor": 1, "webSdkMajor": 1 },
+  "artifactDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "frontend": null,
+  "backend": {
+    "runtime": "oci",
+    "imageRef": "localhost:5001/opsweave/hello-go@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "protocol": { "name": "http-json", "version": "1", "containerPort": 8080 },
+    "health": {
+      "readinessPath": "/_opsweave/health/ready",
+      "livenessPath": "/_opsweave/health/live",
+      "startupPath": "/_opsweave/health/startup"
+    },
+    "apiPrefix": "/api/hello"
+  },
+  "provides": [{ "name": "sample.hello.go.v1", "major": 1 }],
+  "requires": [],
+  "permissions": ["sample.hello.read"],
+  "resources": { "cpuMillis": 300, "memoryMiB": 64 }
+}

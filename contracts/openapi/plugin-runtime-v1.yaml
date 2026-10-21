@@ -1,0 +1,61 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Backend Plugin Runtime v1
+  version: 1.0.0-draft
+  description: >-
+    Language-neutral contract. Internal service endpoints behind Node Proxy only.
+    Conformance tests MUST verify signed workload context and external Gateway isolation.
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /_opsweave/runtime/v1/info:
+    get:
+      operationId: getRuntimeInfo
+      summary: Runtime declaration for attestation against signed Manifest
+      responses:
+        '200':
+          description: Runtime instance info
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RuntimeInfo'}
+        '503': {description: Startup incomplete}
+  /_opsweave/health/live:
+    get:
+      operationId: checkLiveness
+      responses:
+        '200': {description: Local process can continue running}
+        '503': {description: Process cannot continue}
+  /_opsweave/health/ready:
+    get:
+      operationId: checkReadiness
+      responses:
+        '200': {description: Accepting new requests}
+        '503': {description: Not accepting new requests}
+  /_opsweave/health/startup:
+    get:
+      operationId: checkStartup
+      description: Optional; if declared, must use the semantics below
+      responses:
+        '200': {description: Startup complete}
+        '503': {description: Startup incomplete}
+components:
+  schemas:
+    RuntimeInfo:
+      type: object
+      additionalProperties: false
+      required: [pluginId, version, runtimeProtocol, capabilityDigest, buildDigest]
+      properties:
+        pluginId: {type: string, minLength: 3}
+        version: {type: string, pattern: '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$'}
+        runtimeProtocol: {type: string, const: http-json-v1}
+        capabilityDigest: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+        buildDigest: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, retryable]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        requestId: {type: string}
+        retryable: {type: boolean}
