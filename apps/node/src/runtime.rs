@@ -384,6 +384,7 @@ async fn cleanup_managed(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> R
                 None
             }
         };
+    let lifecycle_ready = lifecycle_guard.is_some();
     let runtimes: Vec<InstanceRuntime> = shared.runtimes.read().await.values().cloned().collect();
     for runtime in runtimes {
         let name = container_name(node_id, runtime.workload.instance_id);
@@ -410,6 +411,12 @@ async fn cleanup_managed(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> R
             .map(|names| names.len())
             .unwrap_or(usize::MAX);
         if remaining == 0 {
+            if !lifecycle_ready {
+                drop(lifecycle_guard);
+                return Err(
+                    "QUARANTINE_CLEANUP_FAILED: lifecycle lock deadline expired".to_string()
+                );
+            }
             drop(lifecycle_guard);
             return Ok(());
         }
