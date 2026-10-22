@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proves that a long-running Integration instance refreshes an expired workload
-# token instead of relying on a process restart. CI configures a 2 second TTL.
+# token instead of relying on a process restart. CI configures a 5 second TTL.
 set -euo pipefail
 URL="${OPSWEAVE_URL:-http://127.0.0.1:18181}"
 FIXTURE="${OPSWEAVE_DATA_FIXTURE:-http://127.0.0.1:18090/hosts.json}"
@@ -25,10 +25,32 @@ SPEC_ID="$(printf '%s' "$SPEC" | json "d['specId']")"
 
 # CI configures OPSWEAVE_WORKLOAD_TOKEN_SECONDS=2. Wait beyond that TTL so the
 # token injected at container creation is definitely expired.
-sleep "${OPSWEAVE_TOKEN_WAIT_SECONDS:-4}"
+sleep "${OPSWEAVE_TOKEN_WAIT_SECONDS:-6}"
 RUN="$(curl -fsS "${AUTH[@]}" -X POST -H 'Idempotency-Key: token-refresh-run-0001' \
   "$INT/ingestion-specs/$SPEC_ID/runs")"
 STATUS="$(printf '%s' "$RUN" | json "d['status']")"
 [ "$STATUS" = "SUCCEEDED" ] || bad "run after token expiry status=$STATUS: $RUN"
 ok "expired workload token refreshed; run status=$STATUS"
+
+if [ "${OPSWEAVE_TEST_NODE_REVOCATION:-0}" = "1" ]; then
+  echo "== revoke Node and reject old workload identity"
+  CONTAINER_ID="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-integration/ {print $1; exit}')"
+  [ -n "$CONTAINER_ID" ] || bad "data-integration container not found"
+  ENV_TOKENS="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER_ID" | sed -n 's/^OPSWEAVE_CAPABILITY_TOKENS=//p')"
+  [ -n "$ENV_TOKENS" ] || bad "integration capability tokens not found in container env"
+  OLD_TOKEN="$(printf '%s' "$ENV_TOKENS" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data.catalog.v1"])')"
+  FRESH_RESPONSE="$(curl -fsS -X POST -H "Authorization: Bearer $OLD_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
+  FRESH_TOKEN="$(printf '%s' "$FRESH_RESPONSE" | json "d['token']")"
+  DETAIL="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/plugins/opsweave.data-integration")"
+  NODE_ID="$(printf '%s' "$DETAIL" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(i["nodeId"] for dep in d["deployments"] for i in dep["instances"] if i["state"]=="READY"))')"
+  [ -n "$NODE_ID" ] || bad "integration instance node not found"
+  curl -fsS "${AUTH[@]}" -X DELETE "$URL/api/v1/nodes/$NODE_ID" >/dev/null
+  REFRESH_AFTER="$(curl -sS -o /tmp/token-revoked-refresh.json -w '%{http_code}' -X POST -H "Authorization: Bearer $FRESH_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
+  [ "$REFRESH_AFTER" = "403" ] || bad "refresh after node revoke returned $REFRESH_AFTER"
+  grep -q 'WORKLOAD_IDENTITY_REVOKED' /tmp/token-revoked-refresh.json || bad "refresh after revoke did not return WORKLOAD_IDENTITY_REVOKED"
+  INVOKE_AFTER="$(curl -sS -o /tmp/token-revoked-invoke.json -w '%{http_code}' -X GET -H "Authorization: Bearer $FRESH_TOKEN" "$URL/api/v1/capabilities/data.catalog.v1/1/api/data-catalog/datasets")"
+  [ "$INVOKE_AFTER" = "403" ] || bad "invoke after node revoke returned $INVOKE_AFTER"
+  grep -q 'WORKLOAD_IDENTITY_REVOKED' /tmp/token-revoked-invoke.json || bad "invoke after revoke did not return WORKLOAD_IDENTITY_REVOKED"
+  ok "refresh and old token call rejected after Node revocation"
+fi
 echo "Data Token Refresh: PASS"

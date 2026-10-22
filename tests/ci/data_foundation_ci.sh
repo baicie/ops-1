@@ -48,7 +48,7 @@ env \
   OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$(cat keys/publisher.pub)" \
   OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
   OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost,::1 \
-  OPSWEAVE_WORKLOAD_TOKEN_SECONDS=2 \
+  OPSWEAVE_WORKLOAD_TOKEN_SECONDS=5 \
   OPSWEAVE_WORKLOAD_TOKEN_REFRESH_GRACE_SECONDS=300 \
   OPSWEAVE_PLUGIN_DB_HOST=172.17.0.1 \
   OPSWEAVE_PLUGIN_KERNEL_URL=http://172.17.0.1:18181 \
@@ -92,8 +92,8 @@ echo "== real OCI Golden Path"
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_foundation.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_authz.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_refresh.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke"
   OPSWEAVE_URL="$OPSWEAVE_URL" pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts
 fi
+OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=1 tests/acceptance/data_token_refresh.sh
