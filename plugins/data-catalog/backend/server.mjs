@@ -66,7 +66,7 @@ function verifyContext(token) {
 function identity(req) {
   const context = verifyContext(req.headers['x-opsweave-caller-context']);
   if (context) return { kind: 'workload', pluginId: context.pluginId, scope: context.scope || [], claims: context };
-  if (req.headers['x-opsweave-user-role']) return { kind: 'user', role: req.headers['x-opsweave-user-role'], scope: ['dataset:read', 'dataset:write'] };
+  if (req.headers['x-opsweave-user-role']) { const role = String(req.headers['x-opsweave-user-role']); return { kind: 'user', role, scope: role === 'viewer' ? ['dataset:read'] : ['dataset:read', 'dataset:write'] }; }
   return null;
 }
 function hasScope(who, scope) { return who && (who.kind === 'user' || who.scope.includes(scope)); }
@@ -295,7 +295,7 @@ async function handle(req, res) {
     if (tail === 'records' && req.method === 'POST') {
       if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
       const body = await readJson(req, 8 * 1024 * 1024);
-      if (!Number.isInteger(body.schemaRevision) || !body.sourceBatchKey || !Array.isArray(body.records) || body.records.length === 0 || body.records.length > 1000) return fail(res, 400, 'INVALID_REQUEST', 'invalid records batch', requestId);
+      if (!Number.isInteger(body.schemaRevision) || body.schemaRevision < 1 || typeof body.sourceBatchKey !== 'string' || !/^[A-Za-z0-9._:-]{16,128}$/.test(body.sourceBatchKey) || !Array.isArray(body.records) || body.records.length === 0 || body.records.length > 1000) return fail(res, 400, 'INVALID_REQUEST', 'invalid records batch', requestId);
       const schema = await pool.query('SELECT * FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status=\'PUBLISHED\'', [datasetId, body.schemaRevision]);
       if (!schema.rows[0]) return fail(res, 409, 'SCHEMA_NOT_PUBLISHED', 'target schema revision is not published', requestId);
       const requestDigest = digest({ schemaRevision: body.schemaRevision, sourceBatchKey: body.sourceBatchKey, source: body.source, records: body.records });

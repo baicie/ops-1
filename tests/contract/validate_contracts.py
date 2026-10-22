@@ -206,6 +206,34 @@ def main() -> int:
             if len(operation_ids) != len(set(operation_ids)):
                 FAILURES.append(f"{filename}: duplicate operationId")
 
+            def check_refs(value):
+                if isinstance(value, dict):
+                    for key, child in value.items():
+                        if key == "$ref" and isinstance(child, str) and child.startswith("../schema/"):
+                            target, _, fragment = child.partition("#")
+                            schema_path = (CONTRACTS / "openapi" / target).resolve()
+                            try:
+                                target_schema = json.loads(schema_path.read_text())
+                            except Exception as exc:
+                                FAILURES.append(f"{filename}: unresolved $ref {child}: {exc}")
+                                continue
+                            pointer = fragment.lstrip("/").split("/") if fragment else []
+                            node = target_schema
+                            for segment in pointer:
+                                if not segment:
+                                    continue
+                                if isinstance(node, dict) and segment in node:
+                                    node = node[segment]
+                                else:
+                                    FAILURES.append(f"{filename}: unresolved $ref {child}")
+                                    break
+                        else:
+                            check_refs(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        check_refs(child)
+            check_refs(document)
+
     storage_schema = schemas.get("plugin-storage.v1.schema.json")
     if storage_schema is None:
         FAILURES.append("plugin-storage.v1.schema.json: missing storage ownership contract")

@@ -108,7 +108,8 @@ pub async fn provision_binding(state: &AppState, plugin_id: &str) -> AppResult<S
         tracing::error!(plugin = %plugin_id, error = %error, "create plugin storage role failed");
         AppError::conflict("STORAGE_BIND_FAILED", "could not create plugin storage role")
     })?;
-    let create_schema = format!("CREATE SCHEMA \"{schema_name}\" AUTHORIZATION \"{role_name}\"");
+    let create_schema =
+        format!("CREATE SCHEMA IF NOT EXISTS \"{schema_name}\" AUTHORIZATION \"{role_name}\"");
     sqlx::query(&create_schema)
         .execute(&state.db)
         .await
