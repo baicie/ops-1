@@ -6,6 +6,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 export OPSWEAVE_URL="http://127.0.0.1:18181"
+export OPSWEAVE_DATA_CATALOG_SELECTOR="zone=node-a"
+export OPSWEAVE_DATA_INTEGRATION_SELECTOR="zone=node-b"
 PIDS=()
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
@@ -62,7 +64,7 @@ start_node() {
     OPSWEAVE_KERNEL_URL="$OPSWEAVE_URL" \
     OPSWEAVE_ENROLLMENT_TOKEN="$token" \
     OPSWEAVE_NODE_NAME="$name" \
-    OPSWEAVE_NODE_LABELS='role=node' \
+    OPSWEAVE_NODE_LABELS="role=node,zone=$name" \
     OPSWEAVE_NODE_DATA_BIND="127.0.0.1:$port" \
     OPSWEAVE_NODE_DATA_ENDPOINT="http://127.0.0.1:$port" \
     OPSWEAVE_NODE_STATE_DIR="$ROOT/data-ci/$name" \
