@@ -155,7 +155,7 @@ pub fn build(state: AppState) -> Router {
         )
         .route(
             "/api/v1/plugin-storage/{plugin_id}/migrations",
-            get(storage::list_migrations),
+            get(storage::list_migrations).post(storage::apply_migration),
         )
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(

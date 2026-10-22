@@ -129,6 +129,76 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /plugin-storage/{pluginId}/migrations:
+    get:
+      operationId: listPluginMigrations
+      summary: List checksum-gated plugin migrations
+      parameters:
+        - { name: pluginId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Migration records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [migrationId, version, checksum, phase, status]
+                  properties:
+                    migrationId: { type: string }
+                    version: { type: string }
+                    checksum: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+                    phase: { enum: [EXPAND, MIGRATE, CONTRACT] }
+                    status: { enum: [PENDING, APPLIED, FAILED, BLOCKED] }
+                    appliedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: applyPluginMigration
+      summary: Apply a checksum-gated migration under the plugin database role
+      description: |
+        The SQL is executed with `SET LOCAL ROLE` to the plugin's least-privilege
+        role and is rolled back on failure. CONTRACT is blocked while plugin
+        instances are still desired. This is not a general arbitrary-SQL endpoint
+        for unprivileged users.
+      parameters:
+        - { name: pluginId, in: path, required: true, schema: { type: string } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, migrationId, phase, checksum, sql]
+              properties:
+                version: { type: string }
+                migrationId: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{2,64}$' }
+                phase: { enum: [EXPAND, MIGRATE, CONTRACT] }
+                checksum: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+                sql: { type: string, minLength: 1, maxLength: 65536 }
+      responses:
+        '200':
+          description: Applied or replayed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [pluginId, migrationId, status, checksum, replay]
+                properties:
+                  pluginId: { type: string }
+                  migrationId: { type: string }
+                  status: { enum: [APPLIED, FAILED, BLOCKED] }
+                  checksum: { type: string }
+                  replay: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /plugin-storage/{pluginId}:
     get:
       operationId: getPluginStorage

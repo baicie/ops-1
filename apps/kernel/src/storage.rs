@@ -226,10 +226,147 @@ pub async fn list_migrations(
     Path(plugin_id): Path<String>,
 ) -> AppResult<Json<Vec<MigrationView>>> {
     let rows = sqlx::query_as::<_, MigrationView>(
-        "SELECT migration_id,version,checksum,phase,status,applied_at FROM kernel.plugin_migrations WHERE plugin_id=$1 ORDER BY created_at, migration_id",
+        "SELECT migration_id,version,checksum,phase,status,applied_at FROM kernel.plugin_migrations WHERE plugin_id=$1 ORDER BY migration_id",
     )
     .bind(&plugin_id)
     .fetch_all(&state.db)
     .await?;
     Ok(Json(rows))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyMigrationRequest {
+    pub version: String,
+    pub migration_id: String,
+    pub phase: String,
+    pub checksum: String,
+    pub sql: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyMigrationResponse {
+    pub plugin_id: String,
+    pub migration_id: String,
+    pub status: String,
+    pub checksum: String,
+    pub replay: bool,
+}
+
+pub async fn apply_migration(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(plugin_id): Path<String>,
+    Json(payload): Json<ApplyMigrationRequest>,
+) -> AppResult<Json<ApplyMigrationResponse>> {
+    auth.require_admin()?;
+    if !matches!(payload.phase.as_str(), "EXPAND" | "MIGRATE" | "CONTRACT") {
+        return Err(AppError::bad_request("invalid migration phase"));
+    }
+    if payload.phase == "CONTRACT" {
+        let active: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id=$1 AND i.desired_action='START'",
+        )
+        .bind(&plugin_id)
+        .fetch_one(&state.db)
+        .await?;
+        if active > 0 {
+            return Err(AppError::conflict(
+                "MIGRATION_CONTRACT_BLOCKED",
+                "CONTRACT migration requires all plugin instances to have drained",
+            ));
+        }
+    }
+    if payload.migration_id.len() < 3 || payload.migration_id.len() > 64 {
+        return Err(AppError::bad_request("invalid migration id"));
+    }
+    let actual = opsweave_bundle::sha256_digest(payload.sql.as_bytes());
+    if actual != payload.checksum {
+        return Err(AppError::conflict(
+            "MIGRATION_CHECKSUM_MISMATCH",
+            "migration checksum does not match SQL bytes",
+        ));
+    }
+    let binding = sqlx::query_as::<_, StorageBindingRow>(
+        "SELECT plugin_id,schema_name,role_name,credential_ref,state,migration_plan_digest,created_at,updated_at FROM kernel.plugin_storage_bindings WHERE plugin_id=$1 AND state='READY'",
+    )
+    .bind(&plugin_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::conflict("STORAGE_NOT_BOUND", "plugin storage binding is not ready"))?;
+    let existing: Option<(String, String)> = sqlx::query_as(
+        "SELECT checksum,status FROM kernel.plugin_migrations WHERE plugin_id=$1 AND version=$2 AND migration_id=$3",
+    )
+    .bind(&plugin_id)
+    .bind(&payload.version)
+    .bind(&payload.migration_id)
+    .fetch_optional(&state.db)
+    .await?;
+    if let Some((checksum, status)) = existing {
+        if checksum != payload.checksum {
+            return Err(AppError::conflict(
+                "MIGRATION_CHECKSUM_MISMATCH",
+                "an applied migration has a different checksum",
+            ));
+        }
+        if status == "APPLIED" {
+            return Ok(Json(ApplyMigrationResponse {
+                plugin_id,
+                migration_id: payload.migration_id,
+                status,
+                checksum,
+                replay: true,
+            }));
+        }
+        return Err(AppError::conflict(
+            "MIGRATION_BLOCKED",
+            format!("migration is already in status {status}"),
+        ));
+    }
+
+    let mut tx = state.db.begin().await?;
+    let set_role = format!("SET LOCAL ROLE \"{}\"", binding.role_name);
+    let set_path = format!("SET LOCAL search_path = \"{}\"", binding.schema_name);
+    sqlx::query(&set_role).execute(&mut *tx).await?;
+    sqlx::query(&set_path).execute(&mut *tx).await?;
+    let execution = sqlx::query(&payload.sql).execute(&mut *tx).await;
+    if let Err(error) = execution {
+        tx.rollback().await.ok();
+        let _ = sqlx::query(
+            "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,details) VALUES ($1,$2,$3,$4,$5,'FAILED',$6,NULL,$7) ON CONFLICT (plugin_id,version,migration_id) DO UPDATE SET status='FAILED', details=EXCLUDED.details",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(&plugin_id)
+        .bind(&payload.version)
+        .bind(&payload.migration_id)
+        .bind(&payload.checksum)
+        .bind(&payload.phase)
+        .bind(serde_json::json!({"error": error.to_string()}))
+        .execute(&state.db)
+        .await;
+        return Err(AppError::conflict(
+            "MIGRATION_FAILED",
+            "migration failed and was rolled back; manual recovery is required",
+        ));
+    }
+    tx.commit().await?;
+    sqlx::query(
+        "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,applied_at) VALUES ($1,$2,$3,$4,$5,'APPLIED',$6,NULL,now())",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(&plugin_id)
+    .bind(&payload.version)
+    .bind(&payload.migration_id)
+    .bind(&payload.checksum)
+    .bind(&payload.phase)
+    .execute(&state.db)
+    .await?;
+    Ok(Json(ApplyMigrationResponse {
+        plugin_id,
+        migration_id: payload.migration_id,
+        status: "APPLIED".into(),
+        checksum: payload.checksum,
+        replay: false,
+    }))
 }

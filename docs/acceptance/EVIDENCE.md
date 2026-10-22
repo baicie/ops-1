@@ -263,6 +263,6 @@ This section records only what was actually executed during the 0.0.2 implementa
 | Data OCI image build/deploy | NOT_RUN | Docker daemon was unavailable during this pass; bundles were assembled in contract-only mode with placeholder image refs. |
 | Real two-plugin OCI cross-node Gateway path | NOT_RUN | Requires the unavailable Docker daemon and two Node runtime containers. |
 | Catalog/Integration browser E2E | NOT_RUN | UIs typecheck/build but were not run in a browser with active data plugins. |
-| Kernel migration execution gate | PARTIAL / NOT_RUN | `plugin_migrations`/storage binding and schema ownership exist; arbitrary plugin migration execution is deliberately not exposed. |
+| Kernel migration gate | PASS (local) | Checksum-matched EXPAND migration applied under a least-privilege plugin database role; replay returned the original record; a second list encoded the APPLIED record. CONTRACT-during-live-instances and changed-checksum rejection are implemented but not all tested. |
 
 The local capability harness is not a substitute for the required real OCI Golden Path. No production claim is made.
