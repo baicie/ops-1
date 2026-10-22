@@ -25,7 +25,7 @@ if [ ! -f keys/publisher.key ]; then
 fi
 PUBLIC_KEY="$(cat keys/publisher.pub)"
 
-if ! docker ps --format '{{.Names}}' | grep -qx 'opsweave-registry'; then
+if [ "${OPSWEAVE_SKIP_REGISTRY:-0}" != "1" ] && ! docker ps --format '{{.Names}}' | grep -qx 'opsweave-registry'; then
   docker rm -f opsweave-registry >/dev/null 2>&1 || true
   docker run -d --name opsweave-registry -p 127.0.0.1:5001:5000 registry:2 >/dev/null
   sleep 1

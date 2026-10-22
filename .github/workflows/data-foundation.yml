@@ -78,18 +78,19 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y maven
       - run: pnpm install --frozen-lockfile
       - run: |
-          docker run -d --name opsweave-legacy-registry -p 5001:5000 registry:2
+          docker run -d --name opsweave-legacy-registry -p 5002:5000 registry:2
           cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
           mkdir -p keys
           ./target/debug/opsctl keygen --out-dir keys >/dev/null
           make web
-          scripts/build-plugins.sh
+          OPSWEAVE_REGISTRY=localhost:5002 scripts/build-plugins.sh
       - name: 0.0.1 E2E
         env:
           PGHOST: 127.0.0.1
           PGUSER: postgres
           PGPASSWORD: postgres
           OPSWEAVE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
+          OPSWEAVE_SKIP_REGISTRY: '1'
         run: |
           RESET=1 BUILD=0 scripts/demo_up.sh
           tests/acceptance/e2e_platform.sh
