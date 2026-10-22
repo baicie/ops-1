@@ -42,3 +42,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
       - run: RUN_BROWSER_SMOKE=1 tests/ci/data_foundation_ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-foundation-screenshots
+          path: artifacts/ui/data-*.png
+          if-no-files-found: warn
