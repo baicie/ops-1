@@ -29,7 +29,7 @@ psql "$DB" -qAt -c "DROP TABLE IF EXISTS \"$SCHEMA\".concurrency_probe; DROP SEQ
 psql "$DB" -qAt -c "SET ROLE \"$ROLE\"; CREATE SEQUENCE \"$SCHEMA\".concurrency_gate_seq START 1;" >/dev/null
 psql "$DB" -qAt -c "CREATE OR REPLACE FUNCTION test_delay_failed_migration() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN IF NEW.status='FAILED' THEN PERFORM pg_sleep(4); END IF; RETURN NEW; END \$\$; DROP TRIGGER IF EXISTS test_delay_failed_migration ON kernel.plugin_migrations; CREATE TRIGGER test_delay_failed_migration BEFORE INSERT OR UPDATE ON kernel.plugin_migrations FOR EACH ROW EXECUTE FUNCTION test_delay_failed_migration();" >/dev/null
 
-SQL="CREATE TABLE concurrency_probe(id integer); SELECT CASE WHEN nextval('concurrency_gate_seq') <= 1 THEN 1/0 ELSE 1 END;"
+SQL="CREATE TABLE concurrency_probe(id integer); SELECT pg_sleep(1); SELECT CASE WHEN nextval('concurrency_gate_seq') <= 1 THEN 1/0 ELSE 1 END;"
 BODY="$(python3 - "$SQL" "$VERSION" "$MIGRATION" <<'PY'
 import hashlib,json,sys
 sql,version,mid=sys.argv[1:]
