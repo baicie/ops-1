@@ -41,7 +41,12 @@ printf '%s' "$BODY" > /tmp/migration-race-body.json
 # A acquires the advisory lock first and creates DDL, then sleeps.
 curl -sS -o /tmp/migration-race-a.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @/tmp/migration-race-body.json "$URL/api/v1/plugin-storage/$PLUGIN/migrations" > /tmp/migration-race-a.code &
 A_PID=$!
-sleep 1
+for _ in $(seq 1 50); do
+  ACTIVE="$(psql "$DB" -qAt -c "SELECT count(*) FROM pg_stat_activity WHERE state='active' AND query LIKE '%concurrency_probe%';")"
+  [ "$ACTIVE" -ge 1 ] && break
+  sleep 0.1
+done
+[ "${ACTIVE:-0}" -ge 1 ] || bad "A never acquired the migration path"
 # Remove the gate so B's otherwise-identical SQL succeeds; B waits on A's lock.
 psql "$DB" -qAt -c "SET ROLE \"$ROLE\"; DELETE FROM \"$SCHEMA\".concurrency_gate;" >/dev/null
 curl -sS -o /tmp/migration-race-b.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @/tmp/migration-race-body.json "$URL/api/v1/plugin-storage/$PLUGIN/migrations" > /tmp/migration-race-b.code &
