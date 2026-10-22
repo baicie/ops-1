@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 declare const __PLUGIN_VERSION__: string;
-type HostApi = { get(path: string): Promise<any>; post(path: string, body: unknown): Promise<any> };
+type HostApi = { get(path: string): Promise<any>; post(path: string, body: unknown, idempotencyKey?: string): Promise<any> };
 export type DataHost = { pluginId: string; version: string; activationRevision: number; api: HostApi };
 const css = `
 .dc { display:flex; flex-direction:column; gap:18px; }

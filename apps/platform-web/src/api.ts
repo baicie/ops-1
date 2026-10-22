@@ -94,9 +94,10 @@ export const api = {
   },
   gatewayGet: <T>(pluginId: string, path: string) =>
     request<T>(`/api/v1/gateway/${encodeURIComponent(pluginId)}${path}`),
-  gatewayPost: <T>(pluginId: string, path: string, body: unknown) =>
+  gatewayPost: <T>(pluginId: string, path: string, body: unknown, idempotencyKey?: string) =>
     request<T>(`/api/v1/gateway/${encodeURIComponent(pluginId)}${path}`, {
       method: 'POST',
       body: JSON.stringify(body),
+      headers: idempotencyKey ? { 'idempotency-key': idempotencyKey } : {},
     }),
 };

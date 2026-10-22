@@ -59,7 +59,7 @@ async function loadRemote(extension: Extension) {
     activationRevision: extension.activationRevision,
     api: {
       get: (path: string) => api.gatewayGet(extension.pluginId, path),
-      post: (path: string, body: unknown) => api.gatewayPost(extension.pluginId, path, body),
+      post: (path: string, body: unknown, idempotencyKey?: string) => api.gatewayPost(extension.pluginId, path, body, idempotencyKey),
     },
   };
   return module.register(host);

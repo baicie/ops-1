@@ -57,7 +57,7 @@ pub async fn get_binding(
     let row = sqlx::query_as::<_, StorageBindingRow>(
         "SELECT plugin_id,schema_name,role_name,credential_ref,state,migration_plan_digest,created_at,updated_at FROM kernel.plugin_storage_bindings WHERE plugin_id=$1",
     )
-    .bind(&plugin_id)
+    .bind(plugin_id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::not_found("plugin storage binding not found"))?;
@@ -70,15 +70,20 @@ pub async fn ensure_binding(
     Path(plugin_id): Path<String>,
 ) -> AppResult<(StatusCode, Json<StorageBindingView>)> {
     auth.require_admin()?;
-    let (schema_name, role_name) = safe_names(&plugin_id)?;
+    let view = provision_binding(&state, &plugin_id).await?;
+    Ok((StatusCode::CREATED, Json(view)))
+}
+
+pub async fn provision_binding(state: &AppState, plugin_id: &str) -> AppResult<StorageBindingView> {
+    let (schema_name, role_name) = safe_names(plugin_id)?;
     if let Some(existing) = sqlx::query_as::<_, StorageBindingRow>(
         "SELECT plugin_id,schema_name,role_name,credential_ref,state,migration_plan_digest,created_at,updated_at FROM kernel.plugin_storage_bindings WHERE plugin_id=$1",
     )
-    .bind(&plugin_id)
+    .bind(plugin_id)
     .fetch_optional(&state.db)
     .await?
     {
-        return Ok((StatusCode::OK, Json(existing.into())));
+        return Ok(existing.into());
     }
 
     let mut password_bytes = [0_u8; 32];
@@ -87,10 +92,19 @@ pub async fn ensure_binding(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let credential_ref = plugin_database_url(&state, &role_name, &password)?;
+    let credential_ref = plugin_database_url(state, &role_name, &password)?;
     let db_name = database_name(&state.config.database_url)?;
-    let create_role = format!("CREATE ROLE \"{role_name}\" LOGIN PASSWORD '{password}'");
-    sqlx::query(&create_role).execute(&state.db).await.map_err(|error| {
+    let role_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=$1)")
+            .bind(&role_name)
+            .fetch_one(&state.db)
+            .await?;
+    let role_statement = if role_exists {
+        format!("ALTER ROLE \"{role_name}\" LOGIN PASSWORD '{password}'")
+    } else {
+        format!("CREATE ROLE \"{role_name}\" LOGIN PASSWORD '{password}'")
+    };
+    sqlx::query(&role_statement).execute(&state.db).await.map_err(|error| {
         tracing::error!(plugin = %plugin_id, error = %error, "create plugin storage role failed");
         AppError::conflict("STORAGE_BIND_FAILED", "could not create plugin storage role")
     })?;
@@ -120,14 +134,14 @@ pub async fn ensure_binding(
         RETURNING plugin_id,schema_name,role_name,credential_ref,state,migration_plan_digest,created_at,updated_at
         "#,
     )
-    .bind(&plugin_id)
+    .bind(plugin_id)
     .bind(&schema_name)
     .bind(&role_name)
     .bind(&credential_ref)
     .fetch_one(&state.db)
     .await?;
     tracing::info!(plugin = %plugin_id, schema = %schema_name, "plugin storage binding provisioned");
-    Ok((StatusCode::CREATED, Json(row.into())))
+    Ok(row.into())
 }
 
 fn safe_names(plugin_id: &str) -> AppResult<(String, String)> {
@@ -192,4 +206,29 @@ mod tests {
         assert_eq!(role, "plugin_opsweave_data_catalog_role");
         assert!(safe_names("../bad").is_err());
     }
+}
+
+#[derive(Debug, serde::Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationView {
+    pub migration_id: String,
+    pub version: String,
+    pub checksum: String,
+    pub phase: String,
+    pub status: String,
+    pub applied_at: Option<chrono::DateTime<Utc>>,
+}
+
+pub async fn list_migrations(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(plugin_id): Path<String>,
+) -> AppResult<Json<Vec<MigrationView>>> {
+    let rows = sqlx::query_as::<_, MigrationView>(
+        "SELECT migration_id,version,checksum,phase,status,applied_at FROM kernel.plugin_migrations WHERE plugin_id=$1 ORDER BY created_at, migration_id",
+    )
+    .bind(&plugin_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows))
 }

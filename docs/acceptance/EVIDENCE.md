@@ -244,3 +244,25 @@ Screenshots: `artifacts/ui/` (six overview matrix images plus route/feature capt
 - Final UI evidence is regenerated after the final clean reset; `artifacts/ui/`.
 - `artifacts/ui/*.png`
 - Kernel and Node logs: `/tmp/opsweave-kernel.log`, `/tmp/opsweave-node-a.log`, `/tmp/opsweave-node-b.log`
+
+## 0.0.2 Data Foundation development evidence
+
+This section records only what was actually executed during the 0.0.2 implementation branch. It is not a production acceptance report.
+
+| Check | Result | Notes |
+|---|---|---|
+| Contract validation | PASS | `python3 tests/contract/validate_contracts.py`: 10 schemas and all generated bundles validate; data bundles include capability/storage schema/examples. |
+| Rust workspace | PASS (local) | 27 tests: 4 bundle + 3 contracts + 12 kernel + 8 node; Clippy `-D warnings` and `cargo fmt --check` pass. |
+| Catalog host-process PostgreSQL | PASS (local) | Dataset creation, schema revision 2 draft/publish, compatible diff and incompatible type/removal rejection (`SCHEMA_INCOMPATIBLE`). |
+| Catalog idempotency | PASS (local) | Same `sourceBatchKey` + same request returned the original receipt; changed content is rejected by the receipt digest check. |
+| Integration HTTP/JSON connector | PASS (local) | Connection test `OK`, four discovered fields, preview `readOnly=true`; preview left Catalog record count unchanged. |
+| SSRF negative | PASS (local) | Loopback source without opt-in returned HTTP 422 `SOURCE_SSRF_BLOCKED`. |
+| Kernel capability grant/resolve | PASS (local) | `data.catalog.v1` provider resolved; grant created; disable returned 409 `DEPENDENCY_BLOCKED` while Integration grant was active. |
+| Kernel capability invoke | PASS (local harness) | Signed workload token accepted; invocation routed through a local Node-proxy harness to the real Catalog service and returned an `ACCEPTED` receipt. |
+| Integration → real Kernel → Catalog | PASS (local harness) | Run `E2E` resolved through `/api/v1/capabilities/data.catalog.v1/1/...`, returned `SUCCEEDED`, `accepted=2`; replaying the same idempotency key returned the same run. |
+| Data OCI image build/deploy | NOT_RUN | Docker daemon was unavailable during this pass; bundles were assembled in contract-only mode with placeholder image refs. |
+| Real two-plugin OCI cross-node Gateway path | NOT_RUN | Requires the unavailable Docker daemon and two Node runtime containers. |
+| Catalog/Integration browser E2E | NOT_RUN | UIs typecheck/build but were not run in a browser with active data plugins. |
+| Kernel migration execution gate | PARTIAL / NOT_RUN | `plugin_migrations`/storage binding and schema ownership exist; arbitrary plugin migration execution is deliberately not exposed. |
+
+The local capability harness is not a substitute for the required real OCI Golden Path. No production claim is made.

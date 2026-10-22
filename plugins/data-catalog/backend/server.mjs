@@ -87,7 +87,7 @@ function validateFields(fields) {
   }
   return fields.slice().sort((a, b) => a.ordinal - b.ordinal);
 }
-function schemaDigest(fields) { return digest(validateFields(fields)); }
+function schemaDigest(fields) { return digest(validateFields(fields).slice().sort((a, b) => a.name.localeCompare(b.name))); }
 function compareSchemas(from, to) {
   const changes = [];
   const a = new Map(from.map((field) => [field.name, field]));

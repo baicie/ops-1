@@ -256,6 +256,9 @@ async fn create_deployment_inner(
             "backend-less plugins cannot be deployed to a node",
         ));
     }
+    if plugin_id.starts_with("opsweave.data-") {
+        crate::storage::provision_binding(state, plugin_id).await?;
+    }
     let resources = opsweave_contracts::ResourceRequirements {
         cpu_millis: payload.cpu_millis.unwrap_or(manifest.resources.cpu_millis),
         memory_mib: payload.memory_mib.unwrap_or(manifest.resources.memory_mib),

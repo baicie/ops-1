@@ -31,15 +31,21 @@ cp -R plugins/data-catalog/web/dist /tmp/data-catalog-web
 cp -R plugins/data-integration/web/dist /tmp/data-integration-web
 
 echo "== backend images"
-for name in data-catalog data-integration; do
-  cap="$(cap_digest "plugins/$name/manifest.template.json")"
-  build="$(sha256_file "plugins/$name/backend/server.mjs")"
-  base="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null || echo node:22-bookworm-slim)"
-  docker build --build-arg BASE_IMAGE="$base" --build-arg PLUGIN_VERSION="$TS_VERSION" --build-arg CAPABILITY_DIGEST="$cap" --build-arg BUILD_DIGEST="$build" -t "$REGISTRY/opsweave/$name:$TS_VERSION" "plugins/$name/backend" >/dev/null
-  docker push "$REGISTRY/opsweave/$name:$TS_VERSION" >/dev/null
-done
-CAT_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/data-catalog:$TS_VERSION")"
-INT_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/data-integration:$TS_VERSION")"
+if [ "${OPSWEAVE_SKIP_IMAGE_BUILD:-0}" = "1" ]; then
+  # Contract/bundle-only mode. This is NOT a deployable image artifact.
+  CAT_DIGEST="$REGISTRY/opsweave/data-catalog@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  INT_DIGEST="$REGISTRY/opsweave/data-integration@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+else
+  for name in data-catalog data-integration; do
+    cap="$(cap_digest "plugins/$name/manifest.template.json")"
+    build="$(sha256_file "plugins/$name/backend/server.mjs")"
+    base="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null || echo node:22-bookworm-slim)"
+    docker build --build-arg BASE_IMAGE="$base" --build-arg PLUGIN_VERSION="$TS_VERSION" --build-arg CAPABILITY_DIGEST="$cap" --build-arg BUILD_DIGEST="$build" -t "$REGISTRY/opsweave/$name:$TS_VERSION" "plugins/$name/backend" >/dev/null
+    docker push "$REGISTRY/opsweave/$name:$TS_VERSION" >/dev/null
+  done
+  CAT_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/data-catalog:$TS_VERSION")"
+  INT_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/data-integration:$TS_VERSION")"
+fi
 
 echo "== signed bundles"
 rm -rf /tmp/data-bundles dist/plugins/data-catalog-*.zip dist/plugins/data-integration-*.zip

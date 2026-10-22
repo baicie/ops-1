@@ -153,6 +153,10 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/plugin-storage/{plugin_id}",
             get(storage::get_binding).post(storage::ensure_binding),
         )
+        .route(
+            "/api/v1/plugin-storage/{plugin_id}/migrations",
+            get(storage::list_migrations),
+        )
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(
             state.clone(),

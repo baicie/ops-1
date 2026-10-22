@@ -90,6 +90,8 @@ Implemented platform increment:
 - Disable dependency protection for active capability consumers.
 - Node runtime fetches workload env before container create and passes it as Docker env; old Kernel without the endpoint remains compatible for 0.0.1 plugins (404 → empty env).
 
+Local evidence is recorded in `docs/acceptance/EVIDENCE.md` under `0.0.2 Data Foundation development evidence`.
+
 Explicit NOT_RUN for this increment: OCI image builds for the two data plugins, real Node-proxied capability calls, real cross-plugin Golden Path, schema migration execution through a Kernel migration gate, browser E2E, three-host/mTLS/Fencing. No production claim.
 
 ## Explicit non-goals (unchanged)

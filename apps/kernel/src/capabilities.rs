@@ -116,7 +116,7 @@ pub async fn list_grants(
 ) -> AppResult<Json<Vec<CapabilityGrantView>>> {
     require_operator(&auth)?;
     let rows = sqlx::query_as::<_, CapabilityGrantView>(
-        "SELECT id,name,major,consumer_plugin_id,provider_plugin_id,scope,state,expires_at,created_at FROM kernel.capability_grants ORDER BY created_at DESC",
+        "SELECT id,name,major::bigint,consumer_plugin_id,provider_plugin_id,scope,state,expires_at,created_at FROM kernel.capability_grants ORDER BY created_at DESC",
     )
     .fetch_all(&state.db)
     .await?;
@@ -157,7 +157,7 @@ pub async fn create_grant(
               state='ACTIVE',
               expires_at=EXCLUDED.expires_at,
               revoked_at=NULL
-        RETURNING id,name,major,consumer_plugin_id,provider_plugin_id,scope,state,expires_at,created_at
+        RETURNING id,name,major::bigint,consumer_plugin_id,provider_plugin_id,scope,state,expires_at,created_at
         "#,
     )
     .bind(id)
@@ -394,7 +394,11 @@ pub async fn invoke(
     .fetch_optional(&state.db)
     .await?;
     let Some((_, grant_scope)) = grant else {
-        return Err(AppError::forbidden("CAPABILITY_FORBIDDEN: no active grant"));
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "CAPABILITY_FORBIDDEN",
+            "no active grant",
+        ));
     };
     let granted: Vec<String> = serde_json::from_value(grant_scope).unwrap_or_default();
     if !claims.scope.iter().all(|scope| granted.contains(scope)) {
@@ -445,7 +449,8 @@ pub async fn invoke(
                 | "content-length"
                 | "connection"
                 | "transfer-encoding"
-        ) {
+        ) || key.starts_with("x-opsweave-")
+        {
             continue;
         }
         request = request.header(key, value);
