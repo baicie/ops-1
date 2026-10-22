@@ -1185,12 +1185,6 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         };
         if let Some(current) = current {
             if current.node_id != node.id {
-                if let Some(count) = used_nodes.get_mut(&current.node_id) {
-                    *count = count.saturating_sub(1);
-                }
-                if let Some(count) = global_counts.get_mut(&current.node_id) {
-                    *count = count.saturating_sub(1);
-                }
                 sqlx::query(
                     "UPDATE kernel.plugin_instances SET node_id=$2, desired_action='START', state='STARTING', observed_at=NULL, container_id=NULL, image_digest=NULL, host_port=NULL, restart_count=0, last_error=NULL, deployment_generation=$3, updated_at=now() WHERE id=$1",
                 )
@@ -1199,13 +1193,20 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
                 .bind(deployment.generation)
                 .execute(&state.db)
                 .await?;
+                transfer_placement(
+                    &mut used_nodes,
+                    &mut global_counts,
+                    &mut reserved,
+                    current.node_id,
+                    node.id,
+                    &requested,
+                );
             } else {
                 sqlx::query("UPDATE kernel.plugin_instances SET desired_action='START', updated_at=now() WHERE id=$1")
                     .bind(current.id)
                     .execute(&state.db)
                     .await?;
             }
-            *used_nodes.entry(node.id).or_insert(0) += 1;
         } else {
             let id = Uuid::new_v4();
             sqlx::query(
@@ -1323,6 +1324,31 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     Ok(())
 }
 
+fn transfer_placement(
+    used_nodes: &mut HashMap<Uuid, usize>,
+    global_counts: &mut HashMap<Uuid, usize>,
+    reserved: &mut HashMap<Uuid, (i64, i64)>,
+    from: Uuid,
+    to: Uuid,
+    request: &ResourceRequirements,
+) {
+    if let Some(count) = used_nodes.get_mut(&from) {
+        *count = count.saturating_sub(1);
+    }
+    if let Some(count) = global_counts.get_mut(&from) {
+        *count = count.saturating_sub(1);
+    }
+    if let Some(reservation) = reserved.get_mut(&from) {
+        reservation.0 = reservation.0.saturating_sub(request.cpu_millis);
+        reservation.1 = reservation.1.saturating_sub(request.memory_mib);
+    }
+    *used_nodes.entry(to).or_insert(0) += 1;
+    *global_counts.entry(to).or_insert(0) += 1;
+    let reservation = reserved.entry(to).or_insert((0, 0));
+    reservation.0 += request.cpu_millis;
+    reservation.1 += request.memory_mib;
+}
+
 fn node_has_capacity(node: &NodeRow, requested_cpu_millis: i64, requested_memory_mib: i64) -> bool {
     let Some(snapshot) = node.resource_snapshot.as_ref() else {
         return false;
@@ -1363,6 +1389,7 @@ mod tests {
     use super::node_has_capacity;
     use crate::nodes::NodeRow;
     use chrono::Utc;
+    use opsweave_contracts::ResourceRequirements;
     use serde_json::json;
     use uuid::Uuid;
 
@@ -1386,6 +1413,30 @@ mod tests {
             revoked_at: None,
             cert_expires_at: None,
         }
+    }
+
+    #[test]
+    fn migration_transfers_global_count_and_reservation_to_target() {
+        let from = Uuid::new_v4();
+        let to = Uuid::new_v4();
+        let mut used = std::collections::HashMap::from([(from, 1)]);
+        let mut global = std::collections::HashMap::from([(from, 1), (to, 2)]);
+        let mut reserved = std::collections::HashMap::from([(from, (500, 128)), (to, (1000, 256))]);
+        super::transfer_placement(
+            &mut used,
+            &mut global,
+            &mut reserved,
+            from,
+            to,
+            &ResourceRequirements {
+                cpu_millis: 500,
+                memory_mib: 128,
+            },
+        );
+        assert_eq!(used.get(&from), Some(&0));
+        assert_eq!(global.get(&to), Some(&3));
+        assert_eq!(reserved.get(&from), Some(&(0, 0)));
+        assert_eq!(reserved.get(&to), Some(&(1500, 384)));
     }
 
     #[test]

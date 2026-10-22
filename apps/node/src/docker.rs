@@ -103,16 +103,20 @@ impl DockerAdapter {
     }
 
     pub async fn inspect(&self, name: &str) -> anyhow::Result<Option<ContainerInfo>> {
-        let output = self
-            .command()
-            .args([
-                "inspect",
-                name,
-                "--format",
-                "{{.Id}}|{{.State.Running}}|{{.Config.Image}}",
-            ])
-            .output()
-            .await?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.command()
+                .args([
+                    "inspect",
+                    name,
+                    "--format",
+                    "{{.Id}}|{{.State.Running}}|{{.Config.Image}}",
+                ])
+                .output(),
+        )
+        .await
+        .context("docker inspect timed out")?
+        .context("run docker inspect")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let lower = stderr.to_ascii_lowercase();
@@ -168,7 +172,11 @@ impl DockerAdapter {
     }
 
     pub async fn remove_if_exists(&self, name: &str) {
-        let _ = self.command().args(["rm", "-f", name]).output().await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.command().args(["rm", "-f", name]).output(),
+        )
+        .await;
     }
 
     pub async fn create_and_start(

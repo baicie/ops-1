@@ -115,6 +115,7 @@ pub struct Shared {
     pub desired: RwLock<DesiredNodeState>,
     pub runtimes: Arc<RwLock<HashMap<Uuid, InstanceRuntime>>>,
     pub tasks: Arc<tokio::sync::Mutex<HashMap<Uuid, TaskEntry>>>,
+    pub lifecycle: Arc<tokio::sync::Mutex<()>>,
     pub metrics: Arc<StdMutex<MetricsState>>,
     pub quarantined: Arc<AtomicBool>,
     pub quarantine_error: Arc<StdMutex<Option<String>>>,
@@ -346,6 +347,10 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
     for entry in entries {
         let _ = entry.cancel.send(true);
     }
+    // Wait for an in-flight inspect/pull/create/start setup to leave its critical
+    // section, then remove whatever it may have created. This closes the gap
+    // between the last quarantine check and Docker create/start.
+    let _lifecycle = shared.lifecycle.lock().await;
     let runtimes: Vec<InstanceRuntime> = shared.runtimes.read().await.values().cloned().collect();
     let node_id = shared.identity.read().await.node_id;
     let mut failures: Vec<String> = Vec::new();
@@ -370,7 +375,20 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
     }
     // Re-inspect until no managed container remains, within a bounded retry
     // window. A failure is visible and never downgraded to a success claim.
+    let cleanup_deadline = Instant::now() + Duration::from_secs(45);
     for attempt in 1..=3 {
+        // Re-enumerate and re-attempt stop/remove on every pass. Counting alone
+        // is not a cleanup retry.
+        match shared.docker.list_managed(node_id).await {
+            Ok(names) => {
+                for name in names {
+                    if let Err(error) = shared.docker.stop_and_remove(&name).await {
+                        failures.push(format!("{name}: {error}"));
+                    }
+                }
+            }
+            Err(error) => failures.push(format!("list managed containers: {error}")),
+        }
         let remaining = shared
             .docker
             .list_managed(node_id)
@@ -388,6 +406,9 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
             return;
         }
         if attempt < 3 {
+            if Instant::now() >= cleanup_deadline {
+                break;
+            }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
@@ -579,9 +600,14 @@ async fn run_once(
     let image_ref = &workload.backend.image_ref;
     let port = workload.backend.container_port;
 
+    // Pull outside the lifecycle guard so a slow image cannot delay quarantine
+    // for up to the full pull timeout. The create/start critical section is
+    // still serialized with quarantine and re-checks the flag after the pull.
     let existing = shared.docker.inspect(&name).await.unwrap_or(None);
     let (container_id, host_port) = match existing {
         Some(info) if info.running && info.image == *image_ref => {
+            let _lifecycle = shared.lifecycle.lock().await;
+            ensure_node_active(shared).await?;
             let host_port = info
                 .host_port
                 .ok_or_else(|| anyhow::anyhow!("adopted container has no published port"))?;
@@ -590,6 +616,7 @@ async fn run_once(
         }
         _ => {
             shared.docker.pull(image_ref).await?;
+            let _lifecycle = shared.lifecycle.lock().await;
             ensure_node_active(shared).await?;
             shared.docker.verify_digest(image_ref).await?;
             ensure_node_active(shared).await?;

@@ -87,12 +87,21 @@ for plugin in ["dev.opsweave.hello", "dev.opsweave.hello-go", "dev.opsweave.hell
     probe(plugin)
 
 # Gateway identity header is host-owned; a forged header must not survive.
-status, echo = request(
-    "/api/v1/gateway/dev.opsweave.hello/api/hello/echo",
-    "POST",
-    {"probe": True},
-    {"X-OpsWeave-User-Role": "forged-superadmin", "X-OpsWeave-User-Id": "forged"},
-)
+# A just-activated replacement replica can be observed READY a fraction before
+# the Node proxy accepts traffic; retry the idempotent probe briefly.
+import time
+
+status, echo = 0, {}
+for attempt in range(6):
+    status, echo = request(
+        "/api/v1/gateway/dev.opsweave.hello/api/hello/echo",
+        "POST",
+        {"probe": True},
+        {"X-OpsWeave-User-Role": "forged-superadmin", "X-OpsWeave-User-Id": "forged"},
+    )
+    if status == 200:
+        break
+    time.sleep(1)
 check(status == 200, "gateway TS echo 200")
 check(echo.get("serverVerifiedCallerRole") == "admin", "gateway overwrites forged caller role")
 

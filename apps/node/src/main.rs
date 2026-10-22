@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
         desired: RwLock::new(empty_desired),
         runtimes: Arc::new(RwLock::new(HashMap::new())),
         tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        lifecycle: Arc::new(tokio::sync::Mutex::new(())),
         metrics: Arc::new(StdMutex::new(runtime::MetricsState::default())),
         quarantined: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         quarantine_error: Arc::new(StdMutex::new(None)),

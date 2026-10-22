@@ -182,18 +182,34 @@ fn client_ip(
     headers: &HeaderMap,
     trusted_proxies: &[String],
 ) -> std::net::IpAddr {
-    let proxy_ip = peer.ip().to_string();
-    if trusted_proxies.iter().any(|trusted| trusted == &proxy_ip) {
-        if let Some(forwarded) = headers
-            .get("x-forwarded-for")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').next())
-            .and_then(|value| value.trim().parse::<std::net::IpAddr>().ok())
+    let proxy_ip = peer.ip();
+    if !trusted_proxies
+        .iter()
+        .any(|trusted| trusted == &proxy_ip.to_string())
+    {
+        return proxy_ip;
+    }
+    let Some(chain) = headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return proxy_ip;
+    };
+    let hops: Vec<std::net::IpAddr> = chain
+        .split(',')
+        .filter_map(|hop| hop.trim().parse().ok())
+        .collect();
+    // Walk from the trusted proxy side toward the client. A client-supplied
+    // leftmost value must never win over the rightmost trusted hop.
+    for hop in hops.iter().rev() {
+        if !trusted_proxies
+            .iter()
+            .any(|trusted| trusted == &hop.to_string())
         {
-            return forwarded;
+            return *hop;
         }
     }
-    peer.ip()
+    hops.first().copied().unwrap_or(proxy_ip)
 }
 
 #[derive(Debug, Serialize)]
@@ -425,6 +441,19 @@ mod tests {
         assert_eq!(client_ip(peer, &headers, &[]), peer.ip());
         assert_eq!(
             client_ip(peer, &headers, &["203.0.113.7".to_string()]),
+            "198.51.100.9".parse::<std::net::IpAddr>().unwrap()
+        );
+        let mut chain = HeaderMap::new();
+        chain.insert(
+            "x-forwarded-for",
+            "198.51.100.9, 203.0.113.8".parse().unwrap(),
+        );
+        assert_eq!(
+            client_ip(
+                peer,
+                &chain,
+                &["203.0.113.7".to_string(), "203.0.113.8".to_string()]
+            ),
             "198.51.100.9".parse::<std::net::IpAddr>().unwrap()
         );
     }
