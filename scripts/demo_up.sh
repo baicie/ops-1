@@ -11,6 +11,7 @@ ADMIN_PASSWORD="${OPSWEAVE_ADMIN_PASSWORD:-OpsWeave!2026}"
 RESET="${RESET:-1}"
 BUILD="${BUILD:-0}"
 DB="${OPSWEAVE_DB:-opsweave}"
+DATABASE_URL="${OPSWEAVE_DATABASE_URL:-postgres://localhost/${DB}?sslmode=disable}"
 
 kill_port() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | xargs -r kill 2>/dev/null || true; }
 
@@ -52,7 +53,7 @@ echo "== start kernel"
 nohup env \
   OPSWEAVE_BIND="127.0.0.1:${KERNEL_PORT}" \
   OPSWEAVE_PUBLIC_URL="$KERNEL_URL" \
-  DATABASE_URL="postgres://localhost/${DB}?sslmode=disable" \
+  DATABASE_URL="$DATABASE_URL" \
   OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$ADMIN_EMAIL" \
   OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   OPSWEAVE_BOOTSTRAP_ADMIN_NAME="Platform Admin" \
