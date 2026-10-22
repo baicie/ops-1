@@ -32,6 +32,10 @@ provider's Node address or container port as the logical identity.
 - `X-OpsWeave-*` request headers are never a trust root. The provider must validate
   the Kernel-signed context before using caller identity.
 - A capability call without an active grant returns `CAPABILITY_FORBIDDEN` (403).
+- An expired workload token may be refreshed only at the internal workload-token
+  refresh endpoint, inside a bounded grace window, after re-checking the live
+  instance/node/generation, active grant and scope. Refresh is not a new grant; a
+  revoked Node or stopped instance must reject both refresh and old-token calls.
 - If a grant names `providerPluginId`, invocation must select and call exactly that
   provider. A selection that resolves to another provider returns
   `CAPABILITY_PROVIDER_MISMATCH` (403); it must not silently use another provider.

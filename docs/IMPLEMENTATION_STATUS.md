@@ -116,6 +116,9 @@ AI RCA, Data Catalog, general DAG engine, historical log storage/search, arbitra
   failure/replay locally verified.
 - P1 grant provider binding is enforced at invocation.
 - P1 workload tokens are bound to instance, node and node generation; liveness is
-  checked at invocation.
+  checked at invocation and expired tokens can be refreshed only inside a bounded
+  grace window after re-checking live state and grant. CI verifies refresh with a
+  five-second TTL (`39798000920`).
+- P1 migration failure records can no longer overwrite `APPLIED`.
 - Remaining NOT_RUN: signed package migration plans, real multi-provider switch test,
-  live old-token revocation test, production secret management/mTLS/Fencing.
+  true concurrent migration interleaving test, production secret management/mTLS/Fencing.

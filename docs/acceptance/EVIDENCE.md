@@ -284,7 +284,7 @@ The local capability harness is not a substitute for the required real OCI Golde
   `viewer` gets read-only scopes, `operator`/`admin` get write scopes, and unknown
   roles get an empty scope. `hasScope()` no longer treats `kind === 'user'` as a
   wildcard.
-- Real Kernel Gateway CI run `39788273187` (`golden-path` success) exercised:
+- Real Kernel Gateway CI run `39798000920` (`golden-path` success) exercised:
   - Viewer dataset create `403`;
   - Viewer schema publish `403`;
   - Viewer source create `403`;
@@ -298,7 +298,7 @@ The local capability harness is not a substitute for the required real OCI Golde
 - Integration now parses IPv6 bytes and classifies IPv4-mapped addresses in both
   dotted and hexadecimal forms, plus IPv4 special ranges, IPv6 ULA, link-local,
   loopback, multicast, documentation, Teredo, 6to4 and other non-global ranges.
-- Real Gateway/Connector CI run `39788273187` blocked all nine tested targets with
+- Real Gateway/Connector CI run `39798000920` blocked all nine tested targets with
   `422 SOURCE_SSRF_BLOCKED`:
   `127.0.0.1`, `::ffff:7f00:1`, `::ffff:a9fe:a9fe`, `::1`, `fc00::1`,
   `fe80::1`, `169.254.169.254`, `10.0.0.1`, `198.51.100.1`.
@@ -331,5 +331,26 @@ The local capability harness is not a substitute for the required real OCI Golde
   requires a live READY instance on a non-revoked, non-stale READY node with matching
   generation and `plugin:<capability>` audience.
 - Unit test covers inactive instance, revoked node, generation mismatch and stale
-  node. Real CI Golden Path proves newly issued tokens still work; a live
-  revocation/old-token test remains `NOT_RUN`.
+  node. Real CI Golden Path proves newly issued tokens still work.
+- `refresh_workload_token()` accepts an expired token only inside a bounded grace
+  window, re-checks live instance/node/generation, active grant and scope, and issues
+  a fresh token. Integration refreshes before the 60-second threshold.
+- CI run `39798000920` used a **5 second token TTL**, waited beyond it and then
+  executed an ingestion run; it passed (`expired workload token refreshed; run
+  status=SUCCEEDED`).
+- The same run extracted the Integration container's old token, refreshed it,
+  revoked the Integration Node through the real Kernel API, then verified both
+  refresh and a capability invocation returned `403 WORKLOAD_IDENTITY_REVOKED`.
+  This is a real Gateway/Node revocation test, not only a predicate unit test.
+
+### Migration APPLIED race protection
+
+- `record_failed_migration()` now uses `ON CONFLICT ... DO UPDATE ... WHERE
+  kernel.plugin_migrations.status <> 'APPLIED'`, so a late failure cannot overwrite
+  a committed successful ledger row.
+- Local SQL check on `opsweave_data_test`: inserted an `APPLIED` row, applied the
+  same late `FAILED` upsert, and observed the row remain `APPLIED` with empty details.
+  Reproducer: `tests/acceptance/storage_migration_ledger.sh`; result `PASS`.
+- Reproducer: `tests/acceptance/storage_migration_ledger.sh`; result `PASS`.
+- A true two-request interleaving test that controls A-fails/B-succeeds timing is
+  `NOT_RUN`; the ordering predicate is covered, not the full scheduling race.

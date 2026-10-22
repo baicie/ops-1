@@ -29,6 +29,9 @@ accessing each other's tables.
   current instance/node liveness before routing; provider still validates the
   signed caller context for defense in depth. Stopping an instance, revoking a
   node, changing the generation or becoming stale invalidates old tokens.
+  Long-running instances may refresh an expired token only inside a bounded grace
+  window after the same live-state and grant checks; refresh cannot outlive a
+  revoked Node.
 - User-session Gateway behavior remains unchanged. No user token is exposed to
   a remote extension. Plugin backends derive user scopes from the authenticated
   role only: `viewer` read-only, `operator`/`admin` write, unknown roles denied.
