@@ -8,6 +8,8 @@ on:
       - 'contracts/**'
       - 'plugins/data-catalog/**'
       - 'plugins/data-integration/**'
+      - 'plugins/data-catalog-alt/**'
+      - 'tests/ui/**'
       - 'scripts/**'
       - 'tests/ci/**'
       - 'tests/acceptance/data_foundation.sh'
@@ -40,13 +42,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
       - run: RUN_BROWSER_SMOKE=1 tests/ci/data_foundation_ci.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: data-foundation-screenshots
-          path: artifacts/ui/data-*.png
+          path: artifacts/ui/data-foundation/*.png
           if-no-files-found: warn
   legacy-regression:
     runs-on: ubuntu-latest

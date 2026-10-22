@@ -590,6 +590,23 @@ pub async fn invoke(
     }
     let provider = resolve_provider(&state, &name, major).await?;
     if !provider_matches_grant(bound_provider.as_deref(), &provider.plugin_id) {
+        let _ = audit::record(
+            &state.db,
+            "capability.denied",
+            "WORKLOAD",
+            &claims.plugin_id,
+            "capability",
+            &format!("{name}:{major}"),
+            "capability.invoke",
+            "REJECTED",
+            serde_json::json!({
+                "reason": "provider mismatch",
+                "boundProvider": bound_provider,
+                "selectedProvider": provider.plugin_id,
+            }),
+            None,
+        )
+        .await;
         return Err(AppError::new(
             StatusCode::FORBIDDEN,
             "CAPABILITY_PROVIDER_MISMATCH",

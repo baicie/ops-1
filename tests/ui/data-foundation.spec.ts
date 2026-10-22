@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
-const OUT = path.resolve('../../artifacts/ui');
+const OUT = path.resolve('../../artifacts/ui/data-foundation');
 
 async function login(page: Page) {
   await page.goto('/login');

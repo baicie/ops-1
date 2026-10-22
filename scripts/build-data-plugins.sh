@@ -49,11 +49,12 @@ else
 fi
 
 echo "== signed bundles"
-rm -rf /tmp/data-bundles dist/plugins/data-catalog-*.zip dist/plugins/data-integration-*.zip
+rm -rf /tmp/data-bundles dist/plugins/data-catalog-*.zip dist/plugins/data-catalog-alt-*.zip dist/plugins/data-integration-*.zip
 mkdir -p /tmp/data-bundles dist/plugins
 python3 scripts/assemble_plugin.py --template plugins/data-catalog/manifest.template.json --out /tmp/data-bundles/data-catalog --version "$TS_VERSION" --image-ref "$CAT_DIGEST" --frontend-dist /tmp/data-catalog-web >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/data-integration/manifest.template.json --out /tmp/data-bundles/data-integration --version "$TS_VERSION" --image-ref "$INT_DIGEST" --frontend-dist /tmp/data-integration-web >/dev/null
-for name in data-catalog data-integration; do
+python3 scripts/assemble_plugin.py --template plugins/data-catalog-alt/manifest.template.json --out /tmp/data-bundles/data-catalog-alt --version "$TS_VERSION" --image-ref "$CAT_DIGEST" --frontend-dist /tmp/data-catalog-web >/dev/null
+for name in data-catalog data-catalog-alt data-integration; do
   ./target/debug/opsctl bundle --dir "/tmp/data-bundles/$name" --out "dist/plugins/$name-$TS_VERSION.plugin.zip" --key keys/publisher.key >/dev/null
 done
 ls -lh dist/plugins/data-*.plugin.zip

@@ -52,6 +52,13 @@ if [ "${OPSWEAVE_TEST_NODE_REVOCATION:-0}" = "1" ]; then
   # the current token rather than the stale env value.
   CURRENT_TOKEN="$(docker exec "$CONTAINER_ID" cat /run/opsweave/capability-tokens.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["data.catalog.v1"])')"
   [ -n "$CURRENT_TOKEN" ] || bad "current workload token file is empty"
+  FILE_MODE="$(docker exec "$CONTAINER_ID" stat -c '%a' /run/opsweave/capability-tokens.json)"
+  [ "$FILE_MODE" = "644" ] || bad "token file mode is $FILE_MODE, expected 644"
+  CATALOG_CONTAINER="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-catalog/ {print $1; exit}')"
+  [ -n "$CATALOG_CONTAINER" ] || bad "data-catalog container not found"
+  CATALOG_TOKENS="$(docker exec "$CATALOG_CONTAINER" cat /run/opsweave/capability-tokens.json)"
+  printf '%s' "$CATALOG_TOKENS" | grep -q 'oww1' && bad "Catalog container received another instance's workload token"
+  ok "token file mode=644 and no cross-instance token exposure"
   OLD_REFRESH_CODE="$(curl -sS -o /tmp/token-old-refresh.json -w '%{http_code}' -X POST -H "Authorization: Bearer $OLD_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
   [ "$OLD_REFRESH_CODE" = "401" ] || bad "old env token refresh after TTL+grace returned $OLD_REFRESH_CODE, expected 401"
   FRESH_RESPONSE="$(curl -fsS -X POST -H "Authorization: Bearer $CURRENT_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
