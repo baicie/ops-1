@@ -22,7 +22,7 @@ The production reference target is **Linux amd64 + Rootless Docker + three physi
 
 | Epic | Status | What was actually built / tested |
 |---|---|---|
-| E00 Project Bootstrap | DONE (local) | Cargo + pnpm workspaces, lockfiles, Makefile, CI definition, contract checker, local compose, systemd units. Clean-checkout CI was not executed on a remote runner (`NOT_RUN`). |
+| E00 Project Bootstrap | DONE (local) | Cargo + pnpm workspaces, lockfiles, Makefile, CI definition, contract checker, local compose, systemd units. Remote CI run `39718262755` passed Rust, Web and Contracts jobs on commit `897eacb`; full E2E remains local. |
 | E01 Contract Foundation | DONE | Manifest v1.1, runtime info, deployment, node observation, log event, asset index schemas; generated examples validated with `jsonschema`; bundles recomputed and checked. |
 | E02 Identity & Trust | PARTIAL | Argon2id users, admin/operator/viewer RBAC, CSRF, session cookie/bearer, publisher trust/revocation, one-time node enrollment, node revocation, audit. **mTLS NOT_RUN**. |
 | E03 Registry & Lifecycle | DONE (local) | Immutable bundles with digest conflict rejection, Ed25519 signature (artifact + canonical manifest), stage/deploy/activate/disable/enable/upgrade/rollback/uninstall, receipts, audit. |
@@ -32,7 +32,7 @@ The production reference target is **Linux amd64 + Rootless Docker + three physi
 | E07 Reconciler & Placement | DONE (local) | Desired/observed/effective separation, generation-aware observations, two-node placement, stale→UNREACHABLE, replacement slots, readiness-gated activation. Two **physical Linux** nodes `NOT_RUN`. |
 | E08 Ops Center & Diagnostics | DONE (local) | Ops Center screens, node/instance metrics, log SSE with signed cursors, audit UI, recovery CLI, server-rendered `/bootstrap`. Historical log search out of scope. |
 | E09 Full-stack Hello + v2 | PARTIAL | TS full-stack v1/v2 with independent image digests, signed bundles, permission diff review display, upgrade/rollback tests. Bad-image pull case not exercised; Java full-stack UI not delivered. |
-| E10 Verification & Release | PARTIAL | Contract, runtime conformance, two-node failover, kernel restart, container security, Playwright visual tests. Real three-host acceptance and vulnerability scanning `NOT_RUN`. |
+| E10 Verification & Release | PARTIAL | Contract, runtime conformance, two-node failover, kernel restart, container security, Playwright visual tests. Remote CI now runs workspace tests/clippy/typechecks; real three-host acceptance and vulnerability scanning `NOT_RUN`. |
 
 ## Gate 1–4 / conformance matrix
 
@@ -50,7 +50,7 @@ The production reference target is **Linux amd64 + Rootless Docker + three physi
 | C10 Incompatible DB migration blocks rollback | **NOT_IMPLEMENTED** | No migration engine in 0.0.1; rollback is route/binary only; must be blocked manually by policy. |
 | C11 Kernel restart reconciles PG + observed state | **PASS (local)** | `tests/acceptance/kernel_restart.sh`; active version preserved, Gateway serves after restart. |
 | C12 SSE auth, disconnect, cursor gap, backpressure, revoke | **PARTIAL** | operator-only SSE, forged cursor 400, signed cursors, gap events, disconnect UI, per-poll revocation check and idle backoff; explicit flood/backpressure test `NOT_RUN`. |
-| C13 Node Runtime exit/upgrade workload policy | **PARTIAL** | Graceful exit stops workloads by default; lease expiry and credential rejection enter quarantine and remove containers (`node_lease.sh`, `node_quarantine.sh`); restart re-adopts desired containers. Systemd upgrade procedure is documented only; SIGKILL of the node process still requires host-level cleanup. |
+| C13 Node Runtime exit/upgrade workload policy | **PARTIAL** | Graceful exit stops workloads by default; lease expiry and credential rejection enter quarantine and remove containers (`node_lease.sh`, `node_quarantine.sh`); restart re-adopts desired containers. The systemd unit includes an `ExecStopPost` cleanup safety net for crash/SIGKILL service stops; native SIGKILL still cannot run application code, so host/service supervision remains mandatory. |
 | C14 390/1024/1440 light/dark screenshots | **PASS (local)** | Playwright matrix in `tests/ui/visual.spec.ts`; images under `artifacts/ui/`. |
 
 ## Review remediation (2026-10-22)

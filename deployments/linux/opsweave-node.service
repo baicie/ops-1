@@ -9,6 +9,7 @@ User=opsweave-node
 Group=opsweave-node
 EnvironmentFile=/etc/opsweave/node.env
 ExecStart=/opt/opsweave/bin/opsweave-node
+ExecStopPost=/opt/opsweave/bin/opsweave-node-cleanup
 Restart=on-failure
 RestartSec=3
 # Rootless Docker socket for this dedicated account; never the system socket.

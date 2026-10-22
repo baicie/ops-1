@@ -336,6 +336,13 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
         let _ = shared.docker.stop_and_remove(&name).await;
         runtime.set_state(RuntimeState::Stopped, Some(reason.to_string()));
     }
+    // Also remove managed containers that are not represented in the in-memory
+    // runtime map (for example an orphan left by a previous generation).
+    if let Ok(names) = shared.docker.list_managed(node_id).await {
+        for name in names {
+            let _ = shared.docker.stop_and_remove(&name).await;
+        }
+    }
 }
 
 async fn collect_observations(shared: &Arc<Shared>) -> Vec<InstanceObservation> {

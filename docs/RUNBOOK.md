@@ -87,3 +87,9 @@ Restore verifies a **new** database by default. Never point the Kernel at a part
 - The Docker CLI adapter requires a protected local Engine socket on each Node.
 - Java/Go/TS images in this workspace were built for linux/arm64 due to the development host. Republish `linux/amd64` images before claiming the C01–C04 hardware gate.
 - Do not run multiple Kernel instances against the same PostgreSQL database: leader election is not implemented.
+
+## Node stop / crash containment
+
+`opsweave-node.service` installs `ExecStopPost=/opt/opsweave/bin/opsweave-node-cleanup`. This is a last-resort cleanup for a Node process killed before the Runtime can quarantine itself; it removes containers labeled with that Node identity. The Runtime also quarantines on a `400/401/403/409` heartbeat or when its control lease expires, and removes managed containers before exiting. Test the lease and quarantine paths with `tests/acceptance/node_lease.sh` and `tests/acceptance/node_quarantine.sh`; both are destructive to the local demo state.
+
+Do not expose `OPSWEAVE_NODE_DATA_BIND` beyond loopback until an authenticated TLS/mTLS terminator or tunnel is in front of it. Kernel↔Node mTLS and certificate rotation are still a production release blocker (`NOT_RUN`).

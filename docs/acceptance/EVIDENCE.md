@@ -142,8 +142,8 @@ node credential revocation test passed (unsafe endpoint 400; heartbeat 200 befor
 Command: `tests/acceptance/node_quarantine.sh`
 
 ```
-node-a has 1 managed container(s); revoking 0239d8c1-8aa1-4c86-a4dc-7e6d7b01598d
-node quarantine test passed: 1 container(s) were removed after revocation
+node-a has 3 managed container(s); revoking 3edbf13f-f5f6-4468-81d3-20ec1d4f5db9
+node quarantine test passed: 3 container(s) were removed after revocation
 ```
 
 ### Kernel partition beyond node lease
