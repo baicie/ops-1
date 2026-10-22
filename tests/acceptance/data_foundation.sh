@@ -21,6 +21,26 @@ DATASET_ID="$(printf '%s' "$DATASET_JSON" | json "d['datasetId']")"
 [ -n "$DATASET_ID" ] || bad "dataset creation returned no id"
 ok "dataset $DATASET_ID"
 
+echo "== schema revision 2 compatibility and immutability"
+DRAFT_JSON="$(api -X POST -H 'content-type: application/json' -H 'Idempotency-Key: data-draft-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/drafts" \
+  -d '{"baseRevision":1,"fields":[{"name":"id","type":"string","nullable":false,"ordinal":0},{"name":"name","type":"string","nullable":true,"ordinal":1},{"name":"cpu_percent","type":"number","nullable":true,"ordinal":2},{"name":"observed_at","type":"timestamp","nullable":true,"ordinal":3},{"name":"region","type":"string","nullable":true,"ordinal":4}]}')"
+REV2="$(printf '%s' "$DRAFT_JSON" | json "d['schemaRevision']")"
+[ "$REV2" = "2" ] || bad "expected schema revision 2, got $REV2"
+DIFF_JSON="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/$REV2/diff?against=1")"
+COMPATIBLE="$(printf '%s' "$DIFF_JSON" | json "d['compatible']")"
+[ "$COMPATIBLE" = "True" ] || bad "compatible schema diff was rejected"
+api -X POST "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/$REV2/publish" >/dev/null
+ok "schema revision $REV2 published; old revision 1 remains"
+
+echo "== reject incompatible schema change"
+BAD_CODE="$(curl -sS -o /tmp/data-bad-schema.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/drafts" \
+  -d '{"baseRevision":2,"fields":[{"name":"id","type":"integer","nullable":false,"ordinal":0}]}')"
+[ "$BAD_CODE" = "409" ] || bad "incompatible schema returned $BAD_CODE, expected 409"
+grep -q 'SCHEMA_INCOMPATIBLE' /tmp/data-bad-schema.json || bad "incompatible schema error code missing"
+ok "incompatible schema rejected"
+
 echo "== create source"
 SOURCE_JSON="$(api -X POST -H 'content-type: application/json' -H 'Idempotency-Key: data-source-0001' \
   "$URL/api/v1/gateway/opsweave.data-integration/api/data-integration/sources" \
@@ -46,7 +66,7 @@ ok "preview did not write records"
 echo "== publish ingestion spec"
 SPEC_JSON="$(api -X POST -H 'content-type: application/json' -H 'Idempotency-Key: data-spec-0001' \
   "$URL/api/v1/gateway/opsweave.data-integration/api/data-integration/sources/$SOURCE_ID/ingestion-specs" \
-  -d "{\"sourceRevision\":1,\"schemaRevision\":1,\"targetDatasetId\":\"$DATASET_ID\",\"mappings\":[{\"sourcePath\":\"id\",\"targetField\":\"id\",\"required\":true,\"errorPolicy\":\"REJECT_RECORD\"},{\"sourcePath\":\"name\",\"targetField\":\"name\",\"required\":false,\"errorPolicy\":\"SET_NULL\"},{\"sourcePath\":\"observed_at\",\"targetField\":\"observed_at\",\"required\":false,\"errorPolicy\":\"SET_NULL\",\"castTo\":\"timestamp\"}]}")"
+  -d "{\"sourceRevision\":1,\"schemaRevision\":$REV2,\"targetDatasetId\":\"$DATASET_ID\",\"mappings\":[{\"sourcePath\":\"id\",\"targetField\":\"id\",\"required\":true,\"errorPolicy\":\"REJECT_RECORD\"},{\"sourcePath\":\"name\",\"targetField\":\"name\",\"required\":false,\"errorPolicy\":\"SET_NULL\"},{\"sourcePath\":\"observed_at\",\"targetField\":\"observed_at\",\"required\":false,\"errorPolicy\":\"SET_NULL\",\"castTo\":\"timestamp\"}]}")"
 SPEC_ID="$(printf '%s' "$SPEC_JSON" | json "d['specId']")"
 ok "spec $SPEC_ID"
 
@@ -63,6 +83,14 @@ STATUS="$(printf '%s' "$RUN1" | json "d['status']")"
 ACCEPTED="$(printf '%s' "$RUN1" | json "d['accepted']")"
 [ "$ACCEPTED" -gt 0 ] || bad "run accepted zero records"
 ok "run $RUN_ID status=$STATUS accepted=$ACCEPTED"
+
+echo "== quality result"
+QUALITY="$(api "$URL/api/v1/gateway/opsweave.data-integration/api/data-integration/ingestion-runs/$RUN_ID/quality")"
+QUALITY_TOTAL="$(printf '%s' "$QUALITY" | json "d['total']")"
+QUALITY_UNKNOWN="$(printf '%s' "$QUALITY" | json "d['unknown']")"
+[ "$QUALITY_TOTAL" = "2" ] || bad "quality total is $QUALITY_TOTAL, expected 2"
+[ "$QUALITY_UNKNOWN" = "0" ] || bad "quality unknown is $QUALITY_UNKNOWN, expected 0"
+ok "quality total=$QUALITY_TOTAL unknown=$QUALITY_UNKNOWN"
 
 echo "== lineage and dependency protection"
 LINEAGE="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage")"
