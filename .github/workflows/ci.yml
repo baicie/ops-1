@@ -22,8 +22,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @opsweave/platform-web typecheck
       - run: pnpm --filter @opsweave/hello-web typecheck
+      - run: pnpm --filter @opsweave/data-catalog-web typecheck
+      - run: pnpm --filter @opsweave/data-integration-web typecheck
       - run: pnpm --filter @opsweave/platform-web build
       - run: pnpm --filter @opsweave/hello-web build
+      - run: pnpm --filter @opsweave/data-catalog-web build
+      - run: pnpm --filter @opsweave/data-integration-web build
+      - run: node --check plugins/data-catalog/backend/server.mjs
+      - run: node --check plugins/data-integration/backend/server.mjs
   contracts:
     runs-on: ubuntu-latest
     steps:

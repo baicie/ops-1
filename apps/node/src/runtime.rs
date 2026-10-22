@@ -685,6 +685,39 @@ enum RunOutcome {
     Exited(String),
 }
 
+async fn fetch_workload_env(
+    shared: &Arc<Shared>,
+    workload: &DesiredWorkload,
+    node_id: Uuid,
+) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    let url = format!(
+        "{}/internal/v1/nodes/{}/instances/{}/env",
+        shared.args.kernel_url.trim_end_matches('/'),
+        node_id,
+        workload.instance_id
+    );
+    let credential = shared.identity.read().await.credential.clone();
+    let response = shared
+        .http
+        .get(url)
+        .bearer_auth(credential)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(std::collections::BTreeMap::new());
+    }
+    if !response.status().is_success() {
+        anyhow::bail!("workload environment request failed: {}", response.status());
+    }
+    #[derive(serde::Deserialize)]
+    struct EnvResponse {
+        env: std::collections::BTreeMap<String, String>,
+    }
+    let body: EnvResponse = response.json().await?;
+    Ok(body.env)
+}
+
 async fn run_once(
     shared: &Arc<Shared>,
     runtime: &InstanceRuntime,
@@ -717,9 +750,10 @@ async fn run_once(
             ensure_node_active(shared).await?;
             shared.docker.verify_digest(image_ref).await?;
             ensure_node_active(shared).await?;
+            let extra_env = fetch_workload_env(shared, workload, node_id).await?;
             let id = shared
                 .docker
-                .create_and_start(workload, image_ref, port, node_id)
+                .create_and_start(workload, image_ref, port, node_id, &extra_env)
                 .await?;
             let mut host_port = None;
             for _ in 0..20 {

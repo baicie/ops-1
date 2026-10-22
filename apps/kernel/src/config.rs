@@ -21,6 +21,11 @@ pub struct Config {
     pub allow_insecure_node_transport: bool,
     pub allowed_node_data_hosts: Vec<String>,
     pub trusted_proxy_ips: Vec<String>,
+    pub plugin_db_host: String,
+    #[allow(dead_code)]
+    #[allow(dead_code)]
+    pub plugin_kernel_url: String,
+    pub plugin_source_allowed_hosts: String,
 }
 
 impl Config {
@@ -60,6 +65,12 @@ impl Config {
                 "127.0.0.1,localhost,::1",
             ),
             trusted_proxy_ips: env_list("OPSWEAVE_TRUSTED_PROXY_IPS", ""),
+            plugin_db_host: env_string("OPSWEAVE_PLUGIN_DB_HOST", "host.docker.internal"),
+            plugin_kernel_url: env_string(
+                "OPSWEAVE_PLUGIN_KERNEL_URL",
+                "http://host.docker.internal:18181",
+            ),
+            plugin_source_allowed_hosts: env_string("OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS", ""),
         }
     }
 

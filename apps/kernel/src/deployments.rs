@@ -698,6 +698,30 @@ async fn disable_inner(
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::conflict("PLUGIN_NOT_ACTIVE", "plugin has no active revision"))?;
+    let dependents: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT DISTINCT g.consumer_plugin_id, g.name
+        FROM kernel.capability_grants g
+        JOIN kernel.capability_registrations p
+          ON p.name=g.name AND p.major=g.major AND p.direction='PROVIDES'
+        WHERE p.plugin_id=$1 AND g.state='ACTIVE' AND g.consumer_plugin_id<>$1
+        ORDER BY g.consumer_plugin_id, g.name
+        "#,
+    )
+    .bind(plugin_id)
+    .fetch_all(&state.db)
+    .await?;
+    if !dependents.is_empty() {
+        let names = dependents
+            .iter()
+            .map(|(consumer, capability)| format!("{consumer}:{capability}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppError::conflict(
+            "DEPENDENCY_BLOCKED",
+            format!("active capability consumers must be disabled first: {names}"),
+        ));
+    }
     let mut tx = state.db.begin().await?;
     sqlx::query(
         "UPDATE kernel.activation_revisions SET status='DISABLED', superseded_at=now() WHERE id=$1",

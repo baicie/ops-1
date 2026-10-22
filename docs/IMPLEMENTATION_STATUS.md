@@ -67,6 +67,31 @@ Stage A.1.3.1 follow-up: deterministic retry tests now cover guarded retry succe
 
 Still **NOT_RUN / blocking**: Kernel↔Node mTLS and certificate rotation, three physical Linux amd64 hosts, real Rootless Docker, OCI image signatures/SBOM, SIGKILL host-level container cleanup, full SSE flood/backpressure testing, and Fencing Tokens for side-effecting workloads. The 25s Kernel stale threshold and 30s Node lease are not a substitute for a fencing/generation protocol; a reassignment race can still produce a short double-execution window. No production-ready claim is made.
 
+## 0.0.2 Data Foundation (development)
+
+Baseline: `v0.0.1-dev.1` / `4ce130b`, branch `feat/0.0.2-data-foundation`.
+
+| Epic | Status | Evidence / limitation |
+|---|---|---|
+| D00 Data Capability Contract | DONE (contracts) | `contracts/openapi/{capability,data-catalog,data-integration}-v1.yaml`, capability/storage/catalog/integration JSON Schemas, examples and negative contract checks pass. |
+| D01 Catalog Backend | PARTIAL | Independent Node service and plugin-owned PostgreSQL schema tables implemented; dataset/create/draft/publish/diff/write/idempotency tested against host-process PostgreSQL. OCI deployment not run. |
+| D02 Catalog UI | PARTIAL | Dynamic UMD extension built and typechecked; browser E2E not run. |
+| D03 Integration Backend | PARTIAL | Independent HTTP/JSON source service with ConnectionTest, Discovery, Preview, mappings/specs/runs, SSRF negative test passed; OCI deployment not run. |
+| D04 Integration UI | PARTIAL | Dynamic UMD extension built and typechecked; browser E2E not run. |
+| D05 Ingestion Flow | PARTIAL | Host-process source→parse→map→validate→Catalog sink exercised against a local capability broker; real Kernel Gateway + real OCI plugin pair NOT_RUN. |
+| D06 Quality / Run History | PARTIAL | Run counts, history and batch lineage implemented; retention/quality edge cases limited. |
+| D07 Integration Tests | NOT_RUN | Requires both plugins as real OCI deployments through Kernel Gateway; Docker daemon unavailable during this pass. |
+
+Implemented platform increment:
+
+- `kernel.capability_grants`, `kernel.plugin_storage_bindings`, additive migration `0002_data_foundation.sql`.
+- Capability list/resolve/grant/revoke; workload token issuance; `/internal/v1/nodes/{nodeId}/instances/{instanceId}/env`; capability invoke endpoint with signed workload/caller context.
+- Plugin storage binding with dedicated PostgreSQL schema/role and dev-only credential injection; no credential returned by APIs.
+- Disable dependency protection for active capability consumers.
+- Node runtime fetches workload env before container create and passes it as Docker env; old Kernel without the endpoint remains compatible for 0.0.1 plugins (404 → empty env).
+
+Explicit NOT_RUN for this increment: OCI image builds for the two data plugins, real Node-proxied capability calls, real cross-plugin Golden Path, schema migration execution through a Kernel migration gate, browser E2E, three-host/mTLS/Fencing. No production claim.
+
 ## Explicit non-goals (unchanged)
 
 AI RCA, Data Catalog, general DAG engine, historical log storage/search, arbitrary third-party code, production multi-Kernel HA, GPU scheduling, NAT-transparent relay, OCI image attestation/SBOM enforcement, multi-tenant isolation.

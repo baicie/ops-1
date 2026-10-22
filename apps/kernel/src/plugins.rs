@@ -458,7 +458,7 @@ pub async fn capabilities(
 ) -> AppResult<Json<Vec<CapabilityView>>> {
     let rows = sqlx::query_as::<_, (String, String, String, i64, String, i64)>(
         r#"
-        SELECT c.plugin_id, c.version, c.name, c.major, c.direction, r.generation
+        SELECT c.plugin_id, c.version, c.name, c.major::bigint, c.direction, r.generation::bigint
         FROM kernel.capability_registrations c
         JOIN kernel.activation_revisions r ON r.id=c.revision_id AND r.status='ACTIVE'
         JOIN kernel.plugin_packages p ON p.package_id=r.package_id

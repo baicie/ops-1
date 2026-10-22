@@ -62,6 +62,7 @@ nohup env \
   OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$PUBLIC_KEY" \
   OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
   OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost,::1 \
+  OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS=host.docker.internal \
   OPSWEAVE_LOG_FORMAT=json \
   ./target/debug/opsweave-kernel > /tmp/opsweave-kernel.log 2>&1 &
 echo $! > /tmp/opsweave-kernel.pid

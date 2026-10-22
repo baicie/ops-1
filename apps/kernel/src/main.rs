@@ -1,6 +1,7 @@
 mod assets;
 mod audit;
 mod auth;
+mod capabilities;
 mod config;
 mod db;
 mod deployments;
@@ -15,6 +16,7 @@ mod publishers;
 mod receipts;
 mod routes;
 mod state;
+mod storage;
 mod users;
 
 use anyhow::Context;
