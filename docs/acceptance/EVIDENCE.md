@@ -275,3 +275,61 @@ The local capability harness is not a substitute for the required real OCI Golde
 - PR `#1` (`feat/0.0.2-data-foundation`) Rust/Web/Contracts checks: **PASS** on the latest branch commit.
 - `.github/workflows/data-foundation.yml` run [`39778321050`](https://github.com/baicie/ops-1/actions/runs/39778321050): **PASS** on Linux with Docker, real PostgreSQL, two Node runtimes, real OCI data plugin containers, Chromium smoke tests for both signed extensions, and the 0.0.1 E2E regression (`PASS=21 FAIL=0`).
 - Local Docker Desktop remained unavailable; local-only OCI deployment is `NOT_RUN`. The CI result is not a production deployment.
+
+## 0.0.2 Review Remediation
+
+### P0 authorization
+
+- Both data plugin servers now derive user scopes only from the authenticated role:
+  `viewer` gets read-only scopes, `operator`/`admin` get write scopes, and unknown
+  roles get an empty scope. `hasScope()` no longer treats `kind === 'user'` as a
+  wildcard.
+- Real Kernel Gateway CI run `39786487547` (`golden-path` success) exercised:
+  - Viewer dataset create `403`;
+  - Viewer schema publish `403`;
+  - Viewer source create `403`;
+  - Viewer ingestion run `403`;
+  - Viewer dataset read `200`;
+  - Operator dataset/source/spec/run legal path `SUCCEEDED`.
+- Evidence is emitted by `tests/acceptance/data_authz.sh`.
+
+### P0 SSRF
+
+- Integration now parses IPv6 bytes and classifies IPv4-mapped addresses in both
+  dotted and hexadecimal forms, plus IPv4 special ranges, IPv6 ULA, link-local,
+  loopback, multicast, documentation, Teredo, 6to4 and other non-global ranges.
+- Real Gateway/Connector CI run `39786487547` blocked all nine tested targets with
+  `422 SOURCE_SSRF_BLOCKED`:
+  `127.0.0.1`, `::ffff:7f00:1`, `::ffff:a9fe:a9fe`, `::1`, `fc00::1`,
+  `fe80::1`, `169.254.169.254`, `10.0.0.1`, `198.51.100.1`.
+- Evidence is emitted by `tests/acceptance/data_ssrf.sh`.
+
+### P1 migration ledger atomicity
+
+- `apply_migration()` now takes a per-plugin PostgreSQL advisory transaction lock,
+  writes `PENDING` and `APPLIED` in the same transaction as the migration SQL, and
+  resets the plugin role before writing the ledger. Failure rolls back DDL and the
+  pending row, then records `FAILED`.
+- Local test on `opsweave_data_test` against Kernel `127.0.0.1:18183`:
+  - SQL that created a table then failed returned `409 MIGRATION_FAILED`;
+  - the table was absent and ledger row was `FAILED`;
+  - a successful migration returned `APPLIED`;
+  - replay returned `APPLIED` with `replay=true`.
+- The test used a development PostgreSQL database and was not run in the OCI CI
+  workflow. Signed package migration-plan validation remains `NOT_RUN`; the current
+  gate validates the SQL checksum supplied with the request.
+
+### P1 provider binding
+
+- Grant provider binding is enforced during invocation with
+  `CAPABILITY_PROVIDER_MISMATCH`; predicate unit test passes.
+- A real multi-provider selection/switch test remains `NOT_RUN`.
+
+### P1 workload identity
+
+- Workload claims now include `instanceId`, `nodeId` and `nodeGeneration`; invocation
+  requires a live READY instance on a non-revoked, non-stale READY node with matching
+  generation and `plugin:<capability>` audience.
+- Unit test covers inactive instance, revoked node, generation mismatch and stale
+  node. Real CI Golden Path proves newly issued tokens still work; a live
+  revocation/old-token test remains `NOT_RUN`.

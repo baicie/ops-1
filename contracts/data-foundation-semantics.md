@@ -26,10 +26,18 @@ provider's Node address or container port as the logical identity.
 ### Caller identity and authorization
 
 - A workload token is issued by Kernel for one consumer plugin, capability, audience,
-  scope and short expiry. It must be signed and verified server-side.
+  scope and short expiry. It also binds the exact `instanceId`, `nodeId` and Node
+  generation. Verification must reject a token after the instance stops, the node is
+  revoked, the node generation changes, or the node becomes stale.
 - `X-OpsWeave-*` request headers are never a trust root. The provider must validate
   the Kernel-signed context before using caller identity.
 - A capability call without an active grant returns `CAPABILITY_FORBIDDEN` (403).
+- If a grant names `providerPluginId`, invocation must select and call exactly that
+  provider. A selection that resolves to another provider returns
+  `CAPABILITY_PROVIDER_MISMATCH` (403); it must not silently use another provider.
+- Backend plugin authorization uses the authenticated role's scope list. A user
+  identity is never a wildcard: `viewer` is read-only, `operator`/`admin` may write,
+  and unknown roles are denied. The plugin must not infer permissions from UI state.
 - User-session Gateway routes remain separate; a remote Web Extension receives only
   the host API client and never a raw session token.
 
@@ -58,6 +66,14 @@ the provider activation revision are included in the audit details.
   gates. A plugin cannot execute arbitrary SQL through the Kernel API.
 - Migration records are `(pluginId, version, migrationId, checksum, phase, status)`.
   A migration with an already-applied id but a different checksum is rejected.
+- Migration SQL and its `APPLIED` ledger update commit in one transaction, guarded by
+  a per-plugin PostgreSQL advisory transaction lock. A failed SQL rolls back both the
+  DDL and the `PENDING` row, then records `FAILED`; a committed SQL can never exist
+  without an `APPLIED` ledger row. Transaction-control statements in submitted SQL
+  are rejected.
+- The current runner validates the SQL checksum supplied in the request. It does not
+  yet validate a migration plan carried inside a signed package; that remains a
+  known 0.0.2 limitation.
 - `EXPAND` adds backward-compatible structures. `MIGRATE` backfills/transforms.
   `CONTRACT` may remove old structures only after old instances have drained and the
   rollback window is closed. Automatic rollback is not promised.
@@ -127,7 +143,10 @@ Before connecting, Integration must:
 
 1. allow only `http`/`https`;
 2. resolve DNS and reject loopback, link-local, private, multicast, unspecified,
-   metadata and IPv6 equivalents;
+   metadata and IPv6 equivalents, including IPv4-mapped IPv6 in both dotted and
+   hexadecimal forms (`::ffff:127.0.0.1`, `::ffff:7f00:1`, `::ffff:a9fe:a9fe`),
+   IPv6 ULA (`fc00::/7`), link-local (`fe80::/10`), documentation and other
+   non-global ranges;
 3. use the resolved address for the request (prevent DNS rebinding);
 4. disable redirects by default, or revalidate every redirect hop under the same
    policy and a small maximum;
@@ -163,8 +182,9 @@ no Dataset write is attempted.
 
 - All errors: `code`, `message`, `requestId`, `retryable`; optional redacted `details`.
 - Stable capability errors: `CAPABILITY_UNAVAILABLE`, `CAPABILITY_FORBIDDEN`,
-  `CAPABILITY_TIMEOUT`, `DEPENDENCY_BLOCKED`, `IDEMPOTENCY_CONFLICT`,
-  `UNKNOWN_OUTCOME`.
+  `CAPABILITY_TIMEOUT`, `CAPABILITY_PROVIDER_MISMATCH`,
+  `WORKLOAD_IDENTITY_REVOKED`, `DEPENDENCY_BLOCKED`, `IDEMPOTENCY_CONFLICT`,
+  `UNKNOWN_OUTCOME`, `MIGRATION_TRANSACTION_CONTROL_FORBIDDEN`.
 - Data errors: `SCHEMA_INCOMPATIBLE`, `SCHEMA_REVISION_IMMUTABLE`,
   `DATASET_NOT_FOUND`, `SOURCE_FAILED`, `SOURCE_SSRF_BLOCKED`,
   `SOURCE_LIMIT_EXCEEDED`, `RUN_ALREADY_ACTIVE`.

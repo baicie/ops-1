@@ -24,16 +24,20 @@ accessing each other's tables.
 - Expose synchronous calls through the existing Kernel HTTP Gateway and Node
   proxy, not provider IPs or ports.
 - A caller presents a short-lived **workload bearer token** issued by Kernel.
-  The token binds workload/plugin, capability, audience, scope and expiry.
-  Kernel verifies the token before routing; provider still validates the
-  signed caller context for defense in depth.
+  The token binds workload/plugin, capability, audience, scope, expiry, exact
+  `instanceId`, `nodeId` and Node generation. Kernel verifies the token and
+  current instance/node liveness before routing; provider still validates the
+  signed caller context for defense in depth. Stopping an instance, revoking a
+  node, changing the generation or becoming stale invalidates old tokens.
 - User-session Gateway behavior remains unchanged. No user token is exposed to
-  a remote extension.
+  a remote extension. Plugin backends derive user scopes from the authenticated
+  role only: `viewer` read-only, `operator`/`admin` write, unknown roles denied.
 
 ### 2. Grant/revoke is server-side and separate from Manifest metadata
 
-- `kernel.capability_grants` records consumer, capability, major, scope,
-  state and optional expiry.
+- `kernel.capability_grants` records consumer, capability, major, provider
+  binding, scope, state and optional expiry. A bound provider is enforced during
+  invocation; a different selected provider returns `CAPABILITY_PROVIDER_MISMATCH`.
 - Manifest `permissions` is an installation-time request only. Installation
   does not imply a grant.
 - Required dependencies block activation when no compatible provider exists;
@@ -66,6 +70,12 @@ accessing each other's tables.
   successful rollback. Recovery is an explicit operator action with backup.
   The implementation runs each migration under `SET LOCAL ROLE` to the plugin
   role; `CONTRACT` is refused while the plugin still has desired instances.
+- The migration SQL and its `APPLIED` ledger update are committed in one
+  transaction. A per-plugin advisory transaction lock serializes concurrent
+  attempts. Failure rolls back both DDL and the `PENDING` ledger row, then
+  records `FAILED`. Transaction-control statements in migration SQL are rejected.
+- The current request checksum gates SQL bytes; validating a signed package
+  migration plan is still a known limitation.
 
 ### 5. Manifest compatibility
 

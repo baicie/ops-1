@@ -88,6 +88,14 @@ struct WorkloadClaims {
     jti: Uuid,
 }
 
+type LiveInstanceRow = (
+    String,
+    i64,
+    Option<chrono::DateTime<Utc>>,
+    String,
+    Option<chrono::DateTime<Utc>>,
+);
+
 #[derive(Debug, Clone, FromRow)]
 struct ProviderRow {
     instance_id: Uuid,
@@ -409,13 +417,7 @@ pub async fn invoke(
     if claims.audience != format!("plugin:{name}") {
         return Err(AppError::forbidden("workload token audience is invalid"));
     }
-    let live: Option<(
-        String,
-        i64,
-        Option<chrono::DateTime<Utc>>,
-        String,
-        Option<chrono::DateTime<Utc>>,
-    )> = sqlx::query_as(
+    let live: Option<LiveInstanceRow> = sqlx::query_as(
         r#"
         SELECT i.state, n.generation, n.revoked_at, n.status, n.last_seen_at
         FROM kernel.plugin_instances i
@@ -436,14 +438,16 @@ pub async fn invoke(
         ));
     };
     let stale = last_seen_at.is_none_or(|seen| {
-        seen < Utc::now() - ChronoDuration::seconds(state.config.node_stale_seconds as i64)
+        seen < Utc::now() - ChronoDuration::seconds(state.config.node_stale_seconds)
     });
-    if instance_state != "READY"
-        || revoked_at.is_some()
-        || node_status != "READY"
-        || stale
-        || node_generation != claims.node_generation
-    {
+    if !workload_identity_is_live(
+        &instance_state,
+        revoked_at.is_some(),
+        &node_status,
+        stale,
+        node_generation,
+        claims.node_generation,
+    ) {
         return Err(AppError::new(
             StatusCode::FORBIDDEN,
             "WORKLOAD_IDENTITY_REVOKED",
@@ -575,6 +579,21 @@ pub async fn invoke(
         response.headers_mut().insert(header::CONTENT_TYPE, value);
     }
     Ok(response)
+}
+
+fn workload_identity_is_live(
+    instance_state: &str,
+    revoked: bool,
+    node_status: &str,
+    stale: bool,
+    current_generation: i64,
+    claimed_generation: i64,
+) -> bool {
+    instance_state == "READY"
+        && !revoked
+        && node_status == "READY"
+        && !stale
+        && current_generation == claimed_generation
 }
 
 fn provider_matches_grant(bound: Option<&str>, selected: &str) -> bool {
@@ -742,6 +761,25 @@ mod tests {
         assert!(!safe_path("/api/../kernel"));
         assert!(!safe_path("/api/%2e%2e/kernel"));
         assert!(!safe_path("/api\\kernel"));
+    }
+
+    #[test]
+    fn workload_identity_requires_live_instance_and_generation() {
+        assert!(super::workload_identity_is_live(
+            "READY", false, "READY", false, 3, 3
+        ));
+        assert!(!super::workload_identity_is_live(
+            "STOPPED", false, "READY", false, 3, 3
+        ));
+        assert!(!super::workload_identity_is_live(
+            "READY", true, "READY", false, 3, 3
+        ));
+        assert!(!super::workload_identity_is_live(
+            "READY", false, "READY", false, 4, 3
+        ));
+        assert!(!super::workload_identity_is_live(
+            "READY", false, "READY", true, 3, 3
+        ));
     }
 
     #[test]

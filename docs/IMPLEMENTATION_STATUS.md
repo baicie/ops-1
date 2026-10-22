@@ -105,3 +105,17 @@ AI RCA, Data Catalog, general DAG engine, historical log storage/search, arbitra
 3. **Package signature scope:** Ed25519 covers `artifactDigest` and canonical manifest digest. Image signature is separate and not implemented.
 4. **Java:** runtime is Java 21 but the frontend is not shipped for Java; C01 full-stack is partial.
 5. **Two-node validation:** two Node processes share one Docker daemon. This validates protocol/placement/failover semantics but is not the required three-host Linux gate.
+
+## 0.0.2 Security Remediation (2026-10-22)
+
+- P0 backend role-scope bypass fixed in both data plugins; real Gateway Viewer/Operator
+  authorization test added (`tests/acceptance/data_authz.sh`).
+- P0 IPv4-mapped IPv6 and special-address SSRF classification fixed; real Connector
+  negative test added (`tests/acceptance/data_ssrf.sh`).
+- P1 migration SQL and ledger are atomic under a per-plugin advisory transaction lock;
+  failure/replay locally verified.
+- P1 grant provider binding is enforced at invocation.
+- P1 workload tokens are bound to instance, node and node generation; liveness is
+  checked at invocation.
+- Remaining NOT_RUN: signed package migration plans, real multi-provider switch test,
+  live old-token revocation test, production secret management/mTLS/Fencing.
