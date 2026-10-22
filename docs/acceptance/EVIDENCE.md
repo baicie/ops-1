@@ -232,7 +232,7 @@ Screenshots: `artifacts/ui/` (six overview matrix images plus route/feature capt
 | mTLS control and data channels | Not implemented; bearer credentials over private TLS ingress only. Remote plaintext HTTP is rejected by endpoint policy; the reference Node listener must remain loopback behind an authenticated TLS/mTLS tunnel. |
 | OCI image signature/attestation, SBOM, vulnerability gate | Not implemented; content digest pull is enforced. |
 | C09 old-tab compatibility window | Not implemented. |
-| C10 migration gate / destructive schema rollback prevention | No migration engine in 0.0.1. |
+| C10 migration gate / destructive schema rollback prevention | 0.0.2 adds checksum-gated EXPAND/MIGRATE/CONTRACT storage migrations; automatic destructive rollback remains intentionally unsupported. |
 | SSE backpressure/flood | Per-poll revocation and idle backoff implemented; deliberate flood/backpressure test not run. |
 | Production performance, HA, multi-tenancy, disaster recovery | Explicitly out of scope for 0.0.1. |
 
