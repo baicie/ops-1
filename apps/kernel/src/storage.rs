@@ -196,9 +196,47 @@ fn plugin_database_url(state: &AppState, role: &str, password: &str) -> AppResul
     ))
 }
 
+fn has_transaction_control(sql: &str) -> bool {
+    sql.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .map(|token| token.to_ascii_uppercase())
+        .any(|token| {
+            matches!(
+                token.as_str(),
+                "COMMIT" | "ROLLBACK" | "BEGIN" | "END" | "ABORT" | "SAVEPOINT" | "RELEASE"
+            )
+        })
+}
+
+async fn record_failed_migration(
+    state: &AppState,
+    plugin_id: &str,
+    payload: &ApplyMigrationRequest,
+    error: &str,
+) {
+    let _ = sqlx::query(
+        "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,details) VALUES ($1,$2,$3,$4,$5,'FAILED',$6,NULL,$7) ON CONFLICT (plugin_id,version,migration_id) DO UPDATE SET status='FAILED', details=EXCLUDED.details",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(plugin_id)
+    .bind(&payload.version)
+    .bind(&payload.migration_id)
+    .bind(&payload.checksum)
+    .bind(&payload.phase)
+    .bind(serde_json::json!({"error": error}))
+    .execute(&state.db)
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
-    use super::safe_names;
+    use super::{has_transaction_control, safe_names};
+
+    #[test]
+    fn migration_sql_rejects_transaction_control() {
+        assert!(has_transaction_control("CREATE TABLE t(id int); COMMIT;"));
+        assert!(has_transaction_control("ROLLBACK"));
+        assert!(!has_transaction_control("CREATE TABLE t(id int)"));
+    }
 
     #[test]
     fn storage_names_are_bounded_and_safe() {
@@ -325,34 +363,53 @@ pub async fn apply_migration(
         ));
     }
 
-    let mut tx = state.db.begin().await?;
-    let set_role = format!("SET LOCAL ROLE \"{}\"", binding.role_name);
-    let set_path = format!("SET LOCAL search_path = \"{}\"", binding.schema_name);
-    sqlx::query(&set_role).execute(&mut *tx).await?;
-    sqlx::query(&set_path).execute(&mut *tx).await?;
-    let execution = sqlx::query(&payload.sql).execute(&mut *tx).await;
-    if let Err(error) = execution {
-        tx.rollback().await.ok();
-        let _ = sqlx::query(
-            "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,details) VALUES ($1,$2,$3,$4,$5,'FAILED',$6,NULL,$7) ON CONFLICT (plugin_id,version,migration_id) DO UPDATE SET status='FAILED', details=EXCLUDED.details",
-        )
-        .bind(uuid::Uuid::new_v4())
-        .bind(&plugin_id)
-        .bind(&payload.version)
-        .bind(&payload.migration_id)
-        .bind(&payload.checksum)
-        .bind(&payload.phase)
-        .bind(serde_json::json!({"error": error.to_string()}))
-        .execute(&state.db)
-        .await;
-        return Err(AppError::conflict(
-            "MIGRATION_FAILED",
-            "migration failed and was rolled back; manual recovery is required",
+    if has_transaction_control(&payload.sql) {
+        return Err(AppError::bad_request(
+            "migration SQL must not contain transaction-control statements",
         ));
     }
-    tx.commit().await?;
-    sqlx::query(
-        "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,applied_at) VALUES ($1,$2,$3,$4,$5,'APPLIED',$6,NULL,now())",
+
+    let mut tx = state.db.begin().await?;
+    // Serialize migration attempts per plugin. The advisory lock is
+    // transaction-scoped, so a crashed request cannot leave a stuck lock.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(format!("plugin-migration:{plugin_id}"))
+        .execute(&mut *tx)
+        .await?;
+
+    let existing: Option<(String, String)> = sqlx::query_as(
+        "SELECT checksum,status FROM kernel.plugin_migrations WHERE plugin_id=$1 AND version=$2 AND migration_id=$3",
+    )
+    .bind(&plugin_id)
+    .bind(&payload.version)
+    .bind(&payload.migration_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((checksum, status)) = existing {
+        tx.rollback().await.ok();
+        if checksum != payload.checksum {
+            return Err(AppError::conflict(
+                "MIGRATION_CHECKSUM_MISMATCH",
+                "an applied migration has a different checksum",
+            ));
+        }
+        if status == "APPLIED" {
+            return Ok(Json(ApplyMigrationResponse {
+                plugin_id,
+                migration_id: payload.migration_id,
+                status,
+                checksum,
+                replay: true,
+            }));
+        }
+        return Err(AppError::conflict(
+            "MIGRATION_BLOCKED",
+            format!("migration is already in status {status}"),
+        ));
+    }
+
+    let pending = sqlx::query(
+        "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,details) VALUES ($1,$2,$3,$4,$5,'PENDING',$6,$7,$8)",
     )
     .bind(uuid::Uuid::new_v4())
     .bind(&plugin_id)
@@ -360,8 +417,46 @@ pub async fn apply_migration(
     .bind(&payload.migration_id)
     .bind(&payload.checksum)
     .bind(&payload.phase)
-    .execute(&state.db)
-    .await?;
+    .bind(&binding.migration_plan_digest)
+    .bind(serde_json::json!({"execution": "started"}))
+    .execute(&mut *tx)
+    .await;
+    if let Err(error) = pending {
+        tx.rollback().await.ok();
+        record_failed_migration(&state, &plugin_id, &payload, &error.to_string()).await;
+        return Err(AppError::conflict(
+            "MIGRATION_FAILED",
+            "migration ledger entry could not be created; no SQL was applied",
+        ));
+    }
+
+    let set_role = format!("SET LOCAL ROLE \"{}\"", binding.role_name);
+    let set_path = format!("SET LOCAL search_path = \"{}\"", binding.schema_name);
+    let execution = async {
+        sqlx::query(&set_role).execute(&mut *tx).await?;
+        sqlx::query(&set_path).execute(&mut *tx).await?;
+        sqlx::query(&payload.sql).execute(&mut *tx).await?;
+        sqlx::query("RESET ROLE").execute(&mut *tx).await?;
+        sqlx::query(
+            "UPDATE kernel.plugin_migrations SET status='APPLIED',applied_at=now(),details='{}'::jsonb WHERE plugin_id=$1 AND version=$2 AND migration_id=$3 AND status='PENDING'",
+        )
+        .bind(&plugin_id)
+        .bind(&payload.version)
+        .bind(&payload.migration_id)
+        .execute(&mut *tx)
+        .await?;
+        Ok::<(), sqlx::Error>(())
+    }
+    .await;
+    if let Err(error) = execution {
+        tx.rollback().await.ok();
+        record_failed_migration(&state, &plugin_id, &payload, &error.to_string()).await;
+        return Err(AppError::conflict(
+            "MIGRATION_FAILED",
+            "migration failed and was rolled back; manual recovery is required",
+        ));
+    }
+    tx.commit().await?;
     Ok(Json(ApplyMigrationResponse {
         plugin_id,
         migration_id: payload.migration_id,

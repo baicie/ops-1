@@ -76,6 +76,9 @@ struct WorkloadClaims {
     v: u8,
     sub: String,
     plugin_id: String,
+    instance_id: Uuid,
+    node_id: Uuid,
+    node_generation: i64,
     capability_name: String,
     capability_major: i64,
     audience: String,
@@ -257,6 +260,12 @@ pub async fn issue_workload_token(
         return Err(AppError::bad_request("audience and scope are required"));
     }
     validate_capability_name(&payload.capability_name)?;
+    let expected_audience = format!("plugin:{}", payload.capability_name);
+    if payload.audience != expected_audience {
+        return Err(AppError::bad_request(
+            "audience must be plugin:<capability-name>",
+        ));
+    }
     let instance: Option<(Uuid, String)> = sqlx::query_as(
         r#"
         SELECT i.id, d.plugin_id
@@ -269,14 +278,17 @@ pub async fn issue_workload_token(
     .bind(node.id)
     .fetch_optional(&state.db)
     .await?;
-    let Some((_, plugin_id)) = instance else {
+    let Some((instance_id, plugin_id)) = instance else {
         return Err(AppError::not_found("instance is not assigned to this node"));
     };
     let expires_at = Utc::now() + ChronoDuration::hours(1);
     let claims = WorkloadClaims {
         v: 1,
-        sub: Uuid::new_v4().to_string(),
+        sub: instance_id.to_string(),
         plugin_id,
+        instance_id,
+        node_id: node.id,
+        node_generation: node.generation,
         capability_name: payload.capability_name,
         capability_major: payload.capability_major,
         audience: payload.audience,
@@ -295,12 +307,13 @@ pub async fn instance_environment(
     headers: HeaderMap,
 ) -> AppResult<Json<InstanceEnvironmentResponse>> {
     let node = crate::nodes::authenticate_node(&state, node_id, &headers).await?;
-    let row: Option<(String, Value)> = sqlx::query_as(
+    let row: Option<(String, Value, i64)> = sqlx::query_as(
         r#"
-        SELECT d.plugin_id, p.manifest
+        SELECT d.plugin_id, p.manifest, n.generation
         FROM kernel.plugin_instances i
         JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
         JOIN kernel.plugin_packages p ON p.package_id=d.package_id
+        JOIN kernel.nodes n ON n.id=i.node_id
         WHERE i.id=$1 AND i.node_id=$2 AND i.desired_action='START'
         "#,
     )
@@ -308,7 +321,7 @@ pub async fn instance_environment(
     .bind(node.id)
     .fetch_optional(&state.db)
     .await?;
-    let Some((plugin_id, manifest_value)) = row else {
+    let Some((plugin_id, manifest_value, node_generation)) = row else {
         return Err(AppError::not_found("instance is not assigned to this node"));
     };
     let mut env = std::collections::BTreeMap::new();
@@ -353,6 +366,9 @@ pub async fn instance_environment(
                 v: 1,
                 sub: instance_id.to_string(),
                 plugin_id: plugin_id.clone(),
+                instance_id,
+                node_id: node.id,
+                node_generation,
                 capability_name: required.name.clone(),
                 capability_major: required.major,
                 audience: format!("plugin:{}", required.name),
@@ -390,15 +406,59 @@ pub async fn invoke(
             "workload token is for a different capability",
         ));
     }
-    let grant: Option<(String, Value)> = sqlx::query_as(
-        "SELECT consumer_plugin_id, scope FROM kernel.capability_grants WHERE consumer_plugin_id=$1 AND name=$2 AND major=$3 AND state='ACTIVE' AND (expires_at IS NULL OR expires_at > now())",
+    if claims.audience != format!("plugin:{name}") {
+        return Err(AppError::forbidden("workload token audience is invalid"));
+    }
+    let live: Option<(
+        String,
+        i64,
+        Option<chrono::DateTime<Utc>>,
+        String,
+        Option<chrono::DateTime<Utc>>,
+    )> = sqlx::query_as(
+        r#"
+        SELECT i.state, n.generation, n.revoked_at, n.status, n.last_seen_at
+        FROM kernel.plugin_instances i
+        JOIN kernel.nodes n ON n.id=i.node_id
+        WHERE i.id=$1 AND i.node_id=$2 AND i.desired_action='START'
+        "#,
+    )
+    .bind(claims.instance_id)
+    .bind(claims.node_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((instance_state, node_generation, revoked_at, node_status, last_seen_at)) = live
+    else {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "WORKLOAD_IDENTITY_REVOKED",
+            "workload instance is no longer assigned to the node",
+        ));
+    };
+    let stale = last_seen_at.is_none_or(|seen| {
+        seen < Utc::now() - ChronoDuration::seconds(state.config.node_stale_seconds as i64)
+    });
+    if instance_state != "READY"
+        || revoked_at.is_some()
+        || node_status != "READY"
+        || stale
+        || node_generation != claims.node_generation
+    {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "WORKLOAD_IDENTITY_REVOKED",
+            "workload instance or node is no longer active",
+        ));
+    }
+    let grant: Option<(String, Value, Option<String>)> = sqlx::query_as(
+        "SELECT consumer_plugin_id, scope, provider_plugin_id FROM kernel.capability_grants WHERE consumer_plugin_id=$1 AND name=$2 AND major=$3 AND state='ACTIVE' AND (expires_at IS NULL OR expires_at > now())",
     )
     .bind(&claims.plugin_id)
     .bind(&name)
     .bind(major)
     .fetch_optional(&state.db)
     .await?;
-    let Some((_, grant_scope)) = grant else {
+    let Some((_, grant_scope, bound_provider)) = grant else {
         let _ = audit::record(
             &state.db,
             "capability.denied",
@@ -425,6 +485,13 @@ pub async fn invoke(
         ));
     }
     let provider = resolve_provider(&state, &name, major).await?;
+    if !provider_matches_grant(bound_provider.as_deref(), &provider.plugin_id) {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "CAPABILITY_PROVIDER_MISMATCH",
+            "active grant is bound to a different provider",
+        ));
+    }
     crate::nodes::validate_node_data_endpoint(&state.config, &provider.data_endpoint)?;
     let manifest: ManifestV11 = serde_json::from_value(provider.manifest)
         .map_err(|error| AppError::internal(format!("provider manifest invalid: {error}")))?;
@@ -508,6 +575,10 @@ pub async fn invoke(
         response.headers_mut().insert(header::CONTENT_TYPE, value);
     }
     Ok(response)
+}
+
+fn provider_matches_grant(bound: Option<&str>, selected: &str) -> bool {
+    bound.is_none_or(|bound| bound == selected)
 }
 
 async fn resolve_provider(state: &AppState, name: &str, major: i64) -> AppResult<ProviderRow> {
@@ -674,12 +745,28 @@ mod tests {
     }
 
     #[test]
+    fn provider_binding_is_enforced() {
+        assert!(super::provider_matches_grant(None, "provider-a"));
+        assert!(super::provider_matches_grant(
+            Some("provider-a"),
+            "provider-a"
+        ));
+        assert!(!super::provider_matches_grant(
+            Some("provider-a"),
+            "provider-b"
+        ));
+    }
+
+    #[test]
     fn workload_token_round_trip_and_signature_rejection() {
         let key = b"test-workload-key";
         let claims = super::WorkloadClaims {
             v: 1,
             sub: uuid::Uuid::new_v4().to_string(),
             plugin_id: "opsweave.data-integration".into(),
+            instance_id: uuid::Uuid::new_v4(),
+            node_id: uuid::Uuid::new_v4(),
+            node_generation: 1,
             capability_name: "data.catalog.v1".into(),
             capability_major: 1,
             audience: "plugin:data.catalog.v1".into(),

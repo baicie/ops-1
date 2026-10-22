@@ -65,11 +65,17 @@ function verifyContext(token) {
 }
 function identity(req) {
   const context = verifyContext(req.headers['x-opsweave-caller-context']);
-  if (context) return { kind: 'workload', pluginId: context.pluginId, scope: context.scope || [], claims: context };
-  if (req.headers['x-opsweave-user-role']) { const role = String(req.headers['x-opsweave-user-role']); return { kind: 'user', role, scope: role === 'viewer' ? ['dataset:read'] : ['dataset:read', 'dataset:write'] }; }
+  if (context) return { kind: 'workload', pluginId: context.pluginId, scope: Array.isArray(context.scope) ? context.scope : [], claims: context };
+  const rawRole = req.headers['x-opsweave-user-role'];
+  if (rawRole) {
+    const role = String(rawRole).toLowerCase();
+    if (role === 'admin' || role === 'operator') return { kind: 'user', role, scope: ['dataset:read', 'dataset:write'] };
+    if (role === 'viewer') return { kind: 'user', role, scope: ['dataset:read'] };
+    return { kind: 'user', role, scope: [] };
+  }
   return null;
 }
-function hasScope(who, scope) { return who && (who.kind === 'user' || who.scope.includes(scope)); }
+function hasScope(who, scope) { return Boolean(who && Array.isArray(who.scope) && who.scope.includes(scope)); }
 
 function validateFields(fields) {
   if (!Array.isArray(fields) || fields.length < 1 || fields.length > 512) throw new Error('fields must contain 1..512 entries');

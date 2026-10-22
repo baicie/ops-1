@@ -28,21 +28,106 @@ async function readJson(req, limit = 1024 * 1024) { let body = ''; for await (co
 function canonical(v) { if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']'; if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}'; return JSON.stringify(v); }
 function digest(v) { return 'sha256:' + crypto.createHash('sha256').update(canonical(v)).digest('hex'); }
 function verifyContext(token) { if (!token || !CONTEXT_KEY) return null; const p = token.split('.'); if (p.length !== 3 || p[0] !== 'oww1') return null; const expected = crypto.createHmac('sha256', Buffer.from(CONTEXT_KEY, 'hex')).update(p[1]).digest('base64url'); if (expected.length !== p[2].length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(p[2]))) return null; try { const c = JSON.parse(Buffer.from(p[1], 'base64url').toString()); if (c.v !== 1 || Number(c.expiresAt) * 1000 <= Date.now()) return null; return c; } catch { return null; } }
-function identity(req) { const c = verifyContext(req.headers['x-opsweave-caller-context']); if (c) return { kind: 'workload', pluginId: c.pluginId, scope: c.scope || [] }; if (req.headers['x-opsweave-user-role']) { const role = String(req.headers['x-opsweave-user-role']); return { kind: 'user', role, scope: role === 'viewer' ? ['source:read'] : ['source:read', 'source:write'] }; } return null; }
-function hasScope(who, scope) { return who && (who.kind === 'user' || who.scope.includes(scope)); }
+function identity(req) {
+  const c = verifyContext(req.headers['x-opsweave-caller-context']);
+  if (c) return { kind: 'workload', pluginId: c.pluginId, scope: Array.isArray(c.scope) ? c.scope : [] };
+  const rawRole = req.headers['x-opsweave-user-role'];
+  if (rawRole) {
+    const role = String(rawRole).toLowerCase();
+    if (role === 'admin' || role === 'operator') return { kind: 'user', role, scope: ['source:read', 'source:write'] };
+    if (role === 'viewer') return { kind: 'user', role, scope: ['source:read'] };
+    return { kind: 'user', role, scope: [] };
+  }
+  return null;
+}
+function hasScope(who, scope) { return Boolean(who && Array.isArray(who.scope) && who.scope.includes(scope)); }
+function ipv4Bytes(ip) {
+  if (!net.isIPv4(ip)) return null;
+  return ip.split('.').map(Number);
+}
+function isNonPublicIPv4(ip) {
+  const b = ipv4Bytes(ip);
+  if (!b) return true;
+  return b[0] === 0 || b[0] === 10 || b[0] === 127 ||
+    (b[0] === 100 && b[1] >= 64 && b[1] <= 127) ||
+    (b[0] === 169 && b[1] === 254) ||
+    (b[0] === 172 && b[1] >= 16 && b[1] <= 31) ||
+    (b[0] === 192 && b[1] === 0 && b[2] === 0) ||
+    (b[0] === 192 && b[1] === 0 && b[2] === 2) ||
+    (b[0] === 192 && b[1] === 88 && b[2] === 99) ||
+    (b[0] === 192 && b[1] === 168) ||
+    (b[0] === 198 && (b[1] === 18 || b[1] === 19)) ||
+    (b[0] === 198 && b[1] === 51 && b[2] === 100) ||
+    (b[0] === 203 && b[1] === 0 && b[2] === 113) ||
+    b[0] >= 224;
+}
+function parseIPv6(ip) {
+  const lower = ip.toLowerCase();
+  if (lower.includes('%') || lower.split('::').length > 2) return null;
+  const parsePart = (part) => {
+    if (!part) return [];
+    const items = part.split(':');
+    if (items.at(-1)?.includes('.')) {
+      const v4 = ipv4Bytes(items.pop());
+      if (!v4) throw new Error('bad embedded IPv4');
+      items.push(((v4[0] << 8) | v4[1]).toString(16), ((v4[2] << 8) | v4[3]).toString(16));
+    }
+    return items.map((item) => {
+      if (!/^[0-9a-f]{1,4}$/.test(item)) throw new Error('bad IPv6 group');
+      return Number.parseInt(item, 16);
+    });
+  };
+  try {
+    const hasCompression = lower.includes('::');
+    const [leftRaw, rightRaw = ''] = hasCompression ? lower.split('::') : [lower];
+    const left = parsePart(leftRaw);
+    const right = parsePart(rightRaw);
+    let groups;
+    if (hasCompression) {
+      const zeros = 8 - left.length - right.length;
+      if (zeros < 1) return null;
+      groups = [...left, ...Array(zeros).fill(0), ...right];
+    } else {
+      groups = left;
+    }
+    if (groups.length !== 8) return null;
+    return groups.flatMap((group) => [group >> 8, group & 0xff]);
+  } catch { return null; }
+}
 function isPrivate(ip) {
-  if (net.isIPv4(ip)) { const p = ip.split('.').map(Number); return p[0] === 10 || p[0] === 127 || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || p[0] === 0 || (p[0] === 100 && p[1] >= 64 && p[1] <= 127); }
-  if (net.isIPv6(ip)) { const lower = ip.toLowerCase(); if (lower === '::1' || lower === '::' || lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe80') || lower.startsWith('ff')) return true; if (lower.startsWith('::ffff:')) { const mapped = lower.slice(7); if (net.isIPv4(mapped)) return isPrivate(mapped); } return false; }
-  return true;
+  const value = String(ip).replace(/^\[|\]$/g, '').toLowerCase();
+  if (net.isIPv4(value)) return isNonPublicIPv4(value);
+  if (!net.isIPv6(value)) return true;
+  const bytes = parseIPv6(value);
+  if (!bytes) return true;
+  const mapped = bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
+  if (mapped) return isNonPublicIPv4(bytes.slice(12).join('.'));
+  // IPv4-compatible ::/96 is non-public too.
+  if (bytes.slice(0, 12).every((byte) => byte === 0)) return isNonPublicIPv4(bytes.slice(12).join('.'));
+  // Only the global-unicast 2000::/3 range may pass this gate. This rejects
+  // loopback, ULA, link-local, multicast, unspecified and other special ranges.
+  if ((bytes[0] & 0xe0) !== 0x20) return true;
+  // Documentation, Teredo, benchmarking, ORCHID and 6to4 ranges are non-public.
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return true;
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x00) return true;
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x02) return true;
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && (bytes[3] & 0xf0) === 0x10) return true;
+  if (bytes[0] === 0x20 && bytes[1] === 0x02) return true;
+  if (bytes[0] === 0x3f && bytes[1] === 0xff && (bytes[2] & 0xf0) === 0) return true;
+  return false;
 }
 async function assertUrl(raw) {
   const url = new URL(raw);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw Object.assign(new Error('SOURCE_SSRF_BLOCKED: unsupported URL'), { code: 'SOURCE_SSRF_BLOCKED', status: 422 });
-  const addresses = await dns.lookup(url.hostname, { all: true });
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  const literalFamily = net.isIP(host);
+  const addresses = literalFamily
+    ? [{ address: host, family: literalFamily }]
+    : await dns.lookup(host, { all: true });
   if (!addresses.length) throw Object.assign(new Error('SOURCE_DNS_FAILED'), { code: 'SOURCE_DNS_FAILED', status: 422 });
   for (const { address } of addresses) {
     const loopbackAllowed = ALLOW_LOOPBACK && (address === '127.0.0.1' || address === '::1');
-    if (isPrivate(address) && !loopbackAllowed && !ALLOWED_PRIVATE_HOSTS.has(url.hostname)) throw Object.assign(new Error('SOURCE_SSRF_BLOCKED: private address'), { code: 'SOURCE_SSRF_BLOCKED', status: 422 });
+    if (isPrivate(address) && !loopbackAllowed && !ALLOWED_PRIVATE_HOSTS.has(host)) throw Object.assign(new Error('SOURCE_SSRF_BLOCKED: private address'), { code: 'SOURCE_SSRF_BLOCKED', status: 422 });
   }
   return { url, addresses };
 }
