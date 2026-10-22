@@ -21,15 +21,15 @@ cleanup() {
   psql "$DB" -qAt -c "DROP TRIGGER IF EXISTS test_delay_failed_migration ON kernel.plugin_migrations;" >/dev/null 2>&1 || true
   psql "$DB" -qAt -c "DROP FUNCTION IF EXISTS test_delay_failed_migration();" >/dev/null 2>&1 || true
   psql "$DB" -qAt -c "DELETE FROM kernel.plugin_migrations WHERE plugin_id='$PLUGIN' AND version='$VERSION';" >/dev/null 2>&1 || true
-  psql "$DB" -qAt -c "DROP TABLE IF EXISTS \"$SCHEMA\".concurrency_probe; DROP SEQUENCE IF EXISTS \"$SCHEMA\".concurrency_gate_seq;" >/dev/null 2>&1 || true
+  psql "$DB" -qAt -c "DROP TABLE IF EXISTS \"$SCHEMA\".concurrency_probe;" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-psql "$DB" -qAt -c "DROP TABLE IF EXISTS \"$SCHEMA\".concurrency_probe; DROP SEQUENCE IF EXISTS \"$SCHEMA\".concurrency_gate_seq;" >/dev/null
-psql "$DB" -qAt -c "SET ROLE \"$ROLE\"; CREATE SEQUENCE \"$SCHEMA\".concurrency_gate_seq START 1;" >/dev/null
+psql "$DB" -qAt -c "DROP TABLE IF EXISTS \"$SCHEMA\".concurrency_probe;" >/dev/null
 psql "$DB" -qAt -c "CREATE OR REPLACE FUNCTION test_delay_failed_migration() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN IF NEW.status='FAILED' THEN PERFORM pg_sleep(4); END IF; RETURN NEW; END \$\$; DROP TRIGGER IF EXISTS test_delay_failed_migration ON kernel.plugin_migrations; CREATE TRIGGER test_delay_failed_migration BEFORE INSERT OR UPDATE ON kernel.plugin_migrations FOR EACH ROW EXECUTE FUNCTION test_delay_failed_migration();" >/dev/null
 
-SQL="CREATE TABLE concurrency_probe(id integer); SELECT pg_sleep(1); SELECT CASE WHEN nextval('concurrency_gate_seq') <= 1 THEN 1/0 ELSE 1 END;"
+THRESHOLD="$(python3 -c 'from datetime import datetime,timezone,timedelta; print((datetime.now(timezone.utc)+timedelta(seconds=3)).isoformat())')"
+SQL="CREATE TABLE concurrency_probe(id integer); SELECT CASE WHEN now() < '$THRESHOLD'::timestamptz THEN 1/0 ELSE 1 END;"
 BODY="$(python3 - "$SQL" "$VERSION" "$MIGRATION" <<'PY'
 import hashlib,json,sys
 sql,version,mid=sys.argv[1:]
@@ -41,9 +41,9 @@ printf '%s' "$BODY" > /tmp/migration-race-body.json
 # A acquires the advisory lock first and creates DDL, then sleeps.
 curl -sS -o /tmp/migration-race-a.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @/tmp/migration-race-body.json "$URL/api/v1/plugin-storage/$PLUGIN/migrations" > /tmp/migration-race-a.code &
 A_PID=$!
-# Give A the advisory lock first. A consumes sequence value 1 and fails; B then
-# consumes value 2 and succeeds after A's transaction rolls back.
-sleep 1
+# A starts before the threshold and fails. B starts after the threshold; the
+# advisory lock still serializes the two requests.
+sleep 4
 curl -sS -o /tmp/migration-race-b.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @/tmp/migration-race-body.json "$URL/api/v1/plugin-storage/$PLUGIN/migrations" > /tmp/migration-race-b.code &
 B_PID=$!
 wait "$A_PID"
