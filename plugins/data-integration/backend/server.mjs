@@ -51,7 +51,6 @@ async function catalogToken() {
       let payload = {};
       try { payload = JSON.parse(text); } catch { payload = {}; }
       if (!response.ok || !payload.token) {
-        delete CAPABILITY_TOKENS['data.catalog.v1'];
         throw Object.assign(new Error(payload.message || 'workload token refresh failed'), { code: payload.code || 'TOKEN_REFRESH_FAILED', status: response.status });
       }
       CAPABILITY_TOKENS['data.catalog.v1'] = payload.token;
