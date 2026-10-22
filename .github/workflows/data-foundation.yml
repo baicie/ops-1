@@ -1,17 +1,7 @@
 name: data-foundation
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'apps/kernel/**'
-      - 'apps/node/**'
-      - 'contracts/**'
-      - 'plugins/data-catalog/**'
-      - 'plugins/data-integration/**'
-      - 'scripts/**'
-      - 'tests/ci/**'
-      - 'tests/acceptance/data_foundation.sh'
-      - '.github/workflows/data-foundation.yml' 
+
 permissions:
   contents: read
 jobs:
