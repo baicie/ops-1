@@ -36,7 +36,7 @@ ok "same batch key with changed content rejected"
 BAD_SCHEMA="$(printf '%s' "$WRITE" | python3 -c 'import json,sys; d=json.load(sys.stdin); d["schemaRevision"]=999; print(json.dumps(d))')"
 SCHEMA_CODE="$(curl -sS -o /tmp/reliability-schema.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' -H 'Idempotency-Key: reliability-write-0003' "$CAT/datasets/$DATASET_ID/records" -d "$BAD_SCHEMA")"
 [ "$SCHEMA_CODE" = "409" ] || bad "unknown schema revision returned $SCHEMA_CODE"
-grep -q 'SCHEMA_REVISION' /tmp/reliability-schema.json || bad "unknown schema error code missing"
+grep -q 'SCHEMA_NOT_PUBLISHED' /tmp/reliability-schema.json || bad "unknown schema error code missing"
 ok "unknown schema revision rejected"
 
 RECORDS="$(curl -fsS "${AUTH[@]}" "$CAT/datasets/$DATASET_ID/records?limit=100")"
