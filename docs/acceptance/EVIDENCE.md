@@ -266,3 +266,8 @@ This section records only what was actually executed during the 0.0.2 implementa
 | Kernel migration gate | PASS (local) | Checksum-matched EXPAND migration applied under a least-privilege plugin database role; replay returned the original record; a second list encoded the APPLIED record. CONTRACT-during-live-instances and changed-checksum rejection are implemented but not all tested. |
 
 The local capability harness is not a substitute for the required real OCI Golden Path. No production claim is made.
+
+### 0.0.2 branch CI
+
+- PR `#1` (`feat/0.0.2-data-foundation`, latest `4910eb5`) Rust/Web/Contracts checks: **PASS**.
+- `.github/workflows/data-foundation.yml` is a manual-only real-OCI workflow. A first CI attempt built both data backend images and failed at pushing to an insecure local registry (`server gave HTTP response to HTTPS client`); it is retained as a reproducible skeleton, not counted as a pass. Registry TLS/insecure-registry configuration remains `NOT_RUN`.
