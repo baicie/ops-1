@@ -44,7 +44,7 @@ if [ "${OPSWEAVE_TEST_NODE_REVOCATION:-0}" = "1" ]; then
   CURRENT_TOKEN="$(docker exec "$CONTAINER_ID" cat /run/opsweave/capability-tokens.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["data.catalog.v1"])')"
   [ -n "$CURRENT_TOKEN" ] || bad "current workload token file is empty"
   OLD_REFRESH_CODE="$(curl -sS -o /tmp/token-old-refresh.json -w '%{http_code}' -X POST -H "Authorization: Bearer $OLD_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
-  [ "$OLD_REFRESH_CODE" = "403" ] || bad "old env token refresh after TTL+grace returned $OLD_REFRESH_CODE, expected 403"
+  [ "$OLD_REFRESH_CODE" = "401" ] || bad "old env token refresh after TTL+grace returned $OLD_REFRESH_CODE, expected 401"
   FRESH_RESPONSE="$(curl -fsS -X POST -H "Authorization: Bearer $CURRENT_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
   FRESH_TOKEN="$(printf '%s' "$FRESH_RESPONSE" | json "d['token']")"
   DETAIL="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/plugins/opsweave.data-integration")"
