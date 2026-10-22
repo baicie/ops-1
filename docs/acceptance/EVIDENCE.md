@@ -7,7 +7,7 @@ This report records what was actually executed on the development host. It does 
 | Item | Observed value |
 |---|---|
 | Date | 2026-10-22 (Asia/Shanghai) |
-| Commit | `git log -1` (implementation checkout) |
+| Code freeze commit | `ca56462` (`Stage A.1.3.1`) |
 | Host OS / arch | macOS 15.7.7 / arm64 (Apple M1) |
 | Rust / Cargo | 1.96.0 |
 | Node / pnpm | 22.12.0 / 10.34.3 |
@@ -35,7 +35,7 @@ The signature covers both the canonical payload index digest and the canonical m
 
 ### Remote CI
 
-GitHub Actions run [`39732155194`](https://github.com/baicie/ops-1/actions/runs/39732155194) on commit `b9a4d88`:
+GitHub Actions run [`39736068436`](https://github.com/baicie/ops-1/actions/runs/39736068436) on commit `ca56462`:
 
 ```
 web       success  (pnpm typechecks + Shell/hello builds)
@@ -55,8 +55,8 @@ opsweave_bundle: 4 passed
   manifest_image_reference_is_covered_by_signature ... ok
 opsweave_contracts: 3 passed
 opsweave_kernel: 9 passed (cursor, path traversal, capacity fail-closed, placement transfer, STOP/START accounting, IP-key/trusted-proxy, sliding-window limiter)
-opsweave_node: 4 passed (path traversal, Docker cleanup failure propagation, lifecycle lock timeout, no unlocked Docker scan)
-result: all 20 passed, 0 failed
+opsweave_node: 8 passed (path traversal, Docker cleanup failure propagation, lifecycle lock timeout, no unlocked Docker scan, retry convergence/error retention, runtime helpers)
+result: all 24 passed, 0 failed
 ```
 
 ### Contract validation
@@ -139,7 +139,7 @@ node credential revocation test passed (unsafe endpoint 400; heartbeat 200 befor
 
 ### Node lifecycle barrier and cleanup
 
-`run_once()` pulls outside the lifecycle mutex, then holds it across digest verification and `create/start`; adoption is also guarded. `quarantine()` sets the flag, cancels supervisors, and performs only a guarded sweep. A 15s lifecycle-lock timeout is itself a `QUARANTINE_CLEANUP_FAILED` result: it never scans Docker without the lock. A separate detached retry task waits for the in-flight lifecycle operation, then retries guarded cleanup and clears the error only after an empty managed-container enumeration. A post-pull `ensure_node_active()` check prevents a slow pull from creating after the flag was set. Docker `inspect` (including `port_of`), `list_managed`, `is_running`, `version`, normal commands, pull and stop/remove are all timeout-bounded. The initial quarantine attempt has a 15s lifecycle-lock wait and a 45s cleanup deadline; it never calls Docker without the lock. A detached retry task continues after that response deadline, re-enumerates and re-attempts stop/remove, and retains `QUARANTINE_CLEANUP_FAILED` until it can verify an empty managed set. A timeout is never treated as success.
+`run_once()` pulls outside the lifecycle mutex, then holds it across digest verification and `create/start`; adoption is also guarded. `quarantine()` sets the flag, cancels supervisors, and performs only a guarded sweep. A 15s lifecycle-lock timeout is itself a `QUARANTINE_CLEANUP_FAILED` result: it never scans Docker without the lock. A separate detached retry task waits for the in-flight lifecycle operation, then retries guarded cleanup and clears the error only after an empty managed-container enumeration. Deterministic tests cover both the retry-success path (lock released, error cleared) and the permanent-Docker-failure path (error retained), in addition to the no-unlocked-scan test. A post-pull `ensure_node_active()` check prevents a slow pull from creating after the flag was set. Docker `inspect` (including `port_of`), `list_managed`, `is_running`, `version`, normal commands, pull and stop/remove are all timeout-bounded. The initial quarantine attempt has a 15s lifecycle-lock wait and a 45s cleanup deadline; it never calls Docker without the lock. A detached retry task continues after that response deadline, re-enumerates and re-attempts stop/remove, and retains `QUARANTINE_CLEANUP_FAILED` until it can verify an empty managed set. A timeout is never treated as success.
 
 The deterministic slow-pull-versus-lease race test is not automated; the lifecycle barrier and post-pull checks are the code-level mitigation. Real Docker daemon unavailability and permanent CLI hang remain `NOT_RUN`.
 
@@ -148,7 +148,7 @@ The deterministic slow-pull-versus-lease race test is not automated; the lifecyc
 Command: `tests/acceptance/node_quarantine.sh`
 
 ```
-node-a has 3 managed container(s); revoking d434796d-0940-4879-80af-1ab00740482a
+node-a has 3 managed container(s); revoking e976c6d5-53fe-4012-93a6-07236778a52d
 node quarantine test passed: 3 container(s) were removed after revocation
 ```
 
@@ -157,7 +157,7 @@ node quarantine test passed: 3 container(s) were removed after revocation
 Command: `tests/acceptance/node_lease.sh`
 
 ```
-stopping Kernel pid=13371; node-b has 1 container(s)
+stopping Kernel pid=81407; node-b has 2 container(s)
 node lease test passed: workloads stopped after Kernel partition exceeded lease
 ```
 
@@ -238,8 +238,8 @@ Screenshots: `artifacts/ui/` (six overview matrix images plus route/feature capt
 
 ## Evidence files
 
-- `/tmp/a13-e2e.out`, `/tmp/a13-quarantine.out`, `/tmp/a13-lease.out`, `/tmp/a13-auth2.out`, `/tmp/a13-endpoint2.out`, `/tmp/a13-security2.out`, `/tmp/a13-conformance2.out`
-- `/tmp/a12-failover.out`, `/tmp/a12-restart.out` (failover/restart were unchanged by the quarantine-only follow-up)
+- `/tmp/a131-e2e2.out`, `/tmp/a131-quarantine.out`, `/tmp/a131-lease.out`, `/tmp/a13-auth2.out`, `/tmp/a13-endpoint2.out`, `/tmp/a13-security2.out`, `/tmp/a13-conformance2.out`
+- `/tmp/a12-failover.out`, `/tmp/a12-restart.out` (the quarantine follow-up did not alter failover/restart semantics)
 - Final UI evidence is regenerated by `pnpm --filter @opsweave/ui-tests test` in `artifacts/ui/`.
 - Final UI evidence is regenerated after the final clean reset; `artifacts/ui/`.
 - `artifacts/ui/*.png`
