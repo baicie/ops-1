@@ -399,14 +399,33 @@ async fn try_cleanup_with_timeout(
 }
 
 async fn cleanup_retry_loop(shared: Arc<Shared>, node_id: Uuid, reason: String) {
+    cleanup_retry_loop_with(
+        shared,
+        node_id,
+        reason,
+        Duration::from_secs(30),
+        Duration::from_secs(45),
+        Duration::from_secs(2),
+    )
+    .await;
+}
+
+async fn cleanup_retry_loop_with(
+    shared: Arc<Shared>,
+    node_id: Uuid,
+    reason: String,
+    lock_timeout: Duration,
+    cleanup_timeout: Duration,
+    retry_delay: Duration,
+) {
     loop {
         if !shared.quarantined.load(Ordering::SeqCst) {
             return;
         }
-        match tokio::time::timeout(Duration::from_secs(30), shared.lifecycle.lock()).await {
+        match tokio::time::timeout(lock_timeout, shared.lifecycle.lock()).await {
             Ok(lifecycle_guard) => {
                 let result = tokio::time::timeout(
-                    Duration::from_secs(45),
+                    cleanup_timeout,
                     cleanup_locked(&shared, node_id, &reason),
                 )
                 .await;
@@ -434,7 +453,7 @@ async fn cleanup_retry_loop(shared: Arc<Shared>, node_id: Uuid, reason: String) 
                 mark_unhealthy(&shared, &error);
             }
         }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(retry_delay).await;
     }
 }
 
@@ -1047,7 +1066,7 @@ fn resource_snapshot(metrics: &Arc<StdMutex<MetricsState>>) -> ResourceSnapshot 
 
 #[cfg(test)]
 mod tests {
-    use super::{try_cleanup_with_timeout, Shared};
+    use super::{cleanup_retry_loop_with, try_cleanup_with_timeout, Shared};
     use crate::config::Args;
     use crate::docker::DockerAdapter;
     use clap::Parser;
@@ -1057,6 +1076,19 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::RwLock;
     use uuid::Uuid;
+
+    fn simple_docker(exit_code: i32) -> String {
+        let dir = std::env::temp_dir().join(format!("opsweave-test-docker-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("docker");
+        std::fs::write(&script, format!("#!/bin/sh\nexit {exit_code}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        script.to_string_lossy().into_owned()
+    }
 
     fn test_shared(docker_bin: &str) -> Arc<Shared> {
         let args = Args::parse_from(["opsweave-node", "--data-bind", "127.0.0.1:0"]);
@@ -1127,7 +1159,7 @@ mod tests {
 
     #[tokio::test]
     async fn lifecycle_lock_timeout_is_not_a_cleanup_success() {
-        let shared = test_shared("/bin/true");
+        let shared = test_shared(&simple_docker(0));
         let guard = shared.lifecycle.lock().await;
         let error = try_cleanup_with_timeout(
             &shared,
@@ -1140,5 +1172,59 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("lifecycle lock"));
         drop(guard);
+    }
+
+    #[tokio::test]
+    async fn retry_loop_reacquires_lock_and_clears_error_after_cleanup() {
+        let shared = test_shared(&simple_docker(0));
+        shared
+            .quarantined
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let guard = shared.lifecycle.lock().await;
+        let task = tokio::spawn(cleanup_retry_loop_with(
+            shared.clone(),
+            Uuid::new_v4(),
+            "test".into(),
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            Duration::from_millis(20),
+        ));
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        assert!(shared
+            .quarantine_error
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|error| error.contains("lifecycle")));
+        drop(guard);
+        tokio::time::timeout(Duration::from_secs(15), task)
+            .await
+            .expect("retry task did not converge")
+            .unwrap();
+        assert!(shared.quarantine_error.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn retry_loop_keeps_error_when_docker_cleanup_never_succeeds() {
+        let shared = test_shared(&simple_docker(1));
+        shared
+            .quarantined
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let task = tokio::spawn(cleanup_retry_loop_with(
+            shared.clone(),
+            Uuid::new_v4(),
+            "test".into(),
+            Duration::from_millis(20),
+            Duration::from_millis(100),
+            Duration::from_millis(20),
+        ));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(shared
+            .quarantine_error
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|error| error.contains("QUARANTINE_CLEANUP_FAILED")));
+        task.abort();
     }
 }

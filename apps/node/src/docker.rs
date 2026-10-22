@@ -336,6 +336,7 @@ pub fn container_name(node_id: uuid::Uuid, instance_id: uuid::Uuid) -> String {
 
 #[cfg(test)]
 mod tests {
+
     use super::DockerAdapter;
 
     #[tokio::test]
@@ -358,5 +359,30 @@ mod tests {
         );
         let error = adapter.stop_and_remove("surviving").await.unwrap_err();
         assert!(error.to_string().contains("still running"));
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::DockerAdapter;
+    #[tokio::test]
+    async fn list_managed_simple_command() {
+        let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into());
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            adapter.list_managed(uuid::Uuid::new_v4()),
+        )
+        .await
+        .expect("list hung");
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    #[tokio::test]
+    async fn run_simple_command() {
+        let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into());
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), adapter.run(&["x"]))
+            .await
+            .expect("inner run hung");
+        assert!(result.is_ok());
     }
 }

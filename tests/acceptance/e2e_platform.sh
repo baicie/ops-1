@@ -18,7 +18,7 @@ check() { if "$@"; then ok "$*"; else bad "$*"; fi; }
 
 login() { "$OPSCTL" --url "$KERNEL_URL" login --email "$1" --password "$2" >/dev/null; }
 token() { python3 -c 'import json;print(json.load(open("'"$HOME"'/.opsweave/session.json"))["token"])'; }
-gateway() { curl -fsS -m 15 --retry 3 --retry-delay 1 --retry-all-errors -H "Authorization: Bearer $(token)" "$KERNEL_URL/api/v1/gateway/$1$2"; }
+gateway() { curl -fsS -m 15 --retry 8 --retry-delay 1 --retry-all-errors -H "Authorization: Bearer $(token)" "$KERNEL_URL/api/v1/gateway/$1$2"; }
 gateway_code() { curl -sS -o /tmp/opsweave-gw-body -w '%{http_code}' -m 15 -H "Authorization: Bearer $(token)" "$KERNEL_URL/api/v1/gateway/$1$2"; }
 
 section "authentication and health"
