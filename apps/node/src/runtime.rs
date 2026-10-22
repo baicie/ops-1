@@ -348,50 +348,118 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
         let _ = entry.cancel.send(true);
     }
     let node_id = shared.identity.read().await.node_id;
-    let result = tokio::time::timeout(
-        Duration::from_secs(45),
-        cleanup_managed(shared, node_id, reason),
-    )
-    .await;
-    let error = match result {
-        Ok(Ok(())) => {
-            if let Ok(mut slot) = shared.quarantine_error.lock() {
-                *slot = None;
-            }
+    let result = try_cleanup(shared, node_id, reason).await;
+    match result {
+        Ok(()) => {
+            set_quarantine_error(shared, None);
             tracing::info!("quarantine cleanup confirmed no managed containers remain");
-            return;
         }
-        Ok(Err(error)) => error,
-        Err(_) => "QUARANTINE_CLEANUP_FAILED: cleanup exceeded the 45s deadline".to_string(),
-    };
-    tracing::error!(error = %error, "quarantine cleanup could not be verified");
-    if let Ok(mut slot) = shared.quarantine_error.lock() {
-        *slot = Some(error);
+        Err(error) => {
+            tracing::error!(error = %error, "quarantine cleanup attempt failed; starting retry task");
+            set_quarantine_error(shared, Some(error.clone()));
+            mark_unhealthy(shared, &error);
+            // Never scan/delete without the lifecycle barrier. Keep retrying
+            // until the in-flight create/start leaves and a guarded sweep is
+            // confirmed; the health endpoint exposes the unresolved state.
+            tokio::spawn(cleanup_retry_loop(
+                shared.clone(),
+                node_id,
+                reason.to_string(),
+            ));
+        }
     }
 }
 
-async fn cleanup_managed(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> Result<(), String> {
-    let mut failures: Vec<String> = Vec::new();
-    // The total cleanup window is bounded by the caller. Give an in-flight
-    // create/start a short chance to leave, but never block forever on the
-    // lifecycle mutex; if it times out, report a failure even if the sweep
-    // later removes the containers.
-    let lifecycle_guard =
-        match tokio::time::timeout(Duration::from_secs(15), shared.lifecycle.lock()).await {
-            Ok(guard) => Some(guard),
-            Err(_) => {
-                failures.push("lifecycle lock wait exceeded 15s".to_string());
-                None
+async fn try_cleanup(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> Result<(), String> {
+    try_cleanup_with_timeout(
+        shared,
+        node_id,
+        reason,
+        Duration::from_secs(15),
+        Duration::from_secs(45),
+    )
+    .await
+}
+
+async fn try_cleanup_with_timeout(
+    shared: &Arc<Shared>,
+    node_id: Uuid,
+    reason: &str,
+    lock_timeout: Duration,
+    cleanup_timeout: Duration,
+) -> Result<(), String> {
+    let lifecycle_guard = tokio::time::timeout(lock_timeout, shared.lifecycle.lock())
+        .await
+        .map_err(|_| "QUARANTINE_CLEANUP_FAILED: lifecycle lock wait exceeded 15s".to_string())?;
+    let result = tokio::time::timeout(cleanup_timeout, cleanup_locked(shared, node_id, reason))
+        .await
+        .map_err(|_| "QUARANTINE_CLEANUP_FAILED: cleanup exceeded 45s".to_string())?;
+    drop(lifecycle_guard);
+    result
+}
+
+async fn cleanup_retry_loop(shared: Arc<Shared>, node_id: Uuid, reason: String) {
+    loop {
+        if !shared.quarantined.load(Ordering::SeqCst) {
+            return;
+        }
+        match tokio::time::timeout(Duration::from_secs(30), shared.lifecycle.lock()).await {
+            Ok(lifecycle_guard) => {
+                let result = tokio::time::timeout(
+                    Duration::from_secs(45),
+                    cleanup_locked(&shared, node_id, &reason),
+                )
+                .await;
+                drop(lifecycle_guard);
+                match result {
+                    Ok(Ok(())) => {
+                        set_quarantine_error(&shared, None);
+                        tracing::info!("quarantine retry confirmed no managed containers remain");
+                        return;
+                    }
+                    Ok(Err(error)) => {
+                        set_quarantine_error(&shared, Some(error.clone()));
+                        mark_unhealthy(&shared, &error);
+                    }
+                    Err(_) => {
+                        let error = "QUARANTINE_CLEANUP_FAILED: retry exceeded 45s; host intervention may be required".to_string();
+                        set_quarantine_error(&shared, Some(error.clone()));
+                        mark_unhealthy(&shared, &error);
+                    }
+                }
             }
-        };
-    let lifecycle_ready = lifecycle_guard.is_some();
+            Err(_) => {
+                let error = "QUARANTINE_CLEANUP_FAILED: waiting for in-flight lifecycle operation; retrying".to_string();
+                set_quarantine_error(&shared, Some(error.clone()));
+                mark_unhealthy(&shared, &error);
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+fn set_quarantine_error(shared: &Arc<Shared>, error: Option<String>) {
+    if let Ok(mut slot) = shared.quarantine_error.lock() {
+        *slot = error;
+    }
+}
+
+fn mark_unhealthy(shared: &Arc<Shared>, error: &str) {
+    if let Ok(runtimes) = shared.runtimes.try_read() {
+        for runtime in runtimes.values() {
+            runtime.set_state(RuntimeState::Unhealthy, Some(error.to_string()));
+        }
+    }
+}
+
+async fn cleanup_locked(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> Result<(), String> {
     let runtimes: Vec<InstanceRuntime> = shared.runtimes.read().await.values().cloned().collect();
-    for runtime in runtimes {
+    let mut failures: Vec<String> = Vec::new();
+    for runtime in &runtimes {
         let name = container_name(node_id, runtime.workload.instance_id);
         if let Err(error) = shared.docker.stop_and_remove(&name).await {
             failures.push(format!("{name}: {error}"));
         }
-        runtime.set_state(RuntimeState::Stopped, Some(reason.to_string()));
     }
     for attempt in 1..=3 {
         match shared.docker.list_managed(node_id).await {
@@ -411,28 +479,29 @@ async fn cleanup_managed(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> R
             .map(|names| names.len())
             .unwrap_or(usize::MAX);
         if remaining == 0 {
-            if !lifecycle_ready {
-                drop(lifecycle_guard);
-                return Err(
-                    "QUARANTINE_CLEANUP_FAILED: lifecycle lock deadline expired".to_string()
-                );
+            for runtime in &runtimes {
+                runtime.set_state(RuntimeState::Stopped, Some(reason.to_string()));
             }
-            drop(lifecycle_guard);
             return Ok(());
         }
         if attempt < 3 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
-    drop(lifecycle_guard);
-    if failures.is_empty() {
-        Err("QUARANTINE_CLEANUP_FAILED: managed containers may remain".to_string())
+    let error = if failures.is_empty() {
+        "QUARANTINE_CLEANUP_FAILED: managed containers may remain".to_string()
     } else {
-        Err(format!(
+        format!(
             "QUARANTINE_CLEANUP_FAILED: managed containers may remain: {}",
             failures.join("; ")
-        ))
+        )
+    };
+    // No confirmed cleanup: preserve an explicit failure state rather than
+    // claiming the workload is STOPPED.
+    for runtime in &runtimes {
+        runtime.set_state(RuntimeState::Failed, Some(error.clone()));
     }
+    Err(error)
 }
 
 async fn collect_observations(shared: &Arc<Shared>) -> Vec<InstanceObservation> {
@@ -973,5 +1042,103 @@ fn resource_snapshot(metrics: &Arc<StdMutex<MetricsState>>) -> ResourceSnapshot 
             .map(|count| count.get() as i64),
         filesystem_used_bytes,
         filesystem_total_bytes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{try_cleanup_with_timeout, Shared};
+    use crate::config::Args;
+    use crate::docker::DockerAdapter;
+    use clap::Parser;
+    use opsweave_contracts::DesiredNodeState;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex as StdMutex};
+    use std::time::Duration;
+    use tokio::sync::RwLock;
+    use uuid::Uuid;
+
+    fn test_shared(docker_bin: &str) -> Arc<Shared> {
+        let args = Args::parse_from(["opsweave-node", "--data-bind", "127.0.0.1:0"]);
+        let node_id = Uuid::new_v4();
+        let identity = super::Identity {
+            node_id,
+            credential: "test".into(),
+            data_token: "test".into(),
+            generation: 1,
+            name: "test".into(),
+        };
+        Arc::new(Shared {
+            args,
+            http: reqwest::Client::new(),
+            docker: DockerAdapter::new(docker_bin.to_string(), "unix://unused".into()),
+            docker_version: "test".into(),
+            identity: RwLock::new(identity),
+            desired: RwLock::new(DesiredNodeState {
+                node_id,
+                node_generation: 1,
+                heartbeat_interval_seconds: 5,
+                max_instances: 1,
+                desired: vec![],
+            }),
+            runtimes: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            metrics: Arc::new(StdMutex::new(super::MetricsState::default())),
+            quarantined: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            quarantine_error: Arc::new(StdMutex::new(None)),
+            lease_deadline: Arc::new(StdMutex::new(None)),
+        })
+    }
+
+    #[tokio::test]
+    async fn lifecycle_lock_timeout_does_not_scan_containers() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("docker-called");
+        let script = dir.path().join("docker");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\ntouch '{}'\nexit 0\n", marker.display()),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let shared = test_shared(script.to_str().unwrap());
+        let guard = shared.lifecycle.lock().await;
+        let error = try_cleanup_with_timeout(
+            &shared,
+            Uuid::new_v4(),
+            "test",
+            Duration::from_millis(20),
+            Duration::from_millis(200),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("lifecycle lock"));
+        assert!(
+            !marker.exists(),
+            "cleanup scanned Docker without the lifecycle lock"
+        );
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_lock_timeout_is_not_a_cleanup_success() {
+        let shared = test_shared("/bin/true");
+        let guard = shared.lifecycle.lock().await;
+        let error = try_cleanup_with_timeout(
+            &shared,
+            Uuid::new_v4(),
+            "test",
+            Duration::from_millis(20),
+            Duration::from_millis(200),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("lifecycle lock"));
+        drop(guard);
     }
 }

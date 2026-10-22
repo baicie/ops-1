@@ -63,6 +63,8 @@ Stage A.1.1 follow-up: migration now transfers both `global_counts` and CPU/memo
 
 Stage A.1.2 follow-up: STOP→START now restores per-deployment/global counts and CPU/memory reservation at the target; STOP migration never decrements an uncounted source; START migration transfers reservation in both directions. Docker `inspect`/`port_of`, `list_managed`, `is_running`, `version`, normal commands, pull and stop/remove are timeout-bounded; quarantine has a strict 45s total deadline, a 15s lifecycle-lock wait, re-enumerates/re-attempts cleanup and reports `QUARANTINE_CLEANUP_FAILED` on timeout.
 
+Stage A.1.3 follow-up: quarantine no longer scans Docker after a lifecycle-lock timeout. The initial attempt is bounded at 15s lock wait / 45s cleanup; a failed or unconfirmed attempt reports `QUARANTINE_CLEANUP_FAILED` and leaves managed instances in an explicit failure state. A detached retry task waits for the in-flight lifecycle operation, retries guarded stop/remove and clears the error only after an empty managed-container enumeration. Deterministic unit tests verify that a held lifecycle lock causes failure without any Docker scan.
+
 Still **NOT_RUN / blocking**: Kernel↔Node mTLS and certificate rotation, three physical Linux amd64 hosts, real Rootless Docker, OCI image signatures/SBOM, SIGKILL host-level container cleanup, full SSE flood/backpressure testing, and Fencing Tokens for side-effecting workloads. The 25s Kernel stale threshold and 30s Node lease are not a substitute for a fencing/generation protocol; a reassignment race can still produce a short double-execution window. No production-ready claim is made.
 
 ## Explicit non-goals (unchanged)
