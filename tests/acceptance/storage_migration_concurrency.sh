@@ -49,6 +49,9 @@ done
 [ "${ACTIVE:-0}" -ge 1 ] || bad "A never acquired the migration path"
 # Remove the gate so B's otherwise-identical SQL succeeds; B waits on A's lock.
 psql "$DB" -qAt -c "SET ROLE \"$ROLE\"; DELETE FROM \"$SCHEMA\".concurrency_gate;" >/dev/null
+GATE_AFTER="$(psql "$DB" -qAt -c "SELECT count(*) FROM \"$SCHEMA\".concurrency_gate;")"
+echo "gate rows after delete: $GATE_AFTER"
+[ "$GATE_AFTER" = "0" ] || bad "gate row cleanup failed"
 curl -sS -o /tmp/migration-race-b.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @/tmp/migration-race-body.json "$URL/api/v1/plugin-storage/$PLUGIN/migrations" > /tmp/migration-race-b.code &
 B_PID=$!
 wait "$A_PID"
