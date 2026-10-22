@@ -202,7 +202,7 @@ fn has_transaction_control(sql: &str) -> bool {
         .any(|token| {
             matches!(
                 token.as_str(),
-                "COMMIT" | "ROLLBACK" | "BEGIN" | "END" | "ABORT" | "SAVEPOINT" | "RELEASE"
+                "COMMIT" | "ROLLBACK" | "BEGIN" | "ABORT" | "SAVEPOINT" | "RELEASE"
             )
         })
 }
@@ -236,6 +236,9 @@ mod tests {
         assert!(has_transaction_control("CREATE TABLE t(id int); COMMIT;"));
         assert!(has_transaction_control("ROLLBACK"));
         assert!(!has_transaction_control("CREATE TABLE t(id int)"));
+        assert!(!has_transaction_control(
+            "SELECT CASE WHEN true THEN 1 ELSE 0 END"
+        ));
     }
 
     #[test]
