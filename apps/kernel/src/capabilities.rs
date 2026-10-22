@@ -289,7 +289,7 @@ pub async fn issue_workload_token(
     let Some((instance_id, plugin_id)) = instance else {
         return Err(AppError::not_found("instance is not assigned to this node"));
     };
-    let expires_at = Utc::now() + ChronoDuration::hours(1);
+    let expires_at = Utc::now() + ChronoDuration::seconds(state.config.workload_token_seconds);
     let claims = WorkloadClaims {
         v: 1,
         sub: instance_id.to_string(),
@@ -306,6 +306,105 @@ pub async fn issue_workload_token(
         jti: Uuid::new_v4(),
     };
     let token = sign_claims(&state, &claims)?;
+    Ok(Json(WorkloadTokenResponse { token, expires_at }))
+}
+
+pub async fn refresh_workload_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Json<WorkloadTokenResponse>> {
+    let token =
+        bearer(&headers).ok_or_else(|| AppError::unauthorized("workload token required"))?;
+    // Refresh deliberately accepts an expired token, but only inside a bounded
+    // grace window and only after re-checking the current instance/node state.
+    let claims = verify_claims_with_key_allow_expired(&state.cursor_secret, &token)?;
+    if claims.audience != format!("plugin:{}", claims.capability_name) {
+        return Err(AppError::forbidden("workload token audience is invalid"));
+    }
+    if claims
+        .expires_at
+        .saturating_add(state.config.workload_token_refresh_grace_seconds)
+        < Utc::now().timestamp()
+    {
+        return Err(AppError::unauthorized(
+            "workload token refresh window expired",
+        ));
+    }
+    let live: Option<LiveInstanceRow> = sqlx::query_as(
+        r#"
+        SELECT i.state, n.generation, n.revoked_at, n.status, n.last_seen_at
+        FROM kernel.plugin_instances i
+        JOIN kernel.nodes n ON n.id=i.node_id
+        WHERE i.id=$1 AND i.node_id=$2 AND i.desired_action='START'
+        "#,
+    )
+    .bind(claims.instance_id)
+    .bind(claims.node_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((instance_state, node_generation, revoked_at, node_status, last_seen_at)) = live
+    else {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "WORKLOAD_IDENTITY_REVOKED",
+            "workload instance is no longer assigned to the node",
+        ));
+    };
+    let stale = last_seen_at.is_none_or(|seen| {
+        seen < Utc::now() - ChronoDuration::seconds(state.config.node_stale_seconds)
+    });
+    if !workload_identity_is_live(
+        &instance_state,
+        revoked_at.is_some(),
+        &node_status,
+        stale,
+        node_generation,
+        claims.node_generation,
+    ) {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "WORKLOAD_IDENTITY_REVOKED",
+            "workload instance or node is no longer active",
+        ));
+    }
+    let grant: Option<(Value, Option<String>)> = sqlx::query_as(
+        "SELECT scope, provider_plugin_id FROM kernel.capability_grants WHERE consumer_plugin_id=$1 AND name=$2 AND major=$3 AND state='ACTIVE' AND (expires_at IS NULL OR expires_at > now())",
+    )
+    .bind(&claims.plugin_id)
+    .bind(&claims.capability_name)
+    .bind(claims.capability_major)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((grant_scope, _)) = grant else {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "CAPABILITY_FORBIDDEN",
+            "no active grant",
+        ));
+    };
+    let granted: Vec<String> = serde_json::from_value(grant_scope).unwrap_or_default();
+    if !claims.scope.iter().all(|scope| granted.contains(scope)) {
+        return Err(AppError::forbidden(
+            "CAPABILITY_FORBIDDEN: scope is no longer granted",
+        ));
+    }
+    let expires_at = Utc::now() + ChronoDuration::seconds(state.config.workload_token_seconds);
+    let refreshed = WorkloadClaims {
+        v: 1,
+        sub: claims.sub,
+        plugin_id: claims.plugin_id,
+        instance_id: claims.instance_id,
+        node_id: claims.node_id,
+        node_generation: claims.node_generation,
+        capability_name: claims.capability_name,
+        capability_major: claims.capability_major,
+        audience: claims.audience,
+        scope: claims.scope,
+        issued_at: Utc::now().timestamp(),
+        expires_at: expires_at.timestamp(),
+        jti: Uuid::new_v4(),
+    };
+    let token = sign_claims(&state, &refreshed)?;
     Ok(Json(WorkloadTokenResponse { token, expires_at }))
 }
 
@@ -369,7 +468,8 @@ pub async fn instance_environment(
             .await?;
             let Some(scope_value) = grant else { continue };
             let scope: Vec<String> = serde_json::from_value(scope_value).unwrap_or_default();
-            let expires_at = Utc::now() + ChronoDuration::hours(1);
+            let expires_at =
+                Utc::now() + ChronoDuration::seconds(state.config.workload_token_seconds);
             let claims = WorkloadClaims {
                 v: 1,
                 sub: instance_id.to_string(),
@@ -696,7 +796,7 @@ fn verify_claims(state: &AppState, token: &str) -> AppResult<WorkloadClaims> {
     verify_claims_with_key(&state.cursor_secret, token)
 }
 
-fn verify_claims_with_key(key: &[u8], token: &str) -> AppResult<WorkloadClaims> {
+fn parse_claims_with_key(key: &[u8], token: &str) -> AppResult<WorkloadClaims> {
     let mut parts = token.split('.');
     let prefix = parts.next();
     let encoded = parts.next();
@@ -721,10 +821,22 @@ fn verify_claims_with_key(key: &[u8], token: &str) -> AppResult<WorkloadClaims> 
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(encoded)
         .map_err(|_| AppError::unauthorized("invalid workload token payload"))?;
-    let claims: WorkloadClaims = serde_json::from_slice(&payload)
-        .map_err(|_| AppError::unauthorized("invalid workload token claims"))?;
+    serde_json::from_slice(&payload)
+        .map_err(|_| AppError::unauthorized("invalid workload token claims"))
+}
+
+fn verify_claims_with_key(key: &[u8], token: &str) -> AppResult<WorkloadClaims> {
+    let claims = parse_claims_with_key(key, token)?;
     if claims.v != 1 || claims.expires_at <= Utc::now().timestamp() {
         return Err(AppError::unauthorized("workload token expired"));
+    }
+    Ok(claims)
+}
+
+fn verify_claims_with_key_allow_expired(key: &[u8], token: &str) -> AppResult<WorkloadClaims> {
+    let claims = parse_claims_with_key(key, token)?;
+    if claims.v != 1 {
+        return Err(AppError::unauthorized("invalid workload token version"));
     }
     Ok(claims)
 }

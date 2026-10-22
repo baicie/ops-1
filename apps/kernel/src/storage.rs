@@ -214,7 +214,7 @@ async fn record_failed_migration(
     error: &str,
 ) {
     let _ = sqlx::query(
-        "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,details) VALUES ($1,$2,$3,$4,$5,'FAILED',$6,NULL,$7) ON CONFLICT (plugin_id,version,migration_id) DO UPDATE SET status='FAILED', details=EXCLUDED.details",
+        "INSERT INTO kernel.plugin_migrations (id,plugin_id,version,migration_id,checksum,status,phase,plan_digest,details) VALUES ($1,$2,$3,$4,$5,'FAILED',$6,NULL,$7) ON CONFLICT (plugin_id,version,migration_id) DO UPDATE SET status='FAILED', details=EXCLUDED.details WHERE kernel.plugin_migrations.status <> 'APPLIED'",
     )
     .bind(uuid::Uuid::new_v4())
     .bind(plugin_id)

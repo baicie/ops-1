@@ -16,6 +16,8 @@ pub struct Config {
     pub session_hours: i64,
     pub heartbeat_interval_seconds: u32,
     pub node_stale_seconds: i64,
+    pub workload_token_seconds: i64,
+    pub workload_token_refresh_grace_seconds: i64,
     pub max_instances_per_node: u32,
     pub request_timeout_seconds: u64,
     pub allow_insecure_node_transport: bool,
@@ -54,6 +56,12 @@ impl Config {
             session_hours: env_i64("OPSWEAVE_SESSION_HOURS", 12),
             heartbeat_interval_seconds: env_i64("OPSWEAVE_NODE_HEARTBEAT_SECONDS", 5) as u32,
             node_stale_seconds: env_i64("OPSWEAVE_NODE_STALE_SECONDS", 25),
+            workload_token_seconds: env_i64("OPSWEAVE_WORKLOAD_TOKEN_SECONDS", 3600).max(1),
+            workload_token_refresh_grace_seconds: env_i64(
+                "OPSWEAVE_WORKLOAD_TOKEN_REFRESH_GRACE_SECONDS",
+                300,
+            )
+            .max(1),
             max_instances_per_node: env_i64("OPSWEAVE_MAX_INSTANCES_PER_NODE", 4) as u32,
             request_timeout_seconds: env_i64("OPSWEAVE_REQUEST_TIMEOUT_SECONDS", 10) as u64,
             allow_insecure_node_transport: env_bool(

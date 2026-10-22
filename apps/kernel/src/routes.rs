@@ -43,6 +43,10 @@ pub fn build(state: AppState) -> Router {
             post(capabilities::issue_workload_token),
         )
         .route(
+            "/internal/v1/workload-tokens/refresh",
+            post(capabilities::refresh_workload_token),
+        )
+        .route(
             "/internal/v1/nodes/{node_id}/instances/{instance_id}/env",
             get(capabilities::instance_environment),
         )

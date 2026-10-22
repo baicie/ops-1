@@ -17,6 +17,9 @@ const ALLOWED_PRIVATE_HOSTS = new Set((process.env.OPSWEAVE_ALLOW_PRIVATE_SOURCE
 const PORT = Number(process.env.PORT || 8080);
 const MAX_BYTES = 8 * 1024 * 1024;
 const { Pool } = pg;
+let CAPABILITY_TOKENS = {};
+try { CAPABILITY_TOKENS = JSON.parse(process.env.OPSWEAVE_CAPABILITY_TOKENS || '{}'); } catch { CAPABILITY_TOKENS = {}; }
+let tokenRefreshPromise = null;
 const pool = new Pool({ connectionString: DATABASE_URL, max: 5 });
 let ready = false;
 let stopping = false;
@@ -27,6 +30,36 @@ function fail(res, status, code, message, id, retryable = false, details) { send
 async function readJson(req, limit = 1024 * 1024) { let body = ''; for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > limit) throw Object.assign(new Error('body too large'), { status: 413 }); } if (!body) return {}; try { return JSON.parse(body); } catch { throw Object.assign(new Error('invalid JSON'), { status: 400 }); } }
 function canonical(v) { if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']'; if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}'; return JSON.stringify(v); }
 function digest(v) { return 'sha256:' + crypto.createHash('sha256').update(canonical(v)).digest('hex'); }
+function tokenExpiryMs(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+    return Number(payload.expiresAt) * 1000;
+  } catch { return 0; }
+}
+async function catalogToken() {
+  const current = CAPABILITY_TOKENS['data.catalog.v1'];
+  if (!current) throw Object.assign(new Error('CAPABILITY_UNAVAILABLE: no data.catalog.v1 workload token'), { code: 'CAPABILITY_UNAVAILABLE', status: 503 });
+  if (tokenExpiryMs(current) > Date.now() + 60_000) return current;
+  if (!tokenRefreshPromise) {
+    tokenRefreshPromise = (async () => {
+      const response = await fetch(`${KERNEL_URL.replace(/\/$/, '')}/internal/v1/workload-tokens/refresh`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${current}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      const text = await response.text();
+      let payload = {};
+      try { payload = JSON.parse(text); } catch { payload = {}; }
+      if (!response.ok || !payload.token) {
+        delete CAPABILITY_TOKENS['data.catalog.v1'];
+        throw Object.assign(new Error(payload.message || 'workload token refresh failed'), { code: payload.code || 'TOKEN_REFRESH_FAILED', status: response.status });
+      }
+      CAPABILITY_TOKENS['data.catalog.v1'] = payload.token;
+      return payload.token;
+    })().finally(() => { tokenRefreshPromise = null; });
+  }
+  return tokenRefreshPromise;
+}
 function verifyContext(token) { if (!token || !CONTEXT_KEY) return null; const p = token.split('.'); if (p.length !== 3 || p[0] !== 'oww1') return null; const expected = crypto.createHmac('sha256', Buffer.from(CONTEXT_KEY, 'hex')).update(p[1]).digest('base64url'); if (expected.length !== p[2].length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(p[2]))) return null; try { const c = JSON.parse(Buffer.from(p[1], 'base64url').toString()); if (c.v !== 1 || Number(c.expiresAt) * 1000 <= Date.now()) return null; return c; } catch { return null; } }
 function identity(req) {
   const c = verifyContext(req.headers['x-opsweave-caller-context']);
@@ -160,9 +193,7 @@ function inferType(value) { if (typeof value === 'number') return Number.isInteg
 function validateMapping(mapping) { return mapping && typeof mapping.sourcePath === 'string' && typeof mapping.targetField === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(mapping.targetField); }
 function getPath(value, path) { return path.split('.').reduce((current, key) => current == null ? undefined : current[key], value); }
 async function callCatalog(datasetId, body, idempotencyKey) {
-  const tokens = JSON.parse(process.env.OPSWEAVE_CAPABILITY_TOKENS || '{}');
-  const token = tokens['data.catalog.v1'];
-  if (!token) throw Object.assign(new Error('CAPABILITY_UNAVAILABLE: no data.catalog.v1 workload token'), { code: 'CAPABILITY_UNAVAILABLE', status: 503 });
+  const token = await catalogToken();
   let response;
   try {
     response = await fetch(`${KERNEL_URL.replace(/\/$/, '')}/api/v1/capabilities/data.catalog.v1/1/api/data-catalog/datasets/${datasetId}/records`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'idempotency-key': idempotencyKey }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
