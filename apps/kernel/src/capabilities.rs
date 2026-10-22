@@ -91,7 +91,6 @@ struct ProviderRow {
     plugin_id: String,
     version: String,
     generation: i64,
-    api_digest: String,
     manifest: Value,
     data_endpoint: String,
     data_token: String,
@@ -235,7 +234,13 @@ pub async fn resolve(
         provider_plugin_id: provider.plugin_id,
         provider_version: provider.version,
         activation_revision: provider.generation,
-        api_digest: provider.api_digest,
+        api_digest: opsweave_bundle::sha256_digest(&opsweave_contracts::canonical_json(
+            &provider
+                .manifest
+                .get("provides")
+                .cloned()
+                .unwrap_or(Value::Null),
+        )),
         execution_mode: "sync",
         status: "AVAILABLE",
     }))
@@ -509,7 +514,7 @@ async fn resolve_provider(state: &AppState, name: &str, major: i64) -> AppResult
     let row = sqlx::query_as::<_, ProviderRow>(
         r#"
         SELECT i.id AS instance_id, r.plugin_id, r.version, r.generation,
-               c.api_digest, p.manifest, n.data_endpoint, n.data_token
+               p.manifest, n.data_endpoint, n.data_token
         FROM kernel.capability_registrations c
         JOIN kernel.activation_revisions r ON r.id=c.revision_id AND r.status='ACTIVE'
         JOIN kernel.plugin_deployments d ON d.id=r.deployment_id
