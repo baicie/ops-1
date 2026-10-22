@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.opsweave.dev/data-catalog.v1.schema.json",
+  "title": "OpsWeave Data Catalog v1",
+  "type": "object",
+  "$defs": {
+    "FieldType": { "enum": ["string", "integer", "number", "boolean", "timestamp", "json"] },
+    "FieldDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "nullable", "ordinal"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$" },
+        "type": { "$ref": "#/$defs/FieldType" },
+        "nullable": { "type": "boolean" },
+        "defaultValue": {},
+        "semanticTags": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9.:/-]{1,63}$" }
+        },
+        "description": { "type": "string", "maxLength": 512 },
+        "ordinal": { "type": "integer", "minimum": 0, "maximum": 1023 }
+      }
+    },
+    "SchemaDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaRevision", "digest", "status", "fields", "createdAt"],
+      "properties": {
+        "schemaRevision": { "type": "integer", "minimum": 1 },
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "status": { "enum": ["DRAFT", "PUBLISHED", "RETIRED"] },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "items": { "$ref": "#/$defs/FieldDefinition" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "publishedAt": { "type": "string", "format": "date-time" },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["compatible", "fromRevision"],
+          "properties": {
+            "compatible": { "type": "boolean" },
+            "fromRevision": { "type": ["integer", "null"], "minimum": 1 },
+            "errors": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "Dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["datasetId", "name", "ownerPluginId", "schemaRevision", "schemaDigest", "storageProvider", "retentionPolicy", "createdAt", "updatedAt"],
+      "properties": {
+        "datasetId": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "ownerPluginId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{2,100}$" },
+        "schemaRevision": { "type": "integer", "minimum": 1 },
+        "schemaDigest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "storageProvider": { "const": "postgres" },
+        "retentionPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "maxRecords", "maxBytes"],
+          "properties": {
+            "mode": { "enum": ["RETAIN", "WINDOW"] },
+            "maxRecords": { "type": "integer", "minimum": 1, "maximum": 100000 },
+            "maxBytes": { "type": "integer", "minimum": 1024, "maximum": 1073741824 }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "DatasetWriteRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaRevision", "sourceBatchKey", "source", "records"],
+      "properties": {
+        "schemaRevision": { "type": "integer", "minimum": 1 },
+        "sourceBatchKey": { "type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pluginId", "sourceId", "sourceRevision"],
+          "properties": {
+            "pluginId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{2,100}$" },
+            "sourceId": { "type": "string", "format": "uuid" },
+            "sourceRevision": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "records": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": { "type": "object", "maxProperties": 512 }
+        }
+      }
+    },
+    "DatasetWriteReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receiptId", "datasetId", "schemaRevision", "sourceBatchKey", "status", "accepted", "rejected", "unknown", "createdAt"],
+      "properties": {
+        "receiptId": { "type": "string", "format": "uuid" },
+        "datasetId": { "type": "string", "format": "uuid" },
+        "schemaRevision": { "type": "integer", "minimum": 1 },
+        "sourceBatchKey": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "status": { "enum": ["ACCEPTED", "PARTIAL", "REJECTED", "UNKNOWN"] },
+        "accepted": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "unknown": { "type": "integer", "minimum": 0 },
+        "errors": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["recordIndex", "code", "message"],
+            "properties": {
+              "recordIndex": { "type": "integer", "minimum": 0 },
+              "field": { "type": "string" },
+              "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+              "message": { "type": "string", "maxLength": 512 }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SchemaDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromRevision", "toRevision", "compatible", "changes"],
+      "properties": {
+        "fromRevision": { "type": "integer", "minimum": 1 },
+        "toRevision": { "type": "integer", "minimum": 1 },
+        "compatible": { "type": "boolean" },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "field", "compatible"],
+            "properties": {
+              "kind": { "enum": ["ADD", "REMOVE", "TYPE_CHANGE", "NULLABILITY_CHANGE", "DEFAULT_CHANGE", "RENAME"] },
+              "field": { "type": "string" },
+              "compatible": { "type": "boolean" },
+              "detail": { "type": "string", "maxLength": 512 }
+            }
+          }
+        },
+        "errors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "DataLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lineageId", "sourceBatchKey", "source", "ingestionRunId", "dataset", "accepted", "rejected", "unknown", "occurredAt"],
+      "properties": {
+        "lineageId": { "type": "string", "format": "uuid" },
+        "sourceBatchKey": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sourceId", "sourceRevision"],
+          "properties": {
+            "sourceId": { "type": "string", "format": "uuid" },
+            "sourceRevision": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "ingestionRunId": { "type": "string", "format": "uuid" },
+        "dataset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["datasetId", "schemaRevision"],
+          "properties": {
+            "datasetId": { "type": "string", "format": "uuid" },
+            "schemaRevision": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "accepted": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "unknown": { "type": "integer", "minimum": 0 },
+        "occurredAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

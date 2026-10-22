@@ -1,0 +1,12 @@
+{
+  "receiptId": "33333333-3333-4333-8333-333333333333",
+  "datasetId": "44444444-4444-4444-8444-444444444444",
+  "schemaRevision": 1,
+  "sourceBatchKey": "source-11111111-20261022T000000Z",
+  "status": "ACCEPTED",
+  "accepted": 2,
+  "rejected": 0,
+  "unknown": 0,
+  "errors": [],
+  "createdAt": "2026-10-22T00:02:00Z"
+}

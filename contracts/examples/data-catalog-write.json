@@ -1,0 +1,13 @@
+{
+  "schemaRevision": 1,
+  "sourceBatchKey": "source-11111111-20261022T000000Z",
+  "source": {
+    "pluginId": "opsweave.data-integration",
+    "sourceId": "22222222-2222-4222-8222-222222222222",
+    "sourceRevision": 1
+  },
+  "records": [
+    {"id": "host-1", "host": "host-1.example", "cpu_percent": 12.5, "observed_at": "2026-10-22T00:00:00Z"},
+    {"id": "host-2", "host": "host-2.example", "cpu_percent": 88.1, "observed_at": "2026-10-22T00:00:00Z"}
+  ]
+}

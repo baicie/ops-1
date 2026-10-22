@@ -15,3 +15,15 @@
 - `contracts/openapi/plugin-runtime-v1.yaml` plus `plugin-runtime-info` fixtures define language-neutral plugin host endpoints.
 - `frontend-asset-index.v1.schema.json` validates static asset listings; example byte lengths/digests are **fictional syntax samples**, not working executable release assets.
 - Runtime IDs, image digests and signing are attested by trusted Kernel + Node, not accepted from plugin self-report. See [full design](../docs/20-language-agnostic-plugin-runtime.md).
+
+## 0.0.2 Data Foundation contracts (draft)
+
+- `openapi/capability-v1.yaml` — Capability resolution, workload identity, grants and plugin storage status.
+- `openapi/data-catalog-v1.yaml` — `data.catalog.v1` Dataset/Schema/Write/Lineage contract.
+- `openapi/data-integration-v1.yaml` — `data.source.v1` HTTP/JSON source, preview, mapping and ingestion-run contract.
+- `schema/capability-fabric.v1.schema.json` — Capability descriptor, grant and signed caller context.
+- `schema/plugin-storage.v1.schema.json` — Plugin-owned schema, migration plan and retention declaration.
+- `schema/data-catalog.v1.schema.json` — Catalog domain objects and write receipts.
+- `schema/data-integration.v1.schema.json` — Integration domain objects and run/quality/lineage objects.
+
+These are design contracts. The Kernel/API implementation must be verified separately; schema presence is not evidence that an endpoint or authorization rule exists.

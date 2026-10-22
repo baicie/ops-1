@@ -1,0 +1,11 @@
+{
+  "name": "data.catalog.v1",
+  "major": 1,
+  "providerPluginId": "opsweave.data-catalog",
+  "providerVersion": "0.0.1",
+  "activationRevision": 1,
+  "apiDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "permissions": ["data.catalog.dataset.read", "data.catalog.dataset.write"],
+  "executionMode": "sync",
+  "status": "AVAILABLE"
+}

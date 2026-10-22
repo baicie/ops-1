@@ -1,0 +1,14 @@
+{
+  "schemaRevision": 1,
+  "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "status": "PUBLISHED",
+  "fields": [
+    {"name": "id", "type": "string", "nullable": false, "ordinal": 0, "semanticTags": ["identifier"]},
+    {"name": "host", "type": "string", "nullable": false, "ordinal": 1},
+    {"name": "cpu_percent", "type": "number", "nullable": true, "ordinal": 2},
+    {"name": "observed_at", "type": "timestamp", "nullable": false, "ordinal": 3}
+  ],
+  "createdAt": "2026-10-22T00:00:00Z",
+  "publishedAt": "2026-10-22T00:01:00Z",
+  "compatibility": {"compatible": true, "fromRevision": null, "errors": []}
+}

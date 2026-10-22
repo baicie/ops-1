@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.opsweave.dev/data-integration.v1.schema.json",
+  "title": "OpsWeave Data Integration v1",
+  "type": "object",
+  "$defs": {
+    "ConnectorType": { "enum": ["http-json"] },
+    "CredentialReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["credentialRef", "kind", "maskedHint"],
+      "description": "Only a reference and a non-reversible masked hint are returned. Secret material never appears in this contract.",
+      "properties": {
+        "credentialRef": { "type": "string", "pattern": "^secret://[a-z0-9][a-z0-9/_-]{2,120}$" },
+        "kind": { "enum": ["none", "bearer", "basic", "api-key"] },
+        "maskedHint": { "type": "string", "minLength": 1, "maxLength": 32 }
+      }
+    },
+    "DataSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "name", "connectorType", "endpoint", "credential", "status", "createdAt", "updatedAt"],
+      "properties": {
+        "sourceId": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "connectorType": { "$ref": "#/$defs/ConnectorType" },
+        "endpoint": { "type": "string", "format": "uri", "pattern": "^https?://" },
+        "credential": { "$ref": "#/$defs/CredentialReference" },
+        "status": { "enum": ["UNVERIFIED", "READY", "DEGRADED", "UNAVAILABLE"] },
+        "lastTestAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ConnectionTest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "status", "checkedAt", "latencyMs"],
+      "properties": {
+        "sourceId": { "type": "string", "format": "uuid" },
+        "status": { "enum": ["OK", "FAILED"] },
+        "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "latencyMs": { "type": "integer", "minimum": 0, "maximum": 120000 },
+        "failureCode": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+        "message": { "type": "string", "maxLength": 512 },
+        "checkedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SourceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotId", "sourceId", "sourceRevision", "digest", "capturedAt", "byteSize"],
+      "properties": {
+        "snapshotId": { "type": "string", "format": "uuid" },
+        "sourceId": { "type": "string", "format": "uuid" },
+        "sourceRevision": { "type": "integer", "minimum": 1 },
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "byteSize": { "type": "integer", "minimum": 0, "maximum": 8388608 }
+      }
+    },
+    "DiscoveredField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "type", "nullable", "sampleCount"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "type": { "enum": ["string", "integer", "number", "boolean", "timestamp", "json"] },
+        "nullable": { "type": "boolean" },
+        "sampleCount": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "FieldDiscovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "snapshot", "fields", "discoveredAt"],
+      "properties": {
+        "sourceId": { "type": "string", "format": "uuid" },
+        "snapshot": { "$ref": "#/$defs/SourceSnapshot" },
+        "fields": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/DiscoveredField" }
+        },
+        "discoveredAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "PreviewRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "limit"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
+    "PreviewResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "snapshot", "records", "truncated", "readOnly"],
+      "properties": {
+        "sourceId": { "type": "string", "format": "uuid" },
+        "snapshot": { "$ref": "#/$defs/SourceSnapshot" },
+        "records": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "object", "maxProperties": 256 }
+        },
+        "truncated": { "type": "boolean" },
+        "readOnly": { "const": true }
+      }
+    },
+    "FieldMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourcePath", "targetField", "required", "errorPolicy"],
+      "properties": {
+        "sourcePath": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "targetField": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$" },
+        "required": { "type": "boolean" },
+        "castTo": { "enum": ["string", "integer", "number", "boolean", "timestamp", "json"] },
+        "defaultValue": {},
+        "errorPolicy": { "enum": ["REJECT_RECORD", "SET_NULL", "USE_DEFAULT"] }
+      }
+    },
+    "IngestionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["specId", "sourceId", "sourceRevision", "schemaRevision", "targetDatasetId", "mappings", "mode", "batchSize", "timeoutSeconds", "createdAt"],
+      "properties": {
+        "specId": { "type": "string", "format": "uuid" },
+        "sourceId": { "type": "string", "format": "uuid" },
+        "sourceRevision": { "type": "integer", "minimum": 1 },
+        "schemaRevision": { "type": "integer", "minimum": 1 },
+        "targetDatasetId": { "type": "string", "format": "uuid" },
+        "mappings": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/FieldMapping" }
+        },
+        "mode": { "const": "MANUAL" },
+        "batchSize": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 60 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "IngestionRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "specId", "sourceBatchKey", "status", "startedAt"],
+      "properties": {
+        "runId": { "type": "string", "format": "uuid" },
+        "specId": { "type": "string", "format": "uuid" },
+        "sourceBatchKey": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "status": { "enum": ["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED", "UNKNOWN"] },
+        "inputCount": { "type": "integer", "minimum": 0 },
+        "accepted": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "unknown": { "type": "integer", "minimum": 0 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "receiptId": { "type": "string", "format": "uuid" },
+        "failureCode": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" },
+        "failureMessage": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "QualityResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "total", "missing", "validationRejected", "unknown", "computedAt"],
+      "properties": {
+        "runId": { "type": "string", "format": "uuid" },
+        "total": { "type": "integer", "minimum": 0 },
+        "missing": { "type": "integer", "minimum": 0 },
+        "validationRejected": { "type": "integer", "minimum": 0 },
+        "unknown": { "type": "integer", "minimum": 0 },
+        "sampleLimit": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "computedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "BatchLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "sourceId", "sourceRevision", "sourceBatchKey", "datasetId", "schemaRevision", "counts"],
+      "properties": {
+        "runId": { "type": "string", "format": "uuid" },
+        "sourceId": { "type": "string", "format": "uuid" },
+        "sourceRevision": { "type": "integer", "minimum": 1 },
+        "sourceBatchKey": { "type": "string", "minLength": 16, "maxLength": 128 },
+        "datasetId": { "type": "string", "format": "uuid" },
+        "schemaRevision": { "type": "integer", "minimum": 1 },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["accepted", "rejected", "unknown"],
+          "properties": {
+            "accepted": { "type": "integer", "minimum": 0 },
+            "rejected": { "type": "integer", "minimum": 0 },
+            "unknown": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

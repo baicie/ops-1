@@ -1,0 +1,283 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Data Catalog Capability v1
+  version: 0.1.0-draft
+  description: |
+    Provider contract for `data.catalog.v1`. The Catalog manages Dataset semantics
+    and immutable Schema revisions; it is not a one-to-one mapping to physical
+    database tables. All writes require an idempotency key and return a durable
+    receipt. Preview is not part of this API.
+servers:
+  - url: /api/data-catalog
+security:
+  - cookieSession: []
+  - workloadBearer: []
+paths:
+  /datasets:
+    get:
+      operationId: listDatasets
+      summary: List datasets
+      parameters:
+        - { name: cursor, in: query, required: false, schema: { type: string, maxLength: 1024 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Dataset page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/Dataset' } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      operationId: createDataset
+      summary: Create a dataset with a draft schema
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, fields, retentionPolicy]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 128 }
+                description: { type: string, maxLength: 1024 }
+                fields: { type: array, minItems: 1, maxItems: 512, items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/FieldDefinition' } }
+                retentionPolicy: { type: object }
+      responses:
+        '201':
+          description: Dataset created
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/Dataset' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /datasets/{datasetId}:
+    get:
+      operationId: getDataset
+      summary: Get a dataset and current schema summary
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+      responses:
+        '200':
+          description: Dataset
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/Dataset' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /datasets/{datasetId}/schemas:
+    get:
+      operationId: listSchemaRevisions
+      summary: List immutable schema revisions (newest first)
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+      responses:
+        '200':
+          description: Revisions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/SchemaDefinition' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /datasets/{datasetId}/schemas/drafts:
+    post:
+      operationId: createSchemaDraft
+      summary: Create a new draft revision from fields (not yet published)
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fields]
+              properties:
+                fields: { type: array, minItems: 1, maxItems: 512, items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/FieldDefinition' } }
+                baseRevision: { type: [integer, 'null'], minimum: 1 }
+      responses:
+        '201':
+          description: Draft revision
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/SchemaDefinition' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /datasets/{datasetId}/schemas/{revision}/publish:
+    post:
+      operationId: publishSchemaRevision
+      summary: Publish an immutable revision after compatibility checks
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: revision, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Published revision
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/SchemaDefinition' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /datasets/{datasetId}/schemas/{revision}/diff:
+    get:
+      operationId: diffSchemaRevision
+      summary: Compare a revision with its base or another revision
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: revision, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: against, in: query, required: false, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Schema diff and compatibility decision
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/SchemaDiff' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /datasets/{datasetId}/records:
+    post:
+      operationId: writeDatasetRecords
+      summary: Idempotently write a bounded batch into a dataset revision
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DatasetWriteRequest' }
+      responses:
+        '200':
+          description: Duplicate batch replay returns the original receipt
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DatasetWriteReceipt' }
+        '201':
+          description: Batch accepted (may be PARTIAL)
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DatasetWriteReceipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '408': { $ref: '#/components/responses/Timeout' }
+    get:
+      operationId: listDatasetRecords
+      summary: Read a bounded page of records from an authorized dataset
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: revision, in: query, required: false, schema: { type: integer, minimum: 1 } }
+        - { name: cursor, in: query, required: false, schema: { type: string, maxLength: 1024 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Records page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { type: object } }
+                  nextCursor: { type: [string, 'null'] }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /datasets/{datasetId}/lineage:
+    get:
+      operationId: listDatasetLineage
+      summary: Batch-level lineage for a dataset
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Lineage entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DataLineage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: opsweave_session
+    workloadBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: OpsWeave-Workload-Token
+  parameters:
+    DatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 128 }
+  responses:
+    BadRequest:
+      description: Invalid dataset/schema/record input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: Missing or invalid identity
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Caller lacks dataset scope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Schema conflict, immutable revision, or idempotency digest mismatch
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Timeout:
+      description: Deadline exceeded; result may be UNKNOWN_OUTCOME
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Dataset or revision not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, retryable]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]+$' }
+        message: { type: string }
+        requestId: { type: string }
+        retryable: { type: boolean }
+        details: { type: object }

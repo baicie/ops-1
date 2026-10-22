@@ -1,0 +1,10 @@
+{
+  "sourceId": "22222222-2222-4222-8222-222222222222",
+  "name": "local-json-fixture",
+  "connectorType": "http-json",
+  "endpoint": "https://data.example.test/hosts.json",
+  "credential": {"credentialRef": "secret://local/http-json/source-1", "kind": "bearer", "maskedHint": "…9f2a"},
+  "status": "UNVERIFIED",
+  "createdAt": "2026-10-22T00:00:00Z",
+  "updatedAt": "2026-10-22T00:00:00Z"
+}
