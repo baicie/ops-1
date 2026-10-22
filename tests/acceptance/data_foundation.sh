@@ -92,6 +92,17 @@ QUALITY_UNKNOWN="$(printf '%s' "$QUALITY" | json "d['unknown']")"
 [ "$QUALITY_UNKNOWN" = "0" ] || bad "quality unknown is $QUALITY_UNKNOWN, expected 0"
 ok "quality total=$QUALITY_TOTAL unknown=$QUALITY_UNKNOWN"
 
+echo "== Catalog capability unavailable fails closed"
+GRANT_ID="$(api "$URL/api/v1/capability-grants" | json "next(g['id'] for g in d if g['name']=='data.catalog.v1' and g['state']=='ACTIVE')")"
+api -X DELETE "$URL/api/v1/capability-grants/$GRANT_ID" >/dev/null
+NO_CAT_CODE="$(curl -sS -o /tmp/data-no-catalog.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'Idempotency-Key: data-no-catalog-0001' \
+  "$URL/api/v1/gateway/opsweave.data-integration/api/data-integration/ingestion-specs/$SPEC_ID/runs")"
+[ "$NO_CAT_CODE" = "422" ] || bad "missing catalog capability returned $NO_CAT_CODE, expected 422"
+grep -q 'CAPABILITY_FORBIDDEN\|CAPABILITY_UNAVAILABLE' /tmp/data-no-catalog.json || bad "missing catalog did not fail with a capability error"
+api -X POST -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
+  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write"]}' >/dev/null
+ok "missing capability failed closed and was restored"
+
 echo "== lineage and dependency protection"
 LINEAGE="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage")"
 printf '%s' "$LINEAGE" | grep -q "$RUN_ID" || bad "batch lineage missing run id"
