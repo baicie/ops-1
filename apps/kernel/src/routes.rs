@@ -24,10 +24,13 @@ pub fn build(state: AppState) -> Router {
     let public = Router::new()
         .route("/livez", get(diagnostics::livez))
         .route("/readyz", get(diagnostics::readyz))
-        .route("/api/v1/auth/login", post(auth::login))
+        .route(
+            "/api/v1/auth/login",
+            post(auth::login).layer(DefaultBodyLimit::max(64 * 1024)),
+        )
         .route(
             "/api/v1/node-enrollment/redeem",
-            post(nodes::redeem_enrollment),
+            post(nodes::redeem_enrollment).layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             "/internal/v1/nodes/{node_id}/heartbeat",
@@ -46,7 +49,10 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/health", get(plugins::overview))
         .route("/api/v1/overview", get(plugins::overview))
         .route("/api/v1/plugins", get(plugins::list_plugins))
-        .route("/api/v1/plugins/packages", post(packages::upload))
+        .route(
+            "/api/v1/plugins/packages",
+            post(packages::upload).layer(DefaultBodyLimit::max(80 * 1024 * 1024)),
+        )
         .route("/api/v1/plugins/{plugin_id}", get(plugins::get_plugin))
         .route(
             "/api/v1/plugins/{plugin_id}/packages",
@@ -129,7 +135,7 @@ pub fn build(state: AppState) -> Router {
 
     let api = public
         .merge(protected)
-        .layer(DefaultBodyLimit::max(80 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn(request_id))
         .layer(TraceLayer::new_for_http());

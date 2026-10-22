@@ -292,6 +292,26 @@ fn package_dir(state: &AppState, bundle: &VerifiedBundle) -> std::path::PathBuf 
         .join(&digest[..16])
 }
 
+pub async fn ensure_publisher_trusted(state: &AppState, publisher: &str) -> AppResult<()> {
+    let trust_state: Option<String> = sqlx::query_scalar(
+        "SELECT trust_state FROM kernel.trusted_publishers WHERE publisher_id = $1",
+    )
+    .bind(publisher)
+    .fetch_optional(&state.db)
+    .await?;
+    match trust_state.as_deref() {
+        Some("TRUSTED") => Ok(()),
+        Some(_) => Err(AppError::conflict(
+            "PUBLISHER_REVOKED",
+            format!("publisher '{publisher}' is revoked; deploy and activation are blocked"),
+        )),
+        None => Err(AppError::conflict(
+            "PUBLISHER_NOT_TRUSTED",
+            format!("publisher '{publisher}' is not trusted"),
+        )),
+    }
+}
+
 pub async fn get_package(
     state: &AppState,
     plugin_id: &str,

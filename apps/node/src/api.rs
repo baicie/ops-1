@@ -25,8 +25,13 @@ pub fn router(shared: Arc<Shared>) -> Router {
 
 async fn healthz(State(state): State<ApiState>) -> Json<serde_json::Value> {
     let identity = state.shared.identity.read().await;
+    let quarantined = state
+        .shared
+        .quarantined
+        .load(std::sync::atomic::Ordering::SeqCst);
     Json(serde_json::json!({
-        "status": "ok",
+        "status": if quarantined { "quarantined" } else { "ok" },
+        "quarantined": quarantined,
         "nodeId": identity.node_id,
         "name": identity.name,
         "generation": identity.generation,
@@ -69,6 +74,24 @@ async fn proxy(
 ) -> Response {
     if !authorized(&state, &headers).await {
         return unauthorized();
+    }
+    if state
+        .shared
+        .quarantined
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return quarantined();
+    }
+    if !safe_forward_path(&path) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "code": "INVALID_PLUGIN_PATH",
+                "message": "path traversal is not allowed",
+                "retryable": false
+            })),
+        )
+            .into_response();
     }
     let (host_port, running) = {
         let runtimes = state.shared.runtimes.read().await;
@@ -133,6 +156,20 @@ async fn proxy(
     match request.send().await {
         Ok(response) => {
             let status = response.status();
+            if response
+                .content_length()
+                .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+            {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "code": "UPSTREAM_RESPONSE_TOO_LARGE",
+                        "message": "plugin response exceeded the 8 MiB gateway limit",
+                        "retryable": false
+                    })),
+                )
+                    .into_response();
+            }
             let content_type = response
                 .headers()
                 .get(header::CONTENT_TYPE)
@@ -152,6 +189,17 @@ async fn proxy(
                         .into_response()
                 }
             };
+            if bytes.len() > MAX_RESPONSE_BYTES {
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(serde_json::json!({
+                        "code": "UPSTREAM_RESPONSE_TOO_LARGE",
+                        "message": "plugin response exceeded the 8 MiB gateway limit",
+                        "retryable": false
+                    })),
+                )
+                    .into_response();
+            }
             let mut out = (status, bytes).into_response();
             if let Some(content_type) = content_type {
                 if let Ok(value) = header::HeaderValue::from_str(&content_type) {
@@ -176,7 +224,43 @@ async fn proxy(
     }
 }
 
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+fn safe_forward_path(path: &str) -> bool {
+    if path.contains('\0') || path.contains('\\') {
+        return false;
+    }
+    for segment in path.split('/') {
+        let decoded = urlencoding::decode(segment)
+            .map(|value| value.into_owned())
+            .unwrap_or_else(|_| segment.to_string());
+        if decoded == "." || decoded == ".." || decoded.contains('/') || decoded.contains('\\') {
+            return false;
+        }
+    }
+    true
+}
+
+fn quarantined() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({
+            "code": "NODE_QUARANTINED",
+            "message": "node credential or lease is invalid; workloads are isolated",
+            "retryable": false
+        })),
+    )
+        .into_response()
+}
+
 async fn authorized(state: &ApiState, headers: &HeaderMap) -> bool {
+    if state
+        .shared
+        .quarantined
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return false;
+    }
     let expected = state.shared.identity.read().await.data_token.clone();
     let Some(provided) = headers
         .get(header::AUTHORIZATION)
@@ -221,4 +305,19 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         diff |= a ^ b;
     }
     diff == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_forward_path;
+
+    #[test]
+    fn rejects_path_traversal_variants() {
+        assert!(safe_forward_path("api/hello"));
+        assert!(safe_forward_path("api/hello/items/1"));
+        assert!(!safe_forward_path("api/../admin"));
+        assert!(!safe_forward_path("api/%2e%2e/admin"));
+        assert!(!safe_forward_path("api/%2fadmin"));
+        assert!(!safe_forward_path("api\\admin"));
+    }
 }

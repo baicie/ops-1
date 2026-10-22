@@ -50,6 +50,8 @@ async fn main() -> anyhow::Result<()> {
         runtimes: Arc::new(RwLock::new(HashMap::new())),
         tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         metrics: Arc::new(StdMutex::new(runtime::MetricsState::default())),
+        quarantined: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        lease_deadline: Arc::new(StdMutex::new(None)),
     });
 
     let listener = tokio::net::TcpListener::bind(&args.data_bind)

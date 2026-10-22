@@ -14,6 +14,11 @@ for name in names:
     data = json.loads(docker("inspect", name))[0]
     host = data["HostConfig"]
     config = data["Config"]
+    user = (config.get("User") or "").strip()
+    user_name = user.split(":", 1)[0]
+    non_root = bool(user_name) and user_name not in ("root", "0") and not (
+        user_name.isdigit() and int(user_name) == 0
+    )
     checks = [
         ("privileged=false", host.get("Privileged") is False),
         ("cap-drop includes ALL", "ALL" in (host.get("CapDrop") or [])),
@@ -29,8 +34,14 @@ for name in names:
             for bindings in (host.get("PortBindings") or {}).values() or []
             for binding in (bindings or [])
         )),
-        ("non-root image user", bool(config.get("User"))),
+        ("non-root image user", non_root),
     ]
+    if non_root:
+        try:
+            actual_uid = docker("exec", name, "id", "-u")
+            checks.append(("actual process uid non-zero", actual_uid.strip() not in ("", "0")))
+        except subprocess.CalledProcessError:
+            checks.append(("actual process uid non-zero", False))
     for label, passed in checks:
         print(("PASS  " if passed else "FAIL  ") + f"{name}: {label}")
         if not passed:

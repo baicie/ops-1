@@ -18,7 +18,7 @@ pub async fn serve_asset(
         return Err(AppError::not_found("asset not found"));
     }
     let row = sqlx::query_as::<_, (String, String)>(
-        "SELECT bundle_digest, publisher FROM kernel.plugin_packages WHERE plugin_id=$1 AND version=$2 AND status <> 'REJECTED'",
+        "SELECT p.bundle_digest, p.publisher FROM kernel.plugin_packages p JOIN kernel.trusted_publishers tp ON tp.publisher_id=p.publisher WHERE p.plugin_id=$1 AND p.version=$2 AND p.status <> 'REJECTED' AND tp.trust_state='TRUSTED'",
     )
     .bind(&plugin_id)
     .bind(&version)

@@ -45,12 +45,19 @@ pub struct Args {
     pub state_dir: PathBuf,
     #[arg(long, env = "OPSWEAVE_NODE_MAX_INSTANCES", default_value_t = 8)]
     pub max_instances: u32,
+    #[arg(
+        long,
+        env = "OPSWEAVE_NODE_LEASE_SECONDS",
+        default_value_t = 30,
+        help = "Stop workloads when the Kernel has not acknowledged a heartbeat within this lease"
+    )]
+    pub lease_seconds: u64,
     #[arg(long, env = "OPSWEAVE_NODE_HEARTBEAT_SECONDS", default_value_t = 5)]
     pub heartbeat_seconds: u64,
     #[arg(
         long,
         env = "OPSWEAVE_NODE_STOP_WORKLOADS_ON_EXIT",
-        default_value_t = false
+        default_value_t = true
     )]
     pub stop_workloads_on_exit: bool,
 }

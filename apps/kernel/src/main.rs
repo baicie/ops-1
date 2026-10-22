@@ -58,10 +58,13 @@ async fn main() -> anyhow::Result<()> {
         web_dist = %config.web_dist.display(),
         "OpsWeave Kernel listening"
     );
-    axum::serve(listener, routes::build(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("serve kernel")?;
+    axum::serve(
+        listener,
+        routes::build(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("serve kernel")?;
     Ok(())
 }
 

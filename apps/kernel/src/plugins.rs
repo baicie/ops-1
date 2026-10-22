@@ -414,7 +414,8 @@ pub async fn extensions(
         SELECT r.plugin_id, p.publisher, r.version, r.generation, p.manifest
         FROM kernel.activation_revisions r
         JOIN kernel.plugin_packages p ON p.package_id=r.package_id
-        WHERE r.status='ACTIVE' AND p.manifest->'frontend' IS NOT NULL AND p.manifest->'frontend' <> 'null'::jsonb
+        JOIN kernel.trusted_publishers tp ON tp.publisher_id=p.publisher
+        WHERE r.status='ACTIVE' AND tp.trust_state='TRUSTED' AND p.manifest->'frontend' IS NOT NULL AND p.manifest->'frontend' <> 'null'::jsonb
         ORDER BY r.plugin_id
         "#,
     )
@@ -460,6 +461,9 @@ pub async fn capabilities(
         SELECT c.plugin_id, c.version, c.name, c.major, c.direction, r.generation
         FROM kernel.capability_registrations c
         JOIN kernel.activation_revisions r ON r.id=c.revision_id AND r.status='ACTIVE'
+        JOIN kernel.plugin_packages p ON p.package_id=r.package_id
+        JOIN kernel.trusted_publishers tp ON tp.publisher_id=p.publisher
+        WHERE tp.trust_state='TRUSTED'
         ORDER BY c.name, c.plugin_id
         "#,
     )
@@ -567,6 +571,21 @@ pub async fn overview(State(state): State<AppState>, _auth: AuthUser) -> AppResu
                 .3
                 .unwrap_or_else(|| "Open diagnostics for details.".into()),
             link: format!("/plugins/{}", deployment.1),
+        });
+    }
+    let revoked_publishers = sqlx::query_as::<_, (String, String)>(
+        "SELECT r.plugin_id, p.publisher FROM kernel.activation_revisions r JOIN kernel.plugin_packages p ON p.package_id=r.package_id JOIN kernel.trusted_publishers tp ON tp.publisher_id=p.publisher WHERE r.status='ACTIVE' AND tp.trust_state='REVOKED' ORDER BY r.plugin_id",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    for (plugin_id, publisher) in revoked_publishers {
+        attention.push(AttentionItem {
+            severity: "critical".into(),
+            title: format!("Active plugin {plugin_id} has a revoked publisher"),
+            detail: format!(
+                "Publisher {publisher} is revoked. Gateway, assets and extensions now fail closed; activate a trusted replacement or disable the plugin."
+            ),
+            link: format!("/plugins/{plugin_id}"),
         });
     }
     if nodes.is_empty() {

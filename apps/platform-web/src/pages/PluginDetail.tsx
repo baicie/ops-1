@@ -216,8 +216,8 @@ export function PluginDetailPage() {
 
       {tab === 'permissions' && (
         <section className="panel"><div className="panel-head"><div><h2>Requested permissions</h2><p>These are data/capability permissions declared by the signed manifest. UI hiding is never authorization.</p></div></div>
-          {data.permissions.length ? <ul className="permission-list">{data.permissions.map((permission) => <li key={permission}><Icon name="key" size={15} /><code>{permission}</code><span className="muted">granted at activation</span></li>)}</ul> : <EmptyState icon="access" title="No permissions requested" />}
-          <div className="callout"><Icon name="alert" size={16} /><p>Permission expansion on upgrade must be reviewed and approved before activation. This version shows the manifest as signed.</p></div>
+          {data.permissions.length ? <ul className="permission-list">{data.permissions.map((permission) => <li key={permission}><Icon name="key" size={15} /><code>{permission}</code><span className="muted">declared in signed manifest · operator review</span></li>)}</ul> : <EmptyState icon="access" title="No permissions requested" />}
+          <div className="callout"><Icon name="alert" size={16} /><p>0.0.1 uses a trusted-publisher code-trust model. Permission strings are review metadata, not an OS sandbox or a user-scoped grant. Signed Remote Extensions run same-origin in the Shell; activate only code from publishers you trust.</p></div>
         </section>
       )}
 

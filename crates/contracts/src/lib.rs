@@ -438,6 +438,7 @@ pub struct ResourceSnapshot {
     pub cpu_utilization: Option<f64>,
     pub memory_used_bytes: Option<i64>,
     pub memory_total_bytes: Option<i64>,
+    pub cpu_cores: Option<i64>,
     pub filesystem_used_bytes: Option<i64>,
     pub filesystem_total_bytes: Option<i64>,
 }

@@ -145,6 +145,61 @@ pub async fn create_enrollment_token(
     }))
 }
 
+pub fn validate_node_data_endpoint(
+    config: &crate::config::Config,
+    endpoint: &str,
+) -> AppResult<()> {
+    let parsed = url::Url::parse(endpoint).map_err(|_| {
+        AppError::bad_request("NODE_DATA_ENDPOINT_INVALID: data endpoint must be an absolute URL")
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::bad_request(
+            "NODE_DATA_ENDPOINT_INVALID: data endpoint must use http or https",
+        ));
+    }
+    if parsed.username() != "" || parsed.password().is_some() {
+        return Err(AppError::bad_request(
+            "NODE_DATA_ENDPOINT_INVALID: userinfo is not allowed in a node endpoint",
+        ));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(AppError::bad_request(
+            "NODE_DATA_ENDPOINT_INVALID: query and fragment are not allowed",
+        ));
+    }
+    if parsed.path() != "/" && !parsed.path().is_empty() {
+        return Err(AppError::bad_request(
+            "NODE_DATA_ENDPOINT_INVALID: data endpoint must be an origin, not a path",
+        ));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| AppError::bad_request("NODE_DATA_ENDPOINT_INVALID: host is required"))?
+        .trim_matches(['[', ']'])
+        .to_ascii_lowercase();
+    let loopback = host == "localhost"
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|address| address.is_loopback())
+            .unwrap_or(false);
+    if !loopback
+        && !config
+            .allowed_node_data_hosts
+            .iter()
+            .any(|allowed| allowed == &host)
+    {
+        return Err(AppError::bad_request(
+            "NODE_DATA_ENDPOINT_NOT_ALLOWED: host is not in OPSWEAVE_ALLOWED_NODE_DATA_HOSTS",
+        ));
+    }
+    if parsed.scheme() == "http" && (!config.allow_insecure_node_transport || !loopback) {
+        return Err(AppError::bad_request(
+            "NODE_DATA_ENDPOINT_INSECURE: plaintext HTTP is only allowed for loopback development",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn redeem_enrollment(
     State(state): State<AppState>,
     Json(payload): Json<NodeEnrollRequest>,
@@ -152,11 +207,18 @@ pub async fn redeem_enrollment(
     if payload.token.trim().is_empty() || payload.name.trim().len() < 2 {
         return Err(AppError::bad_request("token and node name are required"));
     }
+    let node_id = Uuid::new_v4();
+    let credential = format!("ow_node_{}", random_token(40));
+    let data_token = format!("ow_data_{}", random_token(40));
+    let mut tx = state.db.begin().await?;
+    // Lock the one-time token before checking it. The conditional UPDATE below is
+    // the second half of the compare-and-swap so two concurrent redemptions can
+    // never both create a Node.
     let row = sqlx::query_as::<_, (Uuid, Option<DateTime<Utc>>, DateTime<Utc>)>(
-        "SELECT id, used_at, expires_at FROM kernel.node_enrollment_tokens WHERE token_hash = $1",
+        "SELECT id, used_at, expires_at FROM kernel.node_enrollment_tokens WHERE token_hash = $1 FOR UPDATE",
     )
     .bind(hash_token(payload.token.trim()))
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::unauthorized("Enrollment token is invalid"))?;
     if row.1.is_some() {
@@ -167,10 +229,6 @@ pub async fn redeem_enrollment(
     if row.2 <= Utc::now() {
         return Err(AppError::unauthorized("Enrollment token has expired"));
     }
-    let node_id = Uuid::new_v4();
-    let credential = format!("ow_node_{}", random_token(40));
-    let data_token = format!("ow_data_{}", random_token(40));
-    let mut tx = state.db.begin().await?;
     sqlx::query(
         r#"
         INSERT INTO kernel.nodes
@@ -188,27 +246,31 @@ pub async fn redeem_enrollment(
     .bind(serde_json::to_value(&payload.capabilities).unwrap_or_else(|_| serde_json::json!([])))
     .execute(&mut *tx)
     .await?;
-    sqlx::query(
-        "UPDATE kernel.node_enrollment_tokens SET used_at = now(), used_by_node = $1 WHERE id = $2",
+    let consumed = sqlx::query(
+        "UPDATE kernel.node_enrollment_tokens SET used_at = now(), used_by_node = $1 WHERE id = $2 AND used_at IS NULL AND expires_at > now()",
     )
     .bind(node_id)
     .bind(row.0)
     .execute(&mut *tx)
     .await?;
-    tx.commit().await?;
-    audit::record(
-        &state.db,
-        "node.enrolled",
-        "NODE",
-        &node_id.to_string(),
-        "node",
-        &node_id.to_string(),
-        "node.enroll",
-        "CONFIRMED",
-        serde_json::json!({"name": payload.name, "os": payload.os, "arch": payload.arch}),
-        None,
+    if consumed.rows_affected() != 1 {
+        return Err(AppError::unauthorized(
+            "Enrollment token was consumed by another request",
+        ));
+    }
+    sqlx::query(
+        r#"
+        INSERT INTO kernel.audit_events
+          (id, event_type, actor_type, actor_id, subject_type, subject_id, action, result, details, request_id, occurred_at)
+        VALUES ($1,'node.enrolled','NODE',$2,'node',$2,'node.enroll','CONFIRMED',$3,NULL,now())
+        "#,
     )
+    .bind(Uuid::new_v4())
+    .bind(node_id.to_string())
+    .bind(serde_json::json!({"name": payload.name, "os": payload.os, "arch": payload.arch}))
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok((
         StatusCode::CREATED,
         Json(NodeEnrollResponse {
@@ -279,10 +341,14 @@ pub async fn revoke_node(
 ) -> AppResult<Json<serde_json::Value>> {
     auth.require_admin()?;
     let row = fetch_node(&state, node_id).await?;
-    sqlx::query("UPDATE kernel.nodes SET revoked_at = now(), status = 'UNREACHABLE' WHERE id = $1")
-        .bind(node_id)
-        .execute(&state.db)
-        .await?;
+    let revoked_data_token = format!("revoked-{}", Uuid::new_v4());
+    sqlx::query(
+        "UPDATE kernel.nodes SET revoked_at = now(), status = 'UNREACHABLE', data_token = $2 WHERE id = $1",
+    )
+    .bind(node_id)
+    .bind(&revoked_data_token)
+    .execute(&state.db)
+    .await?;
     sqlx::query(
         "UPDATE kernel.plugin_instances SET state='UNREACHABLE', updated_at=now() WHERE node_id=$1 AND desired_action='START'",
     )
@@ -312,6 +378,7 @@ pub async fn heartbeat(
     Json(payload): Json<NodeHeartbeatRequest>,
 ) -> AppResult<Json<DesiredNodeState>> {
     let node = authenticate_node(&state, node_id, &headers).await?;
+    validate_node_data_endpoint(&state.config, &payload.data_endpoint)?;
     if payload.generation < node.generation {
         return Err(AppError::conflict(
             "STALE_NODE_GENERATION",

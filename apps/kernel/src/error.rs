@@ -50,6 +50,12 @@ impl AppError {
         error
     }
 
+    pub fn too_many_requests(code: &'static str, message: impl Into<String>) -> Self {
+        let mut error = Self::new(StatusCode::TOO_MANY_REQUESTS, code, message);
+        error.retryable = true;
+        error
+    }
+
     pub fn internal(error: impl std::fmt::Display) -> Self {
         tracing::error!(error = %error, "internal kernel error");
         Self::new(

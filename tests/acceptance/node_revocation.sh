@@ -22,9 +22,12 @@ import json,sys,datetime
 print(json.dumps({"generation":1,"observedAt":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),"status":"READY","resourceSnapshot":{"sampledAt":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),"cpuUtilization":None,"memoryUsedBytes":None,"memoryTotalBytes":None},"instances":[],"dataEndpoint":"http://127.0.0.1:9999","runtimeAdapterVersion":"test","os":"linux","arch":"amd64","labels":{},"capabilities":[]}))
 PY
 )"
+BAD_ENDPOINT_BODY="$(echo "$BODY" | python3 -c 'import sys,json; d=json.load(sys.stdin); d["dataEndpoint"]="http://169.254.169.254/latest/meta-data"; print(json.dumps(d))')"
+BAD_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $NODE_TOKEN" -H 'content-type: application/json' -X POST "$URL/internal/v1/nodes/$NODE_ID/heartbeat" -d "$BAD_ENDPOINT_BODY")"
+[ "$BAD_CODE" = "400" ] || { echo "expected unsafe data endpoint 400, got $BAD_CODE" >&2; exit 1; }
 CODE1="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $NODE_TOKEN" -H 'content-type: application/json' -X POST "$URL/internal/v1/nodes/$NODE_ID/heartbeat" -d "$BODY")"
 [ "$CODE1" = "200" ] || { echo "expected enrolled node heartbeat 200, got $CODE1" >&2; exit 1; }
 curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" -H "x-csrf-token: $CSRF" "$URL/api/v1/nodes/$NODE_ID" >/dev/null
 CODE2="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $NODE_TOKEN" -H 'content-type: application/json' -X POST "$URL/internal/v1/nodes/$NODE_ID/heartbeat" -d "$BODY")"
 [ "$CODE2" = "403" ] || { echo "expected revoked node heartbeat 403, got $CODE2" >&2; exit 1; }
-echo "node credential revocation test passed (200 before revoke, 403 after)"
+echo "node credential revocation test passed (unsafe endpoint 400; heartbeat 200 before revoke, 403 after)"

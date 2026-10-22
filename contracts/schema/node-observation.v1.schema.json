@@ -67,6 +67,13 @@
             "null"
           ],
           "minimum": 0
+        },
+        "cpuCores": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
         }
       }
     },

@@ -50,6 +50,11 @@ Open <http://127.0.0.1:18181>. The bootstrap admin is `admin@opsweave.local` / `
 tests/acceptance/e2e_platform.sh
 tests/acceptance/two_node_failover.sh
 tests/acceptance/kernel_restart.sh
+tests/acceptance/node_revocation.sh
+tests/acceptance/node_quarantine.sh   # destructive: revokes node-a; reset afterwards
+tests/acceptance/node_lease.sh        # destructive: partitions Kernel; reset afterwards
+tests/acceptance/auth_limits.sh
+tests/acceptance/publisher_revocation.sh
 tests/acceptance/container_security.sh
 tests/contract/run_conformance.sh
 python3 tests/contract/validate_contracts.py
@@ -103,10 +108,10 @@ tests/                   Contract, acceptance, runtime conformance and Playwrigh
 ## Security model in this implementation
 
 - User sessions are HttpOnly, SameSite=Strict cookies plus CSRF tokens; bearer sessions are supported for `opsctl`. Passwords use Argon2id.
-- Node credentials are one-time enrolled, stored hashed in PostgreSQL, locally stored `0600`, revocable. Data proxy uses a separate node data token.
+- Node credentials are one-time enrolled with atomic token consumption, stored hashed in PostgreSQL, locally stored `0600`, revocable. Data proxy uses a separate node data token that is rotated on revoke; a rejected credential or expired lease quarantines the Runtime and stops its workloads.
 - Plugin backend images are **pulled by digest**; tags are rejected. Docker image *signature* attestation is not implemented (NOT_RUN); registry content digest is verified.
 - Bundles require a trusted publisher, recomputed payload digest, and a detached Ed25519 signature covering both the artifact digest and canonical manifest digest.
-- Containers run read-only, non-root where the image declares it, cap-drop ALL, no-new-privileges, CPU/memory/PID limits, and only loopback-published ports. The Docker socket is never mounted into a plugin.
+- Containers run read-only, forced to numeric non-root UID 65532, cap-drop ALL, no-new-privileges, CPU/memory/PID limits, and only loopback-published ports. The Docker socket is never mounted into a plugin. Signed Remote Extensions use a trusted-publisher same-origin model; manifest permissions are review metadata, not an OS sandbox.
 - Gateway strips browser identity headers and sets caller context itself. UI visibility is never treated as authorization.
 
 ### Known deviations / not delivered in 0.0.1

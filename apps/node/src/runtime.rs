@@ -10,10 +10,12 @@ use opsweave_contracts::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex as StdMutex,
+};
+use std::time::{Duration, Instant};
 use tokio::sync::{watch, RwLock};
-use tokio::time::Instant;
 use uuid::Uuid;
 
 pub const ADAPTER_VERSION: &str = "opsweave-node/0.0.1+docker-cli";
@@ -114,6 +116,8 @@ pub struct Shared {
     pub runtimes: Arc<RwLock<HashMap<Uuid, InstanceRuntime>>>,
     pub tasks: Arc<tokio::sync::Mutex<HashMap<Uuid, TaskEntry>>>,
     pub metrics: Arc<StdMutex<MetricsState>>,
+    pub quarantined: Arc<AtomicBool>,
+    pub lease_deadline: Arc<StdMutex<Option<Instant>>>,
 }
 
 pub struct TaskEntry {
@@ -206,10 +210,19 @@ fn save_identity(path: &Path, identity: &Identity) -> anyhow::Result<()> {
 
 pub async fn heartbeat_loop(shared: Arc<Shared>) {
     let mut orphans_cleaned = false;
+    let mut last_success = Instant::now();
+    let lease = Duration::from_secs(shared.args.lease_seconds.max(5));
     loop {
+        if shared.quarantined.load(Ordering::SeqCst) {
+            break;
+        }
         let started = Instant::now();
         match send_heartbeat(&shared).await {
             Ok(interval) => {
+                last_success = Instant::now();
+                if let Ok(mut deadline) = shared.lease_deadline.lock() {
+                    *deadline = Some(last_success + lease);
+                }
                 reconcile(shared.clone()).await;
                 if !orphans_cleaned {
                     cleanup_orphans(&shared).await;
@@ -219,15 +232,41 @@ pub async fn heartbeat_loop(shared: Arc<Shared>) {
                 let sleep = Duration::from_secs(interval.max(2)).saturating_sub(elapsed);
                 tokio::time::sleep(sleep).await;
             }
+            Err(HeartbeatError::Rejected(status, body))
+                if status == 401 || status == 403 || status == 409 || status == 400 =>
+            {
+                tracing::error!(status = status, body = %body, "node credential rejected; quarantining workloads");
+                quarantine(&shared, &format!("heartbeat rejected with {status}")).await;
+                break;
+            }
             Err(error) => {
-                tracing::warn!(error = %error, "node heartbeat failed");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                let expired = last_success.elapsed() >= lease;
+                tracing::warn!(error = %error, expired, "node heartbeat failed");
+                if expired {
+                    quarantine(&shared, "node lease expired while Kernel was unreachable").await;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
     }
 }
 
-async fn send_heartbeat(shared: &Arc<Shared>) -> anyhow::Result<u64> {
+enum HeartbeatError {
+    Rejected(u16, String),
+    Transport(anyhow::Error),
+}
+
+impl std::fmt::Display for HeartbeatError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rejected(status, body) => write!(formatter, "rejected ({status}): {body}"),
+            Self::Transport(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+async fn send_heartbeat(shared: &Arc<Shared>) -> Result<u64, HeartbeatError> {
     let identity = shared.identity.read().await.clone();
     let snapshot = resource_snapshot(&shared.metrics);
     let observations = collect_observations(shared).await;
@@ -259,16 +298,44 @@ async fn send_heartbeat(shared: &Arc<Shared>) -> anyhow::Result<u64> {
         .json(&request)
         .timeout(Duration::from_secs(10))
         .send()
-        .await?;
+        .await
+        .map_err(|error| HeartbeatError::Transport(error.into()))?;
     if !response.status().is_success() {
-        let status_code = response.status();
+        let status_code = response.status().as_u16();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("heartbeat rejected ({status_code}): {body}");
+        return Err(HeartbeatError::Rejected(status_code, body));
     }
-    let desired: DesiredNodeState = response.json().await?;
+    let desired: DesiredNodeState = response
+        .json()
+        .await
+        .map_err(|error| HeartbeatError::Transport(error.into()))?;
     let interval = desired.heartbeat_interval_seconds as u64;
     *shared.desired.write().await = desired;
     Ok(interval)
+}
+
+async fn quarantine(shared: &Arc<Shared>, reason: &str) {
+    if shared.quarantined.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tracing::error!(
+        reason,
+        "node entering quarantine; stopping all managed workloads"
+    );
+    let entries: Vec<TaskEntry> = {
+        let mut tasks = shared.tasks.lock().await;
+        tasks.drain().map(|(_, entry)| entry).collect()
+    };
+    for entry in entries {
+        let _ = entry.cancel.send(true);
+    }
+    let runtimes: Vec<InstanceRuntime> = shared.runtimes.read().await.values().cloned().collect();
+    let node_id = shared.identity.read().await.node_id;
+    for runtime in runtimes {
+        let name = container_name(node_id, runtime.workload.instance_id);
+        let _ = shared.docker.stop_and_remove(&name).await;
+        runtime.set_state(RuntimeState::Stopped, Some(reason.to_string()));
+    }
 }
 
 async fn collect_observations(shared: &Arc<Shared>) -> Vec<InstanceObservation> {
@@ -295,6 +362,9 @@ async fn collect_observations(shared: &Arc<Shared>) -> Vec<InstanceObservation> 
 }
 
 pub async fn reconcile(shared: Arc<Shared>) {
+    if shared.quarantined.load(Ordering::SeqCst) {
+        return;
+    }
     let desired = shared.desired.read().await.clone();
     let wanted: HashMap<Uuid, DesiredWorkload> = desired
         .desired
@@ -781,6 +851,9 @@ fn resource_snapshot(metrics: &Arc<StdMutex<MetricsState>>) -> ResourceSnapshot 
         cpu_utilization,
         memory_used_bytes,
         memory_total_bytes,
+        cpu_cores: std::thread::available_parallelism()
+            .ok()
+            .map(|count| count.get() as i64),
         filesystem_used_bytes,
         filesystem_total_bytes,
     }

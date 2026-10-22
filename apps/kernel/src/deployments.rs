@@ -8,7 +8,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Utc};
-use opsweave_contracts::ManifestV11;
+use opsweave_contracts::{ManifestV11, ResourceRequirements};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
@@ -248,6 +248,7 @@ async fn create_deployment_inner(
         return Err(AppError::bad_request("desiredReplicas must be 0..=20"));
     }
     let package = crate::packages::get_package(state, plugin_id, &payload.version).await?;
+    crate::packages::ensure_publisher_trusted(state, &package.publisher).await?;
     let manifest: ManifestV11 = serde_json::from_value(package.manifest.clone())
         .map_err(|error| AppError::internal(format!("stored manifest invalid: {error}")))?;
     if manifest.backend.is_none() {
@@ -425,6 +426,8 @@ async fn activate_inner(
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::not_found("deployment not found; deploy the version first"))?;
+    let package = crate::packages::get_package(state, plugin_id, &payload.version).await?;
+    crate::packages::ensure_publisher_trusted(state, &package.publisher).await?;
 
     let active: Option<ActivationRow> = sqlx::query_as::<_, ActivationRow>(
         "SELECT * FROM kernel.activation_revisions WHERE plugin_id=$1 AND status='ACTIVE'",
@@ -484,7 +487,6 @@ async fn activate_inner(
             ),
         ));
     }
-    let package = crate::packages::get_package(state, plugin_id, &payload.version).await?;
     let manifest: ManifestV11 = serde_json::from_value(package.manifest.clone())
         .map_err(|error| AppError::internal(format!("stored manifest invalid: {error}")))?;
     validate_requires(state, plugin_id, &manifest).await?;
@@ -1072,9 +1074,41 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         .and_then(|value| value.as_i64())
         .unwrap_or(1)
         .clamp(1, 20) as usize;
+    let requested: ResourceRequirements = serde_json::from_value(deployment.resources.clone())
+        .unwrap_or(ResourceRequirements {
+            cpu_millis: 500,
+            memory_mib: 256,
+        });
+    let allocations: Vec<(Uuid, i64, i64)> = sqlx::query_as(
+        r#"
+        SELECT i.node_id,
+               COALESCE(SUM((d.resources->>'cpuMillis')::bigint)::bigint, 0),
+               COALESCE(SUM((d.resources->>'memoryMiB')::bigint)::bigint, 0)
+        FROM kernel.plugin_instances i
+        JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+        WHERE i.desired_action='START'
+          AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+        GROUP BY i.node_id
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut reserved: HashMap<Uuid, (i64, i64)> = allocations
+        .into_iter()
+        .map(|(node_id, cpu, memory)| (node_id, (cpu, memory)))
+        .collect();
     let eligible: Vec<NodeRow> = nodes
         .into_iter()
         .filter(|node| node_matches(node, &selector))
+        .filter(|node| {
+            let (cpu_allocated, memory_allocated) =
+                reserved.get(&node.id).copied().unwrap_or((0, 0));
+            node_has_capacity(
+                node,
+                cpu_allocated + requested.cpu_millis,
+                memory_allocated + requested.memory_mib,
+            )
+        })
         .collect();
     let existing = sqlx::query_as::<_, InstanceRow>(
         "SELECT i.*, n.name AS node_name, n.status AS node_status, n.last_seen_at AS node_last_seen_at, n.data_endpoint AS node_data_endpoint, n.data_token AS node_data_token FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id WHERE i.deployment_id=$1 ORDER BY i.slot",
@@ -1166,6 +1200,9 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
             .execute(&state.db)
             .await?;
             *used_nodes.entry(node.id).or_insert(0) += 1;
+            let reservation = reserved.entry(node.id).or_insert((0, 0));
+            reservation.0 += requested.cpu_millis;
+            reservation.1 += requested.memory_mib;
         }
     }
     for row in existing
@@ -1260,6 +1297,28 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         .await?;
     }
     Ok(())
+}
+
+fn node_has_capacity(node: &NodeRow, requested_cpu_millis: i64, requested_memory_mib: i64) -> bool {
+    let Some(snapshot) = node.resource_snapshot.as_ref() else {
+        return true;
+    };
+    if let Some(total) = snapshot.get("memoryTotalBytes").and_then(Value::as_i64) {
+        let used = snapshot
+            .get("memoryUsedBytes")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let available_mib = (total - used).max(0) / (1024 * 1024);
+        if available_mib > 0 && requested_memory_mib > available_mib * 9 / 10 {
+            return false;
+        }
+    }
+    if let Some(cores) = snapshot.get("cpuCores").and_then(Value::as_i64) {
+        if cores > 0 && requested_cpu_millis > cores * 1000 * 9 / 10 {
+            return false;
+        }
+    }
+    true
 }
 
 fn node_matches(node: &NodeRow, selector: &BTreeMap<String, String>) -> bool {

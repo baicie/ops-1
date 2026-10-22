@@ -24,10 +24,10 @@ This report records what was actually executed on the development host. It does 
 
 | Plugin | Image |
 |---|---|
-| `dev.opsweave.hello@0.0.1` | `localhost:5001/opsweave/hello-ts@sha256:7fff8456d2c1d8a8b430207bfea3e4dd34ea30f3c28e93483cad252eea624b6b` |
-| `dev.opsweave.hello@0.0.2` | `localhost:5001/opsweave/hello-ts@sha256:693424870872a813324e0bfba52469f9e33a5f1903b6a6a441dfbaea59ce40e6` |
-| `dev.opsweave.hello-go@0.0.1` | `localhost:5001/opsweave/hello-go@sha256:b2b0a8ee141638dd8787ac871dc918d86f62826ccbe968c50511b216b3b39bda` |
-| `dev.opsweave.hello-java@0.0.1` | `localhost:5001/opsweave/hello-java@sha256:a7a45af9222bf022b334c78b1e95eb361e162005881bdf60e2320668e96df996` |
+| `dev.opsweave.hello@0.0.1` | `localhost:5001/opsweave/hello-ts@sha256:6da03a9732278ba36f87456a637a04e79357a9775262289612222b1a0352d226` |
+| `dev.opsweave.hello@0.0.2` | `localhost:5001/opsweave/hello-ts@sha256:3061f3715be35a41c4bdbe5ae4673354bac4bec2d36d73cbbb258dff9e690804` |
+| `dev.opsweave.hello-go@0.0.1` | `localhost:5001/opsweave/hello-go@sha256:7c12d2e85bb306256a54e58b3d1f1335c87cdd6e149edb8b6ccb506b29d3fd2c` |
+| `dev.opsweave.hello-java@0.0.1` | `localhost:5001/opsweave/hello-java@sha256:27f33d59da172c368e8fba5c97d39a1c9d4a055ee85c986c288aa545c7840f12` |
 
 The signature covers both the canonical payload index digest and the canonical manifest digest, so changing `backend.imageRef` invalidates the publisher signature (asserted by a Rust unit test).
 
@@ -44,8 +44,9 @@ opsweave_bundle: 4 passed
   rejects_path_traversal ... ok
   manifest_image_reference_is_covered_by_signature ... ok
 opsweave_contracts: 3 passed
-opsweave_kernel: 1 passed
-result: all 8 passed, 0 failed
+opsweave_kernel: 2 passed (cursor + path traversal)
+opsweave_node: 1 passed (path traversal)
+result: all 10 passed, 0 failed
 ```
 
 ### Contract validation
@@ -95,12 +96,12 @@ Result: `PASS=21 FAIL=0`, including:
 Command: `tests/acceptance/two_node_failover.sh`
 
 ```
-active instance on node-a: df301173-f71a-408b-88e9-14caae7723d4
-before (forced node-a): df301173-f71a-408b-88e9-14caae7723d4
-immediate failover: 89defb3e-37d8-49ec-adfe-1595ef01ffd5
+active instance on node-a: 22a7405c-1538-4e02-bfe0-040c2943cab5
+before (forced node-a): 22a7405c-1538-4e02-bfe0-040c2943cab5
+immediate failover: a1d22fdf-a85b-4b27-876b-512d41c90909
 node statuses after stale window: node-a=UNREACHABLE node-b=READY
-after stale failover: 89defb3e-37d8-49ec-adfe-1595ef01ffd5
-recovered: df301173-f71a-408b-88e9-14caae7723d4
+after stale failover: a1d22fdf-a85b-4b27-876b-512d41c90909
+recovered: 22a7405c-1538-4e02-bfe0-040c2943cab5
 dev.opsweave.hello ... replicas=2/2
 two-node failover test passed
 ```
@@ -118,19 +119,60 @@ packages=4 installedPlugins=3 deployments=3 readyInstances=4
 kernel restart reconciliation test passed
 ```
 
-### Node credential revocation
+### Node credential revocation and unsafe endpoint rejection
 
 Command: `tests/acceptance/node_revocation.sh`
 
 ```
-node credential revocation test passed (200 before revoke, 403 after)
+node credential revocation test passed (unsafe endpoint 400; heartbeat 200 before revoke, 403 after)
 ```
+
+### Live node quarantine — containers actually stop
+
+Command: `tests/acceptance/node_quarantine.sh`
+
+```
+node-a has 1 managed container(s); revoking 0239d8c1-8aa1-4c86-a4dc-7e6d7b01598d
+node quarantine test passed: 1 container(s) were removed after revocation
+```
+
+### Kernel partition beyond node lease
+
+Command: `tests/acceptance/node_lease.sh`
+
+```
+stopping Kernel pid=59755; node-b has 3 container(s)
+node lease test passed: workloads stopped after Kernel partition exceeded lease
+```
+
+This is a local process/network partition simulation, not a physical network partition.
+
+### Public auth limits
+
+Command: `tests/acceptance/auth_limits.sh`
+
+```
+login throttle codes: [401, 401, ..., 429, 429]
+auth limit test passed: oversized body 413; repeated failures end in 429
+```
+
+### Publisher revocation gate
+
+Command: `tests/acceptance/publisher_revocation.sh`
+
+```
+publisher revocation gate passed: deploy rejected with PUBLISHER_REVOKED
+```
+
+### Scheduler capacity reservation
+
+The scheduler now filters eligible Nodes using reported memory availability and CPU cores, in addition to labels and max-instances-per-node. It resets reservations on each reconcile and is covered indirectly by the clean two-node deployment; a dedicated low-capacity stress test is `NOT_RUN`.
 
 ### Container security baseline
 
 Command: `tests/acceptance/container_security.sh`
 
-Inspected every running managed container: `privileged=false`, `cap-drop ALL`, `no-new-privileges`, read-only rootfs, memory/CPU/PID limits, no host binds, no host network, loopback-only published ports, non-root image user.
+Inspected every running managed container: `privileged=false`, `cap-drop ALL`, `no-new-privileges`, forced `User=65532:65532`, actual `id -u` non-zero, read-only rootfs, memory/CPU/PID limits, no host binds, no host network, loopback-only published ports.
 
 Result: `container security baseline: 0 failure(s) across 4 containers`.
 
@@ -158,16 +200,17 @@ Screenshots: `artifacts/ui/` (six overview matrix images plus route/feature capt
 | Gate | Reason |
 |---|---|
 | Real Linux amd64 + Rootless Docker | Development host is macOS arm64 with Docker Desktop; images built for linux/arm64. |
-| Three physical machines / independent network boundaries | Two Node processes share one Docker daemon; no packet loss/partition test. |
-| mTLS control and data channels | Not implemented; bearer credentials over private TLS ingress only. |
+| Three physical machines / independent network boundaries | Two Node processes share one Docker daemon; `node_lease.sh` covers local Kernel partition, physical network partition remains `NOT_RUN`. |
+| mTLS control and data channels | Not implemented; bearer credentials over private TLS ingress only. Remote plaintext HTTP is rejected by endpoint policy; the reference Node listener must remain loopback behind an authenticated TLS/mTLS tunnel. |
 | OCI image signature/attestation, SBOM, vulnerability gate | Not implemented; content digest pull is enforced. |
 | C09 old-tab compatibility window | Not implemented. |
 | C10 migration gate / destructive schema rollback prevention | No migration engine in 0.0.1. |
-| SSE backpressure/flood and revoke-mid-stream | UI/stream path implemented; stress tests not run. |
+| SSE backpressure/flood | Per-poll revocation and idle backoff implemented; deliberate flood/backpressure test not run. |
 | Production performance, HA, multi-tenancy, disaster recovery | Explicitly out of scope for 0.0.1. |
 
 ## Evidence files
 
-- `/tmp/final2-e2e.out`, `/tmp/final2-failover.out`, `/tmp/final2-restart.out`, `/tmp/final-revoke.out`, `/tmp/final-security2.out`, `/tmp/final-conformance.out`, `/tmp/final-contract.out`, `/tmp/final-ui2.out`
+- `/tmp/review-e2e.out`, `/tmp/review-failover.out`, `/tmp/review-restart.out`, `/tmp/review-revoke.out`, `/tmp/review-quarantine.out`, `/tmp/review-lease.out`, `/tmp/review-auth.out`, `/tmp/review-publisher.out`, `/tmp/review-security.out`, `/tmp/review-conformance.out`, `/tmp/review-contract.out`
+- Final UI evidence is regenerated after the final clean reset; `artifacts/ui/`.
 - `artifacts/ui/*.png`
 - Kernel and Node logs: `/tmp/opsweave-kernel.log`, `/tmp/opsweave-node-a.log`, `/tmp/opsweave-node-b.log`

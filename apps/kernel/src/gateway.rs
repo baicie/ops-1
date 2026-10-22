@@ -56,6 +56,11 @@ pub async fn proxy(
         .as_ref()
         .ok_or_else(|| AppError::bad_request("plugin has no backend service"))?;
     let requested = format!("/{path}");
+    if !safe_forward_path(&requested) {
+        return Err(AppError::bad_request(
+            "INVALID_PLUGIN_PATH: path traversal is not allowed",
+        ));
+    }
     if !(requested == backend.api_prefix
         || requested.starts_with(&format!("{}/", backend.api_prefix.trim_end_matches('/'))))
     {
@@ -77,6 +82,12 @@ pub async fn proxy(
     let mut last_error = None;
     for attempt in 0..attempts {
         let route = &routes[(route_start + attempt) % routes.len()];
+        if let Err(error) =
+            crate::nodes::validate_node_data_endpoint(&state.config, &route.data_endpoint)
+        {
+            last_error = Some(error.to_string());
+            continue;
+        }
         let query = uri
             .query()
             .map(|value| format!("?{value}"))
@@ -132,6 +143,15 @@ pub async fn proxy(
                     tokio::time::sleep(Duration::from_millis(120)).await;
                     continue;
                 }
+                if response
+                    .content_length()
+                    .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+                {
+                    return Err(AppError::unavailable(
+                        "UPSTREAM_RESPONSE_TOO_LARGE",
+                        "plugin response exceeded the 8 MiB gateway limit",
+                    ));
+                }
                 let content_type = response
                     .headers()
                     .get(header::CONTENT_TYPE)
@@ -140,6 +160,12 @@ pub async fn proxy(
                 let bytes = response.bytes().await.map_err(|error| {
                     AppError::internal(format!("read plugin response: {error}"))
                 })?;
+                if bytes.len() > MAX_RESPONSE_BYTES {
+                    return Err(AppError::unavailable(
+                        "UPSTREAM_RESPONSE_TOO_LARGE",
+                        "plugin response exceeded the 8 MiB gateway limit",
+                    ));
+                }
                 let mut out = (status, bytes).into_response();
                 if let Some(content_type) = content_type {
                     if let Ok(value) = header::HeaderValue::from_str(&content_type) {
@@ -168,6 +194,23 @@ pub async fn proxy(
     ))
 }
 
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+fn safe_forward_path(path: &str) -> bool {
+    if path.contains('\0') || path.contains('\\') || path.contains('\\') {
+        return false;
+    }
+    for segment in path.split('/') {
+        let decoded = urlencoding::decode(segment)
+            .map(|value| value.into_owned())
+            .unwrap_or_else(|_| segment.to_string());
+        if decoded == "." || decoded == ".." || decoded.contains('/') || decoded.contains('\\') {
+            return false;
+        }
+    }
+    true
+}
+
 async fn route_candidates(state: &AppState, plugin_id: &str) -> AppResult<Vec<RouteRow>> {
     let rows = sqlx::query_as::<_, RouteRow>(
         r#"
@@ -176,10 +219,12 @@ async fn route_candidates(state: &AppState, plugin_id: &str) -> AppResult<Vec<Ro
         FROM kernel.activation_revisions r
         JOIN kernel.plugin_deployments d ON d.id = r.deployment_id
         JOIN kernel.plugin_packages p ON p.package_id = r.package_id
+        JOIN kernel.trusted_publishers tp ON tp.publisher_id = p.publisher
         JOIN kernel.plugin_instances i ON i.deployment_id = d.id
         JOIN kernel.nodes n ON n.id = i.node_id
         WHERE r.plugin_id = $1
           AND r.status = 'ACTIVE'
+          AND tp.trust_state = 'TRUSTED'
           AND i.state = 'READY'
           AND i.desired_action = 'START'
           AND n.revoked_at IS NULL
@@ -194,4 +239,20 @@ async fn route_candidates(state: &AppState, plugin_id: &str) -> AppResult<Vec<Ro
     .fetch_all(&state.db)
     .await?;
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_forward_path;
+
+    #[test]
+    fn rejects_path_traversal_variants() {
+        assert!(safe_forward_path("/api/hello"));
+        assert!(safe_forward_path("/api/hello/items/1"));
+        assert!(!safe_forward_path("/api/../admin"));
+        assert!(!safe_forward_path("/api/%2e%2e/admin"));
+        assert!(!safe_forward_path("/api/%2E%2E/admin"));
+        assert!(!safe_forward_path("/api/%2fadmin"));
+        assert!(!safe_forward_path("/api\\admin"));
+    }
 }

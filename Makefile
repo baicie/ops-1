@@ -4,8 +4,10 @@ build:
 web:
 	pnpm --filter @opsweave/platform-web build
 test:
-	cargo test -p opsweave-contracts -p opsweave-bundle
+	cargo test --workspace
+	cargo clippy --workspace --all-targets -- -D warnings
 	pnpm --filter @opsweave/platform-web typecheck
+	pnpm --filter @opsweave/hello-web typecheck
 contract:
 	python3 tests/contract/validate_contracts.py
 demo-up:

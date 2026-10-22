@@ -9,3 +9,4 @@
 - React Shell with dynamic signed remote extensions, Ops Center, responsive design system and Bootstrap Diagnostics.
 - Java 21 Spring Boot, Go and TypeScript Runtime v1 hello plugins with real OCI images.
 - `opsctl` recovery CLI, contract validation, runtime conformance, two-node failover and Playwright visual tests.
+- Review remediation: atomic enrollment-token consumption, node lease/quarantine, data-endpoint allowlist/SSRF guard, publisher-revocation fail-closed routing, login throttling, tiered body limits, forced non-root containers, SSE revocation checks, path/response bounds, basic capacity reservation, CI web-job fix and expanded checks.

@@ -1,7 +1,8 @@
 # The reference Node image is Linux/arm64 on this development host; the binary is
 # built for the target platform by scripts/build-plugins.sh. Production release
 # pipelines build linux/amd64 with the same static binary.
-FROM node:22-bookworm-slim
+ARG BASE_IMAGE=node:22-bookworm-slim
+FROM ${BASE_IMAGE}
 ARG PLUGIN_VERSION=0.0.1
 ARG CAPABILITY_DIGEST
 ARG BUILD_DIGEST

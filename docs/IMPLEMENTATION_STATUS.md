@@ -41,17 +41,23 @@ The production reference target is **Linux amd64 + Rootless Docker + three physi
 | C01 Java Spring Boot Fullstack v1, page/API visible | **PARTIAL** | Java 21 Spring Boot **backend** runs in OCI and serves Runtime v1 + `/api/hello`; no Java frontend remote. |
 | C02 Go backend on Runtime v1 | **PASS (local)** | `tests/contract/run_conformance.sh`; Go 1.25 static image; gateway response. |
 | C03 TS/Node Fullstack v1 and independent upgrade | **PASS (local)** | v1/v2 image digests differ; bundle signatures validate; upgrade/rollback E2E. |
-| C04 Node A/B same image digest, two replicas | **PASS (local simulation)** | two node processes, same OCI digest `sha256:11f0315e...`, 2 READY slots. Physical machines `NOT_RUN`. |
+| C04 Node A/B same image digest, two replicas | **PASS (local simulation)** | two node processes, same `hello-ts` OCI digest `sha256:6da03a97...`, 2 READY slots. Physical machines `NOT_RUN`. |
 | C05 Close Node A, B continues; no permanent bad route | **PASS (local)** | `tests/acceptance/two_node_failover.sh`; Gateway retries GET to Node B; A becomes UNREACHABLE. |
 | C06 Tampered/unsigned/digest-mismatch package rejected | **PARTIAL** | tampered manifest signature rejected with `SIGNATURE_OR_BUNDLE_INVALID`; version conflict rejected. OCI image **signature** verification not implemented; digest pull is enforced. |
-| C07 Expired/revoked node credential rejected | **PARTIAL** | revoke endpoint + heartbeat token check implemented; expiry/rotation not implemented; mTLS `NOT_RUN`. |
-| C08 Resource quotas and host socket/hostPath/privileged denied | **PASS (local)** | `tests/acceptance/container_security.sh` inspects live containers: read-only, cap-drop ALL, no-new-privileges, memory/cpu/PID, no binds, loopback ports. |
+| C07 Expired/revoked node credential rejected | **PASS (local)** | `node_revocation.sh`: unsafe endpoint 400, heartbeat 200 before revoke, 403 after; `node_quarantine.sh` proves live managed containers are removed. Token expiry/rotation and mTLS remain `NOT_RUN`. |
+| C08 Resource quotas and host socket/hostPath/privileged denied | **PASS (local)** | `tests/acceptance/container_security.sh` inspects live containers: read-only, cap-drop ALL, no-new-privileges, forced UID 65532, actual `id -u` non-zero, memory/cpu/PID, no binds, loopback ports. |
 | C09 Old browser tab across v1→v2 release | **NOT_RUN** | No compatibility-window or forced-reload protocol implemented; old tab gets CAPABILITY_UNAVAILABLE after drain. |
 | C10 Incompatible DB migration blocks rollback | **NOT_IMPLEMENTED** | No migration engine in 0.0.1; rollback is route/binary only; must be blocked manually by policy. |
 | C11 Kernel restart reconciles PG + observed state | **PASS (local)** | `tests/acceptance/kernel_restart.sh`; active version preserved, Gateway serves after restart. |
-| C12 SSE auth, disconnect, cursor gap, backpressure, revoke | **PARTIAL** | operator-only SSE, forged cursor 400, signed cursors, gap events, disconnect UI; explicit backpressure/flood and revoke-mid-stream tests `NOT_RUN`. |
-| C13 Node Runtime exit/upgrade workload policy | **PARTIAL** | Node leaves containers running on exit and re-adopts; failover test kills Node A and recovers. Systemd upgrade procedure is documented only. |
+| C12 SSE auth, disconnect, cursor gap, backpressure, revoke | **PARTIAL** | operator-only SSE, forged cursor 400, signed cursors, gap events, disconnect UI, per-poll revocation check and idle backoff; explicit flood/backpressure test `NOT_RUN`. |
+| C13 Node Runtime exit/upgrade workload policy | **PARTIAL** | Graceful exit stops workloads by default; lease expiry and credential rejection enter quarantine and remove containers (`node_lease.sh`, `node_quarantine.sh`); restart re-adopts desired containers. Systemd upgrade procedure is documented only; SIGKILL of the node process still requires host-level cleanup. |
 | C14 390/1024/1440 light/dark screenshots | **PASS (local)** | Playwright matrix in `tests/ui/visual.spec.ts`; images under `artifacts/ui/`. |
+
+## Review remediation (2026-10-22)
+
+The first external review identified node revocation/lease, data-endpoint/SSRF, enrollment-token race, publisher-revocation, login throttling, non-root enforcement, SSE revocation, CI and capacity-scheduling gaps. Implemented in this pass: atomic `FOR UPDATE` + conditional token consumption; node lease/quarantine and container stop; rotated data token on revoke; allowlisted origin-only data endpoints with loopback-only plaintext; publisher trust re-check and fail-closed Gateway/assets/extensions; login rate limiting and tiered body limits; forced non-root container UID; SSE per-poll authorization; path traversal/response-size bounds; basic CPU/memory reservation scheduling; CI pnpm version fix plus workspace tests/clippy/typechecks. New tests: `node_quarantine.sh`, `node_lease.sh`, `auth_limits.sh`, path unit tests, and strengthened `node_revocation.sh` / `container_security.py`.
+
+Still **NOT_RUN / blocking**: Kernel↔Node mTLS and certificate rotation, three physical Linux amd64 hosts, real Rootless Docker, OCI image signatures/SBOM, SIGKILL host-level container cleanup, and full SSE flood/backpressure testing. No production-ready claim is made.
 
 ## Explicit non-goals (unchanged)
 

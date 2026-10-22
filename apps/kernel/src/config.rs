@@ -18,6 +18,8 @@ pub struct Config {
     pub node_stale_seconds: i64,
     pub max_instances_per_node: u32,
     pub request_timeout_seconds: u64,
+    pub allow_insecure_node_transport: bool,
+    pub allowed_node_data_hosts: Vec<String>,
 }
 
 impl Config {
@@ -48,6 +50,11 @@ impl Config {
             node_stale_seconds: env_i64("OPSWEAVE_NODE_STALE_SECONDS", 25),
             max_instances_per_node: env_i64("OPSWEAVE_MAX_INSTANCES_PER_NODE", 4) as u32,
             request_timeout_seconds: env_i64("OPSWEAVE_REQUEST_TIMEOUT_SECONDS", 10) as u64,
+            allow_insecure_node_transport: env_bool("OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT", true),
+            allowed_node_data_hosts: env_list(
+                "OPSWEAVE_ALLOWED_NODE_DATA_HOSTS",
+                "127.0.0.1,localhost,::1",
+            ),
         }
     }
 
@@ -58,6 +65,28 @@ impl Config {
 
 fn env_string(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    env::var(key)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn env_list(key: &str, default: &str) -> Vec<String> {
+    env::var(key)
+        .unwrap_or_else(|_| default.to_string())
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
 }
 
 fn env_i64(key: &str, default: i64) -> i64 {

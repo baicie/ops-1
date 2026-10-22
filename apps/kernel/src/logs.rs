@@ -64,6 +64,11 @@ pub async fn get_instance(
 ) -> AppResult<Json<Value>> {
     auth.require_operator()?;
     let context = fetch_instance_context(&state, instance_id).await?;
+    if !node_authorized(&state, context.node_id).await? {
+        return Err(AppError::forbidden(
+            "node hosting this instance is revoked or unavailable",
+        ));
+    }
     Ok(Json(serde_json::json!({
         "id": context.id,
         "deploymentId": context.deployment_id,
@@ -93,6 +98,11 @@ pub async fn live_logs(
 ) -> AppResult<Response> {
     auth.require_operator()?;
     let context = fetch_instance_context(&state, instance_id).await?;
+    if !node_authorized(&state, context.node_id).await? {
+        return Err(AppError::forbidden(
+            "node hosting this instance is revoked or unavailable",
+        ));
+    }
     let stale_before = Utc::now() - chrono::Duration::seconds(state.config.node_stale_seconds);
     if context
         .node_last_seen_at
@@ -168,6 +178,27 @@ pub async fn live_logs(
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
+            match node_authorized(&state_clone, node_id).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    let payload = serde_json::json!({
+                        "code": "NODE_REVOKED",
+                        "message": "The node credential was revoked; this log stream is closed.",
+                        "retryable": false
+                    });
+                    let _ = send_event(&tx, None, "status", &payload).await;
+                    break;
+                }
+                Err(error) => {
+                    let payload = serde_json::json!({
+                        "code": "LOG_STREAM_ERROR",
+                        "message": format!("authorization check failed: {error}"),
+                        "retryable": true
+                    });
+                    let _ = send_event(&tx, None, "status", &payload).await;
+                    break;
+                }
+            }
             tokio::select! {
                 _ = heartbeat.tick() => {
                     let payload = serde_json::json!({"observedAt": Utc::now()});
@@ -221,6 +252,9 @@ pub async fn live_logs(
                             }
                             if let Some(last) = batch.last_sequence {
                                 sequence = sequence.max(last);
+                            }
+                            if batch.events.is_empty() {
+                                tokio::time::sleep(Duration::from_millis(250)).await;
                             }
                         }
                         Err(error) => {
@@ -357,6 +391,16 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         diff |= a ^ b;
     }
     diff == 0
+}
+
+async fn node_authorized(state: &AppState, node_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM kernel.nodes WHERE id=$1 AND revoked_at IS NULL AND status='READY' AND last_seen_at > now() - ($2 || ' seconds')::interval)",
+    )
+    .bind(node_id)
+    .bind(state.config.node_stale_seconds)
+    .fetch_one(&state.db)
+    .await
 }
 
 async fn fetch_instance_context(

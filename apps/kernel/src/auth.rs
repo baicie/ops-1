@@ -3,7 +3,7 @@ use crate::state::AppState;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
-use axum::extract::{FromRequestParts, Request, State};
+use axum::extract::{ConnectInfo, FromRequestParts, Request, State};
 use axum::http::request::Parts;
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
@@ -16,6 +16,8 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::FromRow;
+use std::net::SocketAddr;
+use std::time::Duration as StdDuration;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -185,10 +187,22 @@ pub struct LoginResponse {
 
 pub async fn login(
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<Response> {
     if payload.email.trim().is_empty() || payload.password.is_empty() {
         return Err(AppError::bad_request("email and password are required"));
+    }
+    let email_key = format!("login:email:{}", payload.email.trim().to_ascii_lowercase());
+    let ip_key = format!("login:ip:{peer}");
+    let window = StdDuration::from_secs(300);
+    if state.rate_limiter.is_limited(&email_key, 10, window)
+        || state.rate_limiter.is_limited(&ip_key, 60, window)
+    {
+        return Err(AppError::too_many_requests(
+            "LOGIN_RATE_LIMITED",
+            "too many failed authentication attempts; retry later",
+        ));
     }
     let row = sqlx::query_as::<_, (Uuid, String, String, String, String, bool)>(
         "SELECT id, email, display_name, password_hash, role, disabled FROM kernel.users WHERE lower(email) = lower($1)",
@@ -196,15 +210,28 @@ pub async fn login(
     .bind(payload.email.trim())
     .fetch_optional(&state.db)
     .await?
-    .ok_or_else(|| AppError::unauthorized("Invalid email or password"))?;
+    .ok_or_else(|| {
+        state.rate_limiter.record_failure(&email_key, window);
+        state.rate_limiter.record_failure(&ip_key, window);
+        AppError::unauthorized("Invalid email or password")
+    })?;
     if row.5 {
+        state.rate_limiter.record_failure(&email_key, window);
+        state.rate_limiter.record_failure(&ip_key, window);
         return Err(AppError::unauthorized("Invalid email or password"));
     }
     let parsed = PasswordHash::new(&row.3)
         .map_err(|_| AppError::internal("stored password hash is invalid"))?;
-    Argon2::default()
+    if Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed)
-        .map_err(|_| AppError::unauthorized("Invalid email or password"))?;
+        .is_err()
+    {
+        state.rate_limiter.record_failure(&email_key, window);
+        state.rate_limiter.record_failure(&ip_key, window);
+        return Err(AppError::unauthorized("Invalid email or password"));
+    }
+    state.rate_limiter.reset(&email_key);
+    state.rate_limiter.reset(&ip_key);
 
     let token = random_token(32);
     let csrf = random_token(24);
