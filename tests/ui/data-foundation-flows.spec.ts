@@ -39,7 +39,7 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   const idText = await page.getByTestId('catalog-dataset-id').innerText();
   const datasetId = idText.match(/[0-9a-f]{8}-[0-9a-f-]{27,}/)?.[0];
   expect(datasetId, `dataset id from ${idText}`).toBeTruthy();
-  await page.screenshot({ path: path.join(OUT, 'catalog-detail-flow.png'), fullPage: true });
+  await page.getByTestId('catalog-dataset-detail').screenshot({ path: path.join(OUT, 'catalog-detail-flow.png') });
 
   const draft = page.getByTestId('catalog-draft-fields');
   const fields = JSON.parse(await draft.inputValue());
@@ -50,7 +50,7 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   await page.getByTestId('catalog-publish-draft').click();
   await expect(page.getByTestId('catalog-schema-revisions')).toContainText('"schemaRevision": 2');
   await expect(page.getByTestId('catalog-schema-revisions')).toContainText('"schemaRevision": 1');
-  await page.screenshot({ path: path.join(OUT, 'catalog-schema-flow.png'), fullPage: true });
+  await page.getByTestId('catalog-dataset-detail').screenshot({ path: path.join(OUT, 'catalog-schema-flow.png') });
 
   await page.goto('/ext/trusted-team/data-integration');
   await expect(page.getByRole('heading', { name: 'Data Integration', exact: true })).toBeVisible();
@@ -76,7 +76,8 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   await expect(page.getByTestId('integration-quality')).toContainText('"total": 2');
   await runRow.getByRole('button', { name: 'Lineage' }).click();
   await expect(page.getByTestId('integration-lineage')).toContainText('sourceBatchKey');
-  await page.screenshot({ path: path.join(OUT, 'integration-run-flow.png'), fullPage: true });
+  await page.getByTestId('integration-quality').screenshot({ path: path.join(OUT, 'integration-quality-flow.png') });
+  await page.getByTestId('integration-lineage').screenshot({ path: path.join(OUT, 'integration-lineage-flow.png') });
 
   await page.goto('/ext/trusted-team/data-catalog');
   await expect(page.getByText(datasetName, { exact: true }).first()).toBeVisible();
@@ -102,11 +103,11 @@ test('responsive catalog/integration screenshot matrix', async ({ browser }) => 
       await page.goto('/ext/trusted-team/data-catalog');
       await expect(page.getByRole('heading', { name: 'Data Catalog', exact: true })).toBeVisible();
       await noOverflow(page);
-      await page.screenshot({ path: path.join(OUT, `catalog-${width}-${theme}.png`), fullPage: true });
+      await page.screenshot({ path: path.join(OUT, `catalog-${width}-${theme}.png`), fullPage: width < 700 });
       await page.goto('/ext/trusted-team/data-integration');
       await expect(page.getByRole('heading', { name: 'Data Integration', exact: true })).toBeVisible();
       await noOverflow(page);
-      await page.screenshot({ path: path.join(OUT, `integration-${width}-${theme}.png`), fullPage: true });
+      await page.screenshot({ path: path.join(OUT, `integration-${width}-${theme}.png`), fullPage: width < 700 });
       expect(errors, `page errors at ${width}/${theme}: ${errors.join('; ')}`).toEqual([]);
       await context.close();
     }
