@@ -31,7 +31,10 @@ accessing each other's tables.
   node, changing the generation or becoming stale invalidates old tokens.
   Long-running instances may refresh an expired token only inside a bounded grace
   window after the same live-state and grant checks; refresh cannot outlive a
-  revoked Node.
+  revoked Node. Integration also runs an idle keepalive, and Node refreshes a
+  mounted token file from the Node-authenticated instance environment so a plugin
+  can recover after an outage or idle period beyond the grace window without a
+  restart. The plugin never receives the Node control credential.
 - User-session Gateway behavior remains unchanged. No user token is exposed to
   a remote extension. Plugin backends derive user scopes from the authenticated
   role only: `viewer` read-only, `operator`/`admin` write, unknown roles denied.

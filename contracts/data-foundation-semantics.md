@@ -36,6 +36,11 @@ provider's Node address or container port as the logical identity.
   refresh endpoint, inside a bounded grace window, after re-checking the live
   instance/node/generation, active grant and scope. Refresh is not a new grant; a
   revoked Node or stopped instance must reject both refresh and old-token calls.
+- Long-running consumers must actively renew before expiry, not rely on a first
+  request after idleness. The Node runtime also refreshes a mounted capability-token
+  file using its Node credential; after a Kernel outage longer than the access-token
+  grace window the Node can reissue the file from the live instance environment,
+  without restarting or granting the plugin a Node control credential.
 - If a grant names `providerPluginId`, invocation must select and call exactly that
   provider. A selection that resolves to another provider returns
   `CAPABILITY_PROVIDER_MISMATCH` (403); it must not silently use another provider.
