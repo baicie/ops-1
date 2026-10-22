@@ -260,10 +260,10 @@ This section records only what was actually executed during the 0.0.2 implementa
 | Kernel capability grant/resolve | PASS (local) | `data.catalog.v1` provider resolved; grant created; disable returned 409 `DEPENDENCY_BLOCKED` while Integration grant was active. |
 | Kernel capability invoke | PASS (local harness) | Signed workload token accepted; invocation routed through a local Node-proxy harness to the real Catalog service and returned an `ACCEPTED` receipt. |
 | Integration → real Kernel → Catalog | PASS (local harness) | Run `E2E` resolved through `/api/v1/capabilities/data.catalog.v1/1/...`, returned `SUCCEEDED`, `accepted=2`; replaying the same idempotency key returned the same run. |
-| Data OCI image build/deploy | PASS (CI) | GitHub Actions run `39776769691`: both data backend images built, pushed to a host-local registry, and deployed as OCI containers. Local Docker Desktop remained unavailable; this is a CI Linux result. |
-| Real two-plugin OCI cross-node Gateway path | PASS (CI) | Run `39776769691`: two real Node runtimes enrolled; Catalog placed on `zone=node-a`, Integration on `zone=node-b`; Golden Path passed through the real Kernel Capability Gateway. |
+| Data OCI image build/deploy | PASS (CI) | GitHub Actions run `39778321050`: both data backend images built, pushed to a host-local registry, and deployed as OCI containers. Local Docker Desktop remained unavailable; this is a CI Linux result. |
+| Real two-plugin OCI cross-node Gateway path | PASS (CI) | Run `39778321050`: two real Node runtimes enrolled; Catalog placed on `zone=node-a`, Integration on `zone=node-b`; Golden Path passed through the real Kernel Capability Gateway. |
 | Data Foundation CI workflow | PASS | `.github/workflows/data-foundation.yml`, run `39767019066` (job `golden-path`). |
-| Catalog/Integration browser smoke | PASS (CI) | Run `39776769691` loaded both signed remote extensions in Chromium against active OCI plugins (`2 passed`); screenshots are uploaded as the `data-foundation-screenshots` artifact. |
+| Catalog/Integration browser smoke | PASS (CI) | Run `39778321050` loaded both signed remote extensions in Chromium against active OCI plugins (`2 passed`); screenshots are uploaded as the `data-foundation-screenshots` artifact. |
 | 0.0.1 E2E regression | PASS (CI) | Same run, `legacy-regression` job: existing hello TS/Go/Java lifecycle, rollback and re-enable path `PASS=21 FAIL=0`. |
 | Schema/quality assertions | PASS (CI) | Same run: schema revision 2 draft/publish, compatible diff, incompatible change rejection (`409`), and quality total/unknown assertions. |
 | Kernel migration gate | PASS (local) | Checksum-matched EXPAND migration applied under a least-privilege plugin database role; replay returned the original record; a second list encoded the APPLIED record. CONTRACT-during-live-instances and changed-checksum rejection are implemented but not all tested. |
@@ -273,5 +273,5 @@ The local capability harness is not a substitute for the required real OCI Golde
 ### 0.0.2 branch CI
 
 - PR `#1` (`feat/0.0.2-data-foundation`) Rust/Web/Contracts checks: **PASS** on the latest branch commit.
-- `.github/workflows/data-foundation.yml` run [`39776769691`](https://github.com/baicie/ops-1/actions/runs/39776769691): **PASS** on Linux with Docker, real PostgreSQL, two Node runtimes, real OCI data plugin containers, Chromium smoke tests for both signed extensions, and the 0.0.1 E2E regression (`PASS=21 FAIL=0`).
+- `.github/workflows/data-foundation.yml` run [`39778321050`](https://github.com/baicie/ops-1/actions/runs/39778321050): **PASS** on Linux with Docker, real PostgreSQL, two Node runtimes, real OCI data plugin containers, Chromium smoke tests for both signed extensions, and the 0.0.1 E2E regression (`PASS=21 FAIL=0`).
 - Local Docker Desktop remained unavailable; local-only OCI deployment is `NOT_RUN`. The CI result is not a production deployment.
