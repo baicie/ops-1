@@ -88,3 +88,7 @@ scripts/demo_data_up.sh
 
 echo "== real OCI Golden Path"
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_foundation.sh
+if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
+  echo "== browser extension smoke"
+  OPSWEAVE_URL="$OPSWEAVE_URL" pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts
+fi
