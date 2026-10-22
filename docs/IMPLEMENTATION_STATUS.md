@@ -74,11 +74,11 @@ Baseline: `v0.0.1-dev.1` / `4ce130b`, branch `feat/0.0.2-data-foundation`.
 | Epic | Status | Evidence / limitation |
 |---|---|---|
 | D00 Data Capability Contract | DONE (contracts) | `contracts/openapi/{capability,data-catalog,data-integration}-v1.yaml`, capability/storage/catalog/integration JSON Schemas, examples and negative contract checks pass. |
-| D01 Catalog Backend | PARTIAL | Independent Node service and plugin-owned PostgreSQL schema tables implemented; dataset/create/draft/publish/diff/write/idempotency tested against host-process PostgreSQL. OCI deployment not run. |
+| D01 Catalog Backend | PASS (CI) | Independent Node service and plugin-owned PostgreSQL schema tables; dataset/create/draft/publish/diff/write/idempotency verified in real OCI CI run `39776769691`. |
 | D02 Catalog UI | PARTIAL | Dynamic UMD extension built/typechecked and Chromium smoke-loaded in CI run `39776769691`; full flow screenshot suite not run. |
-| D03 Integration Backend | PARTIAL | Independent HTTP/JSON source service with ConnectionTest, Discovery, Preview, mappings/specs/runs, SSRF negative test passed; OCI deployment not run. |
+| D03 Integration Backend | PASS (CI) | Independent HTTP/JSON source service with ConnectionTest, Discovery, Preview, mappings/specs/runs and SSRF negative test; real OCI CI run `39776769691`. |
 | D04 Integration UI | PARTIAL | Dynamic UMD extension built/typechecked and Chromium smoke-loaded in CI run `39776769691`; full flow screenshot suite not run. |
-| D05 Ingestion Flow | PARTIAL | Host-process source→parse→map→validate→Catalog sink exercised against a local capability broker; real Kernel Gateway + real OCI plugin pair NOT_RUN. |
+| D05 Ingestion Flow | PASS (CI) | Source→parse→map→validate→Catalog sink through the real Kernel Capability Gateway and real OCI plugin pair, run `39776769691`. |
 | D06 Quality / Run History | PARTIAL | Run counts, history and batch lineage implemented; retention/quality edge cases limited. |
 | D07 Integration Tests | PASS (CI) | GitHub Actions `39776769691`: two real Node runtimes, real OCI Catalog/Integration containers on distinct nodes, real Kernel Capability Gateway, Chromium extension smoke, schema compatibility/quality checks, and 0.0.1 E2E `PASS=21 FAIL=0`; local Docker Desktop run remains `NOT_RUN`. |
 
