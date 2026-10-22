@@ -167,6 +167,15 @@ async function initDb() {
       created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE (dataset_id, source_batch_key)
     );
+    CREATE TABLE IF NOT EXISTS catalog_entity_types (
+      entity_type_id uuid PRIMARY KEY,
+      name text NOT NULL,
+      dataset_id uuid NOT NULL REFERENCES catalog_datasets(dataset_id),
+      schema_revision integer,
+      primary_key_fields jsonb NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (dataset_id, name)
+    );
     CREATE TABLE IF NOT EXISTS catalog_lineage (
       lineage_id uuid PRIMARY KEY,
       dataset_id uuid NOT NULL,
@@ -237,6 +246,23 @@ async function handle(req, res) {
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
     const row = await pool.query('SELECT * FROM catalog_datasets WHERE dataset_id=$1', [id]);
     return send(res, 201, datasetView(row.rows[0]), requestId);
+  }
+  if (url.pathname === '/api/data-catalog/entity-types' && req.method === 'GET') {
+    if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
+    const datasetId = url.searchParams.get('datasetId');
+    const rows = datasetId
+      ? await pool.query('SELECT * FROM catalog_entity_types WHERE dataset_id=$1 ORDER BY created_at DESC', [datasetId])
+      : await pool.query('SELECT * FROM catalog_entity_types ORDER BY created_at DESC LIMIT 100');
+    return send(res, 200, rows.rows.map((row) => ({ entityTypeId: row.entity_type_id, name: row.name, datasetId: row.dataset_id, schemaRevision: row.schema_revision, primaryKeyFields: row.primary_key_fields })), requestId);
+  }
+  if (url.pathname === '/api/data-catalog/entity-types' && req.method === 'POST') {
+    if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+    const body = await readJson(req);
+    if (!body.name || !body.datasetId || !Array.isArray(body.primaryKeyFields) || !body.primaryKeyFields.length) return fail(res, 400, 'INVALID_REQUEST', 'name, datasetId and primaryKeyFields are required', requestId);
+    const dataset = await pool.query('SELECT schema_revision FROM catalog_datasets WHERE dataset_id=$1', [body.datasetId]);
+    if (!dataset.rows[0]) return fail(res, 404, 'DATASET_NOT_FOUND', 'dataset not found', requestId);
+    const row = await pool.query('INSERT INTO catalog_entity_types (entity_type_id,name,dataset_id,schema_revision,primary_key_fields) VALUES ($1,$2,$3,$4,$5) RETURNING *', [crypto.randomUUID(), body.name, body.datasetId, body.schemaRevision || dataset.rows[0].schema_revision, JSON.stringify(body.primaryKeyFields)]);
+    return send(res, 201, { entityTypeId: row.rows[0].entity_type_id, name: row.rows[0].name, datasetId: row.rows[0].dataset_id, schemaRevision: row.rows[0].schema_revision, primaryKeyFields: row.rows[0].primary_key_fields }, requestId);
   }
   const datasetMatch = url.pathname.match(/^\/api\/data-catalog\/datasets\/([0-9a-f-]{36})(?:\/(.*))?$/);
   if (datasetMatch) {

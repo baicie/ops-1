@@ -75,6 +75,46 @@ paths:
               schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/Dataset' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /entity-types:
+    get:
+      operationId: listEntityTypes
+      summary: List entity types registered by Catalog
+      parameters:
+        - { name: datasetId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Entity types
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/EntityType' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      operationId: createEntityType
+      summary: Register an entity type for a dataset
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, datasetId, primaryKeyFields]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 128 }
+                datasetId: { type: string, format: uuid }
+                schemaRevision: { type: integer, minimum: 1 }
+                primaryKeyFields: { type: array, minItems: 1, items: { type: string } }
+      responses:
+        '201':
+          description: Entity type created
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/EntityType' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /datasets/{datasetId}/schemas:
     get:
       operationId: listSchemaRevisions

@@ -494,6 +494,78 @@
           "format": "date-time"
         }
       }
+    },
+    "ModelRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modelRevision",
+        "schemaRevision",
+        "digest",
+        "status",
+        "createdAt"
+      ],
+      "properties": {
+        "modelRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schemaRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "status": {
+          "enum": [
+            "DRAFT",
+            "PUBLISHED",
+            "RETIRED"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "EntityType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entityTypeId",
+        "name",
+        "datasetId",
+        "primaryKeyFields"
+      ],
+      "properties": {
+        "entityTypeId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "datasetId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "primaryKeyFields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "schemaRevision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     }
   }
 }
