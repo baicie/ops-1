@@ -82,7 +82,8 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   await expect(page.getByText(datasetName, { exact: true }).first()).toBeVisible();
   await page.getByText(datasetName, { exact: true }).first().click();
   await page.getByTestId('catalog-load-records').click();
-  await expect(page.getByTestId('catalog-records')).toContainText('accepted');
+  await expect(page.getByTestId('catalog-records')).toContainText('host-1');
+  await expect(page.getByTestId('catalog-records')).toContainText('host-2');
   await page.reload();
   await expect(page.getByText(datasetName, { exact: true }).first()).toBeVisible();
   await expect(pageErrors, `page errors: ${pageErrors.join('; ')}`).toEqual([]);
