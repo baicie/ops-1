@@ -368,7 +368,7 @@ The local capability harness is not a substitute for the required real OCI Golde
 - Data Foundation OCI CI [`39827988081`](https://github.com/baicie/ops-1/actions/runs/39827988081): `golden-path` and `legacy-regression` success.
 - Multi-provider real API test: PASS. Grant bound to A reached A; natural selection of B while bound to A returned `403 CAPABILITY_PROVIDER_MISMATCH` and wrote audit; unbounded grant reached B; revoke/restore were immediate; no-provider resolve failed closed.
 - Migration concurrency real HTTP test: PASS. A failed, B applied once, late failure did not overwrite APPLIED; replay, checksum mismatch and CONTRACT live-instance checks passed.
-- Token file security: PASS. Mode 644, no cross-instance token, no Node control credential in plugin env, no token in an unauthenticated response.
+- Token file security: PARTIAL. Mode 644, no cross-instance token, no Node control credential in plugin env, no token in an unauthenticated response; missing/corrupt-file and restart cases remain `NOT_RUN`.
 - Full UI business flow: PASS (4 Playwright tests). Catalog create/Draft/Diff/Publish/Records/refresh persistence and Integration create/Test/Discover/Preview/Mapping/Run/Quality/Lineage passed.
 - Screenshot matrix: PASS. 1440x900, 1024x768 and 390x844, light/dark, both extensions; artifact `data-foundation-screenshots` from run `39827988081`.
 - D06 bounded reliability: PARTIAL. Retention policy visibility, catalog batch idempotency, changed-content rejection, schema revision rejection and record count passed. UNKNOWN/catalog timeout, retention enforcement, Kernel restart recovery and full fault injection remain `NOT_RUN`.

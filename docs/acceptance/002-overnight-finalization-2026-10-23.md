@@ -21,7 +21,7 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 | Catalog UI Flow | PASS |
 | Integration UI Flow | PASS |
 | UI Screenshot Matrix | PASS |
-| Token File Security | PASS |
+| Token File Security | PARTIAL |
 | D06 Reliability | PARTIAL |
 | 0.0.1 Regression | PASS |
 
@@ -55,7 +55,7 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 
 - Multi-provider: bound A reached A; natural switch selected B and returned `403 CAPABILITY_PROVIDER_MISMATCH`; unbounded grant reached B; revoke/restore immediate; no-provider resolution returned `CAPABILITY_UNAVAILABLE`; mismatch audit present.
 - Migration concurrency: A failed, B applied once, late FAILED did not overwrite APPLIED; replay with same checksum `replay=true`; changed checksum rejected; CONTRACT blocked with live instance.
-- Token file: mode 644, per-instance isolation, no Node control credential in plugin env, no token in unauthenticated response, expiry/refresh and Node revocation tests.
+- Token file: mode 644, per-instance isolation, no Node control credential in plugin env, no token in unauthenticated response, expiry/refresh and Node revocation tests. Missing/corrupt-file and Node/Kernel restart cases remain `PARTIAL/NOT_RUN`.
 - Browser: full Catalog and Integration business flows passed with real signed Remote Extensions, real Gateway, PostgreSQL and active OCI plugins.
 - Screenshots: `artifacts/ui/data-foundation/` from artifact `data-foundation-screenshots` (run `39827988081`).
 
