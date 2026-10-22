@@ -29,7 +29,7 @@ psql "$DB" -qAt -c "DROP TABLE IF EXISTS \"$SCHEMA\".concurrency_probe;" >/dev/n
 psql "$DB" -qAt -c "CREATE OR REPLACE FUNCTION test_delay_failed_migration() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN IF NEW.status='FAILED' THEN PERFORM pg_sleep(4); END IF; RETURN NEW; END \$\$; DROP TRIGGER IF EXISTS test_delay_failed_migration ON kernel.plugin_migrations; CREATE TRIGGER test_delay_failed_migration BEFORE INSERT OR UPDATE ON kernel.plugin_migrations FOR EACH ROW EXECUTE FUNCTION test_delay_failed_migration();" >/dev/null
 
 THRESHOLD="$(python3 -c 'from datetime import datetime,timezone,timedelta; print((datetime.now(timezone.utc)+timedelta(seconds=3)).isoformat())')"
-SQL="CREATE TABLE concurrency_probe(id integer); SELECT CASE WHEN now() < '$THRESHOLD'::timestamptz THEN 1/0 ELSE 1 END;"
+SQL="CREATE TABLE concurrency_probe(id integer); SELECT CASE WHEN clock_timestamp() < '$THRESHOLD'::timestamptz THEN 1/0 ELSE 1 END;"
 BODY="$(python3 - "$SQL" "$VERSION" "$MIGRATION" <<'PY'
 import hashlib,json,sys
 sql,version,mid=sys.argv[1:]
