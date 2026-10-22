@@ -196,6 +196,77 @@ fn plugin_database_url(state: &AppState, role: &str, password: &str) -> AppResul
     ))
 }
 
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let bytes = sql.as_bytes();
+    let mut statements = Vec::new();
+    let mut start = 0usize;
+    let mut index = 0usize;
+    let mut single_quote = false;
+    let mut double_quote = false;
+    let mut dollar_tag: Option<String> = None;
+    while index < bytes.len() {
+        if let Some(tag) = &dollar_tag {
+            if sql[index..].starts_with(tag) {
+                index += tag.len();
+                dollar_tag = None;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        let byte = bytes[index];
+        if single_quote {
+            if byte == b'\'' {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'\'' {
+                    index += 2;
+                    continue;
+                }
+                single_quote = false;
+            }
+            index += 1;
+            continue;
+        }
+        if double_quote {
+            if byte == b'"' {
+                if index + 1 < bytes.len() && bytes[index + 1] == b'"' {
+                    index += 2;
+                    continue;
+                }
+                double_quote = false;
+            }
+            index += 1;
+            continue;
+        }
+        match byte {
+            b'\'' => single_quote = true,
+            b'"' => double_quote = true,
+            b'$' => {
+                if let Some(relative_end) = sql[index + 1..].find('$') {
+                    let end = index + 1 + relative_end;
+                    let tag = &sql[index..=end];
+                    if tag[1..tag.len() - 1]
+                        .chars()
+                        .all(|character| character.is_ascii_alphanumeric() || character == '_')
+                    {
+                        dollar_tag = Some(tag.to_string());
+                        index = end;
+                    }
+                }
+            }
+            b';' => {
+                statements.push(sql[start..index].to_string());
+                start = index + 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if start < sql.len() {
+        statements.push(sql[start..].to_string());
+    }
+    statements
+}
+
 fn has_transaction_control(sql: &str) -> bool {
     sql.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
         .map(|token| token.to_ascii_uppercase())
@@ -230,6 +301,14 @@ async fn record_failed_migration(
 #[cfg(test)]
 mod tests {
     use super::{has_transaction_control, safe_names};
+
+    #[test]
+    fn migration_sql_is_split_without_breaking_quoted_semicolons() {
+        let statements =
+            super::split_sql_statements("CREATE TABLE t(id int); SELECT 'a;b'; SELECT 1;");
+        assert_eq!(statements.len(), 3);
+        assert!(statements[1].contains("'a;b'"));
+    }
 
     #[test]
     fn migration_sql_rejects_transaction_control() {
@@ -433,12 +512,17 @@ pub async fn apply_migration(
         ));
     }
 
+    let migration_sql = payload.sql.clone();
     let set_role = format!("SET LOCAL ROLE \"{}\"", binding.role_name);
     let set_path = format!("SET LOCAL search_path = \"{}\"", binding.schema_name);
     let execution = async {
         sqlx::query(&set_role).execute(&mut *tx).await?;
         sqlx::query(&set_path).execute(&mut *tx).await?;
-        sqlx::query(&payload.sql).execute(&mut *tx).await?;
+        for statement in split_sql_statements(&migration_sql) {
+            if !statement.trim().is_empty() {
+                sqlx::query(&statement).execute(&mut *tx).await?;
+            }
+        }
         sqlx::query("RESET ROLE").execute(&mut *tx).await?;
         sqlx::query(
             "UPDATE kernel.plugin_migrations SET status='APPLIED',applied_at=now(),details='{}'::jsonb WHERE plugin_id=$1 AND version=$2 AND migration_id=$3 AND status='PENDING'",
