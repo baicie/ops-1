@@ -349,7 +349,11 @@ async function handle(req, res) {
         return send(res, 201, receiptView(receipt.rows[0]), requestId);
       } catch (error) {
         await client.query('ROLLBACK');
-        if (error.code === '23505') return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'sourceBatchKey already exists', requestId);
+        if (error.code === '23505') {
+          const raced = await pool.query('SELECT * FROM catalog_receipts WHERE dataset_id=$1 AND source_batch_key=$2', [datasetId, body.sourceBatchKey]);
+          if (raced.rows[0] && raced.rows[0].request_digest === requestDigest) return send(res, 200, receiptView(raced.rows[0]), requestId);
+          return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'sourceBatchKey already exists', requestId);
+        }
         throw error;
       } finally { client.release(); }
     }
