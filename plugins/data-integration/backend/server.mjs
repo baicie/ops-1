@@ -3,6 +3,7 @@ import https from 'node:https';
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import pg from 'pg';
 
 const PLUGIN_ID = process.env.OPSWEAVE_PLUGIN_ID || 'opsweave.data-integration';
@@ -36,7 +37,28 @@ function tokenExpiryMs(token) {
     return Number(payload.expiresAt) * 1000;
   } catch { return 0; }
 }
+function startTokenKeepalive() {
+  // Request-driven refresh alone cannot serve an idle plugin. Renew shortly
+  // before expiry while the Kernel is reachable; calls are coalesced by
+  // catalogToken() and a failed tick is retried without restarting the plugin.
+  const timer = setInterval(async () => {
+    const token = CAPABILITY_TOKENS['data.catalog.v1'];
+    if (!token || tokenExpiryMs(token) > Date.now() + 60_000) return;
+    try { await catalogToken(); } catch { /* next tick retries; no restart fallback */ }
+  }, 1000);
+  timer.unref?.();
+}
+
+async function loadWorkloadTokenFile() {
+  try {
+    const raw = await fs.readFile('/run/opsweave/capability-tokens.json', 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) CAPABILITY_TOKENS = parsed;
+  } catch { /* local host-process mode has no mounted token file */ }
+}
+
 async function catalogToken() {
+  await loadWorkloadTokenFile();
   const current = CAPABILITY_TOKENS['data.catalog.v1'];
   if (!current) throw Object.assign(new Error('CAPABILITY_UNAVAILABLE: no data.catalog.v1 workload token'), { code: 'CAPABILITY_UNAVAILABLE', status: 503 });
   if (tokenExpiryMs(current) > Date.now() + 60_000) return current;
@@ -244,4 +266,7 @@ async function handle(req, res) {
 }
 const server = http.createServer((req, res) => { handle(req, res).catch((error) => { const id = rid(req); fail(res, error.status || 500, error.code || 'INTERNAL', error.status && error.status < 500 ? error.message : 'internal integration error', id); }); });
 server.on('SIGTERM', () => { stopping = true; server.close(() => pool.end().then(() => process.exit(0))); });
-initDb().then(() => server.listen(PORT, '0.0.0.0', () => console.log(`data-integration ${VERSION} listening ${PORT}`))).catch((error) => { console.error(error); process.exit(1); });
+initDb().then(() => {
+  server.listen(PORT, '0.0.0.0', () => console.log(`data-integration ${VERSION} listening ${PORT}`));
+  startTokenKeepalive();
+}).catch((error) => { console.error(error); process.exit(1); });

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context};
 use opsweave_contracts::DesiredWorkload;
+use std::path::Path;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
@@ -189,6 +190,7 @@ impl DockerAdapter {
         container_port: u16,
         node_id: uuid::Uuid,
         extra_env: &std::collections::BTreeMap<String, String>,
+        token_file: Option<&Path>,
     ) -> anyhow::Result<String> {
         let name = container_name(node_id, workload.instance_id);
         self.remove_if_exists(&name).await;
@@ -255,6 +257,16 @@ impl DockerAdapter {
                 args.push("--env".to_string());
                 args.push(format!("{key}={value}"));
             }
+        }
+        if let Some(token_file) = token_file {
+            let token_dir = token_file
+                .parent()
+                .ok_or_else(|| anyhow!("token file has no parent directory"))?;
+            args.push("--mount".to_string());
+            args.push(format!(
+                "type=bind,source={},target=/run/opsweave,readonly",
+                token_dir.display()
+            ));
         }
         args.push(image_ref.to_string());
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();

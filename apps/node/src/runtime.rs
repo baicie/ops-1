@@ -685,6 +685,69 @@ enum RunOutcome {
     Exited(String),
 }
 
+fn workload_token_file(shared: &Arc<Shared>, instance_id: Uuid) -> PathBuf {
+    shared
+        .args
+        .state_dir
+        .join("instances")
+        .join(instance_id.to_string())
+        .join("capability-tokens.json")
+}
+
+fn write_workload_tokens(
+    shared: &Arc<Shared>,
+    workload: &DesiredWorkload,
+    env: &std::collections::BTreeMap<String, String>,
+) -> anyhow::Result<PathBuf> {
+    let path = workload_token_file(shared, workload.instance_id);
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("token file has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let raw = env
+        .get("OPSWEAVE_CAPABILITY_TOKENS")
+        .cloned()
+        .unwrap_or_else(|| "{}".to_string());
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({}));
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, serde_json::to_vec(&value)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644));
+    }
+    std::fs::rename(&temporary, &path)?;
+    parent
+        .canonicalize()
+        .map(|dir| dir.join("capability-tokens.json"))
+        .map_err(Into::into)
+}
+
+async fn workload_token_refresher(shared: Arc<Shared>, runtime: InstanceRuntime) {
+    let interval = Duration::from_secs(shared.args.token_refresh_seconds.max(1));
+    loop {
+        tokio::time::sleep(interval).await;
+        if !matches!(
+            runtime.status_copy().state,
+            RuntimeState::Starting | RuntimeState::Ready | RuntimeState::Unhealthy
+        ) {
+            break;
+        }
+        let node_id = shared.identity.read().await.node_id;
+        match fetch_workload_env(&shared, &runtime.workload, node_id).await {
+            Ok(env) => {
+                if let Err(error) = write_workload_tokens(&shared, &runtime.workload, &env) {
+                    tracing::warn!(instance = %runtime.workload.instance_id, error = %error, "could not refresh workload token file");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(instance = %runtime.workload.instance_id, error = %error, "workload token refresh failed; will retry");
+            }
+        }
+    }
+}
+
 async fn fetch_workload_env(
     shared: &Arc<Shared>,
     workload: &DesiredWorkload,
@@ -751,9 +814,17 @@ async fn run_once(
             shared.docker.verify_digest(image_ref).await?;
             ensure_node_active(shared).await?;
             let extra_env = fetch_workload_env(shared, workload, node_id).await?;
+            let token_file = write_workload_tokens(shared, workload, &extra_env)?;
             let id = shared
                 .docker
-                .create_and_start(workload, image_ref, port, node_id, &extra_env)
+                .create_and_start(
+                    workload,
+                    image_ref,
+                    port,
+                    node_id,
+                    &extra_env,
+                    Some(&token_file),
+                )
                 .await?;
             let mut host_port = None;
             for _ in 0..20 {
@@ -781,6 +852,7 @@ async fn run_once(
         }
     }
     spawn_log_pump(shared.clone(), runtime.clone(), name.clone());
+    tokio::spawn(workload_token_refresher(shared.clone(), runtime.clone()));
 
     let base = format!("http://127.0.0.1:{host_port}");
     let startup_started = Instant::now();
