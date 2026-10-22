@@ -25,7 +25,7 @@ docker rm -f opsweave-ci-registry >/dev/null 2>&1 || true
 docker run -d --name opsweave-ci-registry -p 5001:5000 registry:2 >/dev/null
 
 echo "== data plugin images and signed bundles"
-OPSWEAVE_REGISTRY=172.17.0.1:5001 scripts/build-data-plugins.sh
+OPSWEAVE_REGISTRY=localhost:5001 scripts/build-data-plugins.sh
 
 echo "== fixture server"
 (cd tests/fixtures && python3 -m http.server 18090 --bind 0.0.0.0 >/tmp/data-fixture.log 2>&1) &
