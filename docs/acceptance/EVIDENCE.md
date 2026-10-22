@@ -284,7 +284,7 @@ The local capability harness is not a substitute for the required real OCI Golde
   `viewer` gets read-only scopes, `operator`/`admin` get write scopes, and unknown
   roles get an empty scope. `hasScope()` no longer treats `kind === 'user'` as a
   wildcard.
-- Real Kernel Gateway CI run `39786487547` (`golden-path` success) exercised:
+- Real Kernel Gateway CI run `39788273187` (`golden-path` success) exercised:
   - Viewer dataset create `403`;
   - Viewer schema publish `403`;
   - Viewer source create `403`;
@@ -298,7 +298,7 @@ The local capability harness is not a substitute for the required real OCI Golde
 - Integration now parses IPv6 bytes and classifies IPv4-mapped addresses in both
   dotted and hexadecimal forms, plus IPv4 special ranges, IPv6 ULA, link-local,
   loopback, multicast, documentation, Teredo, 6to4 and other non-global ranges.
-- Real Gateway/Connector CI run `39786487547` blocked all nine tested targets with
+- Real Gateway/Connector CI run `39788273187` blocked all nine tested targets with
   `422 SOURCE_SSRF_BLOCKED`:
   `127.0.0.1`, `::ffff:7f00:1`, `::ffff:a9fe:a9fe`, `::1`, `fc00::1`,
   `fe80::1`, `169.254.169.254`, `10.0.0.1`, `198.51.100.1`.
