@@ -26,10 +26,10 @@ cleanup() {
 trap cleanup EXIT
 
 psql "$DB" -qAt -c "DROP TABLE IF EXISTS \"$SCHEMA\".concurrency_probe;" >/dev/null
+psql "$DB" -qAt -c "SET ROLE \"$ROLE\"; CREATE TABLE \"$SCHEMA\".concurrency_probe(id integer);" >/dev/null
 psql "$DB" -qAt -c "CREATE OR REPLACE FUNCTION test_delay_failed_migration() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN IF NEW.status='FAILED' THEN PERFORM pg_sleep(4); END IF; RETURN NEW; END \$\$; DROP TRIGGER IF EXISTS test_delay_failed_migration ON kernel.plugin_migrations; CREATE TRIGGER test_delay_failed_migration BEFORE INSERT OR UPDATE ON kernel.plugin_migrations FOR EACH ROW EXECUTE FUNCTION test_delay_failed_migration();" >/dev/null
 
-THRESHOLD="$(python3 -c 'from datetime import datetime,timezone,timedelta; print((datetime.now(timezone.utc)+timedelta(seconds=3)).isoformat())')"
-SQL="CREATE TABLE concurrency_probe(id integer); SELECT CASE WHEN clock_timestamp() < '$THRESHOLD'::timestamptz THEN 1/0 ELSE 1 END;"
+SQL="CREATE TABLE concurrency_probe(id integer);"
 BODY="$(python3 - "$SQL" "$VERSION" "$MIGRATION" <<'PY'
 import hashlib,json,sys
 sql,version,mid=sys.argv[1:]
@@ -38,12 +38,13 @@ PY
 )"
 printf '%s' "$BODY" > /tmp/migration-race-body.json
 
-# A acquires the advisory lock first and creates DDL, then sleeps.
+# A targets the pre-existing probe table and fails with duplicate_table.
 curl -sS -o /tmp/migration-race-a.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @/tmp/migration-race-body.json "$URL/api/v1/plugin-storage/$PLUGIN/migrations" > /tmp/migration-race-a.code &
 A_PID=$!
-# A starts before the threshold and fails. B starts after the threshold; the
-# advisory lock still serializes the two requests.
-sleep 4
+# Remove the deliberately conflicting table; B then creates it successfully
+# while A's delayed FAILED ledger write is still in flight.
+sleep 1
+psql "$DB" -qAt -c "SET ROLE \"$ROLE\"; DROP TABLE \"$SCHEMA\".concurrency_probe;" >/dev/null
 curl -sS -o /tmp/migration-race-b.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @/tmp/migration-race-body.json "$URL/api/v1/plugin-storage/$PLUGIN/migrations" > /tmp/migration-race-b.code &
 B_PID=$!
 wait "$A_PID"
