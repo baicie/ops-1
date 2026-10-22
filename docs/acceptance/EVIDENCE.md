@@ -252,7 +252,7 @@ This section records only what was actually executed during the 0.0.2 implementa
 | Check | Result | Notes |
 |---|---|---|
 | Contract validation | PASS | `python3 tests/contract/validate_contracts.py`: 10 schemas and all generated bundles validate; data bundles include capability/storage schema/examples. |
-| Rust workspace | PASS (local) | 27 tests: 4 bundle + 3 contracts + 12 kernel + 8 node; Clippy `-D warnings` and `cargo fmt --check` pass. |
+| Rust workspace | PASS (local) | 28 tests: 4 bundle + 3 contracts + 13 kernel + 8 node; Clippy `-D warnings` and `cargo fmt --check` pass. |
 | Catalog host-process PostgreSQL | PASS (local) | Dataset creation, schema revision 2 draft/publish, compatible diff and incompatible type/removal rejection (`SCHEMA_INCOMPATIBLE`). |
 | Catalog idempotency | PASS (local) | Same `sourceBatchKey` + same request returned the original receipt; changed content is rejected by the receipt digest check. |
 | Integration HTTP/JSON connector | PASS (local) | Connection test `OK`, four discovered fields, preview `readOnly=true`; preview left Catalog record count unchanged. |

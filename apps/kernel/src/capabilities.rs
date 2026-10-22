@@ -584,6 +584,10 @@ fn caller_context_token(
 }
 
 fn verify_claims(state: &AppState, token: &str) -> AppResult<WorkloadClaims> {
+    verify_claims_with_key(&state.cursor_secret, token)
+}
+
+fn verify_claims_with_key(key: &[u8], token: &str) -> AppResult<WorkloadClaims> {
     let mut parts = token.split('.');
     let prefix = parts.next();
     let encoded = parts.next();
@@ -597,7 +601,7 @@ fn verify_claims(state: &AppState, token: &str) -> AppResult<WorkloadClaims> {
     }
     let encoded = encoded.unwrap_or_default();
     let signature = signature.unwrap_or_default();
-    let mut mac = HmacSha256::new_from_slice(&state.cursor_secret)
+    let mut mac = HmacSha256::new_from_slice(key)
         .map_err(|_| AppError::internal("workload signing key is invalid"))?;
     mac.update(encoded.as_bytes());
     let expected =
@@ -648,5 +652,31 @@ mod tests {
         assert!(!safe_path("/api/../kernel"));
         assert!(!safe_path("/api/%2e%2e/kernel"));
         assert!(!safe_path("/api\\kernel"));
+    }
+
+    #[test]
+    fn workload_token_round_trip_and_signature_rejection() {
+        let key = b"test-workload-key";
+        let claims = super::WorkloadClaims {
+            v: 1,
+            sub: uuid::Uuid::new_v4().to_string(),
+            plugin_id: "opsweave.data-integration".into(),
+            capability_name: "data.catalog.v1".into(),
+            capability_major: 1,
+            audience: "plugin:data.catalog.v1".into(),
+            scope: vec!["dataset:write".into()],
+            issued_at: chrono::Utc::now().timestamp(),
+            expires_at: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp(),
+            jti: uuid::Uuid::new_v4(),
+        };
+        let token = super::sign_claims_with_key(key, &claims).unwrap();
+        let parsed = super::verify_claims_with_key(key, &token).unwrap();
+        assert_eq!(parsed.plugin_id, claims.plugin_id);
+        let mut tampered = token.into_bytes();
+        let last = tampered.len() - 1;
+        tampered[last] = if tampered[last] == b'a' { b'b' } else { b'a' };
+        assert!(
+            super::verify_claims_with_key(key, std::str::from_utf8(&tampered).unwrap()).is_err()
+        );
     }
 }
