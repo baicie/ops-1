@@ -33,6 +33,16 @@ The signature covers both the canonical payload index digest and the canonical m
 
 ## Executed checks
 
+### Remote CI
+
+GitHub Actions run [`39718262755`](https://github.com/baicie/ops-1/actions/runs/39718262755) on commit `897eacb`:
+
+```
+web       success  (pnpm typechecks + Shell/hello builds)
+contracts success  (schema and example validation)
+rust      success  (workspace tests, fmt, clippy -D warnings)
+```
+
 ### Rust tests
 
 Command: `cargo test --workspace`
