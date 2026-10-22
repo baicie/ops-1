@@ -41,3 +41,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: tests/ci/data_foundation_ci.sh
+      - name: Browser extension smoke
+        run: |
+          pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+          OPSWEAVE_URL=http://127.0.0.1:18181 pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts
