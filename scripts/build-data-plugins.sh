@@ -39,7 +39,8 @@ else
   for name in data-catalog data-integration; do
     cap="$(cap_digest "plugins/$name/manifest.template.json")"
     build="$(sha256_file "plugins/$name/backend/server.mjs")"
-    base="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null || echo node:22-bookworm-slim)"
+    base="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null | tr -d '\n' || true)"
+    if [ -z "$base" ]; then base="node:22-bookworm-slim"; fi
     docker build --build-arg BASE_IMAGE="$base" --build-arg PLUGIN_VERSION="$TS_VERSION" --build-arg CAPABILITY_DIGEST="$cap" --build-arg BUILD_DIGEST="$build" -t "$REGISTRY/opsweave/$name:$TS_VERSION" "plugins/$name/backend" >/dev/null
     docker push "$REGISTRY/opsweave/$name:$TS_VERSION" >/dev/null
   done
