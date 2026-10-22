@@ -55,6 +55,7 @@ tests/acceptance/node_quarantine.sh   # destructive: revokes node-a; reset after
 tests/acceptance/node_lease.sh        # destructive: partitions Kernel; reset afterwards
 tests/acceptance/auth_limits.sh
 tests/acceptance/publisher_revocation.sh
+tests/acceptance/endpoint_policy.sh
 tests/acceptance/container_security.sh
 tests/contract/run_conformance.sh
 python3 tests/contract/validate_contracts.py

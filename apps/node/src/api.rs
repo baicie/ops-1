@@ -32,6 +32,7 @@ async fn healthz(State(state): State<ApiState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": if quarantined { "quarantined" } else { "ok" },
         "quarantined": quarantined,
+        "quarantineError": state.shared.quarantine_error.lock().ok().and_then(|value| value.clone()),
         "nodeId": identity.node_id,
         "name": identity.name,
         "generation": identity.generation,

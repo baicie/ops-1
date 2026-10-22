@@ -25,18 +25,22 @@ impl DockerAdapter {
     fn command(&self) -> Command {
         let mut command = Command::new(&self.binary);
         command.env("DOCKER_HOST", &self.host);
+        command.kill_on_drop(true);
         command
     }
 
     pub async fn version(&self) -> anyhow::Result<String> {
-        let output = self
-            .command()
-            .arg("version")
-            .arg("--format")
-            .arg("{{.Server.Version}}")
-            .output()
-            .await
-            .context("run docker version")?;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.command()
+                .arg("version")
+                .arg("--format")
+                .arg("{{.Server.Version}}")
+                .output(),
+        )
+        .await
+        .context("docker version timed out")?
+        .context("run docker version")?;
         if !output.status.success() {
             return Err(anyhow!(
                 "docker engine is unavailable: {}",
@@ -47,12 +51,17 @@ impl DockerAdapter {
     }
 
     async fn run(&self, args: &[&str]) -> anyhow::Result<String> {
-        let output = self
-            .command()
-            .args(args)
-            .output()
-            .await
-            .with_context(|| format!("run docker {}", args.join(" ")))?;
+        self.run_with_timeout(args, 60).await
+    }
+
+    async fn run_with_timeout(&self, args: &[&str], seconds: u64) -> anyhow::Result<String> {
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(seconds),
+            self.command().args(args).output(),
+        )
+        .await
+        .with_context(|| format!("docker {} timed out after {seconds}s", args.join(" ")))?
+        .with_context(|| format!("run docker {}", args.join(" ")))?;
         if !output.status.success() {
             return Err(anyhow!(
                 "docker {} failed: {}",
@@ -64,7 +73,7 @@ impl DockerAdapter {
     }
 
     pub async fn pull(&self, image_ref: &str) -> anyhow::Result<()> {
-        self.run(&["pull", image_ref]).await?;
+        self.run_with_timeout(&["pull", image_ref], 300).await?;
         Ok(())
     }
 
@@ -105,7 +114,12 @@ impl DockerAdapter {
             .output()
             .await?;
         if !output.status.success() {
-            return Ok(None);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let lower = stderr.to_ascii_lowercase();
+            if lower.contains("no such object") || lower.contains("no such container") {
+                return Ok(None);
+            }
+            return Err(anyhow!("docker inspect failed: {}", stderr.trim()));
         }
         let raw = String::from_utf8_lossy(&output.stdout);
         let mut parts = raw.trim().split('|');
@@ -256,12 +270,22 @@ impl DockerAdapter {
     }
 
     pub async fn stop_and_remove(&self, name: &str) -> anyhow::Result<()> {
-        let _ = self
-            .command()
-            .args(["stop", "--time", "10", name])
-            .output()
-            .await;
-        let _ = self.command().args(["rm", "-f", name]).output().await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            self.command().args(["stop", "--time", "10", name]).output(),
+        )
+        .await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            self.command().args(["rm", "-f", name]).output(),
+        )
+        .await;
+        if let Some(info) = self.inspect(name).await? {
+            if info.running {
+                anyhow::bail!("container {name} is still running after stop/remove");
+            }
+            anyhow::bail!("container {name} still exists after stop/remove");
+        }
         Ok(())
     }
 
@@ -292,4 +316,31 @@ impl DockerAdapter {
 
 pub fn container_name(node_id: uuid::Uuid, instance_id: uuid::Uuid) -> String {
     format!("opsweave-{node_id}-{instance_id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DockerAdapter;
+
+    #[tokio::test]
+    async fn stop_and_remove_reports_a_surviving_container() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("docker");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\ncase \"$1\" in\n  inspect) echo 'surviving|true|fake'; exit 0 ;;\n  *) exit 0 ;;\nesac\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let adapter = DockerAdapter::new(
+            script.to_string_lossy().into_owned(),
+            "unix://unused".into(),
+        );
+        let error = adapter.stop_and_remove("surviving").await.unwrap_err();
+        assert!(error.to_string().contains("still running"));
+    }
 }

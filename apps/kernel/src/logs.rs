@@ -121,6 +121,7 @@ pub async fn live_logs(
             "node data endpoint is not registered",
         )
     })?;
+    crate::nodes::validate_node_data_endpoint(&state.config, &endpoint)?;
 
     let mut epoch = 1_i64;
     let mut sequence = 0_i64;
@@ -317,6 +318,8 @@ async fn fetch_logs(
     epoch: i64,
     after: i64,
 ) -> Result<LogBatch, String> {
+    crate::nodes::validate_node_data_endpoint(&state.config, endpoint)
+        .map_err(|error| error.to_string())?;
     let url = format!(
         "{}/internal/v1/instances/{}/logs?epoch={}&after={}",
         endpoint.trim_end_matches('/'),

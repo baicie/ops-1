@@ -25,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
     let http = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(3))
         .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let docker = DockerAdapter::new(args.docker_bin.clone(), args.docker_host.clone());
     let docker_version = docker
@@ -51,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
         tasks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         metrics: Arc::new(StdMutex::new(runtime::MetricsState::default())),
         quarantined: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        quarantine_error: Arc::new(StdMutex::new(None)),
         lease_deadline: Arc::new(StdMutex::new(None)),
     });
 
@@ -73,10 +75,12 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     let heartbeat = tokio::spawn(runtime::heartbeat_loop(shared.clone()));
+    let lease_watchdog = tokio::spawn(runtime::lease_watchdog(shared.clone()));
 
     tokio::signal::ctrl_c().await?;
     tracing::info!("shutdown signal received");
     heartbeat.abort();
+    lease_watchdog.abort();
     api_task.abort();
     if args.stop_workloads_on_exit {
         let tasks = shared.tasks.lock().await;

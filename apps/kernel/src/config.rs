@@ -20,6 +20,7 @@ pub struct Config {
     pub request_timeout_seconds: u64,
     pub allow_insecure_node_transport: bool,
     pub allowed_node_data_hosts: Vec<String>,
+    pub trusted_proxy_ips: Vec<String>,
 }
 
 impl Config {
@@ -50,11 +51,15 @@ impl Config {
             node_stale_seconds: env_i64("OPSWEAVE_NODE_STALE_SECONDS", 25),
             max_instances_per_node: env_i64("OPSWEAVE_MAX_INSTANCES_PER_NODE", 4) as u32,
             request_timeout_seconds: env_i64("OPSWEAVE_REQUEST_TIMEOUT_SECONDS", 10) as u64,
-            allow_insecure_node_transport: env_bool("OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT", true),
+            allow_insecure_node_transport: env_bool(
+                "OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT",
+                false,
+            ),
             allowed_node_data_hosts: env_list(
                 "OPSWEAVE_ALLOWED_NODE_DATA_HOSTS",
                 "127.0.0.1,localhost,::1",
             ),
+            trusted_proxy_ips: env_list("OPSWEAVE_TRUSTED_PROXY_IPS", ""),
         }
     }
 

@@ -1100,16 +1100,19 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     let eligible: Vec<NodeRow> = nodes
         .into_iter()
         .filter(|node| node_matches(node, &selector))
-        .filter(|node| {
-            let (cpu_allocated, memory_allocated) =
-                reserved.get(&node.id).copied().unwrap_or((0, 0));
-            node_has_capacity(
-                node,
-                cpu_allocated + requested.cpu_millis,
-                memory_allocated + requested.memory_mib,
-            )
-        })
         .collect();
+    let global_instance_counts: Vec<(Uuid, i64)> = sqlx::query_as(
+        r#"
+        SELECT i.node_id, count(*)::bigint
+        FROM kernel.plugin_instances i
+        JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
+        WHERE i.desired_action='START'
+          AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+        GROUP BY i.node_id
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await?;
     let existing = sqlx::query_as::<_, InstanceRow>(
         "SELECT i.*, n.name AS node_name, n.status AS node_status, n.last_seen_at AS node_last_seen_at, n.data_endpoint AS node_data_endpoint, n.data_token AS node_data_token FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id WHERE i.deployment_id=$1 ORDER BY i.slot",
     )
@@ -1118,6 +1121,10 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     .await?;
     let by_slot: HashMap<i32, InstanceRow> =
         existing.iter().map(|row| (row.slot, row.clone())).collect();
+    let mut global_counts: HashMap<Uuid, usize> = global_instance_counts
+        .into_iter()
+        .map(|(node_id, count)| (node_id, count.max(0) as usize))
+        .collect();
     let mut used_nodes: HashMap<Uuid, usize> = existing
         .iter()
         .filter(|row| row.slot < deployment.desired_replicas && row.desired_action == "START")
@@ -1147,6 +1154,19 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         let candidate = eligible
             .iter()
             .filter(|node| used_nodes.get(&node.id).copied().unwrap_or(0) < max_per_node)
+            .filter(|node| {
+                global_counts.get(&node.id).copied().unwrap_or(0)
+                    < state.config.max_instances_per_node as usize
+            })
+            .filter(|node| {
+                let (cpu_allocated, memory_allocated) =
+                    reserved.get(&node.id).copied().unwrap_or((0, 0));
+                node_has_capacity(
+                    node,
+                    cpu_allocated + requested.cpu_millis,
+                    memory_allocated + requested.memory_mib,
+                )
+            })
             .min_by_key(|node| {
                 (
                     used_nodes.get(&node.id).copied().unwrap_or(0),
@@ -1166,6 +1186,9 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         if let Some(current) = current {
             if current.node_id != node.id {
                 if let Some(count) = used_nodes.get_mut(&current.node_id) {
+                    *count = count.saturating_sub(1);
+                }
+                if let Some(count) = global_counts.get_mut(&current.node_id) {
                     *count = count.saturating_sub(1);
                 }
                 sqlx::query(
@@ -1200,6 +1223,7 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
             .execute(&state.db)
             .await?;
             *used_nodes.entry(node.id).or_insert(0) += 1;
+            *global_counts.entry(node.id).or_insert(0) += 1;
             let reservation = reserved.entry(node.id).or_insert((0, 0));
             reservation.0 += requested.cpu_millis;
             reservation.1 += requested.memory_mib;
@@ -1301,22 +1325,24 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
 
 fn node_has_capacity(node: &NodeRow, requested_cpu_millis: i64, requested_memory_mib: i64) -> bool {
     let Some(snapshot) = node.resource_snapshot.as_ref() else {
-        return true;
+        return false;
     };
-    if let Some(total) = snapshot.get("memoryTotalBytes").and_then(Value::as_i64) {
-        let used = snapshot
-            .get("memoryUsedBytes")
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
-        let available_mib = (total - used).max(0) / (1024 * 1024);
-        if available_mib > 0 && requested_memory_mib > available_mib * 9 / 10 {
-            return false;
-        }
+    let Some(total) = snapshot.get("memoryTotalBytes").and_then(Value::as_i64) else {
+        return false;
+    };
+    let Some(cores) = snapshot.get("cpuCores").and_then(Value::as_i64) else {
+        return false;
+    };
+    let used = snapshot
+        .get("memoryUsedBytes")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let available_mib = (total - used).max(0) / (1024 * 1024);
+    if available_mib <= 0 || requested_memory_mib > available_mib * 9 / 10 {
+        return false;
     }
-    if let Some(cores) = snapshot.get("cpuCores").and_then(Value::as_i64) {
-        if cores > 0 && requested_cpu_millis > cores * 1000 * 9 / 10 {
-            return false;
-        }
+    if cores <= 0 || requested_cpu_millis > cores * 1000 * 9 / 10 {
+        return false;
     }
     true
 }
@@ -1330,4 +1356,67 @@ fn node_matches(node: &NodeRow, selector: &BTreeMap<String, String>) -> bool {
             .map(|actual| actual == value)
             .unwrap_or(false)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::node_has_capacity;
+    use crate::nodes::NodeRow;
+    use chrono::Utc;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    fn node(snapshot: Option<serde_json::Value>) -> NodeRow {
+        NodeRow {
+            id: Uuid::new_v4(),
+            name: "test-node".into(),
+            control_token_hash: String::new(),
+            data_token: String::new(),
+            generation: 1,
+            os: "linux".into(),
+            arch: "amd64".into(),
+            labels: json!({}),
+            capabilities: json!([]),
+            status: "READY".into(),
+            last_seen_at: Some(Utc::now()),
+            data_endpoint: Some("http://127.0.0.1:9101".into()),
+            runtime_adapter_version: Some("test".into()),
+            resource_snapshot: snapshot,
+            enrolled_at: Utc::now(),
+            revoked_at: None,
+            cert_expires_at: None,
+        }
+    }
+
+    #[test]
+    fn capacity_is_fail_closed_and_enforces_memory_and_cpu() {
+        assert!(!node_has_capacity(&node(None), 500, 128));
+        assert!(!node_has_capacity(
+            &node(Some(json!({
+                "memoryTotalBytes": 1024_i64 * 1024 * 1024,
+                "memoryUsedBytes": 900_i64 * 1024 * 1024,
+                "cpuCores": 2
+            }))),
+            500,
+            256
+        ));
+        assert!(!node_has_capacity(
+            &node(Some(json!({
+                "memoryTotalBytes": 4_i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+                "cpuCores": 2
+            }))),
+            1801,
+            256
+        ));
+        assert!(node_has_capacity(
+            &node(Some(json!({
+                "memoryTotalBytes": 4_i64 * 1024 * 1024 * 1024,
+                "memoryUsedBytes": 0,
+                "cpuCores": 2
+            }))),
+            800,
+            256
+        ));
+    }
 }

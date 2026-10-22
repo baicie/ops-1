@@ -18,6 +18,8 @@ pub struct RateLimiter {
     buckets: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 
+const MAX_RATE_LIMIT_BUCKETS: usize = 10_000;
+
 impl RateLimiter {
     pub fn is_limited(&self, key: &str, max: usize, window: Duration) -> bool {
         let mut buckets = self
@@ -25,13 +27,12 @@ impl RateLimiter {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let now = Instant::now();
+        buckets.retain(|_, bucket| {
+            bucket
+                .back()
+                .is_some_and(|instant| now.duration_since(*instant) <= window)
+        });
         let bucket = buckets.entry(key.to_string()).or_default();
-        while bucket
-            .front()
-            .is_some_and(|instant| now.duration_since(*instant) > window)
-        {
-            bucket.pop_front();
-        }
         bucket.len() >= max
     }
 
@@ -41,14 +42,21 @@ impl RateLimiter {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let now = Instant::now();
-        let bucket = buckets.entry(key.to_string()).or_default();
-        while bucket
-            .front()
-            .is_some_and(|instant| now.duration_since(*instant) > window)
-        {
-            bucket.pop_front();
+        buckets.retain(|_, bucket| {
+            bucket
+                .back()
+                .is_some_and(|instant| now.duration_since(*instant) <= window)
+        });
+        if buckets.len() >= MAX_RATE_LIMIT_BUCKETS {
+            if let Some(oldest) = buckets
+                .iter()
+                .min_by_key(|(_, bucket)| bucket.back().copied())
+                .map(|(key, _)| key.clone())
+            {
+                buckets.remove(&oldest);
+            }
         }
-        bucket.push_back(now);
+        buckets.entry(key.to_string()).or_default().push_back(now);
     }
 
     pub fn reset(&self, key: &str) {

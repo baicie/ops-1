@@ -117,6 +117,7 @@ pub struct Shared {
     pub tasks: Arc<tokio::sync::Mutex<HashMap<Uuid, TaskEntry>>>,
     pub metrics: Arc<StdMutex<MetricsState>>,
     pub quarantined: Arc<AtomicBool>,
+    pub quarantine_error: Arc<StdMutex<Option<String>>>,
     pub lease_deadline: Arc<StdMutex<Option<Instant>>>,
 }
 
@@ -206,6 +207,22 @@ fn save_identity(path: &Path, identity: &Identity) -> anyhow::Result<()> {
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
     Ok(())
+}
+
+pub async fn lease_watchdog(shared: Arc<Shared>) {
+    loop {
+        if shared.quarantined.load(Ordering::SeqCst) {
+            break;
+        }
+        let deadline = shared.lease_deadline.lock().ok().and_then(|value| *value);
+        if let Some(deadline) = deadline {
+            if Instant::now() >= deadline {
+                quarantine(&shared, "node lease deadline expired").await;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 pub async fn heartbeat_loop(shared: Arc<Shared>) {
@@ -331,17 +348,60 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
     }
     let runtimes: Vec<InstanceRuntime> = shared.runtimes.read().await.values().cloned().collect();
     let node_id = shared.identity.read().await.node_id;
+    let mut failures: Vec<String> = Vec::new();
     for runtime in runtimes {
         let name = container_name(node_id, runtime.workload.instance_id);
-        let _ = shared.docker.stop_and_remove(&name).await;
+        if let Err(error) = shared.docker.stop_and_remove(&name).await {
+            failures.push(format!("{name}: {error}"));
+        }
         runtime.set_state(RuntimeState::Stopped, Some(reason.to_string()));
     }
     // Also remove managed containers that are not represented in the in-memory
     // runtime map (for example an orphan left by a previous generation).
-    if let Ok(names) = shared.docker.list_managed(node_id).await {
-        for name in names {
-            let _ = shared.docker.stop_and_remove(&name).await;
+    match shared.docker.list_managed(node_id).await {
+        Ok(names) => {
+            for name in names {
+                if let Err(error) = shared.docker.stop_and_remove(&name).await {
+                    failures.push(format!("{name}: {error}"));
+                }
+            }
         }
+        Err(error) => failures.push(format!("list managed containers: {error}")),
+    }
+    // Re-inspect until no managed container remains, within a bounded retry
+    // window. A failure is visible and never downgraded to a success claim.
+    for attempt in 1..=3 {
+        let remaining = shared
+            .docker
+            .list_managed(node_id)
+            .await
+            .map(|names| names.len())
+            .unwrap_or(usize::MAX);
+        if remaining == 0 {
+            if let Ok(mut error) = shared.quarantine_error.lock() {
+                *error = None;
+            }
+            tracing::info!(
+                attempt,
+                "quarantine cleanup confirmed no managed containers remain"
+            );
+            return;
+        }
+        if attempt < 3 {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+    let error = if failures.is_empty() {
+        "QUARANTINE_CLEANUP_FAILED: managed containers may remain".to_string()
+    } else {
+        format!(
+            "QUARANTINE_CLEANUP_FAILED: managed containers may remain: {}",
+            failures.join("; ")
+        )
+    };
+    tracing::error!(error = %error, "quarantine cleanup could not be verified");
+    if let Ok(mut slot) = shared.quarantine_error.lock() {
+        *slot = Some(error);
     }
 }
 
@@ -512,6 +572,7 @@ async fn run_once(
     runtime: &InstanceRuntime,
     cancel: &mut watch::Receiver<bool>,
 ) -> anyhow::Result<RunOutcome> {
+    ensure_node_active(shared).await?;
     let workload = &runtime.workload;
     let node_id = shared.identity.read().await.node_id;
     let name = container_name(node_id, workload.instance_id);
@@ -529,7 +590,9 @@ async fn run_once(
         }
         _ => {
             shared.docker.pull(image_ref).await?;
+            ensure_node_active(shared).await?;
             shared.docker.verify_digest(image_ref).await?;
+            ensure_node_active(shared).await?;
             let id = shared
                 .docker
                 .create_and_start(workload, image_ref, port, node_id)
@@ -733,6 +796,13 @@ fn spawn_log_pump(shared: Arc<Shared>, runtime: InstanceRuntime, name: String) {
     });
 }
 
+async fn ensure_node_active(shared: &Arc<Shared>) -> anyhow::Result<()> {
+    if shared.quarantined.load(Ordering::SeqCst) {
+        anyhow::bail!("node is quarantined; refusing to create a workload");
+    }
+    Ok(())
+}
+
 async fn cleanup_orphans(shared: &Arc<Shared>) {
     let desired = shared.desired.read().await.clone();
     let node_id = shared.identity.read().await.node_id;
@@ -745,7 +815,9 @@ async fn cleanup_orphans(shared: &Arc<Shared>) {
         for name in names {
             if !wanted.contains(&name) {
                 tracing::info!(container = %name, "removing managed container absent from desired state");
-                let _ = shared.docker.stop_and_remove(&name).await;
+                if let Err(error) = shared.docker.stop_and_remove(&name).await {
+                    tracing::warn!(container = %name, error = %error, "orphan cleanup failed");
+                }
             }
         }
     }
@@ -754,7 +826,9 @@ async fn cleanup_orphans(shared: &Arc<Shared>) {
 async fn cleanup(shared: &Arc<Shared>, workload: &DesiredWorkload) {
     let node_id = shared.identity.read().await.node_id;
     let name = container_name(node_id, workload.instance_id);
-    let _ = shared.docker.stop_and_remove(&name).await;
+    if let Err(error) = shared.docker.stop_and_remove(&name).await {
+        tracing::warn!(container = %name, error = %error, "workload cleanup failed");
+    }
 }
 
 async fn probe(shared: &Arc<Shared>, url: &str) -> bool {

@@ -177,6 +177,25 @@ pub struct UserView {
     pub role: Role,
 }
 
+fn client_ip(
+    peer: SocketAddr,
+    headers: &HeaderMap,
+    trusted_proxies: &[String],
+) -> std::net::IpAddr {
+    let proxy_ip = peer.ip().to_string();
+    if trusted_proxies.iter().any(|trusted| trusted == &proxy_ip) {
+        if let Some(forwarded) = headers
+            .get("x-forwarded-for")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .and_then(|value| value.trim().parse::<std::net::IpAddr>().ok())
+        {
+            return forwarded;
+        }
+    }
+    peer.ip()
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginResponse {
@@ -188,13 +207,18 @@ pub struct LoginResponse {
 pub async fn login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<Response> {
     if payload.email.trim().is_empty() || payload.password.is_empty() {
         return Err(AppError::bad_request("email and password are required"));
     }
     let email_key = format!("login:email:{}", payload.email.trim().to_ascii_lowercase());
-    let ip_key = format!("login:ip:{peer}");
+    // ConnectInfo contains an ephemeral source port. Rate-limit by IP only, and
+    // only honor X-Forwarded-For when the immediate peer is an explicitly
+    // configured trusted proxy.
+    let client_ip = client_ip(peer, &headers, &state.config.trusted_proxy_ips);
+    let ip_key = format!("login:ip:{client_ip}");
     let window = StdDuration::from_secs(300);
     if state.rate_limiter.is_limited(&email_key, 10, window)
         || state.rate_limiter.is_limited(&ip_key, 60, window)
@@ -374,4 +398,34 @@ pub fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(str::trim)
         .filter(|token| !token.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_ip;
+    use axum::http::HeaderMap;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn rate_limit_key_ignores_ephemeral_port() {
+        let headers = HeaderMap::new();
+        let first: SocketAddr = "203.0.113.7:41001".parse().unwrap();
+        let second: SocketAddr = "203.0.113.7:55002".parse().unwrap();
+        assert_eq!(
+            client_ip(first, &headers, &[]),
+            client_ip(second, &headers, &[])
+        );
+    }
+
+    #[test]
+    fn forwarded_for_requires_an_explicit_trusted_proxy() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "198.51.100.9".parse().unwrap());
+        let peer: SocketAddr = "203.0.113.7:41001".parse().unwrap();
+        assert_eq!(client_ip(peer, &headers, &[]), peer.ip());
+        assert_eq!(
+            client_ip(peer, &headers, &["203.0.113.7".to_string()]),
+            "198.51.100.9".parse::<std::net::IpAddr>().unwrap()
+        );
+    }
 }

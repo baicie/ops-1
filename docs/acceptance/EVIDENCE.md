@@ -54,9 +54,9 @@ opsweave_bundle: 4 passed
   rejects_path_traversal ... ok
   manifest_image_reference_is_covered_by_signature ... ok
 opsweave_contracts: 3 passed
-opsweave_kernel: 2 passed (cursor + path traversal)
-opsweave_node: 1 passed (path traversal)
-result: all 10 passed, 0 failed
+opsweave_kernel: 5 passed (cursor, path traversal, capacity fail-closed, IP-key extraction + trusted proxy)
+opsweave_node: 2 passed (path traversal, Docker cleanup failure propagation)
+result: all 14 passed, 0 failed
 ```
 
 ### Contract validation
@@ -106,12 +106,12 @@ Result: `PASS=21 FAIL=0`, including:
 Command: `tests/acceptance/two_node_failover.sh`
 
 ```
-active instance on node-a: 22a7405c-1538-4e02-bfe0-040c2943cab5
-before (forced node-a): 22a7405c-1538-4e02-bfe0-040c2943cab5
-immediate failover: a1d22fdf-a85b-4b27-876b-512d41c90909
+active instance on node-a: f40940f9-fc7c-4cf1-a5ff-13815401215f
+before (forced node-a): f40940f9-fc7c-4cf1-a5ff-13815401215f
+immediate failover: b5145338-5d38-443c-bc36-b5997d661abe
 node statuses after stale window: node-a=UNREACHABLE node-b=READY
-after stale failover: a1d22fdf-a85b-4b27-876b-512d41c90909
-recovered: 22a7405c-1538-4e02-bfe0-040c2943cab5
+after stale failover: b5145338-5d38-443c-bc36-b5997d661abe
+recovered: f40940f9-fc7c-4cf1-a5ff-13815401215f
 dev.opsweave.hello ... replicas=2/2
 two-node failover test passed
 ```
@@ -142,7 +142,7 @@ node credential revocation test passed (unsafe endpoint 400; heartbeat 200 befor
 Command: `tests/acceptance/node_quarantine.sh`
 
 ```
-node-a has 3 managed container(s); revoking 3edbf13f-f5f6-4468-81d3-20ec1d4f5db9
+node-a has 3 managed container(s); revoking 6768450f-64b6-4a14-9731-b618ab687e0b
 node quarantine test passed: 3 container(s) were removed after revocation
 ```
 
@@ -151,11 +151,21 @@ node quarantine test passed: 3 container(s) were removed after revocation
 Command: `tests/acceptance/node_lease.sh`
 
 ```
-stopping Kernel pid=59755; node-b has 3 container(s)
+stopping Kernel pid=59733; node-b has 1 container(s)
 node lease test passed: workloads stopped after Kernel partition exceeded lease
 ```
 
-This is a local process/network partition simulation, not a physical network partition.
+Node log shows `node entering quarantine ... reason="node lease deadline expired"`, confirming the independent watchdog path, not just a failed heartbeat request. This is a local process/network partition simulation, not a physical network partition.
+
+### SSE endpoint policy
+
+Command: `tests/acceptance/endpoint_policy.sh`
+
+The test temporarily corrupts a Node's `data_endpoint` in PostgreSQL to the cloud metadata address and calls the live SSE route. The Kernel rejects it before opening the stream:
+
+```
+endpoint policy test passed: SSE rejects a tampered dataEndpoint
+```
 
 ### Public auth limits
 
@@ -165,6 +175,8 @@ Command: `tests/acceptance/auth_limits.sh`
 login throttle codes: [401, 401, ..., 429, 429]
 auth limit test passed: oversized body 413; repeated failures end in 429
 ```
+
+`auth.rs` unit tests additionally prove that two connections from the same IP but different ephemeral ports map to the same IP rate-limit key, and that `X-Forwarded-For` is ignored unless the immediate peer is an explicit trusted proxy.
 
 ### Publisher revocation gate
 
@@ -176,7 +188,7 @@ publisher revocation gate passed: deploy rejected with PUBLISHER_REVOKED
 
 ### Scheduler capacity reservation
 
-The scheduler now filters eligible Nodes using reported memory availability and CPU cores, in addition to labels and max-instances-per-node. It resets reservations on each reconcile and is covered indirectly by the clean two-node deployment; a dedicated low-capacity stress test is `NOT_RUN`.
+The scheduler now re-evaluates CPU/memory reservations for every slot, uses fail-closed capacity when a snapshot is missing, and enforces per-deployment max instances plus the global `OPSWEAVE_MAX_INSTANCES_PER_NODE` cap. `deployments.rs` unit tests cover fail-closed snapshot, memory pressure and CPU pressure. A dedicated multi-deployment low-capacity stress test is `NOT_RUN`.
 
 ### Container security baseline
 
@@ -220,7 +232,7 @@ Screenshots: `artifacts/ui/` (six overview matrix images plus route/feature capt
 
 ## Evidence files
 
-- `/tmp/review-e2e.out`, `/tmp/review-failover.out`, `/tmp/review-restart.out`, `/tmp/review-revoke.out`, `/tmp/review-quarantine.out`, `/tmp/review-lease.out`, `/tmp/review-auth.out`, `/tmp/review-publisher.out`, `/tmp/review-security.out`, `/tmp/review-conformance.out`, `/tmp/review-contract.out`
+- `/tmp/a1-final-e2e.out`, `/tmp/a1-failover.out`, `/tmp/a1-restart3.out`, `/tmp/a1-auth.out`, `/tmp/a1-endpoint.out`, `/tmp/a1-quarantine.out`, `/tmp/a1-lease.out`, `/tmp/a1-final-security.out`, `/tmp/a1-final-conformance.out`, `/tmp/a1-final-contract.out`
 - Final UI evidence is regenerated after the final clean reset; `artifacts/ui/`.
 - `artifacts/ui/*.png`
 - Kernel and Node logs: `/tmp/opsweave-kernel.log`, `/tmp/opsweave-node-a.log`, `/tmp/opsweave-node-b.log`

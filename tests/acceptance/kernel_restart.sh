@@ -28,6 +28,8 @@ nohup env \
   OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \
   OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$(cat keys/publisher.pub)" \
+  OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
+  OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost,::1 \
   OPSWEAVE_LOG_FORMAT=json \
   ./target/debug/opsweave-kernel > /tmp/opsweave-kernel.log 2>&1 &
 for _ in $(seq 1 40); do curl -fsS "$KERNEL_URL/livez" >/dev/null 2>&1 && break; sleep 0.5; done
