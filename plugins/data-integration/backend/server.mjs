@@ -32,7 +32,7 @@ function identity(req) { const c = verifyContext(req.headers['x-opsweave-caller-
 function hasScope(who, scope) { return who && (who.kind === 'user' || who.scope.includes(scope)); }
 function isPrivate(ip) {
   if (net.isIPv4(ip)) { const p = ip.split('.').map(Number); return p[0] === 10 || p[0] === 127 || (p[0] === 169 && p[1] === 254) || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) || (p[0] === 192 && p[1] === 168) || p[0] === 0 || (p[0] === 100 && p[1] >= 64 && p[1] <= 127); }
-  if (net.isIPv6(ip)) { const lower = ip.toLowerCase(); return lower === '::1' || lower === '::' || lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe80') || lower.startsWith('ff'); }
+  if (net.isIPv6(ip)) { const lower = ip.toLowerCase(); if (lower === '::1' || lower === '::' || lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe80') || lower.startsWith('ff')) return true; if (lower.startsWith('::ffff:')) { const mapped = lower.slice(7); if (net.isIPv4(mapped)) return isPrivate(mapped); } return false; }
   return true;
 }
 async function assertUrl(raw) {

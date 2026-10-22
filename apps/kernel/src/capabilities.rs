@@ -394,6 +394,19 @@ pub async fn invoke(
     .fetch_optional(&state.db)
     .await?;
     let Some((_, grant_scope)) = grant else {
+        let _ = audit::record(
+            &state.db,
+            "capability.denied",
+            "WORKLOAD",
+            &claims.plugin_id,
+            "capability",
+            &format!("{name}:{major}"),
+            "capability.invoke",
+            "REJECTED",
+            serde_json::json!({"reason": "no active grant"}),
+            None,
+        )
+        .await;
         return Err(AppError::new(
             StatusCode::FORBIDDEN,
             "CAPABILITY_FORBIDDEN",
@@ -407,6 +420,7 @@ pub async fn invoke(
         ));
     }
     let provider = resolve_provider(&state, &name, major).await?;
+    crate::nodes::validate_node_data_endpoint(&state.config, &provider.data_endpoint)?;
     let manifest: ManifestV11 = serde_json::from_value(provider.manifest)
         .map_err(|error| AppError::internal(format!("provider manifest invalid: {error}")))?;
     let backend = manifest.backend.ok_or_else(|| {
