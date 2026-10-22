@@ -23,8 +23,17 @@ SPEC="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H 'I
 SPEC_ID="$(printf '%s' "$SPEC" | json "d['specId']")"
 [ -n "$SPEC_ID" ] || bad "spec creation failed"
 
-# CI configures OPSWEAVE_WORKLOAD_TOKEN_SECONDS=2. Wait beyond that TTL so the
-# token injected at container creation is definitely expired.
+# Simulate a short Kernel outage during the idle window. The Node-side token
+# refresher must recover when the Kernel returns; no plugin restart is allowed.
+if [ -n "${OPSWEAVE_TEST_KERNEL_PID:-}" ]; then
+  kill -STOP "$OPSWEAVE_TEST_KERNEL_PID"
+  sleep 2
+  kill -CONT "$OPSWEAVE_TEST_KERNEL_PID"
+  ok "Kernel outage injected and resumed"
+fi
+
+# CI configures OPSWEAVE_WORKLOAD_TOKEN_SECONDS=5 and grace=1. Wait beyond that
+# window so the token injected at container creation is definitely expired.
 sleep "${OPSWEAVE_TOKEN_WAIT_SECONDS:-6}"
 RUN="$(curl -fsS "${AUTH[@]}" -X POST -H 'Idempotency-Key: token-refresh-run-0001' \
   "$INT/ingestion-specs/$SPEC_ID/runs")"

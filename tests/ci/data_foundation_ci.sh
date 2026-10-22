@@ -54,6 +54,7 @@ env \
   OPSWEAVE_PLUGIN_KERNEL_URL=http://172.17.0.1:18181 \
   OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS=172.17.0.1 \
   RUST_LOG=info ./target/debug/opsweave-kernel >/tmp/data-kernel.log 2>&1 &
+KERNEL_PID=$!
 PIDS+=($!)
 for _ in $(seq 1 60); do curl -fsS "$OPSWEAVE_URL/livez" >/dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS "$OPSWEAVE_URL/livez" >/dev/null
@@ -97,4 +98,4 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke"
   OPSWEAVE_URL="$OPSWEAVE_URL" pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts
 fi
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=1 tests/acceptance/data_token_refresh.sh
+OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=1 OPSWEAVE_TEST_KERNEL_PID="$KERNEL_PID" tests/acceptance/data_token_refresh.sh
