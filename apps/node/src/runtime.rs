@@ -347,13 +347,44 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
     for entry in entries {
         let _ = entry.cancel.send(true);
     }
-    // Wait for an in-flight inspect/pull/create/start setup to leave its critical
-    // section, then remove whatever it may have created. This closes the gap
-    // between the last quarantine check and Docker create/start.
-    let _lifecycle = shared.lifecycle.lock().await;
-    let runtimes: Vec<InstanceRuntime> = shared.runtimes.read().await.values().cloned().collect();
     let node_id = shared.identity.read().await.node_id;
+    let result = tokio::time::timeout(
+        Duration::from_secs(45),
+        cleanup_managed(shared, node_id, reason),
+    )
+    .await;
+    let error = match result {
+        Ok(Ok(())) => {
+            if let Ok(mut slot) = shared.quarantine_error.lock() {
+                *slot = None;
+            }
+            tracing::info!("quarantine cleanup confirmed no managed containers remain");
+            return;
+        }
+        Ok(Err(error)) => error,
+        Err(_) => "QUARANTINE_CLEANUP_FAILED: cleanup exceeded the 45s deadline".to_string(),
+    };
+    tracing::error!(error = %error, "quarantine cleanup could not be verified");
+    if let Ok(mut slot) = shared.quarantine_error.lock() {
+        *slot = Some(error);
+    }
+}
+
+async fn cleanup_managed(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> Result<(), String> {
     let mut failures: Vec<String> = Vec::new();
+    // The total cleanup window is bounded by the caller. Give an in-flight
+    // create/start a short chance to leave, but never block forever on the
+    // lifecycle mutex; if it times out, report a failure even if the sweep
+    // later removes the containers.
+    let lifecycle_guard =
+        match tokio::time::timeout(Duration::from_secs(15), shared.lifecycle.lock()).await {
+            Ok(guard) => Some(guard),
+            Err(_) => {
+                failures.push("lifecycle lock wait exceeded 15s".to_string());
+                None
+            }
+        };
+    let runtimes: Vec<InstanceRuntime> = shared.runtimes.read().await.values().cloned().collect();
     for runtime in runtimes {
         let name = container_name(node_id, runtime.workload.instance_id);
         if let Err(error) = shared.docker.stop_and_remove(&name).await {
@@ -361,24 +392,7 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
         }
         runtime.set_state(RuntimeState::Stopped, Some(reason.to_string()));
     }
-    // Also remove managed containers that are not represented in the in-memory
-    // runtime map (for example an orphan left by a previous generation).
-    match shared.docker.list_managed(node_id).await {
-        Ok(names) => {
-            for name in names {
-                if let Err(error) = shared.docker.stop_and_remove(&name).await {
-                    failures.push(format!("{name}: {error}"));
-                }
-            }
-        }
-        Err(error) => failures.push(format!("list managed containers: {error}")),
-    }
-    // Re-inspect until no managed container remains, within a bounded retry
-    // window. A failure is visible and never downgraded to a success claim.
-    let cleanup_deadline = Instant::now() + Duration::from_secs(45);
     for attempt in 1..=3 {
-        // Re-enumerate and re-attempt stop/remove on every pass. Counting alone
-        // is not a cleanup retry.
         match shared.docker.list_managed(node_id).await {
             Ok(names) => {
                 for name in names {
@@ -396,33 +410,21 @@ async fn quarantine(shared: &Arc<Shared>, reason: &str) {
             .map(|names| names.len())
             .unwrap_or(usize::MAX);
         if remaining == 0 {
-            if let Ok(mut error) = shared.quarantine_error.lock() {
-                *error = None;
-            }
-            tracing::info!(
-                attempt,
-                "quarantine cleanup confirmed no managed containers remain"
-            );
-            return;
+            drop(lifecycle_guard);
+            return Ok(());
         }
         if attempt < 3 {
-            if Instant::now() >= cleanup_deadline {
-                break;
-            }
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
-    let error = if failures.is_empty() {
-        "QUARANTINE_CLEANUP_FAILED: managed containers may remain".to_string()
+    drop(lifecycle_guard);
+    if failures.is_empty() {
+        Err("QUARANTINE_CLEANUP_FAILED: managed containers may remain".to_string())
     } else {
-        format!(
+        Err(format!(
             "QUARANTINE_CLEANUP_FAILED: managed containers may remain: {}",
             failures.join("; ")
-        )
-    };
-    tracing::error!(error = %error, "quarantine cleanup could not be verified");
-    if let Ok(mut slot) = shared.quarantine_error.lock() {
-        *slot = Some(error);
+        ))
     }
 }
 

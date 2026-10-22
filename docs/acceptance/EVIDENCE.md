@@ -54,9 +54,9 @@ opsweave_bundle: 4 passed
   rejects_path_traversal ... ok
   manifest_image_reference_is_covered_by_signature ... ok
 opsweave_contracts: 3 passed
-opsweave_kernel: 7 passed (cursor, path traversal, capacity fail-closed, placement transfer, IP-key/trusted-proxy, sliding-window limiter)
+opsweave_kernel: 9 passed (cursor, path traversal, capacity fail-closed, placement transfer, STOP/START accounting, IP-key/trusted-proxy, sliding-window limiter)
 opsweave_node: 2 passed (path traversal, Docker cleanup failure propagation)
-result: all 16 passed, 0 failed
+result: all 18 passed, 0 failed
 ```
 
 ### Contract validation
@@ -139,7 +139,7 @@ node credential revocation test passed (unsafe endpoint 400; heartbeat 200 befor
 
 ### Node lifecycle barrier and cleanup
 
-`run_once()` pulls outside the lifecycle mutex, then holds it across digest verification and `create/start`; adoption is also guarded. `quarantine()` sets the flag, cancels supervisors, then waits for that mutex before its final container sweep. A post-pull `ensure_node_active()` check prevents a slow pull from creating after the flag was set. Docker `inspect`, `version`, normal commands, pull and stop/remove are all timeout-bounded. Quarantine re-enumerates and re-attempts stop/remove on every pass and exposes `QUARANTINE_CLEANUP_FAILED` if containers cannot be confirmed gone.
+`run_once()` pulls outside the lifecycle mutex, then holds it across digest verification and `create/start`; adoption is also guarded. `quarantine()` sets the flag, cancels supervisors, then waits for that mutex before its final container sweep. A post-pull `ensure_node_active()` check prevents a slow pull from creating after the flag was set. Docker `inspect` (including `port_of`), `list_managed`, `is_running`, `version`, normal commands, pull and stop/remove are all timeout-bounded. Quarantine waits at most 15s for the lifecycle lock and the whole cleanup is wrapped in a strict 45s deadline; it re-enumerates and re-attempts stop/remove on every pass and exposes `QUARANTINE_CLEANUP_FAILED` if containers cannot be confirmed gone. A timeout is never treated as success.
 
 The deterministic slow-pull-versus-lease race test is not automated; the lifecycle barrier and post-pull checks are the code-level mitigation. Real Docker daemon unavailability and permanent CLI hang remain `NOT_RUN`.
 
@@ -148,8 +148,8 @@ The deterministic slow-pull-versus-lease race test is not automated; the lifecyc
 Command: `tests/acceptance/node_quarantine.sh`
 
 ```
-node-a has 3 managed container(s); revoking 74f529b6-6d50-4274-adae-1893473bf604
-node quarantine test passed: 3 container(s) were removed after revocation
+node-a has 1 managed container(s); revoking fd556ce4-1236-40d3-80c1-4800edda10a4
+node quarantine test passed: 1 container(s) were removed after revocation
 ```
 
 ### Kernel partition beyond node lease
@@ -157,7 +157,7 @@ node quarantine test passed: 3 container(s) were removed after revocation
 Command: `tests/acceptance/node_lease.sh`
 
 ```
-stopping Kernel pid=16490; node-b has 1 container(s)
+stopping Kernel pid=65167; node-b has 3 container(s)
 node lease test passed: workloads stopped after Kernel partition exceeded lease
 ```
 
@@ -194,7 +194,7 @@ publisher revocation gate passed: deploy rejected with PUBLISHER_REVOKED
 
 ### Scheduler capacity reservation
 
-The scheduler now re-evaluates CPU/memory reservations for every slot, uses fail-closed capacity when a snapshot is missing, and enforces per-deployment max instances plus the global `OPSWEAVE_MAX_INSTANCES_PER_NODE` cap. Migration explicitly transfers the global instance count and both CPU/memory reservations from the source Node to the target Node. `deployments.rs` unit tests cover fail-closed snapshot, memory pressure, CPU pressure and that transfer. A dedicated end-to-end multi-deployment low-capacity stress test is `NOT_RUN`.
+The scheduler now re-evaluates CPU/memory reservations for every slot, uses fail-closed capacity when a snapshot is missing, and enforces per-deployment max instances plus the global `OPSWEAVE_MAX_INSTANCES_PER_NODE` cap. Migration explicitly transfers the global instance count and both CPU/memory reservations from the source Node to the target Node. STOP→START restoration charges only the target Node and never subtracts an uncounted source. `deployments.rs` unit tests cover fail-closed snapshot, memory pressure, CPU pressure, START migration, STOP migration and STOP→START restoration. A dedicated end-to-end multi-deployment low-capacity stress test is `NOT_RUN`.
 
 ### Container security baseline
 
@@ -238,7 +238,7 @@ Screenshots: `artifacts/ui/` (six overview matrix images plus route/feature capt
 
 ## Evidence files
 
-- `/tmp/a111-e2e.out`, `/tmp/a11-failover.out`, `/tmp/a11-restart.out`, `/tmp/a111-auth.out`, `/tmp/a111-endpoint.out`, `/tmp/a111-quarantine.out`, `/tmp/a111-lease.out`, `/tmp/a111-security.out`, `/tmp/a111-conformance2.out`
+- `/tmp/a12-e2e.out`, `/tmp/a12-failover.out`, `/tmp/a12-restart.out`, `/tmp/a12-auth.out`, `/tmp/a12-endpoint.out`, `/tmp/a12-quarantine.out`, `/tmp/a12-lease.out`, `/tmp/a12-security.out`, `/tmp/a12-conformance.out`
 - Final UI evidence is regenerated by `pnpm --filter @opsweave/ui-tests test` in `artifacts/ui/`.
 - Final UI evidence is regenerated after the final clean reset; `artifacts/ui/`.
 - `artifacts/ui/*.png`

@@ -141,12 +141,15 @@ impl DockerAdapter {
 
     async fn port_of(&self, name: &str) -> anyhow::Result<Option<u16>> {
         let raw = self
-            .run(&[
-                "inspect",
-                name,
-                "--format",
-                "{{json .NetworkSettings.Ports}}",
-            ])
+            .run_with_timeout(
+                &[
+                    "inspect",
+                    name,
+                    "--format",
+                    "{{json .NetworkSettings.Ports}}",
+                ],
+                5,
+            )
             .await?;
         let value: serde_json::Value = match serde_json::from_str(&raw) {
             Ok(value) => value,
@@ -258,16 +261,19 @@ impl DockerAdapter {
     pub async fn list_managed(&self, node_id: uuid::Uuid) -> anyhow::Result<Vec<String>> {
         let filter = format!("label=opsweave.node-id={node_id}");
         let raw = self
-            .run(&[
-                "ps",
-                "-a",
-                "--filter",
-                "label=opsweave.managed=true",
-                "--filter",
-                &filter,
-                "--format",
-                "{{.Names}}",
-            ])
+            .run_with_timeout(
+                &[
+                    "ps",
+                    "-a",
+                    "--filter",
+                    "label=opsweave.managed=true",
+                    "--filter",
+                    &filter,
+                    "--format",
+                    "{{.Names}}",
+                ],
+                10,
+            )
             .await?;
         Ok(raw
             .lines()
@@ -279,12 +285,12 @@ impl DockerAdapter {
 
     pub async fn stop_and_remove(&self, name: &str) -> anyhow::Result<()> {
         let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(20),
-            self.command().args(["stop", "--time", "10", name]).output(),
+            std::time::Duration::from_secs(10),
+            self.command().args(["stop", "--time", "5", name]).output(),
         )
         .await;
         let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(20),
+            std::time::Duration::from_secs(10),
             self.command().args(["rm", "-f", name]).output(),
         )
         .await;
@@ -308,16 +314,18 @@ impl DockerAdapter {
     }
 
     pub async fn is_running(&self, name: &str) -> bool {
-        let output = self
-            .command()
-            .args(["inspect", name, "--format", "{{.State.Running}}"])
-            .output()
-            .await;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.command()
+                .args(["inspect", name, "--format", "{{.State.Running}}"])
+                .output(),
+        )
+        .await;
         match output {
-            Ok(output) => {
+            Ok(Ok(output)) => {
                 output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
             }
-            Err(_) => false,
+            _ => false,
         }
     }
 }

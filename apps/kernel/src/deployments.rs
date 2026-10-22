@@ -1140,7 +1140,8 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         let existing_node_ok = current
             .as_ref()
             .map(|row| {
-                eligible_ids.contains(&row.node_id)
+                row.desired_action == "START"
+                    && eligible_ids.contains(&row.node_id)
                     && used_nodes.get(&row.node_id).copied().unwrap_or(0) <= max_per_node
             })
             .unwrap_or(false);
@@ -1184,6 +1185,7 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
             continue;
         };
         if let Some(current) = current {
+            let was_started = current.desired_action == "START";
             if current.node_id != node.id {
                 sqlx::query(
                     "UPDATE kernel.plugin_instances SET node_id=$2, desired_action='START', state='STARTING', observed_at=NULL, container_id=NULL, image_digest=NULL, host_port=NULL, restart_count=0, last_error=NULL, deployment_generation=$3, updated_at=now() WHERE id=$1",
@@ -1193,19 +1195,40 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
                 .bind(deployment.generation)
                 .execute(&state.db)
                 .await?;
-                transfer_placement(
-                    &mut used_nodes,
-                    &mut global_counts,
-                    &mut reserved,
-                    current.node_id,
-                    node.id,
-                    &requested,
-                );
+                if was_started {
+                    transfer_placement(
+                        &mut used_nodes,
+                        &mut global_counts,
+                        &mut reserved,
+                        current.node_id,
+                        node.id,
+                        &requested,
+                    );
+                } else {
+                    // A STOP instance was not counted at the source; only add
+                    // it to the target's global and resource accounting.
+                    account_start(
+                        &mut used_nodes,
+                        &mut global_counts,
+                        &mut reserved,
+                        node.id,
+                        &requested,
+                    );
+                }
             } else {
                 sqlx::query("UPDATE kernel.plugin_instances SET desired_action='START', updated_at=now() WHERE id=$1")
                     .bind(current.id)
                     .execute(&state.db)
                     .await?;
+                if !was_started {
+                    account_start(
+                        &mut used_nodes,
+                        &mut global_counts,
+                        &mut reserved,
+                        node.id,
+                        &requested,
+                    );
+                }
             }
         } else {
             let id = Uuid::new_v4();
@@ -1324,6 +1347,20 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     Ok(())
 }
 
+fn account_start(
+    used_nodes: &mut HashMap<Uuid, usize>,
+    global_counts: &mut HashMap<Uuid, usize>,
+    reserved: &mut HashMap<Uuid, (i64, i64)>,
+    node: Uuid,
+    request: &ResourceRequirements,
+) {
+    *used_nodes.entry(node).or_insert(0) += 1;
+    *global_counts.entry(node).or_insert(0) += 1;
+    let reservation = reserved.entry(node).or_insert((0, 0));
+    reservation.0 += request.cpu_millis;
+    reservation.1 += request.memory_mib;
+}
+
 fn transfer_placement(
     used_nodes: &mut HashMap<Uuid, usize>,
     global_counts: &mut HashMap<Uuid, usize>,
@@ -1413,6 +1450,54 @@ mod tests {
             revoked_at: None,
             cert_expires_at: None,
         }
+    }
+
+    #[test]
+    fn stopped_migration_does_not_decrement_an_uncounted_source() {
+        let source = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let mut used = std::collections::HashMap::new();
+        let mut global = std::collections::HashMap::from([(source, 1), (target, 2)]);
+        let mut reserved =
+            std::collections::HashMap::from([(source, (500, 128)), (target, (1000, 256))]);
+        // The STOP instance is represented by neither `used` nor the source
+        // reservation; only the target is charged when it is activated.
+        super::account_start(
+            &mut used,
+            &mut global,
+            &mut reserved,
+            target,
+            &ResourceRequirements {
+                cpu_millis: 500,
+                memory_mib: 128,
+            },
+        );
+        assert_eq!(used.get(&source), None);
+        assert_eq!(global.get(&source), Some(&1));
+        assert_eq!(reserved.get(&source), Some(&(500, 128)));
+        assert_eq!(global.get(&target), Some(&3));
+        assert_eq!(reserved.get(&target), Some(&(1500, 384)));
+    }
+
+    #[test]
+    fn stopped_instance_restart_restores_accounting() {
+        let node = Uuid::new_v4();
+        let mut used = std::collections::HashMap::new();
+        let mut global = std::collections::HashMap::from([(node, 2)]);
+        let mut reserved = std::collections::HashMap::from([(node, (1000, 256))]);
+        super::account_start(
+            &mut used,
+            &mut global,
+            &mut reserved,
+            node,
+            &ResourceRequirements {
+                cpu_millis: 500,
+                memory_mib: 128,
+            },
+        );
+        assert_eq!(used.get(&node), Some(&1));
+        assert_eq!(global.get(&node), Some(&3));
+        assert_eq!(reserved.get(&node), Some(&(1500, 384)));
     }
 
     #[test]

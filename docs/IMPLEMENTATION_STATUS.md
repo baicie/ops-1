@@ -61,6 +61,8 @@ Stage A.1 follow-up: login IP keys now use `peer.ip()` (not the ephemeral port),
 
 Stage A.1.1 follow-up: migration now transfers both `global_counts` and CPU/memory reservation to the target Node (with a unit regression test); Docker `inspect` has its own timeout; `run_once()` setup and `quarantine()` serialize through a lifecycle mutex so the final sweep waits for in-flight create/start; quarantine re-enumerates and retries actual stop/remove; the rate limiter uses a true sliding timestamp window and parses trusted-proxy chains from the trusted side.
 
+Stage A.1.2 follow-up: STOP→START now restores per-deployment/global counts and CPU/memory reservation at the target; STOP migration never decrements an uncounted source; START migration transfers reservation in both directions. Docker `inspect`/`port_of`, `list_managed`, `is_running`, `version`, normal commands, pull and stop/remove are timeout-bounded; quarantine has a strict 45s total deadline, a 15s lifecycle-lock wait, re-enumerates/re-attempts cleanup and reports `QUARANTINE_CLEANUP_FAILED` on timeout.
+
 Still **NOT_RUN / blocking**: Kernel↔Node mTLS and certificate rotation, three physical Linux amd64 hosts, real Rootless Docker, OCI image signatures/SBOM, SIGKILL host-level container cleanup, full SSE flood/backpressure testing, and Fencing Tokens for side-effecting workloads. The 25s Kernel stale threshold and 30s Node lease are not a substitute for a fencing/generation protocol; a reassignment race can still produce a short double-execution window. No production-ready claim is made.
 
 ## Explicit non-goals (unchanged)
