@@ -508,7 +508,7 @@ async fn resolve_provider(state: &AppState, name: &str, major: i64) -> AppResult
           AND n.revoked_at IS NULL AND n.status='READY'
           AND n.data_endpoint IS NOT NULL
           AND n.last_seen_at > now() - ($3 || ' seconds')::interval
-        ORDER BY i.slot, i.id
+        ORDER BY r.plugin_id, r.generation DESC, i.slot, i.id
         LIMIT 1
         "#,
     )

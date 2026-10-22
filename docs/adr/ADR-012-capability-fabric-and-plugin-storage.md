@@ -64,6 +64,8 @@ accessing each other's tables.
   have drained. The Kernel does not claim arbitrary migrations are reversible.
 - A failed migration is `FAILED` or `BLOCKED`; it is never converted into a
   successful rollback. Recovery is an explicit operator action with backup.
+  The implementation runs each migration under `SET LOCAL ROLE` to the plugin
+  role; `CONTRACT` is refused while the plugin still has desired instances.
 
 ### 5. Manifest compatibility
 
