@@ -22,7 +22,7 @@ The production reference target is **Linux amd64 + Rootless Docker + three physi
 
 | Epic | Status | What was actually built / tested |
 |---|---|---|
-| E00 Project Bootstrap | DONE (local) | Cargo + pnpm workspaces, lockfiles, Makefile, CI definition, contract checker, local compose, systemd units. Remote CI run `39718975566` passed Rust, Web and Contracts jobs on commit `816e9f6`; full E2E remains local. |
+| E00 Project Bootstrap | DONE (local) | Cargo + pnpm workspaces, lockfiles, Makefile, CI definition, contract checker, local compose, systemd units. Remote CI run `39723679225` passed Rust, Web and Contracts jobs on commit `35181c3`; full E2E remains local. |
 | E01 Contract Foundation | DONE | Manifest v1.1, runtime info, deployment, node observation, log event, asset index schemas; generated examples validated with `jsonschema`; bundles recomputed and checked. |
 | E02 Identity & Trust | PARTIAL | Argon2id users, admin/operator/viewer RBAC, CSRF, session cookie/bearer, publisher trust/revocation, one-time node enrollment, node revocation, audit. **mTLS NOT_RUN**. |
 | E03 Registry & Lifecycle | DONE (local) | Immutable bundles with digest conflict rejection, Ed25519 signature (artifact + canonical manifest), stage/deploy/activate/disable/enable/upgrade/rollback/uninstall, receipts, audit. |

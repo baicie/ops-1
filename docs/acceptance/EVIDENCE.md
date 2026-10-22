@@ -35,7 +35,7 @@ The signature covers both the canonical payload index digest and the canonical m
 
 ### Remote CI
 
-GitHub Actions run [`39718975566`](https://github.com/baicie/ops-1/actions/runs/39718975566) on commit `816e9f6`:
+GitHub Actions run [`39723679225`](https://github.com/baicie/ops-1/actions/runs/39723679225) on commit `35181c3`:
 
 ```
 web       success  (pnpm typechecks + Shell/hello builds)
