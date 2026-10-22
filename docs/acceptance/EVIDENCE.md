@@ -260,10 +260,10 @@ This section records only what was actually executed during the 0.0.2 implementa
 | Kernel capability grant/resolve | PASS (local) | `data.catalog.v1` provider resolved; grant created; disable returned 409 `DEPENDENCY_BLOCKED` while Integration grant was active. |
 | Kernel capability invoke | PASS (local harness) | Signed workload token accepted; invocation routed through a local Node-proxy harness to the real Catalog service and returned an `ACCEPTED` receipt. |
 | Integration → real Kernel → Catalog | PASS (local harness) | Run `E2E` resolved through `/api/v1/capabilities/data.catalog.v1/1/...`, returned `SUCCEEDED`, `accepted=2`; replaying the same idempotency key returned the same run. |
-| Data OCI image build/deploy | PASS (CI) | GitHub Actions run `39825950028`: both data backend images built, pushed to a host-local registry, and deployed as OCI containers. Local Docker Desktop remained unavailable; this is a CI Linux result. |
-| Real two-plugin OCI cross-node Gateway path | PASS (CI) | Run `39825950028`: two real Node runtimes enrolled; Catalog placed on `zone=node-a`, Integration on `zone=node-b`; Golden Path passed through the real Kernel Capability Gateway. |
+| Data OCI image build/deploy | PASS (CI) | GitHub Actions run `39827988081`: both data backend images built, pushed to a host-local registry, and deployed as OCI containers. Local Docker Desktop remained unavailable; this is a CI Linux result. |
+| Real two-plugin OCI cross-node Gateway path | PASS (CI) | Run `39827988081`: two real Node runtimes enrolled; Catalog placed on `zone=node-a`, Integration on `zone=node-b`; Golden Path passed through the real Kernel Capability Gateway. |
 | Data Foundation CI workflow | PASS | `.github/workflows/data-foundation.yml`, run `39767019066` (job `golden-path`). |
-| Catalog/Integration browser smoke | PASS (CI) | Run `39825950028` loaded both signed remote extensions in Chromium against active OCI plugins (`2 passed`); screenshots are uploaded as the `data-foundation-screenshots` artifact. |
+| Catalog/Integration browser smoke | PASS (CI) | Run `39827988081` loaded both signed remote extensions in Chromium against active OCI plugins (`2 passed`); screenshots are uploaded as the `data-foundation-screenshots` artifact. |
 | 0.0.1 E2E regression | PASS (CI) | Same run, `legacy-regression` job: existing hello TS/Go/Java lifecycle, rollback and re-enable path `PASS=21 FAIL=0`. |
 | Schema/quality assertions | PASS (CI) | Same run: schema revision 2 draft/publish, compatible diff, incompatible change rejection (`409`), and quality total/unknown assertions. |
 | Kernel migration gate | PASS (local) | Checksum-matched EXPAND migration applied under a least-privilege plugin database role; replay returned the original record; a second list encoded the APPLIED record. CONTRACT-during-live-instances and changed-checksum rejection are implemented but not all tested. |
@@ -273,7 +273,7 @@ The local capability harness is not a substitute for the required real OCI Golde
 ### 0.0.2 branch CI
 
 - PR `#1` (`feat/0.0.2-data-foundation`) Rust/Web/Contracts checks: **PASS** on the latest branch commit.
-- `.github/workflows/data-foundation.yml` run [`39825950028`](https://github.com/baicie/ops-1/actions/runs/39825950028): **PASS** on Linux with Docker, real PostgreSQL, two Node runtimes, real OCI data plugin containers, Chromium smoke tests for both signed extensions, and the 0.0.1 E2E regression (`PASS=21 FAIL=0`).
+- `.github/workflows/data-foundation.yml` run [`39827988081`](https://github.com/baicie/ops-1/actions/runs/39827988081): **PASS** on Linux with Docker, real PostgreSQL, two Node runtimes, real OCI data plugin containers, Chromium smoke tests for both signed extensions, and the 0.0.1 E2E regression (`PASS=21 FAIL=0`).
 - Local Docker Desktop remained unavailable; local-only OCI deployment is `NOT_RUN`. The CI result is not a production deployment.
 
 ## 0.0.2 Review Remediation
@@ -284,7 +284,7 @@ The local capability harness is not a substitute for the required real OCI Golde
   `viewer` gets read-only scopes, `operator`/`admin` get write scopes, and unknown
   roles get an empty scope. `hasScope()` no longer treats `kind === 'user'` as a
   wildcard.
-- Real Kernel Gateway CI run `39825950028` (`golden-path` success) exercised:
+- Real Kernel Gateway CI run `39827988081` (`golden-path` success) exercised:
   - Viewer dataset create `403`;
   - Viewer schema publish `403`;
   - Viewer source create `403`;
@@ -298,7 +298,7 @@ The local capability harness is not a substitute for the required real OCI Golde
 - Integration now parses IPv6 bytes and classifies IPv4-mapped addresses in both
   dotted and hexadecimal forms, plus IPv4 special ranges, IPv6 ULA, link-local,
   loopback, multicast, documentation, Teredo, 6to4 and other non-global ranges.
-- Real Gateway/Connector CI run `39825950028` blocked all nine tested targets with
+- Real Gateway/Connector CI run `39827988081` blocked all nine tested targets with
   `422 SOURCE_SSRF_BLOCKED`:
   `127.0.0.1`, `::ffff:7f00:1`, `::ffff:a9fe:a9fe`, `::1`, `fc00::1`,
   `fe80::1`, `169.254.169.254`, `10.0.0.1`, `198.51.100.1`.
@@ -335,7 +335,7 @@ The local capability harness is not a substitute for the required real OCI Golde
 - `refresh_workload_token()` accepts an expired token only inside a bounded grace
   window, re-checks live instance/node/generation, active grant and scope, and issues
   a fresh token. Integration refreshes before the 60-second threshold.
-- CI run `39825950028` used a **5 second token TTL and 1 second grace**, waited
+- CI run `39827988081` used a **5 second token TTL and 1 second grace**, waited
   beyond `TTL + grace` without any Catalog call, then executed an ingestion run;
   it passed (`expired workload token refreshed; run status=SUCCEEDED`).
 - Node runtime now maintains a **mounted capability-token file** and refreshes it
@@ -364,12 +364,12 @@ The local capability harness is not a substitute for the required real OCI Golde
 ## 2026-10-23 Overnight Finalization
 
 - Final branch HEAD before this report: `33c5058`.
-- Standard CI [`39825950061`](https://github.com/baicie/ops-1/actions/runs/39825950061): success.
-- Data Foundation OCI CI [`39825950028`](https://github.com/baicie/ops-1/actions/runs/39825950028): `golden-path` and `legacy-regression` success.
+- Standard CI [`39827988127`](https://github.com/baicie/ops-1/actions/runs/39827988127): success.
+- Data Foundation OCI CI [`39827988081`](https://github.com/baicie/ops-1/actions/runs/39827988081): `golden-path` and `legacy-regression` success.
 - Multi-provider real API test: PASS. Grant bound to A reached A; natural selection of B while bound to A returned `403 CAPABILITY_PROVIDER_MISMATCH` and wrote audit; unbounded grant reached B; revoke/restore were immediate; no-provider resolve failed closed.
 - Migration concurrency real HTTP test: PASS. A failed, B applied once, late failure did not overwrite APPLIED; replay, checksum mismatch and CONTRACT live-instance checks passed.
 - Token file security: PASS. Mode 644, no cross-instance token, no Node control credential in plugin env, no token in an unauthenticated response.
 - Full UI business flow: PASS (4 Playwright tests). Catalog create/Draft/Diff/Publish/Records/refresh persistence and Integration create/Test/Discover/Preview/Mapping/Run/Quality/Lineage passed.
-- Screenshot matrix: PASS. 1440x900, 1024x768 and 390x844, light/dark, both extensions; artifact `data-foundation-screenshots` from run `39825950028`.
+- Screenshot matrix: PASS. 1440x900, 1024x768 and 390x844, light/dark, both extensions; artifact `data-foundation-screenshots` from run `39827988081`.
 - D06 bounded reliability: PARTIAL. Retention policy visibility, catalog batch idempotency, changed-content rejection, schema revision rejection and record count passed. UNKNOWN/catalog timeout, retention enforcement, Kernel restart recovery and full fault injection remain `NOT_RUN`.
 - 0.0.1 E2E regression: PASS, `PASS=21 FAIL=0`.

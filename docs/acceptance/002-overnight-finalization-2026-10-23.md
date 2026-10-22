@@ -47,8 +47,8 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 - `cargo fmt --all -- --check`: PASS.
 - Contract validation: 10 schemas, PASS.
 - Data frontend typecheck/build: PASS.
-- Data Foundation OCI CI [`39825950028`](https://github.com/baicie/ops-1/actions/runs/39825950028): success.
-- Standard CI [`39825950061`](https://github.com/baicie/ops-1/actions/runs/39825950061): success.
+- Data Foundation OCI CI [`39827988081`](https://github.com/baicie/ops-1/actions/runs/39827988081): success.
+- Standard CI [`39827988127`](https://github.com/baicie/ops-1/actions/runs/39827988127): success.
 - 0.0.1 legacy job: `PASS=21 FAIL=0`.
 
 ### Real acceptance evidence
@@ -57,7 +57,7 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 - Migration concurrency: A failed, B applied once, late FAILED did not overwrite APPLIED; replay with same checksum `replay=true`; changed checksum rejected; CONTRACT blocked with live instance.
 - Token file: mode 644, per-instance isolation, no Node control credential in plugin env, no token in unauthenticated response, expiry/refresh and Node revocation tests.
 - Browser: full Catalog and Integration business flows passed with real signed Remote Extensions, real Gateway, PostgreSQL and active OCI plugins.
-- Screenshots: `artifacts/ui/data-foundation/` from artifact `data-foundation-screenshots` (run `39825950028`).
+- Screenshots: `artifacts/ui/data-foundation/` from artifact `data-foundation-screenshots` (run `39827988081`).
 
 ### Screenshot review
 
