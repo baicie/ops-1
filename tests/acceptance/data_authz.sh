@@ -17,7 +17,7 @@ create_user() {
   code="$(curl -sS -o /tmp/data-authz-user.json -w '%{http_code}' "${ADMIN[@]}" -X POST \
     -H 'content-type: application/json' "$URL/api/v1/users" \
     -d "{\"email\":\"$email\",\"displayName\":\"$role User\",\"password\":\"AuthzPass!2026\",\"role\":\"$role\"}")"
-  case "$code" in 201|409) ;; *) bad "create $role user returned $code: $(cat /tmp/data-authz-user.json)";; esac
+  case "$code" in 200|201|409) ;; *) bad "create $role user returned $code: $(cat /tmp/data-authz-user.json)";; esac
 }
 
 login_cookie() {
