@@ -231,7 +231,7 @@ async function handle(req, res) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('INSERT INTO catalog_datasets (dataset_id,name,description,owner_plugin_id,schema_revision,schema_digest,retention_policy) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, body.name, body.description || '', who.pluginId || 'user', revision, digestValue, body.retentionPolicy || { mode: 'RETAIN', maxRecords: 10000, maxBytes: 16777216 }]);
+      await client.query('INSERT INTO catalog_datasets (dataset_id,name,description,owner_plugin_id,schema_revision,schema_digest,retention_policy) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, body.name, body.description || '', PLUGIN_ID, revision, digestValue, body.retentionPolicy || { mode: 'RETAIN', maxRecords: 10000, maxBytes: 16777216 }]);
       await client.query('INSERT INTO catalog_schema_revisions (dataset_id,schema_revision,digest,status,fields,published_at) VALUES ($1,$2,$3,\'PUBLISHED\',$4,now())', [id, revision, digestValue, JSON.stringify(fields)]);
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install and activate the two independent 0.0.2 Data Foundation plugins.
 # Requires: BUILD=1 scripts/build-data-plugins.sh first, platform running, opsctl session.
+# For the local HTTP/JSON fixture: (cd tests/fixtures && python3 -m http.server 18090)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

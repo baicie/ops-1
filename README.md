@@ -52,6 +52,7 @@ tests/acceptance/two_node_failover.sh
 tests/acceptance/kernel_restart.sh
 tests/acceptance/node_revocation.sh
 tests/acceptance/node_quarantine.sh   # destructive: revokes node-a; reset afterwards
+tests/acceptance/data_foundation.sh   # requires data plugins + HTTP fixture
 tests/acceptance/node_lease.sh        # destructive: partitions Kernel; reset afterwards
 tests/acceptance/auth_limits.sh
 tests/acceptance/publisher_revocation.sh
