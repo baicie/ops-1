@@ -256,6 +256,9 @@ async fn create_deployment_inner(
             "backend-less plugins cannot be deployed to a node",
         ));
     }
+    if plugin_id.starts_with("opsweave.data-") {
+        crate::storage::provision_binding(state, plugin_id).await?;
+    }
     let resources = opsweave_contracts::ResourceRequirements {
         cpu_millis: payload.cpu_millis.unwrap_or(manifest.resources.cpu_millis),
         memory_mib: payload.memory_mib.unwrap_or(manifest.resources.memory_mib),
@@ -698,6 +701,40 @@ async fn disable_inner(
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::conflict("PLUGIN_NOT_ACTIVE", "plugin has no active revision"))?;
+    let dependents: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT DISTINCT consumer_plugin_id, name FROM (
+          SELECT g.consumer_plugin_id, g.name
+          FROM kernel.capability_grants g
+          JOIN kernel.capability_registrations p
+            ON p.name=g.name AND p.major=g.major AND p.direction='PROVIDES'
+          WHERE p.plugin_id=$1 AND g.state='ACTIVE' AND g.consumer_plugin_id<>$1
+          UNION
+          SELECT c.plugin_id AS consumer_plugin_id, r.name
+          FROM kernel.capability_registrations r
+          JOIN kernel.activation_revisions c
+            ON c.id=r.revision_id AND c.status='ACTIVE'
+          JOIN kernel.capability_registrations p
+            ON p.name=r.name AND p.major=r.major AND p.direction='PROVIDES'
+          WHERE r.direction='REQUIRES' AND p.plugin_id=$1 AND c.plugin_id<>$1
+        ) dependents
+        ORDER BY consumer_plugin_id, name
+        "#,
+    )
+    .bind(plugin_id)
+    .fetch_all(&state.db)
+    .await?;
+    if !dependents.is_empty() {
+        let names = dependents
+            .iter()
+            .map(|(consumer, capability)| format!("{consumer}:{capability}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AppError::conflict(
+            "DEPENDENCY_BLOCKED",
+            format!("active capability consumers must be disabled first: {names}"),
+        ));
+    }
     let mut tx = state.db.begin().await?;
     sqlx::query(
         "UPDATE kernel.activation_revisions SET status='DISABLED', superseded_at=now() WHERE id=$1",

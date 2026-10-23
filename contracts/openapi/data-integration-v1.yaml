@@ -1,0 +1,293 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Data Integration Capability v1
+  version: 0.1.0-draft
+  description: |
+    Provider contract for `data.source.v1` / HTTP-JSON ingestion. Preview is
+    strictly read-only. Every outbound HTTP request must pass SSRF policy:
+    https/http only, DNS-resolved IP checks, no loopback/link-local/private/
+    metadata targets, no redirects, bounded request/response bytes and timeout.
+    Writes use a stable sourceBatchKey and return UNKNOWN rather than retrying
+    with a new idempotency key when the external outcome is not knowable.
+servers:
+  - url: /api/data-integration
+security:
+  - cookieSession: []
+  - workloadBearer: []
+paths:
+  /sources:
+    get:
+      operationId: listSources
+      summary: List data sources
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Sources
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '../schema/data-integration.v1.schema.json#/$defs/DataSource' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      operationId: createSource
+      summary: Create a source with a credential reference (never a plaintext secret)
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, connectorType, endpoint, credential]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 128 }
+                connectorType: { const: http-json }
+                endpoint: { type: string, format: uri, pattern: '^https?://' }
+                credential: { $ref: '../schema/data-integration.v1.schema.json#/$defs/CredentialReference' }
+      responses:
+        '201':
+          description: Source created
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/DataSource' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sources/{sourceId}:
+    get:
+      operationId: getSource
+      summary: Get source metadata (secret material is never returned)
+      parameters:
+        - { $ref: '#/components/parameters/SourceId' }
+      responses:
+        '200':
+          description: Source
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/DataSource' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /sources/{sourceId}/test:
+    post:
+      operationId: testSourceConnection
+      summary: Test connection without ingesting or previewing records
+      parameters:
+        - { $ref: '#/components/parameters/SourceId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '200':
+          description: Connection result
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/ConnectionTest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/SourceFailure' }
+  /sources/{sourceId}/discover:
+    post:
+      operationId: discoverSourceFields
+      summary: Read a bounded sample and discover fields (no dataset write)
+      parameters:
+        - { $ref: '#/components/parameters/SourceId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                path: { type: string, maxLength: 512 }
+                limit: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        '200':
+          description: Discovered fields
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/FieldDiscovery' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/SourceFailure' }
+  /sources/{sourceId}/preview:
+    post:
+      operationId: previewSource
+      summary: Read at most 10 sample records; never writes a dataset
+      parameters:
+        - { $ref: '#/components/parameters/SourceId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/PreviewRequest' }
+      responses:
+        '200':
+          description: Read-only preview
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/PreviewResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/SourceFailure' }
+  /sources/{sourceId}/ingestion-specs:
+    post:
+      operationId: publishIngestionSpec
+      summary: Publish a manual ingestion specification with explicit mappings
+      parameters:
+        - { $ref: '#/components/parameters/SourceId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sourceRevision, schemaRevision, targetDatasetId, mappings]
+              properties:
+                sourceRevision: { type: integer, minimum: 1 }
+                schemaRevision: { type: integer, minimum: 1 }
+                targetDatasetId: { type: string, format: uuid }
+                mappings: { type: array, minItems: 1, maxItems: 256, items: { $ref: '../schema/data-integration.v1.schema.json#/$defs/FieldMapping' } }
+                batchSize: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+                timeoutSeconds: { type: integer, minimum: 1, maximum: 60, default: 30 }
+      responses:
+        '201':
+          description: Spec published
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/IngestionSpec' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /ingestion-specs/{specId}/runs:
+    post:
+      operationId: createIngestionRun
+      summary: Trigger exactly one manual ingestion run
+      parameters:
+        - { name: specId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '202':
+          description: Run accepted; poll run status
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/IngestionRun' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/SourceFailure' }
+  /ingestion-runs:
+    get:
+      operationId: listIngestionRuns
+      summary: List run history with accepted/rejected/unknown counts
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Runs
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '../schema/data-integration.v1.schema.json#/$defs/IngestionRun' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /ingestion-runs/{runId}:
+    get:
+      operationId: getIngestionRun
+      summary: Get one run and quality result
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Run
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/IngestionRun' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /ingestion-runs/{runId}/quality:
+    get:
+      operationId: getQualityResult
+      summary: Get bounded quality metrics for a run
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Quality result
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/QualityResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /ingestion-runs/{runId}/lineage:
+    get:
+      operationId: getBatchLineage
+      summary: Get batch-level lineage for a run
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Batch lineage
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-integration.v1.schema.json#/$defs/BatchLineage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: opsweave_session
+    workloadBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: OpsWeave-Workload-Token
+  parameters:
+    SourceId:
+      name: sourceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 8, maxLength: 128 }
+  responses:
+    BadRequest:
+      description: Invalid source/preview/spec input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: Missing or invalid identity
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Idempotency digest/state conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Source/spec/run not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    SourceFailure:
+      description: Connection, SSRF, parse, size, or timeout failure; no dataset write is attempted
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, retryable]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]+$' }
+        message: { type: string }
+        requestId: { type: string }
+        retryable: { type: boolean }
+        details: { type: object }

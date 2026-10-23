@@ -56,6 +56,13 @@ pub struct Args {
     pub heartbeat_seconds: u64,
     #[arg(
         long,
+        env = "OPSWEAVE_NODE_TOKEN_REFRESH_SECONDS",
+        default_value_t = 30,
+        help = "Refresh the workload capability-token file even while the plugin is idle"
+    )]
+    pub token_refresh_seconds: u64,
+    #[arg(
+        long,
         env = "OPSWEAVE_NODE_STOP_WORKLOADS_ON_EXIT",
         default_value_t = true
     )]

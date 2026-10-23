@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context};
 use opsweave_contracts::DesiredWorkload;
+use std::path::Path;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
@@ -188,6 +189,8 @@ impl DockerAdapter {
         image_ref: &str,
         container_port: u16,
         node_id: uuid::Uuid,
+        extra_env: &std::collections::BTreeMap<String, String>,
+        token_file: Option<&Path>,
     ) -> anyhow::Result<String> {
         let name = container_name(node_id, workload.instance_id);
         self.remove_if_exists(&name).await;
@@ -204,52 +207,70 @@ impl DockerAdapter {
         let env_instance = format!("OPSWEAVE_INSTANCE_ID={}", workload.instance_id);
         let env_plugin = format!("OPSWEAVE_PLUGIN_ID={}", workload.plugin_id);
         let env_version = format!("OPSWEAVE_VERSION={}", workload.version);
-        let args = vec![
-            "create",
-            "--name",
-            &name,
-            "--label",
-            "opsweave.managed=true",
-            "--label",
-            &instance_label,
-            "--label",
-            &deployment_label,
-            "--label",
-            &plugin_label,
-            "--label",
-            &version_label,
-            "--label",
-            &node_label,
-            "--memory",
-            &memory,
-            "--memory-swap",
-            &memory_swap,
-            "--cpus",
-            &cpu,
-            "--pids-limit",
-            "256",
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--user",
-            "65532:65532",
-            "--init",
-            "--read-only",
-            "--tmpfs",
-            &tmpfs,
-            "--restart",
-            "no",
-            "--publish",
-            &publish,
-            "--env",
-            &env_instance,
-            "--env",
-            &env_plugin,
-            "--env",
-            &env_version,
-            image_ref,
+        let mut args: Vec<String> = vec![
+            "create".to_string(),
+            "--name".to_string(),
+            name.clone(),
+            "--label".to_string(),
+            "opsweave.managed=true".to_string(),
+            "--label".to_string(),
+            instance_label.clone(),
+            "--label".to_string(),
+            deployment_label.clone(),
+            "--label".to_string(),
+            plugin_label.clone(),
+            "--label".to_string(),
+            version_label.clone(),
+            "--label".to_string(),
+            node_label.clone(),
+            "--memory".to_string(),
+            memory.clone(),
+            "--memory-swap".to_string(),
+            memory_swap.clone(),
+            "--cpus".to_string(),
+            cpu.clone(),
+            "--pids-limit".to_string(),
+            "256".to_string(),
+            "--cap-drop".to_string(),
+            "ALL".to_string(),
+            "--security-opt".to_string(),
+            "no-new-privileges".to_string(),
+            "--user".to_string(),
+            "65532:65532".to_string(),
+            "--init".to_string(),
+            "--read-only".to_string(),
+            "--tmpfs".to_string(),
+            tmpfs.clone(),
+            "--restart".to_string(),
+            "no".to_string(),
+            "--publish".to_string(),
+            publish.clone(),
+            "--env".to_string(),
+            env_instance.clone(),
+            "--env".to_string(),
+            env_plugin.clone(),
+            "--env".to_string(),
+            env_version.clone(),
         ];
+        for (key, value) in extra_env {
+            if !key.is_empty() && key.len() <= 128 && value.len() <= 8192 {
+                args.push("--env".to_string());
+                args.push(format!("{key}={value}"));
+            }
+        }
+        if let Some(token_file) = token_file {
+            let token_dir = token_file
+                .parent()
+                .ok_or_else(|| anyhow!("token file has no parent directory"))?;
+            args.push("--mount".to_string());
+            args.push(format!(
+                "type=bind,source={},target=/run/opsweave,readonly",
+                token_dir.display()
+            ));
+        }
+        args.push(image_ref.to_string());
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let args = arg_refs;
         let id = self.run(&args).await?;
         self.run(&["start", &name]).await?;
         if id.is_empty() {

@@ -52,6 +52,7 @@ tests/acceptance/two_node_failover.sh
 tests/acceptance/kernel_restart.sh
 tests/acceptance/node_revocation.sh
 tests/acceptance/node_quarantine.sh   # destructive: revokes node-a; reset afterwards
+tests/acceptance/data_foundation.sh   # requires data plugins + HTTP fixture
 tests/acceptance/node_lease.sh        # destructive: partitions Kernel; reset afterwards
 tests/acceptance/auth_limits.sh
 tests/acceptance/publisher_revocation.sh
@@ -61,6 +62,32 @@ tests/contract/run_conformance.sh
 python3 tests/contract/validate_contracts.py
 pnpm --filter @opsweave/ui-tests test
 ```
+
+## 0.0.2 Data Foundation (development)
+
+The experimental 0.0.2 branch adds two independent full-stack plugins:
+
+- `opsweave.data-catalog` — `data.catalog.v1`, Dataset and immutable Schema revisions.
+- `opsweave.data-integration` — HTTP/JSON DataSource, Discovery, read-only Preview, Mapping and IngestionRun.
+
+Build and start the existing local platform first, then:
+
+```bash
+# Build the two data plugin bundles (requires Docker/go? no: Node + pnpm)
+scripts/build-data-plugins.sh
+
+# Install and activate Catalog, grant data.catalog.v1, then install Integration
+scripts/demo_data_up.sh
+```
+
+Data backend services use `OPSWEAVE_PLUGIN_DATABASE_URL` and a Kernel-provisioned
+plugin schema; the Kernel never returns that credential through an API. The two
+plugins call each other only through `data.catalog.v1`; Integration cannot read
+Catalog tables.
+
+`OPSWEAVE_SKIP_IMAGE_BUILD=1 scripts/build-data-plugins.sh` creates contract-only
+bundles with placeholder image refs — useful for schema/package tests, **not**
+deployable. The real OCI Golden Path is `NOT_RUN` until Docker is available.
 
 ## Architecture
 

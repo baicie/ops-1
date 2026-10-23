@@ -67,6 +67,33 @@ Stage A.1.3.1 follow-up: deterministic retry tests now cover guarded retry succe
 
 Still **NOT_RUN / blocking**: Kernel↔Node mTLS and certificate rotation, three physical Linux amd64 hosts, real Rootless Docker, OCI image signatures/SBOM, SIGKILL host-level container cleanup, full SSE flood/backpressure testing, and Fencing Tokens for side-effecting workloads. The 25s Kernel stale threshold and 30s Node lease are not a substitute for a fencing/generation protocol; a reassignment race can still produce a short double-execution window. No production-ready claim is made.
 
+## 0.0.2 Data Foundation (development)
+
+Baseline: `v0.0.1-dev.1` / `4ce130b`, branch `feat/0.0.2-data-foundation`.
+
+| Epic | Status | Evidence / limitation |
+|---|---|---|
+| D00 Data Capability Contract | DONE (contracts) | `contracts/openapi/{capability,data-catalog,data-integration}-v1.yaml`, capability/storage/catalog/integration JSON Schemas, examples and negative contract checks pass. |
+| D01 Catalog Backend | PASS (CI) | Independent Node service and plugin-owned PostgreSQL schema tables; dataset/create/draft/publish/diff/write/idempotency verified in real OCI CI run `39892827048`. |
+| D02 Catalog UI | PASS (CI) | Dynamic UMD extension; full real browser Dataset/Schema/Diff/Publish/Records flow and responsive screenshot matrix passed in CI run `39892827048`. |
+| D03 Integration Backend | PASS (CI) | Independent HTTP/JSON source service with ConnectionTest, Discovery, Preview, mappings/specs/runs and SSRF negative test; real OCI CI run `39892827048`. |
+| D04 Integration UI | PASS (CI) | Dynamic UMD extension; full real browser Source/Test/Discover/Preview/Mapping/Run/Quality/Lineage flow and responsive screenshot matrix passed in CI run `39892827048`. |
+| D05 Ingestion Flow | PASS (CI) | Source→parse→map→validate→Catalog sink through the real Kernel Capability Gateway and real OCI plugin pair, run `39892827048`. |
+| D06 Quality / Run History | PARTIAL | Run counts, history and batch lineage implemented; retention/quality edge cases limited. |
+| D07 Integration Tests | PASS (CI) | GitHub Actions `39892827048`: two real Node runtimes, real OCI Catalog/Integration containers on distinct nodes, real Kernel Capability Gateway, multi-provider binding, migration concurrency, token-file security, full Chromium business flows, schema compatibility/quality checks, and 0.0.1 E2E `PASS=21 FAIL=0`; local Docker Desktop run remains `NOT_RUN`. |
+
+Implemented platform increment:
+
+- `kernel.capability_grants`, `kernel.plugin_storage_bindings`, additive migration `0002_data_foundation.sql`.
+- Capability list/resolve/grant/revoke; workload token issuance; `/internal/v1/nodes/{nodeId}/instances/{instanceId}/env`; capability invoke endpoint with signed workload/caller context.
+- Plugin storage binding with dedicated PostgreSQL schema/role and dev-only credential injection; no credential returned by APIs.
+- Disable dependency protection for active capability consumers.
+- Node runtime fetches workload env before container create and passes it as Docker env; old Kernel without the endpoint remains compatible for 0.0.1 plugins (404 → empty env).
+
+Local evidence is recorded in `docs/acceptance/EVIDENCE.md` under `0.0.2 Data Foundation development evidence`.
+
+Explicit NOT_RUN for this increment: OCI image builds for the two data plugins, real Node-proxied capability calls, real cross-plugin Golden Path, schema migration execution through a Kernel migration gate, browser E2E, three-host/mTLS/Fencing. No production claim.
+
 ## Explicit non-goals (unchanged)
 
 AI RCA, Data Catalog, general DAG engine, historical log storage/search, arbitrary third-party code, production multi-Kernel HA, GPU scheduling, NAT-transparent relay, OCI image attestation/SBOM enforcement, multi-tenant isolation.
@@ -78,3 +105,20 @@ AI RCA, Data Catalog, general DAG engine, historical log storage/search, arbitra
 3. **Package signature scope:** Ed25519 covers `artifactDigest` and canonical manifest digest. Image signature is separate and not implemented.
 4. **Java:** runtime is Java 21 but the frontend is not shipped for Java; C01 full-stack is partial.
 5. **Two-node validation:** two Node processes share one Docker daemon. This validates protocol/placement/failover semantics but is not the required three-host Linux gate.
+
+## 0.0.2 Security Remediation (2026-10-22)
+
+- P0 backend role-scope bypass fixed in both data plugins; real Gateway Viewer/Operator
+  authorization test added (`tests/acceptance/data_authz.sh`).
+- P0 IPv4-mapped IPv6 and special-address SSRF classification fixed; real Connector
+  negative test added (`tests/acceptance/data_ssrf.sh`).
+- P1 migration SQL and ledger are atomic under a per-plugin advisory transaction lock;
+  failure/replay locally verified.
+- P1 grant provider binding is enforced at invocation.
+- P1 workload tokens are bound to instance, node and node generation; liveness is
+  checked at invocation and expired tokens can be refreshed only inside a bounded
+  grace window after re-checking live state and grant. CI verifies refresh with a
+  five-second TTL (`39892827048`).
+- P1 migration failure records can no longer overwrite `APPLIED`.
+- Remaining NOT_RUN: signed package migration plans, real multi-provider switch test,
+  true concurrent migration interleaving test, production secret management/mTLS/Fencing.

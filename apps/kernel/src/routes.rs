@@ -1,5 +1,6 @@
 use crate::assets;
 use crate::auth::{self, AuthUser};
+use crate::capabilities;
 use crate::deployments;
 use crate::diagnostics;
 use crate::error::AppError;
@@ -10,6 +11,7 @@ use crate::packages;
 use crate::plugins;
 use crate::publishers;
 use crate::state::AppState;
+use crate::storage;
 use crate::users;
 use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{header, HeaderValue, Method, StatusCode};
@@ -35,6 +37,22 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/internal/v1/nodes/{node_id}/heartbeat",
             post(nodes::heartbeat),
+        )
+        .route(
+            "/internal/v1/nodes/{node_id}/workload-token",
+            post(capabilities::issue_workload_token),
+        )
+        .route(
+            "/internal/v1/workload-tokens/refresh",
+            post(capabilities::refresh_workload_token),
+        )
+        .route(
+            "/internal/v1/nodes/{node_id}/instances/{instance_id}/env",
+            get(capabilities::instance_environment),
+        )
+        .route(
+            "/api/v1/capabilities/{name}/{major}/{*path}",
+            any(capabilities::invoke),
         )
         .route(
             "/assets/{publisher}/{plugin_id}/{version}/{*path}",
@@ -123,6 +141,26 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/api/v1/extensions", get(plugins::extensions))
         .route("/api/v1/capabilities", get(plugins::capabilities))
+        .route(
+            "/api/v1/capabilities/{name}/{major}/resolve",
+            get(capabilities::resolve),
+        )
+        .route(
+            "/api/v1/capability-grants",
+            get(capabilities::list_grants).post(capabilities::create_grant),
+        )
+        .route(
+            "/api/v1/capability-grants/{grant_id}",
+            delete(capabilities::revoke_grant),
+        )
+        .route(
+            "/api/v1/plugin-storage/{plugin_id}",
+            get(storage::get_binding).post(storage::ensure_binding),
+        )
+        .route(
+            "/api/v1/plugin-storage/{plugin_id}/migrations",
+            get(storage::list_migrations).post(storage::apply_migration),
+        )
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(
             state.clone(),

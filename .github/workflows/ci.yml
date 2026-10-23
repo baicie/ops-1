@@ -22,13 +22,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @opsweave/platform-web typecheck
       - run: pnpm --filter @opsweave/hello-web typecheck
+      - run: pnpm --filter @opsweave/data-catalog-web typecheck
+      - run: pnpm --filter @opsweave/data-integration-web typecheck
       - run: pnpm --filter @opsweave/platform-web build
       - run: pnpm --filter @opsweave/hello-web build
+      - run: pnpm --filter @opsweave/data-catalog-web build
+      - run: pnpm --filter @opsweave/data-integration-web build
+      - run: node --check plugins/data-catalog/backend/server.mjs
+      - run: node --check plugins/data-integration/backend/server.mjs
   contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
-      - run: pip install jsonschema
+      - run: pip install jsonschema pyyaml
       - run: python3 tests/contract/validate_contracts.py

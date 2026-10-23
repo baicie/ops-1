@@ -1,0 +1,13 @@
+{
+  "runId": "66666666-6666-4666-8666-666666666666",
+  "specId": "77777777-7777-4777-8777-777777777777",
+  "sourceBatchKey": "source-11111111-20261022T000000Z",
+  "status": "SUCCEEDED",
+  "inputCount": 2,
+  "accepted": 2,
+  "rejected": 0,
+  "unknown": 0,
+  "startedAt": "2026-10-22T00:00:00Z",
+  "finishedAt": "2026-10-22T00:00:02Z",
+  "receiptId": "33333333-3333-4333-8333-333333333333"
+}

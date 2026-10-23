@@ -50,6 +50,12 @@ impl AppError {
         error
     }
 
+    pub fn bad_gateway(code: &'static str, message: impl Into<String>) -> Self {
+        let mut error = Self::new(StatusCode::BAD_GATEWAY, code, message);
+        error.retryable = true;
+        error
+    }
+
     pub fn too_many_requests(code: &'static str, message: impl Into<String>) -> Self {
         let mut error = Self::new(StatusCode::TOO_MANY_REQUESTS, code, message);
         error.retryable = true;

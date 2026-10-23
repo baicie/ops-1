@@ -1,0 +1,299 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Capability Fabric v1
+  version: 0.1.0-draft
+  description: |
+    Versioned logical Capability contract. Providers publish a named major
+    capability; consumers call it through the Kernel/Node Gateway, never through
+    provider IPs, ports, private tables, or a forged caller header.
+    The `workloadBearer` scheme is a short-lived Kernel-signed token, not a
+    user session cookie.
+servers:
+  - url: /api/v1
+security:
+  - cookieSession: []
+paths:
+  /capabilities:
+    get:
+      operationId: listCapabilities
+      summary: List resolved capabilities visible to the caller
+      responses:
+        '200':
+          description: Resolved capability descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '../schema/capability-fabric.v1.schema.json#/$defs/CapabilityDescriptor' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /capabilities/{name}/{major}/resolve:
+    get:
+      operationId: resolveCapability
+      summary: Resolve a named major capability to a READY provider
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9.]+$' } }
+        - { name: major, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Selected provider
+          content:
+            application/json:
+              schema: { $ref: '../schema/capability-fabric.v1.schema.json#/$defs/CapabilityDescriptor' }
+        '404': { $ref: '#/components/responses/CapabilityUnavailable' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /capabilities/{name}/{major}/{path}:
+    post:
+      operationId: invokeCapability
+      summary: Invoke a capability through the Gateway (workload identity only)
+      description: |
+        Path is appended to the provider's registered API prefix. The provider
+        must verify the Kernel-signed workload token. Callers MUST send a stable
+        `Idempotency-Key` for side-effecting operations. A network timeout is
+        `UNKNOWN_OUTCOME`; the caller must query the original requestId rather
+        than create a new key.
+      security:
+        - workloadBearer: []
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string, pattern: '^[a-z][a-z0-9.]+$' } }
+        - { name: major, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: path, in: path, required: true, schema: { type: string } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/CapabilityTimeout' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Provider result }
+        '201': { description: Provider created a resource }
+        '202': { description: Accepted; receipt/run status must be polled }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/CapabilityForbidden' }
+        '404': { $ref: '#/components/responses/CapabilityUnavailable' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '408': { $ref: '#/components/responses/Timeout' }
+  /capability-grants:
+    get:
+      operationId: listCapabilityGrants
+      summary: List capability grants
+      responses:
+        '200':
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '../schema/capability-fabric.v1.schema.json#/$defs/CapabilityGrant' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createCapabilityGrant
+      summary: Grant a consumer plugin scoped access to a capability
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, major, consumerPluginId, scope]
+              properties:
+                name: { type: string, pattern: '^[a-z][a-z0-9.]+$' }
+                major: { type: integer, minimum: 1 }
+                consumerPluginId: { type: string, pattern: '^[a-z0-9][a-z0-9.-]{2,100}$' }
+                scope: { type: array, minItems: 1, maxItems: 32, items: { type: string } }
+                expiresAt: { type: string, format: date-time }
+      responses:
+        '201':
+          description: Grant created
+          content:
+            application/json:
+              schema: { $ref: '../schema/capability-fabric.v1.schema.json#/$defs/CapabilityGrant' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /capability-grants/{grantId}:
+    delete:
+      operationId: revokeCapabilityGrant
+      summary: Revoke a capability grant
+      parameters:
+        - { name: grantId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      responses:
+        '204': { description: Revoked }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /plugin-storage/{pluginId}/migrations:
+    get:
+      operationId: listPluginMigrations
+      summary: List checksum-gated plugin migrations
+      parameters:
+        - { name: pluginId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Migration records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [migrationId, version, checksum, phase, status]
+                  properties:
+                    migrationId: { type: string }
+                    version: { type: string }
+                    checksum: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+                    phase: { enum: [EXPAND, MIGRATE, CONTRACT] }
+                    status: { enum: [PENDING, APPLIED, FAILED, BLOCKED] }
+                    appliedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: applyPluginMigration
+      summary: Apply a checksum-gated migration under the plugin database role
+      description: |
+        The SQL is executed with `SET LOCAL ROLE` to the plugin's least-privilege
+        role and is rolled back on failure. CONTRACT is blocked while plugin
+        instances are still desired. This is not a general arbitrary-SQL endpoint
+        for unprivileged users.
+      parameters:
+        - { name: pluginId, in: path, required: true, schema: { type: string } }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, migrationId, phase, checksum, sql]
+              properties:
+                version: { type: string }
+                migrationId: { type: string, pattern: '^[a-z0-9][a-z0-9_-]{2,64}$' }
+                phase: { enum: [EXPAND, MIGRATE, CONTRACT] }
+                checksum: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+                sql: { type: string, minLength: 1, maxLength: 65536 }
+      responses:
+        '200':
+          description: Applied or replayed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [pluginId, migrationId, status, checksum, replay]
+                properties:
+                  pluginId: { type: string }
+                  migrationId: { type: string }
+                  status: { enum: [APPLIED, FAILED, BLOCKED] }
+                  checksum: { type: string }
+                  replay: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /plugin-storage/{pluginId}:
+    get:
+      operationId: getPluginStorage
+      summary: Get storage ownership and migration state (no secret material)
+      parameters:
+        - { name: pluginId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Storage binding status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [pluginId, schemaName, state, migrationState]
+                properties:
+                  pluginId: { type: string }
+                  schemaName: { type: string }
+                  state: { enum: [UNBOUND, READY, BLOCKED, DISABLED] }
+                  migrationState: { enum: [NONE, PENDING, APPLIED, FAILED, BLOCKED] }
+                  lastMigrationId: { type: string }
+                  lastChecksum: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: opsweave_session
+    workloadBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: OpsWeave-Workload-Token
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 8, maxLength: 128 }
+    CapabilityTimeout:
+      name: X-OpsWeave-Timeout-Ms
+      in: header
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 30000 }
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: Missing or invalid identity
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    CapabilityForbidden:
+      description: Caller has no active grant for this capability/scope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    CapabilityUnavailable:
+      description: No compatible READY provider
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Idempotency conflict or current-state conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Timeout:
+      description: Caller deadline exceeded; outcome may be UNKNOWN_OUTCOME
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, retryable]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]+$' }
+        message: { type: string }
+        requestId: { type: string }
+        retryable: { type: boolean }
+        details: { type: object }

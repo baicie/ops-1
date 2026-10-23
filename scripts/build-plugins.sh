@@ -27,7 +27,8 @@ with open(sys.argv[1], "rb") as handle:
 print("sha256:" + digest.hexdigest())
 PYHASH
 }
-NODE_BASE_IMAGE="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null || echo node:22-bookworm-slim)"
+NODE_BASE_IMAGE="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null | tr -d '\n' || true)"
+[ -n "$NODE_BASE_IMAGE" ] || NODE_BASE_IMAGE="node:22-bookworm-slim"
 verify_sha256() {
   python3 - "$1" "$2" <<'PYVERIFY'
 import hashlib, sys

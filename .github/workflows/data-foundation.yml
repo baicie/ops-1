@@ -1,0 +1,99 @@
+name: data-foundation
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/kernel/**'
+      - 'apps/node/**'
+      - 'contracts/**'
+      - 'plugins/data-catalog/**'
+      - 'plugins/data-integration/**'
+      - 'plugins/data-catalog-alt/**'
+      - 'tests/ui/**'
+      - 'scripts/**'
+      - 'tests/ci/**'
+      - 'tests/acceptance/data_foundation.sh'
+      - '.github/workflows/data-foundation.yml' 
+
+permissions:
+  contents: read
+jobs:
+  golden-path:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+      - run: RUN_BROWSER_SMOKE=1 tests/ci/data_foundation_ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: data-foundation-screenshots
+          path: artifacts/ui/data-foundation/*.png
+          if-no-files-found: warn
+  legacy-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - run: sudo apt-get update && sudo apt-get install -y maven
+      - run: pnpm install --frozen-lockfile
+      - run: |
+          docker run -d --name opsweave-legacy-registry -p 5002:5000 registry:2
+          cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
+          mkdir -p keys
+          ./target/debug/opsctl keygen --out-dir keys >/dev/null
+          make web
+          OPSWEAVE_REGISTRY=localhost:5002 scripts/build-plugins.sh
+      - name: 0.0.1 E2E
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          OPSWEAVE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
+          OPSWEAVE_SKIP_REGISTRY: '1'
+        run: |
+          RESET=1 BUILD=0 scripts/demo_up.sh
+          tests/acceptance/e2e_platform.sh

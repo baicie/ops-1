@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0",
+  "pluginId": "opsweave.data-catalog",
+  "schemaName": "plugin_opsweave_data_catalog",
+  "migrationPlanDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "retention": {"onDisable": "RETAIN", "onUninstall": "RETAIN"},
+  "migrations": [
+    {"migrationId": "0001_initial", "phase": "EXPAND", "checksum": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "sql": "CREATE TABLE datasets (id uuid PRIMARY KEY, name text NOT NULL);"}
+  ]
+}

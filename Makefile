@@ -1,4 +1,4 @@
-.PHONY: build test contract web demo-up demo-down clean
+.PHONY: build test contract web demo-up demo-data demo-down clean
 build:
 	cargo build -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
 web:
@@ -12,6 +12,9 @@ contract:
 	python3 tests/contract/validate_contracts.py
 demo-up:
 	BUILD=1 scripts/demo_up.sh
+demo-data:
+	scripts/build-data-plugins.sh
+	scripts/demo_data_up.sh
 demo-down:
 	scripts/demo_down.sh
 clean:
