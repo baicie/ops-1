@@ -52,6 +52,30 @@ pub fn build(state: AppState) -> Router {
             get(capabilities::instance_environment),
         )
         .route(
+            "/internal/v1/pipeline-jobs/{job_id}/claim",
+            post(jobs::claim_job),
+        )
+        .route(
+            "/internal/v1/pipeline-jobs/{job_id}/definition",
+            get(jobs::worker_definition),
+        )
+        .route(
+            "/internal/v1/pipeline-jobs/{job_id}/start",
+            post(jobs::start_job),
+        )
+        .route(
+            "/internal/v1/pipeline-jobs/{job_id}/heartbeat",
+            post(jobs::heartbeat),
+        )
+        .route(
+            "/internal/v1/pipeline-jobs/{job_id}/checkpoint",
+            post(jobs::checkpoint),
+        )
+        .route(
+            "/internal/v1/pipeline-jobs/{job_id}/result",
+            post(jobs::result),
+        )
+        .route(
             "/api/v1/capabilities/{name}/{major}/{*path}",
             any(capabilities::invoke),
         )
@@ -173,11 +197,6 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/api/v1/jobs", post(jobs::submit_job))
         .route("/api/v1/jobs/{job_id}", get(jobs::get_job))
-        .route("/api/v1/jobs/{job_id}/claim", post(jobs::claim_job))
-        .route("/api/v1/jobs/{job_id}/start", post(jobs::start_job))
-        .route("/api/v1/jobs/{job_id}/heartbeat", post(jobs::heartbeat))
-        .route("/api/v1/jobs/{job_id}/checkpoint", post(jobs::checkpoint))
-        .route("/api/v1/jobs/{job_id}/result", post(jobs::result))
         .route("/api/v1/jobs/{job_id}/cancel", post(jobs::cancel_job))
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(

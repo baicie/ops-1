@@ -8,6 +8,7 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)"; }
 ok() { echo "PASS  $*"; }
 bad() { echo "FAIL  $*"; exit 1; }
+source tests/acceptance/pipeline_worker_auth.sh
 PIPELINE_JSON="$(cat contracts/examples/pipeline-definition.json)"
 PIPELINE_ID="$(printf '%s' "$PIPELINE_JSON" | json "d['pipelineId']")"
 REVISION="$(printf '%s' "$PIPELINE_JSON" | json "d['revision']")"
@@ -37,42 +38,44 @@ CONFLICT_CODE="$(curl -sS -o /tmp/job-submit-conflict.json -w '%{http_code}' "${
 grep -q 'JOB_IDEMPOTENCY_CONFLICT' /tmp/job-submit-conflict.json || bad "idempotency conflict code missing"
 ok "duplicate key/different input rejected"
 
-WORKER_A='{"workerId":"worker-a","nodeId":"33333333-3333-4333-8333-333333333333","instanceId":"44444444-4444-4444-8444-444444444444","bootId":"55555555-5555-4555-8555-555555555555","version":"0.0.3"}'
-WORKER_B='{"workerId":"worker-b","nodeId":"66666666-6666-4666-8666-666666666666","instanceId":"77777777-7777-4777-8777-777777777777","bootId":"88888888-8888-4888-8888-888888888888","version":"0.0.3"}'
-CLAIM_CODE="$(curl -sS -o /tmp/job-claim-a.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_A" "$URL/api/v1/jobs/$JOB_ID/claim")"
+load_worker node-b
+WORKER_A="$W_BODY"; WORKER_A_HEADERS=("${W_HEADERS[@]}")
+CLAIM_CODE="$(curl -sS -o /tmp/job-claim-a.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_A" "$URL/internal/v1/pipeline-jobs/$JOB_ID/claim")"
 [ "$CLAIM_CODE" = "200" ] || bad "worker A claim returned $CLAIM_CODE: $(cat /tmp/job-claim-a.json)"
 LEASE_A="$(json "d['leaseId']" < /tmp/job-claim-a.json)"
 FENCE_A="$(json "d['fencingSequence']" < /tmp/job-claim-a.json)"
 [ "$FENCE_A" = "1" ] || bad "first fence is $FENCE_A"
-DUP_CLAIM_CODE="$(curl -sS -o /tmp/job-claim-dup.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_B" "$URL/api/v1/jobs/$JOB_ID/claim")"
+DUP_CLAIM_CODE="$(curl -sS -o /tmp/job-claim-dup.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_A" "$URL/internal/v1/pipeline-jobs/$JOB_ID/claim")"
 [ "$DUP_CLAIM_CODE" = "409" ] || bad "duplicate claim returned $DUP_CLAIM_CODE"
 grep -q 'JOB_ALREADY_CLAIMED' /tmp/job-claim-dup.json || bad "duplicate claim code missing"
-START_CODE="$(curl -sS -o /tmp/job-start.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A}" "$URL/api/v1/jobs/$JOB_ID/start")"
+START_CODE="$(curl -sS -o /tmp/job-start.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/start")"
 [ "$START_CODE" = "200" ] || bad "start returned $START_CODE: $(cat /tmp/job-start.json)"
-HB_CODE="$(curl -sS -o /tmp/job-heartbeat.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A}" "$URL/api/v1/jobs/$JOB_ID/heartbeat")"
+HB_CODE="$(curl -sS -o /tmp/job-heartbeat.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/heartbeat")"
 [ "$HB_CODE" = "200" ] || bad "heartbeat returned $HB_CODE"
-CP_CODE="$(curl -sS -o /tmp/job-checkpoint.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"sequence\":1,\"inputCursor\":\"batch:1\",\"stateDigest\":\"sha256:$(printf 'a%.0s' {1..64})\",\"state\":{}}" "$URL/api/v1/jobs/$JOB_ID/checkpoint")"
+CP_CODE="$(curl -sS -o /tmp/job-checkpoint.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"sequence\":1,\"inputCursor\":\"batch:1\",\"stateDigest\":\"sha256:$(printf 'a%.0s' {1..64})\",\"state\":{}}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/checkpoint")"
 [ "$CP_CODE" = "200" ] || bad "checkpoint returned $CP_CODE: $(cat /tmp/job-checkpoint.json)"
 ok "claim/start/heartbeat/checkpoint passed"
 
 # Forcibly expire A's lease in PostgreSQL, then let B take over with a higher fence.
 psql "$DB" -qAt -c "UPDATE kernel.pipeline_job_leases SET expires_at=now()-interval '1 second' WHERE lease_id='$LEASE_A';" >/dev/null
-CLAIM_B_CODE="$(curl -sS -o /tmp/job-claim-b.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_B" "$URL/api/v1/jobs/$JOB_ID/claim")"
+load_worker node-a
+WORKER_B="$W_BODY"; WORKER_B_HEADERS=("${W_HEADERS[@]}")
+CLAIM_B_CODE="$(curl -sS -o /tmp/job-claim-b.json -w '%{http_code}' "${WORKER_B_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_B" "$URL/internal/v1/pipeline-jobs/$JOB_ID/claim")"
 [ "$CLAIM_B_CODE" = "200" ] || bad "takeover claim returned $CLAIM_B_CODE: $(cat /tmp/job-claim-b.json)"
 LEASE_B="$(json "d['leaseId']" < /tmp/job-claim-b.json)"
 FENCE_B="$(json "d['fencingSequence']" < /tmp/job-claim-b.json)"
 [ "$FENCE_B" -gt "$FENCE_A" ] || bad "takeover fence $FENCE_B is not greater than $FENCE_A"
-STALE_CODE="$(curl -sS -o /tmp/job-stale-result.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"status\":\"SUCCEEDED\",\"output\":{}}" "$URL/api/v1/jobs/$JOB_ID/result")"
+STALE_CODE="$(curl -sS -o /tmp/job-stale-result.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"status\":\"FAILED\",\"output\":{}}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/result")"
 [ "$STALE_CODE" = "409" ] || bad "stale worker result returned $STALE_CODE"
 grep -q 'STALE_FENCE' /tmp/job-stale-result.json || bad "stale fence code missing"
-STALE_CP_CODE="$(curl -sS -o /tmp/job-stale-cp.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"sequence\":2,\"stateDigest\":\"sha256:$(printf 'b%.0s' {1..64})\",\"state\":{}}" "$URL/api/v1/jobs/$JOB_ID/checkpoint")"
+STALE_CP_CODE="$(curl -sS -o /tmp/job-stale-cp.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"sequence\":2,\"stateDigest\":\"sha256:$(printf 'b%.0s' {1..64})\",\"state\":{}}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/checkpoint")"
 [ "$STALE_CP_CODE" = "409" ] || bad "stale worker checkpoint returned $STALE_CP_CODE"
 ok "lease expiry/takeover and old-fence rejection passed"
 
-RESULT_CODE="$(curl -sS -o /tmp/job-result-b.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_B\",\"fencingSequence\":$FENCE_B,\"status\":\"SUCCEEDED\",\"output\":{\"accepted\":1},\"resultDigest\":\"sha256:$(printf 'c%.0s' {1..64})\"}" "$URL/api/v1/jobs/$JOB_ID/result")"
+RESULT_CODE="$(curl -sS -o /tmp/job-result-b.json -w '%{http_code}' "${WORKER_B_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_B\",\"fencingSequence\":$FENCE_B,\"status\":\"FAILED\",\"output\":{},\"errorCode\":\"WORKER_TEST_COMPLETE\",\"resultDigest\":\"sha256:$(printf 'c%.0s' {1..64})\"}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/result")"
 [ "$RESULT_CODE" = "200" ] || bad "new worker result returned $RESULT_CODE: $(cat /tmp/job-result-b.json)"
 FINAL="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/jobs/$JOB_ID")"
-[ "$(json "d['status']" <<< "$FINAL")" = "SUCCEEDED" ] || bad "job is not SUCCEEDED: $FINAL"
+[ "$(json "d['status']" <<< "$FINAL")" = "FAILED" ] || bad "job is not FAILED: $FINAL"
 COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_results WHERE job_id='$JOB_ID';")"
 [ "$COUNT" = "1" ] || bad "expected exactly one result, got $COUNT"
 ok "fenced result persisted exactly once"

@@ -11,7 +11,7 @@ use crate::pipeline::{
 };
 use crate::state::AppState;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,100 @@ pub struct WorkerIdentity {
     pub boot_id: Uuid,
     #[serde(default)]
     pub version: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkerContext {
+    pub node_id: Uuid,
+    pub instance_id: Uuid,
+    pub boot_id: Uuid,
+    pub worker_id: String,
+}
+
+fn worker_header(headers: &HeaderMap, name: &str) -> AppResult<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(str::to_string)
+        .ok_or_else(|| AppError::unauthorized(format!("missing {name}")))
+}
+
+async fn authenticate_worker_headers(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> AppResult<WorkerContext> {
+    let node_id = Uuid::parse_str(&worker_header(headers, "x-opsweave-node-id")?)
+        .map_err(|_| AppError::unauthorized("invalid node identity"))?;
+    let instance_id = Uuid::parse_str(&worker_header(headers, "x-opsweave-instance-id")?)
+        .map_err(|_| AppError::unauthorized("invalid instance identity"))?;
+    let boot_id = Uuid::parse_str(&worker_header(headers, "x-opsweave-boot-id")?)
+        .map_err(|_| AppError::unauthorized("invalid boot identity"))?;
+    let worker_id = worker_header(headers, "x-opsweave-worker-id")?;
+    let generation: i64 = worker_header(headers, "x-opsweave-node-generation")?
+        .parse()
+        .map_err(|_| AppError::unauthorized("invalid node generation"))?;
+    let expected_worker = format!("node:{node_id}:instance:{instance_id}:boot:{boot_id}");
+    if worker_id != expected_worker {
+        return Err(AppError::forbidden(
+            "workerId is not bound to node/instance",
+        ));
+    }
+    let node = crate::nodes::authenticate_node(state, node_id, headers).await?;
+    if node.revoked_at.is_some() || node.status != "READY" {
+        return Err(AppError::forbidden("node is not READY"));
+    }
+    if node.generation != generation {
+        return Err(AppError::conflict(
+            "STALE_NODE_GENERATION",
+            "node generation does not match",
+        ));
+    }
+    let instance: Option<(String, String)> = sqlx::query_as(
+        "SELECT state,desired_action FROM kernel.plugin_instances WHERE id=$1 AND node_id=$2",
+    )
+    .bind(instance_id)
+    .bind(node_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((instance_state, desired_action)) = instance else {
+        return Err(AppError::forbidden("instance is not assigned to this node"));
+    };
+    if instance_state != "READY" || desired_action != "START" {
+        return Err(AppError::forbidden("instance is not READY"));
+    }
+    Ok(WorkerContext {
+        node_id,
+        instance_id,
+        boot_id,
+        worker_id,
+    })
+}
+
+async fn authenticate_worker(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &WorkerIdentity,
+) -> AppResult<WorkerContext> {
+    let trusted = authenticate_worker_headers(state, headers).await?;
+    if body.node_id != trusted.node_id
+        || body.instance_id != trusted.instance_id
+        || body.boot_id != trusted.boot_id
+        || body.worker_id != trusted.worker_id
+    {
+        return Err(AppError::forbidden(
+            "worker declaration does not match trusted identity",
+        ));
+    }
+    Ok(trusted)
+}
+
+async fn authenticate_worker_header_only(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> AppResult<WorkerContext> {
+    authenticate_worker_headers(state, headers).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,6 +229,33 @@ async fn validate_and_plan(
         .map_err(|error| AppError::bad_request(format!("{}: {}", error.code, error.message)))
 }
 
+async fn load_revision(
+    state: &AppState,
+    pipeline_id: &str,
+    revision: u32,
+) -> AppResult<Option<PipelineResponse>> {
+    let row = sqlx::query(
+        "SELECT digest,definition,plan FROM kernel.pipeline_revisions WHERE pipeline_id=$1 AND revision=$2",
+    )
+    .bind(pipeline_id)
+    .bind(revision as i32)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    let definition: PipelineDefinition = serde_json::from_value(row.get("definition"))
+        .map_err(|error| AppError::internal(error.to_string()))?;
+    let plan: PipelineExecutionPlan = serde_json::from_value(row.get("plan"))
+        .map_err(|error| AppError::internal(error.to_string()))?;
+    Ok(Some(PipelineResponse {
+        pipeline_id: definition.pipeline_id.clone(),
+        revision: definition.revision,
+        digest: row.get("digest"),
+        status: definition.status.clone(),
+        definition,
+        plan,
+    }))
+}
+
 pub async fn create_pipeline(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -145,6 +266,17 @@ pub async fn create_pipeline(
     if definition.status != "DRAFT" && definition.status != "PUBLISHED" {
         return Err(AppError::bad_request(
             "pipeline status must be DRAFT or PUBLISHED",
+        ));
+    }
+    if let Some(existing) =
+        load_revision(&state, &definition.pipeline_id, definition.revision).await?
+    {
+        if existing.digest == definition.digest {
+            return Ok(Json(existing));
+        }
+        return Err(AppError::conflict(
+            "PIPELINE_REVISION_IMMUTABLE",
+            "revision already exists with a different digest",
         ));
     }
     let definition_value = serde_json::to_value(&definition)
@@ -159,8 +291,7 @@ pub async fn create_pipeline(
     .await?;
     sqlx::query(
         "INSERT INTO kernel.pipeline_revisions (pipeline_id,revision,digest,definition,plan,status)
-         VALUES ($1,$2,$3,$4,$5,'PUBLISHED')
-         ON CONFLICT (pipeline_id,revision) DO NOTHING",
+         VALUES ($1,$2,$3,$4,$5,'PUBLISHED')",
     )
     .bind(&definition.pipeline_id)
     .bind(definition.revision as i32)
@@ -214,6 +345,15 @@ pub async fn publish_revision(
     if definition.status != "PUBLISHED" {
         return Err(AppError::bad_request(
             "published revision must have status PUBLISHED",
+        ));
+    }
+    if let Some(existing) = load_revision(&state, &pipeline_id, definition.revision).await? {
+        if existing.digest == definition.digest {
+            return Ok(Json(existing));
+        }
+        return Err(AppError::conflict(
+            "PIPELINE_REVISION_IMMUTABLE",
+            "revision already exists with a different digest",
         ));
     }
     let definition_value = serde_json::to_value(&definition)
@@ -404,16 +544,54 @@ pub async fn get_job(
     Ok(Json(fetch_job(&state, job_id).await?))
 }
 
+pub async fn worker_definition(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<Uuid>,
+) -> AppResult<Json<Value>> {
+    let trusted = authenticate_worker_header_only(&state, &headers).await?;
+    let row = sqlx::query(
+        "SELECT j.pipeline_id,j.pipeline_revision,j.current_lease_id,j.input,r.definition,r.plan
+         FROM kernel.pipeline_jobs j
+         JOIN kernel.pipeline_revisions r ON r.pipeline_id=j.pipeline_id AND r.revision=j.pipeline_revision
+         WHERE j.job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::not_found("job or pinned pipeline revision not found"))?;
+    let lease_id: Option<Uuid> = row.get("current_lease_id");
+    let lease_id = lease_id
+        .ok_or_else(|| AppError::conflict("JOB_NOT_CLAIMED", "job has no current lease"))?;
+    let lease_worker: String = sqlx::query_scalar(
+        "SELECT worker_id FROM kernel.pipeline_job_leases WHERE lease_id=$1 AND job_id=$2",
+    )
+    .bind(lease_id)
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::conflict("LEASE_NOT_ACTIVE", "lease is not active"))?;
+    if lease_worker != trusted.worker_id {
+        return Err(AppError::forbidden("lease belongs to a different worker"));
+    }
+    Ok(Json(json!({
+        "jobId": job_id,
+        "pipelineId": row.get::<String, _>("pipeline_id"),
+        "pipelineRevision": row.get::<i32, _>("pipeline_revision"),
+        "leaseId": lease_id,
+        "input": row.get::<Value, _>("input"),
+        "definition": row.get::<Value, _>("definition"),
+        "plan": row.get::<Value, _>("plan")
+    })))
+}
+
 pub async fn claim_job(
     State(state): State<AppState>,
-    auth: AuthUser,
+    headers: HeaderMap,
     Path(job_id): Path<Uuid>,
     Json(worker): Json<WorkerIdentity>,
 ) -> AppResult<Json<ClaimResponse>> {
-    auth.require_operator()?;
-    if worker.worker_id.trim().is_empty() || worker.worker_id.len() > 128 {
-        return Err(AppError::bad_request("workerId is invalid"));
-    }
+    let trusted = authenticate_worker(&state, &headers, &worker).await?;
     let mut tx = state.db.begin().await?;
     let row = sqlx::query(
         "SELECT status,current_fence,current_lease_id,attempts,max_attempts FROM kernel.pipeline_jobs WHERE job_id=$1 FOR UPDATE",
@@ -477,10 +655,10 @@ pub async fn claim_job(
     .bind(lease_id)
     .bind(job_id)
     .bind(attempt)
-    .bind(&worker.worker_id)
-    .bind(worker.node_id)
-    .bind(worker.instance_id)
-    .bind(worker.boot_id)
+    .bind(&trusted.worker_id)
+    .bind(trusted.node_id)
+    .bind(trusted.instance_id)
+    .bind(trusted.boot_id)
     .bind(fence)
     .bind(expires_at)
     .execute(&mut *tx)
@@ -493,10 +671,10 @@ pub async fn claim_job(
     )
     .bind(job_id)
     .bind(attempt)
-    .bind(&worker.worker_id)
-    .bind(worker.node_id)
-    .bind(worker.instance_id)
-    .bind(worker.boot_id)
+    .bind(&trusted.worker_id)
+    .bind(trusted.node_id)
+    .bind(trusted.instance_id)
+    .bind(trusted.boot_id)
     .bind(lease_id)
     .bind(fence)
     .execute(&mut *tx)
@@ -512,7 +690,7 @@ pub async fn claim_job(
         .bind(job_id)
         .bind(&status)
         .bind(fence)
-        .bind(&worker.worker_id)
+        .bind(&trusted.worker_id)
         .bind(json!({"workerVersion": worker.version}))
         .execute(&mut *tx)
         .await?;
@@ -524,17 +702,18 @@ pub async fn claim_job(
         attempt_number: attempt,
         fencing_sequence: fence,
         expires_at,
-        worker_id: worker.worker_id,
+        worker_id: trusted.worker_id,
     }))
 }
 
 async fn authorize_lease(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     job_id: Uuid,
+    worker_id: &str,
     request: &FenceRequest,
 ) -> AppResult<(String, i64)> {
     let row = sqlx::query(
-        "SELECT j.status,j.current_fence,l.status AS lease_status,l.expires_at FROM kernel.pipeline_jobs j JOIN kernel.pipeline_job_leases l ON l.lease_id=$2 AND l.job_id=j.job_id WHERE j.job_id=$1 FOR UPDATE OF j",
+        "SELECT j.status,j.current_fence,l.status AS lease_status,l.expires_at,l.worker_id AS lease_worker FROM kernel.pipeline_jobs j JOIN kernel.pipeline_job_leases l ON l.lease_id=$2 AND l.job_id=j.job_id WHERE j.job_id=$1 FOR UPDATE OF j",
     )
     .bind(job_id)
     .bind(request.lease_id)
@@ -545,6 +724,10 @@ async fn authorize_lease(
     let current_fence: i64 = row.get("current_fence");
     let lease_status: String = row.get("lease_status");
     let expires_at: DateTime<Utc> = row.get("expires_at");
+    let lease_worker: String = row.get("lease_worker");
+    if lease_worker != worker_id {
+        return Err(AppError::forbidden("lease belongs to a different worker"));
+    }
     if request.fencing_sequence != current_fence {
         return Err(AppError::conflict(
             "STALE_FENCE",
@@ -565,13 +748,13 @@ async fn authorize_lease(
 
 pub async fn start_job(
     State(state): State<AppState>,
-    auth: AuthUser,
+    headers: HeaderMap,
     Path(job_id): Path<Uuid>,
     Json(request): Json<FenceRequest>,
 ) -> AppResult<Json<JobView>> {
-    auth.require_operator()?;
+    let trusted = authenticate_worker_header_only(&state, &headers).await?;
     let mut tx = state.db.begin().await?;
-    let (status, _) = authorize_lease(&mut tx, job_id, &request).await?;
+    let (status, _) = authorize_lease(&mut tx, job_id, &trusted.worker_id, &request).await?;
     if status != "CLAIMED" && status != "RUNNING" {
         return Err(AppError::conflict(
             "JOB_NOT_STARTABLE",
@@ -598,13 +781,13 @@ pub async fn start_job(
 
 pub async fn heartbeat(
     State(state): State<AppState>,
-    auth: AuthUser,
+    headers: HeaderMap,
     Path(job_id): Path<Uuid>,
     Json(request): Json<FenceRequest>,
 ) -> AppResult<Json<ClaimResponse>> {
-    auth.require_operator()?;
+    let trusted = authenticate_worker_header_only(&state, &headers).await?;
     let mut tx = state.db.begin().await?;
-    let (_, fence) = authorize_lease(&mut tx, job_id, &request).await?;
+    let (_, fence) = authorize_lease(&mut tx, job_id, &trusted.worker_id, &request).await?;
     let expires_at = Utc::now() + Duration::seconds(60);
     sqlx::query(
         "UPDATE kernel.pipeline_job_leases SET heartbeat_at=now(),expires_at=$2 WHERE lease_id=$1",
@@ -631,11 +814,11 @@ pub async fn heartbeat(
 
 pub async fn checkpoint(
     State(state): State<AppState>,
-    auth: AuthUser,
+    headers: HeaderMap,
     Path(job_id): Path<Uuid>,
     Json(request): Json<CheckpointRequest>,
 ) -> AppResult<Json<Value>> {
-    auth.require_operator()?;
+    let trusted = authenticate_worker_header_only(&state, &headers).await?;
     if request.sequence < 1 || request.state_digest.len() > 71 {
         return Err(AppError::bad_request("invalid checkpoint"));
     }
@@ -643,6 +826,7 @@ pub async fn checkpoint(
     let (_, fence) = authorize_lease(
         &mut tx,
         job_id,
+        &trusted.worker_id,
         &FenceRequest {
             lease_id: request.lease_id,
             fencing_sequence: request.fencing_sequence,
@@ -670,11 +854,11 @@ pub async fn checkpoint(
 
 pub async fn result(
     State(state): State<AppState>,
-    auth: AuthUser,
+    headers: HeaderMap,
     Path(job_id): Path<Uuid>,
     Json(request): Json<ResultRequest>,
 ) -> AppResult<Json<JobView>> {
-    auth.require_operator()?;
+    let trusted = authenticate_worker_header_only(&state, &headers).await?;
     let terminal = match request.status.as_str() {
         "SUCCEEDED" | "FAILED" | "CANCELLED" => request.status.as_str(),
         _ => return Err(AppError::bad_request("result status must be terminal")),
@@ -683,6 +867,7 @@ pub async fn result(
     let (current_status, fence) = authorize_lease(
         &mut tx,
         job_id,
+        &trusted.worker_id,
         &FenceRequest {
             lease_id: request.lease_id,
             fencing_sequence: request.fencing_sequence,
@@ -718,6 +903,23 @@ pub async fn result(
     sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,fencing_sequence,details) VALUES ($1,'JOB_COMPLETED',$2,$3,$4,$5)")
         .bind(job_id).bind(current_status).bind(terminal).bind(fence).bind(json!({"errorCode": request.error_code})).execute(&mut *tx).await?;
     tx.commit().await?;
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.job_completed",
+        "NODE",
+        &trusted.worker_id,
+        "job",
+        &job_id.to_string(),
+        "complete",
+        if terminal == "SUCCEEDED" {
+            "ACCEPTED"
+        } else {
+            "REJECTED"
+        },
+        json!({"status": terminal, "fencingSequence": fence, "errorCode": request.error_code}),
+        None,
+    )
+    .await;
     Ok(Json(fetch_job(&state, job_id).await?))
 }
 

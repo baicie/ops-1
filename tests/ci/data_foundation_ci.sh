@@ -16,7 +16,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== build binaries and frontends"
-cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
+cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl -p opsweave-pipeline-worker
 pnpm install --frozen-lockfile
 pnpm --filter @opsweave/platform-web build >/dev/null
 mkdir -p keys
@@ -99,6 +99,7 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 tests/acceptance/data_token_security.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_jobs.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/catalog_fenced_sink.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"

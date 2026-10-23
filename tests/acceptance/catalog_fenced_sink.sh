@@ -8,6 +8,7 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)"; }
 ok() { echo "PASS  $*"; }
 bad() { echo "FAIL  $*"; exit 1; }
+source tests/acceptance/pipeline_worker_auth.sh
 CAT="$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog"
 
 PIPELINE_JSON="$(cat contracts/examples/pipeline-definition.json)"
@@ -20,9 +21,9 @@ DATASET_ID="$(printf '%s' "$DATASET" | json "d['datasetId']")"
 JOB_BODY="{\"pipelineId\":\"$PIPELINE_ID\",\"pipelineRevision\":$REVISION,\"input\":{\"source\":\"http://172.17.0.1:18090/data-hosts.json\"},\"maxAttempts\":3,\"timeoutSeconds\":300}"
 JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H 'Idempotency-Key: fenced-job-0001' --data-binary "$JOB_BODY" "$URL/api/v1/jobs")"
 JOB_ID="$(printf '%s' "$JOB" | json "d['jobId']")"
-WORKER_A='{"workerId":"fenced-worker-a","nodeId":"33333333-3333-4333-8333-333333333333","instanceId":"44444444-4444-4444-8444-444444444444","bootId":"55555555-5555-4555-8555-555555555555","version":"0.0.3"}'
-WORKER_B='{"workerId":"fenced-worker-b","nodeId":"66666666-6666-4666-8666-666666666666","instanceId":"77777777-7777-4777-8777-777777777777","bootId":"88888888-8888-4888-8888-888888888888","version":"0.0.3"}'
-CLAIM_A="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_A" "$URL/api/v1/jobs/$JOB_ID/claim")"
+load_worker node-a
+WORKER_A="$W_BODY"; WORKER_A_HEADERS=("${W_HEADERS[@]}")
+CLAIM_A="$(curl -fsS "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_A" "$URL/internal/v1/pipeline-jobs/$JOB_ID/claim")"
 LEASE_A="$(printf '%s' "$CLAIM_A" | json "d['leaseId']")"
 FENCE_A="$(printf '%s' "$CLAIM_A" | json "d['fencingSequence']")"
 
@@ -53,7 +54,9 @@ COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.c
 
 # Force a takeover by expiring A's lease.
 psql "$DB" -qAt -c "UPDATE kernel.pipeline_job_leases SET expires_at=now()-interval '1 second' WHERE lease_id='$LEASE_A';" >/dev/null
-CLAIM_B="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_B" "$URL/api/v1/jobs/$JOB_ID/claim")"
+load_worker node-b
+WORKER_B="$W_BODY"; WORKER_B_HEADERS=("${W_HEADERS[@]}")
+CLAIM_B="$(curl -fsS "${WORKER_B_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_B" "$URL/internal/v1/pipeline-jobs/$JOB_ID/claim")"
 LEASE_B="$(printf '%s' "$CLAIM_B" | json "d['leaseId']")"
 FENCE_B="$(printf '%s' "$CLAIM_B" | json "d['fencingSequence']")"
 [ "$FENCE_B" -gt "$FENCE_A" ] || bad "takeover fence did not increase"

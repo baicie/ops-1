@@ -299,7 +299,8 @@ async function handle(req, res) {
     if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
     const body = await readJson(req);
     const fields = validateFields(body.fields);
-    const id = crypto.randomUUID();
+    const id = typeof body.datasetId === 'string' ? body.datasetId : crypto.randomUUID();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return fail(res, 400, 'INVALID_REQUEST', 'datasetId must be a UUID', requestId);
     const digestValue = schemaDigest(fields);
     const revision = 1;
     const client = await pool.connect();
@@ -415,8 +416,8 @@ async function handle(req, res) {
         // The function takes the same pipeline_jobs row lock as Claim. It is the
         // authoritative fence check and remains held until this transaction commits.
         const authority = await client.query(
-          'SELECT authorized,reason,pipeline_id,pipeline_revision FROM kernel.fence_authorize($1,$2,$3)',
-          [fence.jobId, fence.leaseId, fence.fencingSequence],
+          'SELECT authorized,reason,pipeline_id,pipeline_revision FROM kernel.fence_authorize_effect($1,$2,$3,$4,$5,$6)',
+          [fence.jobId, fence.leaseId, fence.fencingSequence, body.sinkNodeId, datasetId, body.schemaRevision],
         );
         const allowed = authority.rows[0];
         if (!allowed || allowed.authorized !== true) {

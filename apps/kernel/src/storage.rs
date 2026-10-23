@@ -136,15 +136,20 @@ pub async fn provision_binding(state: &AppState, plugin_id: &str) -> AppResult<S
                 tracing::error!(plugin = %plugin_id, error = %error, "grant kernel schema usage failed");
                 AppError::internal("could not grant fence authorization")
             })?;
-        sqlx::query(&format!(
-            "GRANT EXECUTE ON FUNCTION kernel.fence_authorize(uuid, uuid, bigint) TO \"{role_name}\""
-        ))
-        .execute(&state.db)
-        .await
-        .map_err(|error| {
-            tracing::error!(plugin = %plugin_id, error = %error, "grant fence function failed");
-            AppError::internal("could not grant fence authorization")
-        })?;
+        for grant in [
+            "GRANT EXECUTE ON FUNCTION kernel.fence_authorize(uuid, uuid, bigint)".to_string(),
+            "GRANT EXECUTE ON FUNCTION kernel.fence_authorize_effect(uuid, uuid, bigint, text, uuid, integer)".to_string(),
+        ] {
+            sqlx::query(&format!(
+                "{grant} TO \"{role_name}\""
+            ))
+            .execute(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(plugin = %plugin_id, error = %error, "grant fence function failed");
+                AppError::internal("could not grant fence authorization")
+            })?;
+        }
     }
     let row = sqlx::query_as::<_, StorageBindingRow>(
         r#"
