@@ -408,7 +408,7 @@ async function handle(req, res) {
         if (error) errors.push({ recordIndex: index, code: 'VALIDATION_FAILED', message: error });
         else acceptedRecords.push(record);
       });
-      const status = acceptedRecords.length === 0 ? 'REJECTED' : errors.length ? 'PARTIAL' : 'ACCEPTED';
+      const status = acceptedRecords.length === 0 ? 'REJECTED' : 'COMMITTED';
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
