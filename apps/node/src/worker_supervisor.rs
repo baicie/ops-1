@@ -50,6 +50,9 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
             if let Ok(allowlist) = std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST") {
                 command.env("OPSWEAVE_WORKER_SOURCE_ALLOWLIST", allowlist);
             }
+            if let Ok(delay) = std::env::var("OPSWEAVE_WORKER_BATCH_DELAY_MS") {
+                command.env("OPSWEAVE_WORKER_BATCH_DELAY_MS", delay);
+            }
             let started = Instant::now();
             let mut child = match command.spawn() {
                 Ok(child) => child,
