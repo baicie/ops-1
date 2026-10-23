@@ -8,7 +8,7 @@ use base64::Engine;
 use ed25519_dalek::{Signature, VerifyingKey};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -17,6 +17,7 @@ pub const REGISTRY_SCHEMA: &str = "pipeline-registry.opsweave.io/v1";
 pub const MAX_NODES: usize = 64;
 pub const MAX_EDGES: usize = 128;
 pub const MAX_RECORDS: usize = 10_000;
+#[allow(dead_code)]
 pub const MAX_CHECKPOINT_BYTES: usize = 1024 * 1024;
 
 const REGISTRY_JSON: &str = include_str!("../../../contracts/examples/node-registry.json");
@@ -159,6 +160,7 @@ pub struct SchemaCatalog {
     pub datasets: Vec<SchemaDataset>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidationIssue {
@@ -168,6 +170,7 @@ pub struct ValidationIssue {
     pub port: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidationResult {
@@ -258,6 +261,7 @@ pub fn digest_without_field(value: &Value, field: &str) -> String {
     digest_value(&copy)
 }
 
+#[allow(dead_code)]
 pub fn effect_id(
     job_id: &str,
     pipeline_id: &str,
@@ -338,6 +342,12 @@ fn verify_registry_signature(
 pub fn trusted_registry() -> Result<(NodeRegistry, TrustedRegistryKeys), PipelineError> {
     let registry: NodeRegistry = serde_json::from_str(REGISTRY_JSON)
         .map_err(|error| PipelineError::new("REGISTRY_INVALID", error.to_string()))?;
+    if registry.schema_version != REGISTRY_SCHEMA {
+        return Err(PipelineError::new(
+            "REGISTRY_INVALID",
+            "unsupported registry schema version",
+        ));
+    }
     let keys: TrustedRegistryKeys = serde_json::from_str(REGISTRY_KEYS_JSON)
         .map_err(|error| PipelineError::new("REGISTRY_INVALID", error.to_string()))?;
     let registry_value = serde_json::to_value(&registry.entries)

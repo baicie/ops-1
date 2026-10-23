@@ -128,6 +128,14 @@ pub async fn provision_binding(state: &AppState, plugin_id: &str) -> AppResult<S
         })?;
     }
     if plugin_id == "opsweave.data-catalog" {
+        let grant_usage = format!("GRANT USAGE ON SCHEMA kernel TO \"{role_name}\"");
+        sqlx::query(&grant_usage)
+            .execute(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(plugin = %plugin_id, error = %error, "grant kernel schema usage failed");
+                AppError::internal("could not grant fence authorization")
+            })?;
         sqlx::query(&format!(
             "GRANT EXECUTE ON FUNCTION kernel.fence_authorize(uuid, uuid, bigint) TO \"{role_name}\""
         ))

@@ -6,8 +6,8 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::pipeline::{
-    canonical_json, digest_without_field, schema_catalog, trusted_registry, validate_pipeline,
-    PipelineDefinition, PipelineExecutionPlan, ValidationIssue,
+    digest_without_field, schema_catalog, trusted_registry, validate_pipeline, PipelineDefinition,
+    PipelineExecutionPlan,
 };
 use crate::state::AppState;
 use axum::extract::{Path, State};
@@ -133,10 +133,6 @@ async fn validate_and_plan(
         .map_err(|error| AppError::bad_request(format!("{}: {}", error.code, error.message)))?;
     validate_pipeline(definition, &registry, &catalog)
         .map_err(|error| AppError::bad_request(format!("{}: {}", error.code, error.message)))
-}
-
-fn validation_details(issues: &[ValidationIssue]) -> Value {
-    json!(issues)
 }
 
 pub async fn create_pipeline(
@@ -512,13 +508,15 @@ pub async fn claim_job(
         .bind(attempt)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,fencing_sequence,worker_id) VALUES ($1,'JOB_CLAIMED',$2,'CLAIMED',$3,$4)")
+    sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,fencing_sequence,worker_id,details) VALUES ($1,'JOB_CLAIMED',$2,'CLAIMED',$3,$4,$5)")
         .bind(job_id)
         .bind(&status)
         .bind(fence)
         .bind(&worker.worker_id)
+        .bind(json!({"workerVersion": worker.version}))
         .execute(&mut *tx)
         .await?;
+    let _ = worker.version.as_str();
     tx.commit().await?;
     Ok(Json(ClaimResponse {
         lease_id,
