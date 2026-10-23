@@ -80,6 +80,11 @@ CONFLICT_CODE="$(curl -sS -o /tmp/snapshot-conflict.json -w '%{http_code}' "${WO
 GET_CODE="$(curl -sS -o /tmp/snapshot-get.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
 [ "$GET_CODE" = "200" ] || bad "snapshot get returned $GET_CODE"
 ok "snapshot integrity rejects forged digest/length and pins content"
+psql "$DB" -qAt -c "UPDATE kernel.pipeline_job_snapshots SET source='[{\"id\":\"tampered\",\"name\":\"tampered\"}]'::jsonb WHERE job_id='$JOB_ID';" >/dev/null
+CORRUPT_CODE="$(curl -sS -o /tmp/snapshot-corrupt.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
+[ "$CORRUPT_CODE" = "500" ] || bad "corrupted snapshot read returned $CORRUPT_CODE"
+grep -q 'SNAPSHOT_CORRUPT' /tmp/snapshot-corrupt.json || bad "snapshot corruption code missing"
+ok "tampered snapshot content fails closed"
 
 # Forcibly expire A's lease in PostgreSQL, then let B take over with a higher fence.
 psql "$DB" -qAt -c "UPDATE kernel.pipeline_job_leases SET expires_at=now()-interval '1 second' WHERE lease_id='$LEASE_A';" >/dev/null
