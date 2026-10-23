@@ -34,7 +34,7 @@ The test is a contract/semantic test only. It **does not** execute a pipeline, d
 
 ## Gate reason
 
-The roadmap requires 0.0.2 to pass and enter `main` before 0.0.3 implementation begins. PR #1 is currently Draft/Open at `48ab0b4` (the 0.0.2 review-fix work is on `feat/0.0.2-data-foundation`). Per the explicit instruction, 0.0.3 runtime implementation is **not** being mixed into PR #1.
+The roadmap requires 0.0.2 to pass and enter `main` before 0.0.3 implementation begins. PR #1 is currently Draft/Open at `f207b75` (the 0.0.2 review-fix work is on `feat/0.0.2-data-foundation`). Per the explicit instruction, 0.0.3 runtime implementation is **not** being mixed into PR #1.
 
 ## Required next steps after gate opens
 
