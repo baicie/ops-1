@@ -173,6 +173,15 @@ def validate_pipeline(pipeline: dict, registry: dict, schema_catalog: dict, trus
 
     incoming: dict[tuple[str, str], int] = defaultdict(int)
     outgoing: dict[tuple[str, str], int] = defaultdict(int)
+    sources = [node for node in nodes if not node["inputs"]]
+    sinks = [node for node in nodes if not node["outputs"]]
+    if len(sources) != 1 or len(sinks) != 1 or len(edges) != len(nodes) - 1:
+        errors.append("TOPOLOGY_NOT_SUPPORTED")
+    for node in nodes:
+        if node["inputs"] and len(node["inputs"]) != 1:
+            errors.append("TOPOLOGY_NOT_SUPPORTED")
+        if node["outputs"] and len(node["outputs"]) != 1:
+            errors.append("TOPOLOGY_NOT_SUPPORTED")
     for edge in edges:
         source = node_by_id.get(edge["fromNode"])
         target = node_by_id.get(edge["toNode"])

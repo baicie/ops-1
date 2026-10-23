@@ -203,6 +203,27 @@ pub struct CheckpointRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SnapshotRequest {
+    pub lease_id: Uuid,
+    pub fencing_sequence: i64,
+    pub source_digest: String,
+    pub source_length: i64,
+    pub source: Value,
+    pub etag: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotResponse {
+    pub source_digest: String,
+    pub source_length: i64,
+    pub source: Value,
+    pub etag: Option<String>,
+    pub fetched_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResultRequest {
     pub lease_id: Uuid,
     pub fencing_sequence: i64,
@@ -544,6 +565,122 @@ pub async fn get_job(
     Ok(Json(fetch_job(&state, job_id).await?))
 }
 
+pub async fn get_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<Uuid>,
+) -> AppResult<Json<SnapshotResponse>> {
+    let trusted = authenticate_worker_header_only(&state, &headers).await?;
+    let row = sqlx::query(
+        "SELECT source_digest,source_length,source,etag,fetched_at FROM kernel.pipeline_job_snapshots WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "SNAPSHOT_NOT_FOUND", "job snapshot not found"))?;
+    let lease_worker: Option<String> = sqlx::query_scalar(
+        "SELECT worker_id FROM kernel.pipeline_job_leases WHERE lease_id=(SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id=$1)",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?;
+    if lease_worker.as_deref() != Some(trusted.worker_id.as_str()) {
+        return Err(AppError::forbidden("lease belongs to a different worker"));
+    }
+    Ok(Json(SnapshotResponse {
+        source_digest: row.get("source_digest"),
+        source_length: row.get("source_length"),
+        source: row.get("source"),
+        etag: row.get("etag"),
+        fetched_at: row.get("fetched_at"),
+    }))
+}
+
+pub async fn save_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<Uuid>,
+    Json(request): Json<SnapshotRequest>,
+) -> AppResult<Json<SnapshotResponse>> {
+    let trusted = authenticate_worker_header_only(&state, &headers).await?;
+    if request.source_length < 0
+        || request.source_length > 4 * 1024 * 1024
+        || request.source_digest.len() != 71
+        || !request.source_digest.starts_with("sha256:")
+    {
+        return Err(AppError::bad_request("invalid source snapshot"));
+    }
+    let mut tx = state.db.begin().await?;
+    let row = sqlx::query(
+        "SELECT j.current_fence,l.worker_id,l.status,l.expires_at FROM kernel.pipeline_jobs j JOIN kernel.pipeline_job_leases l ON l.lease_id=$2 AND l.job_id=j.job_id WHERE j.job_id=$1 FOR UPDATE OF j",
+    )
+    .bind(job_id)
+    .bind(request.lease_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::not_found("job or lease not found"))?;
+    let fence: i64 = row.get("current_fence");
+    let lease_worker: String = row.get("worker_id");
+    let lease_status: String = row.get("status");
+    let expires_at: DateTime<Utc> = row.get("expires_at");
+    if fence != request.fencing_sequence
+        || lease_worker != trusted.worker_id
+        || lease_status != "ACTIVE"
+        || expires_at <= Utc::now()
+    {
+        return Err(AppError::conflict(
+            "STALE_FENCE",
+            "snapshot requires the current active fence",
+        ));
+    }
+    let existing = sqlx::query(
+        "SELECT source_digest,source_length,source,etag,fetched_at FROM kernel.pipeline_job_snapshots WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(existing) = existing {
+        if existing.get::<String, _>("source_digest") != request.source_digest {
+            return Err(AppError::conflict(
+                "SNAPSHOT_CONFLICT",
+                "source changed after snapshot pin",
+            ));
+        }
+        tx.commit().await?;
+        return Ok(Json(SnapshotResponse {
+            source_digest: existing.get("source_digest"),
+            source_length: existing.get("source_length"),
+            source: existing.get("source"),
+            etag: existing.get("etag"),
+            fetched_at: existing.get("fetched_at"),
+        }));
+    }
+    sqlx::query(
+        "INSERT INTO kernel.pipeline_job_snapshots (job_id,source_digest,source_length,source,etag) VALUES ($1,$2,$3,$4,$5)",
+    )
+    .bind(job_id)
+    .bind(&request.source_digest)
+    .bind(request.source_length)
+    .bind(&request.source)
+    .bind(&request.etag)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,fencing_sequence,details) VALUES ($1,'JOB_SNAPSHOT_PINNED',$2,$3)")
+        .bind(job_id)
+        .bind(fence)
+        .bind(json!({"sourceDigest": request.source_digest, "sourceLength": request.source_length}))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(Json(SnapshotResponse {
+        source_digest: request.source_digest,
+        source_length: request.source_length,
+        source: request.source,
+        etag: request.etag,
+        fetched_at: Utc::now(),
+    }))
+}
+
 pub async fn worker_definition(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -863,6 +1000,28 @@ pub async fn result(
         "SUCCEEDED" | "FAILED" | "CANCELLED" => request.status.as_str(),
         _ => return Err(AppError::bad_request("result status must be terminal")),
     };
+    // A released lease must not block an authenticated idempotent result replay.
+    let replay = sqlx::query(
+        "SELECT r.status,r.result_digest,l.worker_id FROM kernel.pipeline_job_results r JOIN kernel.pipeline_job_leases l ON l.lease_id=$2 AND l.job_id=r.job_id WHERE r.job_id=$1",
+    )
+    .bind(job_id)
+    .bind(request.lease_id)
+    .fetch_optional(&state.db)
+    .await?;
+    if let Some(replay) = replay {
+        let replay_worker: String = replay.get("worker_id");
+        if replay_worker == trusted.worker_id
+            && replay.get::<String, _>("status") == terminal
+            && replay.get::<Option<String>, _>("result_digest").as_deref()
+                == request.result_digest.as_deref()
+        {
+            return Ok(Json(fetch_job(&state, job_id).await?));
+        }
+        return Err(AppError::conflict(
+            "RESULT_CONFLICT",
+            "result identity or digest does not match",
+        ));
+    }
     let mut tx = state.db.begin().await?;
     let (current_status, fence) = authorize_lease(
         &mut tx,

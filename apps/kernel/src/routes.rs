@@ -60,6 +60,10 @@ pub fn build(state: AppState) -> Router {
             get(jobs::worker_definition),
         )
         .route(
+            "/internal/v1/pipeline-jobs/{job_id}/snapshot",
+            get(jobs::get_snapshot).post(jobs::save_snapshot),
+        )
+        .route(
             "/internal/v1/pipeline-jobs/{job_id}/start",
             post(jobs::start_job),
         )

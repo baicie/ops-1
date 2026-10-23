@@ -84,6 +84,11 @@ CODE=$?
 set -e
 [ "$CODE" = "18" ] || bad "batch crash exit=$CODE"
 expire "$BULK_JOB"
+# Change the live source after the snapshot was pinned; recovery must use the pinned snapshot.
+python3 - <<'PY'
+import json
+json.dump([{"id":"changed","name":"changed","cpu_percent":0,"observed_at":"2026-10-23T00:00:00Z"}], open('tests/fixtures/data-hosts-large.json','w'))
+PY
 run_worker "$BULK_JOB"
 STATUS="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/jobs/$BULK_JOB" | json "d['status']")"
 [ "$STATUS" = "SUCCEEDED" ] || bad "bulk recovery status=$STATUS"

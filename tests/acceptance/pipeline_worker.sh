@@ -40,7 +40,7 @@ BASELINE_RECORDS="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-ca
 submit_job() {
   local key="$1"
   curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: $key" \
-    --data-binary "{\"pipelineId\":\"$PIPELINE_ID\",\"pipelineRevision\":$REVISION,\"input\":{\"source\":\"http://127.0.0.1:18090/data-hosts.json\"},\"maxAttempts\":4,\"timeoutSeconds\":300}" \
+    --data-binary "{\"pipelineId\":\"$PIPELINE_ID\",\"pipelineRevision\":$REVISION,\"input\":{\"source\":\"http://169.254.169.254/latest/meta-data\"},\"maxAttempts\":4,\"timeoutSeconds\":300}" \
     "$URL/api/v1/jobs" | json "d['jobId']"
 }
 

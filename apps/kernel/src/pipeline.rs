@@ -656,6 +656,43 @@ pub fn validate_pipeline(
         }
     }
     let ordered_nodes = topological_order(&definition.nodes, &definition.edges)?;
+    // 0.0.3 runtime is deliberately a single-source/single-sink linear pipeline.
+    let sources: Vec<&PipelineNode> = definition
+        .nodes
+        .iter()
+        .filter(|node| node.inputs.is_empty())
+        .collect();
+    let sinks: Vec<&PipelineNode> = definition
+        .nodes
+        .iter()
+        .filter(|node| node.outputs.is_empty())
+        .collect();
+    if sources.len() != 1 || sinks.len() != 1 {
+        return Err(PipelineError::new(
+            "TOPOLOGY_NOT_SUPPORTED",
+            "0.0.3 requires exactly one source and one sink",
+        ));
+    }
+    if definition.edges.len() != definition.nodes.len().saturating_sub(1) {
+        return Err(PipelineError::new(
+            "TOPOLOGY_NOT_SUPPORTED",
+            "0.0.3 requires a linear edge count (nodes - 1)",
+        ));
+    }
+    for node in &definition.nodes {
+        if !node.inputs.is_empty() && node.inputs.len() != 1 {
+            return Err(PipelineError::new(
+                "TOPOLOGY_NOT_SUPPORTED",
+                "0.0.3 nodes must have exactly one input except the source",
+            ));
+        }
+        if !node.outputs.is_empty() && node.outputs.len() != 1 {
+            return Err(PipelineError::new(
+                "TOPOLOGY_NOT_SUPPORTED",
+                "0.0.3 nodes must have exactly one output except the sink",
+            ));
+        }
+    }
     let mut incoming: BTreeMap<(String, String), usize> = BTreeMap::new();
     let mut outgoing_count: BTreeMap<(String, String), usize> = BTreeMap::new();
     for edge in &definition.edges {

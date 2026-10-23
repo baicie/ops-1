@@ -196,8 +196,13 @@ impl Worker {
         sequence: usize,
         records: usize,
         completed_batches: usize,
+        snapshot_digest: &str,
     ) -> Result<()> {
-        let state = json!({"records": records, "completedBatches": completed_batches});
+        let state = json!({
+            "records": records,
+            "completedBatches": completed_batches,
+            "snapshotDigest": snapshot_digest
+        });
         let digest = digest(&state);
         let (status, body) = self
             .call(
@@ -283,6 +288,56 @@ impl Worker {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         ))
+    }
+
+    async fn get_snapshot(&self, job_id: Uuid) -> Result<Option<Value>> {
+        let (status, body) = self
+            .call(
+                Method::GET,
+                &format!("/internal/v1/pipeline-jobs/{job_id}/snapshot"),
+                None,
+            )
+            .await?;
+        if status == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            bail!("snapshot lookup failed ({status}): {body}");
+        }
+        Ok(Some(body))
+    }
+
+    async fn save_snapshot(
+        &self,
+        job_id: Uuid,
+        lease: &ClaimResponse,
+        source: &[Value],
+        etag: Option<String>,
+    ) -> Result<Value> {
+        let value = Value::Array(source.to_vec());
+        let source_digest = digest(&value);
+        let serialized = serde_json::to_vec(&value).context("serialize snapshot")?;
+        if serialized.len() > MAX_SOURCE_BYTES {
+            bail!("source snapshot exceeds limit");
+        }
+        let (status, body) = self
+            .call(
+                Method::POST,
+                &format!("/internal/v1/pipeline-jobs/{job_id}/snapshot"),
+                Some(json!({
+                    "leaseId": lease.lease_id,
+                    "fencingSequence": lease.fencing_sequence,
+                    "sourceDigest": source_digest,
+                    "sourceLength": serialized.len(),
+                    "source": value,
+                    "etag": etag
+                })),
+            )
+            .await?;
+        if !status.is_success() {
+            bail!("snapshot save failed ({status}): {body}");
+        }
+        Ok(body)
     }
 
     async fn fetch_source(&self, endpoint: &str) -> Result<Vec<Value>> {
@@ -401,7 +456,41 @@ impl Worker {
         if ordered.len() != node_map.len() {
             bail!("execution plan node set does not match revision");
         }
-        let mut records: Vec<Value> = Vec::new();
+        let source_endpoint = nodes
+            .iter()
+            .find(|node| {
+                node.get("type").and_then(Value::as_str) == Some("builtin.source.http_json")
+            })
+            .and_then(|node| node.get("config"))
+            .and_then(|config| config.get("endpoint"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("pinned revision has no HTTP source endpoint"))?;
+        let snapshot = self.get_snapshot(job_id).await?;
+        let (records, snapshot_digest) = if let Some(snapshot) = snapshot {
+            let source = snapshot
+                .get("source")
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or_else(|| anyhow!("pinned source snapshot is invalid"))?;
+            let snapshot_digest = snapshot
+                .get("sourceDigest")
+                .or_else(|| snapshot.get("source_digest"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("pinned source snapshot digest missing"))?
+                .to_string();
+            (source, snapshot_digest)
+        } else {
+            let fetched = self.fetch_source(source_endpoint).await?;
+            let saved = self.save_snapshot(job_id, &lease, &fetched, None).await?;
+            let snapshot_digest = saved
+                .get("sourceDigest")
+                .or_else(|| saved.get("source_digest"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("snapshot save response has no digest"))?
+                .to_string();
+            (fetched, snapshot_digest)
+        };
+        let mut records = records;
         let mut sink_node: Option<&Value> = None;
         for node_id in &ordered {
             let node = node_map
@@ -410,16 +499,10 @@ impl Worker {
             let node_type = node.get("type").and_then(Value::as_str).unwrap_or_default();
             match node_type {
                 "builtin.source.http_json" => {
-                    if !records.is_empty() {
-                        bail!("source node must be first");
+                    if records.is_empty() {
+                        bail!("pinned source snapshot is empty");
                     }
-                    let endpoint = node
-                        .get("config")
-                        .and_then(|config| config.get("endpoint"))
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| anyhow!("source endpoint missing from pinned revision"))?;
-                    // Job input is deliberately not allowed to override the published endpoint.
-                    records = self.fetch_source(endpoint).await?;
+                    // Snapshot was loaded before executing the plan; Job input cannot override it.
                 }
                 "builtin.parse.json" => {
                     // Source already returns parsed JSON records; this node is typed as
@@ -485,8 +568,25 @@ impl Worker {
                 sink_node_id,
                 &logical_batch,
             );
-            self.checkpoint(job_id, &lease, index + 1, records.len(), index)
-                .await?;
+            self.checkpoint(
+                job_id,
+                &lease,
+                index + 1,
+                records.len(),
+                index,
+                &snapshot_digest,
+            )
+            .await?;
+            let request_digest = digest(&json!({
+                "effectId": effect,
+                "pipelineId": definition.pipeline_id,
+                "pipelineRevision": definition.pipeline_revision,
+                "sinkNodeId": sink_node_id,
+                "logicalBatchId": logical_batch,
+                "schemaRevision": schema_revision,
+                "sourceBatchKey": format!("job-{job_id}-{logical_batch}"),
+                "records": batch
+            }));
             let existing = self
                 .capability(
                     &token,
@@ -497,21 +597,33 @@ impl Worker {
                     None,
                 )
                 .await?;
-            let receipt = if existing.0 == StatusCode::OK
-                && existing.1.get("status").and_then(Value::as_str) == Some("COMMITTED")
-            {
+            let receipt = if existing.0 == StatusCode::OK {
+                let status = existing
+                    .1
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if status == "UNKNOWN" {
+                    bail!("effect {effect} is UNKNOWN; refusing blind retry");
+                }
+                if status != "COMMITTED" {
+                    bail!("effect {effect} has non-committed state {status}");
+                }
+                let stored_digest = existing
+                    .1
+                    .get("requestDigest")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if stored_digest != request_digest {
+                    bail!("EFFECT_DIGEST_CONFLICT: effect {effect} committed with a different source snapshot");
+                }
                 existing.1
-            } else {
-                let request_digest = digest(&json!({
-                    "effectId": effect,
-                    "pipelineId": definition.pipeline_id,
-                    "pipelineRevision": definition.pipeline_revision,
-                    "sinkNodeId": sink_node_id,
-                    "logicalBatchId": logical_batch,
-                    "schemaRevision": schema_revision,
-                    "sourceBatchKey": format!("job-{job_id}-{logical_batch}"),
-                    "records": batch
-                }));
+            } else if matches!(existing.0, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+                bail!("receipt lookup authorization failed ({})", existing.0);
+            } else if existing.0 == StatusCode::NOT_FOUND
+                || existing.1.get("code").and_then(Value::as_str) == Some("RECEIPT_NOT_FOUND")
+            {
+                // A true absence is the only case that may create a new effect.
                 let (status, body) = self
                     .capability(
                         &token,
@@ -541,6 +653,8 @@ impl Worker {
                     bail!("fenced sink failed ({status}): {body}");
                 }
                 body
+            } else {
+                bail!("receipt lookup unavailable ({})", existing.0);
             };
             accepted_total += batch.len();
             last_receipt = receipt;
