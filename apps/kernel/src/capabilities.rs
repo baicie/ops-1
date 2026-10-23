@@ -502,6 +502,7 @@ pub async fn invoke(
     State(state): State<AppState>,
     Path((name, major, path)): Path<(String, i64, String)>,
     method: Method,
+    uri: axum::http::Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> AppResult<Response> {
@@ -627,11 +628,16 @@ pub async fn invoke(
         return Err(AppError::bad_request("INVALID_CAPABILITY_PATH"));
     }
     let request_id = Uuid::new_v4().to_string();
+    let query = uri
+        .query()
+        .map(|value| format!("?{value}"))
+        .unwrap_or_default();
     let target = format!(
-        "{}/internal/v1/proxy/{}{}",
+        "{}/internal/v1/proxy/{}{}{}",
         provider.data_endpoint.trim_end_matches('/'),
         provider.instance_id,
-        requested
+        requested,
+        query
     );
     let mut request = state
         .http
