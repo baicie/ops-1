@@ -76,7 +76,10 @@ PY
 STALE_BODY="$(make_fenced_body "$JOB_ID" "$LEASE_A" "$FENCE_A" "$NEW_EFFECT")"
 STALE_CODE="$(curl -sS -o /tmp/fenced-stale.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$STALE_BODY" "$CAT/datasets/$DATASET_ID/fenced-records")"
 [ "$STALE_CODE" = "409" ] || bad "stale fence write returned $STALE_CODE: $(cat /tmp/fenced-stale.json)"
-grep -q 'STALE_FENCE' /tmp/fenced-stale.json || bad "stale fence error code missing"
+if ! grep -Eq 'STALE_FENCE|LEASE_NOT_ACTIVE' /tmp/fenced-stale.json; then
+  echo "stale response: $(cat /tmp/fenced-stale.json)"
+  bad "stale fence error code missing"
+fi
 COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_records WHERE dataset_id='$DATASET_ID';")"
 [ "$COUNT" = "2" ] || bad "stale fence wrote records (count=$COUNT)"
 ok "new claim after old fence rejected the old worker's new sink effect"

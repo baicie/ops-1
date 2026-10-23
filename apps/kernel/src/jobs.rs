@@ -180,12 +180,12 @@ pub async fn create_pipeline(
     let _ = crate::audit::record(
         &state.db,
         "pipeline.created",
-        "user",
+        "USER",
         &auth.user_id.to_string(),
         "pipeline",
         &definition.pipeline_id,
         "create",
-        "SUCCESS",
+        "ACCEPTED",
         json!({"revision": definition.revision, "digest": definition.digest}),
         None,
     )
@@ -258,12 +258,12 @@ pub async fn publish_revision(
     let _ = crate::audit::record(
         &state.db,
         "pipeline.revision_published",
-        "user",
+        "USER",
         &auth.user_id.to_string(),
         "pipeline",
         &pipeline_id,
         "publish",
-        "SUCCESS",
+        "ACCEPTED",
         json!({"revision": definition.revision, "digest": definition.digest}),
         None,
     )
