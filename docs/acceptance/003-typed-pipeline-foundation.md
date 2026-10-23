@@ -1,145 +1,134 @@
-# 0.0.3 Typed Pipeline Foundation — Runtime Sprint 1 Report
+# 0.0.3 Typed Pipeline Foundation — Runtime Sprint 2 Report
 
 Date: 2026-10-23 (Asia/Shanghai)  
 Branch: `feat/0.0.3-typed-pipeline`  
-Code HEAD: `e2c6ebb`  
-Reported branch HEAD: `79d62e4`  
-Base `main`: `a434a79` (squash merge of PR #1, OpsWeave 0.0.2 Data Foundation)  
-PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — Draft, not merged
+Verified HEAD: `49582b1`  
+Base `main`: `a434a79` (0.0.2 merge)  
+PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — Draft / Open / not merged
 
-## 1. Status Summary
+## 1. Final Status
 
-| Phase | Status | Evidence |
+| Area | Status | Evidence |
 |---|---|---|
-| Version Gate | **PASS** | PR #1 merged as `a434a79`; `main` contains Data Foundation code |
-| Fenced Sink Contract | **PASS** | stable `effectId`, signed fence grant schema, fenced Catalog OpenAPI, atomic DB function |
-| Registry Signature Verification | **PASS** | Ed25519 signature checked by Python conformance and Rust `trusted_registry()` |
+| Version Gate | **PASS** | main contains merged 0.0.2 Data Foundation |
+| Worker Identity | **PARTIAL** | Node credential + boot-bound worker; admin session rejected; full revoked/generation matrix not all run |
+| Revision Immutability | **PASS** | same revision + different digest returns 409 in real API test |
+| Job Result Invariants | **PARTIAL** | SUCCEEDED requires a validated fenced receipt; duplicate/digest matrix not fully covered |
+| Runtime Schema Catalog | **PARTIAL** | Runtime still uses a signed test fixture Schema Catalog; real Catalog capability lookup is not implemented |
+| Trusted Registry Signature | **PASS** | Ed25519 signature and unknown-key/tamper rejection |
 | Rust Validator / Planner | **PASS** | `apps/kernel/src/pipeline.rs`, 8 focused tests |
-| Durable JobStore | **PASS** | PostgreSQL migration 0003 + real HTTP/PostgreSQL acceptance `Pipeline JobStore Golden Path` |
-| Lease / Fencing | **PASS** | claim/start/heartbeat/checkpoint, lease expiry takeover, stale result/checkpoint rejection |
-| Catalog Sink Atomicity | **PARTIAL** | real Catalog endpoint + `kernel.fence_authorize()` same-transaction row lock; stale-fence and retry tests pass, inverse lock-wait interleaving not separately instrumented |
-| Cross-Attempt Idempotency | **PASS** | stable `effectId`; duplicate receipt returned; 2 records remain 2 after retry |
-| Worker Runtime | **NOT_RUN** | no real Node/Worker execution loop in this sprint |
-| Crash / Restart Recovery | **PARTIAL** | lease-expiry takeover passed; full Kernel/Worker restart E2E not run |
-| Multi-Node Golden Path | **NOT_RUN** | single-node API/DB/Catalog path only |
-| 0.0.1 / 0.0.2 Regression | **PASS** | 0.0.2 golden-path and 0.0.1 legacy-regression both passed on final branch HEAD |
+| Durable JobStore | **PASS** | PostgreSQL migration + real HTTP API test |
+| Lease / Fencing | **PASS** | claim/start/heartbeat/checkpoint, expiry takeover, stale result/checkpoint |
+| Fenced Sink Authorization | **PASS** | sink node/dataset/schema/effect bound to pinned plan; stale effect rejected |
+| Catalog Sink Atomicity | **PARTIAL** | same-job row lock + fenced write; inverse lock-wait timing not instrumented |
+| Cross-Attempt Idempotency | **PASS** | stable effectId; receipt reused; no duplicate rows |
+| Pipeline Engine | **PASS** | built-in Source/Parse/Map/Filter/Validate/Sink worker |
+| Single Worker E2E | **PASS** | real HTTP source, PostgreSQL job, Catalog OCI fenced write |
+| Crash / Restart Recovery | **PARTIAL** | crash before/after sink and takeover passed; Kernel process restart not run |
+| Multi-Node Golden Path | **NOT_RUN** | both workers used the same physical Node |
+| 0.0.1 / 0.0.2 Regression | **PASS** | CI `39921641768`: golden-path and legacy-regression success |
 
-## 2. Implemented
+## 2. Implemented Runtime
 
-### Sprint A — Fenced Sink Contract
+### Worker identity and operation binding
 
-- `contracts/schema/sink-receipt.v1.schema.json` now includes:
-  - `effectId = "efx:" + sha256(canonical_json({jobId,pipelineId,pipelineRevision,sinkNodeId,logicalBatchId}))`;
-  - `requestDigest`, pipeline revision, sink node and logical batch;
-  - attempt and fencing sequence are not part of effect identity.
-- `contracts/schema/fence-grant.v1.schema.json` and `contracts/openapi/data-catalog-fenced-v1.yaml`.
-- `contracts/examples/node-registry.json` is now signed with a real Ed25519 signature over
-  `{schemaVersion, registryDigest, entries}`; trusted key fixture is
-  `contracts/examples/trusted-registry-keys.json`.
-- Python conformance now verifies the signature and rejects:
-  - unknown key ID;
-  - altered signature;
-  - altered registry entries;
-  - forged pipeline ports/config/digest;
-  - type mismatch, cycle, unknown node type, node limit;
-  - duplicate claim, stale fence and invalid state transitions.
+- Worker operations moved to authenticated internal endpoints:
+  - `/internal/v1/pipeline-jobs/{id}/claim`
+  - `/internal/v1/pipeline-jobs/{id}/definition`
+  - `/internal/v1/pipeline-jobs/{id}/start|heartbeat|checkpoint|result`
+- Worker authenticates with the enrolled **Node control credential**, not an admin browser session.
+- Headers and body must agree on node, instance, generation, boot ID and worker ID.
+- Worker ID is boot-qualified: `n:<node>:i:<instance>:b:<boot>`.
+- Instance must belong to the Node and be `READY`; Node must be `READY` and not revoked.
+- Lease operations compare the lease's worker ID, so another worker cannot use an existing lease.
+- Admin session through the worker endpoint is rejected.
+- A stale Node generation is rejected with `STALE_NODE_GENERATION`.
 
-### Sprint B — Rust Core
+### Pipeline Core
 
-`apps/kernel/src/pipeline.rs`:
+`apps/kernel/src/pipeline.rs` implements typed definitions, Ed25519 signed registry,
+canonical digest, exact port signature, config schema validation, schema pins,
+DAG cycle detection, deterministic topological order and resource bounds.
 
-- typed `PipelineDefinition`, `PipelineNode`, `InputPort`, `OutputPort`, `TypedEdge`;
-- trusted `NodeRegistry` + Ed25519 signature verification;
-- canonical JSON and digest;
-- exact port signature check against the registry;
-- node-type-specific config schema validation;
-- schema revision pin against a trusted schema catalog;
-- DAG cycle detection and deterministic topological order;
-- max 64 nodes / 128 edges / 10,000 records / 8 MiB plan bounds;
-- immutable revision is persisted by the JobStore migration; publish uses a unique `(pipeline_id, revision)` and digest.
+### Durable JobStore
 
-8 focused Rust tests pass, including forged port, cycle, bad registry signature, config error, unknown schema revision and stable effect identity.
+Migration `0003_typed_pipeline.sql` and `apps/kernel/src/jobs.rs` provide jobs,
+attempts, leases, checkpoints, results, events, claim CAS, monotonic fence,
+lease expiry/takeover and idempotent submit.
 
-### Sprint C — Durable JobStore
+### Fenced Catalog sink
 
-`apps/kernel/migrations/0003_typed_pipeline.sql` and `apps/kernel/src/jobs.rs`:
+- Migration `0004_pipeline_sink_scope.sql` adds `fence_authorize_effect()`.
+- It compares the request sink node, dataset UUID and schema revision against the
+  immutable pipeline revision definition, while holding the same job row lock.
+- Catalog performs the fence check, records and receipt in one transaction.
+- Stable `effectId` excludes attempt and fence.
+- Old `/records` remains unchanged.
 
-- `pipeline_definitions`, `pipeline_revisions`, `pipeline_plans`;
-- `pipeline_jobs`, `pipeline_job_attempts`, `pipeline_job_leases`,
-  `pipeline_job_checkpoints`, `pipeline_job_results`, `pipeline_job_events`;
-- HTTP APIs:
-  - create/publish/get plan;
-  - submit job with idempotency key and request digest;
-  - claim / start / heartbeat / checkpoint / result / cancel.
-- Claim transaction row-locks the job, expires old leases, increments fencing sequence, creates attempt and lease atomically.
-- Heartbeat/checkpoint/result reject stale fence and expired leases.
-- Job pins pipeline revision and digest.
-- Audit events use the existing `kernel.audit_events` schema.
+### Worker
 
-Real acceptance `tests/acceptance/pipeline_jobs.sh` passed in CI:
-idempotent submit, duplicate claim rejection, claim/start/heartbeat/checkpoint,
-forced lease expiry/takeover with higher fence, stale worker result/checkpoint
-rejection and exactly one result row.
+New crate `apps/pipeline-worker`:
 
-### Sprint D — Atomic Catalog Sink
+- Node credential authentication and boot-qualified identity.
+- Claim → Start → Definition → bounded HTTP/JSON Source → Parse → Map → Filter →
+  Validate → Checkpoint → fenced Catalog write → Receipt → Complete.
+- Node-side source host allowlist and bounded body/record limits.
+- Crash injection before and after the sink.
+- Stable effect ID and receipt-first recovery.
 
-`kernel.fence_authorize(uuid, uuid, bigint)` is a restricted `SECURITY DEFINER`
-function with fixed `search_path`, no PUBLIC execute, and execute grant only to
-the Catalog role. It takes `FOR UPDATE` on the same `pipeline_jobs` row as
-Claim. Catalog calls this function **inside its records transaction**, so:
+## 3. Real CI Evidence
 
-- old writer's Catalog transaction takes the `pipeline_jobs` row lock while it commits;
-- a new Claim uses the same row lock, so it cannot interleave between authorization and commit;
-- a new Claim committed first makes the old writer's new effect fail with `STALE_FENCE`;
-- records, effect receipt and lineage commit in one Catalog transaction.
+Data Foundation OCI CI `39921641768` — **SUCCESS**:
 
-The real E2E test exercised old-write-committed-then-takeover, retry idempotency
-and new-claim-first stale rejection. It did not yet instrument the inverse
-`pg_locks` wait timing, so the atomicity row is **PARTIAL**, not PASS.
+```text
+PASS  pipeline published/validated with trusted registry
+PASS  job persisted QUEUED
+PASS  duplicate key/different input rejected
+PASS  claim/start/heartbeat/checkpoint passed
+PASS  lease expiry/takeover and old-fence rejection passed
+PASS  fenced result persisted exactly once
+Pipeline JobStore Golden Path: PASS
 
-`plugins/data-catalog/backend/server.mjs` adds:
+PASS  old worker fenced write committed
+PASS  cross-attempt effectId returned original receipt without duplicate records
+PASS  new claim after old fence rejected old worker's new sink effect
+PASS  effect receipt lookup supports UNKNOWN recovery
+Catalog Fenced Sink Golden Path: PASS
 
-- `POST /datasets/{uuid}/fenced-records`;
-- `GET /datasets/{uuid}/effect-receipts?effectId=...`;
-- stable effect receipt table and unique `effect_id`;
-- request digest, cross-attempt receipt reuse, UNKNOWN lookup;
-- old `/records` endpoint unchanged.
+PASS  same revision/different digest rejected
+PASS  admin session cannot impersonate a worker
+PASS  single worker executed Source→Parse→Map→Filter→Validate→Sink and completed
+PASS  worker crash before sink recovered by second worker with higher fence
+PASS  committed effect recovered by receipt without duplicate sink write
+Pipeline Worker Golden Path: PASS
+```
 
-Real CI passed:
-- old worker fenced write committed;
-- retry after takeover returned the original receipt with no duplicate records;
-- old worker's new effect after new Claim returned `409` at the Catalog boundary;
-- effect receipt lookup returned `COMMITTED`.
+- Standard CI `39921641719` — **SUCCESS** (rust/web/contracts).
+- Contract CI `39921641797` — **SUCCESS**.
+- 0.0.1 legacy regression: **PASS=21 FAIL=0**.
+- 0.0.2 Data Foundation: **PASS**.
 
-## 3. Actual commands / CI
+Worker crash/recovery evidence:
+- `OPSWEAVE_WORKER_CRASH_BEFORE_SINK`: process exits before any Catalog write; second worker claims after lease expiry with fence 2 and completes.
+- `OPSWEAVE_WORKER_CRASH_AFTER_SINK`: process exits after Catalog receipt; second worker finds the existing receipt and completes without a second record batch.
 
-- Standard CI `39910365944` — **SUCCESS** (rust, web, contracts).
-- Data Foundation OCI CI `39910365947` — **SUCCESS** (golden-path, legacy-regression).
-- Typed pipeline contract CI `39910365945` — **SUCCESS**.
-  - `Pipeline JobStore Golden Path: PASS`
-  - `Catalog Fenced Sink Golden Path: PASS`
-  - 0.0.1 legacy-regression: PASS.
-- `typed-pipeline-contracts` runs are success.
-- Local:
-  - `cargo test -p opsweave-kernel`: 27 passed;
-  - Python contract validator: PASS;
-  - `cargo clippy -p opsweave-kernel --all-targets -- -D warnings`: PASS.
+## 4. Remaining Risks / NOT_RUN
 
-## 4. Findings / residual risks
+- **P1 Kernel restart recovery**: job state is durable, but the Kernel process is not restarted in this test.
+- **P1 Multi-Node takeover**: both workers currently use the Node Runtime on the same physical Node; cross-Node takeover is `NOT_RUN`.
+- **P1 runtime schema catalog**: the Kernel still validates against a signed fixture
+  `contracts/examples/schema-catalog.json`; production lookup through the real Catalog
+  capability is not implemented.
+- **P1 Catalog lock-wait interleaving**: same-transaction row lock is implemented,
+  but a `pg_locks` measurement proving “Catalog writer first, Claim waits” is not yet
+  automated.
+- **P1 worker identity negative matrix**: full revoked Node, revoked Instance and
+  expired workload-token tests are not all automated; admin impersonation and stale
+  fence/lease binding are.
+- **P1 result duplicate digest**: same-fence duplicate receipt path is implemented;
+  a dedicated different-digest conflict test is not yet present.
+- **P2** independent signed fence-token verification at Catalog; current first version
+  uses the same-database `SECURITY DEFINER` authority.
+- **P2** no full `pg_locks`/SIGKILL Node-runtime recovery test.
 
-- **P1 Worker Runtime missing**: the current real path exercises Kernel APIs, PostgreSQL JobStore and the Catalog sink directly but does not yet run a Node-runtime worker executing the built-in nodes. Therefore the full `Submit → Claim → Execute → Checkpoint → Fenced Sink → Receipt → Complete` pipeline is `NOT_RUN` at the Worker level.
-- **P1 Kernel restart**: job rows persist, but a real process restart/recovery test has not been run.
-- **P1 signature boundary**: Registry signature verification is real; Catalog fence verification currently relies on the Kernel `SECURITY DEFINER` authority and does not independently verify a signed fence token. This is safe for the same-database first version but should be hardened before cross-database deployment.
-- **P1 multi-node**: no two-Node claim/takeover E2E.
-- **P2** an earlier legacy attempt failed on an external Temurin download HTTP 403; the final branch CI rerun passed 0.0.1 legacy. This was environmental, not a code regression.
-- **P2**: old Catalog `/records` compatibility passed Data Foundation Golden Path; a dedicated fenced/legacy mixed-client test is not yet separate.
-
-## 5. Next steps
-
-1. Implement a real Worker loop (Rust or Node) that executes the six built-in nodes and calls the fenced Catalog route.
-2. Add Kernel restart recovery and Worker crash/takeover E2E with controlled barriers.
-3. Add two-Node NodeRuntime claim/takeover.
-4. Add independent fence-token signature verification at Catalog (or document the same-DB authority as the supported boundary).
-5. Re-run 0.0.1 legacy after external download availability and record the final result.
-
-No PR #2 merge, tag move, force-push or release was performed.
+No PR #2 merge, Ready transition, tag move, force-push or release was performed.
