@@ -16,7 +16,7 @@ load_worker() {
   done
   [ -n "$W_INSTANCE_ID" ] || { echo "FAIL no READY plugin instance on $node_name"; exit 1; }
   W_BOOT_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
-  W_WORKER_ID="node:$W_NODE_ID:instance:$W_INSTANCE_ID:boot:$W_BOOT_ID"
+  W_WORKER_ID="n:$W_NODE_ID:i:$W_INSTANCE_ID:b:$W_BOOT_ID"
   W_BODY="$(python3 -c 'import json,sys;print(json.dumps({"workerId":sys.argv[1],"nodeId":sys.argv[2],"instanceId":sys.argv[3],"bootId":sys.argv[4],"version":"0.0.3"}))' "$W_WORKER_ID" "$W_NODE_ID" "$W_INSTANCE_ID" "$W_BOOT_ID")"
   W_HEADERS=(
     -H "Authorization: Bearer $W_CRED"

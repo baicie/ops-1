@@ -73,7 +73,7 @@ async fn authenticate_worker_headers(
     let generation: i64 = worker_header(headers, "x-opsweave-node-generation")?
         .parse()
         .map_err(|_| AppError::unauthorized("invalid node generation"))?;
-    let expected_worker = format!("node:{node_id}:instance:{instance_id}:boot:{boot_id}");
+    let expected_worker = format!("n:{node_id}:i:{instance_id}:b:{boot_id}");
     if worker_id != expected_worker {
         return Err(AppError::forbidden(
             "workerId is not bound to node/instance",
