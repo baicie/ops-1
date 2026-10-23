@@ -1,134 +1,141 @@
-# 0.0.3 Typed Pipeline Foundation — Runtime Sprint 2 Report
+# 0.0.3 Typed Pipeline Foundation — Sprint 3 Report
 
 Date: 2026-10-23 (Asia/Shanghai)  
 Branch: `feat/0.0.3-typed-pipeline`  
-Verified HEAD: `49582b1`  
-Base `main`: `a434a79` (0.0.2 merge)  
+Verified HEAD: `6a57229`  
+Base `main`: `a434a79`  
 PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — Draft / Open / not merged
 
-## 1. Final Status
+## 1. Status
 
 | Area | Status | Evidence |
 |---|---|---|
-| Version Gate | **PASS** | main contains merged 0.0.2 Data Foundation |
-| Worker Identity | **PARTIAL** | Node credential + boot-bound worker; admin session rejected; full revoked/generation matrix not all run |
-| Revision Immutability | **PASS** | same revision + different digest returns 409 in real API test |
-| Job Result Invariants | **PARTIAL** | SUCCEEDED requires a validated fenced receipt; duplicate/digest matrix not fully covered |
-| Runtime Schema Catalog | **PARTIAL** | Runtime still uses a signed test fixture Schema Catalog; real Catalog capability lookup is not implemented |
-| Trusted Registry Signature | **PASS** | Ed25519 signature and unknown-key/tamper rejection |
-| Rust Validator / Planner | **PASS** | `apps/kernel/src/pipeline.rs`, 8 focused tests |
-| Durable JobStore | **PASS** | PostgreSQL migration + real HTTP API test |
-| Lease / Fencing | **PASS** | claim/start/heartbeat/checkpoint, expiry takeover, stale result/checkpoint |
-| Fenced Sink Authorization | **PASS** | sink node/dataset/schema/effect bound to pinned plan; stale effect rejected |
-| Catalog Sink Atomicity | **PARTIAL** | same-job row lock + fenced write; inverse lock-wait timing not instrumented |
-| Cross-Attempt Idempotency | **PASS** | stable effectId; receipt reused; no duplicate rows |
-| Pipeline Engine | **PASS** | built-in Source/Parse/Map/Filter/Validate/Sink worker |
-| Single Worker E2E | **PASS** | real HTTP source, PostgreSQL job, Catalog OCI fenced write |
-| Crash / Restart Recovery | **PARTIAL** | crash before/after sink and takeover passed; Kernel process restart not run |
-| Multi-Node Golden Path | **NOT_RUN** | both workers used the same physical Node |
-| 0.0.1 / 0.0.2 Regression | **PASS** | CI `39921641768`: golden-path and legacy-regression success |
+| Version Gate | **PASS** | main contains 0.0.2 Data Foundation |
+| HTTP Source Security | **PARTIAL** | IP/DNS policy, no redirects, streaming bound, source override ignored; unit tests only for address matrix, no full real HTTP negative server matrix |
+| True Typed Plan Execution | **PASS** | worker consumes plan.orderedNodes; custom map/filter pipeline produced a distinct one-row result |
+| Runtime Schema Catalog | **PARTIAL** | still validates against signed Schema Catalog fixture; no live Catalog Capability lookup |
+| Multi-Batch Effect Idempotency | **PASS** | 1001 records, 3 batches, crash after batch 2, 3 stable effects, no duplicates |
+| Result Replay Correctness | **PARTIAL** | successful result requires fenced Receipt; duplicate/different result-digest matrix not fully covered |
+| Node-managed Worker | **NOT_RUN** | CI still launches `opsweave-pipeline-worker` directly; Node Runtime lifecycle integration not implemented |
+| Kernel Restart | **NOT_RUN** | durable DB state exists, process restart not exercised |
+| Two-Node Takeover | **NOT_RUN** | both worker launches used Node B in this run |
+| Catalog Lock Concurrency | **PARTIAL** | same-row transaction lock exists; no pg_locks wait instrumentation |
+| Worker Identity Negative Matrix | **PARTIAL** | admin impersonation and boot/fence binding tested; revoked Node/Instance/generation/expiry matrix incomplete |
+| 0.0.1 / 0.0.2 Regression | **PASS** | CI `39933199108`: golden-path and legacy-regression success |
 
-## 2. Implemented Runtime
+## 2. Implemented this sprint
 
-### Worker identity and operation binding
+### HTTP Source Security
 
-- Worker operations moved to authenticated internal endpoints:
-  - `/internal/v1/pipeline-jobs/{id}/claim`
-  - `/internal/v1/pipeline-jobs/{id}/definition`
-  - `/internal/v1/pipeline-jobs/{id}/start|heartbeat|checkpoint|result`
-- Worker authenticates with the enrolled **Node control credential**, not an admin browser session.
-- Headers and body must agree on node, instance, generation, boot ID and worker ID.
-- Worker ID is boot-qualified: `n:<node>:i:<instance>:b:<boot>`.
-- Instance must belong to the Node and be `READY`; Node must be `READY` and not revoked.
-- Lease operations compare the lease's worker ID, so another worker cannot use an existing lease.
-- Admin session through the worker endpoint is rejected.
-- A stale Node generation is rejected with `STALE_NODE_GENERATION`.
+`apps/pipeline-worker` now:
 
-### Pipeline Core
+- ignores Job Input `source`; only the immutable Revision source config is used;
+- allows only HTTP/HTTPS and rejects URL credentials/fragments;
+- classifies IPv4/IPv6: loopback, RFC1918, link-local, metadata, CGNAT, documentation, multicast, ULA, site-local, IPv4-mapped/compatible addresses;
+- resolves DNS, validates all addresses, pins the selected address in the reqwest client;
+- disables redirects;
+- applies connect/read/total timeouts;
+- streams response chunks and aborts before exceeding 4 MiB;
+- caps records and JSON depth via serde;
+- supports an explicit `OPSWEAVE_WORKER_SOURCE_ALLOWLIST` only for controlled CI fixtures.
 
-`apps/kernel/src/pipeline.rs` implements typed definitions, Ed25519 signed registry,
-canonical digest, exact port signature, config schema validation, schema pins,
-DAG cycle detection, deterministic topological order and resource bounds.
+Unit tests cover private/metadata/mapped/ULA/link-local addresses and localhost/non-HTTP schemes.
 
-### Durable JobStore
+### Typed Plan Execution
 
-Migration `0003_typed_pipeline.sql` and `apps/kernel/src/jobs.rs` provide jobs,
-attempts, leases, checkpoints, results, events, claim CAS, monotonic fence,
-lease expiry/takeover and idempotent submit.
+The worker reads the persisted `plan`, verifies `planDigest`, uses `orderedNodes`, and executes built-ins by their pinned types:
 
-### Fenced Catalog sink
+- Source HTTP/JSON;
+- Parse;
+- Map with explicit `mappings`;
+- Filter with field/op/value;
+- Validate with `required`;
+- Dataset Sink.
 
-- Migration `0004_pipeline_sink_scope.sql` adds `fence_authorize_effect()`.
-- It compares the request sink node, dataset UUID and schema revision against the
-  immutable pipeline revision definition, while holding the same job row lock.
-- Catalog performs the fence check, records and receipt in one transaction.
-- Stable `effectId` excludes attempt and fence.
-- Old `/records` remains unchanged.
+It no longer hardcodes `id/name` extraction. Unsupported types/configs fail explicitly.
 
-### Worker
-
-New crate `apps/pipeline-worker`:
-
-- Node credential authentication and boot-qualified identity.
-- Claim → Start → Definition → bounded HTTP/JSON Source → Parse → Map → Filter →
-  Validate → Checkpoint → fenced Catalog write → Receipt → Complete.
-- Node-side source host allowlist and bounded body/record limits.
-- Crash injection before and after the sink.
-- Stable effect ID and receipt-first recovery.
-
-## 3. Real CI Evidence
-
-Data Foundation OCI CI `39921641768` — **SUCCESS**:
+Real CI:
 
 ```text
-PASS  pipeline published/validated with trusted registry
-PASS  job persisted QUEUED
-PASS  duplicate key/different input rejected
-PASS  claim/start/heartbeat/checkpoint passed
-PASS  lease expiry/takeover and old-fence rejection passed
-PASS  fenced result persisted exactly once
-Pipeline JobStore Golden Path: PASS
+PASS  custom map/filter config executed with different output
+```
 
-PASS  old worker fenced write committed
-PASS  cross-attempt effectId returned original receipt without duplicate records
-PASS  new claim after old fence rejected old worker's new sink effect
-PASS  effect receipt lookup supports UNKNOWN recovery
-Catalog Fenced Sink Golden Path: PASS
+### Durable Multi-batch Execution
 
-PASS  same revision/different digest rejected
-PASS  admin session cannot impersonate a worker
+- 1,000 record Catalog batch ceiling is respected by a 500-record worker batch.
+- Stable logical batch id and effectId per batch.
+- Monotonic checkpoint sequence before each batch.
+- Existing Receipt is queried before write.
+- Crash after batch 2 is recovered by a new attempt/fence; only missing batch 3 is written.
+- 3 effect receipts; 1001 records exactly once.
+
+Real CI:
+
+```text
+PASS  multi-batch crash after second batch recovered with 3 stable effects and no duplicates
+```
+
+### Fenced Sink Authorization
+
+`fence_authorize_effect()` checks Job, Lease/Fence, Sink Node, Dataset UUID and
+Schema Revision against the pinned revision while holding the Job row lock.
+The Catalog writes receipt/records/lineage in the corresponding transaction.
+
+## 3. CI evidence
+
+- Data Foundation OCI CI `39933199108` — **SUCCESS**
+- Standard CI `39933199109` — **SUCCESS**
+- Typed Pipeline Contract CI `39933199114` — **SUCCESS**
+- 0.0.1 legacy: `PASS=21 FAIL=0`
+- 0.0.2 Data Foundation Golden Path: PASS
+
+Real pipeline evidence:
+
+```text
+pipeline worker completed job ... batches 1 accepted 2
 PASS  single worker executed Source→Parse→Map→Filter→Validate→Sink and completed
 PASS  worker crash before sink recovered by second worker with higher fence
 PASS  committed effect recovered by receipt without duplicate sink write
-Pipeline Worker Golden Path: PASS
+pipeline worker completed job ... batches 1 accepted 1
+PASS  custom map/filter config executed with different output
+pipeline worker completed job ... batches 3 accepted 1001
+PASS  multi-batch crash after second batch recovered with 3 stable effects and no duplicates
 ```
 
-- Standard CI `39921641719` — **SUCCESS** (rust/web/contracts).
-- Contract CI `39921641797` — **SUCCESS**.
-- 0.0.1 legacy regression: **PASS=21 FAIL=0**.
-- 0.0.2 Data Foundation: **PASS**.
+## 4. Remaining issues
 
-Worker crash/recovery evidence:
-- `OPSWEAVE_WORKER_CRASH_BEFORE_SINK`: process exits before any Catalog write; second worker claims after lease expiry with fence 2 and completes.
-- `OPSWEAVE_WORKER_CRASH_AFTER_SINK`: process exits after Catalog receipt; second worker finds the existing receipt and completes without a second record batch.
+### P0
 
-## 4. Remaining Risks / NOT_RUN
+None in the executed single-node path.
 
-- **P1 Kernel restart recovery**: job state is durable, but the Kernel process is not restarted in this test.
-- **P1 Multi-Node takeover**: both workers currently use the Node Runtime on the same physical Node; cross-Node takeover is `NOT_RUN`.
-- **P1 runtime schema catalog**: the Kernel still validates against a signed fixture
-  `contracts/examples/schema-catalog.json`; production lookup through the real Catalog
-  capability is not implemented.
-- **P1 Catalog lock-wait interleaving**: same-transaction row lock is implemented,
-  but a `pg_locks` measurement proving “Catalog writer first, Claim waits” is not yet
-  automated.
-- **P1 worker identity negative matrix**: full revoked Node, revoked Instance and
-  expired workload-token tests are not all automated; admin impersonation and stale
-  fence/lease binding are.
-- **P1 result duplicate digest**: same-fence duplicate receipt path is implemented;
-  a dedicated different-digest conflict test is not yet present.
-- **P2** independent signed fence-token verification at Catalog; current first version
-  uses the same-database `SECURITY DEFINER` authority.
-- **P2** no full `pg_locks`/SIGKILL Node-runtime recovery test.
+### P1
 
-No PR #2 merge, Ready transition, tag move, force-push or release was performed.
+- **Runtime Schema Catalog** still uses `contracts/examples/schema-catalog.json`; live Catalog lookup and dynamic Dataset UUID are not implemented.
+- **Node-managed Worker** lifecycle is not integrated; test harness starts the binary directly.
+- **Kernel restart** recovery is not exercised.
+- **Two-Node takeover** is not exercised; both workers ran on Node B.
+- **Catalog lock-wait interleaving** (writer first, Claim waits) lacks a pg_locks barrier test.
+- **HTTP Source real negative matrix** lacks a live test server for redirect, DNS rebinding, oversized chunked body and connection interruption; only address-policy unit tests exist.
+- **Result replay** duplicate same/different digest matrix is not fully automated.
+- **Worker identity negative matrix** incomplete: revoked Node, revoked Instance, stale generation, expired Node credential.
+- **Job Input source override** is ignored by code but not explicitly asserted in a negative test.
+
+### P2
+
+- Independent signed fence-token verification at Catalog; current boundary is same-DB `SECURITY DEFINER`.
+- Multi-host physical acceptance.
+- Worker concurrency/backpressure and Node Runtime-managed lifecycle.
+
+## 5. Boundary
+
+This run demonstrates:
+
+- real PostgreSQL JobStore and lease/fence takeover;
+- real Catalog OCI fenced write and stable effect receipt;
+- real typed plan execution for two different pipeline configs;
+- multi-batch crash recovery with no duplicate side effects;
+- 0.0.1/0.0.2 regression.
+
+It does **not** yet demonstrate Node Runtime-managed worker lifecycle, live Catalog schema resolution, Kernel restart, or two independent Node takeover.
+
+PR #2 remains Draft. No merge, tag move, force-push or release was performed.
