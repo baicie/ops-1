@@ -665,6 +665,7 @@ impl Worker {
                 &snapshot_digest,
             )
             .await?;
+            self.heartbeat(job_id, &lease).await?;
             let request_digest = digest(&json!({
                 "effectId": effect,
                 "pipelineId": definition.pipeline_id,

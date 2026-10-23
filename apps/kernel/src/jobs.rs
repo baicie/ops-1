@@ -895,7 +895,8 @@ pub async fn claim_next(
     let _ = authenticate_worker(&state, &headers, &worker).await?;
     let job_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT j.job_id FROM kernel.pipeline_jobs j
-         WHERE j.status='QUEUED'
+         WHERE j.status IN ('QUEUED','CLAIMED','RUNNING')
+           AND j.attempts < j.max_attempts
            AND NOT EXISTS (
              SELECT 1 FROM kernel.pipeline_job_leases l
              WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now()

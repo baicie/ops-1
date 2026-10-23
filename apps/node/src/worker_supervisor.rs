@@ -5,8 +5,8 @@
 //! and is bounded to one running worker unless explicitly configured otherwise.
 
 use crate::runtime::{RuntimeState, Shared};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{atomic::Ordering, Arc};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
@@ -19,8 +19,9 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
             .unwrap_or_else(|_| "target/debug/opsweave-pipeline-worker".to_string());
         let identity_path = shared.args.state_dir.join("node-identity.json");
         let enable_marker = shared.args.state_dir.join("worker-enabled");
+        let mut failures = 0u32;
         loop {
-            if !enable_marker.exists() {
+            if !enable_marker.exists() || shared.quarantined.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             }
@@ -49,18 +50,57 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
             if let Ok(allowlist) = std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST") {
                 command.env("OPSWEAVE_WORKER_SOURCE_ALLOWLIST", allowlist);
             }
-            match command.spawn() {
-                Ok(mut child) => match child.wait().await {
-                    Ok(status) => tracing::warn!(%status, "node-managed pipeline worker exited"),
-                    Err(error) => {
-                        tracing::error!(%error, "node-managed pipeline worker wait failed")
-                    }
-                },
+            let started = Instant::now();
+            let mut child = match command.spawn() {
+                Ok(child) => child,
                 Err(error) => {
-                    tracing::error!(%error, bin, "failed to start node-managed pipeline worker")
+                    failures = failures.saturating_add(1);
+                    tracing::error!(%error, bin, "failed to start node-managed pipeline worker");
+                    backoff(failures).await;
+                    continue;
+                }
+            };
+            loop {
+                let instance_ready = {
+                    let runtimes = shared.runtimes.read().await;
+                    runtimes
+                        .get(&instance_id)
+                        .is_some_and(|runtime| runtime.status_copy().state == RuntimeState::Ready)
+                };
+                if !enable_marker.exists()
+                    || !instance_ready
+                    || shared.quarantined.load(Ordering::SeqCst)
+                {
+                    tracing::warn!(%instance_id, "stopping worker: node or instance is no longer eligible");
+                    let _ = child.start_kill();
+                    let _ = child.wait().await;
+                    break;
+                }
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        tracing::warn!(%status, "node-managed pipeline worker exited");
+                        break;
+                    }
+                    Ok(None) => tokio::time::sleep(Duration::from_millis(500)).await,
+                    Err(error) => {
+                        tracing::error!(%error, "worker status check failed");
+                        let _ = child.start_kill();
+                        let _ = child.wait().await;
+                        break;
+                    }
                 }
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            failures = if started.elapsed() > Duration::from_secs(60) {
+                0
+            } else {
+                failures.saturating_add(1)
+            };
+            backoff(failures).await;
         }
     })
+}
+
+async fn backoff(failures: u32) {
+    let seconds = 2u64.saturating_mul(1u64 << failures.min(4));
+    tokio::time::sleep(Duration::from_secs(seconds.min(30))).await;
 }
