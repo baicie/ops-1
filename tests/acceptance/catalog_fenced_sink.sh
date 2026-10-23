@@ -54,6 +54,23 @@ CODE="$(curl -sS -o /tmp/fenced-write-a.json -w '%{http_code}' "${AUTH[@]}" -X P
 ok "old worker fenced write committed with effectId=$EFFECT_ID"
 COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_records WHERE dataset_id='$DATASET_ID';")"
 [ "$COUNT" = "2" ] || bad "expected 2 records after first fenced write, got $COUNT"
+BAD_BODY="$(python3 - "$JOB_ID" "$LEASE_A" "$FENCE_A" "$DATASET_ID" <<'PY'
+import json,sys,hashlib
+job,lease,fence,dataset=sys.argv[1:]
+def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
+effect='efx:'+hashlib.sha256(canonical({'jobId':job,'pipelineId':'host-metrics-pipeline','pipelineRevision':1,'sinkNodeId':'sink','logicalBatchId':'batch-partial-0001'})).hexdigest()
+records=[{'id':'valid','name':'valid'},{'id':123,'name':False}]
+payload={'effectId':effect,'pipelineId':'host-metrics-pipeline','pipelineRevision':1,'sinkNodeId':'sink','logicalBatchId':'batch-partial-0001','schemaRevision':1,'sourceBatchKey':'fenced-partial-0001','records':records}
+digest='sha256:'+hashlib.sha256(canonical(payload)).hexdigest()
+print(json.dumps({**payload,'requestDigest':digest,'fence':{'jobId':job,'leaseId':lease,'fencingSequence':int(fence),'pipelineId':'host-metrics-pipeline','pipelineRevision':1}}))
+PY
+)"
+BAD_CODE="$(curl -sS -o /tmp/fenced-partial.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$BAD_BODY" "$CAT/datasets/$DATASET_ID/fenced-records")"
+[ "$BAD_CODE" = "422" ] || bad "partial invalid batch returned $BAD_CODE"
+grep -q 'RECORD_VALIDATION_FAILED' /tmp/fenced-partial.json || bad "partial validation code missing"
+COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_records WHERE dataset_id='$DATASET_ID';")"
+[ "$COUNT" = "2" ] || bad "partial invalid batch wrote records (count=$COUNT)"
+ok "strict batch semantics rejected partial invalid batch before any write"
 
 # Force a takeover by expiring A's lease.
 psql "$DB" -qAt -c "UPDATE kernel.pipeline_job_leases SET expires_at=now()-interval '1 second' WHERE lease_id='$LEASE_A';" >/dev/null

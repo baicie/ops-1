@@ -794,6 +794,15 @@ impl Worker {
             } else {
                 bail!("receipt lookup unavailable ({})", existing.0);
             };
+            if receipt.get("status").and_then(Value::as_str) != Some("COMMITTED") {
+                bail!("batch receipt is not COMMITTED");
+            }
+            let accepted = receipt.get("accepted").and_then(Value::as_u64);
+            let rejected = receipt.get("rejected").and_then(Value::as_u64).unwrap_or(1);
+            let unknown = receipt.get("unknown").and_then(Value::as_u64).unwrap_or(1);
+            if accepted != Some(batch.len() as u64) || rejected != 0 || unknown != 0 {
+                bail!("batch receipt does not prove all records were committed");
+            }
             accepted_total += batch.len();
             last_receipt = receipt;
             if std::env::var("OPSWEAVE_WORKER_CRASH_AFTER_BATCH")

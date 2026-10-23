@@ -639,7 +639,7 @@ pub async fn submit_job(
     let job_id = Uuid::new_v4();
     let mut tx = state.db.begin().await?;
     sqlx::query(
-        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9)",
+        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds,deadline_at) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9, now() + make_interval(secs => $9))",
     )
     .bind(job_id)
     .bind(&request.pipeline_id)
@@ -902,10 +902,18 @@ pub async fn claim_next(
     )
     .execute(&mut *tx)
     .await?;
+    sqlx::query(
+        "UPDATE kernel.pipeline_jobs j SET status='FAILED',last_error_code='JOB_DEADLINE_EXCEEDED',updated_at=now()
+         WHERE j.status IN ('QUEUED','CLAIMED','RUNNING') AND j.deadline_at IS NOT NULL AND j.deadline_at <= now()
+           AND NOT EXISTS (SELECT 1 FROM kernel.pipeline_job_leases l WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now())",
+    )
+    .execute(&mut *tx)
+    .await?;
     let job_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT j.job_id FROM kernel.pipeline_jobs j
          WHERE j.status IN ('QUEUED','CLAIMED','RUNNING')
            AND j.attempts < j.max_attempts
+           AND (j.deadline_at IS NULL OR j.deadline_at > now())
            AND NOT EXISTS (
              SELECT 1 FROM kernel.pipeline_job_leases l
              WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now()
@@ -940,7 +948,7 @@ async fn claim_core(
     worker_version: &str,
 ) -> AppResult<ClaimResponse> {
     let row = sqlx::query(
-        "SELECT status,current_fence,current_lease_id,attempts,max_attempts FROM kernel.pipeline_jobs WHERE job_id=$1 FOR UPDATE",
+        "SELECT status,current_fence,current_lease_id,attempts,max_attempts,deadline_at FROM kernel.pipeline_jobs WHERE job_id=$1 FOR UPDATE",
     )
     .bind(job_id)
     .fetch_optional(&mut **tx)
@@ -951,6 +959,23 @@ async fn claim_core(
     let current_lease: Option<Uuid> = row.get("current_lease_id");
     let attempts: i32 = row.get("attempts");
     let max_attempts: i32 = row.get("max_attempts");
+    let deadline_at: Option<DateTime<Utc>> = row.get("deadline_at");
+    if deadline_at.is_some_and(|deadline| deadline <= Utc::now()) {
+        sqlx::query("UPDATE kernel.pipeline_jobs SET status='FAILED',last_error_code='JOB_DEADLINE_EXCEEDED',updated_at=now() WHERE job_id=$1")
+            .bind(job_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,details) VALUES ($1,'JOB_DEADLINE_EXCEEDED',$2,'FAILED',$3)")
+            .bind(job_id)
+            .bind(&status)
+            .bind(json!({"deadlineAt": deadline_at}))
+            .execute(&mut **tx)
+            .await?;
+        return Err(AppError::conflict(
+            "JOB_DEADLINE_EXCEEDED",
+            "job execution deadline has passed",
+        ));
+    }
     if !matches!(status.as_str(), "QUEUED" | "CLAIMED" | "RUNNING") {
         return Err(AppError::conflict(
             "JOB_NOT_CLAIMABLE",
@@ -1152,6 +1177,17 @@ pub async fn heartbeat(
     let trusted = authenticate_worker_header_only(&state, &headers).await?;
     let mut tx = state.db.begin().await?;
     let (_, fence) = authorize_lease(&mut tx, job_id, &trusted.worker_id, &request).await?;
+    let deadline_at: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT deadline_at FROM kernel.pipeline_jobs WHERE job_id=$1")
+            .bind(job_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if deadline_at.is_some_and(|deadline| deadline <= Utc::now()) {
+        return Err(AppError::conflict(
+            "JOB_DEADLINE_EXCEEDED",
+            "job execution deadline has passed",
+        ));
+    }
     let expires_at = Utc::now() + Duration::seconds(60);
     sqlx::query(
         "UPDATE kernel.pipeline_job_leases SET heartbeat_at=now(),expires_at=$2 WHERE lease_id=$1",
@@ -1221,6 +1257,7 @@ async fn verify_effect_set(
     job_id: Uuid,
     effects: &[Value],
     batch_count: u64,
+    accepted_total: u64,
 ) -> AppResult<()> {
     let row = sqlx::query(
         "SELECT j.pipeline_id,j.pipeline_revision,r.definition FROM kernel.pipeline_jobs j JOIN kernel.pipeline_revisions r ON r.pipeline_id=j.pipeline_id AND r.revision=j.pipeline_revision WHERE j.job_id=$1",
@@ -1260,6 +1297,7 @@ async fn verify_effect_set(
         ));
     }
     let mut seen = std::collections::BTreeSet::new();
+    let mut verified_accepted = 0u64;
     for (index, effect) in effects.iter().enumerate() {
         let expected_logical = format!("batch-{}", index + 1);
         let expected_effect = format!(
@@ -1316,6 +1354,26 @@ async fn verify_effect_set(
                 "Catalog receipt does not prove the committed effect set",
             ));
         }
+        if receipt.get("rejected").and_then(Value::as_u64) != Some(0)
+            || receipt.get("unknown").and_then(Value::as_u64) != Some(0)
+        {
+            return Err(AppError::conflict(
+                "EFFECT_PARTIAL_COMMIT",
+                "Catalog receipt is not a full-success receipt",
+            ));
+        }
+        verified_accepted += receipt
+            .get("accepted")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                AppError::conflict("EFFECT_NOT_COMMITTED", "receipt accepted is missing")
+            })?;
+    }
+    if verified_accepted != accepted_total {
+        return Err(AppError::conflict(
+            "ACCEPTED_TOTAL_MISMATCH",
+            "receipt accepted totals do not match the job output",
+        ));
     }
     Ok(())
 }
@@ -1385,7 +1443,12 @@ pub async fn result(
             .get("batches")
             .and_then(Value::as_u64)
             .unwrap_or(0);
-        verify_effect_set(&state, job_id, &request.effects, batches).await?;
+        let accepted = request
+            .output
+            .get("accepted")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        verify_effect_set(&state, job_id, &request.effects, batches, accepted).await?;
     }
     let mut tx = state.db.begin().await?;
     let (current_status, fence) = authorize_lease(

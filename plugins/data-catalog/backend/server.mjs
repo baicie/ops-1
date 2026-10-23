@@ -409,7 +409,15 @@ async function handle(req, res) {
         if (error) errors.push({ recordIndex: index, code: 'VALIDATION_FAILED', message: error });
         else acceptedRecords.push(record);
       });
-      const status = acceptedRecords.length === 0 ? 'REJECTED' : 'COMMITTED';
+      // 0.0.3 uses strict all-or-nothing batch semantics. A single invalid record
+      // rejects the whole batch before any record or receipt is written.
+      if (errors.length > 0) {
+        return fail(res, 422, 'RECORD_VALIDATION_FAILED', 'batch contains invalid records', requestId, false, { rejected: errors.length, errors });
+      }
+      if (acceptedRecords.length !== body.records.length) {
+        return fail(res, 422, 'RECORD_VALIDATION_FAILED', 'batch validation accounting mismatch', requestId);
+      }
+      const status = 'COMMITTED';
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
