@@ -51,7 +51,7 @@ function startTokenKeepalive() {
 
 async function loadWorkloadTokenFile() {
   try {
-    const raw = await fs.readFile('/run/opsweave-token.json', 'utf8');
+    const raw = await fs.readFile('/run/opsweave/capability-tokens.json', 'utf8');
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('token file is not an object');
     CAPABILITY_TOKENS = parsed;

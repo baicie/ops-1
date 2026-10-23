@@ -707,7 +707,13 @@ fn write_workload_tokens(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        // The per-instance directory is visible to the container UID. Its
+        // parent (the instances directory) is private to the Node host user.
+        let instances = shared.args.state_dir.join("instances");
+        if instances.exists() {
+            std::fs::set_permissions(&instances, std::fs::Permissions::from_mode(0o700))?;
+        }
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755))?;
     }
     let raw = env
         .get("OPSWEAVE_CAPABILITY_TOKENS")
