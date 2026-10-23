@@ -70,6 +70,7 @@ async fn proxy(
     State(state): State<ApiState>,
     Path((instance_id, path)): Path<(Uuid, String)>,
     method: Method,
+    uri: axum::http::Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -130,7 +131,14 @@ async fn proxy(
         )
             .into_response();
     };
-    let target = format!("http://127.0.0.1:{port}/{}", path.trim_start_matches('/'));
+    let query = uri
+        .query()
+        .map(|value| format!("?{value}"))
+        .unwrap_or_default();
+    let target = format!(
+        "http://127.0.0.1:{port}/{}{query}",
+        path.trim_start_matches('/')
+    );
     let mut request = state
         .shared
         .http
