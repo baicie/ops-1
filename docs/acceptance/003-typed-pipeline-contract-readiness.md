@@ -18,7 +18,7 @@ Implementation status: **BLOCKED by 0.0.2 version gate**
 | Schema Revision conformance | PASS (contract) | Sink config revision is checked against `contracts/examples/schema-catalog.json`; unknown/unpublished revision rejected |
 | Canonical JSON / digest | PASS (contract) | Pipeline, registry and execution-plan canonical digests are recomputed |
 | Durable state machine / Claim / Checkpoint / Fence conformance | PASS (contract) | Duplicate claim, illegal transition, monotonic fence/checkpoint and stale-fence checks |
-| Contract conformance CI | PASS | `typed-pipeline-contracts` run `39895675877` on `226a085` |
+| Contract conformance CI | PASS | `typed-pipeline-contracts` run `39895921388` on `61c1f53` |
 | Catalog Sink atomic fence boundary | **BLOCKED** | Existing `data.catalog.v1` has idempotent batch records but no Job/Fence identity; see `docs/architecture/0.0.3-fenced-sink.md` |
 | Minimal executable closed loop | **BLOCKED** | PR #1 is Draft/Open, not merged to `main`; implementation gate closed |
 | Real Lease/Fencing/Checkpoint/Sink E2E | **BLOCKED** | Requires Catalog fenced-receipt implementation plus Runtime after gate |

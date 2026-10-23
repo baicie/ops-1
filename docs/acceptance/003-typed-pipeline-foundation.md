@@ -35,7 +35,7 @@ The runtime phase is **BLOCKED** because PR #1 has not entered `main`. No
 | Canonical JSON digest | PASS (contract) | Pipeline/registry/plan canonical digest recomputed |
 | Job state machine | PASS (contract) | Illegal transitions, duplicate claim, fence sequence, checkpoint sequence, result key |
 | OpenAPI draft | PASS | `contracts/openapi/typed-pipeline-v1.yaml` and fenced Catalog extension |
-| Contract conformance CI | PASS | `typed-pipeline-contracts` run `39895675877` on `226a085` |
+| Contract conformance CI | PASS | `typed-pipeline-contracts` run `39895921388` on `61c1f53` |
 | Catalog Sink atomic fence | **BLOCKED** | Existing Catalog has no Job/Fence identity; see `docs/architecture/0.0.3-fenced-sink.md` |
 
 Contract result:
@@ -108,8 +108,8 @@ unchanged for 0.0.2 compatibility.
 ## 7. Commits / CI
 
 - Design branch: `feat/0.0.3-typed-pipeline-design`
-- Contract commit: `226a085`
-- Contract CI: [`39895675877`](https://github.com/baicie/ops-1/actions/runs/39895675877)
+- Contract commit: `61c1f53`
+- Contract CI: [`39895921388`](https://github.com/baicie/ops-1/actions/runs/39895921388)
 - Contract CI workflow: `.github/workflows/typed-pipeline-contracts.yml`
 - 0.0.2 PR: [`#1`](https://github.com/baicie/ops-1/pull/1), Draft/Open
 - No merge, no Ready state change, no tag movement, no release.
