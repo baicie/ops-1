@@ -23,6 +23,7 @@ pub const MAX_CHECKPOINT_BYTES: usize = 1024 * 1024;
 const REGISTRY_JSON: &str = include_str!("../../../contracts/examples/node-registry.json");
 const REGISTRY_KEYS_JSON: &str =
     include_str!("../../../contracts/examples/trusted-registry-keys.json");
+#[cfg(test)]
 const SCHEMA_CATALOG_JSON: &str = include_str!("../../../contracts/examples/schema-catalog.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,6 +363,7 @@ pub fn trusted_registry() -> Result<(NodeRegistry, TrustedRegistryKeys), Pipelin
     Ok((registry, keys))
 }
 
+#[cfg(test)]
 pub fn schema_catalog() -> Result<SchemaCatalog, PipelineError> {
     serde_json::from_str(SCHEMA_CATALOG_JSON)
         .map_err(|error| PipelineError::new("SCHEMA_CATALOG_INVALID", error.to_string()))

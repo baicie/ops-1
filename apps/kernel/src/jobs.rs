@@ -6,8 +6,8 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::pipeline::{
-    digest_without_field, schema_catalog, trusted_registry, validate_pipeline, PipelineDefinition,
-    PipelineExecutionPlan,
+    canonical_json, digest_without_field, trusted_registry, validate_pipeline, PipelineDefinition,
+    PipelineExecutionPlan, SchemaCatalog, SchemaDataset, SchemaField, SchemaRevision,
 };
 use crate::state::AppState;
 use axum::extract::{Path, State};
@@ -239,15 +239,136 @@ pub struct ResultRequest {
     pub effects: Vec<Value>,
 }
 
+async fn live_schema_catalog(
+    state: &AppState,
+    definition: &mut PipelineDefinition,
+) -> AppResult<SchemaCatalog> {
+    let sink = definition
+        .nodes
+        .iter_mut()
+        .find(|node| node.node_type == "builtin.sink.dataset")
+        .ok_or_else(|| AppError::bad_request("pipeline has no dataset sink"))?;
+    let dataset_id = sink
+        .config
+        .get("datasetId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::bad_request("sink datasetId is required"))?
+        .to_string();
+    Uuid::parse_str(&dataset_id)
+        .map_err(|_| AppError::bad_request("sink datasetId must be a UUID"))?;
+    let dataset = crate::capabilities::service_catalog_get(
+        state,
+        &format!("/api/data-catalog/datasets/{dataset_id}"),
+    )
+    .await
+    .map_err(|error| {
+        AppError::new(
+            error.status,
+            "CATALOG_UNAVAILABLE",
+            format!("Catalog dataset lookup failed: {}", error.message),
+        )
+    })?;
+    if dataset.get("datasetId").and_then(Value::as_str) != Some(dataset_id.as_str()) {
+        return Err(AppError::bad_request(
+            "Catalog returned a different dataset",
+        ));
+    }
+    let schemas = crate::capabilities::service_catalog_get(
+        state,
+        &format!("/api/data-catalog/datasets/{dataset_id}/schemas"),
+    )
+    .await?;
+    let requested_revision = sink
+        .config
+        .get("schemaRevision")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            dataset
+                .get("schemaRevision")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+        }) as u32;
+    let schema = schemas
+        .as_array()
+        .and_then(|rows| {
+            rows.iter().find(|row| {
+                row.get("schemaRevision").and_then(Value::as_u64) == Some(requested_revision as u64)
+            })
+        })
+        .ok_or_else(|| AppError::bad_request("schema revision does not exist in Catalog"))?;
+    if schema.get("status").and_then(Value::as_str) != Some("PUBLISHED") {
+        return Err(AppError::bad_request("schema revision is not PUBLISHED"));
+    }
+    let declared_digest = schema
+        .get("digest")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::bad_request("Catalog schema digest is missing"))?
+        .to_string();
+    let mut fields_value = schema
+        .get("fields")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| AppError::bad_request("Catalog schema fields are missing"))?;
+    fields_value.sort_by(|a, b| {
+        a.get("name")
+            .and_then(Value::as_str)
+            .cmp(&b.get("name").and_then(Value::as_str))
+    });
+    let actual_digest = format!(
+        "sha256:{}",
+        hex::encode(<sha2::Sha256 as sha2::Digest>::digest(
+            canonical_json(&Value::Array(fields_value.clone())).as_bytes()
+        ))
+    );
+    if actual_digest != declared_digest {
+        return Err(AppError::bad_request(
+            "Catalog schema digest is inconsistent",
+        ));
+    }
+    let fields: Vec<SchemaField> = serde_json::from_value(Value::Array(fields_value))
+        .map_err(|_| AppError::bad_request("Catalog schema fields are invalid"))?;
+    sink.config
+        .as_object_mut()
+        .ok_or_else(|| AppError::bad_request("sink config must be an object"))?
+        .insert(
+            "schemaDigest".to_string(),
+            Value::String(declared_digest.clone()),
+        );
+    sink.config
+        .as_object_mut()
+        .ok_or_else(|| AppError::bad_request("sink config must be an object"))?
+        .insert(
+            "schemaRevision".to_string(),
+            Value::from(requested_revision),
+        );
+    let latest = dataset
+        .get("schemaRevision")
+        .and_then(Value::as_u64)
+        .unwrap_or(requested_revision as u64) as u32;
+    Ok(SchemaCatalog {
+        catalog_version: "schema-catalog.opsweave.io/live-v1".to_string(),
+        datasets: vec![SchemaDataset {
+            dataset_id,
+            latest_published_revision: latest,
+            revisions: vec![SchemaRevision {
+                schema_revision: requested_revision,
+                status: "PUBLISHED".to_string(),
+                digest: declared_digest,
+                fields,
+            }],
+        }],
+    })
+}
+
 async fn validate_and_plan(
+    state: &AppState,
     definition: &mut PipelineDefinition,
 ) -> AppResult<PipelineExecutionPlan> {
+    let catalog = live_schema_catalog(state, definition).await?;
     let definition_value = serde_json::to_value(&*definition)
         .map_err(|error| AppError::bad_request(error.to_string()))?;
     definition.digest = digest_without_field(&definition_value, "digest");
     let (registry, _) = trusted_registry()
-        .map_err(|error| AppError::bad_request(format!("{}: {}", error.code, error.message)))?;
-    let catalog = schema_catalog()
         .map_err(|error| AppError::bad_request(format!("{}: {}", error.code, error.message)))?;
     validate_pipeline(definition, &registry, &catalog)
         .map_err(|error| AppError::bad_request(format!("{}: {}", error.code, error.message)))
@@ -286,7 +407,7 @@ pub async fn create_pipeline(
     Json(mut definition): Json<PipelineDefinition>,
 ) -> AppResult<Json<PipelineResponse>> {
     auth.require_operator()?;
-    let plan = validate_and_plan(&mut definition).await?;
+    let plan = validate_and_plan(&state, &mut definition).await?;
     if definition.status != "DRAFT" && definition.status != "PUBLISHED" {
         return Err(AppError::bad_request(
             "pipeline status must be DRAFT or PUBLISHED",
@@ -365,7 +486,7 @@ pub async fn publish_revision(
     if definition.pipeline_id != pipeline_id {
         return Err(AppError::bad_request("pipelineId does not match path"));
     }
-    let plan = validate_and_plan(&mut definition).await?;
+    let plan = validate_and_plan(&state, &mut definition).await?;
     if definition.status != "PUBLISHED" {
         return Err(AppError::bad_request(
             "published revision must have status PUBLISHED",

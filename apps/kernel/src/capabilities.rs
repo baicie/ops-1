@@ -12,7 +12,7 @@ use chrono::{Duration as ChronoDuration, Utc};
 use hmac::{Hmac, Mac};
 use opsweave_contracts::{ManifestV11, Role};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::Sha256;
 use sqlx::FromRow;
 use std::time::Duration;
@@ -496,6 +496,84 @@ pub async fn instance_environment(
         );
     }
     Ok(Json(InstanceEnvironmentResponse { env }))
+}
+
+pub const CATALOG_SERVICE_PLUGIN: &str = "opsweave.kernel.catalog";
+
+/// Kernel-side, read-only Catalog metadata call. It uses a distinct service
+/// principal and the normal Capability provider/grant/scope checks; it never
+/// reads plugin tables and never reuses a user or Node credential.
+pub async fn service_catalog_get(state: &AppState, path: &str) -> AppResult<Value> {
+    let name = "data.catalog.v1";
+    let major = 1i64;
+    let provider = resolve_provider(state, name, major).await?;
+    let (node_id, node_generation): (Uuid, i64) = sqlx::query_as(
+        "SELECT i.node_id, n.generation FROM kernel.plugin_instances i JOIN kernel.nodes n ON n.id=i.node_id WHERE i.id=$1",
+    )
+    .bind(provider.instance_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::unavailable("CATALOG_UNAVAILABLE", "Catalog provider instance is not live"))?;
+    let now = Utc::now();
+    let claims = WorkloadClaims {
+        v: 1,
+        sub: format!("service:{}", Uuid::new_v4()),
+        plugin_id: CATALOG_SERVICE_PLUGIN.to_string(),
+        instance_id: provider.instance_id,
+        node_id,
+        node_generation,
+        capability_name: name.to_string(),
+        capability_major: major,
+        audience: format!("plugin:{name}"),
+        scope: vec!["dataset:read".to_string()],
+        issued_at: now.timestamp(),
+        expires_at: (now + ChronoDuration::seconds(60)).timestamp(),
+        jti: Uuid::new_v4(),
+    };
+    let token = sign_claims(state, &claims)?;
+    let url = format!(
+        "{}/api/v1/capabilities/{name}/{major}/{}",
+        state.config.public_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|_| {
+            AppError::unavailable("CATALOG_UNAVAILABLE", "Catalog metadata request failed")
+        })?;
+    let status = response.status();
+    let body: Value = response.json().await.map_err(|_| {
+        AppError::unavailable(
+            "CATALOG_INVALID_RESPONSE",
+            "Catalog metadata response is not JSON",
+        )
+    })?;
+    if !status.is_success() {
+        return Err(AppError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "CATALOG_UNAVAILABLE",
+            format!("Catalog metadata query failed with {status}"),
+        ));
+    }
+    let _ = audit::record(
+        &state.db,
+        "capability.service_invoke",
+        "WORKLOAD",
+        CATALOG_SERVICE_PLUGIN,
+        "capability",
+        name,
+        "catalog.metadata.read",
+        "ACCEPTED",
+        json!({"path": path, "provider": provider.plugin_id}),
+        None,
+    )
+    .await;
+    Ok(body)
 }
 
 pub async fn invoke(

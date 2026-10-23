@@ -596,6 +596,11 @@ impl Worker {
             .and_then(|config| config.get("schemaRevision"))
             .and_then(Value::as_u64)
             .unwrap_or(1) as u32;
+        let schema_digest_pin = sink
+            .get("config")
+            .and_then(|config| config.get("schemaDigest"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
         if records.is_empty() {
             bail!("no records after pipeline execution");
         }
@@ -609,6 +614,34 @@ impl Worker {
         }
         self.heartbeat(job_id, &lease).await?;
         let token = self.workload_token().await?;
+        let (schema_status, schema_body) = self
+            .capability(
+                &token,
+                Method::GET,
+                &format!("api/data-catalog/datasets/{dataset_id}/schemas"),
+                None,
+            )
+            .await?;
+        if !schema_status.is_success() {
+            bail!("schema pin verification failed ({schema_status})");
+        }
+        let pinned_schema = schema_body
+            .as_array()
+            .and_then(|rows| {
+                rows.iter().find(|row| {
+                    row.get("schemaRevision").and_then(Value::as_u64)
+                        == Some(schema_revision as u64)
+                })
+            })
+            .ok_or_else(|| anyhow!("pinned schema revision does not exist"))?;
+        if pinned_schema.get("status").and_then(Value::as_str) != Some("PUBLISHED") {
+            bail!("pinned schema revision is not PUBLISHED");
+        }
+        if let Some(expected) = &schema_digest_pin {
+            if pinned_schema.get("digest").and_then(Value::as_str) != Some(expected.as_str()) {
+                bail!("pinned schema digest mismatch");
+            }
+        }
         let mut last_receipt = Value::Null;
         let mut accepted_total = 0usize;
         let batch_size = 500usize;

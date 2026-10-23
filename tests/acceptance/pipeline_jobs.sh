@@ -9,6 +9,10 @@ json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)"; }
 ok() { echo "PASS  $*"; }
 bad() { echo "FAIL  $*"; exit 1; }
 source tests/acceptance/pipeline_worker_auth.sh
+# The production publish path resolves this dataset through live Catalog metadata.
+FIXED_DATASET="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+curl -fsS "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$FIXED_DATASET" >/dev/null 2>&1 || \
+  curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -d '{"datasetId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"pipeline-jobs-hosts","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0},{"name":"name","type":"string","nullable":true,"ordinal":1}]}' "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets" >/dev/null
 PIPELINE_JSON="$(cat contracts/examples/pipeline-definition.json)"
 PIPELINE_ID="$(printf '%s' "$PIPELINE_JSON" | json "d['pipelineId']")"
 REVISION="$(printf '%s' "$PIPELINE_JSON" | json "d['revision']")"
