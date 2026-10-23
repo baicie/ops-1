@@ -15,7 +15,7 @@ PIPELINE_JSON="$(cat contracts/examples/pipeline-definition.json)"
 PIPELINE_ID="$(printf '%s' "$PIPELINE_JSON" | json "d['pipelineId']")"
 REVISION="$(printf '%s' "$PIPELINE_JSON" | json "d['revision']")"
 curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$PIPELINE_JSON" "$URL/api/v1/pipelines" >/tmp/fenced-pipeline.json
-DATASET="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H 'Idempotency-Key: fenced-dataset-0001' -d '{"name":"fenced-hosts","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0},{"name":"name","type":"string","nullable":true,"ordinal":1}]}' "$CAT/datasets")"
+DATASET="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H 'Idempotency-Key: fenced-dataset-0001' -d '{"datasetId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"fenced-hosts","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0},{"name":"name","type":"string","nullable":true,"ordinal":1}]}' "$CAT/datasets")"
 DATASET_ID="$(printf '%s' "$DATASET" | json "d['datasetId']")"
 [ -n "$DATASET_ID" ] || bad "dataset creation failed"
 JOB_BODY="{\"pipelineId\":\"$PIPELINE_ID\",\"pipelineRevision\":$REVISION,\"input\":{\"source\":\"http://172.17.0.1:18090/data-hosts.json\"},\"maxAttempts\":3,\"timeoutSeconds\":300}"
