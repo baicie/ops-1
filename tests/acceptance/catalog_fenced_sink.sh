@@ -27,11 +27,11 @@ LEASE_A="$(printf '%s' "$CLAIM_A" | json "d['leaseId']")"
 FENCE_A="$(printf '%s' "$CLAIM_A" | json "d['fencingSequence']")"
 
 make_fenced_body() {
-  python3 - "$1" "$2" "$3" "$4" "$DATASET_ID" <<'PY'
+  python3 - "$1" "$2" "$3" "$4" "$DATASET_ID" "$5" <<'PY'
 import json,sys,hashlib
-job,lease,fence,effectid,dataset=sys.argv[1:]
+job,lease,fence,effectid,dataset,logical_batch=sys.argv[1:]
 def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
-pipeline_id='host-metrics-pipeline'; pipeline_revision=1; sink_node='sink'; logical_batch='batch-host-metrics-0001'
+pipeline_id='host-metrics-pipeline'; pipeline_revision=1; sink_node='sink' 
 records=[{'id':'host-1','name':'host-1.example'},{'id':'host-2','name':'host-2.example'}]
 payload={'effectId':effectid,'pipelineId':pipeline_id,'pipelineRevision':pipeline_revision,'sinkNodeId':sink_node,'logicalBatchId':logical_batch,'schemaRevision':1,'sourceBatchKey':'fenced-batch-0001-0001','records':records}
 digest='sha256:'+hashlib.sha256(canonical(payload)).hexdigest()
@@ -44,7 +44,7 @@ def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure
 print('efx:'+hashlib.sha256(canonical({'jobId':sys.argv[1],'pipelineId':'host-metrics-pipeline','pipelineRevision':1,'sinkNodeId':'sink','logicalBatchId':'batch-host-metrics-0001'})).hexdigest())
 PY
 )"
-BODY_A="$(make_fenced_body "$JOB_ID" "$LEASE_A" "$FENCE_A" "$EFFECT_ID")"
+BODY_A="$(make_fenced_body "$JOB_ID" "$LEASE_A" "$FENCE_A" "$EFFECT_ID" "batch-host-metrics-0001")"
 CODE="$(curl -sS -o /tmp/fenced-write-a.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$BODY_A" "$CAT/datasets/$DATASET_ID/fenced-records")"
 [ "$CODE" = "201" ] || bad "fenced write A returned $CODE: $(cat /tmp/fenced-write-a.json)"
 ok "old worker fenced write committed with effectId=$EFFECT_ID"
@@ -59,7 +59,7 @@ FENCE_B="$(printf '%s' "$CLAIM_B" | json "d['fencingSequence']")"
 [ "$FENCE_B" -gt "$FENCE_A" ] || bad "takeover fence did not increase"
 
 # Same effectId after takeover must return the original receipt and write nothing.
-RETRY_BODY="$(make_fenced_body "$JOB_ID" "$LEASE_B" "$FENCE_B" "$EFFECT_ID")"
+RETRY_BODY="$(make_fenced_body "$JOB_ID" "$LEASE_B" "$FENCE_B" "$EFFECT_ID" "batch-host-metrics-0001")"
 RETRY_CODE="$(curl -sS -o /tmp/fenced-retry.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$RETRY_BODY" "$CAT/datasets/$DATASET_ID/fenced-records")"
 [ "$RETRY_CODE" = "200" ] || bad "cross-attempt effect retry returned $RETRY_CODE: $(cat /tmp/fenced-retry.json)"
 COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_records WHERE dataset_id='$DATASET_ID';")"
@@ -73,7 +73,7 @@ def canonical(v): return json.dumps(v,sort_keys=True,separators=(',',':'),ensure
 print('efx:'+hashlib.sha256(canonical({'jobId':sys.argv[1],'pipelineId':'host-metrics-pipeline','pipelineRevision':1,'sinkNodeId':'sink','logicalBatchId':'batch-host-metrics-0002'})).hexdigest())
 PY
 )"
-STALE_BODY="$(make_fenced_body "$JOB_ID" "$LEASE_A" "$FENCE_A" "$NEW_EFFECT")"
+STALE_BODY="$(make_fenced_body "$JOB_ID" "$LEASE_A" "$FENCE_A" "$NEW_EFFECT" "batch-host-metrics-0002")"
 STALE_CODE="$(curl -sS -o /tmp/fenced-stale.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$STALE_BODY" "$CAT/datasets/$DATASET_ID/fenced-records")"
 [ "$STALE_CODE" = "409" ] || bad "stale fence write returned $STALE_CODE: $(cat /tmp/fenced-stale.json)"
 if ! grep -Eq 'STALE_FENCE|LEASE_NOT_ACTIVE' /tmp/fenced-stale.json; then
