@@ -16,6 +16,7 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 
 | Stage | Result |
 |---|---|
+| Migration SQL Parser | PASS |
 | Multi Provider E2E | PASS |
 | Migration Concurrent E2E | PASS |
 | Catalog UI Flow | PASS |
@@ -36,7 +37,7 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 - Added bounded D06 reliability checks: `tests/acceptance/data_reliability.sh`.
 - Added full browser flows: `tests/ui/data-foundation-flows.spec.ts`.
 - Added responsive card tables and stable test IDs in both data extensions.
-- Kernel migration execution now uses a quote-aware statement splitter and the `APPLIED`-protecting failure upsert.
+- Kernel migration execution now uses a UTF-8-safe quote-aware statement splitter covering comments, escaped strings, doubled quotes, nested block comments and dollar quotes; `APPLIED` protection remains atomic.
 - Node runtime maintains an atomically updated, read-only mounted capability-token file; Integration has an idle keepalive and refreshes before use.
 
 ### Tests and CI
@@ -47,17 +48,17 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 - `cargo fmt --all -- --check`: PASS.
 - Contract validation: 10 schemas, PASS.
 - Data frontend typecheck/build: PASS.
-- Data Foundation OCI CI [`39827988081`](https://github.com/baicie/ops-1/actions/runs/39827988081): success.
-- Standard CI [`39827988127`](https://github.com/baicie/ops-1/actions/runs/39827988127): success.
+- Data Foundation OCI CI [`39890854728`](https://github.com/baicie/ops-1/actions/runs/39890854728): success.
+- Standard CI [`39890854766`](https://github.com/baicie/ops-1/actions/runs/39890854766): success.
 - 0.0.1 legacy job: `PASS=21 FAIL=0`.
 
 ### Real acceptance evidence
 
 - Multi-provider: bound A reached A; natural switch selected B and returned `403 CAPABILITY_PROVIDER_MISMATCH`; unbounded grant reached B; revoke/restore immediate; no-provider resolution returned `CAPABILITY_UNAVAILABLE`; mismatch audit present.
 - Migration concurrency: A failed, B applied once, late FAILED did not overwrite APPLIED; replay with same checksum `replay=true`; changed checksum rejected; CONTRACT blocked with live instance.
-- Token file: mode 644, per-instance isolation, no Node control credential in plugin env, no token in unauthenticated response, expiry/refresh and Node revocation tests. Missing/corrupt-file and Node/Kernel restart cases remain `PARTIAL/NOT_RUN`.
+- Token file: directory mounted read-only; host `instances` parent mode 700, per-instance directory 755, token file 644 for the non-root plugin; no cross-instance token, no Node control credential in plugin env, no token in unauthenticated response; expiry/refresh and Node revocation passed. Missing/corrupt-file and Node/Kernel restart cases remain `PARTIAL/NOT_RUN`.
 - Browser: full Catalog and Integration business flows passed with real signed Remote Extensions, real Gateway, PostgreSQL and active OCI plugins.
-- Screenshots: `artifacts/ui/data-foundation/` from artifact `data-foundation-screenshots` (run `39827988081`).
+- Screenshots: `artifacts/ui/data-foundation/` from artifact `data-foundation-screenshots` (run `39890854728`).
 
 ### Screenshot review
 
