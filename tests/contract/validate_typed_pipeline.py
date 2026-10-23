@@ -7,6 +7,7 @@ unambiguous before implementation is allowed through Gate 0.0.3.
 """
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import json
@@ -15,6 +16,8 @@ from collections import defaultdict
 from pathlib import Path
 
 import jsonschema
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from jsonschema import FormatChecker
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,7 +98,26 @@ def _port_signature(ports: list[dict], output: bool) -> list[tuple]:
     return sorted(tuple(port.get(field) for field in fields) for port in ports)
 
 
-def validate_pipeline(pipeline: dict, registry: dict, schema_catalog: dict) -> list[str]:
+def verify_registry_signature(registry: dict, trusted_keys: dict) -> str | None:
+    signature = registry.get("signature", {})
+    key_id = signature.get("keyId")
+    key_record = next((item for item in trusted_keys.get("keys", []) if item["keyId"] == key_id), None)
+    if key_record is None:
+        return f"UNKNOWN_REGISTRY_KEY:{key_id}"
+    try:
+        public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(key_record["publicKeyHex"]))
+        payload = canonical_bytes({
+            "schemaVersion": registry["schemaVersion"],
+            "registryDigest": registry["registryDigest"],
+            "entries": registry["entries"],
+        })
+        public_key.verify(base64.b64decode(signature["value"]), payload)
+    except (InvalidSignature, KeyError, ValueError):
+        return "REGISTRY_SIGNATURE_INVALID"
+    return None
+
+
+def validate_pipeline(pipeline: dict, registry: dict, schema_catalog: dict, trusted_keys: dict | None = None) -> list[str]:
     errors: list[str] = []
     nodes = pipeline.get("nodes", [])
     edges = pipeline.get("edges", [])
@@ -107,6 +129,10 @@ def validate_pipeline(pipeline: dict, registry: dict, schema_catalog: dict) -> l
         errors.append("REGISTRY_DIGEST_MISMATCH")
     if not registry.get("signature") or not registry["signature"].get("algorithm"):
         errors.append("REGISTRY_SIGNATURE_MISSING")
+    if trusted_keys is not None:
+        signature_error = verify_registry_signature(registry, trusted_keys)
+        if signature_error:
+            errors.append(signature_error)
 
     registry_by_type = {
         (entry["type"], entry["typeVersion"]): entry for entry in registry.get("entries", [])
@@ -198,6 +224,17 @@ def result_key(job_id: str, fence_sequence: int) -> str:
     return f"{job_id}:{fence_sequence}"
 
 
+def stable_effect_id(job_id: str, pipeline_id: str, revision: int, sink_node_id: str, logical_batch_id: str) -> str:
+    payload = {
+        "jobId": job_id,
+        "pipelineId": pipeline_id,
+        "pipelineRevision": revision,
+        "sinkNodeId": sink_node_id,
+        "logicalBatchId": logical_batch_id,
+    }
+    return "efx:" + hashlib.sha256(canonical_bytes(payload)).hexdigest()
+
+
 def validate_transition(current: str, target: str) -> bool:
     allowed = {
         "QUEUED": {"CLAIMED", "CANCELLED"},
@@ -234,6 +271,7 @@ def main() -> int:
     checkpoint = load(EXAMPLES / "job-checkpoint.json")
     result = load(EXAMPLES / "job-result.json")
     schema_catalog = load(EXAMPLES / "schema-catalog.json")
+    trusted_keys = load(EXAMPLES / "trusted-registry-keys.json")
     receipt = load(EXAMPLES / "sink-receipt.json")
     fence = load(EXAMPLES / "fence-grant.json")
     validate(pipeline, pipeline_schema, "pipeline-definition.json")
@@ -253,7 +291,7 @@ def main() -> int:
     reordered = dict(reversed(list(copy.deepcopy(pipeline).items())))
     if canonical_digest(reordered, "digest") != canonical_digest(pipeline, "digest"):
         FAILURES.append("canonical JSON digest is order dependent")
-    errors = validate_pipeline(pipeline, registry, schema_catalog)
+    errors = validate_pipeline(pipeline, registry, schema_catalog, trusted_keys)
     if errors:
         FAILURES.extend(f"valid pipeline: {error}" for error in errors)
     expected_order = ["source", "parse", "map", "filter", "validate", "sink"]
@@ -273,59 +311,59 @@ def main() -> int:
     # Negative static tests: declarations cannot expand the trusted signature.
     forged_port = copy.deepcopy(pipeline)
     forged_port["nodes"][1]["inputs"][0]["dataType"] = "string"
-    if not any(item.startswith("PORT_SIGNATURE_MISMATCH:") for item in validate_pipeline(forged_port, registry, schema_catalog)):
+    if not any(item.startswith("PORT_SIGNATURE_MISMATCH:") for item in validate_pipeline(forged_port, registry, schema_catalog, trusted_keys)):
         FAILURES.append("forged input port was accepted")
 
     extra_port = copy.deepcopy(pipeline)
     extra_port["nodes"][1]["inputs"].append({"name": "extra", "dataType": "json", "required": False})
-    if not any(item.startswith("PORT_SIGNATURE_MISMATCH:") for item in validate_pipeline(extra_port, registry, schema_catalog)):
+    if not any(item.startswith("PORT_SIGNATURE_MISMATCH:") for item in validate_pipeline(extra_port, registry, schema_catalog, trusted_keys)):
         FAILURES.append("extra input port was accepted")
 
     duplicate_target = copy.deepcopy(pipeline)
     duplicate_target["edges"].append(copy.deepcopy(duplicate_target["edges"][1]))
-    if not any(item.startswith("REQUIRED_INPUT_COUNT:") for item in validate_pipeline(duplicate_target, registry, schema_catalog)):
+    if not any(item.startswith("REQUIRED_INPUT_COUNT:") for item in validate_pipeline(duplicate_target, registry, schema_catalog, trusted_keys)):
         FAILURES.append("duplicate edge to a required input was accepted")
 
     missing_required = copy.deepcopy(pipeline)
     missing_required["edges"] = [edge for edge in missing_required["edges"] if edge["toNode"] != "map"]
-    if not any(item.startswith("REQUIRED_INPUT_COUNT:map.records") for item in validate_pipeline(missing_required, registry, schema_catalog)):
+    if not any(item.startswith("REQUIRED_INPUT_COUNT:map.records") for item in validate_pipeline(missing_required, registry, schema_catalog, trusted_keys)):
         FAILURES.append("missing required input was accepted")
 
     invalid_config = copy.deepcopy(pipeline)
     invalid_config["nodes"][0]["config"]["unexpected"] = True
-    if not any(item.startswith("CONFIG_INVALID:source") for item in validate_pipeline(invalid_config, registry, schema_catalog)):
+    if not any(item.startswith("CONFIG_INVALID:source") for item in validate_pipeline(invalid_config, registry, schema_catalog, trusted_keys)):
         FAILURES.append("invalid node config was accepted")
 
     bad_schema = copy.deepcopy(pipeline)
     bad_schema["nodes"][-1]["config"]["schemaRevision"] = 999
-    if not any(item.startswith("SCHEMA_REVISION_NOT_FOUND:sink") for item in validate_pipeline(bad_schema, registry, schema_catalog)):
+    if not any(item.startswith("SCHEMA_REVISION_NOT_FOUND:sink") for item in validate_pipeline(bad_schema, registry, schema_catalog, trusted_keys)):
         FAILURES.append("unknown schema revision was accepted")
 
     bad_registry = copy.deepcopy(registry)
     bad_registry["entries"][0]["typeVersion"] = 99
-    if "REGISTRY_DIGEST_MISMATCH" not in validate_pipeline(pipeline, bad_registry, schema_catalog):
+    if "REGISTRY_DIGEST_MISMATCH" not in validate_pipeline(pipeline, bad_registry, schema_catalog, trusted_keys):
         FAILURES.append("registry digest forgery was accepted")
 
     bad_digest = copy.deepcopy(pipeline)
     bad_digest["digest"] = "sha256:" + "0" * 64
-    if "PIPELINE_DIGEST_MISMATCH" not in validate_pipeline(bad_digest, registry, schema_catalog):
+    if "PIPELINE_DIGEST_MISMATCH" not in validate_pipeline(bad_digest, registry, schema_catalog, trusted_keys):
         FAILURES.append("pipeline digest forgery was accepted")
 
     cycle = copy.deepcopy(pipeline)
     cycle["edges"].append({
         "fromNode": "sink", "fromPort": "records", "toNode": "source", "toPort": "records", "dataType": "json"
     })
-    if "CYCLE" not in validate_pipeline(cycle, registry, schema_catalog):
+    if "CYCLE" not in validate_pipeline(cycle, registry, schema_catalog, trusted_keys):
         FAILURES.append("cycle was not rejected")
 
     unknown = copy.deepcopy(pipeline)
     unknown["nodes"][0]["type"] = "builtin.unknown.node"
-    if not any(item.startswith("UNKNOWN_NODE_TYPE:") for item in validate_pipeline(unknown, registry, schema_catalog)):
+    if not any(item.startswith("UNKNOWN_NODE_TYPE:") for item in validate_pipeline(unknown, registry, schema_catalog, trusted_keys)):
         FAILURES.append("unknown node type was not rejected")
 
     too_many = copy.deepcopy(pipeline)
     too_many["nodes"] = too_many["nodes"] + [copy.deepcopy(too_many["nodes"][-1]) for _ in range(60)]
-    if "NODE_LIMIT" not in validate_pipeline(too_many, registry, schema_catalog):
+    if "NODE_LIMIT" not in validate_pipeline(too_many, registry, schema_catalog, trusted_keys):
         FAILURES.append("node limit was not rejected")
 
     # Durable-state semantics that are not expressible in JSON Schema alone.
@@ -347,6 +385,15 @@ def main() -> int:
         FAILURES.append("fencing sequence is not positive")
     if receipt["status"] == "UNKNOWN" and receipt.get("resultDigest") is not None:
         FAILURES.append("UNKNOWN receipt must not claim a committed result")
+    effect_id = stable_effect_id(job["jobId"], pipeline["pipelineId"], pipeline["revision"], "sink", "batch-host-metrics-0001")
+    effect_id_retry = stable_effect_id(job["jobId"], pipeline["pipelineId"], pipeline["revision"], "sink", "batch-host-metrics-0001")
+    effect_id_other_batch = stable_effect_id(job["jobId"], pipeline["pipelineId"], pipeline["revision"], "sink", "batch-host-metrics-0002")
+    if effect_id != effect_id_retry:
+        FAILURES.append("stable effectId changes across attempts")
+    if effect_id == effect_id_other_batch:
+        FAILURES.append("different logical batches share an effectId")
+    if "attemptNumber" in effect_id or "fencingSequence" in effect_id:
+        FAILURES.append("effectId contains unstable attempt/fence identity")
     if job["idempotencyKey"] == "":
         FAILURES.append("job idempotency key must not be empty")
     if claim_job("QUEUED", 0) != 1:
@@ -386,7 +433,7 @@ def main() -> int:
             print(f"  - {failure}")
         return 1
     print("TYPED PIPELINE CONTRACT PASS")
-    print("  pipeline schema: valid (trusted registry signature source)")
+    print("  pipeline schema: valid (Ed25519 trusted registry signature verified)")
     print("  durable job schema: valid")
     print("  examples: 12 validated")
     print("  DAG/type/cycle/limits/state/fencing/schema checks: valid")

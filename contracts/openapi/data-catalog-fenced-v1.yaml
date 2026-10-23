@@ -22,9 +22,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [schemaRevision, sourceBatchKey, fence, records]
+              required: [effectId, requestDigest, pipelineId, pipelineRevision, sinkNodeId, logicalBatchId, schemaRevision, sourceBatchKey, fence, records]
               additionalProperties: false
               properties:
+                effectId: { type: string, pattern: '^efx:[a-f0-9]{64}$' }
+                requestDigest: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+                pipelineId: { type: string, pattern: '^[a-z][a-z0-9-]{2,63}$' }
+                pipelineRevision: { type: integer, minimum: 1 }
+                sinkNodeId: { type: string, pattern: '^[a-z][a-z0-9-]{1,47}$' }
+                logicalBatchId: { type: string, minLength: 1, maxLength: 128 }
                 schemaRevision: { type: integer, minimum: 1 }
                 sourceBatchKey: { type: string, minLength: 16, maxLength: 128 }
                 fence:

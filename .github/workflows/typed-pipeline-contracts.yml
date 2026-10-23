@@ -18,5 +18,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install 'jsonschema>=4.20,<5'
+      - run: python -m pip install 'jsonschema>=4.20,<5' 'cryptography>=42,<46'
       - run: python tests/contract/validate_typed_pipeline.py

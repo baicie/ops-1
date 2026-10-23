@@ -11,6 +11,7 @@ mod gateway;
 mod logs;
 mod nodes;
 mod packages;
+mod pipeline;
 mod plugins;
 mod publishers;
 mod receipts;

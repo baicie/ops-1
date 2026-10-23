@@ -179,8 +179,8 @@
   ],
   "registryDigest": "sha256:a1412584f638e134f936f353447d696d162cab41fca7070200245291c9e403f0",
   "signature": {
-    "algorithm": "hmac-sha256",
-    "keyId": "test-registry-key",
-    "value": "example-registry-signature-not-for-production"
+    "algorithm": "ed25519",
+    "keyId": "kernel-registry-test-1",
+    "value": "nfjgYDFP+VJE6uESe3xf4T95TbFSGZWdp9PCmd1fqDzwml1BNVwVPmcXmEOJhxnFt+kqEbrrIkK1z92GxIqwDA=="
   }
 }

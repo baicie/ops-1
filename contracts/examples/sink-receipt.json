@@ -9,5 +9,11 @@
   "schemaRevision": 1,
   "status": "COMMITTED",
   "committedAt": "2026-10-23T00:00:03Z",
-  "resultDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  "resultDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "effectId": "efx:2d3339ad5676cbf93c0aa569199d0ca0ab8297657da446bc00d161a7051274a8",
+  "requestDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "pipelineId": "host-metrics-pipeline",
+  "pipelineRevision": 1,
+  "sinkNodeId": "sink",
+  "logicalBatchId": "batch-host-metrics-0001"
 }

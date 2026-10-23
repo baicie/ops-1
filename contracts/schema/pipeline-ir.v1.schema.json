@@ -538,10 +538,7 @@
       "additionalProperties": false,
       "properties": {
         "algorithm": {
-          "enum": [
-            "ed25519",
-            "hmac-sha256"
-          ]
+          "const": "ed25519"
         },
         "keyId": {
           "type": "string",
