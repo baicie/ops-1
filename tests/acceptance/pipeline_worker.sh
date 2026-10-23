@@ -53,6 +53,7 @@ run_worker() {
     OPSWEAVE_WORKER_INSTANCE_ID="$W_INSTANCE_ID" \
     OPSWEAVE_WORKER_NODE_GENERATION="$W_NODE_GEN" \
     OPSWEAVE_WORKER_JOB_ID="$job" \
+    OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1" \
     ${crash_mode:+OPSWEAVE_WORKER_${crash_mode}=1} \
     ./target/debug/opsweave-pipeline-worker
 }

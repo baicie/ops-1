@@ -10,12 +10,12 @@ use reqwest::{Client, Method, StatusCode};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 use uuid::Uuid;
 
 const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_RECORDS: usize = 10_000;
-const EFFECT_BATCH: &str = "batch-host-metrics-0001";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +49,6 @@ struct ClaimResponse {
 struct DefinitionResponse {
     pipeline_id: String,
     pipeline_revision: u32,
-    input: Value,
     definition: Value,
     #[allow(dead_code)]
     plan: Value,
@@ -190,11 +189,16 @@ impl Worker {
         Ok(())
     }
 
-    async fn checkpoint(&self, job_id: Uuid, lease: &ClaimResponse, records: usize) -> Result<()> {
-        let digest = format!(
-            "sha256:{}",
-            hex::encode(Sha256::digest(json!({"records": records}).to_string()))
-        );
+    async fn checkpoint(
+        &self,
+        job_id: Uuid,
+        lease: &ClaimResponse,
+        sequence: usize,
+        records: usize,
+        completed_batches: usize,
+    ) -> Result<()> {
+        let state = json!({"records": records, "completedBatches": completed_batches});
+        let digest = digest(&state);
         let (status, body) = self
             .call(
                 Method::POST,
@@ -202,10 +206,10 @@ impl Worker {
                 Some(json!({
                     "leaseId": lease.lease_id,
                     "fencingSequence": lease.fencing_sequence,
-                    "sequence": 1,
-                    "inputCursor": "batch:0",
+                    "sequence": sequence,
+                    "inputCursor": format!("batch:{completed_batches}"),
                     "stateDigest": digest,
-                    "state": {"records": records}
+                    "state": state
                 })),
             )
             .await?;
@@ -281,37 +285,48 @@ impl Worker {
         ))
     }
 
-    async fn execute(&self, job_id: Uuid) -> Result<()> {
-        let lease = self.claim(job_id).await?;
-        self.start(job_id, &lease).await?;
-        let definition = self.definition(job_id).await?;
-        let source = definition
-            .input
-            .get("source")
-            .and_then(Value::as_str)
-            .or_else(|| {
-                definition
-                    .definition
-                    .get("nodes")
-                    .and_then(Value::as_array)
-                    .and_then(|nodes| {
-                        nodes.iter().find(|node| {
-                            node.get("type").and_then(Value::as_str)
-                                == Some("builtin.source.http_json")
-                        })
-                    })
-                    .and_then(|node| node.get("config"))
-                    .and_then(|config| config.get("endpoint"))
-                    .and_then(Value::as_str)
-            })
-            .ok_or_else(|| anyhow!("job has no HTTP source"))?
+    async fn fetch_source(&self, endpoint: &str) -> Result<Vec<Value>> {
+        let policy = SourcePolicy::from_env();
+        let url = policy.validate_url(endpoint).await?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| anyhow!("source URL has no host"))?
+            .trim_matches(['[', ']'])
             .to_string();
-        let response = self
-            .client
-            .get(&source)
-            .send()
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| anyhow!("source URL has no port"))?;
+        let pinned: SocketAddr = if let Ok(ip) = host.parse::<IpAddr>() {
+            policy.check_ip(ip, &host)?;
+            SocketAddr::new(ip, port)
+        } else {
+            let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+                .await
+                .context("source DNS resolution failed")?
+                .collect();
+            if addresses.is_empty() {
+                bail!("source DNS has no addresses");
+            }
+            for address in &addresses {
+                policy.check_ip(address.ip(), &host)?;
+            }
+            addresses[0]
+        };
+        let mut builder = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(20));
+        if host.parse::<IpAddr>().is_err() {
+            builder = builder.resolve(&host, pinned);
+        }
+        let client = builder.build()?;
+        let response = tokio::time::timeout(Duration::from_secs(30), client.get(url).send())
             .await
+            .map_err(|_| anyhow!("source request timed out"))?
             .context("source request")?;
+        if response.status().is_redirection() {
+            bail!("source redirects are not allowed");
+        }
         if !response.status().is_success() {
             bail!("source returned {}", response.status());
         }
@@ -321,22 +336,265 @@ impl Worker {
         {
             bail!("source body exceeds limit");
         }
-        let bytes = response.bytes().await.context("read source")?;
-        if bytes.len() > MAX_SOURCE_BYTES {
-            bail!("source body exceeds limit");
-        }
+        let mut bytes = Vec::new();
+        let stream = async {
+            let mut response = response;
+            while let Some(chunk) = response.chunk().await.context("read source")? {
+                if bytes.len().saturating_add(chunk.len()) > MAX_SOURCE_BYTES {
+                    bail!("source body exceeds limit");
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok::<(), anyhow::Error>(())
+        };
+        tokio::time::timeout(Duration::from_secs(20), stream)
+            .await
+            .map_err(|_| anyhow!("source read timed out"))??;
         let parsed: Value = serde_json::from_slice(&bytes).context("parse source JSON")?;
-        let raw_records = parsed
+        let records = parsed
             .as_array()
             .cloned()
             .or_else(|| parsed.get("items").and_then(Value::as_array).cloned())
             .ok_or_else(|| {
                 anyhow!("source must be a JSON array or a document with an items array")
             })?;
-        if raw_records.is_empty() || raw_records.len() > MAX_RECORDS {
-            bail!("record limit exceeded");
+        if records.is_empty() || records.len() > MAX_RECORDS {
+            bail!("source record limit exceeded");
         }
-        let records: Vec<Value> = raw_records
+        Ok(records)
+    }
+
+    async fn execute(&self, job_id: Uuid) -> Result<()> {
+        let lease = self.claim(job_id).await?;
+        self.start(job_id, &lease).await?;
+        let definition = self.definition(job_id).await?;
+        let nodes = definition
+            .definition
+            .get("nodes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| anyhow!("pipeline definition has no nodes"))?;
+        let plan = &definition.plan;
+        if plan.get("deterministic").and_then(Value::as_bool) != Some(true) {
+            bail!("execution plan is not deterministic");
+        }
+        if let Some(expected) = plan.get("planDigest").and_then(Value::as_str) {
+            if digest_without(plan, "planDigest") != expected {
+                bail!("execution plan digest mismatch");
+            }
+        }
+        let ordered = plan
+            .get("orderedNodes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| anyhow!("execution plan has no orderedNodes"))?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let node_map: std::collections::BTreeMap<String, &Value> = nodes
+            .iter()
+            .filter_map(|node| {
+                node.get("nodeId")
+                    .and_then(Value::as_str)
+                    .map(|id| (id.to_string(), node))
+            })
+            .collect();
+        if ordered.len() != node_map.len() {
+            bail!("execution plan node set does not match revision");
+        }
+        let mut records: Vec<Value> = Vec::new();
+        let mut sink_node: Option<&Value> = None;
+        for node_id in &ordered {
+            let node = node_map
+                .get(node_id)
+                .ok_or_else(|| anyhow!("execution plan references unknown node {node_id}"))?;
+            let node_type = node.get("type").and_then(Value::as_str).unwrap_or_default();
+            match node_type {
+                "builtin.source.http_json" => {
+                    if !records.is_empty() {
+                        bail!("source node must be first");
+                    }
+                    let endpoint = node
+                        .get("config")
+                        .and_then(|config| config.get("endpoint"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| anyhow!("source endpoint missing from pinned revision"))?;
+                    // Job input is deliberately not allowed to override the published endpoint.
+                    records = self.fetch_source(endpoint).await?;
+                }
+                "builtin.parse.json" => {
+                    // Source already returns parsed JSON records; this node is typed as
+                    // a bounded parse boundary and must not silently substitute fields.
+                    if records.is_empty() {
+                        bail!("parse node has no source records");
+                    }
+                }
+                "builtin.map.fields" => {
+                    records = apply_mapping(records, node.get("config").unwrap_or(&Value::Null))?;
+                }
+                "builtin.filter.predicate" => {
+                    records = apply_filter(records, node.get("config").unwrap_or(&Value::Null))?;
+                }
+                "builtin.validate.schema" => {
+                    validate_records(&records, node.get("config").unwrap_or(&Value::Null))?;
+                }
+                "builtin.sink.dataset" => {
+                    sink_node = Some(node);
+                    break;
+                }
+                other => bail!("unsupported execution node type {other}"),
+            }
+            if records.len() > MAX_RECORDS {
+                bail!("record limit exceeded after node {node_id}");
+            }
+        }
+        let sink = sink_node.ok_or_else(|| anyhow!("execution plan has no sink node"))?;
+        let sink_node_id = sink.get("nodeId").and_then(Value::as_str).unwrap_or("sink");
+        let dataset_id = sink
+            .get("config")
+            .and_then(|config| config.get("datasetId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("sink dataset missing"))?;
+        let schema_revision = sink
+            .get("config")
+            .and_then(|config| config.get("schemaRevision"))
+            .and_then(Value::as_u64)
+            .unwrap_or(1) as u32;
+        if records.is_empty() {
+            bail!("no records after pipeline execution");
+        }
+        self.heartbeat(job_id, &lease).await?;
+        let token = self.workload_token().await?;
+        let mut last_receipt = Value::Null;
+        let mut accepted_total = 0usize;
+        let batch_size = 500usize;
+        let batch_count = records.len().div_ceil(batch_size);
+        for (index, batch) in records.chunks(batch_size).enumerate() {
+            let logical_batch = format!("batch-{}", index + 1);
+            let effect = effect_id(
+                &job_id,
+                &definition.pipeline_id,
+                definition.pipeline_revision,
+                sink_node_id,
+                &logical_batch,
+            );
+            self.checkpoint(job_id, &lease, index + 1, records.len(), index)
+                .await?;
+            let existing = self
+                .capability(
+                    &token,
+                    Method::GET,
+                    &format!(
+                        "api/data-catalog/datasets/{dataset_id}/effect-receipts?effectId={effect}"
+                    ),
+                    None,
+                )
+                .await?;
+            let receipt = if existing.0 == StatusCode::OK
+                && existing.1.get("status").and_then(Value::as_str) == Some("COMMITTED")
+            {
+                existing.1
+            } else {
+                let request_digest = digest(&json!({
+                    "effectId": effect,
+                    "pipelineId": definition.pipeline_id,
+                    "pipelineRevision": definition.pipeline_revision,
+                    "sinkNodeId": sink_node_id,
+                    "logicalBatchId": logical_batch,
+                    "schemaRevision": schema_revision,
+                    "sourceBatchKey": format!("job-{job_id}-{logical_batch}"),
+                    "records": batch
+                }));
+                let (status, body) = self
+                    .capability(
+                        &token,
+                        Method::POST,
+                        &format!("api/data-catalog/datasets/{dataset_id}/fenced-records"),
+                        Some(json!({
+                            "effectId": effect,
+                            "requestDigest": request_digest,
+                            "pipelineId": definition.pipeline_id,
+                            "pipelineRevision": definition.pipeline_revision,
+                            "sinkNodeId": sink_node_id,
+                            "logicalBatchId": logical_batch,
+                            "schemaRevision": schema_revision,
+                            "sourceBatchKey": format!("job-{job_id}-{logical_batch}"),
+                            "fence": {
+                                "jobId": job_id,
+                                "leaseId": lease.lease_id,
+                                "fencingSequence": lease.fencing_sequence,
+                                "pipelineId": definition.pipeline_id,
+                                "pipelineRevision": definition.pipeline_revision
+                            },
+                            "records": batch
+                        })),
+                    )
+                    .await?;
+                if !status.is_success() {
+                    bail!("fenced sink failed ({status}): {body}");
+                }
+                body
+            };
+            accepted_total += batch.len();
+            last_receipt = receipt;
+            if std::env::var("OPSWEAVE_WORKER_CRASH_AFTER_BATCH")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                == Some(index + 1)
+            {
+                eprintln!("worker crash injection after batch {}", index + 1);
+                std::process::exit(18);
+            }
+        }
+        if std::env::var("OPSWEAVE_WORKER_CRASH_BEFORE_SINK")
+            .ok()
+            .as_deref()
+            == Some("1")
+        {
+            eprintln!("worker crash injection before sink");
+            std::process::exit(17);
+        }
+        let result_digest = digest(&json!({
+            "effectId": effect_id(&job_id, &definition.pipeline_id, definition.pipeline_revision, sink_node_id, "result"),
+            "batches": batch_count,
+            "accepted": accepted_total,
+            "receipt": last_receipt
+        }));
+        let (status, body) = self
+            .call(
+                Method::POST,
+                &format!("/internal/v1/pipeline-jobs/{job_id}/result"),
+                Some(json!({
+                    "leaseId": lease.lease_id,
+                    "fencingSequence": lease.fencing_sequence,
+                    "status": "SUCCEEDED",
+                    "output": {"accepted": accepted_total, "batches": batch_count},
+                    "resultDigest": result_digest,
+                    "receipt": last_receipt
+                })),
+            )
+            .await?;
+        if !status.is_success() {
+            bail!("result submission failed ({status}): {body}");
+        }
+        println!(
+            "pipeline worker completed job {job_id} batches {batch_count} accepted {accepted_total}"
+        );
+        Ok(())
+    }
+}
+
+fn digest_without(value: &Value, field: &str) -> String {
+    let mut copy = value.clone();
+    if let Some(object) = copy.as_object_mut() {
+        object.remove(field);
+    }
+    digest(&copy)
+}
+
+fn apply_mapping(records: Vec<Value>, config: &Value) -> Result<Vec<Value>> {
+    let mappings = config.get("mappings").and_then(Value::as_object);
+    let Some(mappings) = mappings else {
+        return records
             .into_iter()
             .map(|record| {
                 let id = record
@@ -349,142 +607,85 @@ impl Worker {
                     .ok_or_else(|| anyhow!("record name missing"))?;
                 Ok(json!({"id": id, "name": name}))
             })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .filter(|record| {
-                record
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| !id.is_empty())
-            })
             .collect();
-        if records.is_empty() {
-            bail!("no records after parse/filter");
-        }
-        self.heartbeat(job_id, &lease).await?;
-        self.checkpoint(job_id, &lease, records.len()).await?;
-        if std::env::var("OPSWEAVE_WORKER_CRASH_BEFORE_SINK")
-            .ok()
-            .as_deref()
-            == Some("1")
-        {
-            eprintln!("worker crash injection before sink");
-            std::process::exit(17);
-        }
-        let sink = definition
-            .definition
-            .get("nodes")
-            .and_then(Value::as_array)
-            .and_then(|nodes| {
-                nodes.iter().find(|node| {
-                    node.get("type").and_then(Value::as_str) == Some("builtin.sink.dataset")
-                })
-            })
-            .ok_or_else(|| anyhow!("pipeline has no sink"))?;
-        let sink_node_id = sink.get("nodeId").and_then(Value::as_str).unwrap_or("sink");
-        let dataset_id = sink
-            .get("config")
-            .and_then(|config| config.get("datasetId"))
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("sink dataset missing"))?;
-        let schema_revision = sink
-            .get("config")
-            .and_then(|config| config.get("schemaRevision"))
-            .and_then(Value::as_u64)
-            .unwrap_or(1) as u32;
-        let effect_id = effect_id(
-            &job_id,
-            &definition.pipeline_id,
-            definition.pipeline_revision,
-            sink_node_id,
-            EFFECT_BATCH,
-        );
-        let token = self.workload_token().await?;
-        let existing = self
-            .capability(
-                &token,
-                Method::GET,
-                &format!(
-                    "api/data-catalog/datasets/{dataset_id}/effect-receipts?effectId={effect_id}"
-                ),
-                None,
-            )
-            .await?;
-        let receipt = if existing.0 == StatusCode::OK
-            && existing.1.get("status").and_then(Value::as_str) == Some("COMMITTED")
-        {
-            existing.1
-        } else {
-            let request_digest = digest(&json!({
-                "effectId": effect_id,
-                "pipelineId": definition.pipeline_id,
-                "pipelineRevision": definition.pipeline_revision,
-                "sinkNodeId": sink_node_id,
-                "logicalBatchId": EFFECT_BATCH,
-                "schemaRevision": schema_revision,
-                "sourceBatchKey": format!("job-{job_id}-effect"),
-                "records": records
-            }));
-            let (status, body) = self
-                .capability(
-                    &token,
-                    Method::POST,
-                    &format!("api/data-catalog/datasets/{dataset_id}/fenced-records"),
-                    Some(json!({
-                        "effectId": effect_id,
-                        "requestDigest": request_digest,
-                        "pipelineId": definition.pipeline_id,
-                        "pipelineRevision": definition.pipeline_revision,
-                        "sinkNodeId": sink_node_id,
-                        "logicalBatchId": EFFECT_BATCH,
-                        "schemaRevision": schema_revision,
-                        "sourceBatchKey": format!("job-{job_id}-effect"),
-                        "fence": {
-                            "jobId": job_id,
-                            "leaseId": lease.lease_id,
-                            "fencingSequence": lease.fencing_sequence,
-                            "pipelineId": definition.pipeline_id,
-                            "pipelineRevision": definition.pipeline_revision
-                        },
-                        "records": records
-                    })),
-                )
-                .await?;
-            if !status.is_success() {
-                bail!("fenced sink failed ({status}): {body}");
+    };
+    records
+        .into_iter()
+        .map(|record| {
+            let mut output = serde_json::Map::new();
+            for (target, source) in mappings {
+                let path = source
+                    .as_str()
+                    .ok_or_else(|| anyhow!("mapping source must be a string"))?;
+                let value = path
+                    .split('.')
+                    .try_fold(&record, |current, segment| current.get(segment))
+                    .cloned()
+                    .ok_or_else(|| anyhow!("mapping source {path} is missing"))?;
+                output.insert(target.clone(), value);
             }
-            body
-        };
-        if std::env::var("OPSWEAVE_WORKER_CRASH_AFTER_SINK")
-            .ok()
-            .as_deref()
-            == Some("1")
-        {
-            eprintln!("worker crash injection after sink");
-            std::process::exit(18);
+            Ok(Value::Object(output))
+        })
+        .collect()
+}
+
+fn apply_filter(records: Vec<Value>, config: &Value) -> Result<Vec<Value>> {
+    let Some(field) = config.get("field").and_then(Value::as_str) else {
+        return Ok(records);
+    };
+    let op = config.get("op").and_then(Value::as_str).unwrap_or("eq");
+    let expected = config.get("value").cloned().unwrap_or(Value::Null);
+    records
+        .into_iter()
+        .filter(|record| {
+            let actual = record.get(field).unwrap_or(&Value::Null);
+            match op {
+                "eq" => actual == &expected,
+                "ne" => actual != &expected,
+                "gt" => actual
+                    .as_f64()
+                    .zip(expected.as_f64())
+                    .is_some_and(|(a, b)| a > b),
+                "lt" => actual
+                    .as_f64()
+                    .zip(expected.as_f64())
+                    .is_some_and(|(a, b)| a < b),
+                "exists" => !actual.is_null(),
+                _ => false,
+            }
+        })
+        .collect::<Vec<_>>()
+        .pipe(Ok)
+}
+
+fn validate_records(records: &[Value], config: &Value) -> Result<()> {
+    let required = config
+        .get("required")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_else(|| vec![Value::from("id"), Value::from("name")]);
+    for record in records {
+        if !record.is_object() {
+            bail!("validated record is not an object");
         }
-        let result_digest = digest(&json!({"effectId": effect_id, "receipt": receipt}));
-        let (status, body) = self
-            .call(
-                Method::POST,
-                &format!("/internal/v1/pipeline-jobs/{job_id}/result"),
-                Some(json!({
-                    "leaseId": lease.lease_id,
-                    "fencingSequence": lease.fencing_sequence,
-                    "status": "SUCCEEDED",
-                    "output": {"accepted": receipt.get("accepted"), "effectId": effect_id},
-                    "resultDigest": result_digest,
-                    "receipt": receipt
-                })),
-            )
-            .await?;
-        if !status.is_success() {
-            bail!("result submission failed ({status}): {body}");
+        for field in &required {
+            let field = field
+                .as_str()
+                .ok_or_else(|| anyhow!("required field must be a string"))?;
+            if record.get(field).is_none_or(|value| value.is_null()) {
+                bail!("required field {field} is missing");
+            }
         }
-        println!("pipeline worker completed job {job_id} effect {effect_id}");
-        Ok(())
+    }
+    Ok(())
+}
+
+trait Pipe: Sized {
+    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
+        f(self)
     }
 }
+impl<T> Pipe for T {}
 
 fn canonical_json(value: &Value) -> String {
     match value {
@@ -545,6 +746,123 @@ fn effect_id(
     )
 }
 
+#[derive(Debug, Default)]
+struct SourcePolicy {
+    allowlist: Vec<String>,
+}
+
+impl SourcePolicy {
+    fn from_env() -> Self {
+        let allowlist = std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect();
+        Self { allowlist }
+    }
+
+    fn allowed(&self, value: &str) -> bool {
+        let value = value.trim_matches(['[', ']']).to_ascii_lowercase();
+        self.allowlist.iter().any(|entry| entry == &value)
+    }
+
+    fn check_ip(&self, ip: IpAddr, host: &str) -> Result<()> {
+        if self.allowed(host) || self.allowed(&ip.to_string()) {
+            return Ok(());
+        }
+        if is_public_ip(ip) {
+            Ok(())
+        } else {
+            bail!("source address is not public")
+        }
+    }
+
+    async fn validate_url(&self, endpoint: &str) -> Result<reqwest::Url> {
+        let url = reqwest::Url::parse(endpoint).context("invalid source URL")?;
+        if !matches!(url.scheme(), "http" | "https") {
+            bail!("source scheme must be http or https");
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            bail!("source URL must not contain credentials");
+        }
+        if url.fragment().is_some() {
+            bail!("source URL must not contain a fragment");
+        }
+        let host = url
+            .host_str()
+            .ok_or_else(|| anyhow!("source URL has no host"))?
+            .trim_matches(['[', ']']);
+        if (host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost"))
+            && !self.allowed(host)
+        {
+            bail!("source host is local");
+        }
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            self.check_ip(ip, host)?;
+        }
+        Ok(url)
+    }
+}
+
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => is_public_v4(ip),
+        IpAddr::V6(ip) => is_public_v6(ip),
+    }
+}
+
+fn is_public_v4(ip: Ipv4Addr) -> bool {
+    let value = u32::from(ip);
+    let first = (value >> 24) as u8;
+    let second = (value >> 16) as u8;
+    !(first == 0
+        || first == 10
+        || first == 127
+        || (first == 100 && (64..=127).contains(&second))
+        || (first == 169 && second == 254)
+        || (first == 172 && (16..=31).contains(&second))
+        || (first == 192 && second == 0)
+        || (first == 192 && second == 168)
+        || (first == 198 && (18..=19).contains(&second))
+        || (first == 198 && second == 51 && (value >> 8 & 0xff) == 100)
+        || (first == 203 && second == 0 && (value >> 8 & 0xff) == 113)
+        || first >= 224)
+}
+
+fn is_public_v6(ip: Ipv6Addr) -> bool {
+    let segments = ip.segments();
+    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() {
+        return false;
+    }
+    if (segments[0] & 0xfe00) == 0xfc00 || (segments[0] & 0xffc0) == 0xfe80 {
+        return false;
+    }
+    if (segments[0] & 0xffc0) == 0xfec0 || (segments[0] == 0x2001 && segments[1] == 0x0db8) {
+        return false;
+    }
+    if segments[0] == 0
+        && segments[1] == 0
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0xffff
+    {
+        let v4 = Ipv4Addr::new(
+            (segments[6] >> 8) as u8,
+            (segments[6] & 0xff) as u8,
+            (segments[7] >> 8) as u8,
+            (segments[7] & 0xff) as u8,
+        );
+        return is_public_v4(v4);
+    }
+    if segments[0..6].iter().all(|segment| *segment == 0) {
+        return false;
+    }
+    true
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let worker = Worker::new().await?;
@@ -553,4 +871,57 @@ async fn main() -> Result<()> {
         .context("parse job id")?;
     let _ = Utc::now();
     worker.execute(job_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_and_metadata_addresses_are_blocked() {
+        for value in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+        ] {
+            assert!(
+                !is_public_ip(value.parse().unwrap()),
+                "{value} should be blocked"
+            );
+        }
+    }
+
+    #[test]
+    fn public_addresses_are_allowed() {
+        for value in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+            assert!(
+                is_public_ip(value.parse().unwrap()),
+                "{value} should be public"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn source_url_rejects_localhost_and_non_http_scheme() {
+        let policy = SourcePolicy::default();
+        assert!(policy.validate_url("http://127.0.0.1/data").await.is_err());
+        assert!(policy.validate_url("file:///etc/passwd").await.is_err());
+        assert!(policy
+            .validate_url("http://169.254.169.254/latest/meta-data")
+            .await
+            .is_err());
+        assert!(policy.validate_url("http://[::1]/").await.is_err());
+        assert!(policy
+            .validate_url("http://user:pass@example.com/")
+            .await
+            .is_err());
+    }
 }
