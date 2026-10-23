@@ -74,13 +74,13 @@ Baseline: `v0.0.1-dev.1` / `4ce130b`, branch `feat/0.0.2-data-foundation`.
 | Epic | Status | Evidence / limitation |
 |---|---|---|
 | D00 Data Capability Contract | DONE (contracts) | `contracts/openapi/{capability,data-catalog,data-integration}-v1.yaml`, capability/storage/catalog/integration JSON Schemas, examples and negative contract checks pass. |
-| D01 Catalog Backend | PASS (CI) | Independent Node service and plugin-owned PostgreSQL schema tables; dataset/create/draft/publish/diff/write/idempotency verified in real OCI CI run `39890854728`. |
-| D02 Catalog UI | PASS (CI) | Dynamic UMD extension; full real browser Dataset/Schema/Diff/Publish/Records flow and responsive screenshot matrix passed in CI run `39890854728`. |
-| D03 Integration Backend | PASS (CI) | Independent HTTP/JSON source service with ConnectionTest, Discovery, Preview, mappings/specs/runs and SSRF negative test; real OCI CI run `39890854728`. |
-| D04 Integration UI | PASS (CI) | Dynamic UMD extension; full real browser Source/Test/Discover/Preview/Mapping/Run/Quality/Lineage flow and responsive screenshot matrix passed in CI run `39890854728`. |
-| D05 Ingestion Flow | PASS (CI) | Source→parse→map→validate→Catalog sink through the real Kernel Capability Gateway and real OCI plugin pair, run `39890854728`. |
+| D01 Catalog Backend | PASS (CI) | Independent Node service and plugin-owned PostgreSQL schema tables; dataset/create/draft/publish/diff/write/idempotency verified in real OCI CI run `39892827048`. |
+| D02 Catalog UI | PASS (CI) | Dynamic UMD extension; full real browser Dataset/Schema/Diff/Publish/Records flow and responsive screenshot matrix passed in CI run `39892827048`. |
+| D03 Integration Backend | PASS (CI) | Independent HTTP/JSON source service with ConnectionTest, Discovery, Preview, mappings/specs/runs and SSRF negative test; real OCI CI run `39892827048`. |
+| D04 Integration UI | PASS (CI) | Dynamic UMD extension; full real browser Source/Test/Discover/Preview/Mapping/Run/Quality/Lineage flow and responsive screenshot matrix passed in CI run `39892827048`. |
+| D05 Ingestion Flow | PASS (CI) | Source→parse→map→validate→Catalog sink through the real Kernel Capability Gateway and real OCI plugin pair, run `39892827048`. |
 | D06 Quality / Run History | PARTIAL | Run counts, history and batch lineage implemented; retention/quality edge cases limited. |
-| D07 Integration Tests | PASS (CI) | GitHub Actions `39890854728`: two real Node runtimes, real OCI Catalog/Integration containers on distinct nodes, real Kernel Capability Gateway, multi-provider binding, migration concurrency, token-file security, full Chromium business flows, schema compatibility/quality checks, and 0.0.1 E2E `PASS=21 FAIL=0`; local Docker Desktop run remains `NOT_RUN`. |
+| D07 Integration Tests | PASS (CI) | GitHub Actions `39892827048`: two real Node runtimes, real OCI Catalog/Integration containers on distinct nodes, real Kernel Capability Gateway, multi-provider binding, migration concurrency, token-file security, full Chromium business flows, schema compatibility/quality checks, and 0.0.1 E2E `PASS=21 FAIL=0`; local Docker Desktop run remains `NOT_RUN`. |
 
 Implemented platform increment:
 
@@ -118,7 +118,7 @@ AI RCA, Data Catalog, general DAG engine, historical log storage/search, arbitra
 - P1 workload tokens are bound to instance, node and node generation; liveness is
   checked at invocation and expired tokens can be refreshed only inside a bounded
   grace window after re-checking live state and grant. CI verifies refresh with a
-  five-second TTL (`39890854728`).
+  five-second TTL (`39892827048`).
 - P1 migration failure records can no longer overwrite `APPLIED`.
 - Remaining NOT_RUN: signed package migration plans, real multi-provider switch test,
   true concurrent migration interleaving test, production secret management/mTLS/Fencing.
