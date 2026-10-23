@@ -50,7 +50,15 @@ for _ in $(seq 1 120); do
   [ "$STATUS" = "RUNNING" ] && [ "$EFFECTS" -ge 1 ] && break
   sleep 0.2
 done
-[ "$STATUS" = "RUNNING" ] && [ "$EFFECTS" -ge 1 ] || bad "Node A did not produce the first committed effect"
+if [ "$STATUS" != "RUNNING" ] || [ "$EFFECTS" -lt 1 ]; then
+  echo "diagnostics: status=$STATUS effects=$EFFECTS"
+  psql "$DB" -qAt -c "SELECT job_id,status,attempts,current_fence,current_lease_id,deadline_at FROM kernel.pipeline_jobs WHERE job_id='$JOB';" || true
+  psql "$DB" -qAt -c "SELECT lease_id,worker_id,status,expires_at FROM kernel.pipeline_job_leases WHERE job_id='$JOB';" || true
+  psql "$DB" -qAt -c "SELECT job_id,status FROM kernel.pipeline_jobs WHERE status='QUEUED' ORDER BY created_at LIMIT 10;" || true
+  ps -eo pid,ppid,command | grep -E 'opsweave-pipeline-worker|opsweave-node' | grep -v grep || true
+  tail -20 /tmp/node-a.log || true
+  bad "Node A did not produce the first committed effect"
+fi
 NODE_A_PID="$(cat /tmp/node-a.pid)"
 WORKER_A_PID="$(pgrep -P "$NODE_A_PID" -f opsweave-pipeline-worker | head -1 || true)"
 [ -n "$WORKER_A_PID" ] || bad "Node A worker process not found"
