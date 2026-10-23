@@ -232,9 +232,9 @@ impl Worker {
     async fn workload_token(&self) -> Result<String> {
         let body = json!({
             "instanceId": self.instance_id,
-            "capabilityName": "data.catalog",
+            "capabilityName": "data.catalog.v1",
             "capabilityMajor": 1,
-            "audience": "plugin:data.catalog",
+            "audience": "plugin:data.catalog.v1",
             "scope": ["dataset:read", "dataset:write"]
         });
         let response = self
@@ -264,7 +264,7 @@ impl Worker {
         body: Option<Value>,
     ) -> Result<(StatusCode, Value)> {
         let url = format!(
-            "{}/api/v1/capabilities/data.catalog/1/{}",
+            "{}/api/v1/capabilities/data.catalog.v1/1/{}",
             self.kernel_url,
             path.trim_start_matches('/')
         );
