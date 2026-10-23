@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "pipeline-registry.opsweave.io/v1",
+  "entries": [
+    {
+      "type": "builtin.source.http_json",
+      "typeVersion": 1,
+      "inputs": [],
+      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "execution": "BOUNDED_IO",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000
+    },
+    {
+      "type": "builtin.parse.json",
+      "typeVersion": 1,
+      "inputs": [{ "name": "raw", "dataType": "json", "required": true }],
+      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000
+    },
+    {
+      "type": "builtin.map.fields",
+      "typeVersion": 1,
+      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
+      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000
+    },
+    {
+      "type": "builtin.filter.predicate",
+      "typeVersion": 1,
+      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
+      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000
+    },
+    {
+      "type": "builtin.validate.schema",
+      "typeVersion": 1,
+      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
+      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000
+    },
+    {
+      "type": "builtin.sink.dataset",
+      "typeVersion": 1,
+      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
+      "outputs": [],
+      "execution": "BOUNDED_IO",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000
+    }
+  ]
+}

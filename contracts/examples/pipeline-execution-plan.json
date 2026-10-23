@@ -1,0 +1,17 @@
+{
+  "pipelineId": "host-metrics-pipeline",
+  "revision": 1,
+  "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "orderedNodes": ["source", "parse", "map", "filter", "validate", "sink"],
+  "edges": [
+    { "fromNode": "source", "fromPort": "records", "toNode": "parse", "toPort": "raw", "dataType": "json" },
+    { "fromNode": "parse", "fromPort": "records", "toNode": "map", "toPort": "records", "dataType": "json" },
+    { "fromNode": "map", "fromPort": "records", "toNode": "filter", "toPort": "records", "dataType": "json" },
+    { "fromNode": "filter", "fromPort": "records", "toNode": "validate", "toPort": "records", "dataType": "json" },
+    { "fromNode": "validate", "fromPort": "records", "toNode": "sink", "toPort": "records", "dataType": "json" }
+  ],
+  "maxRecords": 10000,
+  "maxBytes": 8388608,
+  "deterministic": true,
+  "planDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+}

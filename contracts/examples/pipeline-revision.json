@@ -1,0 +1,28 @@
+{
+  "pipelineId": "host-metrics-pipeline",
+  "revision": 1,
+  "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "status": "PUBLISHED",
+  "definition": {
+    "schemaVersion": "pipeline.opsweave.io/v1",
+    "pipelineId": "host-metrics-pipeline",
+    "name": "Host Metrics Pipeline",
+    "revision": 1,
+    "status": "PUBLISHED",
+    "nodes": [
+      {
+        "nodeId": "source",
+        "type": "builtin.source.http_json",
+        "typeVersion": 1,
+        "inputs": [],
+        "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+        "config": {}
+      }
+    ],
+    "edges": [],
+    "createdAt": "2026-10-23T00:00:00Z",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "publishedAt": "2026-10-23T00:00:00Z",
+  "publishedBy": "reviewer"
+}
