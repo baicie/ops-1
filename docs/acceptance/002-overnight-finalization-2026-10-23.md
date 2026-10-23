@@ -3,7 +3,7 @@
 Date: 2026-10-23 (Asia/Shanghai)  
 Branch: `feat/0.0.2-data-foundation`  
 PR: [#1](https://github.com/baicie/ops-1/pull/1)  
-Reporting HEAD: `1b9b93e`  
+Tested code HEAD: `f207b75`  
 Frozen baseline: `v0.0.1-dev.1` (unchanged)
 
 ## 1. Overall Status
@@ -48,8 +48,8 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 - `cargo fmt --all -- --check`: PASS.
 - Contract validation: 10 schemas, PASS.
 - Data frontend typecheck/build: PASS.
-- Data Foundation OCI CI [`39890854728`](https://github.com/baicie/ops-1/actions/runs/39890854728): success.
-- Standard CI [`39890854766`](https://github.com/baicie/ops-1/actions/runs/39890854766): success.
+- Data Foundation OCI CI [`39892827048`](https://github.com/baicie/ops-1/actions/runs/39892827048): success.
+- Standard CI [`39892827005`](https://github.com/baicie/ops-1/actions/runs/39892827005): success.
 - 0.0.1 legacy job: `PASS=21 FAIL=0`.
 
 ### Real acceptance evidence
@@ -58,7 +58,7 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 - Migration concurrency: A failed, B applied once, late FAILED did not overwrite APPLIED; replay with same checksum `replay=true`; changed checksum rejected; CONTRACT blocked with live instance.
 - Token file: directory mounted read-only; host `instances` parent mode 700, per-instance directory 755, token file 644 for the non-root plugin; no cross-instance token, no Node control credential in plugin env, no token in unauthenticated response; expiry/refresh and Node revocation passed. Missing/corrupt-file and Node/Kernel restart cases remain `PARTIAL/NOT_RUN`.
 - Browser: full Catalog and Integration business flows passed with real signed Remote Extensions, real Gateway, PostgreSQL and active OCI plugins.
-- Screenshots: `artifacts/ui/data-foundation/` from artifact `data-foundation-screenshots` (run `39890854728`).
+- Screenshots: `artifacts/ui/data-foundation/` from artifact `data-foundation-screenshots` (run `39892827048`).
 
 ### Screenshot review
 
