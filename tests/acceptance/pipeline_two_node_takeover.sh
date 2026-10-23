@@ -11,6 +11,17 @@ json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)"; }
 ok() { echo "PASS  $*"; }
 bad() { echo "FAIL  $*"; exit 1; }
 rm -f "$ROOT/data-ci/node-a/worker-enabled" "$ROOT/data-ci/node-b/worker-enabled"
+# The previous Node-managed test may still have a child in its supervisor kill
+# window. Stop both known worker children before submitting this job.
+for node in node-a node-b; do
+  node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"
+  if [ -n "$node_pid" ]; then
+    for worker_pid in $(pgrep -P "$node_pid" -f opsweave-pipeline-worker || true); do
+      kill -9 "$worker_pid" 2>/dev/null || true
+    done
+  fi
+done
+sleep 3
 python3 - <<'PY'
 import json
 records=[{"id":f"two-{i:04d}","name":f"two-{i:04d}.example","cpu_percent":float(i%100)} for i in range(1001)]
