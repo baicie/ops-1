@@ -36,10 +36,11 @@ PY
 CREATE_CODE="$(curl -sS -o /tmp/dynamic-pipeline.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$PIPELINE_JSON" "$URL/api/v1/pipelines")"
 [ "$CREATE_CODE" = "200" ] || [ "$CREATE_CODE" = "201" ] || bad "live pipeline publish returned $CREATE_CODE: $(cat /tmp/dynamic-pipeline.json)"
 PINNED_SINK="$(python3 -c 'import json;d=json.load(open("/tmp/dynamic-pipeline.json"))["definition"];print(next(n["config"] for n in d["nodes"] if n["nodeId"]=="sink"))')"
-echo "pinned sink: $PINNED_SINK"
-python3 - <<PY
+echo "pinned sink: $(python3 -c 'import json;d=json.load(open("/tmp/dynamic-pipeline.json"))["definition"];print(next(n["config"] for n in d["nodes"] if n["nodeId"]=="sink"))')"
+python3 - <<'PY'
 import json
-sink=json.loads('''$PINNED_SINK''')
+d=json.load(open('/tmp/dynamic-pipeline.json'))['definition']
+sink=next(n['config'] for n in d['nodes'] if n['nodeId']=='sink')
 assert sink['schemaDigest'].startswith('sha256:'), sink
 PY
 JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: dyn-job-$(date +%s%N)" --data-binary '{"pipelineId":"dynamic-hosts-pipeline","pipelineRevision":1,"input":{},"maxAttempts":4,"timeoutSeconds":300}' "$URL/api/v1/jobs" | json "d['jobId']")"
