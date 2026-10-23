@@ -51,6 +51,8 @@ pub struct CreateGrantRequest {
 #[serde(rename_all = "camelCase")]
 pub struct WorkloadTokenRequest {
     pub instance_id: Uuid,
+    #[serde(default)]
+    pub service_plugin_id: Option<String>,
     pub capability_name: String,
     pub capability_major: i64,
     pub audience: String,
@@ -288,6 +290,15 @@ pub async fn issue_workload_token(
     .await?;
     let Some((instance_id, plugin_id)) = instance else {
         return Err(AppError::not_found("instance is not assigned to this node"));
+    };
+    let plugin_id = match payload.service_plugin_id.as_deref() {
+        None => plugin_id,
+        Some("opsweave.pipeline.worker") => "opsweave.pipeline.worker".to_string(),
+        Some(_) => {
+            return Err(AppError::forbidden(
+                "only the pipeline worker service principal may be requested",
+            ));
+        }
     };
     let expires_at = Utc::now() + ChronoDuration::seconds(state.config.workload_token_seconds);
     let claims = WorkloadClaims {

@@ -267,6 +267,7 @@ impl Worker {
     async fn workload_token(&self) -> Result<String> {
         let body = json!({
             "instanceId": self.instance_id,
+            "servicePluginId": "opsweave.pipeline.worker",
             "capabilityName": "data.catalog.v1",
             "capabilityMajor": 1,
             "audience": "plugin:data.catalog.v1",
