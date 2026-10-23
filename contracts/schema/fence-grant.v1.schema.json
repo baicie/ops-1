@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.opsweave.dev/schema/fence-grant.v1.schema.json",
+  "title": "OpsWeave Signed Fence Grant",
+  "description": "Kernel-issued, short-lived grant used at the Catalog side-effect boundary. Workers cannot mint or extend it.",
+  "type": "object",
+  "required": ["schemaVersion", "grantId", "jobId", "leaseId", "fencingSequence", "sinkScope", "issuedAt", "expiresAt", "keyId", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "fence-grant.opsweave.io/v1" },
+    "grantId": { "type": "string", "format": "uuid" },
+    "jobId": { "type": "string", "format": "uuid" },
+    "leaseId": { "type": "string", "format": "uuid" },
+    "fencingSequence": { "type": "integer", "minimum": 1 },
+    "sinkScope": { "type": "string", "pattern": "^dataset:[a-z][a-z0-9-]{2,63}:revision:[1-9][0-9]*$" },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "keyId": { "type": "string", "minLength": 3, "maxLength": 128 },
+    "signature": { "type": "string", "minLength": 16, "maxLength": 1024 }
+  }
+}

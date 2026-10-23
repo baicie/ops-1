@@ -1,0 +1,12 @@
+{
+  "runId": "77777777-7777-4777-8777-777777777777",
+  "pipelineId": "host-metrics-pipeline",
+  "revision": 1,
+  "jobId": "11111111-1111-4111-8111-111111111111",
+  "status": "QUEUED",
+  "createdAt": "2026-10-23T00:00:00Z",
+  "startedAt": null,
+  "finishedAt": null,
+  "resultDigest": null,
+  "errorCode": null
+}
