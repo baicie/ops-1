@@ -12,6 +12,7 @@ use crate::pipeline::{
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -763,6 +764,32 @@ pub async fn worker_definition(
         "definition": row.get::<Value, _>("definition"),
         "plan": row.get::<Value, _>("plan")
     })))
+}
+
+pub async fn claim_next(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(worker): Json<WorkerIdentity>,
+) -> AppResult<axum::response::Response> {
+    let _ = authenticate_worker(&state, &headers, &worker).await?;
+    let job_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT j.job_id FROM kernel.pipeline_jobs j
+         WHERE j.status='QUEUED'
+           AND NOT EXISTS (
+             SELECT 1 FROM kernel.pipeline_job_leases l
+             WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now()
+           )
+         ORDER BY j.created_at ASC
+         LIMIT 1",
+    )
+    .fetch_optional(&state.db)
+    .await?;
+    match job_id {
+        Some(job_id) => Ok(claim_job(State(state), headers, Path(job_id), Json(worker))
+            .await?
+            .into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
 }
 
 pub async fn claim_job(

@@ -56,6 +56,10 @@ pub fn build(state: AppState) -> Router {
             post(jobs::claim_job),
         )
         .route(
+            "/internal/v1/pipeline-jobs/claim-next",
+            post(jobs::claim_next),
+        )
+        .route(
             "/internal/v1/pipeline-jobs/{job_id}/definition",
             get(jobs::worker_definition),
         )

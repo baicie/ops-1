@@ -73,6 +73,9 @@ start_node() {
     OPSWEAVE_NODE_STATE_DIR="$ROOT/data-ci/$name" \
     OPSWEAVE_DOCKER_HOST='unix:///var/run/docker.sock' \
     OPSWEAVE_NODE_TOKEN_REFRESH_SECONDS=1 \
+    OPSWEAVE_NODE_WORKER_ENABLED=1 \
+    OPSWEAVE_PIPELINE_WORKER_BIN="$ROOT/target/debug/opsweave-pipeline-worker" \
+    OPSWEAVE_WORKER_SOURCE_ALLOWLIST=172.17.0.1,127.0.0.1 \
     RUST_LOG=info ./target/debug/opsweave-node >"/tmp/$name.log" 2>&1 &
   PIDS+=($!)
 }
@@ -101,6 +104,7 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/catalog_fenced_sink.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_advanced.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_node_managed.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"

@@ -3,6 +3,7 @@ mod config;
 mod docker;
 mod logs;
 mod runtime;
+mod worker_supervisor;
 
 use crate::config::Args;
 use crate::docker::DockerAdapter;
@@ -77,11 +78,13 @@ async fn main() -> anyhow::Result<()> {
     });
     let heartbeat = tokio::spawn(runtime::heartbeat_loop(shared.clone()));
     let lease_watchdog = tokio::spawn(runtime::lease_watchdog(shared.clone()));
+    let worker_supervisor = worker_supervisor::spawn(shared.clone());
 
     tokio::signal::ctrl_c().await?;
     tracing::info!("shutdown signal received");
     heartbeat.abort();
     lease_watchdog.abort();
+    worker_supervisor.abort();
     api_task.abort();
     if args.stop_workloads_on_exit {
         let tasks = shared.tasks.lock().await;

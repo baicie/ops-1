@@ -41,6 +41,7 @@ struct Worker {
 #[serde(rename_all = "camelCase")]
 struct ClaimResponse {
     lease_id: Uuid,
+    job_id: Uuid,
     fencing_sequence: i64,
 }
 
@@ -422,6 +423,59 @@ impl Worker {
     async fn execute(&self, job_id: Uuid) -> Result<()> {
         let lease = self.claim(job_id).await?;
         self.start(job_id, &lease).await?;
+        self.run_job(job_id, lease).await
+    }
+
+    async fn claim_next(&self) -> Result<Option<ClaimResponse>> {
+        let (status, body) = self
+            .call(
+                Method::POST,
+                "/internal/v1/pipeline-jobs/claim-next",
+                Some(json!({
+                    "workerId": self.worker_id,
+                    "nodeId": self.node_id,
+                    "instanceId": self.instance_id,
+                    "bootId": self.boot_id,
+                    "version": "0.0.3"
+                })),
+            )
+            .await?;
+        if status == StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            bail!("claim-next failed ({status}): {body}");
+        }
+        Ok(Some(
+            serde_json::from_value(body).context("parse claim-next response")?,
+        ))
+    }
+
+    async fn run_auto(&self) -> Result<()> {
+        loop {
+            let claimed = tokio::select! {
+                _ = tokio::signal::ctrl_c() => { eprintln!("worker graceful shutdown"); return Ok(()); }
+                claimed = self.claim_next() => claimed,
+            };
+            match claimed {
+                Ok(Some(lease)) => {
+                    let job_id = lease.job_id;
+                    if let Err(error) = self.start(job_id, &lease).await {
+                        eprintln!("worker start failed for {job_id}: {error:#}");
+                    } else if let Err(error) = self.run_job(job_id, lease).await {
+                        eprintln!("worker execution failed for {job_id}: {error:#}");
+                    }
+                }
+                Ok(None) => tokio::time::sleep(Duration::from_secs(2)).await,
+                Err(error) => {
+                    eprintln!("worker discovery failed: {error:#}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+
+    async fn run_job(&self, job_id: Uuid, lease: ClaimResponse) -> Result<()> {
         let definition = self.definition(job_id).await?;
         let nodes = definition
             .definition
@@ -1033,11 +1087,13 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
 #[tokio::main]
 async fn main() -> Result<()> {
     let worker = Worker::new().await?;
-    let job_id: Uuid = env("OPSWEAVE_WORKER_JOB_ID")?
-        .parse()
-        .context("parse job id")?;
-    let _ = Utc::now();
-    worker.execute(job_id).await
+    if let Ok(value) = std::env::var("OPSWEAVE_WORKER_JOB_ID") {
+        let job_id: Uuid = value.parse().context("parse job id")?;
+        let _ = Utc::now();
+        worker.execute(job_id).await
+    } else {
+        worker.run_auto().await
+    }
 }
 
 #[cfg(test)]
