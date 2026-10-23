@@ -77,7 +77,7 @@ impl Worker {
         let instance_id = env("OPSWEAVE_WORKER_INSTANCE_ID")?
             .parse()
             .context("parse instance id")?;
-        let worker_id = format!("node:{}:instance:{}", identity.node_id, instance_id);
+        let worker_id = format!("n:{}:i:{}:b:{}", identity.node_id, instance_id, boot_id);
         let kernel_url = env("OPSWEAVE_WORKER_KERNEL_URL")?
             .trim_end_matches('/')
             .to_string();
