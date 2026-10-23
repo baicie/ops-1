@@ -15,7 +15,7 @@ Implementation status: **BLOCKED by 0.0.2 version gate**
 | OpenAPI draft | PASS | `contracts/openapi/typed-pipeline-v1.yaml` |
 | ADR-013 execution/persistence/recovery | PASS | `docs/adr/ADR-013-typed-pipeline-and-durable-jobs.md` |
 | Contract conformance tests | PASS (local) | `python3 tests/contract/validate_typed_pipeline.py` |
-| Contract conformance CI | NOT_RUN | Workflow exists; branch has not been pushed/run |
+| Contract conformance CI | PASS | `typed-pipeline-contracts` run `39892613830` on `838cf51` |
 | Minimal executable closed loop | BLOCKED | PR #1 is Draft/Open, not merged to `main`; implementation gate closed |
 | Real Lease/Fencing/Checkpoint E2E | BLOCKED | Requires implementation after gate |
 
