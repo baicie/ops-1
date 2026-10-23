@@ -892,7 +892,16 @@ pub async fn claim_next(
     headers: HeaderMap,
     Json(worker): Json<WorkerIdentity>,
 ) -> AppResult<axum::response::Response> {
-    let _ = authenticate_worker(&state, &headers, &worker).await?;
+    let trusted = authenticate_worker(&state, &headers, &worker).await?;
+    let mut tx = state.db.begin().await?;
+    // Expired exhausted jobs must reach a terminal state instead of hanging as RUNNING.
+    sqlx::query(
+        "UPDATE kernel.pipeline_jobs j SET status='FAILED',last_error_code='JOB_ATTEMPTS_EXHAUSTED',updated_at=now()
+         WHERE j.status IN ('QUEUED','CLAIMED','RUNNING') AND j.attempts >= j.max_attempts
+           AND NOT EXISTS (SELECT 1 FROM kernel.pipeline_job_leases l WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now())",
+    )
+    .execute(&mut *tx)
+    .await?;
     let job_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT j.job_id FROM kernel.pipeline_jobs j
          WHERE j.status IN ('QUEUED','CLAIMED','RUNNING')
@@ -901,32 +910,40 @@ pub async fn claim_next(
              SELECT 1 FROM kernel.pipeline_job_leases l
              WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now()
            )
-         ORDER BY j.created_at ASC
+         ORDER BY j.created_at ASC, j.job_id ASC
+         FOR UPDATE SKIP LOCKED
          LIMIT 1",
     )
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await?;
-    match job_id {
-        Some(job_id) => Ok(claim_job(State(state), headers, Path(job_id), Json(worker))
-            .await?
-            .into_response()),
-        None => Ok(StatusCode::NO_CONTENT.into_response()),
-    }
+    let Some(job_id) = job_id else {
+        tx.commit().await?;
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    };
+    let response = match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
+        Ok(response) => {
+            tx.commit().await?;
+            response
+        }
+        Err(error) => {
+            let _ = tx.commit().await;
+            return Err(error);
+        }
+    };
+    Ok(Json(response).into_response())
 }
 
-pub async fn claim_job(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(job_id): Path<Uuid>,
-    Json(worker): Json<WorkerIdentity>,
-) -> AppResult<Json<ClaimResponse>> {
-    let trusted = authenticate_worker(&state, &headers, &worker).await?;
-    let mut tx = state.db.begin().await?;
+async fn claim_core(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    job_id: Uuid,
+    trusted: &WorkerContext,
+    worker_version: &str,
+) -> AppResult<ClaimResponse> {
     let row = sqlx::query(
         "SELECT status,current_fence,current_lease_id,attempts,max_attempts FROM kernel.pipeline_jobs WHERE job_id=$1 FOR UPDATE",
     )
     .bind(job_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| AppError::not_found("job not found"))?;
     let status: String = row.get("status");
@@ -946,7 +963,7 @@ pub async fn claim_job(
         )
         .bind(lease_id)
         .bind(job_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?;
         if let Some(lease) = lease {
             let lease_status: String = lease.get("status");
@@ -962,9 +979,8 @@ pub async fn claim_job(
     if attempts >= max_attempts {
         sqlx::query("UPDATE kernel.pipeline_jobs SET status='FAILED',last_error_code='JOB_ATTEMPTS_EXHAUSTED',updated_at=now() WHERE job_id=$1")
             .bind(job_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
-        tx.commit().await?;
         return Err(AppError::conflict(
             "JOB_ATTEMPTS_EXHAUSTED",
             "job retry limit reached",
@@ -972,7 +988,7 @@ pub async fn claim_job(
     }
     sqlx::query("UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE job_id=$1 AND status='ACTIVE'")
         .bind(job_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     let lease_id = Uuid::new_v4();
     let fence = current_fence + 1;
@@ -990,7 +1006,7 @@ pub async fn claim_job(
     .bind(trusted.boot_id)
     .bind(fence)
     .bind(expires_at)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await;
     if let Err(error) = inserted_lease {
         return Err(AppError::internal(error));
@@ -1006,33 +1022,52 @@ pub async fn claim_job(
     .bind(trusted.boot_id)
     .bind(lease_id)
     .bind(fence)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     sqlx::query("UPDATE kernel.pipeline_jobs SET status='CLAIMED',current_fence=$2,current_lease_id=$3,attempts=$4,updated_at=now() WHERE job_id=$1")
         .bind(job_id)
         .bind(fence)
         .bind(lease_id)
         .bind(attempt)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,fencing_sequence,worker_id,details) VALUES ($1,'JOB_CLAIMED',$2,'CLAIMED',$3,$4,$5)")
         .bind(job_id)
         .bind(&status)
         .bind(fence)
         .bind(&trusted.worker_id)
-        .bind(json!({"workerVersion": worker.version}))
-        .execute(&mut *tx)
+        .bind(json!({"workerVersion": worker_version}))
+        .execute(&mut **tx)
         .await?;
-    let _ = worker.version.as_str();
-    tx.commit().await?;
-    Ok(Json(ClaimResponse {
+    Ok(ClaimResponse {
         lease_id,
         job_id,
         attempt_number: attempt,
         fencing_sequence: fence,
         expires_at,
-        worker_id: trusted.worker_id,
-    }))
+        worker_id: trusted.worker_id.clone(),
+    })
+}
+
+pub async fn claim_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<Uuid>,
+    Json(worker): Json<WorkerIdentity>,
+) -> AppResult<Json<ClaimResponse>> {
+    let trusted = authenticate_worker(&state, &headers, &worker).await?;
+    let mut tx = state.db.begin().await?;
+    let response = match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
+        Ok(response) => {
+            tx.commit().await?;
+            response
+        }
+        Err(error) => {
+            let _ = tx.commit().await;
+            return Err(error);
+        }
+    };
+    Ok(Json(response))
 }
 
 async fn authorize_lease(

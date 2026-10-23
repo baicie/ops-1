@@ -11,6 +11,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -25,7 +29,7 @@ struct NodeIdentity {
     generation: i64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Worker {
     client: Client,
     kernel_url: String,
@@ -37,7 +41,7 @@ struct Worker {
     boot_id: Uuid,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaimResponse {
     lease_id: Uuid,
@@ -172,6 +176,27 @@ impl Worker {
             bail!("start failed ({status}): {body}");
         }
         Ok(())
+    }
+
+    fn start_heartbeat(
+        &self,
+        job_id: Uuid,
+        lease: ClaimResponse,
+        cancelled: Arc<AtomicBool>,
+    ) -> tokio::task::JoinHandle<()> {
+        let worker = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                if cancelled.load(Ordering::SeqCst) {
+                    return;
+                }
+                if worker.heartbeat(job_id, &lease).await.is_err() {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return;
+                }
+            }
+        })
     }
 
     async fn heartbeat(&self, job_id: Uuid, lease: &ClaimResponse) -> Result<()> {
@@ -423,7 +448,14 @@ impl Worker {
     async fn execute(&self, job_id: Uuid) -> Result<()> {
         let lease = self.claim(job_id).await?;
         self.start(job_id, &lease).await?;
-        self.run_job(job_id, lease).await
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let heartbeat = self.start_heartbeat(job_id, lease.clone(), cancelled.clone());
+        let result = self.run_job(job_id, lease, cancelled.clone()).await;
+        heartbeat.abort();
+        if cancelled.load(Ordering::SeqCst) {
+            bail!("lease heartbeat failed; execution cancelled");
+        }
+        result
     }
 
     async fn claim_next(&self) -> Result<Option<ClaimResponse>> {
@@ -462,8 +494,17 @@ impl Worker {
                     let job_id = lease.job_id;
                     if let Err(error) = self.start(job_id, &lease).await {
                         eprintln!("worker start failed for {job_id}: {error:#}");
-                    } else if let Err(error) = self.run_job(job_id, lease).await {
-                        eprintln!("worker execution failed for {job_id}: {error:#}");
+                    } else {
+                        let cancelled = Arc::new(AtomicBool::new(false));
+                        let heartbeat =
+                            self.start_heartbeat(job_id, lease.clone(), cancelled.clone());
+                        let result = self.run_job(job_id, lease, cancelled.clone()).await;
+                        heartbeat.abort();
+                        if cancelled.load(Ordering::SeqCst) {
+                            eprintln!("worker heartbeat failed; execution cancelled for {job_id}");
+                        } else if let Err(error) = result {
+                            eprintln!("worker execution failed for {job_id}: {error:#}");
+                        }
                     }
                 }
                 Ok(None) => tokio::time::sleep(Duration::from_secs(2)).await,
@@ -475,7 +516,12 @@ impl Worker {
         }
     }
 
-    async fn run_job(&self, job_id: Uuid, lease: ClaimResponse) -> Result<()> {
+    async fn run_job(
+        &self,
+        job_id: Uuid,
+        lease: ClaimResponse,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<()> {
         let definition = self.definition(job_id).await?;
         let nodes = definition
             .definition
@@ -656,6 +702,9 @@ impl Worker {
                 sink_node_id,
                 &logical_batch,
             );
+            if cancelled.load(Ordering::SeqCst) {
+                bail!("execution cancelled: lease is no longer valid");
+            }
             self.checkpoint(
                 job_id,
                 &lease,
