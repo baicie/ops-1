@@ -77,14 +77,14 @@ impl Worker {
         let instance_id = env("OPSWEAVE_WORKER_INSTANCE_ID")?
             .parse()
             .context("parse instance id")?;
-        let worker_id = format!("n:{}:i:{}:b:{}", identity.node_id, instance_id, boot_id);
-        let kernel_url = env("OPSWEAVE_WORKER_KERNEL_URL")?
-            .trim_end_matches('/')
-            .to_string();
         let boot_id = env("OPSWEAVE_WORKER_BOOT_ID")
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or_else(Uuid::new_v4);
+        let worker_id = format!("n:{}:i:{}:b:{}", identity.node_id, instance_id, boot_id);
+        let kernel_url = env("OPSWEAVE_WORKER_KERNEL_URL")?
+            .trim_end_matches('/')
+            .to_string();
         let client = Client::builder()
             .timeout(Duration::from_secs(20))
             .redirect(reqwest::redirect::Policy::none())
