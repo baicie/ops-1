@@ -85,8 +85,8 @@ COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.c
 ok "new claim after old fence rejected the old worker's new sink effect"
 
 # Receipt lookup is the UNKNOWN recovery path.
-LOOKUP_CODE="$(curl -sS -o /tmp/fenced-lookup.json -w '%{http_code}' "${AUTH[@]}" "$CAT/datasets/$DATASET_ID/effect-receipts?effectId=$EFFECT_ID")"
-[ "$LOOKUP_CODE" = "200" ] || bad "receipt lookup returned $LOOKUP_CODE"
+LOOKUP_CODE="$(curl -sS -G -o /tmp/fenced-lookup.json -w '%{http_code}' "${AUTH[@]}" --data-urlencode "effectId=$EFFECT_ID" "$CAT/datasets/$DATASET_ID/effect-receipts")"
+[ "$LOOKUP_CODE" = "200" ] || bad "receipt lookup returned $LOOKUP_CODE: $(cat /tmp/fenced-lookup.json)"
 grep -q '"status":"COMMITTED"' /tmp/fenced-lookup.json || bad "receipt is not COMMITTED"
 ok "effect receipt lookup supports UNKNOWN recovery"
 echo "Catalog Fenced Sink Golden Path: PASS"
