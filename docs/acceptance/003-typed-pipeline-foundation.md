@@ -3,6 +3,7 @@
 Date: 2026-10-23 (Asia/Shanghai)  
 Branch: `feat/0.0.3-typed-pipeline`  
 Code HEAD: `e2c6ebb`  
+Reported branch HEAD: `79d62e4`  
 Base `main`: `a434a79` (squash merge of PR #1, OpsWeave 0.0.2 Data Foundation)  
 PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — Draft, not merged
 
@@ -21,7 +22,7 @@ PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — Draft, not merged
 | Worker Runtime | **NOT_RUN** | no real Node/Worker execution loop in this sprint |
 | Crash / Restart Recovery | **PARTIAL** | lease-expiry takeover passed; full Kernel/Worker restart E2E not run |
 | Multi-Node Golden Path | **NOT_RUN** | single-node API/DB/Catalog path only |
-| 0.0.1 / 0.0.2 Regression | **PARTIAL** | 0.0.2 golden-path passed; 0.0.1 legacy rerun depends on external Java download |
+| 0.0.1 / 0.0.2 Regression | **PASS** | 0.0.2 golden-path and 0.0.1 legacy-regression both passed on final branch HEAD |
 
 ## 2. Implemented
 
@@ -107,12 +108,12 @@ Real CI passed:
 
 ## 3. Actual commands / CI
 
-- Standard CI `39909484807` — **SUCCESS**
-  - rust, web, contracts.
-- Data Foundation OCI CI `39909484846` — **golden-path SUCCESS**
+- Standard CI `39910365944` — **SUCCESS** (rust, web, contracts).
+- Data Foundation OCI CI `39910365947` — **SUCCESS** (golden-path, legacy-regression).
+- Typed pipeline contract CI `39910365945` — **SUCCESS**.
   - `Pipeline JobStore Golden Path: PASS`
   - `Catalog Fenced Sink Golden Path: PASS`
-  - legacy-regression was rerun after an external Temurin download returned HTTP 403; see unresolved note.
+  - 0.0.1 legacy-regression: PASS.
 - `typed-pipeline-contracts` runs are success.
 - Local:
   - `cargo test -p opsweave-kernel`: 27 passed;
@@ -125,7 +126,7 @@ Real CI passed:
 - **P1 Kernel restart**: job rows persist, but a real process restart/recovery test has not been run.
 - **P1 signature boundary**: Registry signature verification is real; Catalog fence verification currently relies on the Kernel `SECURITY DEFINER` authority and does not independently verify a signed fence token. This is safe for the same-database first version but should be hardened before cross-database deployment.
 - **P1 multi-node**: no two-Node claim/takeover E2E.
-- **P1 0.0.1 legacy**: the legacy job was rerun after an external Java download HTTP 403; the failure was environmental, not a code regression. Final rerun result must be recorded before claiming full legacy PASS.
+- **P2** an earlier legacy attempt failed on an external Temurin download HTTP 403; the final branch CI rerun passed 0.0.1 legacy. This was environmental, not a code regression.
 - **P2**: old Catalog `/records` compatibility passed Data Foundation Golden Path; a dedicated fenced/legacy mixed-client test is not yet separate.
 
 ## 5. Next steps
