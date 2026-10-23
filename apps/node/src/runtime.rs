@@ -704,6 +704,11 @@ fn write_workload_tokens(
         .parent()
         .ok_or_else(|| anyhow::anyhow!("token file has no parent"))?;
     std::fs::create_dir_all(parent)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+    }
     let raw = env
         .get("OPSWEAVE_CAPABILITY_TOKENS")
         .cloned()

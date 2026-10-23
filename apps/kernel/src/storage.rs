@@ -196,70 +196,139 @@ fn plugin_database_url(state: &AppState, role: &str, password: &str) -> AppResul
     ))
 }
 
+fn skip_line_comment(sql: &str, index: usize) -> usize {
+    sql[index..]
+        .find('\n')
+        .map(|relative| index + relative + 1)
+        .unwrap_or(sql.len())
+}
+
+fn skip_block_comment(sql: &str, index: usize) -> usize {
+    let mut cursor = index + 2;
+    let mut depth = 1usize;
+    while cursor < sql.len() {
+        let Some(character) = sql[cursor..].chars().next() else {
+            break;
+        };
+        if sql[cursor..].starts_with("/*") {
+            depth += 1;
+            cursor += 2;
+        } else if sql[cursor..].starts_with("*/") {
+            depth -= 1;
+            cursor += 2;
+            if depth == 0 {
+                return cursor;
+            }
+        } else {
+            cursor += character.len_utf8();
+        }
+    }
+    sql.len()
+}
+
+fn skip_single_quoted(sql: &str, index: usize) -> usize {
+    let mut cursor = index + 1;
+    while cursor < sql.len() {
+        let Some(character) = sql[cursor..].chars().next() else {
+            break;
+        };
+        if character == '\\' {
+            cursor += 1;
+            if cursor < sql.len() {
+                if let Some(next) = sql[cursor..].chars().next() {
+                    cursor += next.len_utf8();
+                }
+            }
+            continue;
+        }
+        if character == '\'' {
+            if sql[cursor + 1..].starts_with('\'') {
+                cursor += 2;
+                continue;
+            }
+            return cursor + 1;
+        }
+        cursor += character.len_utf8();
+    }
+    sql.len()
+}
+
+fn skip_double_quoted(sql: &str, index: usize) -> usize {
+    let mut cursor = index + 1;
+    while cursor < sql.len() {
+        let Some(character) = sql[cursor..].chars().next() else {
+            break;
+        };
+        if character == '"' {
+            if sql[cursor + 1..].starts_with('"') {
+                cursor += 2;
+                continue;
+            }
+            return cursor + 1;
+        }
+        cursor += character.len_utf8();
+    }
+    sql.len()
+}
+
+fn dollar_quote_end(sql: &str, index: usize) -> Option<usize> {
+    let relative_end = sql[index + 1..].find('$')?;
+    let tag_end = index + 1 + relative_end;
+    let tag = &sql[index + 1..tag_end];
+    let valid_tag = tag.is_empty()
+        || tag
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && tag
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_');
+    if !valid_tag {
+        return None;
+    }
+    let delimiter = &sql[index..=tag_end];
+    let content_start = tag_end + 1;
+    sql[content_start..]
+        .find(delimiter)
+        .map(|relative| content_start + relative + delimiter.len())
+        .or(Some(sql.len()))
+}
+
 fn split_sql_statements(sql: &str) -> Vec<String> {
-    let bytes = sql.as_bytes();
     let mut statements = Vec::new();
     let mut start = 0usize;
     let mut index = 0usize;
-    let mut single_quote = false;
-    let mut double_quote = false;
-    let mut dollar_tag: Option<String> = None;
-    while index < bytes.len() {
-        if let Some(tag) = &dollar_tag {
-            if sql[index..].starts_with(tag) {
-                index += tag.len();
-                dollar_tag = None;
-            } else {
-                index += 1;
-            }
+    while index < sql.len() {
+        let Some(character) = sql[index..].chars().next() else {
+            break;
+        };
+        if character == '-' && sql[index..].starts_with("--") {
+            index = skip_line_comment(sql, index);
             continue;
         }
-        let byte = bytes[index];
-        if single_quote {
-            if byte == b'\'' {
-                if index + 1 < bytes.len() && bytes[index + 1] == b'\'' {
-                    index += 2;
-                    continue;
-                }
-                single_quote = false;
-            }
-            index += 1;
+        if character == '/' && sql[index..].starts_with("/*") {
+            index = skip_block_comment(sql, index);
             continue;
         }
-        if double_quote {
-            if byte == b'"' {
-                if index + 1 < bytes.len() && bytes[index + 1] == b'"' {
-                    index += 2;
-                    continue;
-                }
-                double_quote = false;
-            }
-            index += 1;
+        if character == '\'' {
+            index = skip_single_quoted(sql, index);
             continue;
         }
-        match byte {
-            b'\'' => single_quote = true,
-            b'"' => double_quote = true,
-            b'$' => {
-                if let Some(relative_end) = sql[index + 1..].find('$') {
-                    let end = index + 1 + relative_end;
-                    let tag = &sql[index..=end];
-                    if tag[1..tag.len() - 1]
-                        .chars()
-                        .all(|character| character.is_ascii_alphanumeric() || character == '_')
-                    {
-                        dollar_tag = Some(tag.to_string());
-                        index = end;
-                    }
-                }
-            }
-            b';' => {
-                statements.push(sql[start..index].to_string());
-                start = index + 1;
-            }
-            _ => {}
+        if character == '"' {
+            index = skip_double_quoted(sql, index);
+            continue;
         }
-        index += 1;
+        if character == '$' {
+            if let Some(end) = dollar_quote_end(sql, index) {
+                index = end;
+                continue;
+            }
+        }
+        if character == ';' {
+            statements.push(sql[start..index].to_string());
+            start = index + 1;
+        }
+        index += character.len_utf8();
     }
     if start < sql.len() {
         statements.push(sql[start..].to_string());
@@ -268,14 +337,58 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 }
 
 fn has_transaction_control(sql: &str) -> bool {
-    sql.split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-        .map(|token| token.to_ascii_uppercase())
-        .any(|token| {
-            matches!(
-                token.as_str(),
+    let mut index = 0usize;
+    while index < sql.len() {
+        let Some(character) = sql[index..].chars().next() else {
+            break;
+        };
+        if character == '-' && sql[index..].starts_with("--") {
+            index = skip_line_comment(sql, index);
+            continue;
+        }
+        if character == '/' && sql[index..].starts_with("/*") {
+            index = skip_block_comment(sql, index);
+            continue;
+        }
+        if character == '\'' {
+            index = skip_single_quoted(sql, index);
+            continue;
+        }
+        if character == '"' {
+            index = skip_double_quoted(sql, index);
+            continue;
+        }
+        if character == '$' {
+            if let Some(end) = dollar_quote_end(sql, index) {
+                index = end;
+                continue;
+            }
+        }
+        if character.is_ascii_alphabetic() || character == '_' {
+            let word_start = index;
+            index += character.len_utf8();
+            while index < sql.len() {
+                let Some(next) = sql[index..].chars().next() else {
+                    break;
+                };
+                if next.is_ascii_alphanumeric() || next == '_' {
+                    index += next.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            let word = sql[word_start..index].to_ascii_uppercase();
+            if matches!(
+                word.as_str(),
                 "COMMIT" | "ROLLBACK" | "BEGIN" | "ABORT" | "SAVEPOINT" | "RELEASE"
-            )
-        })
+            ) {
+                return true;
+            }
+            continue;
+        }
+        index += character.len_utf8();
+    }
+    false
 }
 
 async fn record_failed_migration(
@@ -300,14 +413,37 @@ async fn record_failed_migration(
 
 #[cfg(test)]
 mod tests {
-    use super::{has_transaction_control, safe_names};
+    use super::{has_transaction_control, safe_names, split_sql_statements};
 
     #[test]
     fn migration_sql_is_split_without_breaking_quoted_semicolons() {
-        let statements =
-            super::split_sql_statements("CREATE TABLE t(id int); SELECT 'a;b'; SELECT 1;");
+        let statements = split_sql_statements("CREATE TABLE t(id int); SELECT 'a;b'; SELECT 1;");
         assert_eq!(statements.len(), 3);
         assert!(statements[1].contains("'a;b'"));
+    }
+
+    #[test]
+    fn migration_sql_handles_comments_utf8_and_dollar_quotes() {
+        let sql = "-- semicolon ; in a comment\n                   CREATE TABLE t(id int); /* block ; comment */\n                   SELECT '中文;字符串';\n                   DO $$ BEGIN RAISE NOTICE '中文;内容'; END $$;";
+        let statements = split_sql_statements(sql);
+        assert_eq!(statements.len(), 3, "statements: {statements:?}");
+        assert!(statements[0].contains("-- semicolon ; in a comment"));
+        assert!(statements[1].contains("block ; comment"));
+        assert!(statements[1].contains("中文;字符串"));
+        assert!(statements[2].contains("$$ BEGIN RAISE NOTICE '中文;内容'; END $$"));
+        assert!(!has_transaction_control(sql));
+    }
+
+    #[test]
+    fn transaction_control_inside_strings_and_comments_is_not_control() {
+        assert!(!has_transaction_control(
+            "SELECT 'COMMIT; 中文' -- COMMIT ;\n; /* ROLLBACK; */"
+        ));
+        assert!(!has_transaction_control(
+            "DO $$ BEGIN RAISE NOTICE 'COMMIT;'; END $$;"
+        ));
+        assert!(has_transaction_control("CREATE TABLE t(id int); COMMIT;"));
+        assert!(has_transaction_control("ROLLBACK"));
     }
 
     #[test]

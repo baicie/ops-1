@@ -51,10 +51,15 @@ function startTokenKeepalive() {
 
 async function loadWorkloadTokenFile() {
   try {
-    const raw = await fs.readFile('/run/opsweave/capability-tokens.json', 'utf8');
+    const raw = await fs.readFile('/run/opsweave-token.json', 'utf8');
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) CAPABILITY_TOKENS = parsed;
-  } catch { /* local host-process mode has no mounted token file */ }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('token file is not an object');
+    CAPABILITY_TOKENS = parsed;
+  } catch (error) {
+    // Local host-process mode has no mounted file; fall back to env. A file that
+    // exists but is corrupt must fail closed instead of using stale env.
+    if (error?.code !== 'ENOENT') throw Object.assign(new Error('TOKEN_FILE_INVALID'), { code: 'TOKEN_FILE_INVALID', status: 503 });
+  }
 }
 
 async function catalogToken() {

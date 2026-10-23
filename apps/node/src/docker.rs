@@ -264,8 +264,8 @@ impl DockerAdapter {
                 .ok_or_else(|| anyhow!("token file has no parent directory"))?;
             args.push("--mount".to_string());
             args.push(format!(
-                "type=bind,source={},target=/run/opsweave,readonly",
-                token_dir.display()
+                "type=bind,source={},target=/run/opsweave-token.json,readonly",
+                token_dir.join("capability-tokens.json").display()
             ));
         }
         args.push(image_ref.to_string());

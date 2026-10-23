@@ -10,7 +10,7 @@ bad() { echo "FAIL  $*"; exit 1; }
 
 CONTAINER_ID="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-integration/ {print $1; exit}')"
 [ -n "$CONTAINER_ID" ] || bad "data-integration container not found"
-CURRENT_TOKEN="$(docker exec "$CONTAINER_ID" cat /run/opsweave/capability-tokens.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["data.catalog.v1"])')"
+CURRENT_TOKEN="$(docker exec "$CONTAINER_ID" cat /run/opsweave-token.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["data.catalog.v1"])')"
 [ -n "$CURRENT_TOKEN" ] || bad "current workload token file is empty"
 FRESH_RESPONSE="$(curl -fsS -X POST -H "Authorization: Bearer $CURRENT_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
 FRESH_TOKEN="$(printf '%s' "$FRESH_RESPONSE" | json "d['token']")"
