@@ -59,7 +59,7 @@ expire() {
   psql "$DB" -qAt -c "UPDATE kernel.pipeline_job_leases SET expires_at=now()-interval '1 second' WHERE lease_id='$lease';" >/dev/null
 }
 
-CUSTOM="$(make_pipeline custom-map-filter http://172.17.0.1:18090/data-hosts.json '{"mappings":{"id":"id","name":"id"}}' '{"field":"cpu_percent","op":"gt","value":50}')"
+CUSTOM="$(make_pipeline custom-map-filter http://172.17.0.1:18090/data-hosts.json '{"mappings":{"id":"id","name":"id","cpu_percent":"cpu_percent"}}' '{"field":"cpu_percent","op":"gt","value":50}')"
 curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' --data-binary "$CUSTOM" "$URL/api/v1/pipelines" >/dev/null
 CUSTOM_JOB="$(submit custom-map-filter worker-advanced-custom)"
 run_worker "$CUSTOM_JOB"
