@@ -10,57 +10,154 @@
       "type": "builtin.source.http_json",
       "typeVersion": 1,
       "inputs": [],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
-      "config": { "maxRecords": 10000, "timeoutSeconds": 15 }
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
+      "config": {
+        "maxRecords": 10000,
+        "timeoutSeconds": 15,
+        "endpoint": "http://172.17.0.1:18090/data-hosts.json"
+      }
     },
     {
       "nodeId": "parse",
       "type": "builtin.parse.json",
       "typeVersion": 1,
-      "inputs": [{ "name": "raw", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "raw",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "config": {}
     },
     {
       "nodeId": "map",
       "type": "builtin.map.fields",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "config": {}
     },
     {
       "nodeId": "filter",
       "type": "builtin.filter.predicate",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "config": {}
     },
     {
       "nodeId": "validate",
       "type": "builtin.validate.schema",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "config": {}
     },
     {
       "nodeId": "sink",
       "type": "builtin.sink.dataset",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
       "outputs": [],
-      "config": { "datasetId": "host-metrics" }
+      "config": {
+        "datasetId": "host-metrics",
+        "schemaRevision": 1
+      }
     }
   ],
   "edges": [
-    { "fromNode": "source", "fromPort": "records", "toNode": "parse", "toPort": "raw", "dataType": "json" },
-    { "fromNode": "parse", "fromPort": "records", "toNode": "map", "toPort": "records", "dataType": "json" },
-    { "fromNode": "map", "fromPort": "records", "toNode": "filter", "toPort": "records", "dataType": "json" },
-    { "fromNode": "filter", "fromPort": "records", "toNode": "validate", "toPort": "records", "dataType": "json" },
-    { "fromNode": "validate", "fromPort": "records", "toNode": "sink", "toPort": "records", "dataType": "json" }
+    {
+      "fromNode": "source",
+      "fromPort": "records",
+      "toNode": "parse",
+      "toPort": "raw",
+      "dataType": "json"
+    },
+    {
+      "fromNode": "parse",
+      "fromPort": "records",
+      "toNode": "map",
+      "toPort": "records",
+      "dataType": "json"
+    },
+    {
+      "fromNode": "map",
+      "fromPort": "records",
+      "toNode": "filter",
+      "toPort": "records",
+      "dataType": "json"
+    },
+    {
+      "fromNode": "filter",
+      "fromPort": "records",
+      "toNode": "validate",
+      "toPort": "records",
+      "dataType": "json"
+    },
+    {
+      "fromNode": "validate",
+      "fromPort": "records",
+      "toNode": "sink",
+      "toPort": "records",
+      "dataType": "json"
+    }
   ],
   "createdAt": "2026-10-23T00:00:00Z",
-  "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  "digest": "sha256:658ee385e0c102a9dc37341d2f4844f996ba4f35024aa1c5fc29f451a8591a30"
 }

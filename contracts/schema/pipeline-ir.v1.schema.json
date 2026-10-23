@@ -158,7 +158,8 @@
         "typeVersion",
         "inputs",
         "outputs",
-        "execution"
+        "execution",
+        "configSchema"
       ],
       "additionalProperties": false,
       "properties": {
@@ -201,6 +202,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100000
+        },
+        "configSchema": {
+          "type": "object",
+          "description": "Node-type-specific JSON Schema for node.config; validated by the trusted validator."
         }
       }
     },
@@ -208,6 +213,8 @@
       "type": "object",
       "required": [
         "schemaVersion",
+        "registryDigest",
+        "signature",
         "entries"
       ],
       "additionalProperties": false,
@@ -222,6 +229,13 @@
           "items": {
             "$ref": "#/$defs/NodeRegistryEntry"
           }
+        },
+        "registryDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "signature": {
+          "$ref": "#/$defs/RegistrySignature"
         }
       }
     },
@@ -511,6 +525,33 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "RegistrySignature": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "keyId",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "enum": [
+            "ed25519",
+            "hmac-sha256"
+          ]
+        },
+        "keyId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "value": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 512
         }
       }
     }

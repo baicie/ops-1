@@ -5,55 +5,182 @@
       "type": "builtin.source.http_json",
       "typeVersion": 1,
       "inputs": [],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "execution": "BOUNDED_IO",
       "maxInputRecords": 10000,
-      "maxOutputRecords": 10000
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "endpoint"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "maxRecords": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        }
+      }
     },
     {
       "type": "builtin.parse.json",
       "typeVersion": 1,
-      "inputs": [{ "name": "raw", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "raw",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "execution": "PURE",
       "maxInputRecords": 10000,
-      "maxOutputRecords": 10000
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
     },
     {
       "type": "builtin.map.fields",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "execution": "PURE",
       "maxInputRecords": 10000,
-      "maxOutputRecords": 10000
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
     },
     {
       "type": "builtin.filter.predicate",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "execution": "PURE",
       "maxInputRecords": 10000,
-      "maxOutputRecords": 10000
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
     },
     {
       "type": "builtin.validate.schema",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
-      "outputs": [{ "name": "records", "dataType": "json", "nullable": false }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
       "execution": "PURE",
       "maxInputRecords": 10000,
-      "maxOutputRecords": 10000
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
     },
     {
       "type": "builtin.sink.dataset",
       "typeVersion": 1,
-      "inputs": [{ "name": "records", "dataType": "json", "required": true }],
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
       "outputs": [],
       "execution": "BOUNDED_IO",
       "maxInputRecords": 10000,
-      "maxOutputRecords": 10000
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "datasetId",
+          "schemaRevision"
+        ],
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{2,63}$"
+          },
+          "schemaRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
     }
-  ]
+  ],
+  "registryDigest": "sha256:a1412584f638e134f936f353447d696d162cab41fca7070200245291c9e403f0",
+  "signature": {
+    "algorithm": "hmac-sha256",
+    "keyId": "test-registry-key",
+    "value": "example-registry-signature-not-for-production"
+  }
 }

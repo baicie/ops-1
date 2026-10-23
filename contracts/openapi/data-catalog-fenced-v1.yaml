@@ -1,0 +1,66 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave data.catalog.v1 fenced sink extension (draft)
+  version: 0.0.3-draft
+  description: >
+    Additive optional operation for atomic fenced Dataset writes. The 0.0.2
+    POST /datasets/{datasetId}/records operation remains unchanged. Runtime
+    integration is BLOCKED until the Catalog receipt transaction and Kernel
+    sink reservation are implemented and tested together.
+servers:
+  - url: /api/v1/capability/data.catalog.v1
+paths:
+  /datasets/{datasetId}/fenced-records:
+    post:
+      operationId: fencedRecords
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+        - $ref: '#/components/parameters/FenceGrant'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../schema/fence-grant.v1.schema.json'
+      responses:
+        '201':
+          description: One atomic fenced receipt and record batch
+          content:
+            application/json:
+              schema:
+                $ref: '../schema/sink-receipt.v1.schema.json'
+        '409':
+          description: Stale fence, idempotency conflict or receipt conflict
+        '503':
+          description: Catalog unavailable; caller must preserve UNKNOWN semantics
+  /datasets/{datasetId}/receipts/{sourceBatchKey}:
+    get:
+      operationId: getSinkReceipt
+      parameters:
+        - $ref: '#/components/parameters/DatasetId'
+        - name: sourceBatchKey
+          in: path
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 128 }
+      responses:
+        '200':
+          description: Stable receipt for UNKNOWN recovery
+          content:
+            application/json:
+              schema:
+                $ref: '../schema/sink-receipt.v1.schema.json'
+        '404':
+          description: No receipt exists
+components:
+  parameters:
+    DatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z][a-z0-9-]{2,63}$' }
+    FenceGrant:
+      name: X-OpsWeave-Fence
+      in: header
+      required: true
+      description: Base64url serialized signed fence-grant.v1 document.
+      schema: { type: string, minLength: 16 }

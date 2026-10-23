@@ -14,10 +14,15 @@ Implementation status: **BLOCKED by 0.0.2 version gate**
 | Durable Job JSON Schema | PASS | `contracts/schema/durable-job.v1.schema.json` |
 | OpenAPI draft | PASS | `contracts/openapi/typed-pipeline-v1.yaml` |
 | ADR-013 execution/persistence/recovery | PASS | `docs/adr/ADR-013-typed-pipeline-and-durable-jobs.md` |
-| Contract conformance tests | PASS (local) | `python3 tests/contract/validate_typed_pipeline.py` |
-| Contract conformance CI | PASS | `typed-pipeline-contracts` run `39892613830` on `838cf51` |
-| Minimal executable closed loop | BLOCKED | PR #1 is Draft/Open, not merged to `main`; implementation gate closed |
-| Real Lease/Fencing/Checkpoint E2E | BLOCKED | Requires implementation after gate |
+| Trusted NodeRegistry signature conformance | PASS (contract) | `tests/contract/validate_typed_pipeline.py` verifies registry digest, required signature, exact port signatures and per-node config schema |
+| Schema Revision conformance | PASS (contract) | Sink config revision is checked against `contracts/examples/schema-catalog.json`; unknown/unpublished revision rejected |
+| Canonical JSON / digest | PASS (contract) | Pipeline, registry and execution-plan canonical digests are recomputed |
+| Durable state machine / Claim / Checkpoint / Fence conformance | PASS (contract) | Duplicate claim, illegal transition, monotonic fence/checkpoint and stale-fence checks |
+| Contract conformance CI | PASS | `typed-pipeline-contracts` run `39892613830` on `838cf51`; current B1/B2/B3 update rerun pending |
+| Catalog Sink atomic fence boundary | **BLOCKED** | Existing `data.catalog.v1` has idempotent batch records but no Job/Fence identity; see `docs/architecture/0.0.3-fenced-sink.md` |
+| Minimal executable closed loop | **BLOCKED** | PR #1 is Draft/Open, not merged to `main`; implementation gate closed |
+| Real Lease/Fencing/Checkpoint/Sink E2E | **BLOCKED** | Requires Catalog fenced-receipt implementation plus Runtime after gate |
+| Minimal HTTP/JSON Source → Dataset runtime | **NOT_RUN** | No runtime implementation is allowed before Gate C |
 
 ## Conformance result
 
@@ -25,8 +30,9 @@ Implementation status: **BLOCKED by 0.0.2 version gate**
 TYPED PIPELINE CONTRACT PASS
   pipeline schema: valid
   durable job schema: valid
-  examples: 9 validated
-  DAG/type/cycle/limits/state/fencing checks: valid
+  examples: 12 validated
+  DAG/type/cycle/limits/state/fencing/schema checks: valid
+  canonical JSON and digest checks: valid
   OpenAPI operations: 10 checked
 ```
 

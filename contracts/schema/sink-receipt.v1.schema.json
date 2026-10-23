@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.opsweave.dev/schema/sink-receipt.v1.schema.json",
+  "title": "OpsWeave Fenced Sink Receipt",
+  "description": "Stable idempotency and UNKNOWN recovery record for a fenced external side effect.",
+  "type": "object",
+  "required": ["schemaVersion", "receiptId", "jobId", "leaseId", "fencingSequence", "sourceBatchKey", "datasetId", "schemaRevision", "status", "committedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "sink-receipt.opsweave.io/v1" },
+    "receiptId": { "type": "string", "format": "uuid" },
+    "jobId": { "type": "string", "format": "uuid" },
+    "leaseId": { "type": "string", "format": "uuid" },
+    "fencingSequence": { "type": "integer", "minimum": 1 },
+    "sourceBatchKey": { "type": "string", "minLength": 16, "maxLength": 128 },
+    "datasetId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,63}$" },
+    "schemaRevision": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["COMMITTED", "REJECTED", "UNKNOWN"] },
+    "committedAt": { "type": "string", "format": "date-time" },
+    "resultDigest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}
