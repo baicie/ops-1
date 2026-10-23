@@ -1,135 +1,124 @@
-# 0.0.3 Typed Pipeline Foundation — Final Runtime Gate
+# 0.0.3 Runtime Reliability Final — Evidence Report
 
 Date: 2026-10-23 (Asia/Shanghai)  
 Branch: `feat/0.0.3-typed-pipeline`  
-Verified HEAD: `a964dbb`  
-Base `main`: `a434a79`  
-PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — **Draft / Open / not merged**
+Base: `a434a79`  
+Final code HEAD: `f58da5e`  
+PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — **Draft / Open / not merged**  
+Working tree: clean after report commit.
 
-## 1. Gate Matrix
-
-| Gate | Status |
-|---|---|
-| Live Catalog Schema | **PASS** |
-| Dynamic Dataset E2E | **PASS** |
-| Node-managed Worker | **PASS** |
-| Atomic Claim-Next | **PARTIAL** |
-| Continuous Heartbeat | **PARTIAL** |
-| Kernel Restart | **NOT_RUN** |
-| Two-Node Automatic Takeover | **NOT_RUN** |
-| Authoritative Effect Completion | **PASS** |
-| Source Security | **PARTIAL** |
-| Catalog Fencing Concurrency | **PARTIAL** |
-| Legacy Regression | **PASS** |
-
-**Conclusion: `PARTIAL_NOT_READY`.**
-
-## 2. Implemented in this closeout
-
-### Atomic Claim-Next
-
-`claim_next` now performs discovery, exhausted-job termination, Lease creation and
-Fence increment in one PostgreSQL transaction. Candidate selection uses
-`FOR UPDATE SKIP LOCKED`, ordered by `created_at, job_id`; `QUEUED`, expired
-`CLAIMED` and expired `RUNNING` jobs are eligible. Attempts-exhausted expired jobs
-are moved to `FAILED`.
-
-Remaining gap: no dedicated PostgreSQL two-connection concurrency acceptance was
-added for `claim_next`; the existing Node-managed test exercises only the QUEUED path.
-
-### Independent Heartbeat
-
-Worker now starts a separate heartbeat task after Claim:
-
-- 10 second period against a 60 second lease;
-- shares an `AtomicBool` cancellation flag with execution;
-- heartbeat failure stops further checkpoint/sink writes;
-- forward progress checks the cancellation flag before each batch;
-- heartbeats are aborted on normal completion and cancellation.
-
-Remaining gap: no 60+ second Source acceptance and no explicit heartbeat-rejection
-E2E; therefore Continuous Heartbeat is `PARTIAL`.
-
-### Authoritative Effect Completion
-
-Kernel `result()` for SUCCEEDED now:
-
-1. loads the pinned PipelineRevision and sink;
-2. recomputes stable Effect IDs for `batch-1..N`;
-3. rejects duplicate, missing or extra Effect IDs;
-4. calls the restricted Catalog service identity for each Receipt;
-5. verifies:
-   - `status=COMMITTED`;
-   - `jobId`;
-   - `pipelineId` and Revision;
-   - Sink Node;
-   - Dataset and Schema Revision;
-   - request digest.
-6. only then inserts the Result.
-
-A fabricated `effects` array can no longer produce SUCCEEDED without matching
-Catalog Receipts.
-
-### Supervisor lifecycle
-
-Node Supervisor now stops the live Worker when:
-
-- the enable marker is removed;
-- Node is quarantined;
-- the bound Instance is no longer READY.
-
-It uses bounded exponential backoff and reaps children.
-
-## 3. CI evidence
-
-- Data Foundation OCI CI [39963403270](https://github.com/baicie/ops-1/actions/runs/39963403270) — **SUCCESS**
-- Standard CI [39963403462](https://github.com/baicie/ops-1/actions/runs/39963403462) — **SUCCESS**
-- Typed Pipeline Contract CI [39963403288](https://github.com/baicie/ops-1/actions/runs/39963403288) — **SUCCESS**
-- 0.0.1 Legacy: `PASS=21 FAIL=0`
-- 0.0.2 Data Foundation: PASS
-
-Retained real assertions:
+## A. Commits in this pass
 
 ```text
-PASS  dynamic dataset -> live schema pin -> job SUCCEEDED records=2 effect=efx:5e3e5f...
-PASS  unknown Catalog dataset rejected
-PASS  unpublished schema revision rejected
-PASS  Node Runtime auto-claimed and completed job without manual worker invocation
-Dynamic Catalog Pipeline Golden Path: PASS
-Node-managed Worker Golden Path: PASS
-Pipeline Worker Advanced Golden Path: PASS
+22b2843  Record final runtime gate status and missing recovery evidence
+c9b176f  Make claim-next atomic and run worker heartbeat independently
+a964dbb  Verify completed effect sets through catalog service identity
+f58da5e  Enforce strict batches, accepted totals and job deadlines
 ```
 
-## 4. Not run / incomplete
+No main/tag/release changes. No force push.
 
-### P0
+## B. Architecture changes
 
-No P0 in the exercised single-Node path.
+### R1.1 Strict batch semantics
 
-### P1
+- Catalog fenced sink now rejects the **entire batch with 422
+  RECORD_VALIDATION_FAILED before any record/receipt write** if any record is
+  invalid.
+- `COMMITTED` now means all records validated and the transaction committed;
+  there is no partial accepted/rejected success path.
+- Worker no longer uses `batch.len()` as accepted count: it requires receipt
+  `accepted == batch.len()`, `rejected == 0`, `unknown == 0`.
+- Kernel sums authoritative Receipt `accepted` values and requires the total to
+  equal `output.accepted`.
 
-- Kernel process kill/restart E2E: `NOT_RUN`.
-- Two independent Node Runtime automatic takeover: `NOT_RUN`.
-- `claim_next` two-connection PostgreSQL concurrency test: `MISSING`.
-- Independent long Source/slow Catalog heartbeat test: `MISSING`.
-- Supervisor quarantine/instance-stop/revocation E2E: `MISSING`.
-- Dedicated `.github/workflows/typed-pipeline-runtime.yml`: `MISSING`.
-- Catalog lock `pg_blocking_pids()` proof: `MISSING`.
-- Complete HTTP redirect/DNS-rebinding/chunked/slow matrix: `MISSING`.
+### R1.2 Job deadline
 
-### P2
+- New migration `0008_job_deadline.sql` adds `deadline_at` computed from Job
+  submission time + `timeout_seconds`.
+- Claim rejects an expired deadline and marks the Job `FAILED` with
+  `JOB_DEADLINE_EXCEEDED` plus event.
+- Claim-Next reaps expired candidates, excluding them from selection.
+- Heartbeat returns `JOB_DEADLINE_EXCEEDED` instead of extending execution.
+- Kernel Result verification rejects expired jobs.
 
-- Worker concurrency/backpressure.
-- Multi-host acceptance.
-- Full provider/identity failure matrix.
+Remaining gap: no dedicated deadline E2E and no unified terminalization of
+attempts/leases for the reaper path.
 
-## 5. Boundary
+### R2. Atomic Claim-Next
 
-The live Catalog, dynamic Dataset, immutable Schema Pin, single-Node automatic
-scheduling and Kernel-side Receipt verification are real and pass CI.
+Claim-Next now selects, terminates exhausted/deadline jobs, claims, creates Lease
+and increments Fence in one PostgreSQL transaction with `FOR UPDATE SKIP LOCKED`.
 
-The final distributed recovery gates (Kernel restart, two-Node automatic takeover)
-and the dedicated concurrency/heartbeat acceptance are not implemented. Therefore
-PR #2 is **not ready for formal review yet**.
+Remaining gap: no two-connection PG concurrency test at 8/16/32 workers.
 
-PR #2 remains Draft. No merge, tag move, force-push or release was performed.
+### R2. Heartbeat
+
+Worker starts an independent Task after Claim with 10s cadence and a shared
+cancellation flag. Heartbeat failure stops later checkpoint/sink writes.
+
+Remaining gap: no 70s execution, 429/500/503, Kernel-outage or race injection E2E.
+
+### R5. Authoritative completion
+
+Kernel recomputes every `batch-N` Effect ID, queries the restricted Catalog
+Service Identity for each Receipt, and verifies COMMITTED/Job/Pipeline/Revision/
+Sink/Dataset/Schema/Digest/accepted totals before accepting SUCCEEDED.
+
+## C. Gate Matrix
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Catalog Schema | **PASS** | live service principal + dynamic dataset CI |
+| Dynamic Dataset | **PASS** | `dynamic dataset: ... -> job SUCCEEDED records=2` |
+| Node-managed Worker | **PASS** | single Node auto-claim CI |
+| Atomic Claim-Next | **PARTIAL** | code atomic; no PG concurrency test |
+| Heartbeat | **PARTIAL** | independent task; no long/outage E2E |
+| Job Deadline | **PARTIAL** | code + migration; no E2E |
+| Result Correctness | **PASS** | strict strict batch + authoritative set |
+| Kernel Restart | **NOT_RUN** | no process kill/restart test |
+| Two-Node Takeover | **NOT_RUN** | no two-Node Runtime test |
+| Supervisor Lifecycle | **PARTIAL** | code paths; no full negative E2E |
+| Source Security | **PARTIAL** | SSRF address matrix; no full HTTP server matrix |
+| Catalog Lock Proof | **PARTIAL** | same-row fence; no pg_blocking_pids test |
+| Authoritative Completion | **PASS** | Kernel queries Catalog Receipts |
+| Legacy Regression | **PASS** | CI below |
+| Runtime CI workflow | **NOT_RUN** | `.github/workflows/typed-pipeline-runtime.yml` missing |
+
+## D. Database assertions
+
+CI-covered: unique Job state transition, monotonic fence on takeover, old fence
+rejection, stable Effect IDs, no duplicate records after crash/retry, Snapshot
+integrity, Result replay identity, and strict accepted totals.
+
+NOT covered: 8/16/32 concurrent claims, natural lease expiry two-Node takeover,
+Kernel restart, pg_locks blocking proof, deadline terminalization E2E.
+
+## E. CI evidence
+
+- Data Foundation OCI [39967592684](https://github.com/baicie/ops-1/actions/runs/39967592684) — **SUCCESS**
+- Standard CI [39967592760](https://github.com/baicie/ops-1/actions/runs/39967592760) — **SUCCESS**
+- Typed Pipeline Contract [39967592797](https://github.com/baicie/ops-1/actions/runs/39967592797) — **SUCCESS**
+- 0.0.1 Legacy: PASS=21 FAIL=0
+- 0.0.2 Data Foundation: PASS
+
+Retained assertions:
+
+```text
+PASS  strict batch semantics rejected partial invalid batch before any write
+PASS  dynamic dataset -> live schema pin -> job SUCCEEDED records=2
+PASS  Node Runtime auto-claimed and completed job without manual worker invocation
+PASS  stable Effect / snapshot / result replay gates
+```
+
+## F. Final decision
+
+```text
+PARTIAL_NOT_READY
+```
+
+Reason: R1 data-correctness fixes and authoritative completion are real and green,
+but Kernel restart, two-Node automatic takeover, concurrency stress, long-running
+heartbeat acceptance and the dedicated Runtime CI workflow are not executed.
+
+PR #2 must remain Draft. No merge, tag, force-push or release was performed.
