@@ -462,6 +462,14 @@ impl Worker {
         if records.is_empty() {
             bail!("no records after pipeline execution");
         }
+        if std::env::var("OPSWEAVE_WORKER_CRASH_BEFORE_SINK")
+            .ok()
+            .as_deref()
+            == Some("1")
+        {
+            eprintln!("worker crash injection before sink");
+            std::process::exit(17);
+        }
         self.heartbeat(job_id, &lease).await?;
         let token = self.workload_token().await?;
         let mut last_receipt = Value::Null;
@@ -545,13 +553,13 @@ impl Worker {
                 std::process::exit(18);
             }
         }
-        if std::env::var("OPSWEAVE_WORKER_CRASH_BEFORE_SINK")
+        if std::env::var("OPSWEAVE_WORKER_CRASH_AFTER_SINK")
             .ok()
             .as_deref()
             == Some("1")
         {
-            eprintln!("worker crash injection before sink");
-            std::process::exit(17);
+            eprintln!("worker crash injection after sink");
+            std::process::exit(18);
         }
         let result_digest = digest(&json!({
             "effectId": effect_id(&job_id, &definition.pipeline_id, definition.pipeline_revision, sink_node_id, "result"),
