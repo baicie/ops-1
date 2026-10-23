@@ -17,7 +17,7 @@ PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — Draft, not merged
 | Rust Validator / Planner | **PASS** | `apps/kernel/src/pipeline.rs`, 8 focused tests |
 | Durable JobStore | **PASS** | PostgreSQL migration 0003 + real HTTP/PostgreSQL acceptance `Pipeline JobStore Golden Path` |
 | Lease / Fencing | **PASS** | claim/start/heartbeat/checkpoint, lease expiry takeover, stale result/checkpoint rejection |
-| Catalog Sink Atomicity | **PASS** | real Catalog endpoint + `kernel.fence_authorize()` same-transaction row lock; fenced write tests |
+| Catalog Sink Atomicity | **PARTIAL** | real Catalog endpoint + `kernel.fence_authorize()` same-transaction row lock; stale-fence and retry tests pass, inverse lock-wait interleaving not separately instrumented |
 | Cross-Attempt Idempotency | **PASS** | stable `effectId`; duplicate receipt returned; 2 records remain 2 after retry |
 | Worker Runtime | **NOT_RUN** | no real Node/Worker execution loop in this sprint |
 | Crash / Restart Recovery | **PARTIAL** | lease-expiry takeover passed; full Kernel/Worker restart E2E not run |
@@ -88,9 +88,14 @@ function with fixed `search_path`, no PUBLIC execute, and execute grant only to
 the Catalog role. It takes `FOR UPDATE` on the same `pipeline_jobs` row as
 Claim. Catalog calls this function **inside its records transaction**, so:
 
-- old writer lock first → new Claim waits for the Catalog transaction;
-- new Claim first → old writer sees a higher current fence and is rejected;
+- old writer's Catalog transaction takes the `pipeline_jobs` row lock while it commits;
+- a new Claim uses the same row lock, so it cannot interleave between authorization and commit;
+- a new Claim committed first makes the old writer's new effect fail with `STALE_FENCE`;
 - records, effect receipt and lineage commit in one Catalog transaction.
+
+The real E2E test exercised old-write-committed-then-takeover, retry idempotency
+and new-claim-first stale rejection. It did not yet instrument the inverse
+`pg_locks` wait timing, so the atomicity row is **PARTIAL**, not PASS.
 
 `plugins/data-catalog/backend/server.mjs` adds:
 
