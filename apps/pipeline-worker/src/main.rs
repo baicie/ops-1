@@ -316,7 +316,7 @@ impl Worker {
     ) -> Result<Value> {
         let value = Value::Array(source.to_vec());
         let source_digest = digest(&value);
-        let serialized = serde_json::to_vec(&value).context("serialize snapshot")?;
+        let serialized = canonical_json(&value).into_bytes();
         if serialized.len() > MAX_SOURCE_BYTES {
             bail!("source snapshot exceeds limit");
         }
@@ -559,6 +559,7 @@ impl Worker {
         let mut accepted_total = 0usize;
         let batch_size = 500usize;
         let batch_count = records.len().div_ceil(batch_size);
+        let mut effects: Vec<Value> = Vec::new();
         for (index, batch) in records.chunks(batch_size).enumerate() {
             let logical_batch = format!("batch-{}", index + 1);
             let effect = effect_id(
@@ -667,6 +668,49 @@ impl Worker {
                 std::process::exit(18);
             }
         }
+        for (index, batch) in records.chunks(batch_size).enumerate() {
+            let logical_batch = format!("batch-{}", index + 1);
+            let effect = effect_id(
+                &job_id,
+                &definition.pipeline_id,
+                definition.pipeline_revision,
+                sink_node_id,
+                &logical_batch,
+            );
+            let (status, body) = self
+                .capability(
+                    &token,
+                    Method::GET,
+                    &format!(
+                        "api/data-catalog/datasets/{dataset_id}/effect-receipts?effectId={effect}"
+                    ),
+                    None,
+                )
+                .await?;
+            if status != StatusCode::OK
+                || body.get("status").and_then(Value::as_str) != Some("COMMITTED")
+            {
+                bail!("effect {effect} is not committed; refusing SUCCEEDED");
+            }
+            let expected = digest(&json!({
+                "effectId": effect,
+                "pipelineId": definition.pipeline_id,
+                "pipelineRevision": definition.pipeline_revision,
+                "sinkNodeId": sink_node_id,
+                "logicalBatchId": logical_batch,
+                "schemaRevision": schema_revision,
+                "sourceBatchKey": format!("job-{job_id}-{logical_batch}"),
+                "records": batch
+            }));
+            if body.get("requestDigest").and_then(Value::as_str) != Some(expected.as_str()) {
+                bail!("effect {effect} digest mismatch during completion verification");
+            }
+            effects.push(json!({
+                "effectId": effect,
+                "requestDigest": expected,
+                "status": "COMMITTED"
+            }));
+        }
         if std::env::var("OPSWEAVE_WORKER_CRASH_AFTER_SINK")
             .ok()
             .as_deref()
@@ -691,7 +735,8 @@ impl Worker {
                     "status": "SUCCEEDED",
                     "output": {"accepted": accepted_total, "batches": batch_count},
                     "resultDigest": result_digest,
-                    "receipt": last_receipt
+                    "receipt": last_receipt,
+                    "effects": effects
                 })),
             )
             .await?;

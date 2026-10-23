@@ -55,6 +55,31 @@ HB_CODE="$(curl -sS -o /tmp/job-heartbeat.json -w '%{http_code}' "${WORKER_A_HEA
 CP_CODE="$(curl -sS -o /tmp/job-checkpoint.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"sequence\":1,\"inputCursor\":\"batch:1\",\"stateDigest\":\"sha256:$(printf 'a%.0s' {1..64})\",\"state\":{}}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/checkpoint")"
 [ "$CP_CODE" = "200" ] || bad "checkpoint returned $CP_CODE: $(cat /tmp/job-checkpoint.json)"
 ok "claim/start/heartbeat/checkpoint passed"
+python3 - <<'PY'
+import json,hashlib
+def write(name, source):
+    payload=json.dumps(source,sort_keys=True,separators=(',',':')).encode()
+    open(f'/tmp/{name}-source.json','wb').write(payload)
+    open(f'/tmp/{name}-digest.txt','w').write('sha256:'+hashlib.sha256(payload).hexdigest())
+    open(f'/tmp/{name}-length.txt','w').write(str(len(payload)))
+write('snapshot',[{"id":"snap-1","name":"snap-1"}])
+write('snapshot-other',[{"id":"other","name":"other"}])
+PY
+SNAP_DIGEST="$(cat /tmp/snapshot-digest.txt)"; SNAP_LENGTH="$(cat /tmp/snapshot-length.txt)"
+snapshot_body() { python3 -c 'import json,sys; print(json.dumps({"leaseId":sys.argv[1],"fencingSequence":int(sys.argv[2]),"sourceDigest":sys.argv[3],"sourceLength":int(sys.argv[4]),"source":json.load(open("/tmp/snapshot-source.json")),"etag":"test"}))' "$LEASE_A" "$FENCE_A" "$SNAP_DIGEST" "$SNAP_LENGTH"; }
+SNAP_CODE="$(curl -sS -o /tmp/snapshot-ok.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$(snapshot_body)" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
+[ "$SNAP_CODE" = "200" ] || bad "valid snapshot save returned $SNAP_CODE"
+FORGED_CODE="$(curl -sS -o /tmp/snapshot-forged.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); d["sourceDigest"]="sha256:"+"0"*64; print(json.dumps(d))' "$(snapshot_body)")" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
+[ "$FORGED_CODE" = "400" ] || bad "forged snapshot digest returned $FORGED_CODE"
+LENGTH_CODE="$(curl -sS -o /tmp/snapshot-length.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); d["sourceLength"]+=1; print(json.dumps(d))' "$(snapshot_body)")" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
+[ "$LENGTH_CODE" = "400" ] || bad "forged snapshot length returned $LENGTH_CODE"
+OTHER_DIGEST="$(cat /tmp/snapshot-other-digest.txt)"; OTHER_LENGTH="$(cat /tmp/snapshot-other-length.txt)"
+OTHER_BODY="$(python3 -c 'import json,sys; print(json.dumps({"leaseId":sys.argv[1],"fencingSequence":int(sys.argv[2]),"sourceDigest":sys.argv[3],"sourceLength":int(sys.argv[4]),"source":json.load(open("/tmp/snapshot-other-source.json"))}))' "$LEASE_A" "$FENCE_A" "$OTHER_DIGEST" "$OTHER_LENGTH")"
+CONFLICT_CODE="$(curl -sS -o /tmp/snapshot-conflict.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$OTHER_BODY" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
+[ "$CONFLICT_CODE" = "409" ] || bad "different snapshot content returned $CONFLICT_CODE"
+GET_CODE="$(curl -sS -o /tmp/snapshot-get.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
+[ "$GET_CODE" = "200" ] || bad "snapshot get returned $GET_CODE"
+ok "snapshot integrity rejects forged digest/length and pins content"
 
 # Forcibly expire A's lease in PostgreSQL, then let B take over with a higher fence.
 psql "$DB" -qAt -c "UPDATE kernel.pipeline_job_leases SET expires_at=now()-interval '1 second' WHERE lease_id='$LEASE_A';" >/dev/null
@@ -71,6 +96,9 @@ grep -q 'STALE_FENCE' /tmp/job-stale-result.json || bad "stale fence code missin
 STALE_CP_CODE="$(curl -sS -o /tmp/job-stale-cp.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_A\",\"fencingSequence\":$FENCE_A,\"sequence\":2,\"stateDigest\":\"sha256:$(printf 'b%.0s' {1..64})\",\"state\":{}}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/checkpoint")"
 [ "$STALE_CP_CODE" = "409" ] || bad "stale worker checkpoint returned $STALE_CP_CODE"
 ok "lease expiry/takeover and old-fence rejection passed"
+SNAP_OLD_CODE="$(curl -sS -o /tmp/snapshot-old.json -w '%{http_code}' "${WORKER_A_HEADERS[@]}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/snapshot")"
+[ "$SNAP_OLD_CODE" = "403" ] || bad "old worker snapshot read returned $SNAP_OLD_CODE"
+ok "old worker cannot read snapshot after takeover"
 
 RESULT_CODE="$(curl -sS -o /tmp/job-result-b.json -w '%{http_code}' "${WORKER_B_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LEASE_B\",\"fencingSequence\":$FENCE_B,\"status\":\"FAILED\",\"output\":{},\"errorCode\":\"WORKER_TEST_COMPLETE\",\"resultDigest\":\"sha256:$(printf 'c%.0s' {1..64})\"}" "$URL/internal/v1/pipeline-jobs/$JOB_ID/result")"
 [ "$RESULT_CODE" = "200" ] || bad "new worker result returned $RESULT_CODE: $(cat /tmp/job-result-b.json)"

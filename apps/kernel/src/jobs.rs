@@ -234,6 +234,8 @@ pub struct ResultRequest {
     pub error_message: Option<String>,
     pub result_digest: Option<String>,
     pub receipt: Option<Value>,
+    #[serde(default)]
+    pub effects: Vec<Value>,
 }
 
 async fn validate_and_plan(
@@ -587,10 +589,41 @@ pub async fn get_snapshot(
     if lease_worker.as_deref() != Some(trusted.worker_id.as_str()) {
         return Err(AppError::forbidden("lease belongs to a different worker"));
     }
+    let lease_state: Option<(String, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT status,expires_at FROM kernel.pipeline_job_leases WHERE lease_id=(SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id=$1)",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?;
+    match lease_state {
+        Some((status, expires_at)) if status == "ACTIVE" && expires_at > Utc::now() => {}
+        _ => {
+            return Err(AppError::conflict(
+                "STALE_FENCE",
+                "snapshot requires the current active lease",
+            ));
+        }
+    }
+    let stored_source: Value = row.get("source");
+    let canonical = crate::pipeline::canonical_json(&stored_source).into_bytes();
+    let stored_digest: String = row.get("source_digest");
+    let actual_digest = format!(
+        "sha256:{}",
+        hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&canonical))
+    );
+    if actual_digest != stored_digest
+        || canonical.len() as i64 != row.get::<i64, _>("source_length")
+    {
+        return Err(AppError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "SNAPSHOT_CORRUPT",
+            "stored source snapshot failed integrity verification",
+        ));
+    }
     Ok(Json(SnapshotResponse {
-        source_digest: row.get("source_digest"),
+        source_digest: stored_digest,
         source_length: row.get("source_length"),
-        source: row.get("source"),
+        source: stored_source,
         etag: row.get("etag"),
         fetched_at: row.get("fetched_at"),
     }))
@@ -603,12 +636,22 @@ pub async fn save_snapshot(
     Json(request): Json<SnapshotRequest>,
 ) -> AppResult<Json<SnapshotResponse>> {
     let trusted = authenticate_worker_header_only(&state, &headers).await?;
-    if request.source_length < 0
-        || request.source_length > 4 * 1024 * 1024
-        || request.source_digest.len() != 71
-        || !request.source_digest.starts_with("sha256:")
-    {
+    if request.source_length < 0 || request.source_digest.len() != 71 {
         return Err(AppError::bad_request("invalid source snapshot"));
+    }
+    let canonical = crate::pipeline::canonical_json(&request.source).into_bytes();
+    if canonical.len() > 4 * 1024 * 1024 {
+        return Err(AppError::bad_request("source snapshot exceeds limit"));
+    }
+    if canonical.len() as i64 != request.source_length {
+        return Err(AppError::bad_request("source snapshot length mismatch"));
+    }
+    let actual_digest = format!(
+        "sha256:{}",
+        hex::encode(<sha2::Sha256 as sha2::Digest>::digest(&canonical))
+    );
+    if actual_digest != request.source_digest {
+        return Err(AppError::bad_request("source snapshot digest mismatch"));
     }
     let mut tx = state.db.begin().await?;
     let row = sqlx::query(
@@ -1000,17 +1043,43 @@ pub async fn result(
         "SUCCEEDED" | "FAILED" | "CANCELLED" => request.status.as_str(),
         _ => return Err(AppError::bad_request("result status must be terminal")),
     };
+    if terminal == "SUCCEEDED" {
+        let batches = request
+            .output
+            .get("batches")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if request.effects.is_empty() || request.effects.len() as u64 != batches {
+            return Err(AppError::bad_request(
+                "SUCCEEDED requires one committed effect per batch",
+            ));
+        }
+        for effect in &request.effects {
+            if effect.get("status").and_then(Value::as_str) != Some("COMMITTED")
+                || effect.get("effectId").and_then(Value::as_str).is_none()
+                || effect
+                    .get("requestDigest")
+                    .and_then(Value::as_str)
+                    .is_none()
+            {
+                return Err(AppError::bad_request("incomplete committed effect set"));
+            }
+        }
+    }
     // A released lease must not block an authenticated idempotent result replay.
     let replay = sqlx::query(
-        "SELECT r.status,r.result_digest,l.worker_id FROM kernel.pipeline_job_results r JOIN kernel.pipeline_job_leases l ON l.lease_id=$2 AND l.job_id=r.job_id WHERE r.job_id=$1",
+        "SELECT status,result_digest,lease_id,fencing_sequence,worker_id FROM kernel.pipeline_job_results WHERE job_id=$1",
     )
     .bind(job_id)
-    .bind(request.lease_id)
     .fetch_optional(&state.db)
     .await?;
     if let Some(replay) = replay {
-        let replay_worker: String = replay.get("worker_id");
-        if replay_worker == trusted.worker_id
+        let replay_worker: Option<String> = replay.get("worker_id");
+        let replay_lease: Option<Uuid> = replay.get("lease_id");
+        let replay_fence: i64 = replay.get("fencing_sequence");
+        if replay_worker.as_deref() == Some(trusted.worker_id.as_str())
+            && replay_lease == Some(request.lease_id)
+            && replay_fence == request.fencing_sequence
             && replay.get::<String, _>("status") == terminal
             && replay.get::<Option<String>, _>("result_digest").as_deref()
                 == request.result_digest.as_deref()
@@ -1049,8 +1118,8 @@ pub async fn result(
             "job already has a result",
         ));
     }
-    sqlx::query("INSERT INTO kernel.pipeline_job_results (job_id,fencing_sequence,status,output,error_code,error_message,result_digest,receipt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
-        .bind(job_id).bind(fence).bind(terminal).bind(&request.output).bind(&request.error_code).bind(&request.error_message).bind(&request.result_digest).bind(&request.receipt).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO kernel.pipeline_job_results (job_id,fencing_sequence,status,output,error_code,error_message,result_digest,receipt,lease_id,worker_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+        .bind(job_id).bind(fence).bind(terminal).bind(&request.output).bind(&request.error_code).bind(&request.error_message).bind(&request.result_digest).bind(&request.receipt).bind(request.lease_id).bind(&trusted.worker_id).execute(&mut *tx).await?;
     sqlx::query("UPDATE kernel.pipeline_jobs SET status=$2,last_error_code=$3,updated_at=now() WHERE job_id=$1")
         .bind(job_id).bind(terminal).bind(&request.error_code).execute(&mut *tx).await?;
     sqlx::query("UPDATE kernel.pipeline_job_leases SET status='RELEASED' WHERE lease_id=$1")
