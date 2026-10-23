@@ -123,4 +123,22 @@ grep -q 'RESULT_CONFLICT' /tmp/job-result-conflict.json || bad "result conflict 
 COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_results WHERE job_id='$JOB_ID';")"
 [ "$COUNT" = "1" ] || bad "result replay created another row"
 ok "fenced result persisted exactly once; same digest replay is idempotent and different digest conflicts"
+# Deadline is an execution authority, not only a Claim filter.
+DEADLINE_JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: deadline-job-$(date +%s%N)" --data-binary "{\"pipelineId\":\"$PIPELINE_ID\",\"pipelineRevision\":$REVISION,\"input\":{},\"maxAttempts\":3,\"timeoutSeconds\":1}" "$URL/api/v1/jobs" | json "d['jobId']")"
+sleep 2
+DCLAIM="$(curl -sS -o /tmp/deadline-claim.json -w '%{http_code}' "${WORKER_B_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_B" "$URL/internal/v1/pipeline-jobs/$DEADLINE_JOB/claim")"
+[ "$DCLAIM" = "409" ] || bad "expired deadline claim returned $DCLAIM"
+grep -q 'JOB_DEADLINE_EXCEEDED' /tmp/deadline-claim.json || bad "deadline claim code missing"
+DSTATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$DEADLINE_JOB';")"
+[ "$DSTATUS" = "FAILED" ] || bad "deadline job status=$DSTATUS"
+ok "expired deadline is rejected and terminalized"
+
+LIVE_JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: deadline-live-$(date +%s%N)" --data-binary "{\"pipelineId\":\"$PIPELINE_ID\",\"pipelineRevision\":$REVISION,\"input\":{},\"maxAttempts\":3,\"timeoutSeconds\":2}" "$URL/api/v1/jobs" | json "d['jobId']")"
+LCLAIM="$(curl -fsS "${WORKER_B_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "$WORKER_B" "$URL/internal/v1/pipeline-jobs/$LIVE_JOB/claim")"
+LLEASE="$(printf '%s' "$LCLAIM" | json "d['leaseId']")"; LFENCE="$(printf '%s' "$LCLAIM" | json "d['fencingSequence']")"
+sleep 3
+LHB="$(curl -sS -o /tmp/deadline-heartbeat.json -w '%{http_code}' "${WORKER_B_HEADERS[@]}" -X POST -H 'content-type: application/json' --data-binary "{\"leaseId\":\"$LLEASE\",\"fencingSequence\":$LFENCE}" "$URL/internal/v1/pipeline-jobs/$LIVE_JOB/heartbeat")"
+[ "$LHB" = "409" ] || bad "expired deadline heartbeat returned $LHB"
+grep -q 'JOB_DEADLINE_EXCEEDED' /tmp/deadline-heartbeat.json || bad "deadline heartbeat code missing"
+ok "active lease cannot heartbeat past deadline"
 echo "Pipeline JobStore Golden Path: PASS"

@@ -717,6 +717,18 @@ pub async fn get_snapshot(
     .bind(job_id)
     .fetch_optional(&state.db)
     .await?;
+    let deadline_expired: bool = sqlx::query_scalar(
+        "SELECT deadline_at IS NOT NULL AND clock_timestamp() >= deadline_at FROM kernel.pipeline_jobs WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_one(&state.db)
+    .await?;
+    if deadline_expired {
+        return Err(AppError::conflict(
+            "JOB_DEADLINE_EXCEEDED",
+            "snapshot access after job deadline",
+        ));
+    }
     match lease_state {
         Some((status, expires_at)) if status == "ACTIVE" && expires_at > Utc::now() => {}
         _ => {
@@ -929,16 +941,25 @@ pub async fn claim_next(
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
     let response = match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
-        Ok(response) => {
+        Ok(ClaimOutcome::Claimed(response)) => {
             tx.commit().await?;
             response
         }
+        Ok(ClaimOutcome::Terminalized(code)) => {
+            tx.commit().await?;
+            return Err(AppError::conflict(code, "job reached a terminal state"));
+        }
         Err(error) => {
-            let _ = tx.commit().await;
+            tx.rollback().await.ok();
             return Err(error);
         }
     };
     Ok(Json(response).into_response())
+}
+
+enum ClaimOutcome {
+    Claimed(ClaimResponse),
+    Terminalized(&'static str),
 }
 
 async fn claim_core(
@@ -946,7 +967,7 @@ async fn claim_core(
     job_id: Uuid,
     trusted: &WorkerContext,
     worker_version: &str,
-) -> AppResult<ClaimResponse> {
+) -> AppResult<ClaimOutcome> {
     let row = sqlx::query(
         "SELECT status,current_fence,current_lease_id,attempts,max_attempts,deadline_at FROM kernel.pipeline_jobs WHERE job_id=$1 FOR UPDATE",
     )
@@ -965,16 +986,21 @@ async fn claim_core(
             .bind(job_id)
             .execute(&mut **tx)
             .await?;
+        sqlx::query("UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE job_id=$1 AND status='ACTIVE'")
+            .bind(job_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("UPDATE kernel.pipeline_job_attempts SET status='FAILED',finished_at=now(),error_code='JOB_DEADLINE_EXCEEDED' WHERE job_id=$1 AND status IN ('CLAIMED','RUNNING')")
+            .bind(job_id)
+            .execute(&mut **tx)
+            .await?;
         sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,details) VALUES ($1,'JOB_DEADLINE_EXCEEDED',$2,'FAILED',$3)")
             .bind(job_id)
             .bind(&status)
             .bind(json!({"deadlineAt": deadline_at}))
             .execute(&mut **tx)
             .await?;
-        return Err(AppError::conflict(
-            "JOB_DEADLINE_EXCEEDED",
-            "job execution deadline has passed",
-        ));
+        return Ok(ClaimOutcome::Terminalized("JOB_DEADLINE_EXCEEDED"));
     }
     if !matches!(status.as_str(), "QUEUED" | "CLAIMED" | "RUNNING") {
         return Err(AppError::conflict(
@@ -1006,10 +1032,21 @@ async fn claim_core(
             .bind(job_id)
             .execute(&mut **tx)
             .await?;
-        return Err(AppError::conflict(
-            "JOB_ATTEMPTS_EXHAUSTED",
-            "job retry limit reached",
-        ));
+        sqlx::query("UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE job_id=$1 AND status='ACTIVE'")
+            .bind(job_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("UPDATE kernel.pipeline_job_attempts SET status='FAILED',finished_at=now(),error_code='JOB_ATTEMPTS_EXHAUSTED' WHERE job_id=$1 AND status IN ('CLAIMED','RUNNING')")
+            .bind(job_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,details) VALUES ($1,'JOB_ATTEMPTS_EXHAUSTED',$2,'FAILED',$3)")
+            .bind(job_id)
+            .bind(&status)
+            .bind(json!({"attempts": attempts, "maxAttempts": max_attempts}))
+            .execute(&mut **tx)
+            .await?;
+        return Ok(ClaimOutcome::Terminalized("JOB_ATTEMPTS_EXHAUSTED"));
     }
     sqlx::query("UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE job_id=$1 AND status='ACTIVE'")
         .bind(job_id)
@@ -1064,14 +1101,14 @@ async fn claim_core(
         .bind(json!({"workerVersion": worker_version}))
         .execute(&mut **tx)
         .await?;
-    Ok(ClaimResponse {
+    Ok(ClaimOutcome::Claimed(ClaimResponse {
         lease_id,
         job_id,
         attempt_number: attempt,
         fencing_sequence: fence,
         expires_at,
         worker_id: trusted.worker_id.clone(),
-    })
+    }))
 }
 
 pub async fn claim_job(
@@ -1083,12 +1120,16 @@ pub async fn claim_job(
     let trusted = authenticate_worker(&state, &headers, &worker).await?;
     let mut tx = state.db.begin().await?;
     let response = match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
-        Ok(response) => {
+        Ok(ClaimOutcome::Claimed(response)) => {
             tx.commit().await?;
             response
         }
+        Ok(ClaimOutcome::Terminalized(code)) => {
+            tx.commit().await?;
+            return Err(AppError::conflict(code, "job reached a terminal state"));
+        }
         Err(error) => {
-            let _ = tx.commit().await;
+            tx.rollback().await.ok();
             return Err(error);
         }
     };
@@ -1127,6 +1168,18 @@ async fn authorize_lease(
         return Err(AppError::conflict(
             "LEASE_NOT_ACTIVE",
             "lease is not active",
+        ));
+    }
+    let deadline_expired: bool = sqlx::query_scalar(
+        "SELECT deadline_at IS NOT NULL AND clock_timestamp() >= deadline_at FROM kernel.pipeline_jobs WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if deadline_expired {
+        return Err(AppError::conflict(
+            "JOB_DEADLINE_EXCEEDED",
+            "job execution deadline has passed",
         ));
     }
     if !matches!(status.as_str(), "CLAIMED" | "RUNNING") {
