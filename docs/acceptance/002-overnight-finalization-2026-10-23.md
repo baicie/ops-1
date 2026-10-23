@@ -3,7 +3,7 @@
 Date: 2026-10-23 (Asia/Shanghai)  
 Branch: `feat/0.0.2-data-foundation`  
 PR: [#1](https://github.com/baicie/ops-1/pull/1)  
-Reporting HEAD: `698ada7`  
+Reporting HEAD: `205af1a`  
 Frozen baseline: `v0.0.1-dev.1` (unchanged)
 
 ## 1. Overall Status
@@ -42,8 +42,8 @@ Reason: the P0/P1 security fixes and all major requested acceptance paths now ha
 
 ### Tests and CI
 
-- `cargo test --workspace`: **32 passed**
-  - bundle 4, contracts 3, kernel 17, node 8.
+- `cargo test --workspace -- --test-threads=1`: **34 passed**
+  - bundle 4, contracts 3, kernel 19, node 8.
 - `cargo clippy --workspace --all-targets -- -D warnings`: PASS.
 - `cargo fmt --all -- --check`: PASS.
 - Contract validation: 10 schemas, PASS.
