@@ -1,141 +1,154 @@
-# 0.0.3 Typed Pipeline Foundation — Sprint 3 Report
+# 0.0.3 Typed Pipeline Foundation — Sprint 4 Report
 
 Date: 2026-10-23 (Asia/Shanghai)  
 Branch: `feat/0.0.3-typed-pipeline`  
-Verified HEAD: `6a57229`  
+Verified HEAD: `5178312`  
 Base `main`: `a434a79`  
 PR: [`#2`](https://github.com/baicie/ops-1/pull/2) — Draft / Open / not merged
 
 ## 1. Status
 
-| Area | Status | Evidence |
+| Area | Status | Real evidence |
 |---|---|---|
 | Version Gate | **PASS** | main contains 0.0.2 Data Foundation |
-| HTTP Source Security | **PARTIAL** | IP/DNS policy, no redirects, streaming bound, source override ignored; unit tests only for address matrix, no full real HTTP negative server matrix |
-| True Typed Plan Execution | **PASS** | worker consumes plan.orderedNodes; custom map/filter pipeline produced a distinct one-row result |
-| Runtime Schema Catalog | **PARTIAL** | still validates against signed Schema Catalog fixture; no live Catalog Capability lookup |
-| Multi-Batch Effect Idempotency | **PASS** | 1001 records, 3 batches, crash after batch 2, 3 stable effects, no duplicates |
-| Result Replay Correctness | **PARTIAL** | successful result requires fenced Receipt; duplicate/different result-digest matrix not fully covered |
-| Node-managed Worker | **NOT_RUN** | CI still launches `opsweave-pipeline-worker` directly; Node Runtime lifecycle integration not implemented |
-| Kernel Restart | **NOT_RUN** | durable DB state exists, process restart not exercised |
-| Two-Node Takeover | **NOT_RUN** | both worker launches used Node B in this run |
-| Catalog Lock Concurrency | **PARTIAL** | same-row transaction lock exists; no pg_locks wait instrumentation |
-| Worker Identity Negative Matrix | **PARTIAL** | admin impersonation and boot/fence binding tested; revoked Node/Instance/generation/expiry matrix incomplete |
-| 0.0.1 / 0.0.2 Regression | **PASS** | CI `39933199108`: golden-path and legacy-regression success |
+| Source Snapshot Pin | **PASS** | snapshot persisted in PostgreSQL before sink; recovery after source file changed still produced 1001 pinned records |
+| Effect Receipt Digest | **PARTIAL** | COMMITTED same digest reused; different digest fails; 401/403/404/500/timeout matrix not all automated |
+| Checkpoint Recovery | **PARTIAL** | snapshot digest, completed batch and sequence persisted; recovery combines Receipts and snapshot; no dedicated cursor-replay test |
+| Result Replay | **PARTIAL** | same digest replay returns 200 after lease release; different digest returns 409; completed-receipt verification only uses last batch |
+| HTTP Source Negative Matrix | **PARTIAL** | address-policy matrix passes in CI; redirect/DNS-rebinding/chunked/slow-connection server matrix not all automated |
+| TypedEdge / Linear Topology | **PARTIAL** | 0.0.3 rejects non-linear topology in Rust and Python contract; no dedicated branch/merge negative fixture yet |
+| Runtime Catalog Schema | **NOT_RUN** | still uses `contracts/examples/schema-catalog.json` for publish validation |
+| Node-managed Worker | **NOT_RUN** | CI still invokes `opsweave-pipeline-worker` directly |
+| Kernel Restart | **NOT_RUN** | no real Kernel kill/restart E2E |
+| Two-Node Takeover | **NOT_RUN** | workers still ran on one Node |
+| Catalog Lock Race | **PARTIAL** | same Job row lock implemented; no pg_locks blocking proof |
+| Worker Identity Negative Matrix | **PARTIAL** | admin impersonation, boot/fence binding tested; revoke/generation/expiry matrix incomplete |
+| 0.0.1 / 0.0.2 Regression | **PASS** | CI `39939865143` legacy and golden path success |
 
-## 2. Implemented this sprint
+## 2. Implemented
 
-### HTTP Source Security
+### Source Snapshot and deterministic recovery
 
-`apps/pipeline-worker` now:
-
-- ignores Job Input `source`; only the immutable Revision source config is used;
-- allows only HTTP/HTTPS and rejects URL credentials/fragments;
-- classifies IPv4/IPv6: loopback, RFC1918, link-local, metadata, CGNAT, documentation, multicast, ULA, site-local, IPv4-mapped/compatible addresses;
-- resolves DNS, validates all addresses, pins the selected address in the reqwest client;
-- disables redirects;
-- applies connect/read/total timeouts;
-- streams response chunks and aborts before exceeding 4 MiB;
-- caps records and JSON depth via serde;
-- supports an explicit `OPSWEAVE_WORKER_SOURCE_ALLOWLIST` only for controlled CI fixtures.
-
-Unit tests cover private/metadata/mapped/ULA/link-local addresses and localhost/non-HTTP schemes.
-
-### Typed Plan Execution
-
-The worker reads the persisted `plan`, verifies `planDigest`, uses `orderedNodes`, and executes built-ins by their pinned types:
-
-- Source HTTP/JSON;
-- Parse;
-- Map with explicit `mappings`;
-- Filter with field/op/value;
-- Validate with `required`;
-- Dataset Sink.
-
-It no longer hardcodes `id/name` extraction. Unsupported types/configs fail explicitly.
-
-Real CI:
+Migration `0005_pipeline_snapshots.sql` plus internal endpoints:
 
 ```text
-PASS  custom map/filter config executed with different output
+GET  /internal/v1/pipeline-jobs/{job_id}/snapshot
+POST /internal/v1/pipeline-jobs/{job_id}/snapshot
 ```
 
-### Durable Multi-batch Execution
+- snapshot is stored in PostgreSQL, capped at 4 MiB;
+- bound to Job and current active fence;
+- stores `sourceDigest`, length, parsed source and optional ETag;
+- Worker loads the snapshot on every attempt; it never refetches the live source after pinning;
+- Job Input `source` is ignored;
+- a changed live source after a crash cannot change the recovered input.
 
-- 1,000 record Catalog batch ceiling is respected by a 500-record worker batch.
-- Stable logical batch id and effectId per batch.
-- Monotonic checkpoint sequence before each batch.
-- Existing Receipt is queried before write.
-- Crash after batch 2 is recovered by a new attempt/fence; only missing batch 3 is written.
-- 3 effect receipts; 1001 records exactly once.
+Advanced acceptance changes `data-hosts-large.json` after crashing on batch 2, then
+recovers; the final count remains exactly 1001 records.
 
-Real CI:
+### Effect receipt digest check
+
+Before writing a batch, the Worker computes the request digest and:
+
+- COMMITTED same digest: reuse Receipt;
+- COMMITTED different digest: fail with `EFFECT_DIGEST_CONFLICT`;
+- UNKNOWN: fail closed without creating a new Effect;
+- 401/403/500: fail, not treated as missing;
+- only true absence creates a new fenced effect.
+
+### Checkpoints
+
+Checkpoint state now contains:
+
+- total records;
+- completed batch count;
+- snapshot digest;
+- monotonically increasing sequence per attempt.
+
+Recovery uses the pinned snapshot plus stable Receipts. It does not use a full
+re-run as the only deduplication mechanism.
+
+### Result replay
+
+Kernel Job Result now supports an authenticated idempotent replay:
+
+- same Worker identity + same status + same Result Digest after lease release returns the original Job;
+- different digest returns `409 RESULT_CONFLICT`;
+- other Worker identity cannot reuse the result.
+
+CI evidence:
 
 ```text
-PASS  multi-batch crash after second batch recovered with 3 stable effects and no duplicates
+PASS  fenced result persisted exactly once; same digest replay is idempotent and different digest conflicts
 ```
 
-### Fenced Sink Authorization
+### Linear topology enforcement
 
-`fence_authorize_effect()` checks Job, Lease/Fence, Sink Node, Dataset UUID and
-Schema Revision against the pinned revision while holding the Job row lock.
-The Catalog writes receipt/records/lineage in the corresponding transaction.
+0.0.3 formally limits executable Pipelines to exactly one Source and one Sink with
+linear intermediate nodes. Rust validator and Python contract validator reject other
+topologies. This prevents publishing a Pipeline the Runtime cannot faithfully execute.
+
+### Capability query forwarding
+
+Kernel Capability invocation now forwards the query string to the plugin proxy.
+This fixed receipt lookup (`?effectId=...`) through the capability path.
 
 ## 3. CI evidence
 
-- Data Foundation OCI CI `39933199108` — **SUCCESS**
-- Standard CI `39933199109` — **SUCCESS**
-- Typed Pipeline Contract CI `39933199114` — **SUCCESS**
+- Data Foundation OCI CI `39939865143` — **SUCCESS**
+- Standard CI `39939865084` — **SUCCESS**
+- Typed Pipeline Contract CI `39939865074` — **SUCCESS**
 - 0.0.1 legacy: `PASS=21 FAIL=0`
-- 0.0.2 Data Foundation Golden Path: PASS
+- 0.0.2 Data Foundation: PASS
 
-Real pipeline evidence:
+Runtime outputs:
 
 ```text
-pipeline worker completed job ... batches 1 accepted 2
-PASS  single worker executed Source→Parse→Map→Filter→Validate→Sink and completed
-PASS  worker crash before sink recovered by second worker with higher fence
-PASS  committed effect recovered by receipt without duplicate sink write
-pipeline worker completed job ... batches 1 accepted 1
 PASS  custom map/filter config executed with different output
-pipeline worker completed job ... batches 3 accepted 1001
-PASS  multi-batch crash after second batch recovered with 3 stable effects and no duplicates
+PASS  1001 records split into 3 durable batches; crash after batch 2 recovered without duplicates
+Pipeline Worker Advanced Golden Path: PASS
+PASS  fenced result persisted exactly once; same digest replay is idempotent and different digest conflicts
 ```
 
-## 4. Remaining issues
+Existing SSRF CI output also passes:
 
-### P0
+```text
+PASS  ipv4-loopback blocked
+PASS  ipv4-private blocked
+PASS  ipv4-metadata blocked
+PASS  ipv6-loopback blocked
+PASS  ipv6-ula blocked
+PASS  ipv6-link-local blocked
+Data SSRF Golden Path: PASS
+```
 
-None in the executed single-node path.
+## 4. Remaining
 
 ### P1
 
-- **Runtime Schema Catalog** still uses `contracts/examples/schema-catalog.json`; live Catalog lookup and dynamic Dataset UUID are not implemented.
-- **Node-managed Worker** lifecycle is not integrated; test harness starts the binary directly.
-- **Kernel restart** recovery is not exercised.
-- **Two-Node takeover** is not exercised; both workers ran on Node B.
-- **Catalog lock-wait interleaving** (writer first, Claim waits) lacks a pg_locks barrier test.
-- **HTTP Source real negative matrix** lacks a live test server for redirect, DNS rebinding, oversized chunked body and connection interruption; only address-policy unit tests exist.
-- **Result replay** duplicate same/different digest matrix is not fully automated.
-- **Worker identity negative matrix** incomplete: revoked Node, revoked Instance, stale generation, expired Node credential.
-- **Job Input source override** is ignored by code but not explicitly asserted in a negative test.
+- Runtime Schema Catalog remains a fixture; no live Catalog Capability lookup or dynamic Dataset acceptance.
+- Node Runtime does not supervise/start/stop the Worker; tests still launch the binary manually.
+- No Kernel process kill/restart E2E.
+- No two independent Node Runtime takeover.
+- No pg_locks instrumentation for Catalog lock ordering.
+- No complete real HTTP negative server matrix (redirect, DNS rebinding, chunked oversized, slow/interrupted).
+- Worker identity revoked/generation/expiry matrix incomplete.
+- Result completion checks only the last batch Receipt, not all batch Receipts.
+- No dedicated checkpoint-cursor replay test.
 
 ### P2
 
-- Independent signed fence-token verification at Catalog; current boundary is same-DB `SECURITY DEFINER`.
+- Node-managed worker concurrency/backpressure and graceful shutdown.
+- Independent signed fence token verification.
 - Multi-host physical acceptance.
-- Worker concurrency/backpressure and Node Runtime-managed lifecycle.
 
 ## 5. Boundary
 
-This run demonstrates:
+This sprint demonstrates deterministic source pinning, digest-checked Effects,
+multi-batch crash recovery, and result replay on a real Kernel/PostgreSQL/Catalog OCI
+runtime.
 
-- real PostgreSQL JobStore and lease/fence takeover;
-- real Catalog OCI fenced write and stable effect receipt;
-- real typed plan execution for two different pipeline configs;
-- multi-batch crash recovery with no duplicate side effects;
-- 0.0.1/0.0.2 regression.
-
-It does **not** yet demonstrate Node Runtime-managed worker lifecycle, live Catalog schema resolution, Kernel restart, or two independent Node takeover.
+It does **not** complete Node-managed Worker, live Catalog Schema resolution,
+Kernel restart or two-Node takeover. These are explicitly `NOT_RUN` or `PARTIAL`.
 
 PR #2 remains Draft. No merge, tag move, force-push or release was performed.
