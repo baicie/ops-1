@@ -5,7 +5,7 @@
   "leaseId": "22222222-2222-4222-8222-222222222222",
   "fencingSequence": 7,
   "sourceBatchKey": "job-11111111-attempt-1-fence-7",
-  "datasetId": "host-metrics",
+  "datasetId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "schemaRevision": 1,
   "status": "COMMITTED",
   "committedAt": "2026-10-23T00:00:03Z",

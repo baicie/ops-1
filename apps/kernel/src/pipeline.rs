@@ -20,7 +20,8 @@ pub const MAX_RECORDS: usize = 10_000;
 pub const MAX_CHECKPOINT_BYTES: usize = 1024 * 1024;
 
 const REGISTRY_JSON: &str = include_str!("../../../contracts/examples/node-registry.json");
-const REGISTRY_KEYS_JSON: &str = include_str!("../../../contracts/examples/trusted-registry-keys.json");
+const REGISTRY_KEYS_JSON: &str =
+    include_str!("../../../contracts/examples/trusted-registry-keys.json");
 const SCHEMA_CATALOG_JSON: &str = include_str!("../../../contracts/examples/schema-catalog.json");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,7 +244,10 @@ pub fn canonical_json(value: &Value) -> String {
 }
 
 pub fn digest_value(value: &Value) -> String {
-    format!("sha256:{}", hex::encode(Sha256::digest(canonical_json(value).as_bytes())))
+    format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(canonical_json(value).as_bytes()))
+    )
 }
 
 pub fn digest_without_field(value: &Value, field: &str) -> String {
@@ -268,7 +272,10 @@ pub fn effect_id(
         "sinkNodeId": sink_node_id,
         "logicalBatchId": logical_batch_id
     });
-    format!("efx:{}", hex::encode(Sha256::digest(canonical_json(&payload).as_bytes())))
+    format!(
+        "efx:{}",
+        hex::encode(Sha256::digest(canonical_json(&payload).as_bytes()))
+    )
 }
 
 fn signing_document(registry: &NodeRegistry) -> Value {
@@ -279,29 +286,53 @@ fn signing_document(registry: &NodeRegistry) -> Value {
     })
 }
 
-fn verify_registry_signature(registry: &NodeRegistry, keys: &TrustedRegistryKeys) -> Result<(), PipelineError> {
+fn verify_registry_signature(
+    registry: &NodeRegistry,
+    keys: &TrustedRegistryKeys,
+) -> Result<(), PipelineError> {
     let key = keys
         .keys
         .iter()
         .find(|key| key.key_id == registry.signature.key_id)
         .ok_or_else(|| PipelineError::new("UNKNOWN_REGISTRY_KEY", "registry key is not trusted"))?;
     if key.algorithm != "ed25519" || registry.signature.algorithm != "ed25519" {
-        return Err(PipelineError::new("REGISTRY_SIGNATURE_INVALID", "unsupported registry signature algorithm"));
+        return Err(PipelineError::new(
+            "REGISTRY_SIGNATURE_INVALID",
+            "unsupported registry signature algorithm",
+        ));
     }
     let public_key: [u8; 32] = hex::decode(&key.public_key_hex)
-        .map_err(|_| PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid trusted public key"))?
+        .map_err(|_| {
+            PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid trusted public key")
+        })?
         .try_into()
-        .map_err(|_| PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid trusted public key length"))?;
-    let verifying_key = VerifyingKey::from_bytes(&public_key)
-        .map_err(|_| PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid Ed25519 public key"))?;
+        .map_err(|_| {
+            PipelineError::new(
+                "REGISTRY_SIGNATURE_INVALID",
+                "invalid trusted public key length",
+            )
+        })?;
+    let verifying_key = VerifyingKey::from_bytes(&public_key).map_err(|_| {
+        PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid Ed25519 public key")
+    })?;
     let signature_bytes = base64::engine::general_purpose::STANDARD
         .decode(&registry.signature.value)
-        .map_err(|_| PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid signature encoding"))?;
+        .map_err(|_| {
+            PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid signature encoding")
+        })?;
     let signature = Signature::from_slice(&signature_bytes)
         .map_err(|_| PipelineError::new("REGISTRY_SIGNATURE_INVALID", "invalid signature"))?;
     verifying_key
-        .verify_strict(canonical_json(&signing_document(registry)).as_bytes(), &signature)
-        .map_err(|_| PipelineError::new("REGISTRY_SIGNATURE_INVALID", "registry signature verification failed"))
+        .verify_strict(
+            canonical_json(&signing_document(registry)).as_bytes(),
+            &signature,
+        )
+        .map_err(|_| {
+            PipelineError::new(
+                "REGISTRY_SIGNATURE_INVALID",
+                "registry signature verification failed",
+            )
+        })
 }
 
 pub fn trusted_registry() -> Result<(NodeRegistry, TrustedRegistryKeys), PipelineError> {
@@ -312,7 +343,10 @@ pub fn trusted_registry() -> Result<(NodeRegistry, TrustedRegistryKeys), Pipelin
     let registry_value = serde_json::to_value(&registry.entries)
         .map_err(|error| PipelineError::new("REGISTRY_INVALID", error.to_string()))?;
     if digest_value(&registry_value) != registry.registry_digest {
-        return Err(PipelineError::new("REGISTRY_DIGEST_MISMATCH", "registry digest mismatch"));
+        return Err(PipelineError::new(
+            "REGISTRY_DIGEST_MISMATCH",
+            "registry digest mismatch",
+        ));
     }
     verify_registry_signature(&registry, &keys)?;
     Ok((registry, keys))
@@ -367,7 +401,12 @@ fn validate_schema_node(schema: &Value, value: &Value, path: &str, errors: &mut 
         if let Some(map) = value.as_object() {
             for (field, subschema) in properties {
                 if let Some(field_value) = map.get(field) {
-                    validate_schema_node(subschema, field_value, &format!("{path}.{field}"), errors);
+                    validate_schema_node(
+                        subschema,
+                        field_value,
+                        &format!("{path}.{field}"),
+                        errors,
+                    );
                 }
             }
             if object.get("additionalProperties").and_then(Value::as_bool) == Some(false) {
@@ -397,7 +436,9 @@ fn validate_schema_node(schema: &Value, value: &Value, path: &str, errors: &mut 
                 }
             }
         }
-        if object.get("format").and_then(Value::as_str) == Some("uri") && url::Url::parse(text).is_err() {
+        if object.get("format").and_then(Value::as_str) == Some("uri")
+            && url::Url::parse(text).is_err()
+        {
             errors.push(format!("{path} is not a URI"));
         }
     }
@@ -418,7 +459,14 @@ fn validate_schema_node(schema: &Value, value: &Value, path: &str, errors: &mut 
 fn port_signature_inputs(ports: &[InputPort]) -> Vec<(String, String, bool, Option<u32>)> {
     let mut signature: Vec<_> = ports
         .iter()
-        .map(|port| (port.name.clone(), port.data_type.clone(), port.required, port.schema_revision))
+        .map(|port| {
+            (
+                port.name.clone(),
+                port.data_type.clone(),
+                port.required,
+                port.schema_revision,
+            )
+        })
         .collect();
     signature.sort();
     signature
@@ -427,21 +475,37 @@ fn port_signature_inputs(ports: &[InputPort]) -> Vec<(String, String, bool, Opti
 fn port_signature_outputs(ports: &[OutputPort]) -> Vec<(String, String, bool, Option<u32>)> {
     let mut signature: Vec<_> = ports
         .iter()
-        .map(|port| (port.name.clone(), port.data_type.clone(), port.nullable, port.schema_revision))
+        .map(|port| {
+            (
+                port.name.clone(),
+                port.data_type.clone(),
+                port.nullable,
+                port.schema_revision,
+            )
+        })
         .collect();
     signature.sort();
     signature
 }
 
-pub fn topological_order(nodes: &[PipelineNode], edges: &[TypedEdge]) -> Result<Vec<String>, PipelineError> {
+pub fn topological_order(
+    nodes: &[PipelineNode],
+    edges: &[TypedEdge],
+) -> Result<Vec<String>, PipelineError> {
     let node_ids: BTreeSet<String> = nodes.iter().map(|node| node.node_id.clone()).collect();
     let mut indegree: BTreeMap<String, usize> = node_ids.iter().map(|id| (id.clone(), 0)).collect();
     let mut outgoing: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for edge in edges {
         if !node_ids.contains(&edge.from_node) || !node_ids.contains(&edge.to_node) {
-            return Err(PipelineError::new("EDGE_ENDPOINT_UNKNOWN", "edge endpoint is unknown"));
+            return Err(PipelineError::new(
+                "EDGE_ENDPOINT_UNKNOWN",
+                "edge endpoint is unknown",
+            ));
         }
-        outgoing.entry(edge.from_node.clone()).or_default().push(edge.to_node.clone());
+        outgoing
+            .entry(edge.from_node.clone())
+            .or_default()
+            .push(edge.to_node.clone());
         *indegree.entry(edge.to_node.clone()).or_default() += 1;
     }
     let mut ready: VecDeque<String> = indegree
@@ -482,16 +546,28 @@ pub fn validate_pipeline(
     let definition_value = serde_json::to_value(definition)
         .map_err(|error| PipelineError::new("PIPELINE_INVALID", error.to_string()))?;
     if definition.schema_version != PIPELINE_SCHEMA {
-        return Err(PipelineError::new("PIPELINE_VERSION_UNSUPPORTED", "unsupported pipeline schema version"));
+        return Err(PipelineError::new(
+            "PIPELINE_VERSION_UNSUPPORTED",
+            "unsupported pipeline schema version",
+        ));
     }
     if definition.nodes.is_empty() || definition.nodes.len() > MAX_NODES {
-        return Err(PipelineError::new("NODE_LIMIT", "pipeline node limit exceeded"));
+        return Err(PipelineError::new(
+            "NODE_LIMIT",
+            "pipeline node limit exceeded",
+        ));
     }
     if definition.edges.len() > MAX_EDGES {
-        return Err(PipelineError::new("EDGE_LIMIT", "pipeline edge limit exceeded"));
+        return Err(PipelineError::new(
+            "EDGE_LIMIT",
+            "pipeline edge limit exceeded",
+        ));
     }
     if definition.digest != digest_without_field(&definition_value, "digest") {
-        return Err(PipelineError::new("PIPELINE_DIGEST_MISMATCH", "pipeline digest mismatch"));
+        return Err(PipelineError::new(
+            "PIPELINE_DIGEST_MISMATCH",
+            "pipeline digest mismatch",
+        ));
     }
     let registry_entries: BTreeMap<(String, u32), &NodeRegistryEntry> = registry
         .entries
@@ -505,32 +581,67 @@ pub fn validate_pipeline(
         }
         let entry = registry_entries
             .get(&(node.node_type.clone(), node.type_version))
-            .ok_or_else(|| PipelineError::new("UNKNOWN_NODE_TYPE", format!("unknown node type {}", node.node_type)))?;
+            .ok_or_else(|| {
+                PipelineError::new(
+                    "UNKNOWN_NODE_TYPE",
+                    format!("unknown node type {}", node.node_type),
+                )
+            })?;
         if port_signature_inputs(&node.inputs) != port_signature_inputs(&entry.inputs) {
-            return Err(PipelineError::new("PORT_SIGNATURE_MISMATCH", "input port signature does not match trusted registry"));
+            return Err(PipelineError::new(
+                "PORT_SIGNATURE_MISMATCH",
+                "input port signature does not match trusted registry",
+            ));
         }
         if port_signature_outputs(&node.outputs) != port_signature_outputs(&entry.outputs) {
-            return Err(PipelineError::new("PORT_SIGNATURE_MISMATCH", "output port signature does not match trusted registry"));
+            return Err(PipelineError::new(
+                "PORT_SIGNATURE_MISMATCH",
+                "output port signature does not match trusted registry",
+            ));
         }
         let config_errors = validate_config_schema(&entry.config_schema, &node.config);
         if !config_errors.is_empty() {
-            return Err(PipelineError::new("CONFIG_INVALID", config_errors.join("; ")));
+            return Err(PipelineError::new(
+                "CONFIG_INVALID",
+                config_errors.join("; "),
+            ));
         }
         if node.node_type == "builtin.sink.dataset" {
-            let dataset_id = node.config.get("datasetId").and_then(Value::as_str).unwrap_or_default();
-            let revision = node.config.get("schemaRevision").and_then(Value::as_u64).unwrap_or(0) as u32;
+            let dataset_id = node
+                .config
+                .get("datasetId")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let revision = node
+                .config
+                .get("schemaRevision")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as u32;
             let dataset = catalog
                 .datasets
                 .iter()
                 .find(|dataset| dataset.dataset_id == dataset_id)
-                .ok_or_else(|| PipelineError::new("SCHEMA_REVISION_NOT_FOUND", "dataset schema is not in the trusted catalog"))?;
+                .ok_or_else(|| {
+                    PipelineError::new(
+                        "SCHEMA_REVISION_NOT_FOUND",
+                        "dataset schema is not in the trusted catalog",
+                    )
+                })?;
             let schema = dataset
                 .revisions
                 .iter()
                 .find(|schema| schema.schema_revision == revision)
-                .ok_or_else(|| PipelineError::new("SCHEMA_REVISION_NOT_FOUND", "schema revision is not published"))?;
+                .ok_or_else(|| {
+                    PipelineError::new(
+                        "SCHEMA_REVISION_NOT_FOUND",
+                        "schema revision is not published",
+                    )
+                })?;
             if schema.status != "PUBLISHED" || revision > dataset.latest_published_revision {
-                return Err(PipelineError::new("SCHEMA_NOT_PUBLISHED", "schema revision is not published"));
+                return Err(PipelineError::new(
+                    "SCHEMA_NOT_PUBLISHED",
+                    "schema revision is not published",
+                ));
             }
         }
     }
@@ -555,25 +666,47 @@ pub fn validate_pipeline(
             .find(|port| port.name == edge.to_port)
             .ok_or_else(|| PipelineError::new("PORT_UNKNOWN", "edge target port is unknown"))?;
         if source_port.data_type != edge.data_type || target_port.data_type != edge.data_type {
-            return Err(PipelineError::new("TYPE_MISMATCH", "edge data type does not match ports"));
+            return Err(PipelineError::new(
+                "TYPE_MISMATCH",
+                "edge data type does not match ports",
+            ));
         }
-        *incoming.entry((edge.to_node.clone(), edge.to_port.clone())).or_default() += 1;
-        *outgoing_count.entry((edge.from_node.clone(), edge.from_port.clone())).or_default() += 1;
+        *incoming
+            .entry((edge.to_node.clone(), edge.to_port.clone()))
+            .or_default() += 1;
+        *outgoing_count
+            .entry((edge.from_node.clone(), edge.from_port.clone()))
+            .or_default() += 1;
     }
     for node in &definition.nodes {
         for port in &node.inputs {
-            let count = incoming.get(&(node.node_id.clone(), port.name.clone())).copied().unwrap_or(0);
+            let count = incoming
+                .get(&(node.node_id.clone(), port.name.clone()))
+                .copied()
+                .unwrap_or(0);
             if port.required && count != 1 {
-                return Err(PipelineError::new("REQUIRED_INPUT_COUNT", format!("required input {} has {count} edges", port.name)));
+                return Err(PipelineError::new(
+                    "REQUIRED_INPUT_COUNT",
+                    format!("required input {} has {count} edges", port.name),
+                ));
             }
             if !port.required && count > 1 {
-                return Err(PipelineError::new("OPTIONAL_INPUT_MULTIPLE", format!("optional input {} has multiple edges", port.name)));
+                return Err(PipelineError::new(
+                    "OPTIONAL_INPUT_MULTIPLE",
+                    format!("optional input {} has multiple edges", port.name),
+                ));
             }
         }
         for port in &node.outputs {
-            let count = outgoing_count.get(&(node.node_id.clone(), port.name.clone())).copied().unwrap_or(0);
+            let count = outgoing_count
+                .get(&(node.node_id.clone(), port.name.clone()))
+                .copied()
+                .unwrap_or(0);
             if count > 1 {
-                return Err(PipelineError::new("OUTPUT_FANOUT", format!("output {} has multiple edges", port.name)));
+                return Err(PipelineError::new(
+                    "OUTPUT_FANOUT",
+                    format!("output {} has multiple edges", port.name),
+                ));
             }
         }
     }
@@ -600,7 +733,10 @@ mod tests {
     use super::*;
 
     fn fixture_pipeline() -> PipelineDefinition {
-        serde_json::from_str(include_str!("../../../contracts/examples/pipeline-definition.json")).unwrap()
+        serde_json::from_str(include_str!(
+            "../../../contracts/examples/pipeline-definition.json"
+        ))
+        .unwrap()
     }
 
     fn rehash(pipeline: &mut PipelineDefinition) {
@@ -622,8 +758,12 @@ mod tests {
     #[test]
     fn valid_pipeline_gets_deterministic_plan() {
         let (registry, _) = registry();
-        let plan = validate_pipeline(&fixture_pipeline(), &registry, &schema_catalog().unwrap()).unwrap();
-        assert_eq!(plan.ordered_nodes, vec!["source", "parse", "map", "filter", "validate", "sink"]);
+        let plan =
+            validate_pipeline(&fixture_pipeline(), &registry, &schema_catalog().unwrap()).unwrap();
+        assert_eq!(
+            plan.ordered_nodes,
+            vec!["source", "parse", "map", "filter", "validate", "sink"]
+        );
         assert!(plan.plan_digest.starts_with("sha256:"));
     }
 
@@ -649,14 +789,24 @@ mod tests {
             data_type: "json".into(),
         });
         rehash(&mut pipeline);
-        assert_eq!(validate_pipeline(&pipeline, &registry, &schema_catalog().unwrap()).unwrap_err().code, "CYCLE");
+        assert_eq!(
+            validate_pipeline(&pipeline, &registry, &schema_catalog().unwrap())
+                .unwrap_err()
+                .code,
+            "CYCLE"
+        );
     }
 
     #[test]
     fn bad_registry_signature_is_rejected() {
         let (mut registry, keys) = registry();
         registry.signature.value = "AAAA".to_string();
-        assert_eq!(verify_registry_signature(&registry, &keys).unwrap_err().code, "REGISTRY_SIGNATURE_INVALID");
+        assert_eq!(
+            verify_registry_signature(&registry, &keys)
+                .unwrap_err()
+                .code,
+            "REGISTRY_SIGNATURE_INVALID"
+        );
     }
 
     #[test]
@@ -676,11 +826,21 @@ mod tests {
         let mut pipeline = fixture_pipeline();
         pipeline.nodes[0].config["endpoint"] = Value::String("not a uri".into());
         rehash(&mut pipeline);
-        assert_eq!(validate_pipeline(&pipeline, &registry, &schema_catalog().unwrap()).unwrap_err().code, "CONFIG_INVALID");
+        assert_eq!(
+            validate_pipeline(&pipeline, &registry, &schema_catalog().unwrap())
+                .unwrap_err()
+                .code,
+            "CONFIG_INVALID"
+        );
         let mut pipeline = fixture_pipeline();
         pipeline.nodes[5].config["schemaRevision"] = Value::from(999);
         rehash(&mut pipeline);
-        assert_eq!(validate_pipeline(&pipeline, &registry, &schema_catalog().unwrap()).unwrap_err().code, "SCHEMA_REVISION_NOT_FOUND");
+        assert_eq!(
+            validate_pipeline(&pipeline, &registry, &schema_catalog().unwrap())
+                .unwrap_err()
+                .code,
+            "SCHEMA_REVISION_NOT_FOUND"
+        );
     }
 
     #[test]

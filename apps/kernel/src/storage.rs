@@ -127,6 +127,17 @@ pub async fn provision_binding(state: &AppState, plugin_id: &str) -> AppResult<S
             AppError::internal("could not grant plugin schema privileges")
         })?;
     }
+    if plugin_id == "opsweave.data-catalog" {
+        sqlx::query(&format!(
+            "GRANT EXECUTE ON FUNCTION kernel.fence_authorize(uuid, uuid, bigint) TO \"{role_name}\""
+        ))
+        .execute(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(plugin = %plugin_id, error = %error, "grant fence function failed");
+            AppError::internal("could not grant fence authorization")
+        })?;
+    }
     let row = sqlx::query_as::<_, StorageBindingRow>(
         r#"
         INSERT INTO kernel.plugin_storage_bindings

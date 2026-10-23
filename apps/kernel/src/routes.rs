@@ -5,6 +5,7 @@ use crate::deployments;
 use crate::diagnostics;
 use crate::error::AppError;
 use crate::gateway;
+use crate::jobs;
 use crate::logs;
 use crate::nodes;
 use crate::packages;
@@ -161,6 +162,23 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/plugin-storage/{plugin_id}/migrations",
             get(storage::list_migrations).post(storage::apply_migration),
         )
+        .route("/api/v1/pipelines", post(jobs::create_pipeline))
+        .route(
+            "/api/v1/pipelines/{pipeline_id}/revisions",
+            post(jobs::publish_revision),
+        )
+        .route(
+            "/api/v1/pipelines/{pipeline_id}/revisions/{revision}/plan",
+            get(jobs::get_plan),
+        )
+        .route("/api/v1/jobs", post(jobs::submit_job))
+        .route("/api/v1/jobs/{job_id}", get(jobs::get_job))
+        .route("/api/v1/jobs/{job_id}/claim", post(jobs::claim_job))
+        .route("/api/v1/jobs/{job_id}/start", post(jobs::start_job))
+        .route("/api/v1/jobs/{job_id}/heartbeat", post(jobs::heartbeat))
+        .route("/api/v1/jobs/{job_id}/checkpoint", post(jobs::checkpoint))
+        .route("/api/v1/jobs/{job_id}/result", post(jobs::result))
+        .route("/api/v1/jobs/{job_id}/cancel", post(jobs::cancel_job))
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(
             state.clone(),

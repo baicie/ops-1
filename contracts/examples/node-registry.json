@@ -167,7 +167,7 @@
         "properties": {
           "datasetId": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{2,63}$"
+            "format": "uuid"
           },
           "schemaRevision": {
             "type": "integer",
@@ -177,10 +177,10 @@
       }
     }
   ],
-  "registryDigest": "sha256:a1412584f638e134f936f353447d696d162cab41fca7070200245291c9e403f0",
+  "registryDigest": "sha256:aa1a3cbcd380ff5a0e94a26c9c355a17bfa25597df84a0364a68a20dbfc81068",
   "signature": {
     "algorithm": "ed25519",
     "keyId": "kernel-registry-test-1",
-    "value": "nfjgYDFP+VJE6uESe3xf4T95TbFSGZWdp9PCmd1fqDzwml1BNVwVPmcXmEOJhxnFt+kqEbrrIkK1z92GxIqwDA=="
+    "value": "ZAIrPC8u6Vorm4papZUmn8CxYedWTSsyEt7lmedUU5R3rkVrs71GLuweLc7NGvpgrsKuk9k0x1ucI0BJQHnsAA=="
   }
 }
