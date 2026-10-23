@@ -1216,6 +1216,110 @@ pub async fn checkpoint(
     ))
 }
 
+async fn verify_effect_set(
+    state: &AppState,
+    job_id: Uuid,
+    effects: &[Value],
+    batch_count: u64,
+) -> AppResult<()> {
+    let row = sqlx::query(
+        "SELECT j.pipeline_id,j.pipeline_revision,r.definition FROM kernel.pipeline_jobs j JOIN kernel.pipeline_revisions r ON r.pipeline_id=j.pipeline_id AND r.revision=j.pipeline_revision WHERE j.job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::bad_request("job revision is not pinned"))?;
+    let pipeline_id: String = row.get("pipeline_id");
+    let revision: i32 = row.get("pipeline_revision");
+    let definition: Value = row.get("definition");
+    let sink = definition
+        .get("nodes")
+        .and_then(Value::as_array)
+        .and_then(|nodes| {
+            nodes.iter().find(|node| {
+                node.get("type").and_then(Value::as_str) == Some("builtin.sink.dataset")
+            })
+        })
+        .ok_or_else(|| AppError::bad_request("pinned revision has no sink"))?;
+    let sink_node_id = sink
+        .get("nodeId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::bad_request("pinned sink has no node id"))?;
+    let config = sink.get("config").unwrap_or(&Value::Null);
+    let dataset_id = config
+        .get("datasetId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppError::bad_request("pinned sink has no dataset"))?;
+    let schema_revision = config
+        .get("schemaRevision")
+        .and_then(Value::as_u64)
+        .unwrap_or(1);
+    if effects.len() as u64 != batch_count || effects.is_empty() {
+        return Err(AppError::bad_request(
+            "effect set does not match batch count",
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for (index, effect) in effects.iter().enumerate() {
+        let expected_logical = format!("batch-{}", index + 1);
+        let expected_effect = format!(
+            "efx:{}",
+            hex::encode(<sha2::Sha256 as sha2::Digest>::digest(
+                canonical_json(&json!({
+                    "jobId": job_id,
+                    "pipelineId": pipeline_id,
+                    "pipelineRevision": revision,
+                    "sinkNodeId": sink_node_id,
+                    "logicalBatchId": expected_logical
+                }))
+                .as_bytes()
+            ))
+        );
+        let claimed_id = effect
+            .get("effectId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::bad_request("effect id is missing"))?;
+        let claimed_digest = effect
+            .get("requestDigest")
+            .and_then(Value::as_str)
+            .ok_or_else(|| AppError::bad_request("effect digest is missing"))?;
+        if claimed_id != expected_effect || !seen.insert(claimed_id.to_string()) {
+            return Err(AppError::bad_request(
+                "effect identity is not the pinned batch identity",
+            ));
+        }
+        let receipt = crate::capabilities::service_catalog_get(
+            state,
+            &format!(
+                "/api/data-catalog/datasets/{dataset_id}/effect-receipts?effectId={expected_effect}"
+            ),
+        )
+        .await
+        .map_err(|_| {
+            AppError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "EFFECT_VERIFICATION_UNAVAILABLE",
+                "Catalog effect verification failed",
+            )
+        })?;
+        let committed = receipt.get("status").and_then(Value::as_str) == Some("COMMITTED")
+            && receipt.get("jobId").and_then(Value::as_str) == Some(job_id.to_string().as_str())
+            && receipt.get("pipelineId").and_then(Value::as_str) == Some(pipeline_id.as_str())
+            && receipt.get("pipelineRevision").and_then(Value::as_u64) == Some(revision as u64)
+            && receipt.get("sinkNodeId").and_then(Value::as_str) == Some(sink_node_id)
+            && receipt.get("datasetId").and_then(Value::as_str) == Some(dataset_id)
+            && receipt.get("schemaRevision").and_then(Value::as_u64) == Some(schema_revision)
+            && receipt.get("requestDigest").and_then(Value::as_str) == Some(claimed_digest);
+        if !committed {
+            return Err(AppError::conflict(
+                "EFFECT_NOT_COMMITTED",
+                "Catalog receipt does not prove the committed effect set",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn result(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1274,6 +1378,14 @@ pub async fn result(
             "RESULT_CONFLICT",
             "result identity or digest does not match",
         ));
+    }
+    if terminal == "SUCCEEDED" {
+        let batches = request
+            .output
+            .get("batches")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        verify_effect_set(&state, job_id, &request.effects, batches).await?;
     }
     let mut tx = state.db.begin().await?;
     let (current_status, fence) = authorize_lease(
