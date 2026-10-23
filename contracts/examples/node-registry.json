@@ -88,7 +88,11 @@
       "configSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "mappings": {
+            "type": "object"
+          }
+        }
       }
     },
     {
@@ -114,7 +118,21 @@
       "configSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "op": {
+            "enum": [
+              "eq",
+              "ne",
+              "gt",
+              "lt",
+              "exists"
+            ]
+          },
+          "value": {}
+        }
       }
     },
     {
@@ -140,7 +158,11 @@
       "configSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "required": {
+            "type": "array"
+          }
+        }
       }
     },
     {
@@ -177,10 +199,10 @@
       }
     }
   ],
-  "registryDigest": "sha256:aa1a3cbcd380ff5a0e94a26c9c355a17bfa25597df84a0364a68a20dbfc81068",
+  "registryDigest": "sha256:1c9a5efb445c51c64b3feecb8de506008398b6906932b1520100ae11da1f4f1d",
   "signature": {
     "algorithm": "ed25519",
     "keyId": "kernel-registry-test-1",
-    "value": "ZAIrPC8u6Vorm4papZUmn8CxYedWTSsyEt7lmedUU5R3rkVrs71GLuweLc7NGvpgrsKuk9k0x1ucI0BJQHnsAA=="
+    "value": "hMi7O+QjstvWYvV3OBW2bq7iJiOeVPt1ZMY07F7mjcThVUW8trtjTaiWHlt1lCW1/0LGaI0QXwjkw7mqwPJADw=="
   }
 }
