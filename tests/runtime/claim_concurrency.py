@@ -36,9 +36,12 @@ def instance_id():
     data = request("GET", "/api/v1/plugins/opsweave.data-catalog")[1]
     return next(i["id"] for d in data["deployments"] for i in d["instances"] if i["state"] == "READY")
 
+CREATED_JOBS = []
+
 def submit(index):
     status, body = request("POST", "/api/v1/jobs", {"pipelineId": PIPELINE, "pipelineRevision": 1, "input": {}, "maxAttempts": 3, "timeoutSeconds": 300}, {"idempotency-key": f"claim-concurrency-{index}-{uuid.uuid4()}"})
     assert status == 201, (status, body)
+    CREATED_JOBS.append(body["jobId"])
     return body["jobId"]
 
 def main():
@@ -109,6 +112,13 @@ def main():
     if empty[0] != 204:
         failures.append(f"empty claim-next returned {empty[0]}")
     print(f"claim-next empty queue: status={empty[0]}")
+    # Do not leave active test leases behind for the node-managed workers that
+    # start in later scenarios. Cancel every job created by this test.
+    for job in CREATED_JOBS:
+        status, _ = request("POST", f"/api/v1/jobs/{job}/cancel")
+        if status not in (200, 409):
+            failures.append(f"cleanup cancel {job} returned {status}")
+    print(f"cleanup: cancelled {len(CREATED_JOBS)} test jobs")
     if failures:
         print("\n".join("FAIL " + failure for failure in failures)); return 1
     print("Claim Concurrency Golden Path: PASS"); return 0
