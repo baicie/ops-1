@@ -101,10 +101,11 @@ Implemented:
 - Content-Length cap, streaming chunk cap, total timeout, per-read timeout;
 - source JSON array/items shape and record count limits.
 
-Tests currently cover redirect 301/302/303/307/308, malformed JSON,
-Content-Length mismatch/truncated body, oversized chunked body and address
-classification. A live DNS-rebinding/slow-header/proxy fixture matrix is not yet
-implemented and remains a P1 gap.
+Tests now cover DNS rebinding/mixed answers with deterministic resolution,
+actual TCP peer pinning, slow header/body, redirect 301/302/303/307/308,
+malformed/truncated JSON, Content-Length mismatch, oversized chunked body,
+environment proxy bypass with a counted proxy, and a normal allowed source.
+A source-timeout→no-Sink integration gate remains outstanding.
 
 ## 5. Heartbeat Failure Policy
 
@@ -118,8 +119,9 @@ implemented and remains a P1 gap.
 - Kernel deadline/cancel/fence checks remain authoritative; a stale worker cannot
   commit after the new fence.
 
-The status decision table is unit-tested; deterministic HTTP fault injection
-against a mock Kernel is not yet implemented.
+A real local mock Kernel exercises single/continuous 429/500/502/503, transport
+disconnect and 401/403/404/409. Outage longer than Lease TTL, Deadline-vs-Sink
+concurrency and Retry-After remain gaps.
 
 ## 6. Explicit Known Limits
 
@@ -129,8 +131,8 @@ These are not claimed as PASS:
    credential revocation is not yet a single complete automated matrix.
 2. Source Security lacks live DNS rebinding, slow-header/slow-body and real proxy
    environment tests.
-3. Heartbeat lacks deterministic 429/500/503 mock-server injection; only the
-   decision table and bounded retry are tested.
+3. Supervisor Instance STOP, Node generation change and Node SIGTERM scenarios
+   are still missing from the single automated matrix.
 4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    are outside this RC.
 
