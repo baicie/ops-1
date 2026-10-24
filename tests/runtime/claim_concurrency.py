@@ -63,6 +63,26 @@ def main():
     assigned = psql(f"SELECT count(DISTINCT current_lease_id) FROM kernel.pipeline_jobs WHERE job_id IN ({','.join(chr(39)+j+chr(39) for j in jobs)});")
     if assigned != "8": failures.append(f"multi-job distinct leases={assigned}")
     print(f"multi-job claim: {assigned} distinct leases across 8 jobs")
+    # Claim-Next concurrency: one queued Job must yield exactly one claim.
+    next_job = submit("claim-next-single")
+    identities = [worker_identity(iid, str(uuid.uuid4())) for _ in range(8)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda pair: request("POST", "/internal/v1/pipeline-jobs/claim-next", pair[1], pair[0]), identities))
+    statuses = [status for status, _ in results]
+    if statuses.count(200) != 1 or any(s not in (200, 204) for s in statuses):
+        failures.append(f"claim-next single statuses={statuses}")
+    if psql(f"SELECT status FROM kernel.pipeline_jobs WHERE job_id='{next_job}';") != "CLAIMED":
+        failures.append("claim-next single job was not claimed")
+    # Claim-Next with several queued Jobs must distribute them exactly once.
+    next_jobs = [submit(f"claim-next-{i}") for i in range(8)]
+    next_identities = [worker_identity(iid, str(uuid.uuid4())) for _ in range(8)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda pair: request("POST", "/internal/v1/pipeline-jobs/claim-next", pair[1][1], pair[1][0]), zip(next_jobs, next_identities)))
+    statuses = [status for status, _ in results]
+    claimed = [body.get("jobId") for status, body in results if status == 200]
+    if any(status != 200 for status in statuses) or len(set(claimed)) != 8:
+        failures.append(f"claim-next multi statuses={statuses} jobs={claimed}")
+    print(f"claim-next: single={statuses.count(200)}x200 multi={len(set(claimed))} distinct")
     if failures:
         print("\n".join("FAIL " + failure for failure in failures)); return 1
     print("Claim Concurrency Golden Path: PASS"); return 0
