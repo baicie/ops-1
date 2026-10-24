@@ -15,6 +15,31 @@ cleanup_worker() {
   [ -n "${OLD_WORKER_PID:-}" ] && kill -9 "$OLD_WORKER_PID" 2>/dev/null || true
 }
 trap cleanup_worker EXIT
+# Restart Node B with a long batch delay so the orphan cannot finish the job
+# before its Lease/Node authority expires.
+NODE_B_PID="$(cat /tmp/node-b.pid 2>/dev/null || true)"
+if [ -n "$NODE_B_PID" ]; then
+  for worker_pid in $(pgrep -P "$NODE_B_PID" -f opsweave-pipeline-worker || true); do kill -9 "$worker_pid" 2>/dev/null || true; done
+  kill -9 "$NODE_B_PID" 2>/dev/null || true
+fi
+sleep 1
+OPSWEAVE_WORKER_BATCH_DELAY_MS=90000 tests/runtime/start_node.sh node-b 9102 >/tmp/orphan-node-b.pid
+for _ in $(seq 1 120); do curl -fsS http://127.0.0.1:9102/healthz >/dev/null 2>&1 && break; sleep 0.5; done
+curl -fsS http://127.0.0.1:9102/healthz >/dev/null
+NODE_B_ID="$(python3 -c 'import json;print(json.load(open("data-ci/node-b/node-identity.json"))["nodeId"])')"
+for _ in $(seq 1 120); do
+  READY="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/nodes" | python3 -c 'import json,sys;d=json.load(sys.stdin);nid=sys.argv[1];print(next((1 for n in d if n["id"]==nid and n.get("status")=="READY" and not n.get("stale")),0))' "$NODE_B_ID")"
+  [ "$READY" = "1" ] && break
+  sleep 1
+done
+[ "$READY" = "1" ] || bad "Node B did not become READY for orphan scenario"
+for _ in $(seq 1 120); do
+  INSTANCE_READY="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/plugins/opsweave.data-integration" | python3 -c 'import json,sys;d=json.load(sys.stdin);nid=sys.argv[1];print(next((1 for dep in d.get("deployments",[]) for i in dep["instances"] if i["nodeId"]==nid and i["state"]=="READY"),0))' "$NODE_B_ID")"
+  [ "$INSTANCE_READY" = "1" ] && break
+  sleep 1
+done
+[ "$INSTANCE_READY" = "1" ] || bad "Node B Integration instance is not READY for orphan scenario"
+
 rm -f "$ROOT/data-ci/node-a/worker-enabled" "$ROOT/data-ci/node-b/worker-enabled"
 for node in node-a node-b; do
   node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"

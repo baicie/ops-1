@@ -17,7 +17,7 @@ nohup env \
   OPSWEAVE_NODE_WORKER_ENABLED=1 \
   OPSWEAVE_PIPELINE_WORKER_BIN="$ROOT/target/debug/opsweave-pipeline-worker" \
   OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1" \
-  OPSWEAVE_WORKER_BATCH_DELAY_MS=800 \
+  OPSWEAVE_WORKER_BATCH_DELAY_MS="${OPSWEAVE_WORKER_BATCH_DELAY_MS:-800}" \
   RUST_LOG=info ./target/debug/opsweave-node >>"/tmp/$NAME.log" 2>&1 &
 PID=$!
 echo "$PID" > "/tmp/$NAME.pid"
