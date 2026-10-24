@@ -10,10 +10,14 @@ DATASET_ID="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)"; }
 ok() { echo "PASS  $*"; }
 bad() { echo "FAIL  $*"; exit 1; }
-# The multi-provider scenario may leave the selected provider switched. Ensure the
-# pinned dataset exists in the currently selected provider before the job starts.
-curl -fsS "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID" >/dev/null 2>&1 || \
-  curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -d '{"datasetId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"node-sigkill-hosts","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0},{"name":"name","type":"string","nullable":true,"ordinal":1}]}' "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets" >/dev/null || true
+# The multi-provider scenario leaves both Catalog providers active. Capability
+# routing may select either one, so the pinned dataset must exist in both test
+# provider schemas (the fixture schema is identical).
+for plugin in opsweave.data-catalog opsweave.data-catalo; do
+  if ! curl -fsS "${AUTH[@]}" "$URL/api/v1/gateway/$plugin/api/data-catalog/datasets/$DATASET_ID" >/dev/null 2>&1; then
+    curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -d '{"datasetId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"node-sigkill-hosts-'"$plugin"'","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0},{"name":"name","type":"string","nullable":true,"ordinal":1}]}' "$URL/api/v1/gateway/$plugin/api/data-catalog/datasets" >/dev/null || true
+  fi
+done
 rm -f "$ROOT/data-ci/node-a/worker-enabled" "$ROOT/data-ci/node-b/worker-enabled"
 for node in node-a node-b; do
   node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"
