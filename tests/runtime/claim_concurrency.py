@@ -92,6 +92,22 @@ def main():
     if len(set(claimed)) != 8 or claimed_status != "8":
         failures.append(f"claim-next multi statuses={statuses} jobs={claimed} claimed={claimed_status}")
     print(f"claim-next: single={single_statuses.count(200)}x200 multi={len(set(claimed))} distinct")
+    # True /claim-next fan-out at 2/8/16/32 workers.
+    for concurrency in (2, 8, 16, 32):
+        jobs = [submit(f"claim-next-fanout-{concurrency}-{i}") for i in range(concurrency)]
+        identities = [worker_identity(iid, str(uuid.uuid4())) for _ in range(concurrency)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+            results = list(pool.map(lambda pair: request("POST", "/internal/v1/pipeline-jobs/claim-next", pair[1], pair[0]), identities))
+        statuses = [status for status, _ in results]
+        assigned = [body.get("jobId") for status, body in results if status == 200]
+        db_assigned = psql(f"SELECT count(DISTINCT current_lease_id) FROM kernel.pipeline_jobs WHERE job_id IN ({','.join(chr(39)+j+chr(39) for j in jobs)});")
+        if statuses.count(200) != concurrency or len(set(assigned)) != concurrency or db_assigned != str(concurrency):
+            failures.append(f"claim-next fanout {concurrency}: statuses={statuses} assigned={assigned} db={db_assigned}")
+        print(f"claim-next fanout {concurrency}: {statuses.count(200)}x200 distinct={len(set(assigned))} dbLeases={db_assigned}")
+    empty = request("POST", "/internal/v1/pipeline-jobs/claim-next", worker_identity(iid, str(uuid.uuid4()))[1], worker_identity(iid, str(uuid.uuid4()))[0])
+    if empty[0] != 204:
+        failures.append(f"empty claim-next returned {empty[0]}")
+    print(f"claim-next empty queue: status={empty[0]}")
     if failures:
         print("\n".join("FAIL " + failure for failure in failures)); return 1
     print("Claim Concurrency Golden Path: PASS"); return 0
