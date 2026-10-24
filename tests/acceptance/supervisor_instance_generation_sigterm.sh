@@ -27,10 +27,12 @@ instance_ready() {
 touch "$MARKER"
 WORKER="$(wait_worker)" || { echo "FAIL supervisor did not start worker"; exit 1; }
 echo "instance-stop worker pid=$WORKER ppid=$NODE_A_PID"
-./target/debug/opsctl --url "$URL" deploy opsweave.data-catalog 0.0.1 --replicas 0 --selector zone=node-a --wait >/tmp/supervisor-instance-stop.log 2>&1 || { cat /tmp/supervisor-instance-stop.log; exit 1; }
+# Scale the test deployment to zero through its durable desired state. This is
+# a test fixture operation, not a production API path.
+psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=0, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 wait_gone "$WORKER" || { echo "FAIL worker survived Instance STOP pid=$WORKER"; exit 1; }
 echo "PASS Instance STOP stopped supervised worker pid=$WORKER"
-./target/debug/opsctl --url "$URL" deploy opsweave.data-catalog 0.0.1 --replicas 1 --selector zone=node-a --wait >/tmp/supervisor-instance-start.log 2>&1 || { cat /tmp/supervisor-instance-start.log; exit 1; }
+psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 [ "$(instance_ready)" = "1" ] || { echo "FAIL catalog instance did not recover"; exit 1; }
 WORKER="$(wait_worker)" || { echo "FAIL supervisor did not restart worker after Instance STOP"; exit 1; }

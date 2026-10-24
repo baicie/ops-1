@@ -1401,20 +1401,25 @@ mod tests {
 
     async fn serve_once_peer(
         response: Vec<u8>,
-    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    ) -> (
+        std::net::SocketAddr,
+        tokio::sync::oneshot::Receiver<std::net::SocketAddr>,
+        tokio::task::JoinHandle<()>,
+    ) {
         use tokio::io::AsyncWriteExt;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let handle = tokio::spawn(async move {
             if let Ok((mut socket, peer)) = listener.accept().await {
                 let mut buffer = [0u8; 1024];
                 let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
-                eprintln!("source-fixture-peer={}", peer.ip());
+                let _ = tx.send(peer);
                 let _ = socket.write_all(&response).await;
                 let _ = socket.shutdown().await;
             }
         });
-        (addr, handle)
+        (addr, rx, handle)
     }
 
     async fn serve_after(delay: Duration, response: Vec<u8>) -> String {
@@ -1576,6 +1581,49 @@ mod tests {
         assert_eq!(count, 3, "disconnect count={count}");
     }
 
+    async fn serve_infinite_chunked() -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buffer = [0u8; 1024];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
+                if socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                let chunk = vec![b'a'; 4096];
+                loop {
+                    if socket
+                        .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if socket.write_all(&chunk).await.is_err() {
+                        return;
+                    }
+                    if socket.write_all(b"\r\n").await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    #[tokio::test]
+    async fn infinite_chunked_source_is_bounded() {
+        let url = serve_infinite_chunked().await;
+        let error = test_worker().fetch_source(&url).await.unwrap_err();
+        assert!(format!("{error:#}").contains("exceeds limit"), "{error:#}");
+    }
+
     #[tokio::test]
     async fn dns_rebinding_and_mixed_answers_are_rejected() {
         for answers in [
@@ -1598,7 +1646,7 @@ mod tests {
 
     #[tokio::test]
     async fn dns_resolution_pins_the_actual_tcp_peer() {
-        let (addr, _handle) =
+        let (addr, peer_rx, _handle) =
             serve_once_peer(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[{\"id\":1}]".to_vec())
                 .await;
         let policy = SourcePolicy::from_allowlist("127.0.0.1")
@@ -1607,7 +1655,8 @@ mod tests {
         let url = format!("http://pinned.test:{}/records", addr.port());
         let records = worker.fetch_source(&url).await.unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(addr.ip(), "127.0.0.1".parse::<IpAddr>().unwrap());
+        let peer = peer_rx.await.unwrap();
+        assert_eq!(peer.ip(), "127.0.0.1".parse::<IpAddr>().unwrap());
     }
 
     #[tokio::test]
