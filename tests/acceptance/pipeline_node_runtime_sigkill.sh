@@ -68,5 +68,10 @@ for _ in $(seq 1 120); do
   sleep 1
 done
 [ "$READY" = "1" ] || bad "restarted Node B did not become READY"
-sleep 5
+for _ in $(seq 1 120); do
+  INSTANCE_READY="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/plugins/opsweave.data-integration" | python3 -c 'import json,sys;d=json.load(sys.stdin);nid=sys.argv[1];print(next((1 for dep in d.get("deployments",[]) for i in dep["instances"] if i["nodeId"]==nid and i["state"]=="READY"),0))' "$NODE_B_ID")"
+  [ "$INSTANCE_READY" = "1" ] && break
+  sleep 1
+done
+[ "$INSTANCE_READY" = "1" ] || bad "restarted Node B Integration instance is not READY"
 echo "Node Runtime SIGKILL Golden Path: PASS"
