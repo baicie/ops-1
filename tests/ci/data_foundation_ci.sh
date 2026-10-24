@@ -12,6 +12,9 @@ PIDS=()
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
   if [ -f /tmp/data-kernel.pid ]; then kill "$(cat /tmp/data-kernel.pid)" 2>/dev/null || true; fi
+  for pidfile in /tmp/node-a.pid /tmp/node-b.pid; do
+    if [ -f "$pidfile" ]; then kill "$(cat "$pidfile")" 2>/dev/null || true; fi
+  done
   docker ps -aq --filter label=opsweave.managed=true | xargs -r docker rm -f >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -106,6 +109,7 @@ done
 sleep 3
 python3 tests/runtime/claim_concurrency.py
 python3 tests/runtime/catalog_lock_race.py
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"
