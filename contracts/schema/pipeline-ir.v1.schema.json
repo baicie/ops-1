@@ -1,0 +1,556 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.opsweave.dev/schema/pipeline-ir.v1.schema.json",
+  "title": "OpsWeave Pipeline IR v1",
+  "$ref": "#/$defs/PipelineDefinition",
+  "$defs": {
+    "DataType": {
+      "enum": [
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "timestamp",
+        "json",
+        "dataset_ref"
+      ]
+    },
+    "PortName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,31}$"
+    },
+    "InputPort": {
+      "type": "object",
+      "required": [
+        "name",
+        "dataType",
+        "required"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/PortName"
+        },
+        "dataType": {
+          "$ref": "#/$defs/DataType"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "schemaRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "OutputPort": {
+      "type": "object",
+      "required": [
+        "name",
+        "dataType",
+        "nullable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/PortName"
+        },
+        "dataType": {
+          "$ref": "#/$defs/DataType"
+        },
+        "nullable": {
+          "type": "boolean"
+        },
+        "schemaRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "PipelineNode": {
+      "type": "object",
+      "required": [
+        "nodeId",
+        "type",
+        "typeVersion",
+        "inputs",
+        "outputs",
+        "config"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,47}$"
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._]{2,63}$"
+        },
+        "typeVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "inputs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/InputPort"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/OutputPort"
+          }
+        },
+        "config": {
+          "type": "object",
+          "maxProperties": 32
+        }
+      }
+    },
+    "TypedEdge": {
+      "type": "object",
+      "required": [
+        "fromNode",
+        "fromPort",
+        "toNode",
+        "toPort",
+        "dataType"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fromNode": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,47}$"
+        },
+        "fromPort": {
+          "$ref": "#/$defs/PortName"
+        },
+        "toNode": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,47}$"
+        },
+        "toPort": {
+          "$ref": "#/$defs/PortName"
+        },
+        "dataType": {
+          "$ref": "#/$defs/DataType"
+        }
+      }
+    },
+    "NodeRegistryEntry": {
+      "type": "object",
+      "required": [
+        "type",
+        "typeVersion",
+        "inputs",
+        "outputs",
+        "execution",
+        "configSchema"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._]{2,63}$"
+        },
+        "typeVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "inputs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/InputPort"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/OutputPort"
+          }
+        },
+        "execution": {
+          "enum": [
+            "PURE",
+            "BOUNDED_IO"
+          ]
+        },
+        "maxInputRecords": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "maxOutputRecords": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "configSchema": {
+          "type": "object",
+          "description": "Node-type-specific JSON Schema for node.config; validated by the trusted validator."
+        }
+      }
+    },
+    "NodeRegistry": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "registryDigest",
+        "signature",
+        "entries"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "pipeline-registry.opsweave.io/v1"
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/NodeRegistryEntry"
+          }
+        },
+        "registryDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "signature": {
+          "$ref": "#/$defs/RegistrySignature"
+        }
+      }
+    },
+    "ValidationIssue": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]+$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        }
+      }
+    },
+    "ValidationResult": {
+      "type": "object",
+      "required": [
+        "valid",
+        "errors",
+        "warnings",
+        "canonicalOrder"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "valid": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationIssue"
+          }
+        },
+        "canonicalOrder": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "planDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "PipelineExecutionPlan": {
+      "type": "object",
+      "required": [
+        "pipelineId",
+        "revision",
+        "digest",
+        "orderedNodes",
+        "edges",
+        "maxRecords",
+        "maxBytes",
+        "deterministic",
+        "planDigest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pipelineId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "orderedNodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypedEdge"
+          }
+        },
+        "maxRecords": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "deterministic": {
+          "const": true
+        },
+        "planDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "PipelineRevision": {
+      "type": "object",
+      "required": [
+        "pipelineId",
+        "revision",
+        "digest",
+        "status",
+        "definition",
+        "publishedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pipelineId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "status": {
+          "const": "PUBLISHED"
+        },
+        "definition": {
+          "$ref": "#/$defs/PipelineDefinition"
+        },
+        "publishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "publishedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "PipelineDefinition": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "pipelineId",
+        "revision",
+        "status",
+        "nodes",
+        "edges",
+        "createdAt",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": "pipeline.opsweave.io/v1"
+        },
+        "pipelineId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,63}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "DRAFT",
+            "PUBLISHED"
+          ]
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/PipelineNode"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/TypedEdge"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "title": "PipelineDefinition"
+    },
+    "PipelineRun": {
+      "type": "object",
+      "required": [
+        "runId",
+        "pipelineId",
+        "revision",
+        "jobId",
+        "status",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "pipelineId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "jobId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "enum": [
+            "QUEUED",
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "resultDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "RegistrySignature": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "keyId",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "keyId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "value": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}

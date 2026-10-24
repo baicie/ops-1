@@ -1455,6 +1455,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "opsweave-pipeline-worker"
+version = "0.0.3"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

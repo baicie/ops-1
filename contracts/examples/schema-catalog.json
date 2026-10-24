@@ -1,0 +1,29 @@
+{
+  "catalogVersion": "schema-catalog.opsweave.io/v1",
+  "datasets": [
+    {
+      "datasetId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "name": "host-metrics",
+      "latestPublishedRevision": 1,
+      "revisions": [
+        {
+          "schemaRevision": 1,
+          "status": "PUBLISHED",
+          "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+          "fields": [
+            {
+              "name": "id",
+              "type": "string",
+              "nullable": false
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "nullable": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

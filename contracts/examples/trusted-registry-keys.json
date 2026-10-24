@@ -1,0 +1,9 @@
+{
+  "keys": [
+    {
+      "keyId": "kernel-registry-test-1",
+      "algorithm": "ed25519",
+      "publicKeyHex": "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737"
+    }
+  ]
+}

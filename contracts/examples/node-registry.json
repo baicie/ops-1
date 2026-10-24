@@ -1,0 +1,212 @@
+{
+  "schemaVersion": "pipeline-registry.opsweave.io/v1",
+  "entries": [
+    {
+      "type": "builtin.source.http_json",
+      "typeVersion": 1,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
+      "execution": "BOUNDED_IO",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "endpoint"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "maxRecords": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        }
+      }
+    },
+    {
+      "type": "builtin.parse.json",
+      "typeVersion": 1,
+      "inputs": [
+        {
+          "name": "raw",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "type": "builtin.map.fields",
+      "typeVersion": 1,
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mappings": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "type": "builtin.filter.predicate",
+      "typeVersion": 1,
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "op": {
+            "enum": [
+              "eq",
+              "ne",
+              "gt",
+              "lt",
+              "exists"
+            ]
+          },
+          "value": {}
+        }
+      }
+    },
+    {
+      "type": "builtin.validate.schema",
+      "typeVersion": 1,
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "nullable": false
+        }
+      ],
+      "execution": "PURE",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "required": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    {
+      "type": "builtin.sink.dataset",
+      "typeVersion": 1,
+      "inputs": [
+        {
+          "name": "records",
+          "dataType": "json",
+          "required": true
+        }
+      ],
+      "outputs": [],
+      "execution": "BOUNDED_IO",
+      "maxInputRecords": 10000,
+      "maxOutputRecords": 10000,
+      "configSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "datasetId",
+          "schemaRevision"
+        ],
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schemaRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "schemaDigest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          }
+        }
+      }
+    }
+  ],
+  "registryDigest": "sha256:89a12ecbf97d347b7f1268dbb262565ca019999a70b515fe34e23f16834bcd99",
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "kernel-registry-test-1",
+    "value": "lScTZoBb6BNlVXf9IZ7oIh+mGmsSRQPtqdR4CgTEdM8j+6XU7zBPDHyUOJiM10+abD9BWxMJOsF2GUTyMkqaDQ=="
+  }
+}

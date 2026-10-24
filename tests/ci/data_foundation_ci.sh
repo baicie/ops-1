@@ -11,12 +11,16 @@ export OPSWEAVE_DATA_INTEGRATION_SELECTOR="zone=node-b"
 PIDS=()
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+  if [ -f /tmp/data-kernel.pid ]; then kill "$(cat /tmp/data-kernel.pid)" 2>/dev/null || true; fi
+  for pidfile in /tmp/node-a.pid /tmp/node-b.pid; do
+    if [ -f "$pidfile" ]; then kill "$(cat "$pidfile")" 2>/dev/null || true; fi
+  done
   docker ps -aq --filter label=opsweave.managed=true | xargs -r docker rm -f >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 echo "== build binaries and frontends"
-cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
+cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl -p opsweave-pipeline-worker
 pnpm install --frozen-lockfile
 pnpm --filter @opsweave/platform-web build >/dev/null
 mkdir -p keys
@@ -35,29 +39,13 @@ PIDS+=($!)
 sleep 1
 
 echo "== Kernel"
-env \
-  OPSWEAVE_BIND=0.0.0.0:18181 \
-  OPSWEAVE_PUBLIC_URL="$OPSWEAVE_URL" \
-  DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
-  OPSWEAVE_DATA_DIR="$ROOT/data-ci" \
-  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-web/dist" \
-  OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
-  OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
-  OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin' \
-  OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \
-  OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$(cat keys/publisher.pub)" \
-  OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
-  OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost,::1 \
-  OPSWEAVE_WORKLOAD_TOKEN_SECONDS=5 \
-  OPSWEAVE_WORKLOAD_TOKEN_REFRESH_GRACE_SECONDS=1 \
-  OPSWEAVE_PLUGIN_DB_HOST=172.17.0.1 \
-  OPSWEAVE_PLUGIN_KERNEL_URL=http://172.17.0.1:18181 \
-  OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS=172.17.0.1 \
-  RUST_LOG=info ./target/debug/opsweave-kernel >/tmp/data-kernel.log 2>&1 &
-KERNEL_PID=$!
-PIDS+=($!)
+KERNEL_PID="$(tests/runtime/start_kernel.sh)"
+PIDS+=($KERNEL_PID)
 for _ in $(seq 1 60); do curl -fsS "$OPSWEAVE_URL/livez" >/dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS "$OPSWEAVE_URL/livez" >/dev/null
+
+echo "== terminalization service PostgreSQL tests"
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave'   cargo test -q -p opsweave-kernel terminalization -- --nocapture
 
 echo "== authenticate and enroll two real Node runtimes"
 ./target/debug/opsctl login --email admin@opsweave.local --password 'OpsWeave!2026' >/dev/null
@@ -73,8 +61,14 @@ start_node() {
     OPSWEAVE_NODE_STATE_DIR="$ROOT/data-ci/$name" \
     OPSWEAVE_DOCKER_HOST='unix:///var/run/docker.sock' \
     OPSWEAVE_NODE_TOKEN_REFRESH_SECONDS=1 \
+    OPSWEAVE_NODE_WORKER_ENABLED=1 \
+    OPSWEAVE_PIPELINE_WORKER_BIN="$ROOT/target/debug/opsweave-pipeline-worker" \
+    OPSWEAVE_WORKER_SOURCE_ALLOWLIST=172.17.0.1,127.0.0.1 \
+    OPSWEAVE_WORKER_BATCH_DELAY_MS=800 \
     RUST_LOG=info ./target/debug/opsweave-node >"/tmp/$name.log" 2>&1 &
-  PIDS+=($!)
+  NODE_PID=$!
+  PIDS+=($NODE_PID)
+  echo "$NODE_PID" > "/tmp/$name.pid"
 }
 TOKEN_A="$(./target/debug/opsctl node-token --label node-a)"
 TOKEN_B="$(./target/debug/opsctl node-token --label node-b)"
@@ -90,6 +84,9 @@ done
 echo "== install/activate both data plugins"
 scripts/demo_data_up.sh
 
+echo "== supervisor lifecycle (real OS processes)"
+tests/acceptance/supervisor_lifecycle.sh
+
 echo "== real OCI Golden Path"
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_foundation.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_authz.sh
@@ -97,11 +94,48 @@ OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/d
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/storage_migration_concurrency.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/storage_migration_parser.sh
 tests/acceptance/data_token_security.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/dynamic_catalog_pipeline.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_jobs.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/catalog_fenced_sink.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_advanced.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_node_managed.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_two_node_takeover.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/kernel_restart_takeover.sh
+KERNEL_PID="$(cat /tmp/data-kernel.pid)"
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_long_heartbeat.sh
+# Concurrency testing must not compete with Node-managed workers left by prior scenarios.
+rm -f "$ROOT/data-ci/node-a/worker-enabled" "$ROOT/data-ci/node-b/worker-enabled"
+for node in node-a node-b; do
+  node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"
+  if [ -n "$node_pid" ]; then
+    for worker_pid in $(pgrep -P "$node_pid" -f opsweave-pipeline-worker || true); do kill -9 "$worker_pid" 2>/dev/null || true; done
+  fi
+done
+sleep 3
+python3 tests/runtime/claim_concurrency.py
+python3 tests/runtime/catalog_lock_race.py
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"
+  # A Node restart can adopt the Integration container before its workload
+  # token file is refreshed. Wait for the actual Catalog token, not a sleep.
+  INT_CID="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-integration/ {print $1; exit}')"
+  [ -n "$INT_CID" ] || { echo "integration container missing"; exit 1; }
+  TOKEN_READY=0
+  for _ in $(seq 1 60); do
+    if docker exec "$INT_CID" cat /run/opsweave/capability-tokens.json 2>/dev/null | grep -q '"data.catalog.v1"'; then
+      TOKEN_READY=1; break
+    fi
+    sleep 1
+  done
+  [ "$TOKEN_READY" = "1" ] || { echo "integration workload token file missing data.catalog.v1"; exit 1; }
   OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts
 fi
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_orphan_worker.sh
+OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=0 OPSWEAVE_TEST_KERNEL_PID="$KERNEL_PID" tests/acceptance/data_token_refresh.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/capability_multi_provider.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/source_timeout_no_sink.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_instance_generation_sigterm.sh

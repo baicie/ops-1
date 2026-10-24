@@ -173,6 +173,28 @@ async function initDb() {
       created_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE (dataset_id, source_batch_key)
     );
+    CREATE TABLE IF NOT EXISTS catalog_effect_receipts (
+      receipt_id uuid PRIMARY KEY,
+      effect_id text NOT NULL UNIQUE,
+      request_digest text NOT NULL,
+      job_id uuid NOT NULL,
+      lease_id uuid NOT NULL,
+      fencing_sequence bigint NOT NULL,
+      pipeline_id text NOT NULL,
+      pipeline_revision integer NOT NULL,
+      sink_node_id text NOT NULL,
+      logical_batch_id text NOT NULL,
+      dataset_id uuid NOT NULL,
+      schema_revision integer NOT NULL,
+      source_batch_key text NOT NULL,
+      status text NOT NULL,
+      accepted integer NOT NULL,
+      rejected integer NOT NULL,
+      unknown integer NOT NULL DEFAULT 0,
+      errors jsonb NOT NULL DEFAULT '[]'::jsonb,
+      committed_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (dataset_id, source_batch_key)
+    );
     CREATE TABLE IF NOT EXISTS catalog_entity_types (
       entity_type_id uuid PRIMARY KEY,
       name text NOT NULL,
@@ -221,6 +243,43 @@ function receiptView(row) {
     createdAt: row.created_at.toISOString(),
   };
 }
+function effectReceiptView(row) {
+  return {
+    receiptId: row.receipt_id,
+    effectId: row.effect_id,
+    requestDigest: row.request_digest,
+    jobId: row.job_id,
+    pipelineId: row.pipeline_id,
+    pipelineRevision: row.pipeline_revision,
+    sinkNodeId: row.sink_node_id,
+    logicalBatchId: row.logical_batch_id,
+    leaseId: row.lease_id,
+    fencingSequence: Number(row.fencing_sequence),
+    sourceBatchKey: row.source_batch_key,
+    datasetId: row.dataset_id,
+    schemaRevision: row.schema_revision,
+    status: row.status,
+    accepted: row.accepted,
+    rejected: row.rejected,
+    unknown: row.unknown,
+    errors: row.errors,
+    committedAt: row.committed_at.toISOString(),
+  };
+}
+function fencedEffectId(body) {
+  return 'efx:' + crypto.createHash('sha256').update(canonical({
+    jobId: body.fence?.jobId, pipelineId: body.pipelineId, pipelineRevision: body.pipelineRevision,
+    sinkNodeId: body.sinkNodeId, logicalBatchId: body.logicalBatchId,
+  })).digest('hex');
+}
+function fencedRequestDigest(body) {
+  return digest({
+    effectId: body.effectId, pipelineId: body.pipelineId, pipelineRevision: body.pipelineRevision,
+    sinkNodeId: body.sinkNodeId, logicalBatchId: body.logicalBatchId,
+    schemaRevision: body.schemaRevision, sourceBatchKey: body.sourceBatchKey, records: body.records,
+  });
+}
+
 
 async function handle(req, res) {
   const requestId = rid(req);
@@ -240,7 +299,8 @@ async function handle(req, res) {
     if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
     const body = await readJson(req);
     const fields = validateFields(body.fields);
-    const id = crypto.randomUUID();
+    const id = typeof body.datasetId === 'string' ? body.datasetId : crypto.randomUUID();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return fail(res, 400, 'INVALID_REQUEST', 'datasetId must be a UUID', requestId);
     const digestValue = schemaDigest(fields);
     const revision = 1;
     const client = await pool.connect();
@@ -323,6 +383,91 @@ async function handle(req, res) {
       const previous = await pool.query('SELECT * FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2', [datasetId, against]);
       const diff = previous.rows[0] ? compareSchemas(previous.rows[0].fields, current.rows[0].fields) : { compatible: true, changes: [], errors: [] };
       return send(res, 200, { fromRevision: against, toRevision: revision, ...diff }, requestId);
+    }
+    if (tail === 'fenced-records' && req.method === 'POST') {
+      if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+      const body = await readJson(req, 8 * 1024 * 1024);
+      if (!body || typeof body.effectId !== 'string' || !/^efx:[a-f0-9]{64}$/.test(body.effectId)) return fail(res, 400, 'INVALID_REQUEST', 'effectId is required', requestId);
+      if (typeof body.requestDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(body.requestDigest)) return fail(res, 400, 'INVALID_REQUEST', 'requestDigest is required', requestId);
+      if (fencedEffectId(body) !== body.effectId) return fail(res, 409, 'EFFECT_ID_MISMATCH', 'effectId is not the stable job/pipeline/sink/batch identity', requestId);
+      if (fencedRequestDigest(body) !== body.requestDigest) return fail(res, 409, 'REQUEST_DIGEST_MISMATCH', 'requestDigest does not match the fenced batch', requestId);
+      const fence = body.fence || {};
+      if (typeof fence.jobId !== 'string' || typeof fence.leaseId !== 'string' || !Number.isInteger(fence.fencingSequence) || fence.fencingSequence < 1) return fail(res, 400, 'INVALID_REQUEST', 'fence jobId, leaseId and fencingSequence are required', requestId);
+      if (fence.pipelineId && fence.pipelineId !== body.pipelineId) return fail(res, 409, 'FENCE_SCOPE_MISMATCH', 'fence pipeline does not match the sink', requestId);
+      const existing = await pool.query('SELECT * FROM catalog_effect_receipts WHERE effect_id=$1', [body.effectId]);
+      if (existing.rows[0]) {
+        if (existing.rows[0].request_digest !== body.requestDigest) return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'effectId was used with different content', requestId);
+        return send(res, 200, effectReceiptView(existing.rows[0]), requestId);
+      }
+      const schema = await pool.query("SELECT * FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status='PUBLISHED'", [datasetId, body.schemaRevision]);
+      if (!schema.rows[0]) return fail(res, 409, 'SCHEMA_NOT_PUBLISHED', 'target schema revision is not published', requestId);
+      if (!Array.isArray(body.records) || body.records.length === 0 || body.records.length > 1000) return fail(res, 400, 'INVALID_REQUEST', 'records must contain 1..1000 entries', requestId);
+      const errors = [];
+      const acceptedRecords = [];
+      body.records.forEach((record, index) => {
+        const error = validateRecord(schema.rows[0].fields, record);
+        if (error) errors.push({ recordIndex: index, code: 'VALIDATION_FAILED', message: error });
+        else acceptedRecords.push(record);
+      });
+      // 0.0.3 uses strict all-or-nothing batch semantics. A single invalid record
+      // rejects the whole batch before any record or receipt is written.
+      if (errors.length > 0) {
+        return fail(res, 422, 'RECORD_VALIDATION_FAILED', 'batch contains invalid records', requestId, false, { rejected: errors.length, errors });
+      }
+      if (acceptedRecords.length !== body.records.length) {
+        return fail(res, 422, 'RECORD_VALIDATION_FAILED', 'batch validation accounting mismatch', requestId);
+      }
+      const status = 'COMMITTED';
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        // The function takes the same pipeline_jobs row lock as Claim. It is the
+        // authoritative fence check and remains held until this transaction commits.
+        const authority = await client.query(
+          'SELECT authorized,reason,pipeline_id,pipeline_revision FROM kernel.fence_authorize_effect($1,$2,$3,$4,$5,$6)',
+          [fence.jobId, fence.leaseId, fence.fencingSequence, body.sinkNodeId, datasetId, body.schemaRevision],
+        );
+        const allowed = authority.rows[0];
+        if (!allowed || allowed.authorized !== true) {
+          await client.query('ROLLBACK');
+          return fail(res, 409, 'STALE_FENCE', allowed?.reason || 'fence is not authoritative', requestId);
+        }
+        if (allowed.pipeline_id !== body.pipelineId || Number(allowed.pipeline_revision) !== body.pipelineRevision) {
+          await client.query('ROLLBACK');
+          return fail(res, 409, 'FENCE_SCOPE_MISMATCH', 'fence pipeline revision does not match', requestId);
+        }
+        const receiptId = crypto.randomUUID();
+        const receipt = await client.query(
+          `INSERT INTO catalog_effect_receipts
+            (receipt_id,effect_id,request_digest,job_id,lease_id,fencing_sequence,pipeline_id,pipeline_revision,sink_node_id,logical_batch_id,dataset_id,schema_revision,source_batch_key,status,accepted,rejected,unknown,errors)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,0,$17) RETURNING *`,
+          [receiptId, body.effectId, body.requestDigest, fence.jobId, fence.leaseId, fence.fencingSequence,
+           body.pipelineId, body.pipelineRevision, body.sinkNodeId, body.logicalBatchId, datasetId,
+           body.schemaRevision, body.sourceBatchKey, status, acceptedRecords.length, errors.length, JSON.stringify(errors)],
+        );
+        for (const record of acceptedRecords) {
+          await client.query('INSERT INTO catalog_records (record_id,dataset_id,schema_revision,source_batch_key,payload) VALUES ($1,$2,$3,$4,$5)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, JSON.stringify(record)]);
+        }
+        await client.query('INSERT INTO catalog_lineage (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,accepted,rejected,unknown) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, body.jobId || null, JSON.stringify(body.source || {}), acceptedRecords.length, errors.length]);
+        await client.query('COMMIT');
+        return send(res, 201, effectReceiptView(receipt.rows[0]), requestId);
+      } catch (error) {
+        await client.query('ROLLBACK');
+        if (error.code === '23505') {
+          const raced = await pool.query('SELECT * FROM catalog_effect_receipts WHERE effect_id=$1', [body.effectId]);
+          if (raced.rows[0] && raced.rows[0].request_digest === body.requestDigest) return send(res, 200, effectReceiptView(raced.rows[0]), requestId);
+          return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'effectId already exists', requestId);
+        }
+        throw error;
+      } finally { client.release(); }
+    }
+    if (tail === 'effect-receipts' && req.method === 'GET') {
+      if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
+      const effectId = url.searchParams.get('effectId');
+      if (!effectId) return fail(res, 400, 'INVALID_REQUEST', 'effectId is required', requestId);
+      const row = await pool.query('SELECT * FROM catalog_effect_receipts WHERE effect_id=$1 AND dataset_id=$2', [effectId, datasetId]);
+      if (!row.rows[0]) return fail(res, 404, 'RECEIPT_NOT_FOUND', 'no effect receipt', requestId);
+      return send(res, 200, effectReceiptView(row.rows[0]), requestId);
     }
     if (tail === 'records' && req.method === 'POST') {
       if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
