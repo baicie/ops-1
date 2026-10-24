@@ -127,12 +127,14 @@ concurrency and Retry-After remain gaps.
 
 These are not claimed as PASS:
 
-1. Full Supervisor PID matrix for Quarantine, Instance STOP, Node generation and
-   credential revocation is not yet a single complete automated matrix.
-2. Source Security lacks live DNS rebinding, slow-header/slow-body and real proxy
-   environment tests.
-3. Supervisor Instance STOP, Node generation change and Node SIGTERM scenarios
-   are still missing from the single automated matrix.
+1. Supervisor: Instance STOP, Node generation change and Node SIGTERM are still
+   missing from the single automated PID matrix. Revocation/quarantine, marker,
+   worker SIGKILL, crash loop, Node SIGKILL and orphan are covered.
+2. Source Security: a source-timeout→no-Sink integration gate and an explicit
+   infinite-chunk test are missing; TCP peer pinning is covered by a local test.
+3. Heartbeat: outage longer than Lease TTL, Deadline-vs-Sink concurrency and
+   Retry-After behavior are not automated; the real mock-Kernel transient/fatal
+   matrix is covered.
 4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    are outside this RC.
 
