@@ -25,7 +25,7 @@ STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_
 LEASE="$(psql "$DB" -qAt -c "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 LEASE_STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE';")"
 [ "$LEASE_STATUS" = "ACTIVE" ] || bad "lease state after 75s is $LEASE_STATUS"
-HEARTBEATS="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE' AND heartbeat_at > created_at + interval '20 seconds';")"
+HEARTBEATS="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE' AND heartbeat_at > acquired_at + interval '20 seconds';")"
 [ "$HEARTBEATS" = "1" ] || bad "lease heartbeat was not refreshed"
 wait "$WORKER_PID"
 STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
