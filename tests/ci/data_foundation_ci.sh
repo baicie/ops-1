@@ -84,6 +84,9 @@ done
 echo "== install/activate both data plugins"
 scripts/demo_data_up.sh
 
+echo "== supervisor lifecycle (real OS processes)"
+tests/acceptance/supervisor_lifecycle.sh
+
 echo "== real OCI Golden Path"
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_foundation.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_authz.sh
