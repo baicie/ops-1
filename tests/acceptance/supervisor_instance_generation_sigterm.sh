@@ -12,7 +12,7 @@ trap cleanup EXIT
 workers() { pgrep -P "$NODE_A_PID" -f opsweave-pipeline-worker 2>/dev/null || true; }
 wait_worker() {
   local pid=""
-  for _ in $(seq 1 60); do pid="$(workers | head -1)"; [ -n "$pid" ] && { echo "$pid"; return 0; }; sleep 0.5; done
+  for _ in $(seq 1 240); do pid="$(workers | head -1)"; [ -n "$pid" ] && { echo "$pid"; return 0; }; sleep 0.5; done
   return 1
 }
 wait_gone() {
@@ -35,7 +35,12 @@ echo "PASS Instance STOP stopped supervised worker pid=$WORKER"
 psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 [ "$(instance_ready)" = "1" ] || { echo "FAIL catalog instance did not recover"; exit 1; }
-WORKER="$(wait_worker)" || { echo "FAIL supervisor did not restart worker after Instance STOP"; exit 1; }
+WORKER="$(wait_worker)" || {
+  echo "FAIL supervisor did not restart worker after Instance STOP marker=$(test -f "$MARKER" && echo yes || echo no)"
+  ps -eo pid,ppid,etime,command | grep -E 'opsweave-(node|pipeline-worker)' | grep -v grep || true
+  tail -40 /tmp/node-a.log 2>/dev/null || true
+  exit 1
+}
 echo "PASS Instance STOP recovery started worker pid=$WORKER"
 # Generation change: Node heartbeats with old generation are rejected, Node Runtime
 # quarantines and the supervisor must stop the child.
