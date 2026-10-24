@@ -1,103 +1,70 @@
-# 0.0.3 Runtime Gate Evidence
+# 0.0.3 Runtime Reliability — Design and Fix Summary
 
-Date: 2026-10-24 (Asia/Shanghai)  
-Branch: `feat/0.0.3-typed-pipeline`  
-Base: `a434a79`  
-Code HEAD: `99f2de8`  
+Functional HEAD: `dfa68ab`  
 PR #2: Draft / Open / not merged.
 
-## Implemented and exercised
+## Fixes landed
 
-### Deadline authority
-- `authorize_lease()` checks `clock_timestamp()` after the Job row lock.
-- `fence_authorize()` / `fence_authorize_effect()` (migration 0009) check Deadline
-  after taking the same row lock.
-- Start, Heartbeat, Checkpoint, Result, Snapshot write/read and Catalog Sink reject
-  expired Jobs.
-- Past Results remain replayable.
+### Deadline as authority
 
-CI assertions:
+- `authorize_lease()` checks `deadline_at` with `clock_timestamp()` after taking the
+  Job row lock.
+- `fence_authorize()` and `fence_authorize_effect()` (migration 0009) enforce the
+  same deadline after their row lock.
+- Claim, Start, Heartbeat, Checkpoint, Snapshot read/write, Catalog fenced Sink and
+  Result all reject an expired Job.
+- Completed Results remain readable by strict idempotent replay.
 
-```text
-PASS  expired deadline is rejected and terminalized
-PASS  active lease cannot heartbeat past deadline
-```
+### Claim transaction semantics
 
-### Claim transaction outcomes
 - Claim Core returns `Claimed` or `Terminalized`.
-- Successful and terminal claims commit.
-- Technical errors roll back.
-- Attempts/Deadline terminalization revokes active leases, fails attempts and writes
-  events.
+- Successful and intentional-terminal claims commit.
+- Database/technical errors roll back.
+- Deadline and Attempts-Exhausted terminalization update Job, active Lease, active
+  Attempt and Event.
 
-### Strict Catalog batches
-- Any invalid record rejects the whole batch with `422 RECORD_VALIDATION_FAILED`
-  before writes.
-- `COMMITTED` means all records were accepted.
-- Worker requires `accepted == batch.len()`, `rejected == 0`, `unknown == 0`.
-- Kernel aggregates authoritative receipt accepted counts.
+### Strict batches and authoritative completion
 
-### Node-managed worker identity
-- Added `opsweave.pipeline.worker` service principal with only
-  `dataset:read`/`dataset:write`.
-- Node control credential may request this principal for a trusted worker; arbitrary
-  plugin principals are rejected.
-- This removed the accidental dependency on the first READY plugin instance having
-  an Integration grant.
+- Catalog rejects any batch containing an invalid record before writing anything
+  (`422 RECORD_VALIDATION_FAILED`).
+- Worker requires `accepted == batch.len()`, `rejected = unknown = 0`.
+- Kernel recomputes every `batch-N` Effect ID and fetches its Receipt through the
+  restricted Catalog Service Identity; Job/Pipeline/Revision/Sink/Dataset/Schema/
+  Digest/accepted totals must all match before SUCCEEDED.
 
-### Two independent Node Runtimes — natural Lease takeover
-Real CI evidence:
+### Worker identity and lifecycle
 
-```text
-two-node job: 40f7d457-0b59-4936-aa9c-97e9d983c2e9
-PASS  two independent Node Runtimes:
-      job=40f7d457-0b59-4936-aa9c-97e9d983c2e9
-      oldFence=1 newFence=2 attempts=2 effects=3
-      takeover=65s oldLease=EXPIRED
-Two-Node Takeover Golden Path: PASS
-```
+- Node-managed workers use a dedicated `opsweave.pipeline.worker` service principal
+  with only Catalog read/write scope; arbitrary plugin principals cannot be requested.
+- Independent Heartbeat Task runs every 10s; transient transport/5xx failures retry
+  with bounded backoff; explicit 401/403/409/404 cancels execution.
+- Workload tokens are refreshed before each batch and before final Effect verification,
+  supporting jobs longer than the token TTL.
+- Node Supervisor stops the live child when the marker is removed, Node is quarantined,
+  or the bound Instance stops being READY; it uses bounded backoff and reaps children.
 
-- Initial executor: Node A (real child Worker).
-- Node A marker removed and Worker SIGKILLed.
-- No database `expires_at` update.
-- Lease expired naturally after 60s.
-- Node B auto-claimed with fence 2.
-- Snapshot reused; first committed Effect reused; 1001 job-scoped records and 3
-  Effects exactly.
+### Recovery harness
 
-## Gate Matrix
+- Real PostgreSQL claim concurrency: 2/8/16/32 direct claims plus Claim-Next
+  single/multi-job races.
+- Real Catalog fence lock race with `pg_blocking_pids()` evidence for Commit and
+  Rollback.
+- Real Kernel SIGKILL and restart.
+- Real two-Node natural Lease takeover.
+- Real Node Runtime SIGKILL and restart (non-provider Node).
+- 75+ second Job with independent heartbeat and a 15-second Kernel pause.
+- Source negative tests: redirect, oversized chunked body, malformed JSON; source
+  client disables environment proxies.
 
-| Gate | Status | Evidence |
-|---|---|---|
-| Catalog Schema | PASS | live Catalog service identity |
-| Dynamic Dataset | PASS | dynamic UUID E2E |
-| Node-managed Worker | PASS | single Node auto-claim |
-| Atomic Claim-Next | PARTIAL | code atomic; no 2/8/16/32 PG concurrency test |
-| Heartbeat | PARTIAL | independent Task; no 70s/fault E2E |
-| Job Deadline | PASS | real claim/heartbeat rejection; Sink SQL code |
-| Result Correctness | PASS | strict accepted + authoritative receipts |
-| Kernel Restart | NOT_RUN | no process kill/restart test |
-| Two-Node Takeover | PASS | natural 65s lease takeover in CI |
-| Supervisor Lifecycle | PARTIAL | code paths; no PID-level negative matrix |
-| Source Security | PARTIAL | SSRF address matrix; no full HTTP server matrix |
-| Catalog Lock Proof | PARTIAL | same-row lock; no pg_blocking_pids test |
-| Authoritative Completion | PASS | Kernel queries Catalog receipts |
-| Legacy Regression | PASS | 0.0.1 PASS=21; 0.0.2 PASS |
-| Runtime CI workflow | NOT_RUN | dedicated workflow not created |
+## Residuals
 
-## CI
+- Catalog reaper terminalization is not yet uniform with Claim Core.
+- Supervisor quarantine/instance-stop/revocation has code but no dedicated full PID
+  matrix.
+- Source Security has address policy plus redirect/chunked/malformed tests, but no
+  live DNS-rebinding/slow-header/slow-body matrix.
+- Heartbeat transient retry is implemented; 429/500/503 injection is not a separate
+  automated gate.
+- Physical two-host acceptance is NOT_RUN.
 
-- Data Foundation OCI [39983716889](https://github.com/baicie/ops-1/actions/runs/39983716889) — SUCCESS
-- Standard/Contract runs on the same commit — SUCCESS
-- 0.0.1 Legacy: PASS=21 FAIL=0
-- 0.0.2 Data Foundation: PASS
-
-## Decision
-
-```text
-PARTIAL_NOT_READY
-```
-
-Kernel restart, 2/8/16/32 concurrent Claim, 70s heartbeat fault injection, Catalog
-`pg_blocking_pids` proof, Supervisor PID-level matrix and the dedicated Runtime CI
-workflow remain unexecuted. PR #2 must remain Draft.
+These residuals keep the release decision at `PARTIAL_NOT_READY`.

@@ -1,103 +1,41 @@
-# 0.0.3 Runtime Gate Evidence
+# 0.0.3 Typed Pipeline Foundation — Functional Baseline
 
-Date: 2026-10-24 (Asia/Shanghai)  
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `99f2de8`  
+Functional HEAD: `dfa68ab`  
 PR #2: Draft / Open / not merged.
 
-## Implemented and exercised
+## Functional baseline
 
-### Deadline authority
-- `authorize_lease()` checks `clock_timestamp()` after the Job row lock.
-- `fence_authorize()` / `fence_authorize_effect()` (migration 0009) check Deadline
-  after taking the same row lock.
-- Start, Heartbeat, Checkpoint, Result, Snapshot write/read and Catalog Sink reject
-  expired Jobs.
-- Past Results remain replayable.
+This branch implements the 0.0.3 experimental typed pipeline runtime:
 
-CI assertions:
+- signed typed Pipeline Registry and linear ExecutionPlan;
+- immutable PipelineRevision with pinned Dataset UUID, Schema Revision and Schema Digest;
+- live Catalog Schema resolution through a restricted Kernel service identity;
+- dynamic Dataset → Published Schema → Pipeline → Job → Worker → fenced Records;
+- PostgreSQL JobStore, Claim, Lease, Fence, Checkpoint, Snapshot and Result;
+- Node Runtime-managed Worker with automatic Claim-Next discovery;
+- catalog fenced sink with stable Effect IDs and Receipt recovery;
+- strict all-or-nothing Catalog batches;
+- Deadline authority across Claim, Heartbeat, Snapshot, Sink and Result.
 
-```text
-PASS  expired deadline is rejected and terminalized
-PASS  active lease cannot heartbeat past deadline
-```
+## Evidence summary
 
-### Claim transaction outcomes
-- Claim Core returns `Claimed` or `Terminalized`.
-- Successful and terminal claims commit.
-- Technical errors roll back.
-- Attempts/Deadline terminalization revokes active leases, fails attempts and writes
-  events.
+- live dynamic Dataset E2E: PASS;
+- single-Node automatic Worker: PASS;
+- two independent Node Runtimes on one CI host: PASS (natural Lease expiry);
+- Kernel SIGKILL/restart recovery: PASS;
+- Node Runtime SIGKILL recovery: PASS (victim role is the non-provider Node);
+- 1001-record multi-batch crash recovery: PASS;
+- fenced Result replay and authoritative Receipt completion: PASS.
 
-### Strict Catalog batches
-- Any invalid record rejects the whole batch with `422 RECORD_VALIDATION_FAILED`
-  before writes.
-- `COMMITTED` means all records were accepted.
-- Worker requires `accepted == batch.len()`, `rejected == 0`, `unknown == 0`.
-- Kernel aggregates authoritative receipt accepted counts.
+Detailed, reproducible evidence is in `003-runtime-gate-evidence.md` and
+`003-runtime-reliability-final.md`.
 
-### Node-managed worker identity
-- Added `opsweave.pipeline.worker` service principal with only
-  `dataset:read`/`dataset:write`.
-- Node control credential may request this principal for a trusted worker; arbitrary
-  plugin principals are rejected.
-- This removed the accidental dependency on the first READY plugin instance having
-  an Integration grant.
+## Boundary
 
-### Two independent Node Runtimes — natural Lease takeover
-Real CI evidence:
+This is not a production-HA certification. It is a single CI host with two
+independent Node Runtime processes, one PostgreSQL, one Kernel and local OCI
+Catalog providers. Physical multi-host acceptance remains `NOT_RUN`.
 
-```text
-two-node job: 40f7d457-0b59-4936-aa9c-97e9d983c2e9
-PASS  two independent Node Runtimes:
-      job=40f7d457-0b59-4936-aa9c-97e9d983c2e9
-      oldFence=1 newFence=2 attempts=2 effects=3
-      takeover=65s oldLease=EXPIRED
-Two-Node Takeover Golden Path: PASS
-```
-
-- Initial executor: Node A (real child Worker).
-- Node A marker removed and Worker SIGKILLed.
-- No database `expires_at` update.
-- Lease expired naturally after 60s.
-- Node B auto-claimed with fence 2.
-- Snapshot reused; first committed Effect reused; 1001 job-scoped records and 3
-  Effects exactly.
-
-## Gate Matrix
-
-| Gate | Status | Evidence |
-|---|---|---|
-| Catalog Schema | PASS | live Catalog service identity |
-| Dynamic Dataset | PASS | dynamic UUID E2E |
-| Node-managed Worker | PASS | single Node auto-claim |
-| Atomic Claim-Next | PARTIAL | code atomic; no 2/8/16/32 PG concurrency test |
-| Heartbeat | PARTIAL | independent Task; no 70s/fault E2E |
-| Job Deadline | PASS | real claim/heartbeat rejection; Sink SQL code |
-| Result Correctness | PASS | strict accepted + authoritative receipts |
-| Kernel Restart | NOT_RUN | no process kill/restart test |
-| Two-Node Takeover | PASS | natural 65s lease takeover in CI |
-| Supervisor Lifecycle | PARTIAL | code paths; no PID-level negative matrix |
-| Source Security | PARTIAL | SSRF address matrix; no full HTTP server matrix |
-| Catalog Lock Proof | PARTIAL | same-row lock; no pg_blocking_pids test |
-| Authoritative Completion | PASS | Kernel queries Catalog receipts |
-| Legacy Regression | PASS | 0.0.1 PASS=21; 0.0.2 PASS |
-| Runtime CI workflow | NOT_RUN | dedicated workflow not created |
-
-## CI
-
-- Data Foundation OCI [39983716889](https://github.com/baicie/ops-1/actions/runs/39983716889) — SUCCESS
-- Standard/Contract runs on the same commit — SUCCESS
-- 0.0.1 Legacy: PASS=21 FAIL=0
-- 0.0.2 Data Foundation: PASS
-
-## Decision
-
-```text
-PARTIAL_NOT_READY
-```
-
-Kernel restart, 2/8/16/32 concurrent Claim, 70s heartbeat fault injection, Catalog
-`pg_blocking_pids` proof, Supervisor PID-level matrix and the dedicated Runtime CI
-workflow remain unexecuted. PR #2 must remain Draft.
+PR #2 remains Draft; nothing was merged, tagged or released.
