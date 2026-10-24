@@ -21,9 +21,9 @@ wait_gone() {
   return 1
 }
 instance_ready() {
-  curl -fsS -H "Authorization: Bearer $(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')" "$URL/api/v1/plugins/opsweave.data-catalog" \
-    | python3 -c 'import json,sys;print(1 if any(i["state"]=="READY" for d in json.load(sys.stdin).get("deployments",[]) for i in d["instances"]) else 0)'
+  psql "$DB" -qAt -c "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.node_id='$NODE_A_ID' AND i.state='READY' AND i.desired_action='START';"
 }
+NODE_A_ID="$(python3 -c 'import json;print(json.load(open("data-ci/node-a/node-identity.json"))["nodeId"])')"
 touch "$MARKER"
 WORKER="$(wait_worker)" || { echo "FAIL supervisor did not start worker"; exit 1; }
 echo "instance-stop worker pid=$WORKER ppid=$NODE_A_PID"
@@ -31,10 +31,12 @@ echo "instance-stop worker pid=$WORKER ppid=$NODE_A_PID"
 # a test fixture operation, not a production API path.
 psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=0, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 wait_gone "$WORKER" || { echo "FAIL worker survived Instance STOP pid=$WORKER"; exit 1; }
+rm -f "$MARKER"
 echo "PASS Instance STOP stopped supervised worker pid=$WORKER"
 psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
-[ "$(instance_ready)" = "1" ] || { echo "FAIL catalog instance did not recover"; exit 1; }
+[ "$(instance_ready)" = "1" ] || { echo "FAIL catalog instance did not recover READY/START"; exit 1; }
+touch "$MARKER"
 WORKER="$(wait_worker)" || {
   echo "FAIL supervisor did not restart worker after Instance STOP marker=$(test -f "$MARKER" && echo yes || echo no)"
   ps -eo pid,ppid,etime,command | grep -E 'opsweave-(node|pipeline-worker)' | grep -v grep || true
@@ -44,7 +46,6 @@ WORKER="$(wait_worker)" || {
 echo "PASS Instance STOP recovery started worker pid=$WORKER"
 # Generation change: Node heartbeats with old generation are rejected, Node Runtime
 # quarantines and the supervisor must stop the child.
-NODE_A_ID="$(python3 -c 'import json;print(json.load(open("data-ci/node-a/node-identity.json"))["nodeId"])')"
 GENERATION="$(psql "$DB" -qAt -c "SELECT generation FROM kernel.nodes WHERE id='$NODE_A_ID';")"
 psql "$DB" -qAt -c "UPDATE kernel.nodes SET generation=generation+1 WHERE id='$NODE_A_ID';" >/dev/null
 wait_gone "$WORKER" || { echo "FAIL worker survived Node generation change pid=$WORKER"; exit 1; }
