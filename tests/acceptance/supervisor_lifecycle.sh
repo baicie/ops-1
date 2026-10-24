@@ -42,6 +42,16 @@ THIRD="$(wait_worker)" || bad "supervisor did not restart after worker SIGKILL"
 [ "$THIRD" != "$SECOND" ] || bad "supervisor did not replace SIGKILLed worker"
 echo "supervisor restart worker pid=$THIRD"
 ok "worker SIGKILL restarted by supervisor (old=$SECOND new=$THIRD)"
+# Consecutive crash loop: each kill must produce a new supervised PID; backoff
+# must be bounded and the supervisor must keep observing the marker.
+CRASH="$THIRD"
+for round in 1 2 3; do
+  kill -9 "$CRASH" 2>/dev/null || true
+  wait_gone "$CRASH" || bad "crash-loop round $round worker pid=$CRASH survived"
+  CRASH="$(wait_worker)" || bad "supervisor did not restart in crash-loop round $round"
+  echo "crash-loop round=$round old=$THIRD new=$CRASH"
+done
+ok "repeated worker crash loop recovered with bounded backoff (final=$CRASH)"
 rm -f "$MARKER"
-wait_gone "$THIRD" || bad "final marker removal did not stop worker"
+wait_gone "$CRASH" || bad "final marker removal did not stop worker"
 ok "Supervisor Lifecycle Golden Path: PASS"

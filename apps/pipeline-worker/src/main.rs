@@ -211,11 +211,30 @@ impl Worker {
         lease: ClaimResponse,
         cancelled: Arc<AtomicBool>,
     ) -> tokio::task::JoinHandle<()> {
+        self.start_heartbeat_with(
+            job_id,
+            lease,
+            cancelled,
+            Duration::from_secs(10),
+            3,
+            Duration::from_secs(2),
+        )
+    }
+
+    fn start_heartbeat_with(
+        &self,
+        job_id: Uuid,
+        lease: ClaimResponse,
+        cancelled: Arc<AtomicBool>,
+        interval: Duration,
+        max_transient_failures: u32,
+        backoff: Duration,
+    ) -> tokio::task::JoinHandle<()> {
         let worker = self.clone();
         tokio::spawn(async move {
             let mut transient_failures = 0u32;
             loop {
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                tokio::time::sleep(interval).await;
                 if cancelled.load(Ordering::SeqCst) {
                     return;
                 }
@@ -231,11 +250,11 @@ impl Worker {
                     }
                     HeartbeatAction::Retry => {
                         transient_failures = transient_failures.saturating_add(1);
-                        if transient_failures >= 3 {
+                        if transient_failures >= max_transient_failures {
                             cancelled.store(true, Ordering::SeqCst);
                             return;
                         }
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        tokio::time::sleep(backoff).await;
                     }
                 }
             }
@@ -426,32 +445,37 @@ impl Worker {
         let port = url
             .port_or_known_default()
             .ok_or_else(|| anyhow!("source URL has no port"))?;
-        let pinned: SocketAddr = if let Ok(ip) = host.parse::<IpAddr>() {
+        let addresses: Vec<SocketAddr> = if let Ok(ip) = host.parse::<IpAddr>() {
             policy.check_ip(ip, &host)?;
-            SocketAddr::new(ip, port)
+            vec![SocketAddr::new(ip, port)]
+        } else if let Some(overrides) = &policy.resolve_override {
+            overrides
+                .iter()
+                .map(|ip| SocketAddr::new(*ip, port))
+                .collect()
         } else {
-            let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+            tokio::net::lookup_host((host.as_str(), port))
                 .await
                 .context("source DNS resolution failed")?
-                .collect();
-            if addresses.is_empty() {
-                bail!("source DNS has no addresses");
-            }
-            for address in &addresses {
-                policy.check_ip(address.ip(), &host)?;
-            }
-            addresses[0]
+                .collect()
         };
+        if addresses.is_empty() {
+            bail!("source DNS has no addresses");
+        }
+        for address in &addresses {
+            policy.check_ip(address.ip(), &host)?;
+        }
+        let pinned = addresses[0];
         let mut builder = Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(20));
+            .timeout(policy.request_timeout);
         if host.parse::<IpAddr>().is_err() {
             builder = builder.resolve(&host, pinned);
         }
         let client = builder.build()?;
-        let response = tokio::time::timeout(Duration::from_secs(30), client.get(url).send())
+        let response = tokio::time::timeout(policy.request_timeout, client.get(url).send())
             .await
             .map_err(|_| anyhow!("source request timed out"))?
             .context("source request")?;
@@ -478,7 +502,7 @@ impl Worker {
             }
             Ok::<(), anyhow::Error>(())
         };
-        tokio::time::timeout(Duration::from_secs(20), stream)
+        tokio::time::timeout(policy.read_timeout, stream)
             .await
             .map_err(|_| anyhow!("source read timed out"))??;
         let parsed: Value = serde_json::from_slice(&bytes).context("parse source JSON")?;
@@ -1119,9 +1143,24 @@ fn effect_id(
     )
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct SourcePolicy {
     allowlist: Vec<String>,
+    /// Test-only deterministic DNS answers. Production always resolves via DNS.
+    resolve_override: Option<Vec<IpAddr>>,
+    request_timeout: Duration,
+    read_timeout: Duration,
+}
+
+impl Default for SourcePolicy {
+    fn default() -> Self {
+        Self {
+            allowlist: Vec::new(),
+            resolve_override: None,
+            request_timeout: Duration::from_secs(20),
+            read_timeout: Duration::from_secs(20),
+        }
+    }
 }
 
 impl SourcePolicy {
@@ -1132,11 +1171,27 @@ impl SourcePolicy {
             .filter(|entry| !entry.is_empty())
             .map(str::to_ascii_lowercase)
             .collect();
-        Self { allowlist }
+        Self {
+            allowlist,
+            ..Self::default()
+        }
     }
 
     fn from_env() -> Self {
         Self::from_allowlist(&std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST").unwrap_or_default())
+    }
+
+    #[cfg(test)]
+    fn with_resolution(mut self, addresses: Vec<IpAddr>) -> Self {
+        self.resolve_override = Some(addresses);
+        self
+    }
+
+    #[cfg(test)]
+    fn with_timeouts(mut self, request: Duration, read: Duration) -> Self {
+        self.request_timeout = request;
+        self.read_timeout = read;
+        self
     }
 
     fn allowed(&self, value: &str) -> bool {
@@ -1311,6 +1366,10 @@ mod tests {
     }
 
     fn test_worker() -> Worker {
+        test_worker_with(SourcePolicy::from_allowlist("127.0.0.1"))
+    }
+
+    fn test_worker_with(policy: SourcePolicy) -> Worker {
         Worker {
             client: Client::builder().build().unwrap(),
             kernel_url: "http://127.0.0.1:1".into(),
@@ -1320,7 +1379,7 @@ mod tests {
             worker_id: "test".into(),
             instance_id: Uuid::new_v4(),
             boot_id: Uuid::new_v4(),
-            source_policy: SourcePolicy::from_allowlist("127.0.0.1"),
+            source_policy: policy,
         }
     }
 
@@ -1337,6 +1396,280 @@ mod tests {
             }
         });
         format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    async fn serve_once_peer(
+        response: Vec<u8>,
+    ) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            if let Ok((mut socket, peer)) = listener.accept().await {
+                let mut buffer = [0u8; 1024];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
+                eprintln!("source-fixture-peer={}", peer.ip());
+                let _ = socket.write_all(&response).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (addr, handle)
+    }
+
+    async fn serve_after(delay: Duration, response: Vec<u8>) -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buffer = [0u8; 1024];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
+                tokio::time::sleep(delay).await;
+                let _ = socket.write_all(&response).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    async fn serve_slow_body(delay: Duration) -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buffer = [0u8; 1024];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
+                let _ = socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n[{\"id\":1}")
+                    .await;
+                tokio::time::sleep(delay).await;
+                let _ = socket.write_all(b"]").await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    async fn proxy_counter() -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = count.clone();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let _ = socket
+                    .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                    .await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (addr, count)
+    }
+
+    fn test_worker_with_kernel(kernel_url: String) -> Worker {
+        let mut worker = test_worker();
+        worker.kernel_url = kernel_url;
+        worker
+    }
+
+    fn claim() -> ClaimResponse {
+        ClaimResponse {
+            lease_id: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            fencing_sequence: 1,
+        }
+    }
+
+    async fn mock_heartbeat(
+        responses: Vec<Option<u16>>,
+    ) -> (
+        String,
+        Arc<std::sync::atomic::AtomicUsize>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = count.clone();
+        let handle = tokio::spawn(async move {
+            let mut index = 0usize;
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buffer = [0u8; 4096];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
+                counter.fetch_add(1, Ordering::SeqCst);
+                let response = if index < responses.len() {
+                    responses[index]
+                } else {
+                    Some(200)
+                };
+                index += 1;
+                match response {
+                    Some(status) => {
+                        let body = format!("HTTP/1.1 {status} X\r\nContent-Length: 0\r\n\r\n");
+                        let _ = socket.write_all(body.as_bytes()).await;
+                    }
+                    None => { /* disconnect */ }
+                }
+                let _ = socket.shutdown().await;
+            }
+        });
+        (format!("http://{}", addr), count, handle)
+    }
+
+    async fn run_heartbeat_case(responses: Vec<Option<u16>>, max_failures: u32) -> (bool, usize) {
+        let (url, count, server) = mock_heartbeat(responses).await;
+        let worker = test_worker_with_kernel(url);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let task = worker.start_heartbeat_with(
+            Uuid::new_v4(),
+            claim(),
+            cancelled.clone(),
+            Duration::from_millis(10),
+            max_failures,
+            Duration::from_millis(10),
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let cancelled_now = cancelled.load(Ordering::SeqCst);
+        task.abort();
+        server.abort();
+        (cancelled_now, count.load(Ordering::SeqCst))
+    }
+
+    #[tokio::test]
+    async fn heartbeat_transient_statuses_retry_then_recover() {
+        for status in [429, 500, 502, 503] {
+            let (cancelled, count) =
+                run_heartbeat_case(vec![Some(status), Some(200), Some(200)], 3).await;
+            assert!(!cancelled, "status {status} should be transient");
+            assert!(count >= 2, "status {status} request count={count}");
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_consecutive_transient_failures_cancel_at_bound() {
+        for status in [429, 500, 503] {
+            let (cancelled, count) =
+                run_heartbeat_case(vec![Some(status), Some(status), Some(status), Some(200)], 3)
+                    .await;
+            assert!(cancelled, "status {status} did not cancel at bound");
+            assert_eq!(count, 3, "status {status} request count={count}");
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_fatal_and_disconnect_statuses_cancel() {
+        for status in [401, 403, 404, 409] {
+            let (cancelled, count) = run_heartbeat_case(vec![Some(status), Some(200)], 3).await;
+            assert!(cancelled, "status {status} must be fatal");
+            assert_eq!(count, 1, "status {status} request count={count}");
+        }
+        let (cancelled, count) = run_heartbeat_case(vec![None, None, None, Some(200)], 3).await;
+        assert!(cancelled, "transport disconnect must eventually cancel");
+        assert_eq!(count, 3, "disconnect count={count}");
+    }
+
+    #[tokio::test]
+    async fn dns_rebinding_and_mixed_answers_are_rejected() {
+        for answers in [
+            vec!["8.8.8.8".parse().unwrap(), "127.0.0.1".parse().unwrap()],
+            vec!["127.0.0.1".parse().unwrap(), "8.8.8.8".parse().unwrap()],
+            vec![
+                "8.8.8.8".parse().unwrap(),
+                "169.254.169.254".parse().unwrap(),
+            ],
+        ] {
+            let policy = SourcePolicy::from_allowlist("").with_resolution(answers);
+            let worker = test_worker_with(policy);
+            let error = worker
+                .fetch_source("http://rebind.test:80/records")
+                .await
+                .unwrap_err();
+            assert!(format!("{error:#}").contains("not public"), "{error:#}");
+        }
+    }
+
+    #[tokio::test]
+    async fn dns_resolution_pins_the_actual_tcp_peer() {
+        let (addr, _handle) =
+            serve_once_peer(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[{\"id\":1}]".to_vec())
+                .await;
+        let policy = SourcePolicy::from_allowlist("127.0.0.1")
+            .with_resolution(vec!["127.0.0.1".parse().unwrap()]);
+        let worker = test_worker_with(policy);
+        let url = format!("http://pinned.test:{}/records", addr.port());
+        let records = worker.fetch_source(&url).await.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(addr.ip(), "127.0.0.1".parse::<IpAddr>().unwrap());
+    }
+
+    #[tokio::test]
+    async fn slow_header_and_slow_body_are_bounded() {
+        let header_url = serve_after(
+            Duration::from_secs(2),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[{\"id\":1}]".to_vec(),
+        )
+        .await;
+        let policy = SourcePolicy::from_allowlist("127.0.0.1")
+            .with_timeouts(Duration::from_millis(200), Duration::from_millis(200));
+        let error = test_worker_with(policy.clone())
+            .fetch_source(&header_url)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("timed out"), "{error:#}");
+
+        let body_url = serve_slow_body(Duration::from_secs(2)).await;
+        let body_policy = SourcePolicy::from_allowlist("127.0.0.1")
+            .with_timeouts(Duration::from_secs(2), Duration::from_millis(200));
+        let error = test_worker_with(body_policy)
+            .fetch_source(&body_url)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("read timed out"), "{error:#}");
+    }
+
+    #[tokio::test]
+    async fn proxy_environment_is_not_used_for_source_requests() {
+        static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _guard = ENV_LOCK.lock().await;
+        let (proxy_addr, count) = proxy_counter().await;
+        let proxy = format!("http://{}", proxy_addr);
+        let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"];
+        let old: Vec<_> = names
+            .iter()
+            .map(|name| (name, std::env::var(name).ok()))
+            .collect();
+        for name in names {
+            std::env::set_var(name, &proxy);
+        }
+        std::env::set_var("NO_PROXY", "");
+        let url =
+            serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[{\"id\":1}]".to_vec()).await;
+        let records = test_worker().fetch_source(&url).await;
+        for (name, value) in old {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+        std::env::remove_var("NO_PROXY");
+        assert!(records.is_ok(), "{records:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 0, "source request used proxy");
+    }
+
+    #[tokio::test]
+    async fn normal_http_source_is_allowed() {
+        let url =
+            serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[{\"id\":1}]".to_vec()).await;
+        let records = test_worker().fetch_source(&url).await.unwrap();
+        assert_eq!(records.len(), 1);
     }
 
     #[tokio::test]
