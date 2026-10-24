@@ -104,7 +104,8 @@ def main():
         if statuses.count(200) != concurrency or len(set(assigned)) != concurrency or db_assigned != str(concurrency):
             failures.append(f"claim-next fanout {concurrency}: statuses={statuses} assigned={assigned} db={db_assigned}")
         print(f"claim-next fanout {concurrency}: {statuses.count(200)}x200 distinct={len(set(assigned))} dbLeases={db_assigned}")
-    empty = request("POST", "/internal/v1/pipeline-jobs/claim-next", worker_identity(iid, str(uuid.uuid4()))[1], worker_identity(iid, str(uuid.uuid4()))[0])
+    empty_identity = worker_identity(iid, str(uuid.uuid4()))
+    empty = request("POST", "/internal/v1/pipeline-jobs/claim-next", empty_identity[1], empty_identity[0])
     if empty[0] != 204:
         failures.append(f"empty claim-next returned {empty[0]}")
     print(f"claim-next empty queue: status={empty[0]}")

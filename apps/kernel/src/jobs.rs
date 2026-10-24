@@ -1094,6 +1094,12 @@ async fn audit_terminalization(
     .await;
 }
 
+async fn audit_reaped(state: &AppState, reaped: &[(Uuid, &'static str)]) {
+    for (job_id, code) in reaped {
+        audit_terminalization(state, *job_id, "FAILED", Some(*code), "SYSTEM", "reaper").await;
+    }
+}
+
 /// Bounded reaper. Candidate rows are locked with SKIP LOCKED and terminalized
 /// individually through the same service used by Claim/Result/Cancel.
 async fn reap_terminal_jobs(
@@ -1175,53 +1181,67 @@ pub async fn claim_next(
             return Err(error);
         }
     };
-    let job_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT j.job_id FROM kernel.pipeline_jobs j
-         WHERE j.status IN ('QUEUED','CLAIMED','RUNNING')
-           AND j.attempts < j.max_attempts
-           AND (j.deadline_at IS NULL OR j.deadline_at > clock_timestamp())
-           AND NOT EXISTS (
-             SELECT 1 FROM kernel.pipeline_job_leases l
-             WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > clock_timestamp()
-           )
-         ORDER BY j.created_at ASC, j.job_id ASC
-         FOR UPDATE SKIP LOCKED
-         LIMIT 1",
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(job_id) = job_id else {
-        tx.commit().await?;
-        for (reaped_job, code) in reaped {
-            audit_terminalization(&state, reaped_job, "FAILED", Some(code), "SYSTEM", "reaper")
-                .await;
-        }
-        return Ok(StatusCode::NO_CONTENT.into_response());
-    };
-    let response = match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
-        Ok(ClaimOutcome::Claimed(response)) => {
+    let mut attempts = 0u8;
+    loop {
+        attempts += 1;
+        let job_id: Option<Uuid> = sqlx::query_scalar(
+            "SELECT j.job_id FROM kernel.pipeline_jobs j
+             WHERE j.status IN ('QUEUED','CLAIMED','RUNNING')
+               AND j.attempts < j.max_attempts
+               AND (j.deadline_at IS NULL OR j.deadline_at > clock_timestamp())
+               AND NOT EXISTS (
+                 SELECT 1 FROM kernel.pipeline_job_leases l
+                 WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > clock_timestamp()
+               )
+             ORDER BY j.created_at ASC, j.job_id ASC
+             FOR UPDATE SKIP LOCKED
+             LIMIT 1",
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(job_id) = job_id else {
             tx.commit().await?;
-            for (reaped_job, code) in reaped {
-                audit_terminalization(&state, reaped_job, "FAILED", Some(code), "SYSTEM", "reaper")
-                    .await;
+            audit_reaped(&state, &reaped).await;
+            return Ok(StatusCode::NO_CONTENT.into_response());
+        };
+        match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
+            Ok(ClaimOutcome::Claimed(response)) => {
+                tx.commit().await?;
+                audit_reaped(&state, &reaped).await;
+                return Ok(Json(response).into_response());
             }
-            response
-        }
-        Ok(ClaimOutcome::Terminalized(code)) => {
-            tx.commit().await?;
-            for (reaped_job, code) in reaped {
-                audit_terminalization(&state, reaped_job, "FAILED", Some(code), "SYSTEM", "reaper")
+            Ok(ClaimOutcome::Terminalized(code)) => {
+                tx.commit().await?;
+                audit_reaped(&state, &reaped).await;
+                audit_terminalization(&state, job_id, "FAILED", Some(code), "SYSTEM", "claim")
                     .await;
+                return Err(AppError::conflict(code, "job reached a terminal state"));
             }
-            audit_terminalization(&state, job_id, "FAILED", Some(code), "SYSTEM", "claim").await;
-            return Err(AppError::conflict(code, "job reached a terminal state"));
+            Err(error)
+                if matches!(
+                    error.code,
+                    "JOB_ALREADY_CLAIMED" | "JOB_NOT_CLAIMABLE" | "JOB_NOT_RUNNING"
+                ) =>
+            {
+                // A concurrent claimant won this candidate. The row stays locked
+                // by this transaction, so the next SKIP LOCKED probe chooses a
+                // different queued Job. Bounded retry avoids a spurious 409 for a
+                // claim-next request that still has work available.
+                if attempts >= 8 {
+                    tx.rollback().await.ok();
+                    return Err(AppError::conflict(
+                        "CLAIM_CONTENTION",
+                        "claim-next could not find an uncontended job",
+                    ));
+                }
+                continue;
+            }
+            Err(error) => {
+                tx.rollback().await.ok();
+                return Err(error);
+            }
         }
-        Err(error) => {
-            tx.rollback().await.ok();
-            return Err(error);
-        }
-    };
-    Ok(Json(response).into_response())
+    }
 }
 
 enum ClaimOutcome {
