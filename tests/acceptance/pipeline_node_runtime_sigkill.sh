@@ -44,7 +44,16 @@ for _ in $(seq 1 180); do
   sleep 1
 done
 TOOK="$(( $(date +%s) - START_TS ))"
-[ "$STATUS" = "SUCCEEDED" ] || bad "node runtime SIGKILL takeover status=$STATUS"
+if [ "$STATUS" != "SUCCEEDED" ]; then
+  echo "diagnostics: status=$STATUS mode=$STATUS"
+  psql "$DB" -qAt -c "SELECT job_id,status,attempts,current_fence,current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB';" || true
+  psql "$DB" -qAt -c "SELECT lease_id,worker_id,status,expires_at,heartbeat_at FROM kernel.pipeline_job_leases WHERE job_id='$JOB';" || true
+  echo "node-a marker=$(test -f "$ROOT/data-ci/node-a/worker-enabled" && echo yes || echo no) node-b marker=$(test -f "$ROOT/data-ci/node-b/worker-enabled" && echo yes || echo no)"
+  ps -eo pid,ppid,etime,command | grep -E 'opsweave-(node|pipeline-worker)' | grep -v grep || true
+  echo '--- node-a.log'; tail -40 /tmp/node-a.log 2>/dev/null || true
+  echo '--- node-b.log'; tail -20 /tmp/node-b.log 2>/dev/null || true
+  bad "node runtime SIGKILL takeover status=$STATUS"
+fi
 NEW_FENCE="$(psql "$DB" -qAt -c "SELECT max(fencing_sequence) FROM kernel.pipeline_job_leases WHERE job_id='$JOB';")"
 ATTEMPTS="$(psql "$DB" -qAt -c "SELECT attempts FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 RECORDS="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_records WHERE dataset_id='$DATASET_ID' AND source_batch_key LIKE 'job-$JOB-%';")"
