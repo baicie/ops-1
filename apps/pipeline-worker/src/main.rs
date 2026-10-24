@@ -695,6 +695,7 @@ impl Worker {
         let batch_count = records.len().div_ceil(batch_size);
         let mut effects: Vec<Value> = Vec::new();
         token = self.workload_token().await?;
+        token = self.workload_token().await?;
         for (index, batch) in records.chunks(batch_size).enumerate() {
             let logical_batch = format!("batch-{}", index + 1);
             let effect = effect_id(
@@ -822,6 +823,7 @@ impl Worker {
                 std::process::exit(18);
             }
         }
+        token = self.workload_token().await?;
         for (index, batch) in records.chunks(batch_size).enumerate() {
             let logical_batch = format!("batch-{}", index + 1);
             let effect = effect_id(
