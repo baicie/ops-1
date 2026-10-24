@@ -117,6 +117,18 @@ python3 tests/runtime/claim_concurrency.py
 python3 tests/runtime/catalog_lock_race.py
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"
+  # A Node restart can adopt the Integration container before its workload
+  # token file is refreshed. Wait for the actual Catalog token, not a sleep.
+  INT_CID="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-integration/ {print $1; exit}')"
+  [ -n "$INT_CID" ] || { echo "integration container missing"; exit 1; }
+  TOKEN_READY=0
+  for _ in $(seq 1 60); do
+    if docker exec "$INT_CID" cat /run/opsweave/capability-tokens.json 2>/dev/null | grep -q '"data.catalog.v1"'; then
+      TOKEN_READY=1; break
+    fi
+    sleep 1
+  done
+  [ "$TOKEN_READY" = "1" ] || { echo "integration workload token file missing data.catalog.v1"; exit 1; }
   OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts
 fi
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
