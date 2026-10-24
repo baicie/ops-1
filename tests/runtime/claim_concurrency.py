@@ -68,9 +68,9 @@ def main():
     identities = [worker_identity(iid, str(uuid.uuid4())) for _ in range(8)]
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda pair: request("POST", "/internal/v1/pipeline-jobs/claim-next", pair[1], pair[0]), identities))
-    statuses = [status for status, _ in results]
-    if statuses.count(200) != 1 or any(s not in (200, 204) for s in statuses):
-        failures.append(f"claim-next single statuses={statuses}")
+    single_statuses = [status for status, _ in results]
+    if single_statuses.count(200) != 1 or any(s not in (200, 204) for s in single_statuses):
+        failures.append(f"claim-next single statuses={single_statuses}")
     if psql(f"SELECT status FROM kernel.pipeline_jobs WHERE job_id='{next_job}';") != "CLAIMED":
         failures.append("claim-next single job was not claimed")
     # Claim-Next with several queued Jobs must distribute them exactly once.
@@ -82,7 +82,7 @@ def main():
     claimed = [body.get("jobId") for status, body in results if status == 200]
     if any(status != 200 for status in statuses) or len(set(claimed)) != 8:
         failures.append(f"claim-next multi statuses={statuses} jobs={claimed}")
-    print(f"claim-next: single={statuses.count(200)}x200 multi={len(set(claimed))} distinct")
+    print(f"claim-next: single={single_statuses.count(200)}x200 multi={len(set(claimed))} distinct")
     if failures:
         print("\n".join("FAIL " + failure for failure in failures)); return 1
     print("Claim Concurrency Golden Path: PASS"); return 0
