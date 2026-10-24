@@ -34,6 +34,7 @@ wait_gone "$WORKER" || { echo "FAIL worker survived Instance STOP pid=$WORKER"; 
 rm -f "$MARKER"
 echo "PASS Instance STOP stopped supervised worker pid=$WORKER"
 psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
+psql "$DB" -qAt -c "UPDATE kernel.plugin_instances i SET desired_action='START', state='STARTING', observed_at=NULL, deployment_generation=i.deployment_generation+1, updated_at=now() FROM kernel.plugin_deployments d WHERE i.deployment_id=d.id AND d.plugin_id='opsweave.data-catalog';" >/dev/null
 for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 [ "$(instance_ready)" = "1" ] || { echo "FAIL catalog instance did not recover READY/START"; exit 1; }
 touch "$MARKER"
