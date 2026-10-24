@@ -63,8 +63,12 @@ OLD_WORKER_PID="$(pgrep -P "$NODE_B_PID" -f opsweave-pipeline-worker | head -1 |
 OLD_LEASE="$(psql "$DB" -qAt -c "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 OLD_FENCE="$(psql "$DB" -qAt -c "SELECT current_fence FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 OLD_BOOT="$(psql "$DB" -qAt -c "SELECT boot_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
+OLD_INSTANCE="$(psql "$DB" -qAt -c "SELECT instance_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
+OLD_GENERATION="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/nodes" | python3 -c 'import json,sys;nid=sys.argv[1];d=json.load(sys.stdin);print(next(n["generation"] for n in d if n["id"]==nid))' "$(python3 -c 'import json;print(json.load(open("data-ci/node-b/node-identity.json"))["nodeId"])')")"
+OLD_CREDENTIAL="$(python3 -c 'import json;print(json.load(open("data-ci/node-b/node-identity.json"))["credential"])')"
+OLD_NODE_ID="$(python3 -c 'import json;print(json.load(open("data-ci/node-b/node-identity.json"))["nodeId"])')"
 OLD_PPID="$(ps -o ppid= -p "$OLD_WORKER_PID" 2>/dev/null | tr -d ' ' || true)"
-echo "orphan evidence: nodePid=$NODE_B_PID workerPid=${OLD_WORKER_PID:-none} workerPpid=${OLD_PPID:-none} bootId=${OLD_BOOT:-none} lease=$OLD_LEASE fence=$OLD_FENCE"
+echo "orphan evidence: nodePid=$NODE_B_PID workerPid=${OLD_WORKER_PID:-none} workerPpid=${OLD_PPID:-none} bootId=${OLD_BOOT:-none} lease=$OLD_LEASE fence=$OLD_FENCE instance=${OLD_INSTANCE:-none} generation=$OLD_GENERATION"
 rm -f "$ROOT/data-ci/node-b/worker-enabled"
 kill -9 "$NODE_B_PID" 2>/dev/null || true
 touch "$ROOT/data-ci/node-a/worker-enabled"
@@ -90,6 +94,22 @@ RECORDS2="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalo
 EFFECTS2="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB';")"
 [ "$RECORDS2" = "$RECORDS" ] || bad "orphan created new records: $RECORDS -> $RECORDS2"
 [ "$EFFECTS2" = "$EFFECTS" ] || bad "orphan created new effects: $EFFECTS -> $EFFECTS2"
+# Send requests through the same worker-authentication path with the old
+# Lease/Fence after the replacement Node has claimed the Job.
+OLD_WORKER_ID="n:$OLD_NODE_ID:i:$OLD_INSTANCE:b:$OLD_BOOT"
+OLD_HEADERS=(-H "Authorization: Bearer $OLD_CREDENTIAL" -H "X-OpsWeave-Node-Id: $OLD_NODE_ID" -H "X-OpsWeave-Instance-Id: $OLD_INSTANCE" -H "X-OpsWeave-Node-Generation: $OLD_GENERATION" -H "X-OpsWeave-Boot-Id: $OLD_BOOT" -H "X-OpsWeave-Worker-Id: $OLD_WORKER_ID" -H 'content-type: application/json')
+STALE_HB_CODE="$(curl -sS -o /tmp/orphan-stale-heartbeat.json -w '%{http_code}' "${OLD_HEADERS[@]}" -X POST -d "{\"leaseId\":\"$OLD_LEASE\",\"fencingSequence\":$OLD_FENCE}" "$URL/internal/v1/pipeline-jobs/$JOB/heartbeat")"
+STALE_RESULT_CODE="$(curl -sS -o /tmp/orphan-stale-result.json -w '%{http_code}' "${OLD_HEADERS[@]}" -X POST -d "{\"leaseId\":\"$OLD_LEASE\",\"fencingSequence\":$OLD_FENCE,\"status\":\"FAILED\",\"output\":{},\"errorCode\":\"STALE_ORPHAN\"}" "$URL/internal/v1/pipeline-jobs/$JOB/result")"
+STALE_ERROR="$(python3 -c 'import json;d=json.load(open("/tmp/orphan-stale-heartbeat.json"));print(d.get("code",""))' 2>/dev/null || true)"
+RESULT_COUNT="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_results WHERE job_id='$JOB';")"
+FINAL_RECORDS="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_records WHERE dataset_id='$DATASET_ID' AND source_batch_key LIKE 'job-$JOB-%';")"
+FINAL_EFFECTS="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB';")"
+echo "stale request: heartbeat=$STALE_HB_CODE code=$STALE_ERROR result=$STALE_RESULT_CODE results=$RESULT_COUNT records=$FINAL_RECORDS effects=$FINAL_EFFECTS"
+[ "$STALE_HB_CODE" != "200" ] || bad "stale orphan heartbeat was accepted"
+[ "$STALE_RESULT_CODE" != "200" ] || bad "stale orphan result was accepted"
+[ "$RESULT_COUNT" = "1" ] || bad "terminal result count=$RESULT_COUNT"
+[ "$FINAL_RECORDS" = "1001" ] || bad "stale request changed records=$FINAL_RECORDS"
+[ "$FINAL_EFFECTS" = "3" ] || bad "stale request changed effects=$FINAL_EFFECTS"
 if [ -n "${OLD_WORKER_PID:-}" ] && kill -0 "$OLD_WORKER_PID" 2>/dev/null; then
   CURRENT_PPID="$(ps -o ppid= -p "$OLD_WORKER_PID" 2>/dev/null | tr -d ' ' || true)"
   ok "orphan worker survived node SIGKILL (pid=$OLD_WORKER_PID ppid=$CURRENT_PPID) but produced no new effects"
