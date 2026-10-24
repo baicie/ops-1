@@ -110,6 +110,7 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_advanced.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_node_managed.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_two_node_takeover.sh
+python3 tests/runtime/claim_concurrency.py
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"
