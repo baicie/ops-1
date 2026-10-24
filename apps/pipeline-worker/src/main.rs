@@ -116,6 +116,7 @@ impl Worker {
             .trim_end_matches('/')
             .to_string();
         let client = Client::builder()
+            .no_proxy()
             .timeout(Duration::from_secs(20))
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
@@ -1371,7 +1372,7 @@ mod tests {
 
     fn test_worker_with(policy: SourcePolicy) -> Worker {
         Worker {
-            client: Client::builder().build().unwrap(),
+            client: Client::builder().no_proxy().build().unwrap(),
             kernel_url: "http://127.0.0.1:1".into(),
             node_id: Uuid::new_v4(),
             credential: "test".into(),
