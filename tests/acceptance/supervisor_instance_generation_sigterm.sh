@@ -65,6 +65,17 @@ GENERATION="$(psql "$DB" -qAt -c "SELECT generation FROM kernel.nodes WHERE id='
 psql "$DB" -qAt -c "UPDATE kernel.nodes SET generation=generation+1 WHERE id='$NODE_A_ID';" >/dev/null
 wait_gone "$WORKER" || { echo "FAIL worker survived Node generation change pid=$WORKER"; exit 1; }
 echo "PASS Node generation change ($GENERATION -> $((GENERATION+1))) stopped supervised worker pid=$WORKER"
+# Restore the durable generation and restart the Node: generation quarantine must
+# be reversible and must restart exactly one supervised worker.
+psql "$DB" -qAt -c "UPDATE kernel.nodes SET generation=$GENERATION WHERE id='$NODE_A_ID';" >/dev/null
+kill -TERM "$NODE_A_PID" 2>/dev/null || true
+for _ in $(seq 1 40); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; done
+NODE_A_PID="$(tests/runtime/start_node.sh node-a 9101)"
+for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
+[ "$(instance_ready)" = "1" ] || { echo "FAIL instance did not recover after generation restore"; exit 1; }
+touch "$MARKER"
+WORKER="$(wait_worker)" || { echo "FAIL worker did not recover after generation restore"; exit 1; }
+echo "PASS Node generation quarantine released; worker pid=$WORKER"
 # Node SIGTERM: the Node process must exit and not leave an unowned live Worker.
 kill -TERM "$NODE_A_PID" 2>/dev/null || true
 for _ in $(seq 1 60); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; done
