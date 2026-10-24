@@ -186,21 +186,49 @@ impl Worker {
     ) -> tokio::task::JoinHandle<()> {
         let worker = self.clone();
         tokio::spawn(async move {
+            let mut transient_failures = 0u32;
             loop {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 if cancelled.load(Ordering::SeqCst) {
                     return;
                 }
-                if worker.heartbeat(job_id, &lease).await.is_err() {
-                    cancelled.store(true, Ordering::SeqCst);
-                    return;
+                match worker.heartbeat_status(job_id, &lease).await {
+                    Ok(status) => {
+                        if status.is_success() {
+                            transient_failures = 0;
+                        } else if matches!(
+                            status,
+                            StatusCode::UNAUTHORIZED
+                                | StatusCode::FORBIDDEN
+                                | StatusCode::CONFLICT
+                                | StatusCode::NOT_FOUND
+                        ) {
+                            cancelled.store(true, Ordering::SeqCst);
+                            return;
+                        } else {
+                            transient_failures = transient_failures.saturating_add(1);
+                            if transient_failures >= 3 {
+                                cancelled.store(true, Ordering::SeqCst);
+                                return;
+                            }
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                    }
+                    Err(_) => {
+                        transient_failures = transient_failures.saturating_add(1);
+                        if transient_failures >= 3 {
+                            cancelled.store(true, Ordering::SeqCst);
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
                 }
             }
         })
     }
 
-    async fn heartbeat(&self, job_id: Uuid, lease: &ClaimResponse) -> Result<()> {
-        let (status, body) = self
+    async fn heartbeat_status(&self, job_id: Uuid, lease: &ClaimResponse) -> Result<StatusCode> {
+        let (status, _body) = self
             .call(
                 Method::POST,
                 &format!("/internal/v1/pipeline-jobs/{job_id}/heartbeat"),
@@ -209,8 +237,13 @@ impl Worker {
                 })),
             )
             .await?;
+        Ok(status)
+    }
+
+    async fn heartbeat(&self, job_id: Uuid, lease: &ClaimResponse) -> Result<()> {
+        let status = self.heartbeat_status(job_id, lease).await?;
         if !status.is_success() {
-            bail!("heartbeat failed ({status}): {body}");
+            bail!("heartbeat failed ({status})");
         }
         Ok(())
     }
@@ -716,6 +749,9 @@ impl Worker {
             )
             .await?;
             self.heartbeat(job_id, &lease).await?;
+            if cancelled.load(Ordering::SeqCst) {
+                bail!("execution cancelled before new sink effect");
+            }
             token = self.workload_token().await?;
             let request_digest = digest(&json!({
                 "effectId": effect,
