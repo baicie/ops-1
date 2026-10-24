@@ -86,7 +86,16 @@ idempotent; a different one is a conflict.
 - Marker removal, Instance no longer READY, Node quarantine and Node generation
   change are checked by the supervisor's 500ms control loop; it kills the live
   child.
-- Worker self-SIGKILL is recovered by supervisor backoff (2s, 4s, … capped 30s).
+- Instance STOP and recovery are tested by scaling the Catalog deployment to
+  zero and back; the recovered Worker has a new PID and the Node adopts the
+  recovered Instance.
+- Node generation change is tested against a real Node Runtime: the stale
+  generation stops the Worker; restoring the durable generation and restarting
+  the Node releases quarantine and starts exactly one new Worker.
+- Node SIGTERM is tested against a live supervised Worker; the Node process exits
+  and the harness records the orphan child PPID=1, then reaps only that PID.
+- Worker self-SIGKILL is recovered by supervisor backoff (2s, 4s, … capped 30s);
+  three consecutive kills produce three new supervised PIDs.
 
 ## 4. Source Security
 
@@ -101,11 +110,12 @@ Implemented:
 - Content-Length cap, streaming chunk cap, total timeout, per-read timeout;
 - source JSON array/items shape and record count limits.
 
-Tests now cover DNS rebinding/mixed answers with deterministic resolution,
-actual TCP peer pinning, slow header/body, redirect 301/302/303/307/308,
-malformed/truncated JSON, Content-Length mismatch, oversized chunked body,
+Tests cover DNS rebinding/mixed answers with deterministic resolution, actual
+TCP peer pinning, slow header/body, infinite chunked body, redirect
+301/302/303/307/308, malformed/truncated JSON, Content-Length mismatch,
 environment proxy bypass with a counted proxy, and a normal allowed source.
-A source-timeout→no-Sink integration gate remains outstanding.
+A real published PipelineRevision with a slow HTTP source additionally proves
+the Worker fails before any Snapshot/Sink write: records=0, effects=0, result=1.
 
 ## 5. Heartbeat Failure Policy
 
@@ -120,22 +130,18 @@ A source-timeout→no-Sink integration gate remains outstanding.
   commit after the new fence.
 
 A real local mock Kernel exercises single/continuous 429/500/502/503, transport
-disconnect and 401/403/404/409. Outage longer than Lease TTL, Deadline-vs-Sink
-concurrency and Retry-After remain gaps.
+disconnect and 401/403/404/409; the Worker sends exactly 1 or 3 requests and
+then cancels. Outage longer than Lease TTL, Deadline-vs-Sink concurrency and
+Retry-After remain gaps.
 
 ## 6. Explicit Known Limits
 
 These are not claimed as PASS:
 
-1. Supervisor: Instance STOP, Node generation change and Node SIGTERM are still
-   missing from the single automated PID matrix. Revocation/quarantine, marker,
-   worker SIGKILL, crash loop, Node SIGKILL and orphan are covered.
-2. Source Security: a source-timeout→no-Sink integration gate and an explicit
-   infinite-chunk test are missing; TCP peer pinning is covered by a local test.
-3. Heartbeat: outage longer than Lease TTL, Deadline-vs-Sink concurrency and
-   Retry-After behavior are not automated; the real mock-Kernel transient/fatal
-   matrix is covered.
-4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
+1. Heartbeat lifecycle: an outage longer than Lease TTL, Deadline-vs-Sink
+   concurrency and Retry-After behavior are not automated. The real mock HTTP
+   transient/fatal matrix and bounded cancellation are covered.
+2. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    are outside this RC.
 
 ## 7. Terminalization State Machine
@@ -184,14 +190,15 @@ Attacks and controls:
 |---|---|---|
 | loopback/private/metadata/metadata IPv6 | address classification, allowlist | address matrix; redirect tests |
 | redirect to private | redirect policy none | 301/302/303/307/308 |
-| DNS rebinding | resolve once, check every answer, pin resolved IP | static policy tests only; live DNS pending |
-| environment proxy bypass | `.no_proxy()` | code only; live proxy pending |
+| DNS rebinding | resolve once, check every answer, pin resolved IP | deterministic rebinding/mixed tests; TCP peer assertion |
+| environment proxy bypass | `.no_proxy()` | counted local proxy; zero proxy requests |
 | chunked/CL oversized | length + streaming cap | chunked/CL tests |
-| slow header/body | connect/request/read timeouts | not yet live-injected |
+| slow header/body | connect/request/read timeouts | local slow HTTP fixture; bounded failure |
 | malformed/truncated JSON | JSON parse/shape failure | unit tests |
 
-Explicit non-claim: the current PASS does **not** prove DNS rebinding or proxy
-bypass is impossible; those remain P1 evidence gaps.
+The tests use deterministic local resolution and a local proxy; they do not
+prove a hostile system resolver cannot influence the process before the policy
+is applied. Production should still use a trusted resolver/network policy.
 
 ## 10. Failure Recovery Runbook
 
