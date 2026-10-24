@@ -660,7 +660,7 @@ impl Worker {
             std::process::exit(17);
         }
         self.heartbeat(job_id, &lease).await?;
-        let token = self.workload_token().await?;
+        let mut token = self.workload_token().await?;
         let (schema_status, schema_body) = self
             .capability(
                 &token,
@@ -694,6 +694,7 @@ impl Worker {
         let batch_size = 500usize;
         let batch_count = records.len().div_ceil(batch_size);
         let mut effects: Vec<Value> = Vec::new();
+        token = self.workload_token().await?;
         for (index, batch) in records.chunks(batch_size).enumerate() {
             let logical_batch = format!("batch-{}", index + 1);
             let effect = effect_id(
@@ -716,6 +717,7 @@ impl Worker {
             )
             .await?;
             self.heartbeat(job_id, &lease).await?;
+            token = self.workload_token().await?;
             let request_digest = digest(&json!({
                 "effectId": effect,
                 "pipelineId": definition.pipeline_id,
