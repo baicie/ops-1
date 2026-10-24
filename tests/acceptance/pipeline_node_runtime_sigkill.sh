@@ -27,7 +27,14 @@ for _ in $(seq 1 120); do
   [ "$STATUS" = "RUNNING" ] && [ "$EFFECTS" -ge 1 ] && break
   sleep 0.2
 done
-[ "$STATUS" = "RUNNING" ] && [ "$EFFECTS" -ge 1 ] || bad "Node A did not produce the first effect"
+if [ "$STATUS" != "RUNNING" ] || [ "$EFFECTS" -lt 1 ]; then
+  echo "diagnostics: status=$STATUS effects=$EFFECTS"
+  psql "$DB" -qAt -c "SELECT job_id,status,attempts,current_fence,current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB';" || true
+  psql "$DB" -qAt -c "SELECT lease_id,worker_id,status FROM kernel.pipeline_job_leases WHERE job_id='$JOB';" || true
+  ps -eo pid,ppid,command | grep -E 'opsweave-pipeline-worker|opsweave-node' | grep -v grep || true
+  tail -15 /tmp/node-a.log || true
+  bad "Node A did not produce the first effect"
+fi
 NODE_A_PID="$(cat /tmp/node-a.pid)"
 WORKER_A_PID="$(pgrep -P "$NODE_A_PID" -f opsweave-pipeline-worker | head -1 || true)"
 OLD_LEASE="$(psql "$DB" -qAt -c "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
