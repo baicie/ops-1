@@ -19,6 +19,11 @@ env OPSWEAVE_WORKER_KERNEL_URL="$URL" OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-
   OPSWEAVE_WORKER_BATCH_DELAY_MS=30000 \
   ./target/debug/opsweave-pipeline-worker >/tmp/long-heartbeat.log 2>&1 &
 WORKER_PID=$!
+KERNEL_PID="$(cat /tmp/data-kernel.pid)"
+# Temporary Kernel unreachability: one heartbeat attempt is allowed to fail and
+# retry, but the job must not lose its Lease or create a second Effect.
+( sleep 40; kill -STOP "$KERNEL_PID"; sleep 15; kill -CONT "$KERNEL_PID" ) &
+OUTAGE_PID=$!
 sleep 75
 STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 [ "$STATUS" = "SUCCEEDED" ] && bad "job completed before long-running proof"
@@ -27,6 +32,7 @@ LEASE_STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_job_lease
 [ "$LEASE_STATUS" = "ACTIVE" ] || bad "lease state after 75s is $LEASE_STATUS"
 HEARTBEATS="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE' AND heartbeat_at > acquired_at + interval '20 seconds';")"
 [ "$HEARTBEATS" = "1" ] || bad "lease heartbeat was not refreshed"
+wait "$OUTAGE_PID" || true
 if ! wait "$WORKER_PID"; then
   echo "worker failed during long heartbeat job"
   tail -30 /tmp/long-heartbeat.log || true

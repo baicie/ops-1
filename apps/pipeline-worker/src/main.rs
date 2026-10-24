@@ -428,6 +428,7 @@ impl Worker {
             addresses[0]
         };
         let mut builder = Client::builder()
+            .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(20));
@@ -1266,6 +1267,87 @@ mod tests {
                 "{value} should be public"
             );
         }
+    }
+
+    fn test_worker() -> Worker {
+        Worker {
+            client: Client::builder().build().unwrap(),
+            kernel_url: "http://127.0.0.1:1".into(),
+            node_id: Uuid::new_v4(),
+            credential: "test".into(),
+            generation: 1,
+            worker_id: "test".into(),
+            instance_id: Uuid::new_v4(),
+            boot_id: Uuid::new_v4(),
+        }
+    }
+
+    async fn serve_once(response: Vec<u8>) -> String {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buffer = [0u8; 1024];
+                let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buffer).await;
+                let _ = socket.write_all(&response).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    async fn with_allowlist<F, T>(future: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        let old = std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST").ok();
+        std::env::set_var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST", "127.0.0.1");
+        let result = future.await;
+        match old {
+            Some(value) => std::env::set_var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST", value),
+            None => std::env::remove_var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST"),
+        }
+        result
+    }
+
+    #[tokio::test]
+    async fn source_redirect_is_rejected() {
+        let url = serve_once(
+            b"HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/\r\nContent-Length: 0\r\n\r\n"
+                .to_vec(),
+        )
+        .await;
+        let error = with_allowlist(test_worker().fetch_source(&url))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("redirect"));
+    }
+
+    #[tokio::test]
+    async fn oversized_chunked_source_is_rejected() {
+        let mut response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+        let chunk = vec![b'a'; 1024 * 1024];
+        for _ in 0..5 {
+            response.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+            response.extend_from_slice(&chunk);
+            response.extend_from_slice(b"\r\n");
+        }
+        response.extend_from_slice(b"0\r\n\r\n");
+        let url = serve_once(response).await;
+        let error = with_allowlist(test_worker().fetch_source(&url))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("exceeds limit"));
+    }
+
+    #[tokio::test]
+    async fn malformed_source_json_is_rejected() {
+        let url = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n{no}".to_vec()).await;
+        let error = with_allowlist(test_worker().fetch_source(&url))
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("parse source JSON"));
     }
 
     #[tokio::test]
