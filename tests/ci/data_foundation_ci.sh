@@ -94,6 +94,7 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_two_node_takeover.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/kernel_restart_takeover.sh
 KERNEL_PID="$(cat /tmp/data-kernel.pid)"
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_long_heartbeat.sh
 python3 tests/runtime/claim_concurrency.py
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then

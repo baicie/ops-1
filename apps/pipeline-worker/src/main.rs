@@ -808,7 +808,7 @@ impl Worker {
             last_receipt = receipt;
             if let Ok(value) = std::env::var("OPSWEAVE_WORKER_BATCH_DELAY_MS") {
                 if let Ok(milliseconds) = value.parse::<u64>() {
-                    tokio::time::sleep(Duration::from_millis(milliseconds.min(5000))).await;
+                    tokio::time::sleep(Duration::from_millis(milliseconds.min(30000))).await;
                 }
             }
             if std::env::var("OPSWEAVE_WORKER_CRASH_AFTER_BATCH")
