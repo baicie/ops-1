@@ -11,6 +11,7 @@ export OPSWEAVE_DATA_INTEGRATION_SELECTOR="zone=node-b"
 PIDS=()
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+  if [ -f /tmp/data-kernel.pid ]; then kill "$(cat /tmp/data-kernel.pid)" 2>/dev/null || true; fi
   docker ps -aq --filter label=opsweave.managed=true | xargs -r docker rm -f >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -35,27 +36,8 @@ PIDS+=($!)
 sleep 1
 
 echo "== Kernel"
-env \
-  OPSWEAVE_BIND=0.0.0.0:18181 \
-  OPSWEAVE_PUBLIC_URL="$OPSWEAVE_URL" \
-  DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
-  OPSWEAVE_DATA_DIR="$ROOT/data-ci" \
-  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-web/dist" \
-  OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
-  OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
-  OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin' \
-  OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \
-  OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$(cat keys/publisher.pub)" \
-  OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
-  OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost,::1 \
-  OPSWEAVE_WORKLOAD_TOKEN_SECONDS=5 \
-  OPSWEAVE_WORKLOAD_TOKEN_REFRESH_GRACE_SECONDS=1 \
-  OPSWEAVE_PLUGIN_DB_HOST=172.17.0.1 \
-  OPSWEAVE_PLUGIN_KERNEL_URL=http://172.17.0.1:18181 \
-  OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS=172.17.0.1 \
-  RUST_LOG=info ./target/debug/opsweave-kernel >/tmp/data-kernel.log 2>&1 &
-KERNEL_PID=$!
-PIDS+=($!)
+KERNEL_PID="$(tests/runtime/start_kernel.sh)"
+PIDS+=($KERNEL_PID)
 for _ in $(seq 1 60); do curl -fsS "$OPSWEAVE_URL/livez" >/dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS "$OPSWEAVE_URL/livez" >/dev/null
 
@@ -110,6 +92,8 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_advanced.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_node_managed.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_two_node_takeover.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/kernel_restart_takeover.sh
+KERNEL_PID="$(cat /tmp/data-kernel.pid)"
 python3 tests/runtime/claim_concurrency.py
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
