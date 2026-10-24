@@ -33,7 +33,7 @@ psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=0, gen
 wait_gone "$WORKER" || { echo "FAIL worker survived Instance STOP pid=$WORKER"; exit 1; }
 rm -f "$MARKER"
 echo "PASS Instance STOP stopped supervised worker pid=$WORKER"
-psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, placement=jsonb_set(placement, '{nodeSelector,zone}', '"node-a"', true), updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
+psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, placement=jsonb_set(placement, '{nodeSelector,zone}', to_jsonb('node-a'::text), true), updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 psql "$DB" -qAt -c "UPDATE kernel.plugin_instances i SET desired_action='START', state='STARTING', observed_at=NULL, deployment_generation=i.deployment_generation+1, updated_at=now() FROM kernel.plugin_deployments d WHERE i.deployment_id=d.id AND d.plugin_id='opsweave.data-catalog';" >/dev/null
 for _ in $(seq 1 60); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 if [ "$(instance_ready)" != "1" ]; then
