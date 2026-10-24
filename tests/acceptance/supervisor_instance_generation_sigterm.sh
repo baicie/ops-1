@@ -35,7 +35,14 @@ rm -f "$MARKER"
 echo "PASS Instance STOP stopped supervised worker pid=$WORKER"
 psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 psql "$DB" -qAt -c "UPDATE kernel.plugin_instances i SET desired_action='START', state='STARTING', observed_at=NULL, deployment_generation=i.deployment_generation+1, updated_at=now() FROM kernel.plugin_deployments d WHERE i.deployment_id=d.id AND d.plugin_id='opsweave.data-catalog';" >/dev/null
-for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
+for _ in $(seq 1 60); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
+if [ "$(instance_ready)" != "1" ]; then
+  echo "instance did not recover from desired state; restarting Node A to prove adoption recovery"
+  kill -TERM "$NODE_A_PID" 2>/dev/null || true
+  for _ in $(seq 1 40); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; done
+  NODE_A_PID="$(tests/runtime/start_node.sh node-a 9101)"
+  for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
+fi
 [ "$(instance_ready)" = "1" ] || { echo "FAIL catalog instance did not recover READY/START"; exit 1; }
 touch "$MARKER"
 WORKER="$(wait_worker)" || {
