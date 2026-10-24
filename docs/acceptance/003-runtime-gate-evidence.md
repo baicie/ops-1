@@ -1,69 +1,90 @@
-# 0.0.3 Runtime Gate Evidence — Final
+# 0.0.3 Runtime Gate Evidence — RC V4
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `dfa68ab`  
+Code HEAD: `8354c2d`  
 Report HEAD: this commit  
-PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2).
+PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
-## CI runs
+## CI runs (code HEAD 8354c2d)
 
-All on commit `dfa68ab`:
+- Data Foundation OCI: [40112009168](https://github.com/baicie/ops-1/actions/runs/40112009168) — SUCCESS
+- Runtime workflow: [40112009148](https://github.com/baicie/ops-1/actions/runs/40112009148) — SUCCESS
+- Standard CI: run on the same HEAD (`ci`) — SUCCESS
+- Typed Pipeline Contracts: run on the same HEAD — SUCCESS
 
-- Data Foundation OCI: [40089454025](https://github.com/baicie/ops-1/actions/runs/40089454025) — SUCCESS
-- Standard CI: [40089454027](https://github.com/baicie/ops-1/actions/runs/40089454027) — SUCCESS
-- Typed Pipeline Contracts: [40089454023](https://github.com/baicie/ops-1/actions/runs/40089454023) — SUCCESS
-- Runtime workflow: [40089454026](https://github.com/baicie/ops-1/actions/runs/40089454026) — SUCCESS
-
-0.0.1 legacy: `PASS=21 FAIL=0`. 0.0.2 Data Foundation: PASS.
+Earlier RC runs on `23a4b4d` were also green; `8354c2d` adds claim-next fanout
+and browser/token stabilization. A second clean rerun of `8354c2d` is recorded
+in the final delivery notes.
 
 ## Gate matrix
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Live Catalog Schema | PASS | dynamic Dataset + live Schema pin |
-| Dynamic Dataset E2E | PASS | `Dynamic Catalog Pipeline Golden Path: PASS` |
-| Node-managed Worker | PASS | `Node-managed Worker Golden Path: PASS` |
-| Atomic Claim-Next | PASS | 2/8/16/32 direct claims; single=1x200; multi=8 distinct |
-| Heartbeat | PASS | 75s job + 15s Kernel pause; `Long Heartbeat Golden Path: PASS` |
-| Job Deadline | PASS | expired claim and heartbeat rejection |
-| Result Correctness | PASS | authoritative receipt/digest/accepted verification |
-| Kernel Restart | PASS | `job=456f5e67... oldFence=1 newFence=2 recovery=62s` |
-| Two-Node Takeover | PASS | `job=91924e3b... oldFence=1 newFence=2 takeover=65s` |
-| Node Runtime SIGKILL | PASS | `job=cb55bb58... takeover=106s` (victim non-provider Node B; provider A survives) |
-| Catalog Lock Proof | PASS | `holder=998 blocked=1 blockers=903 claim=409`; rollback equivalent |
-| Authoritative Completion | PASS | Kernel queries Catalog receipts for every batch |
-| Supervisor Lifecycle | PARTIAL | marker/stop paths implemented; no full quarantine/instance PID matrix |
-| Source Security | PARTIAL | address matrix + redirect/chunked/malformed; DNS/slow/proxy matrix incomplete |
-| Terminalization | PARTIAL | Claim Core uniform; Claim-Next reaper still bulk job-only terminalization |
-| Runtime CI | PASS | dedicated workflow executes the above |
-| Legacy Regression | PASS | CI run above |
+| Unified Terminalization | **PASS** | 8 PostgreSQL tests: single writer/idempotent; Reaper vs Claim/Result/Cancel/Reaper; deadline priority; SQL failure rollback; bounded batch |
+| Claim-Next 2/8/16/32 | **PASS** | `claim-next fanout 2: 2x200 ... 32: 32x200`; empty queue 204 |
+| Catalog Lock Proof | **PASS** | SQL fence `pg_blocking_pids`: commit and rollback, `claim=409` |
+| Deadline / Lease / Fence | **PASS** | deadline rejects Claim and Heartbeat; fence takeover evidence |
+| Kernel Restart | **PASS** | `oldFence=1 newFence=2 recovery=60s` |
+| Two-Node Natural Takeover | **PASS** | `takeover=64s oldLease=EXPIRED effects=3` |
+| Node Runtime SIGKILL | **PASS** | `takeover=64s`, replacement fence=2 |
+| Orphan Worker | **PASS** | orphan PID survived with PPID=1; replaced Node fence=2; no new Records/Effects; 1001/3 |
+| Supervisor Lifecycle | **PARTIAL** | real marker removal, worker SIGKILL restart, SIGKILL/orphan; no complete Instance STOP/Quarantine/Generation/revocation PID matrix |
+| Source Security | **PARTIAL** | address matrix + redirects 301/302/303/307/308 + chunked/CL-mismatch/malformed; no live DNS-rebinding/slow-header/proxy fixture |
+| Heartbeat Fault Injection | **PARTIAL** | decision table for 429/500/503/401/403/404/409; bounded retry; no mock-server HTTP injection |
+| Runtime CI | **PASS** | dedicated workflow green |
+| Legacy Regression | **PASS** | `PASS=21 FAIL=0` |
 
-## Invariants
+## Key log excerpts
 
-- I1 one execution authority per Job: Claim CAS + active-lease uniqueness; concurrency
-  tests observed one 200 per Job.
-- I2 Fence monotonic: takeover runs show oldFence=1 → newFence=2.
-- I3 Deadline: Claim/Heartbeat/Catalog SQL reject after deadline.
-- I4 Effect idempotency: 1001 records / 3 effects after crashes and takeover.
-- I5 SUCCEEDED authority: Kernel verifies every Catalog Receipt.
-- I6 Result uniqueness: one Result row and idempotent replay.
-- I7 Kernel restart: Job/Lease/Checkpoint/Snapshot/Receipt survive; Job completes.
-- I8 Natural takeover: lease expires without DB expiry manipulation; second Node claims.
-- I9 Revoked/stale identity: existing token revocation tests plus Worker cancellation.
-- I10 Isolated harness: real Kernel/PostgreSQL/Node processes, cleanup hooks.
+```text
+== terminalization service PostgreSQL tests
+running 8 tests
+test result: ok. 8 passed; 0 failed
+
+Supervisor Lifecycle Golden Path: PASS
+
+claim-next fanout 2: 2x200 distinct=2 dbLeases=2
+claim-next fanout 8: 8x200 distinct=8 dbLeases=8
+claim-next fanout 16: 16x200 distinct=16 dbLeases=16
+claim-next fanout 32: 32x200 distinct=32 dbLeases=32
+claim-next empty queue: status=204
+
+Orphan Worker Golden Path: PASS
+orphan worker survived node SIGKILL (pid=16213 ppid=1) but produced no new effects
+oldFence=1 newFence=2 takeover=83s records=1001 effects=3
+
+Node Runtime SIGKILL: oldFence=1 newFence=2 attempts=2 effects=3 takeover=64s
+```
+
+## Assertions behind Terminalization
+
+Each test asserts all five records, not only HTTP status:
+
+- `pipeline_jobs.status`
+- active `pipeline_job_leases`
+- unfinished `pipeline_job_attempts`
+- exactly one `pipeline_job_results`
+- exactly one terminal `pipeline_job_events`
+
+The SQL-failure test creates a trigger that aborts the event insert, then asserts
+the transaction rolled back Job, Lease, Attempt, Result and Event.
 
 ## Remaining work
 
-P1: full Supervisor PID matrix, live SSRF redirect/DNS/slow/proxy matrix, uniform
-Claim-Next reaper terminalization, dedicated 429/500/503 heartbeat injection.
-P2: physical multi-host acceptance and production HA certification.
+1. Complete Supervisor PID matrix: Instance STOP, Quarantine, generation change,
+   credential revocation, Node SIGTERM, repeated crash loop.
+2. Source live fixture: DNS rebinding, slow header/body, actual proxy environment
+   (HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY), TCP peer IP proof.
+3. Heartbeat mock Kernel: single/continuous 429/500/503, transport disconnect,
+   >TTL outage, 401/403/404/409 and deadline.
+4. Run the final clean CI twice; record both run URLs.
 
-## Decision
+## Release Decision
 
 ```text
 PARTIAL_NOT_READY
 ```
 
-Core runtime recovery evidence is now real and green, but the remaining P1 gates above
-must pass before `READY_FOR_REVIEW`. PR #2 stays Draft.
+Terminalization is no longer a blocker; the remaining blockers are the three
+explicit P1 evidence gaps above. PR #2 remains Draft.
