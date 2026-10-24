@@ -33,7 +33,7 @@ psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=0, gen
 wait_gone "$WORKER" || { echo "FAIL worker survived Instance STOP pid=$WORKER"; exit 1; }
 rm -f "$MARKER"
 echo "PASS Instance STOP stopped supervised worker pid=$WORKER"
-psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
+psql "$DB" -qAt -c "UPDATE kernel.plugin_deployments SET desired_replicas=1, generation=generation+1, placement=jsonb_set(placement, '{nodeSelector,zone}', '"node-a"', true), updated_at=now() WHERE plugin_id='opsweave.data-catalog';" >/dev/null
 psql "$DB" -qAt -c "UPDATE kernel.plugin_instances i SET desired_action='START', state='STARTING', observed_at=NULL, deployment_generation=i.deployment_generation+1, updated_at=now() FROM kernel.plugin_deployments d WHERE i.deployment_id=d.id AND d.plugin_id='opsweave.data-catalog';" >/dev/null
 for _ in $(seq 1 60); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 if [ "$(instance_ready)" != "1" ]; then
@@ -43,7 +43,13 @@ if [ "$(instance_ready)" != "1" ]; then
   NODE_A_PID="$(tests/runtime/start_node.sh node-a 9101)"
   for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 fi
-[ "$(instance_ready)" = "1" ] || { echo "FAIL catalog instance did not recover READY/START"; exit 1; }
+[ "$(instance_ready)" = "1" ] || {
+  echo "FAIL catalog instance did not recover READY/START"
+  psql "$DB" -x -c "SELECT id,status,desired_replicas,generation,placement FROM kernel.plugin_deployments WHERE plugin_id='opsweave.data-catalog';" || true
+  psql "$DB" -x -c "SELECT i.id,i.node_id,i.slot,i.state,i.desired_action,i.deployment_generation,i.last_error FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog';" || true
+  psql "$DB" -x -c "SELECT id,name,status,last_seen_at FROM kernel.nodes ORDER BY name;" || true
+  exit 1
+}
 touch "$MARKER"
 WORKER="$(wait_worker)" || {
   echo "FAIL supervisor did not restart worker after Instance STOP marker=$(test -f "$MARKER" && echo yes || echo no)"
