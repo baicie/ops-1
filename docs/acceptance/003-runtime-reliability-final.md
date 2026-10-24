@@ -133,3 +133,76 @@ These are not claimed as PASS:
    decision table and bounded retry are tested.
 4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    are outside this RC.
+
+## 7. Terminalization State Machine
+
+```text
+QUEUED ──claim──> CLAIMED ──start──> RUNNING
+  │                  │                │
+  ├──cancel──────────┴────────────────┴──> CANCELLED
+  ├──reaper(deadline/attempts)───────────> FAILED
+  └──worker result───────────────────────> SUCCEEDED | FAILED | CANCELLED
+```
+
+Terminal states are absorbing. A second terminal transition is an idempotent
+no-op only when the requested status matches; a different status is a conflict.
+The Result row primary key guarantees at most one Result.
+
+## 8. Worker Identity Trust Boundary
+
+- Node enrollment creates a Node credential; only Node Runtime receives it.
+- Worker identity is `n:<node>:i:<instance>:b:<boot>` and must match Node headers,
+  generation, assigned Instance and Boot ID.
+- Worker auth additionally requires a fresh Node heartbeat and READY/START
+  Instance; an orphan worker loses authority when Node freshness/Lease/Fence
+  expires.
+- A Worker must never receive the Node credential through Pipeline input; it
+  reads the Node identity file owned by Node Runtime.
+- Kernel service identities (`opsweave.kernel.catalog`,
+  `opsweave.pipeline.worker`) are narrower than arbitrary plugin principals.
+
+## 9. Source Security Threat Model
+
+Assets: external source URL, DNS answers, resolved IP, HTTP response bytes, and
+the Catalog sink.
+
+Trust boundaries:
+
+1. Pipeline input/Config → Worker SourcePolicy;
+2. DNS answer → pinned socket address;
+3. HTTP client/proxy environment → actual TCP peer;
+4. source JSON → bounded Record array;
+5. Worker → Kernel workload token / Catalog fenced transaction.
+
+Attacks and controls:
+
+| Attack | Control | Test |
+|---|---|---|
+| loopback/private/metadata/metadata IPv6 | address classification, allowlist | address matrix; redirect tests |
+| redirect to private | redirect policy none | 301/302/303/307/308 |
+| DNS rebinding | resolve once, check every answer, pin resolved IP | static policy tests only; live DNS pending |
+| environment proxy bypass | `.no_proxy()` | code only; live proxy pending |
+| chunked/CL oversized | length + streaming cap | chunked/CL tests |
+| slow header/body | connect/request/read timeouts | not yet live-injected |
+| malformed/truncated JSON | JSON parse/shape failure | unit tests |
+
+Explicit non-claim: the current PASS does **not** prove DNS rebinding or proxy
+bypass is impossible; those remain P1 evidence gaps.
+
+## 10. Failure Recovery Runbook
+
+1. **Job stuck RUNNING**: check `pipeline_jobs`, `pipeline_job_leases`,
+   `pipeline_job_attempts`, `pipeline_job_results`, `pipeline_job_events`.
+   Trigger a claim-next to run the bounded Reaper; do not issue ad-hoc full-table
+   UPDATEs.
+2. **Reaper suspected duplicate**: inspect `pipeline_job_results` primary key,
+   event count per job, and active lease count; run the terminalization tests.
+3. **Node lost**: confirm Node `last_seen_at`/status, wait for Lease expiry, let
+   the other Node claim; verify old fence cannot write.
+4. **Orphan worker suspected**: record PID/PPID/Boot/Worker/Lease/Fence; verify
+   Node freshness and Lease expiry; confirm no new Effect/Records after takeover;
+   terminate only the recorded harness-owned PID.
+5. **Kernel restart**: restart Kernel, verify migrations, nodes re-enroll, then
+   observe `claim-next` takeover; do not edit Lease expiry.
+6. **CI failure**: preserve `/tmp/data-kernel.log`, node logs, worker logs and
+   PostgreSQL query output; do not extend sleeps to hide races.

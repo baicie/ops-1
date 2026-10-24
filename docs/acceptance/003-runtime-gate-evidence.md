@@ -8,14 +8,15 @@ PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Rea
 
 ## CI runs (code HEAD 8354c2d)
 
-- Data Foundation OCI: [40112009168](https://github.com/baicie/ops-1/actions/runs/40112009168) — SUCCESS
-- Runtime workflow: [40112009148](https://github.com/baicie/ops-1/actions/runs/40112009148) — SUCCESS
+- Data Foundation OCI: [40112009168](https://github.com/baicie/ops-1/actions/runs/40112009168) — SUCCESS (attempt 1 and attempt 2)
+- Runtime workflow: [40112009148](https://github.com/baicie/ops-1/actions/runs/40112009148) — SUCCESS (attempt 1 and attempt 2)
 - Standard CI: run on the same HEAD (`ci`) — SUCCESS
 - Typed Pipeline Contracts: run on the same HEAD — SUCCESS
 
-Earlier RC runs on `23a4b4d` were also green; `8354c2d` adds claim-next fanout
-and browser/token stabilization. A second clean rerun of `8354c2d` is recorded
-in the final delivery notes.
+A **second clean rerun of the same code HEAD** was executed after the docs-only
+change: Data Foundation and Runtime runs `40112009168` / `40112009148` both have
+`run_attempt=2` and `conclusion=success`. This is the required repeat run for
+order-independent fixture cleanup.
 
 ## Gate matrix
 
