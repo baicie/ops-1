@@ -27,7 +27,11 @@ LEASE_STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_job_lease
 [ "$LEASE_STATUS" = "ACTIVE" ] || bad "lease state after 75s is $LEASE_STATUS"
 HEARTBEATS="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE' AND heartbeat_at > acquired_at + interval '20 seconds';")"
 [ "$HEARTBEATS" = "1" ] || bad "lease heartbeat was not refreshed"
-wait "$WORKER_PID"
+if ! wait "$WORKER_PID"; then
+  echo "worker failed during long heartbeat job"
+  tail -30 /tmp/long-heartbeat.log || true
+  bad "long-running worker exited non-zero"
+fi
 STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 [ "$STATUS" = "SUCCEEDED" ] || bad "long job status=$STATUS"
 EFFECTS="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB';")"
