@@ -39,6 +39,7 @@ struct Worker {
     worker_id: String,
     instance_id: Uuid,
     boot_id: Uuid,
+    source_policy: SourcePolicy,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -67,6 +68,31 @@ struct WorkloadTokenResponse {
 
 fn env(name: &str) -> Result<String> {
     std::env::var(name).with_context(|| format!("missing {name}"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeartbeatAction {
+    Success,
+    Fatal,
+    Retry,
+}
+
+fn heartbeat_action(status: StatusCode) -> HeartbeatAction {
+    if status.is_success() {
+        HeartbeatAction::Success
+    } else if matches!(
+        status,
+        StatusCode::UNAUTHORIZED
+            | StatusCode::FORBIDDEN
+            | StatusCode::CONFLICT
+            | StatusCode::NOT_FOUND
+    ) {
+        HeartbeatAction::Fatal
+    } else {
+        // 429/500/503/transport errors are bounded transient failures. Retry-After
+        // is intentionally not trusted here; the bound is the fixed backoff below.
+        HeartbeatAction::Retry
+    }
 }
 
 impl Worker {
@@ -105,6 +131,7 @@ impl Worker {
             worker_id,
             instance_id,
             boot_id,
+            source_policy: SourcePolicy::from_env(),
         })
     }
 
@@ -192,29 +219,17 @@ impl Worker {
                 if cancelled.load(Ordering::SeqCst) {
                     return;
                 }
-                match worker.heartbeat_status(job_id, &lease).await {
-                    Ok(status) => {
-                        if status.is_success() {
-                            transient_failures = 0;
-                        } else if matches!(
-                            status,
-                            StatusCode::UNAUTHORIZED
-                                | StatusCode::FORBIDDEN
-                                | StatusCode::CONFLICT
-                                | StatusCode::NOT_FOUND
-                        ) {
-                            cancelled.store(true, Ordering::SeqCst);
-                            return;
-                        } else {
-                            transient_failures = transient_failures.saturating_add(1);
-                            if transient_failures >= 3 {
-                                cancelled.store(true, Ordering::SeqCst);
-                                return;
-                            }
-                            tokio::time::sleep(Duration::from_secs(2)).await;
-                        }
+                let action = match worker.heartbeat_status(job_id, &lease).await {
+                    Ok(status) => heartbeat_action(status),
+                    Err(_) => HeartbeatAction::Retry,
+                };
+                match action {
+                    HeartbeatAction::Success => transient_failures = 0,
+                    HeartbeatAction::Fatal => {
+                        cancelled.store(true, Ordering::SeqCst);
+                        return;
                     }
-                    Err(_) => {
+                    HeartbeatAction::Retry => {
                         transient_failures = transient_failures.saturating_add(1);
                         if transient_failures >= 3 {
                             cancelled.store(true, Ordering::SeqCst);
@@ -401,7 +416,7 @@ impl Worker {
     }
 
     async fn fetch_source(&self, endpoint: &str) -> Result<Vec<Value>> {
-        let policy = SourcePolicy::from_env();
+        let policy = self.source_policy.clone();
         let url = policy.validate_url(endpoint).await?;
         let host = url
             .host_str()
@@ -1104,21 +1119,24 @@ fn effect_id(
     )
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct SourcePolicy {
     allowlist: Vec<String>,
 }
 
 impl SourcePolicy {
-    fn from_env() -> Self {
-        let allowlist = std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST")
-            .unwrap_or_default()
+    fn from_allowlist(value: &str) -> Self {
+        let allowlist = value
             .split(',')
             .map(str::trim)
-            .filter(|value| !value.is_empty())
+            .filter(|entry| !entry.is_empty())
             .map(str::to_ascii_lowercase)
             .collect();
         Self { allowlist }
+    }
+
+    fn from_env() -> Self {
+        Self::from_allowlist(&std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST").unwrap_or_default())
     }
 
     fn allowed(&self, value: &str) -> bool {
@@ -1238,6 +1256,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn heartbeat_status_decision_is_bounded_and_deterministic() {
+        for status in [StatusCode::OK, StatusCode::NO_CONTENT] {
+            assert_eq!(heartbeat_action(status), HeartbeatAction::Success);
+        }
+        for status in [
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::NOT_FOUND,
+            StatusCode::CONFLICT,
+        ] {
+            assert_eq!(heartbeat_action(status), HeartbeatAction::Fatal);
+        }
+        for status in [
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::BAD_GATEWAY,
+        ] {
+            assert_eq!(heartbeat_action(status), HeartbeatAction::Retry);
+        }
+    }
+
+    #[test]
     fn private_and_metadata_addresses_are_blocked() {
         for value in [
             "127.0.0.1",
@@ -1279,6 +1320,7 @@ mod tests {
             worker_id: "test".into(),
             instance_id: Uuid::new_v4(),
             boot_id: Uuid::new_v4(),
+            source_policy: SourcePolicy::from_allowlist("127.0.0.1"),
         }
     }
 
@@ -1297,20 +1339,6 @@ mod tests {
         format!("http://127.0.0.1:{}", addr.port())
     }
 
-    async fn with_allowlist<F, T>(future: F) -> T
-    where
-        F: std::future::Future<Output = T>,
-    {
-        let old = std::env::var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST").ok();
-        std::env::set_var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST", "127.0.0.1");
-        let result = future.await;
-        match old {
-            Some(value) => std::env::set_var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST", value),
-            None => std::env::remove_var("OPSWEAVE_WORKER_SOURCE_ALLOWLIST"),
-        }
-        result
-    }
-
     #[tokio::test]
     async fn source_redirect_is_rejected() {
         let url = serve_once(
@@ -1318,10 +1346,36 @@ mod tests {
                 .to_vec(),
         )
         .await;
-        let error = with_allowlist(test_worker().fetch_source(&url))
-            .await
-            .unwrap_err();
+        let error = test_worker().fetch_source(&url).await.unwrap_err();
         assert!(format!("{error:#}").contains("redirect"));
+    }
+
+    #[tokio::test]
+    async fn all_redirect_statuses_are_rejected() {
+        for status in [301, 302, 303, 307, 308] {
+            let response = format!(
+                "HTTP/1.1 {status} Redirect\r\nLocation: http://169.254.169.254/\r\nContent-Length: 0\r\n\r\n"
+            );
+            let url = serve_once(response.into_bytes()).await;
+            let error = test_worker().fetch_source(&url).await.unwrap_err();
+            assert!(
+                format!("{error:#}").contains("redirect"),
+                "{status}: {error:#}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn content_length_mismatch_and_truncated_source_are_rejected() {
+        let url =
+            serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n[{\"id\":1}]".to_vec())
+                .await;
+        let error = test_worker().fetch_source(&url).await.unwrap_err();
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("read source") || text.contains("parse source JSON"),
+            "{text}"
+        );
     }
 
     #[tokio::test]
@@ -1335,24 +1389,20 @@ mod tests {
         }
         response.extend_from_slice(b"0\r\n\r\n");
         let url = serve_once(response).await;
-        let error = with_allowlist(test_worker().fetch_source(&url))
-            .await
-            .unwrap_err();
+        let error = test_worker().fetch_source(&url).await.unwrap_err();
         assert!(format!("{error:#}").contains("exceeds limit"));
     }
 
     #[tokio::test]
     async fn malformed_source_json_is_rejected() {
         let url = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n{no}".to_vec()).await;
-        let error = with_allowlist(test_worker().fetch_source(&url))
-            .await
-            .unwrap_err();
+        let error = test_worker().fetch_source(&url).await.unwrap_err();
         assert!(format!("{error:#}").contains("parse source JSON"));
     }
 
     #[tokio::test]
     async fn source_url_rejects_localhost_and_non_http_scheme() {
-        let policy = SourcePolicy::default();
+        let policy = SourcePolicy::from_allowlist("");
         assert!(policy.validate_url("http://127.0.0.1/data").await.is_err());
         assert!(policy.validate_url("file:///etc/passwd").await.is_err());
         assert!(policy

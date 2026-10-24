@@ -84,6 +84,16 @@ async fn authenticate_worker_headers(
     if node.revoked_at.is_some() || node.status != "READY" {
         return Err(AppError::forbidden("node is not READY"));
     }
+    let stale: bool = sqlx::query_scalar(
+        "SELECT last_seen_at IS NULL OR last_seen_at < now() - ($2 || ' seconds')::interval FROM kernel.nodes WHERE id=$1",
+    )
+    .bind(node_id)
+    .bind(state.config.node_stale_seconds)
+    .fetch_one(&state.db)
+    .await?;
+    if stale {
+        return Err(AppError::forbidden("node heartbeat is stale"));
+    }
     if node.generation != generation {
         return Err(AppError::conflict(
             "STALE_NODE_GENERATION",
@@ -899,6 +909,256 @@ pub async fn worker_definition(
     })))
 }
 
+/// Result of the single authoritative terminalization transition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminalizeOutcome {
+    Applied {
+        status: &'static str,
+        event_created: bool,
+    },
+    AlreadyTerminal {
+        status: String,
+    },
+}
+
+/// Everything needed to atomically record one terminal Job transition.
+struct TerminalizeSpec<'a> {
+    status: &'static str,
+    error_code: Option<&'a str>,
+    error_message: Option<&'a str>,
+    output: Value,
+    result_digest: Option<&'a str>,
+    receipt: Option<Value>,
+    lease_id: Option<Uuid>,
+    worker_id: Option<&'a str>,
+    event_type: &'a str,
+    details: Value,
+    lease_final_status: &'a str,
+}
+
+/// The only writer for a Job terminal state.
+///
+/// Callers must already be inside a transaction. This function takes the Job
+/// row lock, so a Result, Claim, Reaper and Cancel racing on the same Job all
+/// serialize here. The first terminal transition wins; later attempts become
+/// idempotent no-ops (or an explicit conflict for a different terminal state).
+#[allow(clippy::too_many_arguments)]
+async fn terminalize_job(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    job_id: Uuid,
+    spec: &TerminalizeSpec<'_>,
+) -> AppResult<TerminalizeOutcome> {
+    if !matches!(spec.status, "SUCCEEDED" | "FAILED" | "CANCELLED") {
+        return Err(AppError::bad_request("terminal status is required"));
+    }
+    let row = sqlx::query(
+        "SELECT status,current_fence,current_lease_id FROM kernel.pipeline_jobs WHERE job_id=$1 FOR UPDATE",
+    )
+    .bind(job_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| AppError::not_found("job not found"))?;
+    let current_status: String = row.get("status");
+    let current_fence: i64 = row.get("current_fence");
+    let current_lease: Option<Uuid> = row.get("current_lease_id");
+    if matches!(
+        current_status.as_str(),
+        "SUCCEEDED" | "FAILED" | "CANCELLED"
+    ) {
+        return Ok(TerminalizeOutcome::AlreadyTerminal {
+            status: current_status,
+        });
+    }
+
+    let existing_result: Option<String> =
+        sqlx::query_scalar("SELECT status FROM kernel.pipeline_job_results WHERE job_id=$1")
+            .bind(job_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if let Some(existing) = existing_result {
+        if existing == spec.status && current_status == spec.status {
+            return Ok(TerminalizeOutcome::AlreadyTerminal {
+                status: current_status,
+            });
+        }
+        return Err(AppError::conflict(
+            "TERMINAL_RESULT_CONFLICT",
+            "job already has a different terminal result",
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE kernel.pipeline_jobs SET status=$2,last_error_code=$3,updated_at=now() WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .bind(spec.status)
+    .bind(spec.error_code)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        "UPDATE kernel.pipeline_job_leases SET status=$2 WHERE job_id=$1 AND status='ACTIVE'",
+    )
+    .bind(job_id)
+    .bind(spec.lease_final_status)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        "UPDATE kernel.pipeline_job_attempts SET status=$2,finished_at=now(),error_code=$3 WHERE job_id=$1 AND status IN ('CLAIMED','RUNNING')",
+    )
+    .bind(job_id)
+    .bind(spec.status)
+    .bind(spec.error_code)
+    .execute(&mut **tx)
+    .await?;
+
+    let lease_id = spec.lease_id.or(current_lease);
+    let inserted = sqlx::query(
+        "INSERT INTO kernel.pipeline_job_results (job_id,fencing_sequence,status,output,error_code,error_message,result_digest,receipt,lease_id,worker_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT (job_id) DO NOTHING",
+    )
+    .bind(job_id)
+    .bind(current_fence)
+    .bind(spec.status)
+    .bind(&spec.output)
+    .bind(spec.error_code)
+    .bind(spec.error_message)
+    .bind(spec.result_digest)
+    .bind(spec.receipt.as_ref())
+    .bind(lease_id)
+    .bind(spec.worker_id)
+    .execute(&mut **tx)
+    .await?;
+    if inserted.rows_affected() == 0 {
+        let existing: String =
+            sqlx::query_scalar("SELECT status FROM kernel.pipeline_job_results WHERE job_id=$1")
+                .bind(job_id)
+                .fetch_one(&mut **tx)
+                .await?;
+        if existing != spec.status {
+            return Err(AppError::conflict(
+                "TERMINAL_RESULT_CONFLICT",
+                "job already has a different terminal result",
+            ));
+        }
+    }
+
+    sqlx::query(
+        "INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,fencing_sequence,worker_id,details)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    )
+    .bind(job_id)
+    .bind(spec.event_type)
+    .bind(&current_status)
+    .bind(spec.status)
+    .bind(current_fence)
+    .bind(spec.worker_id)
+    .bind(&spec.details)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(TerminalizeOutcome::Applied {
+        status: spec.status,
+        event_created: true,
+    })
+}
+
+async fn audit_terminalization(
+    state: &AppState,
+    job_id: Uuid,
+    status: &str,
+    error_code: Option<&str>,
+    actor_type: &str,
+    actor_id: &str,
+) {
+    // Audit is intentionally after the Job transaction commits: no external
+    // HTTP/audit operation runs while holding the Job row lock.
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.job_terminalized",
+        actor_type,
+        actor_id,
+        "job",
+        &job_id.to_string(),
+        "terminalize",
+        if status == "SUCCEEDED" {
+            "ACCEPTED"
+        } else {
+            "REJECTED"
+        },
+        json!({"status": status, "errorCode": error_code}),
+        None,
+    )
+    .await;
+}
+
+/// Bounded reaper. Candidate rows are locked with SKIP LOCKED and terminalized
+/// individually through the same service used by Claim/Result/Cancel.
+async fn reap_terminal_jobs(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    limit: i64,
+) -> AppResult<Vec<(Uuid, &'static str)>> {
+    let rows = sqlx::query(
+        "SELECT j.job_id,
+                CASE
+                  WHEN j.deadline_at IS NOT NULL AND j.deadline_at <= clock_timestamp()
+                    THEN 'JOB_DEADLINE_EXCEEDED'
+                  ELSE 'JOB_ATTEMPTS_EXHAUSTED'
+                END AS terminal_code
+         FROM kernel.pipeline_jobs j
+         WHERE j.status IN ('QUEUED','CLAIMED','RUNNING')
+           AND (
+             (j.deadline_at IS NOT NULL AND j.deadline_at <= clock_timestamp())
+             OR (j.attempts >= j.max_attempts
+                 AND NOT EXISTS (
+                   SELECT 1 FROM kernel.pipeline_job_leases l
+                   WHERE l.job_id=j.job_id AND l.status='ACTIVE'
+                     AND l.expires_at > clock_timestamp()
+                 ))
+           )
+         ORDER BY j.created_at ASC, j.job_id ASC
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED",
+    )
+    .bind(limit)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut reaped = Vec::new();
+    for row in rows {
+        let job_id: Uuid = row.get("job_id");
+        let code: String = row.get("terminal_code");
+        let code: &'static str = if code == "JOB_DEADLINE_EXCEEDED" {
+            "JOB_DEADLINE_EXCEEDED"
+        } else {
+            "JOB_ATTEMPTS_EXHAUSTED"
+        };
+        let outcome = terminalize_job(
+            tx,
+            job_id,
+            &TerminalizeSpec {
+                status: "FAILED",
+                error_code: Some(code),
+                error_message: Some("job terminalized by durable reaper"),
+                output: json!({}),
+                result_digest: None,
+                receipt: None,
+                lease_id: None,
+                worker_id: None,
+                event_type: code,
+                details: json!({"reaped": true, "reason": code}),
+                lease_final_status: "REVOKED",
+            },
+        )
+        .await?;
+        if let TerminalizeOutcome::Applied { .. } = outcome {
+            reaped.push((job_id, code));
+        }
+    }
+    Ok(reaped)
+}
+
 pub async fn claim_next(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -906,29 +1166,23 @@ pub async fn claim_next(
 ) -> AppResult<axum::response::Response> {
     let trusted = authenticate_worker(&state, &headers, &worker).await?;
     let mut tx = state.db.begin().await?;
-    // Expired exhausted jobs must reach a terminal state instead of hanging as RUNNING.
-    sqlx::query(
-        "UPDATE kernel.pipeline_jobs j SET status='FAILED',last_error_code='JOB_ATTEMPTS_EXHAUSTED',updated_at=now()
-         WHERE j.status IN ('QUEUED','CLAIMED','RUNNING') AND j.attempts >= j.max_attempts
-           AND NOT EXISTS (SELECT 1 FROM kernel.pipeline_job_leases l WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now())",
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query(
-        "UPDATE kernel.pipeline_jobs j SET status='FAILED',last_error_code='JOB_DEADLINE_EXCEEDED',updated_at=now()
-         WHERE j.status IN ('QUEUED','CLAIMED','RUNNING') AND j.deadline_at IS NOT NULL AND j.deadline_at <= now()
-           AND NOT EXISTS (SELECT 1 FROM kernel.pipeline_job_leases l WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now())",
-    )
-    .execute(&mut *tx)
-    .await?;
+    // Bounded reaper: never a full-table UPDATE. Candidate rows are locked with
+    // SKIP LOCKED and each transition goes through the single service below.
+    let reaped = match reap_terminal_jobs(&mut tx, 100).await {
+        Ok(reaped) => reaped,
+        Err(error) => {
+            tx.rollback().await.ok();
+            return Err(error);
+        }
+    };
     let job_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT j.job_id FROM kernel.pipeline_jobs j
          WHERE j.status IN ('QUEUED','CLAIMED','RUNNING')
            AND j.attempts < j.max_attempts
-           AND (j.deadline_at IS NULL OR j.deadline_at > now())
+           AND (j.deadline_at IS NULL OR j.deadline_at > clock_timestamp())
            AND NOT EXISTS (
              SELECT 1 FROM kernel.pipeline_job_leases l
-             WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > now()
+             WHERE l.job_id=j.job_id AND l.status='ACTIVE' AND l.expires_at > clock_timestamp()
            )
          ORDER BY j.created_at ASC, j.job_id ASC
          FOR UPDATE SKIP LOCKED
@@ -938,15 +1192,28 @@ pub async fn claim_next(
     .await?;
     let Some(job_id) = job_id else {
         tx.commit().await?;
+        for (reaped_job, code) in reaped {
+            audit_terminalization(&state, reaped_job, "FAILED", Some(code), "SYSTEM", "reaper")
+                .await;
+        }
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
     let response = match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
         Ok(ClaimOutcome::Claimed(response)) => {
             tx.commit().await?;
+            for (reaped_job, code) in reaped {
+                audit_terminalization(&state, reaped_job, "FAILED", Some(code), "SYSTEM", "reaper")
+                    .await;
+            }
             response
         }
         Ok(ClaimOutcome::Terminalized(code)) => {
             tx.commit().await?;
+            for (reaped_job, code) in reaped {
+                audit_terminalization(&state, reaped_job, "FAILED", Some(code), "SYSTEM", "reaper")
+                    .await;
+            }
+            audit_terminalization(&state, job_id, "FAILED", Some(code), "SYSTEM", "claim").await;
             return Err(AppError::conflict(code, "job reached a terminal state"));
         }
         Err(error) => {
@@ -981,26 +1248,40 @@ async fn claim_core(
     let attempts: i32 = row.get("attempts");
     let max_attempts: i32 = row.get("max_attempts");
     let deadline_at: Option<DateTime<Utc>> = row.get("deadline_at");
-    if deadline_at.is_some_and(|deadline| deadline <= Utc::now()) {
-        sqlx::query("UPDATE kernel.pipeline_jobs SET status='FAILED',last_error_code='JOB_DEADLINE_EXCEEDED',updated_at=now() WHERE job_id=$1")
-            .bind(job_id)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query("UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE job_id=$1 AND status='ACTIVE'")
-            .bind(job_id)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query("UPDATE kernel.pipeline_job_attempts SET status='FAILED',finished_at=now(),error_code='JOB_DEADLINE_EXCEEDED' WHERE job_id=$1 AND status IN ('CLAIMED','RUNNING')")
-            .bind(job_id)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,details) VALUES ($1,'JOB_DEADLINE_EXCEEDED',$2,'FAILED',$3)")
-            .bind(job_id)
-            .bind(&status)
-            .bind(json!({"deadlineAt": deadline_at}))
-            .execute(&mut **tx)
-            .await?;
-        return Ok(ClaimOutcome::Terminalized("JOB_DEADLINE_EXCEEDED"));
+    let deadline_expired: bool = sqlx::query_scalar(
+        "SELECT deadline_at IS NOT NULL AND clock_timestamp() >= deadline_at FROM kernel.pipeline_jobs WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if deadline_expired {
+        let outcome = terminalize_job(
+            tx,
+            job_id,
+            &TerminalizeSpec {
+                status: "FAILED",
+                error_code: Some("JOB_DEADLINE_EXCEEDED"),
+                error_message: Some("job execution deadline has passed"),
+                output: json!({}),
+                result_digest: None,
+                receipt: None,
+                lease_id: None,
+                worker_id: None,
+                event_type: "JOB_DEADLINE_EXCEEDED",
+                details: json!({"deadlineAt": deadline_at}),
+                lease_final_status: "REVOKED",
+            },
+        )
+        .await?;
+        return match outcome {
+            TerminalizeOutcome::Applied { .. } => {
+                Ok(ClaimOutcome::Terminalized("JOB_DEADLINE_EXCEEDED"))
+            }
+            TerminalizeOutcome::AlreadyTerminal { .. } => Err(AppError::conflict(
+                "JOB_NOT_CLAIMABLE",
+                "job reached a terminal state",
+            )),
+        };
     }
     if !matches!(status.as_str(), "QUEUED" | "CLAIMED" | "RUNNING") {
         return Err(AppError::conflict(
@@ -1028,25 +1309,33 @@ async fn claim_core(
         }
     }
     if attempts >= max_attempts {
-        sqlx::query("UPDATE kernel.pipeline_jobs SET status='FAILED',last_error_code='JOB_ATTEMPTS_EXHAUSTED',updated_at=now() WHERE job_id=$1")
-            .bind(job_id)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query("UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE job_id=$1 AND status='ACTIVE'")
-            .bind(job_id)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query("UPDATE kernel.pipeline_job_attempts SET status='FAILED',finished_at=now(),error_code='JOB_ATTEMPTS_EXHAUSTED' WHERE job_id=$1 AND status IN ('CLAIMED','RUNNING')")
-            .bind(job_id)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,details) VALUES ($1,'JOB_ATTEMPTS_EXHAUSTED',$2,'FAILED',$3)")
-            .bind(job_id)
-            .bind(&status)
-            .bind(json!({"attempts": attempts, "maxAttempts": max_attempts}))
-            .execute(&mut **tx)
-            .await?;
-        return Ok(ClaimOutcome::Terminalized("JOB_ATTEMPTS_EXHAUSTED"));
+        let outcome = terminalize_job(
+            tx,
+            job_id,
+            &TerminalizeSpec {
+                status: "FAILED",
+                error_code: Some("JOB_ATTEMPTS_EXHAUSTED"),
+                error_message: Some("job attempts are exhausted"),
+                output: json!({}),
+                result_digest: None,
+                receipt: None,
+                lease_id: None,
+                worker_id: None,
+                event_type: "JOB_ATTEMPTS_EXHAUSTED",
+                details: json!({"attempts": attempts, "maxAttempts": max_attempts}),
+                lease_final_status: "REVOKED",
+            },
+        )
+        .await?;
+        return match outcome {
+            TerminalizeOutcome::Applied { .. } => {
+                Ok(ClaimOutcome::Terminalized("JOB_ATTEMPTS_EXHAUSTED"))
+            }
+            TerminalizeOutcome::AlreadyTerminal { .. } => Err(AppError::conflict(
+                "JOB_NOT_CLAIMABLE",
+                "job reached a terminal state",
+            )),
+        };
     }
     sqlx::query("UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE job_id=$1 AND status='ACTIVE'")
         .bind(job_id)
@@ -1126,6 +1415,7 @@ pub async fn claim_job(
         }
         Ok(ClaimOutcome::Terminalized(code)) => {
             tx.commit().await?;
+            audit_terminalization(&state, job_id, "FAILED", Some(code), "SYSTEM", "claim").await;
             return Err(AppError::conflict(code, "job reached a terminal state"));
         }
         Err(error) => {
@@ -1438,8 +1728,10 @@ pub async fn result(
     Json(request): Json<ResultRequest>,
 ) -> AppResult<Json<JobView>> {
     let trusted = authenticate_worker_header_only(&state, &headers).await?;
-    let terminal = match request.status.as_str() {
-        "SUCCEEDED" | "FAILED" | "CANCELLED" => request.status.as_str(),
+    let terminal: &'static str = match request.status.as_str() {
+        "SUCCEEDED" => "SUCCEEDED",
+        "FAILED" => "FAILED",
+        "CANCELLED" => "CANCELLED",
         _ => return Err(AppError::bad_request("result status must be terminal")),
     };
     if terminal == "SUCCEEDED" {
@@ -1504,7 +1796,7 @@ pub async fn result(
         verify_effect_set(&state, job_id, &request.effects, batches, accepted).await?;
     }
     let mut tx = state.db.begin().await?;
-    let (current_status, fence) = authorize_lease(
+    let (_, fence) = authorize_lease(
         &mut tx,
         job_id,
         &trusted.worker_id,
@@ -1530,18 +1822,31 @@ pub async fn result(
             "job already has a result",
         ));
     }
-    sqlx::query("INSERT INTO kernel.pipeline_job_results (job_id,fencing_sequence,status,output,error_code,error_message,result_digest,receipt,lease_id,worker_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
-        .bind(job_id).bind(fence).bind(terminal).bind(&request.output).bind(&request.error_code).bind(&request.error_message).bind(&request.result_digest).bind(&request.receipt).bind(request.lease_id).bind(&trusted.worker_id).execute(&mut *tx).await?;
-    sqlx::query("UPDATE kernel.pipeline_jobs SET status=$2,last_error_code=$3,updated_at=now() WHERE job_id=$1")
-        .bind(job_id).bind(terminal).bind(&request.error_code).execute(&mut *tx).await?;
-    sqlx::query("UPDATE kernel.pipeline_job_leases SET status='RELEASED' WHERE lease_id=$1")
-        .bind(request.lease_id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("UPDATE kernel.pipeline_job_attempts SET status=$3,finished_at=now(),error_code=$4 WHERE job_id=$1 AND lease_id=$2")
-        .bind(job_id).bind(request.lease_id).bind(terminal).bind(&request.error_code).execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status,fencing_sequence,details) VALUES ($1,'JOB_COMPLETED',$2,$3,$4,$5)")
-        .bind(job_id).bind(current_status).bind(terminal).bind(fence).bind(json!({"errorCode": request.error_code})).execute(&mut *tx).await?;
+    let outcome = terminalize_job(
+        &mut tx,
+        job_id,
+        &TerminalizeSpec {
+            status: terminal,
+            error_code: request.error_code.as_deref(),
+            error_message: request.error_message.as_deref(),
+            output: request.output.clone(),
+            result_digest: request.result_digest.as_deref(),
+            receipt: request.receipt.clone(),
+            lease_id: Some(request.lease_id),
+            worker_id: Some(&trusted.worker_id),
+            event_type: "JOB_COMPLETED",
+            details: json!({"status": terminal, "errorCode": request.error_code}),
+            lease_final_status: "RELEASED",
+        },
+    )
+    .await?;
+    if let TerminalizeOutcome::AlreadyTerminal { status } = outcome {
+        tx.rollback().await.ok();
+        return Err(AppError::conflict(
+            "RESULT_ALREADY_COMMITTED",
+            format!("job is already terminal: {status}"),
+        ));
+    }
     tx.commit().await?;
     let _ = crate::audit::record(
         &state.db,
@@ -1570,25 +1875,629 @@ pub async fn cancel_job(
 ) -> AppResult<Json<JobView>> {
     auth.require_operator()?;
     let mut tx = state.db.begin().await?;
-    let status: Option<String> =
-        sqlx::query_scalar("SELECT status FROM kernel.pipeline_jobs WHERE job_id=$1 FOR UPDATE")
-            .bind(job_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    let status = status.ok_or_else(|| AppError::not_found("job not found"))?;
-    if matches!(status.as_str(), "SUCCEEDED" | "FAILED" | "CANCELLED") {
-        tx.rollback().await.ok();
-        return Ok(Json(fetch_job(&state, job_id).await?));
-    }
-    sqlx::query(
-        "UPDATE kernel.pipeline_jobs SET status='CANCELLED',updated_at=now() WHERE job_id=$1",
+    let outcome = match terminalize_job(
+        &mut tx,
+        job_id,
+        &TerminalizeSpec {
+            status: "CANCELLED",
+            error_code: None,
+            error_message: None,
+            output: json!({}),
+            result_digest: None,
+            receipt: None,
+            lease_id: None,
+            worker_id: None,
+            event_type: "JOB_CANCELLED",
+            details: json!({"cancelledBy": "API"}),
+            lease_final_status: "REVOKED",
+        },
     )
-    .bind(job_id)
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query("UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE job_id=$1 AND status='ACTIVE'").bind(job_id).execute(&mut *tx).await?;
-    sqlx::query("UPDATE kernel.pipeline_job_attempts SET status='CANCELLED',finished_at=now() WHERE job_id=$1 AND status IN ('CLAIMED','RUNNING')").bind(job_id).execute(&mut *tx).await?;
-    sqlx::query("INSERT INTO kernel.pipeline_job_events (job_id,event_type,from_status,to_status) VALUES ($1,'JOB_CANCELLED',$2,'CANCELLED')").bind(job_id).bind(status).execute(&mut *tx).await?;
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            tx.rollback().await.ok();
+            return Err(error);
+        }
+    };
     tx.commit().await?;
+    if let TerminalizeOutcome::Applied { .. } = outcome {
+        audit_terminalization(
+            &state,
+            job_id,
+            "CANCELLED",
+            None,
+            "USER",
+            &auth.user_id.to_string(),
+        )
+        .await;
+    }
     Ok(Json(fetch_job(&state, job_id).await?))
+}
+
+#[cfg(test)]
+mod terminalization_tests {
+    use super::*;
+    use sqlx::PgPool;
+    use tokio::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+    fn test_url() -> Option<String> {
+        std::env::var("OPSWEAVE_TEST_DATABASE_URL").ok()
+    }
+
+    async fn test_pool() -> Option<PgPool> {
+        let url = test_url()?;
+        let pool = PgPool::connect(&url).await.ok()?;
+        crate::db::migrate(&pool).await.ok()?;
+        Some(pool)
+    }
+
+    async fn cleanup_test_data(pool: &PgPool) {
+        let pipelines = "SELECT pipeline_id FROM kernel.pipeline_definitions WHERE pipeline_id LIKE 'test.terminalize.%'";
+        let jobs =
+            format!("SELECT job_id FROM kernel.pipeline_jobs WHERE pipeline_id IN ({pipelines})");
+        for table in [
+            "kernel.pipeline_job_events",
+            "kernel.pipeline_job_results",
+            "kernel.pipeline_job_snapshots",
+            "kernel.pipeline_job_checkpoints",
+            "kernel.pipeline_job_leases",
+            "kernel.pipeline_job_attempts",
+        ] {
+            let sql = format!("DELETE FROM {table} WHERE job_id IN ({jobs})");
+            sqlx::query(&sql).execute(pool).await.unwrap();
+        }
+        let sql = format!("DELETE FROM kernel.pipeline_jobs WHERE pipeline_id IN ({pipelines})");
+        sqlx::query(&sql).execute(pool).await.unwrap();
+        let sql =
+            format!("DELETE FROM kernel.pipeline_revisions WHERE pipeline_id IN ({pipelines})");
+        sqlx::query(&sql).execute(pool).await.unwrap();
+        let sql =
+            format!("DELETE FROM kernel.pipeline_definitions WHERE pipeline_id IN ({pipelines})");
+        sqlx::query(&sql).execute(pool).await.unwrap();
+    }
+
+    async fn new_pipeline(pool: &PgPool) -> String {
+        let pipeline = format!("test.terminalize.{}", Uuid::new_v4());
+        sqlx::query(
+            "INSERT INTO kernel.pipeline_definitions (pipeline_id,latest_revision) VALUES ($1,1)",
+        )
+        .bind(&pipeline)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO kernel.pipeline_revisions (pipeline_id,revision,digest,definition,plan,status) VALUES ($1,1,$2,'{}'::jsonb,'{}'::jsonb,'PUBLISHED')")
+            .bind(&pipeline)
+            .bind(format!("sha256:{}", "a".repeat(64)))
+            .execute(pool)
+            .await
+            .unwrap();
+        pipeline
+    }
+
+    async fn add_job(
+        pool: &PgPool,
+        pipeline: &str,
+        attempts: i32,
+        max_attempts: i32,
+        deadline: Option<DateTime<Utc>>,
+    ) -> Uuid {
+        let job = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.pipeline_jobs
+             (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,attempts,max_attempts,deadline_at)
+             VALUES ($1,$2,1,$3,$4,$5,'QUEUED','{}'::jsonb,$6,$7,$8)",
+        )
+        .bind(job)
+        .bind(pipeline)
+        .bind(format!("sha256:{}", "a".repeat(64)))
+        .bind(format!("terminalize-key-{job}"))
+        .bind(format!("sha256:{}", "b".repeat(64)))
+        .bind(attempts)
+        .bind(max_attempts)
+        .bind(deadline)
+        .execute(pool)
+        .await
+        .unwrap();
+        job
+    }
+
+    async fn add_active_lease(
+        pool: &PgPool,
+        job: Uuid,
+        worker: &WorkerContext,
+        fence: i64,
+    ) -> Uuid {
+        let lease = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.pipeline_job_leases
+             (lease_id,job_id,attempt_number,worker_id,node_id,instance_id,boot_id,fencing_sequence,status,expires_at)
+             VALUES ($1,$2,1,$3,$4,$5,$6,$7,'ACTIVE',now()+interval '60 seconds')",
+        )
+        .bind(lease)
+        .bind(job)
+        .bind(&worker.worker_id)
+        .bind(worker.node_id)
+        .bind(worker.instance_id)
+        .bind(worker.boot_id)
+        .bind(fence)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO kernel.pipeline_job_attempts
+             (job_id,attempt_number,worker_id,node_id,instance_id,boot_id,lease_id,fencing_sequence,status)
+             VALUES ($1,1,$2,$3,$4,$5,$6,$7,'RUNNING')",
+        )
+        .bind(job)
+        .bind(&worker.worker_id)
+        .bind(worker.node_id)
+        .bind(worker.instance_id)
+        .bind(worker.boot_id)
+        .bind(lease)
+        .bind(fence)
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE kernel.pipeline_jobs SET status='RUNNING',current_fence=$2,current_lease_id=$3,attempts=1 WHERE job_id=$1")
+            .bind(job)
+            .bind(fence)
+            .bind(lease)
+            .execute(pool)
+            .await
+            .unwrap();
+        lease
+    }
+
+    fn worker() -> WorkerContext {
+        WorkerContext {
+            node_id: Uuid::new_v4(),
+            instance_id: Uuid::new_v4(),
+            boot_id: Uuid::new_v4(),
+            worker_id: format!(
+                "n:{}:i:{}:b:{}",
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4()
+            ),
+        }
+    }
+
+    async fn row_counts(pool: &PgPool, job: Uuid) -> (String, i64, i64, i64, i64) {
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM kernel.pipeline_jobs WHERE job_id=$1")
+                .bind(job)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        let leases: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.pipeline_job_leases WHERE job_id=$1 AND status='ACTIVE'",
+        )
+        .bind(job)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let attempts: i64 = sqlx::query_scalar("SELECT count(*) FROM kernel.pipeline_job_attempts WHERE job_id=$1 AND status IN ('CLAIMED','RUNNING')")
+            .bind(job).fetch_one(pool).await.unwrap();
+        let results: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM kernel.pipeline_job_results WHERE job_id=$1")
+                .bind(job)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        let events: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM kernel.pipeline_job_events WHERE job_id=$1")
+                .bind(job)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        (status, leases, attempts, results, events)
+    }
+
+    #[tokio::test]
+    async fn terminalize_is_single_writer_and_idempotent() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let job = add_job(&pool, &pipeline, 0, 3, None).await;
+        let w = worker();
+        add_active_lease(&pool, job, &w, 1).await;
+        let mut tx = pool.begin().await.unwrap();
+        let first = terminalize_job(
+            &mut tx,
+            job,
+            &TerminalizeSpec {
+                status: "FAILED",
+                error_code: Some("WORKER_FAILED"),
+                error_message: Some("test"),
+                output: json!({}),
+                result_digest: None,
+                receipt: None,
+                lease_id: None,
+                worker_id: Some(&w.worker_id),
+                event_type: "JOB_COMPLETED",
+                details: json!({"test": true}),
+                lease_final_status: "REVOKED",
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(first, TerminalizeOutcome::Applied { .. }));
+        tx.commit().await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let second = terminalize_job(
+            &mut tx,
+            job,
+            &TerminalizeSpec {
+                status: "FAILED",
+                error_code: Some("WORKER_FAILED"),
+                error_message: Some("test"),
+                output: json!({}),
+                result_digest: None,
+                receipt: None,
+                lease_id: None,
+                worker_id: Some(&w.worker_id),
+                event_type: "JOB_COMPLETED",
+                details: json!({"test": true}),
+                lease_final_status: "REVOKED",
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(second, TerminalizeOutcome::AlreadyTerminal { .. }));
+        tx.commit().await.unwrap();
+        let (status, leases, attempts, results, events) = row_counts(&pool, job).await;
+        assert_eq!(status, "FAILED");
+        assert_eq!((leases, attempts, results, events), (0, 0, 1, 1));
+    }
+
+    #[tokio::test]
+    async fn reaper_deadline_wins_and_is_bounded() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let both = add_job(
+            &pool,
+            &pipeline,
+            3,
+            3,
+            Some(Utc::now() - Duration::seconds(1)),
+        )
+        .await;
+        let attempts = add_job(&pool, &pipeline, 3, 3, None).await;
+        let deadline = add_job(
+            &pool,
+            &pipeline,
+            0,
+            3,
+            Some(Utc::now() - Duration::seconds(1)),
+        )
+        .await;
+        let mut tx = pool.begin().await.unwrap();
+        let reaped = reap_terminal_jobs(&mut tx, 100).await.unwrap();
+        tx.commit().await.unwrap();
+        let ours: Vec<_> = reaped
+            .iter()
+            .filter(|(job, _)| [both, attempts, deadline].contains(job))
+            .collect();
+        assert_eq!(ours.len(), 3);
+        assert_eq!(
+            ours.iter()
+                .filter(|(_, code)| *code == "JOB_DEADLINE_EXCEEDED")
+                .count(),
+            2
+        );
+        assert_eq!(
+            ours.iter()
+                .filter(|(_, code)| *code == "JOB_ATTEMPTS_EXHAUSTED")
+                .count(),
+            1
+        );
+        for job in [both, attempts, deadline] {
+            let (status, leases, attempts_active, results, events) = row_counts(&pool, job).await;
+            assert_eq!(status, "FAILED");
+            assert_eq!((leases, attempts_active, results, events), (0, 0, 1, 1));
+        }
+        let mut tx = pool.begin().await.unwrap();
+        assert!(reap_terminal_jobs(&mut tx, 100).await.unwrap().is_empty());
+        tx.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reaper_batch_is_bounded() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        for _ in 0..105 {
+            add_job(
+                &pool,
+                &pipeline,
+                0,
+                3,
+                Some(Utc::now() - Duration::seconds(1)),
+            )
+            .await;
+        }
+        let mut terminal = 0i64;
+        for _ in 0..4 {
+            let mut tx = pool.begin().await.unwrap();
+            let batch = reap_terminal_jobs(&mut tx, 100).await.unwrap();
+            tx.commit().await.unwrap();
+            assert!(batch.len() <= 100);
+            terminal = sqlx::query_scalar(
+                "SELECT count(*) FROM kernel.pipeline_jobs WHERE pipeline_id=$1 AND status='FAILED'",
+            )
+            .bind(&pipeline)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            if terminal == 105 {
+                break;
+            }
+        }
+        assert_eq!(terminal, 105);
+    }
+
+    #[tokio::test]
+    async fn reaper_and_claim_serialize_on_job_lock() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let job = add_job(
+            &pool,
+            &pipeline,
+            0,
+            3,
+            Some(Utc::now() - Duration::seconds(1)),
+        )
+        .await;
+        let mut reap_tx = pool.begin().await.unwrap();
+        assert_eq!(reap_terminal_jobs(&mut reap_tx, 10).await.unwrap().len(), 1);
+        let claim_pool = pool.clone();
+        let claim_worker = worker();
+        let claim = tokio::spawn(async move {
+            let mut tx = claim_pool.begin().await.unwrap();
+            claim_core(&mut tx, job, &claim_worker, "test").await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        reap_tx.commit().await.unwrap();
+        let result = claim.await.unwrap();
+        assert!(
+            matches!(result, Err(AppError { .. }))
+                || matches!(result, Ok(ClaimOutcome::Terminalized(_)))
+        );
+        let (status, leases, attempts_active, results, events) = row_counts(&pool, job).await;
+        assert_eq!(status, "FAILED");
+        assert_eq!((leases, attempts_active, results, events), (0, 0, 1, 1));
+    }
+
+    #[tokio::test]
+    async fn reaper_and_cancel_have_one_authority() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let job = add_job(
+            &pool,
+            &pipeline,
+            0,
+            3,
+            Some(Utc::now() - Duration::seconds(1)),
+        )
+        .await;
+        let mut reap_tx = pool.begin().await.unwrap();
+        assert_eq!(reap_terminal_jobs(&mut reap_tx, 10).await.unwrap().len(), 1);
+        let cancel_pool = pool.clone();
+        let cancel = tokio::spawn(async move {
+            let mut tx = cancel_pool.begin().await.unwrap();
+            terminalize_job(
+                &mut tx,
+                job,
+                &TerminalizeSpec {
+                    status: "CANCELLED",
+                    error_code: None,
+                    error_message: None,
+                    output: json!({}),
+                    result_digest: None,
+                    receipt: None,
+                    lease_id: None,
+                    worker_id: None,
+                    event_type: "JOB_CANCELLED",
+                    details: json!({}),
+                    lease_final_status: "REVOKED",
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        reap_tx.commit().await.unwrap();
+        let result = cancel.await.unwrap();
+        assert!(matches!(
+            result,
+            Ok(TerminalizeOutcome::AlreadyTerminal { .. })
+        ));
+        let (status, leases, attempts_active, results, events) = row_counts(&pool, job).await;
+        assert_eq!(status, "FAILED");
+        assert_eq!((leases, attempts_active, results, events), (0, 0, 1, 1));
+    }
+
+    #[tokio::test]
+    async fn reaper_and_result_have_one_terminal_authority() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let job = add_job(
+            &pool,
+            &pipeline,
+            0,
+            3,
+            Some(Utc::now() - Duration::seconds(1)),
+        )
+        .await;
+        let w = worker();
+        add_active_lease(&pool, job, &w, 1).await;
+        let mut reap_tx = pool.begin().await.unwrap();
+        assert_eq!(reap_terminal_jobs(&mut reap_tx, 10).await.unwrap().len(), 1);
+        let result_pool = pool.clone();
+        let result = tokio::spawn(async move {
+            let mut tx = result_pool.begin().await.unwrap();
+            terminalize_job(
+                &mut tx,
+                job,
+                &TerminalizeSpec {
+                    status: "SUCCEEDED",
+                    error_code: None,
+                    error_message: None,
+                    output: json!({}),
+                    result_digest: Some("sha256:test"),
+                    receipt: None,
+                    lease_id: None,
+                    worker_id: None,
+                    event_type: "JOB_COMPLETED",
+                    details: json!({}),
+                    lease_final_status: "RELEASED",
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        reap_tx.commit().await.unwrap();
+        assert!(matches!(
+            result.await.unwrap(),
+            Ok(TerminalizeOutcome::AlreadyTerminal { .. })
+        ));
+        let (status, leases, attempts_active, results, events) = row_counts(&pool, job).await;
+        assert_eq!(status, "FAILED");
+        assert_eq!((leases, attempts_active, results, events), (0, 0, 1, 1));
+        let result_status: String =
+            sqlx::query_scalar("SELECT status FROM kernel.pipeline_job_results WHERE job_id=$1")
+                .bind(job)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(result_status, "FAILED");
+    }
+
+    #[tokio::test]
+    async fn concurrent_reapers_do_not_duplicate_transitions() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let mut jobs = Vec::new();
+        for _ in 0..20 {
+            jobs.push(
+                add_job(
+                    &pool,
+                    &pipeline,
+                    0,
+                    3,
+                    Some(Utc::now() - Duration::seconds(1)),
+                )
+                .await,
+            );
+        }
+        let pool_a = pool.clone();
+        let pool_b = pool.clone();
+        let a = tokio::spawn(async move {
+            let mut tx = pool_a.begin().await.unwrap();
+            let n = reap_terminal_jobs(&mut tx, 20).await.unwrap().len();
+            tx.commit().await.unwrap();
+            n
+        });
+        let b = tokio::spawn(async move {
+            let mut tx = pool_b.begin().await.unwrap();
+            let n = reap_terminal_jobs(&mut tx, 20).await.unwrap().len();
+            tx.commit().await.unwrap();
+            n
+        });
+        let mut total = a.await.unwrap() + b.await.unwrap();
+        if total < jobs.len() {
+            let mut tx = pool.begin().await.unwrap();
+            total += reap_terminal_jobs(&mut tx, 100).await.unwrap().len();
+            tx.commit().await.unwrap();
+        }
+        assert!(total >= jobs.len());
+        for job in jobs {
+            let (status, leases, attempts_active, results, events) = row_counts(&pool, job).await;
+            assert_eq!(status, "FAILED");
+            assert_eq!((leases, attempts_active, results, events), (0, 0, 1, 1));
+        }
+    }
+
+    #[tokio::test]
+    async fn terminalization_sql_failure_rolls_back_everything() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let job = add_job(&pool, &pipeline, 0, 3, None).await;
+        let w = worker();
+        add_active_lease(&pool, job, &w, 1).await;
+        let trigger = format!("fail_term_event_{}", Uuid::new_v4().simple());
+        let function = format!("fail_term_fn_{}", Uuid::new_v4().simple());
+        sqlx::query(&format!(
+            "CREATE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.job_id = '{job}' THEN RAISE EXCEPTION 'injected terminal event failure'; END IF; RETURN NEW; END $$"
+        )).execute(&pool).await.unwrap();
+        sqlx::query(&format!(
+            "CREATE TRIGGER {trigger} BEFORE INSERT ON kernel.pipeline_job_events FOR EACH ROW EXECUTE FUNCTION {function}()"
+        )).execute(&pool).await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        let result = terminalize_job(
+            &mut tx,
+            job,
+            &TerminalizeSpec {
+                status: "FAILED",
+                error_code: Some("INJECTED"),
+                error_message: None,
+                output: json!({}),
+                result_digest: None,
+                receipt: None,
+                lease_id: None,
+                worker_id: None,
+                event_type: "JOB_FAILED",
+                details: json!({}),
+                lease_final_status: "REVOKED",
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        tx.rollback().await.unwrap();
+        let (status, leases, attempts_active, results, events) = row_counts(&pool, job).await;
+        assert_eq!(status, "RUNNING");
+        assert_eq!((leases, attempts_active, results, events), (1, 1, 0, 0));
+        sqlx::query(&format!(
+            "DROP TRIGGER {trigger} ON kernel.pipeline_job_events"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(&format!("DROP FUNCTION {function}()"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
 }

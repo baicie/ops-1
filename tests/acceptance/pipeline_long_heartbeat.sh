@@ -22,6 +22,8 @@ WORKER_PID=$!
 KERNEL_PID="$(cat /tmp/data-kernel.pid)"
 # Temporary Kernel unreachability: one heartbeat attempt is allowed to fail and
 # retry, but the job must not lose its Lease or create a second Effect.
+restore_kernel() { kill -CONT "$KERNEL_PID" 2>/dev/null || true; }
+trap restore_kernel EXIT
 ( sleep 40; kill -STOP "$KERNEL_PID"; sleep 15; kill -CONT "$KERNEL_PID" ) &
 OUTAGE_PID=$!
 sleep 75
