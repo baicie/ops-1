@@ -105,6 +105,7 @@ for node in node-a node-b; do
 done
 sleep 3
 python3 tests/runtime/claim_concurrency.py
+python3 tests/runtime/catalog_lock_race.py
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"
