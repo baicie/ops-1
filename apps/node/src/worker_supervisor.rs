@@ -71,12 +71,14 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
                 continue;
             };
             let generation = shared.identity.read().await.generation;
+            let worker_kernel_url = std::env::var("OPSWEAVE_WORKER_KERNEL_URL")
+                .unwrap_or_else(|_| shared.args.kernel_url.clone());
             let boot_id = Uuid::new_v4();
             tracing::info!(%instance_id, %boot_id, "starting node-managed pipeline worker");
             let mut command = tokio::process::Command::new(&bin);
             command
                 .kill_on_drop(true)
-                .env("OPSWEAVE_WORKER_KERNEL_URL", &shared.args.kernel_url)
+                .env("OPSWEAVE_WORKER_KERNEL_URL", &worker_kernel_url)
                 .env("OPSWEAVE_WORKER_NODE_IDENTITY", &identity_path)
                 .env("OPSWEAVE_WORKER_INSTANCE_ID", instance_id.to_string())
                 .env("OPSWEAVE_WORKER_NODE_GENERATION", generation.to_string())
