@@ -117,7 +117,7 @@ path,job,fence,lease=sys.argv[1:]
 rows=[json.loads(line) for line in open(path) if line.strip()]
 hits=[r for r in rows if r.get("injected") and job in r.get("path","")]
 if len(hits) < 3: raise SystemExit(f"injected hits={len(hits)}")
-gaps=[hits[i+1]["mono"]-hits[i]["mono"] for i in range(len(hits)-1)]
+gaps=[float(hits[i+1]["mono"])-float(hits[i]["mono"]) for i in range(len(hits)-1)]
 print("heartbeat_503_count", len(hits))
 print("heartbeat_503_intervals", " ".join(f"{g:.3f}" for g in gaps))
 if any(g < 1.0 or g > 20.0 for g in gaps):
