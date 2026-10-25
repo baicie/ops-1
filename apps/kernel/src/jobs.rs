@@ -1193,6 +1193,158 @@ pub async fn publish_revision(
     }))
 }
 
+pub async fn publish_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((pipeline_id, draft_id)): Path<(String, Uuid)>,
+    headers: HeaderMap,
+) -> AppResult<Json<PipelineResponse>> {
+    auth.require_operator()?;
+    let idempotency_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .ok_or_else(|| AppError::bad_request("Idempotency-Key is required"))?
+        .to_string();
+    let if_match = headers
+        .get("if-match")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().trim_matches('"'))
+        .ok_or_else(|| AppError::bad_request("If-Match is required"))?;
+    let expected: i64 = if_match
+        .parse()
+        .map_err(|_| AppError::bad_request("If-Match must be a draft version"))?;
+
+    let mut tx = state.db.begin().await?;
+    let draft = sqlx::query(
+        "SELECT definition,version,status,created_by,published_revision,publish_idempotency_key
+         FROM kernel.pipeline_drafts
+         WHERE pipeline_id=$1 AND draft_id=$2 AND (created_by=$3 OR $4)
+         FOR UPDATE",
+    )
+    .bind(&pipeline_id)
+    .bind(draft_id)
+    .bind(auth.user_id)
+    .bind(auth.role.is_admin())
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "DRAFT_NOT_FOUND", "draft not found"))?;
+    if draft.get::<String, _>("status") == "PUBLISHED" {
+        let stored_key: Option<String> = draft.get("publish_idempotency_key");
+        if stored_key.as_deref() != Some(idempotency_key.as_str()) {
+            return Err(AppError::conflict(
+                "IDEMPOTENCY_CONFLICT",
+                "draft was already published with a different operation",
+            ));
+        }
+        let revision = draft
+            .get::<Option<i32>, _>("published_revision")
+            .ok_or_else(|| AppError::internal("published draft has no revision"))?;
+        tx.rollback().await?;
+        return load_revision(&state, &pipeline_id, revision as u32)
+            .await?
+            .map(Json)
+            .ok_or_else(|| AppError::internal("published revision is missing"));
+    }
+    if draft.get::<i64, _>("version") != expected {
+        return Err(AppError::conflict(
+            "DRAFT_VERSION_CONFLICT",
+            "draft was updated by another editor",
+        ));
+    }
+    let key_owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT draft_id FROM kernel.pipeline_drafts
+         WHERE publish_idempotency_key=$1 AND draft_id <> $2",
+    )
+    .bind(&idempotency_key)
+    .bind(draft_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if key_owner.is_some() {
+        return Err(AppError::conflict(
+            "IDEMPOTENCY_CONFLICT",
+            "Idempotency-Key belongs to a different publish operation",
+        ));
+    }
+    let stored_definition: Value = draft.get("definition");
+    let mut definition: PipelineDefinition = serde_json::from_value(stored_definition)
+        .map_err(|error| AppError::bad_request(format!("stored draft is invalid: {error}")))?;
+    let revision: i32 = sqlx::query_scalar(
+        "UPDATE kernel.pipeline_definitions
+         SET latest_revision=latest_revision+1, updated_at=now()
+         WHERE pipeline_id=$1
+         RETURNING latest_revision",
+    )
+    .bind(&pipeline_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "PIPELINE_NOT_FOUND",
+            "pipeline not found",
+        )
+    })?;
+    definition.pipeline_id = pipeline_id.clone();
+    definition.revision = revision as u32;
+    definition.status = "PUBLISHED".to_string();
+    let plan = match validate_and_plan(&state, &mut definition).await {
+        Ok(plan) => plan,
+        Err(error) => {
+            tx.rollback().await?;
+            return Err(error);
+        }
+    };
+    let definition_value = serde_json::to_value(&definition)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    sqlx::query(
+        "INSERT INTO kernel.pipeline_revisions (pipeline_id,revision,digest,definition,plan,status)
+         VALUES ($1,$2,$3,$4,$5,'PUBLISHED')",
+    )
+    .bind(&pipeline_id)
+    .bind(revision)
+    .bind(&definition.digest)
+    .bind(&definition_value)
+    .bind(serde_json::to_value(&plan).unwrap_or(Value::Null))
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE kernel.pipeline_drafts
+         SET status='PUBLISHED', published_revision=$1, publish_idempotency_key=$2,
+             version=version+1, updated_by=$3, updated_at=now()
+         WHERE draft_id=$4",
+    )
+    .bind(revision)
+    .bind(&idempotency_key)
+    .bind(auth.user_id)
+    .bind(draft_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.draft_published",
+        "USER",
+        &auth.user_id.to_string(),
+        "pipeline",
+        &pipeline_id,
+        "publish",
+        "ACCEPTED",
+        json!({"revision": revision, "digest": definition.digest, "draftId": draft_id}),
+        None,
+    )
+    .await;
+    Ok(Json(PipelineResponse {
+        pipeline_id,
+        revision: revision as u32,
+        digest: definition.digest.clone(),
+        status: "PUBLISHED".to_string(),
+        definition,
+        plan,
+    }))
+}
+
 pub async fn get_plan(
     State(state): State<AppState>,
     _auth: AuthUser,
