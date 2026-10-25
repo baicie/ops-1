@@ -35,7 +35,7 @@ test('studio renders published nodes and inspector selection', async ({ page }) 
   await page.goto(`/pipelines/${PIPELINE}/editor`);
   await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
   await expect(page.getByLabel('Pipeline canvas')).toBeVisible();
-  await expect(page.getByText('Published typed pipelines')).toBeVisible();
+  await expect(page.getByText('published revision', { exact: false })).toBeVisible();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).click();
   await expect(page.getByText('http_json')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
