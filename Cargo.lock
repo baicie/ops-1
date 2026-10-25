@@ -1421,6 +1421,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures",
+ "libc",
  "opsweave-contracts",
  "rand 0.8.8",
  "reqwest",
