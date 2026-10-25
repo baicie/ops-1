@@ -2,16 +2,16 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `5984e3c`  
+Code HEAD: `a1d9184`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40132150776](https://github.com/baicie/ops-1/actions/runs/40132150776) — SUCCESS, attempts 1 and 2
-- Runtime workflow: [40132150489](https://github.com/baicie/ops-1/actions/runs/40132150489) — SUCCESS, attempts 1 and 2
-- Standard CI: run `40132150522` on the same HEAD — SUCCESS
-- Typed Pipeline Contracts: run `40132150497` on the same HEAD — SUCCESS
+- Data Foundation OCI: [40156093797](https://github.com/baicie/ops-1/actions/runs/40156093797) — SUCCESS, attempts 1 and 2
+- Runtime workflow: [40156093791](https://github.com/baicie/ops-1/actions/runs/40156093791) — SUCCESS, attempts 1 and 2
+- Standard CI: run on the same HEAD — SUCCESS
+- Typed Pipeline Contracts: run on the same HEAD — SUCCESS
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
@@ -28,9 +28,9 @@ The second run was a clean rerun of the same commit, not a code change.
 | Two-Node Natural Takeover | **PASS** | `takeover=64s oldLease=EXPIRED effects=3` |
 | Node Runtime SIGKILL | **PASS** | `takeover=64s`, replacement fence=2 |
 | Orphan Worker | **PASS** | PPID=1 old worker; new fence=2; stale HTTP heartbeat/result rejected 403; results=1, records=1001, effects=3 |
-| Supervisor Lifecycle | **PASS** | marker remove/restore; Worker SIGKILL; 3-round crash loop; Instance STOP and recovery; Node generation quarantine and release; Node SIGTERM; Node revocation/quarantine; orphan |
+| Supervisor Lifecycle | **PASS** | marker remove/restore; Worker SIGKILL; 3-round crash loop; Instance STOP and recovery; Node generation quarantine and release; SIGINT and SIGTERM stop+reap Worker; Node revocation/quarantine; orphan |
 | Source Security | **PASS** | 14 deterministic Worker source tests + OCI timeout→no-Sink gate: DNS rebinding/mixed answers, TCP peer pin, slow header/body, infinite chunked, redirects, proxy bypass/count, CL mismatch, malformed, normal |
-| Heartbeat Fault Injection | **PARTIAL** | real mock HTTP: single/continuous 429/500/502/503, disconnect, 401/403/404/409, bounded 3 attempts; no >Lease-TTL outage, Deadline-vs-Sink integration, or Retry-After |
+| Heartbeat Fault Injection | **PARTIAL** | real mock HTTP: single/continuous 429/500/502/503, disconnect, 401/403/404/409, bounded 3 attempts; retry scheduling fixed (backoff not full interval); no >Lease-TTL outage, Deadline-vs-Sink integration, timing assertion, or Retry-After |
 | Result Correctness | **PASS** | exactly one Result in terminalization, orphan and timeout tests |
 | Runtime CI | **PASS** | dedicated workflow green twice |
 | Data Foundation OCI | **PASS** | full two-node OCI golden path |
@@ -42,17 +42,20 @@ The second run was a clean rerun of the same commit, not a code change.
 Supervisor Lifecycle Golden Path: PASS
 crash-loop round=1/2/3: new supervised PIDs
 PASS Node revocation/quarantine stopped supervised worker pid=18091
-PASS Instance STOP stopped supervised worker pid=19150
-PASS Instance STOP recovery started worker pid=19589
-PASS Node generation change (1 -> 2) stopped supervised worker pid=19589
-PASS Node generation quarantine released; worker pid=20018
-PASS Node SIGTERM terminated Node A pid=19771
-orphan worker after Node SIGTERM pid=20018 ppid=1
+PASS Instance STOP stopped supervised worker pid=19177
+PASS Instance STOP recovery started worker pid=19593
+PASS Node generation change (1 -> 2) stopped supervised worker pid=19593
+PASS Node generation quarantine released; worker pid=20044
+PASS Node SIGINT terminated Node A and worker (pid=20044)
+PASS Node SIGINT recovery worker pid=20405
+PASS Node SIGTERM terminated Node A pid=20143
+PASS Node SIGTERM left no live or zombie worker (pid=20405 reaped)
 Supervisor Instance STOP/Generation/SIGTERM: PASS
 ```
 
-The Node SIGTERM orphan was the harness-owned child; the test explicitly records
-PPID=1 and terminates that PID, leaving no unowned worker.
+The old SIGTERM path left a PPID=1 child; it is now fixed. The test fails on a
+live or zombie Worker and no longer kills the orphan to manufacture PASS. SIGINT
+and SIGTERM both stop and reap the supervised child before the Node exits.
 
 ## Orphan stale-authority request
 
@@ -107,9 +110,12 @@ Event insert and verifies full rollback.
 
 ## Remaining work
 
-1. Heartbeat: outage longer than Lease TTL, Deadline-vs-Sink concurrency and
-   Retry-After are **NOT_RUN**. The mock HTTP transient/fatal matrix is PASS.
-2. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
+1. Heartbeat: outage longer than Lease TTL, Deadline-vs-Sink concurrency,
+   timestamp-gap assertion and Retry-After are **NOT_RUN**. Mock HTTP
+   transient/fatal and the corrected retry schedule are covered.
+2. SIGTERM during an active Job and during restart backoff are **NOT_RUN**;
+   SIGINT/SIGTERM idle supervision and Worker reaping are PASS.
+3. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    remain outside this RC.
 
 ## Release Decision
@@ -118,6 +124,6 @@ Event insert and verifies full rollback.
 PARTIAL_NOT_READY
 ```
 
-All P0/P1 gates except Heartbeat's three lifecycle/outage scenarios are PASS.
-The remaining gaps are reliability evidence, not a known correctness defect;
-PR #2 remains Draft.
+Supervisor and Source Security now PASS, including graceful SIGINT/SIGTERM and
+Worker reaping. Heartbeat lifecycle/outage and Deadline-vs-Sink remain NOT_RUN;
+therefore the decision stays PARTIAL, not READY. PR #2 remains Draft.

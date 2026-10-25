@@ -1,7 +1,7 @@
 # OpsWeave 0.0.3 — Final PR Code Review
 
-Reviewed range: `git diff a434a79...856d730`  
-Code HEAD: `856d730`  
+Reviewed range: `git diff a434a79...a1d9184`  
+Code HEAD: `a1d9184`  
 Branch: `feat/0.0.3-typed-pipeline`  
 PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
@@ -35,7 +35,7 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Regression test:** `supervisor_instance_generation_sigterm.sh` now fails if
   any live or zombie Worker remains after SIGINT/SIGTERM; it no longer kills the
   orphan to manufacture PASS.
-- **Commit:** `856d730`
+- **Commit:** `856d730`, fixture fix `a1d9184`
 
 ### P0-2 — Heartbeat retry added a full normal interval
 
@@ -62,7 +62,7 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Fix:** all four variables are saved and restored, including `NO_PROXY`.
 - **Remaining limit:** mutation is still process-global; full subprocess
   isolation is `P2` and not implemented.
-- **Commit:** `856d730`
+- **Commit:** `856d730`; test initializer fix `a1d9184`
 
 ### P1-4 — No real Heartbeat > Lease TTL takeover test
 
@@ -70,7 +70,7 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Problem:** the current mock tests prove cancellation, but not the natural
   takeover after 60s with a second Worker and a persisted Snapshot.
 - **Status:** `NOT_RUN`. This is a reliability evidence gap, not a known code
-  correctness defect.
+  correctness defect. The two clean CI runs on `a1d9184` do not cover it.
 - **Required test:** `tests/acceptance/pipeline_heartbeat_ttl_takeover.sh` with
   fault injection only on Heartbeat, no database Lease mutation, oldFence=1,
   newFence=2, attempts=2, records=1001, effects=3, one Result, zero active leases.
@@ -85,6 +85,13 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Risk:** a code change could accidentally use statement/transaction time or
   skip the recheck after waiting; current code review found no such defect, but
   the gate is not proven by execution.
+
+### P1-7 — SIGTERM while a Job is active / restart backoff is not tested
+
+- **File:** `tests/acceptance/supervisor_instance_generation_sigterm.sh`
+- **Problem:** SIGINT/SIGTERM now stop and reap an idle supervised Worker, but no
+  active Job or backoff sleep is running at signal time.
+- **Status:** `NOT_RUN`; separate from the fixed orphan defect.
 
 ### P2-6 — Node shutdown timeout leaves a joinable task
 
@@ -108,5 +115,11 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
 ## Residual risk
 
-`PARTIAL_NOT_READY` until P1-4 and P1-5 execute in CI; Heartbeat retry timing
-assertion and Source subprocess isolation remain follow-ups.
+`PARTIAL_NOT_READY` until P1-4/P1-5/P1-7 execute in CI; Heartbeat retry timing
+assertion and Source subprocess isolation remain follow-ups. PR stays Draft.
+
+## CI for this review
+
+- Data Foundation: `40156093797` — attempt 1 and attempt 2 SUCCESS
+- Runtime: `40156093791` — attempt 1 and attempt 2 SUCCESS
+- Code: `a1d9184`; docs-only report commit follows.
