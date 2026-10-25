@@ -51,6 +51,9 @@ BEGIN
       (lineage_id,dataset_id,schema_revision,source_batch_key,source,accepted,rejected,unknown,occurred_at)
     VALUES (gen_random_uuid(),'$DATASET_ID','1','deadline-barrier-start','{"test":true}',0,0,0,clock_timestamp());
     PERFORM pg_sleep(7);
+    INSERT INTO plugin_opsweave_data_catalog.catalog_lineage
+      (lineage_id,dataset_id,schema_revision,source_batch_key,source,accepted,rejected,unknown,occurred_at)
+    VALUES (gen_random_uuid(),'$DATASET_ID','1','deadline-barrier-end','{"test":true}',0,0,0,clock_timestamp());
   END IF;
   RETURN NEW;
 END \$fn\$;
@@ -70,13 +73,13 @@ COMMITTED_A="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_cat
 RECORDS_A="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_records WHERE source_batch_key='job-$JOB_A-deadline-case-a';")"
 LINEAGE_A="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_lineage WHERE source_batch_key='job-$JOB_A-deadline-case-a';")"
 BARRIER="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_lineage WHERE source_batch_key='deadline-barrier-start' AND occurred_at <= (SELECT deadline_at FROM kernel.pipeline_jobs WHERE job_id='$JOB_A');")"
-COMMITTED_AFTER="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE effect_id='$EFFECT_A' AND committed_at > (SELECT deadline_at FROM kernel.pipeline_jobs WHERE job_id='$JOB_A');")"
-echo "Case A request_start=$DATE_A request_end=$DATE_A_DONE deadline=$DEADLINE_A code=$CODE_A receipt=$RECEIPT_A barrier_before_deadline=$BARRIER committed_after_deadline=$COMMITTED_AFTER"
+BARRIER_END="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_lineage WHERE source_batch_key='deadline-barrier-end' AND occurred_at > (SELECT deadline_at FROM kernel.pipeline_jobs WHERE job_id='$JOB_A');")"
+echo "Case A request_start=$DATE_A request_end=$DATE_A_DONE deadline=$DEADLINE_A code=$CODE_A receipt=$RECEIPT_A barrier_before_deadline=$BARRIER barrier_after_deadline=$BARRIER_END"
 [ "$COMMITTED_A" = "1" ] || bad "Case A receipt not COMMITTED"
 [ "$RECORDS_A" = "2" ] || bad "Case A records=$RECORDS_A"
 [ "$LINEAGE_A" = "1" ] || bad "Case A lineage=$LINEAGE_A"
 [ "$BARRIER" = "1" ] || bad "Case A barrier did not enter before deadline"
-[ "$COMMITTED_AFTER" = "1" ] || bad "Case A receipt did not commit after deadline"
+[ "$BARRIER_END" = "1" ] || bad "Case A transaction did not cross deadline before commit"
 psql "$DB" -qAt -c "DROP TRIGGER IF EXISTS test_deadline_barrier ON plugin_opsweave_data_catalog.catalog_effect_receipts; DROP FUNCTION IF EXISTS plugin_opsweave_data_catalog.test_deadline_barrier();" >/dev/null
 echo "PASS Deadline/Sink Case A real HTTP commit across deadline"
 # Case B: real HTTP request must enter the Job row-lock wait and be rejected after
