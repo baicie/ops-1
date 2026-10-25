@@ -80,6 +80,8 @@ OLD_FENCE="$(psql "$DB" -qAt -c "SELECT current_fence FROM kernel.pipeline_jobs 
 OLD_BOOT="$(psql "$DB" -qAt -c "SELECT boot_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
 OLD_INSTANCE="$(psql "$DB" -qAt -c "SELECT instance_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
 OLD_CRED="$(python3 -c 'import json;print(json.load(open("data-ci/node-a/node-identity.json"))["credential"])')"
+OLD_WORKER_ID="n:$NODE_A_ID:i:$OLD_INSTANCE:b:$OLD_BOOT"
+OLD_HEADERS=(-H "Authorization: Bearer $OLD_CRED" -H "X-OpsWeave-Node-Id: $NODE_A_ID" -H "X-OpsWeave-Instance-Id: $OLD_INSTANCE" -H "X-OpsWeave-Node-Generation: $NODE_GEN" -H "X-OpsWeave-Boot-Id: $OLD_BOOT" -H "X-OpsWeave-Worker-Id: $OLD_WORKER_ID" -H 'content-type: application/json')
 # Negative control: a different state Job must not inject the target heartbeat.
 # Send a real target heartbeat through the proxy while the state names another Job.
 printf '%s 503\n' '00000000-0000-4000-8000-000000000000' > "$STATE"
@@ -167,8 +169,6 @@ ACTIVE="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_leases WH
 [ "$EFFECTS" = "3" ] || bad "effects=$EFFECTS"
 [ "$RESULTS" = "1" ] || bad "results=$RESULTS"
 [ "$ACTIVE" = "0" ] || bad "active leases=$ACTIVE"
-OLD_WORKER_ID="n:$NODE_A_ID:i:$OLD_INSTANCE:b:$OLD_BOOT"
-OLD_HEADERS=(-H "Authorization: Bearer $OLD_CRED" -H "X-OpsWeave-Node-Id: $NODE_A_ID" -H "X-OpsWeave-Instance-Id: $OLD_INSTANCE" -H "X-OpsWeave-Node-Generation: $NODE_GEN" -H "X-OpsWeave-Boot-Id: $OLD_BOOT" -H "X-OpsWeave-Worker-Id: $OLD_WORKER_ID" -H 'content-type: application/json')
 STALE_HB="$(curl -sS -o /tmp/hb-ttl-stale.json -w '%{http_code}' "${OLD_HEADERS[@]}" -X POST -d "{\"leaseId\":\"$OLD_LEASE\",\"fencingSequence\":$OLD_FENCE}" "$URL/internal/v1/pipeline-jobs/$JOB/heartbeat")"
 STALE_RESULT="$(curl -sS -o /tmp/hb-ttl-stale-result.json -w '%{http_code}' "${OLD_HEADERS[@]}" -X POST -d "{\"leaseId\":\"$OLD_LEASE\",\"fencingSequence\":$OLD_FENCE,\"status\":\"FAILED\",\"output\":{},\"errorCode\":\"STALE\"}" "$URL/internal/v1/pipeline-jobs/$JOB/result")"
 [ "$STALE_HB" != "200" ] || bad "old heartbeat accepted"
