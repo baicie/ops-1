@@ -80,10 +80,22 @@ OLD_FENCE="$(psql "$DB" -qAt -c "SELECT current_fence FROM kernel.pipeline_jobs 
 OLD_BOOT="$(psql "$DB" -qAt -c "SELECT boot_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
 OLD_INSTANCE="$(psql "$DB" -qAt -c "SELECT instance_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
 OLD_CRED="$(python3 -c 'import json;print(json.load(open("data-ci/node-a/node-identity.json"))["credential"])')"
-# Negative control: wrong Job ID must not be injected.
+# Negative control: a different state Job must not inject the target heartbeat.
+# Send a real target heartbeat through the proxy while the state names another Job.
 printf '%s 503\n' '00000000-0000-4000-8000-000000000000' > "$STATE"
-sleep 2
+PROXY_URL="http://127.0.0.1:$PROXY_PORT"
+curl -sS -o /tmp/hb-wrong-state.json -w '%{http_code}' "${OLD_HEADERS[@]}" -X POST \
+  -d "{\"leaseId\":\"$OLD_LEASE\",\"fencingSequence\":$OLD_FENCE}" \
+  "$PROXY_URL/internal/v1/pipeline-jobs/$JOB/heartbeat" >/tmp/hb-wrong-state.code || true
+sleep 0.3
 if [ "$(count_events injected)" != "0" ]; then bad "proxy injected for wrong Job ID"; fi
+python3 - "$EVENTS" "$JOB" <<'PY'
+import json,sys
+path,job=sys.argv[1:]
+rows=[json.loads(line) for line in open(path) if line.strip()]
+if not any(r.get("job")==job and r.get("forwarded") and "/heartbeat" in r.get("path","") for r in rows):
+    raise SystemExit("target heartbeat was not forwarded under wrong state")
+PY
 # Arm only the target Job and never remove a Node marker or signal Worker A.
 printf '%s 503\n' "$JOB" > "$STATE"
 INJECT_START="$(date +%s)"
@@ -120,7 +132,7 @@ if len(hits) < 3: raise SystemExit(f"injected hits={len(hits)}")
 gaps=[float(hits[i+1]["mono"])-float(hits[i]["mono"]) for i in range(len(hits)-1)]
 print("heartbeat_503_count", len(hits))
 print("heartbeat_503_intervals", " ".join(f"{g:.3f}" for g in gaps))
-if any(g < 1.0 or g > 20.0 for g in gaps):
+if any(g < 1.5 or g > 3.5 for g in gaps):
     raise SystemExit(f"retry gaps outside bound: {gaps}")
 PY
 echo "Worker A autonomous exit status=$WORKER_STATUS after $(count_events injected) injected 503s at $(date -u +%FT%TZ)"
