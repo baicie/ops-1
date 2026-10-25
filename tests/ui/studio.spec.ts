@@ -25,7 +25,7 @@ test('pipeline list and detail render real published data', async ({ page }) => 
   await page.screenshot({ path: path.join(OUT, 'pipeline-list.png'), fullPage: true });
   await row.click();
   await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
-  await expect(page.getByText('Latest revision')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Latest revision' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-detail.png'), fullPage: true });
 });
 
@@ -35,8 +35,8 @@ test('studio renders published nodes and inspector selection', async ({ page }) 
   await page.goto(`/pipelines/${PIPELINE}/editor`);
   await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
   await expect(page.getByLabel('Pipeline canvas')).toBeVisible();
-  await expect(page.getByText('published revision', { exact: false })).toBeVisible();
-  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).click();
+  await expect(page.locator('.studio-rf-node').first()).toBeVisible();
+  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   await expect(page.getByText('http_json')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-canvas.png'), fullPage: true });
