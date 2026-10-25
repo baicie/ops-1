@@ -99,12 +99,23 @@ panel is rendered. It is not a timer-based mock.
 
 ## CI
 
-Head `cc871ae`:
+Final code `cc871ae`:
 
-- Data Foundation `40216437617`: attempt 1 SUCCESS.
-- Runtime `40216437610`: attempt 1 SUCCESS.
-- Contracts `40216437622`: SUCCESS.
-- Second attempts were requested; see the final report for the exact conclusion.
+- Data Foundation `40216437617`: attempt 1 **SUCCESS**; attempt 2 golden-path
+  PASS but overall FAIL because the legacy-regression registry container step
+  returned `curl 404`; attempt 3 failed at the same unchanged legacy step.
+- Runtime `40216437610`: attempts 1 and 2 **SUCCESS**.
+- Contracts `40216437622`: **SUCCESS**.
+- Standard CI `40216437634`: **SUCCESS**.
+
+Docs/evidence head `fda1b92` (contains no product code):
+- Data Foundation `40218203551`: golden-path and all Studio/browser tests PASS;
+  overall FAIL at the same legacy registry `curl 404`.
+- Runtime, contracts and standard CI on `fda1b92`: SUCCESS.
+
+The repeated failure is isolated to the pre-existing legacy-regression job
+`docker run ... registry:2` setup, not to the Studio code path. Attempt 1 on the
+same SHA is a complete green run.
 
 ## Screenshots (real Chromium, real PostgreSQL/Kernel)
 
@@ -133,7 +144,7 @@ None found in the delivered vertical slice.
 | Inspector was editable without a Draft | user believes published revision is editable | inputs disabled; explicit create-draft notice | `0529c0b` |
 | Stale pipeline load could overwrite current page | rapid route/draft switch shows wrong pipeline | load sequence guard | `74e44ce` |
 | Initial React Flow layout set Dirty | opening Studio showed unsaved changes | compare IR nodes/edges to baseline; only real edits dirty | `0e3517e` |
-| Draft update updated another user's row | cross-user draft overwrite | SQL `created_by` ownership predicate | backend drafts commit |
+| Draft update updated another user's row | cross-user draft overwrite | SQL `created_by` ownership predicate | `c2fa946` |
 | Draft save error/refresh path could use stale cursor | Retry/Refresh no-op | reload token + cursor stack | `0e3517e` |
 
 ### P2 / remaining debt
