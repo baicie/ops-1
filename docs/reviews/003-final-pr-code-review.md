@@ -80,9 +80,10 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Problem:** SQL uses `clock_timestamp()` and row locks, but there is no
   two-transaction test for (A) sink holding the authority row before Deadline and
   (B) sink waiting for the row until after Deadline.
-- **Status:** **PASS** on `ab8e09f`/`4994193`; Case B rejected with
-  `JOB_DEADLINE_EXCEEDED`, Case A remained within the documented linearization
-  contract; no unauthorized Catalog write.
+- **Status:** **PARTIAL** on `26ee107`. Case B is PASS
+  (`JOB_DEADLINE_EXCEEDED` after the lock wait). Case A currently exercises only
+  `fence_authorize_effect()` authorization across the deadline, not a real
+  Receipt/Records commit in the held transaction.
 - **Risk:** a code change could accidentally use statement/transaction time or
   skip the recheck after waiting; current code review found no such defect, but
   the gate is not proven by execution.
@@ -118,9 +119,10 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
 ## Residual risk
 
-All required P0/P1 review items have executed evidence. Remaining items are P2:
-optional SIGTERM matrix variants, Reaper pressure, source subprocess isolation
-and Retry-After. The reviewer conclusion is READY_FOR_REVIEW; PR stays Draft.
+Deadline Case A remains a P1 evidence gap: the authorization race is tested, but
+the actual fenced Receipt/Records commit crossing the deadline is not. P2 items
+are optional SIGTERM variants, Reaper pressure, source subprocess isolation and
+Retry-After. The reviewer conclusion is PARTIAL_NOT_READY; PR stays Draft.
 
 ## CI for this review
 

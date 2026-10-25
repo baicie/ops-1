@@ -31,7 +31,7 @@ The second run was a clean rerun of the same commit, not a code change.
 | Supervisor Lifecycle | **PASS** | marker, Worker SIGKILL/crash loop, Instance STOP/recovery, generation quarantine/release, SIGINT/SIGTERM active Jobs, SIGTERM in backoff, revocation/quarantine, orphan |
 | Source Security | **PASS** | deterministic DNS/TCP/slow/infinite/redirect/proxy tests + OCI timeout→no-Sink gate |
 | Heartbeat Fault Injection | **PASS** | 3 real 503s (intervals 2.003s), autonomous exit, natural 60s Lease, Node B takeover oldFence=1→2, attempts=2, 1001/3/1, activeLeases=0 |
-| Deadline-vs-Sink A/B | **PASS** | real PostgreSQL row-lock race; Case B waits past deadline then gets `f|JOB_DEADLINE_EXCEEDED`; Case A authorized before deadline and commits without duplicate/unauthorized write |
+| Deadline-vs-Sink A/B | **PARTIAL** | Case B PASS (`f|JOB_DEADLINE_EXCEEDED` after lock wait); Case A currently proves authorization linearization only, not a real Receipt/Records commit after the deadline |
 | Deadline-vs-Sink C/D/E | **PASS** | existing `catalog_fenced_sink` stale fence/receipt replay and terminalization late-result tests |
 | SIGTERM in restart backoff | **PASS** | fake crash-loop child; shutdown duration 2013ms, children=0 |
 | Result Correctness | **PASS** | exactly one Result in terminalization, orphan and timeout tests |
@@ -162,7 +162,7 @@ Supervisor Backoff SIGTERM: PASS
 ## Release Decision
 
 ```text
-READY_FOR_REVIEW
+PARTIAL_NOT_READY
 ```
 
 Terminalization, Supervisor, Source Security, Heartbeat fault/TTL, Deadline-vs-Sink
