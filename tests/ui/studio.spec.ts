@@ -65,3 +65,15 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.locator('.metric-value').first()).not.toHaveText('r1');
   await page.screenshot({ path: path.join(OUT, 'pipeline-published.png'), fullPage: true });
 });
+
+test('submit a published revision and open real job detail', async ({ page }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  await login(page);
+  await page.goto(`/pipelines/${PIPELINE}/run`);
+  await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
+  await page.getByRole('button', { name: 'Submit job' }).click();
+  await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]+/);
+  await expect(page.getByRole('heading', { name: 'Lifecycle' })).toBeVisible();
+  await expect(page.locator('.metric-value').first()).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, 'job-detail.png'), fullPage: true });
+});
