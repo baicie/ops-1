@@ -130,6 +130,7 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   done
   [ "$TOKEN_READY" = "1" ] || { echo "integration workload token file missing data.catalog.v1"; exit 1; }
   # A real auto-claim worker lets the Studio browser flow observe a completed Job.
+  URL="$OPSWEAVE_URL"
   TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
   AUTH=(-H "Authorization: Bearer $TOKEN")
   source tests/acceptance/pipeline_worker_auth.sh
