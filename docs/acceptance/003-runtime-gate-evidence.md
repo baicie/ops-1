@@ -2,17 +2,16 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `b2820d6`  
+Code HEAD: `6fd96c4`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40156093797](https://github.com/baicie/ops-1/actions/runs/40156093797) — SUCCESS, attempts 1 and 2, on code `a1d9184`
-- Runtime workflow: [40156093791](https://github.com/baicie/ops-1/actions/runs/40156093791) — SUCCESS, attempts 1 and 2, on code `a1d9184`
-- Standard CI: run `40158381870` on `b2820d6` — SUCCESS
-- Typed Pipeline Contracts: run `40158381835` on `b2820d6` — SUCCESS
-- `b2820d6` differs from `a1d9184` only by the committed `libc` lockfile entry used by the already-tested Node shutdown path.
+- Data Foundation OCI: [40162404195](https://github.com/baicie/ops-1/actions/runs/40162404195) — SUCCESS, attempt 1 and attempt 2
+- Runtime workflow: [40162404173](https://github.com/baicie/ops-1/actions/runs/40162404173) — SUCCESS, attempt 1 and attempt 2
+- Standard CI: run `40162404171` on `6fd96c4` — SUCCESS
+- Typed Pipeline Contracts: run `40162404213` on `6fd96c4` — SUCCESS
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
@@ -31,7 +30,7 @@ The second run was a clean rerun of the same commit, not a code change.
 | Orphan Worker | **PASS** | PPID=1 old worker; new fence=2; stale HTTP heartbeat/result rejected 403; results=1, records=1001, effects=3 |
 | Supervisor Lifecycle | **PASS** | marker remove/restore; Worker SIGKILL; 3-round crash loop; Instance STOP and recovery; Node generation quarantine and release; SIGINT and SIGTERM stop+reap Worker; Node revocation/quarantine; orphan |
 | Source Security | **PASS** | 14 deterministic Worker source tests + OCI timeout→no-Sink gate: DNS rebinding/mixed answers, TCP peer pin, slow header/body, infinite chunked, redirects, proxy bypass/count, CL mismatch, malformed, normal |
-| Heartbeat Fault Injection | **PARTIAL** | real mock HTTP: single/continuous 429/500/502/503, disconnect, 401/403/404/409, bounded 3 attempts; retry scheduling fixed (backoff not full interval); no >Lease-TTL outage, Deadline-vs-Sink integration, timing assertion, or Retry-After |
+| Heartbeat Fault Injection | **PARTIAL** | mock HTTP status matrix PASS; real Heartbeat-only 503 proxy + natural 60s Lease expiry + Node B takeover PASS (oldFence=1, newFence=2, attempts=2, 1001/3/1, activeLeases=0); Deadline-vs-Sink and Retry-After NOT_RUN |
 | Result Correctness | **PASS** | exactly one Result in terminalization, orphan and timeout tests |
 | Runtime CI | **PASS** | dedicated workflow green twice |
 | Data Foundation OCI | **PASS** | full two-node OCI golden path |
@@ -109,14 +108,28 @@ Each test asserts all five records: Job status, active Lease, unfinished Attempt
 exactly one Result, exactly one terminal Event. The SQL-failure test aborts the
 Event insert and verifies full rollback.
 
+## Heartbeat TTL takeover evidence
+
+`tests/acceptance/pipeline_heartbeat_ttl_takeover.sh` restarted Node A with a
+Worker-only Kernel URL proxy, injected 503 only for the target heartbeat, and
+waited for the real `expires_at`:
+
+```text
+heartbeat-ttl worker-a pid=17750 node-a=17491
+Worker A exited after Heartbeat fault at 04:47:54Z
+Lease TTL reached at 04:48:53Z expires_at=04:48:53.344477+00
+oldFence=1 newFence=2 attempts=2
+stale: heartbeat=409 result=409 results=1 records=1001 effects=3 activeLeases=0
+PASS Heartbeat TTL Takeover
+```
+
 ## Remaining work
 
-1. Heartbeat: outage longer than Lease TTL, Deadline-vs-Sink concurrency,
-   timestamp-gap assertion and Retry-After are **NOT_RUN**. Mock HTTP
-   transient/fatal and the corrected retry schedule are covered.
-2. SIGTERM during an active Job and during restart backoff are **NOT_RUN**;
+1. Deadline-vs-Sink concurrency: **NOT_RUN**.
+2. SIGTERM during an active Job and during restart backoff: **NOT_RUN**;
    SIGINT/SIGTERM idle supervision and Worker reaping are PASS.
-3. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
+3. Heartbeat request timestamp-gap assertion and Retry-After: **NOT_RUN**.
+4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    remain outside this RC.
 
 ## Release Decision

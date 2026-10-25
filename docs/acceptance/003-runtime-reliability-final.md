@@ -131,17 +131,23 @@ the Worker fails before any Snapshot/Sink write: records=0, effects=0, result=1.
 
 A real local mock Kernel exercises single/continuous 429/500/502/503, transport
 disconnect and 401/403/404/409; the Worker sends exactly 1 or 3 requests and
-then cancels. Outage longer than Lease TTL, Deadline-vs-Sink concurrency and
+then cancels. A real Heartbeat-only fault proxy on Node A, followed by the real
+60s `expires_at` and Node B takeover, proves oldFence=1 → newFence=2,
+attempts=2, 1001 Records, 3 Effects, one Result and zero active Leases.
+Deadline-vs-Sink concurrency, active-Job SIGTERM, timestamp-gap assertion and
 Retry-After remain gaps.
 
 ## 6. Explicit Known Limits
 
 These are not claimed as PASS:
 
-1. Heartbeat lifecycle: an outage longer than Lease TTL, Deadline-vs-Sink
-   concurrency and Retry-After behavior are not automated. The real mock HTTP
-   transient/fatal matrix and bounded cancellation are covered.
-2. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
+1. Deadline-vs-Sink two-transaction race is not automated; the SQL authority
+   function rechecks `clock_timestamp()` after the Job row lock in code review.
+2. SIGTERM while a Job is active or during restart backoff is not automated;
+   idle SIGINT/SIGTERM stop+reap is automated.
+3. Heartbeat request timestamp-gap assertion and Retry-After remain gaps; the
+   retry scheduling code no longer adds the full normal interval.
+4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    are outside this RC.
 
 ## 7. Terminalization State Machine
