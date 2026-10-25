@@ -74,6 +74,7 @@ test('submit a published revision and open real job detail', async ({ page }) =>
   await page.getByRole('button', { name: 'Submit job' }).click();
   await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]+/);
   await expect(page.getByRole('heading', { name: 'Lifecycle' })).toBeVisible();
-  await expect(page.locator('.metric-value').first()).toBeVisible();
+  await expect(page.locator('.metric-value').first()).toContainText(/Succeeded|SUCCEEDED/i, { timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Result' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'job-detail.png'), fullPage: true });
 });

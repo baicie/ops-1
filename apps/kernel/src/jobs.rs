@@ -1562,6 +1562,48 @@ pub async fn list_jobs(
     Ok(Json(JobListResponse { items, next_cursor }))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobResultView {
+    pub job_id: Uuid,
+    pub status: String,
+    pub output: Value,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub result_digest: Option<String>,
+    pub completed_at: DateTime<Utc>,
+}
+
+pub async fn get_job_result(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(job_id): Path<Uuid>,
+) -> AppResult<Json<JobResultView>> {
+    let row = sqlx::query(
+        "SELECT job_id,status,output,error_code,error_message,result_digest,completed_at
+         FROM kernel.pipeline_job_results WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "JOB_RESULT_NOT_FOUND",
+            "job result not available",
+        )
+    })?;
+    Ok(Json(JobResultView {
+        job_id: row.get("job_id"),
+        status: row.get("status"),
+        output: row.get("output"),
+        error_code: row.get("error_code"),
+        error_message: row.get("error_message"),
+        result_digest: row.get("result_digest"),
+        completed_at: row.get("completed_at"),
+    }))
+}
+
 pub async fn get_job(
     State(state): State<AppState>,
     _auth: AuthUser,

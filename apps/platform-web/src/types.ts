@@ -380,3 +380,13 @@ export interface JobList {
   items: JobView[];
   nextCursor?: string | null;
 }
+
+export interface JobResultView {
+  jobId: string;
+  status: string;
+  output: Record<string, unknown>;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  resultDigest?: string | null;
+  completedAt: string;
+}

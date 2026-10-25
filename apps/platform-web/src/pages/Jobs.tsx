@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { newIdempotencyKey } from '../api';
-import type { JobList, JobView, PipelineDetail } from '../types';
+import type { JobList, JobResultView, JobView, PipelineDetail } from '../types';
 import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
@@ -48,6 +48,8 @@ export function JobDetailPage() {
   const { jobId = '' } = useParams();
   useDocumentTitle('Job detail');
   const [job, setJob] = useState<JobView | null>(null);
+  const [result, setResult] = useState<JobResultView | null>(null);
+  const [resultError, setResultError] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -58,6 +60,10 @@ export function JobDetailPage() {
         setJob(result); setError(null);
         if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(result.status)) {
           window.setTimeout(load, 3000);
+        } else {
+          api.get<JobResultView>(`/api/v1/jobs/${encodeURIComponent(jobId)}/result`)
+            .then(setResult)
+            .catch((cause) => setResultError((cause as Error).message));
         }
       })
       .catch((cause) => { if (!cancelled) setError(cause as Error); });
@@ -82,7 +88,8 @@ export function JobDetailPage() {
         <div className="panel metric-card"><span className="metric-label">Fence</span><strong className="metric-value mono">{job.currentFence}</strong></div>
         <div className="panel metric-card"><span className="metric-label">Lease</span><strong className="metric-value mono small">{job.currentLeaseId || '—'}</strong></div>
       </section>
-      <section className="panel panel-pad"><h2>Lifecycle</h2><ul className="detail-list"><li><span>Created</span><TimeAgo value={job.createdAt} /></li><li><span>Updated</span><TimeAgo value={job.updatedAt} /></li><li><span>Error code</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">Attempt and checkpoint diagnostics require the dedicated diagnostics API; this page shows only durable Job fields returned by the Kernel.</p></section>
+      <section className="panel panel-pad"><h2>Lifecycle</h2><ul className="detail-list"><li><span>Created</span><TimeAgo value={job.createdAt} /></li><li><span>Updated</span><TimeAgo value={job.updatedAt} /></li><li><span>Error code</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">Attempt counts and the durable result are shown from Kernel records; checkpoint diagnostics require a dedicated diagnostics API.</p></section>
+      {result ? <section className="panel panel-pad"><h2>Result</h2><p className="small">Status <StatusBadge status={result.status} /> · Digest <code className="mono">{result.resultDigest || '—'}</code></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre></section> : resultError ? <p className="muted small">Result: {resultError}</p> : null}
     </div>
   );
 }

@@ -691,3 +691,4 @@ input::placeholder { color: var(--ow-text-muted); }
 .detail-list { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 10px; }
 .detail-list li { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--ow-border); }
 .detail-list span:first-child { color: var(--ow-text-muted); }
+.result-json { max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--ow-border); border-radius: 6px; background: var(--ow-surface-2); font-size: 12px; }
