@@ -1,15 +1,15 @@
 import type { PipelineDefinition, PipelineEdge, PipelineNode } from '../../types';
 import type { GraphEdge, GraphNode, StudioGraph } from './types';
 
-const X_GAP = 280;
-const Y_GAP = 150;
+const X_GAP = 200;
+const Y_GAP = 140;
 
 /** Server IR -> canvas graph. Position is editor-only, never persisted. */
 export function toGraph(definition: PipelineDefinition): StudioGraph {
   const nodes: GraphNode[] = definition.nodes.map((node, index) => ({
     id: node.nodeId,
     type: 'pipeline',
-    position: { x: 80 + (index % 2) * X_GAP, y: 70 + Math.floor(index / 2) * Y_GAP },
+    position: { x: 30 + (index % 2) * X_GAP, y: 40 + Math.floor(index / 2) * Y_GAP },
     data: { ir: clone(node) },
   }));
   const edges: GraphEdge[] = definition.edges.map((edge) => ({
