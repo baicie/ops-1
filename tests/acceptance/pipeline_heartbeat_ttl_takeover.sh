@@ -15,11 +15,11 @@ PROXY_PID=""
 cleanup() {
   [ -n "$PROXY_PID" ] && kill "$PROXY_PID" 2>/dev/null || true
   rm -f "$FLAG" "$ROOT/data-ci/node-a/worker-enabled" "$ROOT/data-ci/node-b/worker-enabled"
-  # Restore Node B to the normal direct-Kernel path for later gates.
-  if [ -f /tmp/node-b.pid ]; then
-    kill -TERM "$(cat /tmp/node-b.pid)" 2>/dev/null || true
-    for _ in $(seq 1 40); do kill -0 "$(cat /tmp/node-b.pid)" 2>/dev/null || break; sleep 0.5; done
-    tests/runtime/start_node.sh node-b 9102 >/dev/null 2>&1 || true
+  # Restore Node A to the normal direct-Kernel path for later gates.
+  if [ -f /tmp/node-a.pid ]; then
+    kill -TERM "$(cat /tmp/node-a.pid)" 2>/dev/null || true
+    for _ in $(seq 1 40); do kill -0 "$(cat /tmp/node-a.pid)" 2>/dev/null || break; sleep 0.5; done
+    tests/runtime/start_node.sh node-a 9101 >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -34,20 +34,21 @@ rm -f "$ROOT/data-ci/node-a/worker-enabled" "$ROOT/data-ci/node-b/worker-enabled
 python3 tests/fixtures/heartbeat_fault_proxy.py "$PROXY_PORT" 18181 "$FLAG" >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
 sleep 1
-# Restart Node B with a Worker-only Kernel URL override and a slow pipeline.
-kill -TERM "$(cat /tmp/node-b.pid)" 2>/dev/null || true
-for _ in $(seq 1 40); do kill -0 "$(cat /tmp/node-b.pid)" 2>/dev/null || break; sleep 0.5; done
-NODE_B_PID="$(OPSWEAVE_WORKER_KERNEL_URL="http://127.0.0.1:$PROXY_PORT" OPSWEAVE_WORKER_BATCH_DELAY_MS=12000 tests/runtime/start_node.sh node-b 9102)"
-echo "$NODE_B_PID" >/tmp/node-b.pid
+# Restart Node A with a Worker-only Kernel URL override and a slow pipeline.
+# Node B (and its Catalog provider) stays untouched.
+kill -TERM "$(cat /tmp/node-a.pid)" 2>/dev/null || true
+for _ in $(seq 1 40); do kill -0 "$(cat /tmp/node-a.pid)" 2>/dev/null || break; sleep 0.5; done
+NODE_FAULT_PID="$(OPSWEAVE_WORKER_KERNEL_URL="http://127.0.0.1:$PROXY_PORT" OPSWEAVE_WORKER_BATCH_DELAY_MS=12000 tests/runtime/start_node.sh node-a 9101)"
+echo "$NODE_FAULT_PID" >/tmp/node-a.pid
 for _ in $(seq 1 120); do
   STATE="$(psql "$DB" -qAt -c "SELECT state FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-integration' ORDER BY i.updated_at DESC LIMIT 1;")"
   [ "$STATE" = "READY" ] && break
   sleep 1
 done
-touch "$ROOT/data-ci/node-b/worker-enabled"
-for _ in $(seq 1 60); do WORKER_A="$(pgrep -P "$NODE_B_PID" -f opsweave-pipeline-worker | head -1 || true)"; [ -n "$WORKER_A" ] && break; sleep 0.5; done
+touch "$ROOT/data-ci/node-a/worker-enabled"
+for _ in $(seq 1 60); do WORKER_A="$(pgrep -P "$NODE_FAULT_PID" -f opsweave-pipeline-worker | head -1 || true)"; [ -n "$WORKER_A" ] && break; sleep 0.5; done
 [ -n "${WORKER_A:-}" ] || bad "Node B supervisor did not start Worker A"
-echo "heartbeat-ttl worker-a pid=$WORKER_A node-b=$NODE_B_PID"
+echo "heartbeat-ttl worker-a pid=$WORKER_A node-a=$NODE_FAULT_PID"
 JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: hb-ttl-$(date +%s%N)" --data-binary '{"pipelineId":"two-node-bulk","pipelineRevision":1,"input":{},"maxAttempts":4,"timeoutSeconds":300}' "$URL/api/v1/jobs" | json "d['jobId']")"
 echo "heartbeat-ttl job=$JOB"
 for _ in $(seq 1 180); do
@@ -62,12 +63,12 @@ OLD_LEASE="$(psql "$DB" -qAt -c "SELECT current_lease_id FROM kernel.pipeline_jo
 OLD_FENCE="$(psql "$DB" -qAt -c "SELECT current_fence FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 OLD_BOOT="$(psql "$DB" -qAt -c "SELECT boot_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
 OLD_INSTANCE="$(psql "$DB" -qAt -c "SELECT instance_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
-OLD_NODE_ID="$(python3 -c 'import json;print(json.load(open("data-ci/node-b/node-identity.json"))["nodeId"])')"
-OLD_CRED="$(python3 -c 'import json;print(json.load(open("data-ci/node-b/node-identity.json"))["credential"])')"
+OLD_NODE_ID="$(python3 -c 'import json;print(json.load(open("data-ci/node-a/node-identity.json"))["nodeId"])')"
+OLD_CRED="$(python3 -c 'import json;print(json.load(open("data-ci/node-a/node-identity.json"))["credential"])')"
 OLD_GEN="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/nodes" | python3 -c 'import json,sys;nid=sys.argv[1];print(next(n["generation"] for n in json.load(sys.stdin) if n["id"]==nid))' "$OLD_NODE_ID")"
 INJECT_START="$(date +%s)"
 printf '%s' "$JOB" > "$FLAG"
-rm -f "$ROOT/data-ci/node-b/worker-enabled"
+rm -f "$ROOT/data-ci/node-a/worker-enabled"
 echo "fault armed at $(date -u +%FT%TZ) oldLease=$OLD_LEASE oldFence=$OLD_FENCE effects=$EFFECTS"
 # Worker A must cancel from 503s, not be killed by the harness.
 for _ in $(seq 1 80); do
@@ -86,7 +87,7 @@ for _ in $(seq 1 180); do
   sleep 1
 done
 [ "${ACTIVE:-1}" = "0" ] || bad "Lease did not expire naturally"
-touch "$ROOT/data-ci/node-a/worker-enabled"
+touch "$ROOT/data-ci/node-b/worker-enabled"
 for _ in $(seq 1 240); do
   STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
   [ "$STATUS" = "SUCCEEDED" ] && break
