@@ -37,7 +37,7 @@ test('studio renders published nodes and inspector selection', async ({ page }) 
   await expect(page.getByLabel('Pipeline canvas')).toBeVisible();
   await expect(page.locator('.studio-rf-node').first()).toBeVisible();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
-  await expect(page.getByText('http_json')).toBeVisible();
+  await expect(page.locator('.studio-inspector')).toContainText('http_json');
   await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-canvas.png'), fullPage: true });
 });
