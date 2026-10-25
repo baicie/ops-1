@@ -1,23 +1,68 @@
 #!/usr/bin/env python3
-"""Forward worker traffic to Kernel, but return 503 for the armed Job's heartbeat."""
-import http.client, sys, time
+"""Deterministic Heartbeat-only fault proxy with structured JSONL evidence.
+
+State file format: "<job-uuid> <mode>" where mode is 503, 429, 500, reset,
+timeout, or off. Only POST /internal/v1/pipeline-jobs/<job>/heartbeat is
+intercepted; every other request is forwarded verbatim to Kernel.
+"""
+import http.client
+import json
+import re
+import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 UPSTREAM = ("127.0.0.1", int(sys.argv[2]) if len(sys.argv) > 2 else 18181)
-FLAG = sys.argv[3] if len(sys.argv) > 3 else "/tmp/heartbeat-fault-job"
+STATE = sys.argv[3] if len(sys.argv) > 3 else "/tmp/heartbeat-fault-job"
+EVENTS = sys.argv[4] if len(sys.argv) > 4 else "/tmp/heartbeat-fault-events.jsonl"
+HEARTBEAT = re.compile(r"^/internal/v1/pipeline-jobs/([0-9a-fA-F-]{36})/heartbeat$")
+SEQ = 0
+
+def state():
+    try:
+        parts = open(STATE, encoding="utf-8").read().split()
+    except OSError:
+        return None, "off"
+    return (parts[0], parts[1]) if len(parts) >= 2 else (None, "off")
+
+def emit(**event):
+    global SEQ
+    SEQ += 1
+    event.update(seq=SEQ, mono=f"{time.monotonic():.6f}", wall=f"{time.time():.6f}")
+    print(json.dumps(event, sort_keys=True), flush=True)
+    try:
+        with open(EVENTS, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, sort_keys=True) + "\n")
+    except OSError:
+        pass
 
 class Handler(BaseHTTPRequestHandler):
     def _handle(self):
         length = int(self.headers.get("content-length", "0") or 0)
         body = self.rfile.read(length) if length else b""
-        job = None
-        try:
-            job = open(FLAG).read().strip()
-        except OSError:
-            pass
-        if job and "/heartbeat" in self.path and job in self.path:
-            print(f"{time.time():.6f} heartbeat job={job} -> 503", flush=True)
-            self.send_response(503)
+        if self.path == "/__health":
+            payload = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        match = HEARTBEAT.match(self.path) if self.command == "POST" else None
+        job = match.group(1) if match else None
+        target_job, mode = state()
+        injected = bool(job and target_job and job == target_job and mode != "off")
+        if injected:
+            if mode == "reset":
+                emit(method=self.command, path=self.path, job=job, mode=mode, status="reset", injected=True)
+                self.connection.close()
+                return
+            if mode == "timeout":
+                emit(method=self.command, path=self.path, job=job, mode=mode, status="timeout", injected=True)
+                time.sleep(30)
+                return
+            status = int(mode) if mode in {"429", "500", "503"} else 503
+            emit(method=self.command, path=self.path, job=job, mode=mode, status=status, injected=True)
+            self.send_response(status)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -27,6 +72,9 @@ class Handler(BaseHTTPRequestHandler):
             conn.request(self.command, self.path, body=body, headers=headers)
             response = conn.getresponse()
             payload = response.read()
+            if job:
+                emit(method=self.command, path=self.path, job=job, mode=mode,
+                     status=response.status, injected=False, forwarded=True)
             self.send_response(response.status)
             for k, v in response.getheaders():
                 if k.lower() in {"connection", "transfer-encoding", "content-length"}:
@@ -36,9 +84,10 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
         except Exception as error:
-            print(f"{time.time():.6f} proxy error path={self.path} error={error}", flush=True)
+            emit(method=self.command, path=self.path, job=job, mode=mode,
+                 status="error", injected=False, forwarded=False, proxy_error=str(error))
             try:
-                self.send_response(502); self.send_header("Content-Length","0"); self.end_headers()
+                self.send_response(502); self.send_header("Content-Length", "0"); self.end_headers()
             except Exception:
                 pass
         finally:
@@ -48,4 +97,5 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("heartbeat-proxy: " + fmt % args + "\n")
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 18182), Handler).serve_forever()
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 18182
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
