@@ -108,6 +108,8 @@ if [ "$INJECTED" -lt 3 ]; then
   bad "Heartbeat 503 injection count is below 3"
 fi
 if [ "$PROXY_ERRORS" != "0" ]; then bad "proxy errors=$PROXY_ERRORS"; fi
+kill -0 "$PROXY_PID" 2>/dev/null || bad "heartbeat proxy crashed during fault injection"
+if [ "$TARGET" -lt "$INJECTED" ]; then bad "target heartbeat count < injected count"; fi
 # Verify the 503s belong to the same Job/Lease/Fence and are from the target route.
 python3 - "$EVENTS" "$JOB" "$OLD_FENCE" "$OLD_LEASE" <<'PY'
 import json,sys
