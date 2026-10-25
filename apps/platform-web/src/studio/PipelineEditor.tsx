@@ -223,9 +223,10 @@ export function PipelineEditorPage() {
         <aside className="panel panel-pad studio-inspector">
           <h2>Inspector</h2>
           {selected ? <>
+            {!hasDraft && <p className="muted small">Create a draft to edit this configuration.</p>}
             <p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · typeVersion {selected.typeVersion}</p>
             <h3>Config</h3>
-            <NodeConfigForm key={selected.nodeId} node={selected} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
+            <NodeConfigForm key={selected.nodeId} node={selected} readOnly={!hasDraft} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
             <h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>input{port.required ? ' · required' : ''}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>output{port.nullable ? ' · nullable' : ''}</small></li>)}</ul>
           </> : <p className="muted small">Select a node to edit its typed config.</p>}
           <h3>Validation <span className={errors.length === 0 ? 'text-ok' : 'text-danger'}>{errors.length}</span></h3>
@@ -237,17 +238,17 @@ export function PipelineEditorPage() {
   );
 }
 
-function NodeConfigForm({ node, onChange }: { node: { config: Record<string, unknown>; type: string }; onChange: (key: string, value: unknown) => void }) {
+function NodeConfigForm({ node, readOnly, onChange }: { node: { config: Record<string, unknown>; type: string }; readOnly: boolean; onChange: (key: string, value: unknown) => void }) {
   const entries = useMemo(() => Object.entries(node.config || {}), [node.config]);
   return (
     <div className="config-form">
       {entries.length === 0 && <p className="muted small">This node has no configurable fields.</p>}
       {entries.map(([key, value]) => {
         const id = `${node.type}-${key}`;
-        if (typeof value === 'number') return <label key={key} htmlFor={id}><span>{key}</span><input id={id} type="number" value={value} onChange={(event) => onChange(key, Number(event.target.value))} /></label>;
-        if (typeof value === 'boolean') return <label key={key} htmlFor={id} className="config-checkbox"><input id={id} type="checkbox" checked={value} onChange={(event) => onChange(key, event.target.checked)} /><span>{key}</span></label>;
-        if (typeof value === 'string') return <label key={key} htmlFor={id}><span>{key}</span><input id={id} value={value} onChange={(event) => onChange(key, event.target.value)} /></label>;
-        return <label key={key} htmlFor={id}><span>{key} (JSON)</span><textarea id={id} rows={5} defaultValue={JSON.stringify(value, null, 2)} onChange={(event) => { try { onChange(key, JSON.parse(event.target.value)); } catch { /* keep last valid value until JSON parses */ } }} /></label>;
+        if (typeof value === 'number') return <label key={key} htmlFor={id}><span>{key}</span><input id={id} type="number" value={value} disabled={readOnly} onChange={(event) => onChange(key, Number(event.target.value))} /></label>;
+        if (typeof value === 'boolean') return <label key={key} htmlFor={id} className="config-checkbox"><input id={id} type="checkbox" checked={value} disabled={readOnly} onChange={(event) => onChange(key, event.target.checked)} /><span>{key}</span></label>;
+        if (typeof value === 'string') return <label key={key} htmlFor={id}><span>{key}</span><input id={id} value={value} disabled={readOnly} onChange={(event) => onChange(key, event.target.value)} /></label>;
+        return <label key={key} htmlFor={id}><span>{key} (JSON)</span><textarea id={id} rows={5} defaultValue={JSON.stringify(value, null, 2)} disabled={readOnly} onChange={(event) => { try { onChange(key, JSON.parse(event.target.value)); } catch { /* keep last valid value until JSON parses */ } }} /></label>;
       })}
     </div>
   );
