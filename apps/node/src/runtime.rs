@@ -1239,6 +1239,7 @@ mod tests {
             quarantined: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             quarantine_error: Arc::new(StdMutex::new(None)),
             lease_deadline: Arc::new(StdMutex::new(None)),
+            shutdown: Arc::new(tokio::sync::watch::channel(false).0),
         })
     }
 
