@@ -58,7 +58,14 @@ for _ in $(seq 1 180); do
   sleep 0.5
 done
 [ "$STATUS" = "RUNNING" ] || bad "job left RUNNING before fault status=$STATUS effects=$EFFECTS"
-[ "$EFFECTS" -ge 1 ] || bad "no committed effect before heartbeat fault"
+[ "$EFFECTS" -ge 1 ] || {
+  echo "FAIL no committed effect before heartbeat fault status=$STATUS effects=$EFFECTS"
+  psql "$DB" -x -c "SELECT job_id,status,attempts,current_fence,current_lease_id,last_error FROM kernel.pipeline_jobs WHERE job_id='$JOB';" || true
+  psql "$DB" -x -c "SELECT lease_id,worker_id,status,expires_at FROM kernel.pipeline_job_leases WHERE job_id='$JOB';" || true
+  tail -60 /tmp/node-a.log 2>/dev/null || true
+  tail -30 "$PROXY_LOG" 2>/dev/null || true
+  exit 1
+}
 OLD_LEASE="$(psql "$DB" -qAt -c "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 OLD_FENCE="$(psql "$DB" -qAt -c "SELECT current_fence FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
 OLD_BOOT="$(psql "$DB" -qAt -c "SELECT boot_id FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
