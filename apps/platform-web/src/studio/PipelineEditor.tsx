@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, newIdempotencyKey } from '../api';
 import type { PipelineDetail, PipelineDraft, PipelineRevision, PipelineValidation } from '../types';
@@ -41,8 +41,10 @@ export function PipelineEditorPage() {
   const [busy, setBusy] = useState<'create' | 'save' | 'validate' | 'publish' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   const load = async (draftId?: string | null) => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     setConflict(null);
@@ -51,12 +53,14 @@ export function PipelineEditorPage() {
         api.get<PipelineDetail>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}`),
         api.get<PipelineDraft[]>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}/drafts`).catch(() => []),
       ]);
+      if (seq !== loadSeq.current) return;
       setDetail(pipeline);
       setDrafts(draftList);
       let active: PipelineDraft | null = null;
       if (draftId) {
         active = await api.get<PipelineDraft>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}/drafts/${encodeURIComponent(draftId)}`);
       }
+      if (seq !== loadSeq.current) return;
       setDraft(active);
       const source = active?.definition || pipeline.latest?.definition;
       if (!source) throw new Error('No published revision or draft is available');
@@ -68,9 +72,9 @@ export function PipelineEditorPage() {
       setServerValidation(null);
       setConnectionError(null);
     } catch (cause) {
-      setError(cause as Error);
+      if (seq === loadSeq.current) setError(cause as Error);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   };
 
@@ -221,7 +225,7 @@ export function PipelineEditorPage() {
           {selected ? <>
             <p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · typeVersion {selected.typeVersion}</p>
             <h3>Config</h3>
-            <NodeConfigForm node={selected} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
+            <NodeConfigForm key={selected.nodeId} node={selected} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
             <h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>input{port.required ? ' · required' : ''}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>output{port.nullable ? ' · nullable' : ''}</small></li>)}</ul>
           </> : <p className="muted small">Select a node to edit its typed config.</p>}
           <h3>Validation <span className={errors.length === 0 ? 'text-ok' : 'text-danger'}>{errors.length}</span></h3>
