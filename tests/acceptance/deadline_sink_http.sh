@@ -48,8 +48,8 @@ LANGUAGE plpgsql AS \$fn\$
 BEGIN
   IF NEW.job_id = '$JOB_A'::uuid THEN
     INSERT INTO plugin_opsweave_data_catalog.catalog_lineage
-      (lineage_id,dataset_id,schema_revision,source_batch_key,source,accepted,rejected,unknown)
-    VALUES (gen_random_uuid(),'$DATASET_ID','1','deadline-barrier-start','{"test":true}',0,0,0);
+      (lineage_id,dataset_id,schema_revision,source_batch_key,source,accepted,rejected,unknown,occurred_at)
+    VALUES (gen_random_uuid(),'$DATASET_ID','1','deadline-barrier-start','{"test":true}',0,0,0,clock_timestamp());
     PERFORM pg_sleep(7);
   END IF;
   RETURN NEW;
