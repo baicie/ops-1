@@ -20,6 +20,8 @@ const paths: Record<string, React.ReactNode> = {
   stop: <rect x="6" y="6" width="12" height="12" rx="1.5" />,
   warning: <><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
   check: <path d="m5 12 4 4L19 6" />,
+  save: <><path d="M4 4h13l3 3v13H4z" /><path d="M8 4v6h8V4M8 20v-7h8v7" /></>,
+  upload: <><path d="M12 17V4M6 10l6-6 6 6" /><path d="M5 20h14" /></>,
   copy: <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
   moon: <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8Z" />,

@@ -41,3 +41,27 @@ test('studio renders published nodes and inspector selection', async ({ page }) 
   await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-canvas.png'), fullPage: true });
 });
+
+test('draft edit, save, reload, validate and publish creates a revision', async ({ page }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  await login(page);
+  await page.goto(`/pipelines/${PIPELINE}/editor`);
+  await page.getByRole('button', { name: 'Create draft' }).click();
+  await expect(page.getByRole('status')).toContainText('Draft created');
+  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  const timeout = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
+  await timeout.fill('17');
+  await expect(page.getByRole('button', { name: 'Save draft' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await page.reload();
+  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('17');
+  await page.getByRole('button', { name: 'Validate' }).click();
+  await expect(page.getByRole('status')).toContainText('Server validation passed');
+  await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
+  await expect(page.locator('.metric-value').first()).not.toHaveText('r1');
+  await page.screenshot({ path: path.join(OUT, 'pipeline-published.png'), fullPage: true });
+});

@@ -331,3 +331,52 @@ export interface PipelineDetail {
   latest?: PipelineRevision | null;
   revisions: Array<{ revision: number; digest: string; status: string; publishedAt: string }>;
 }
+
+export interface PipelineDraft {
+  draftId: string;
+  pipelineId: string;
+  baseRevision: number;
+  definition: PipelineDefinition;
+  definitionDigest: string;
+  version: number;
+  status: string;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ValidationIssue {
+  code: string;
+  message: string;
+  nodeId?: string;
+  port?: string;
+}
+
+export interface PipelineValidation {
+  valid: boolean;
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+  canonicalOrder: string[];
+  planDigest?: string | null;
+  digest?: string | null;
+}
+
+export interface JobView {
+  jobId: string;
+  pipelineId: string;
+  pipelineRevision: number;
+  status: string;
+  currentFence: number;
+  currentLeaseId?: string | null;
+  attempts: number;
+  maxAttempts: number;
+  lastErrorCode?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobList {
+  items: JobView[];
+  nextCursor?: string | null;
+}

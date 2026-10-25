@@ -306,6 +306,7 @@ pub async fn update_draft(
         "UPDATE kernel.pipeline_drafts
          SET definition=$1,definition_digest=$2,version=version+1,updated_by=$3,updated_at=now()
          WHERE pipeline_id=$4 AND draft_id=$5 AND version=$6 AND status='DRAFT'
+           AND (created_by=$7 OR $8)
          RETURNING draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at",
     )
     .bind(&value)
@@ -314,6 +315,8 @@ pub async fn update_draft(
     .bind(&pipeline_id)
     .bind(draft_id)
     .bind(expected)
+    .bind(auth.user_id)
+    .bind(auth.role.is_admin())
     .fetch_optional(&state.db)
     .await?;
     let Some(row) = row else {
@@ -1461,6 +1464,102 @@ async fn fetch_job(state: &AppState, job_id: Uuid) -> AppResult<JobView> {
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::not_found("job not found"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobListQuery {
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+    pub pipeline_id: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobListResponse {
+    pub items: Vec<JobView>,
+    pub next_cursor: Option<String>,
+}
+
+fn decode_job_cursor(cursor: &str) -> AppResult<(DateTime<Utc>, Uuid)> {
+    use base64::Engine;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| AppError::bad_request("invalid job cursor"))?;
+    let text = String::from_utf8(raw).map_err(|_| AppError::bad_request("invalid job cursor"))?;
+    let (timestamp, id) = text
+        .split_once('|')
+        .ok_or_else(|| AppError::bad_request("invalid job cursor"))?;
+    let timestamp = DateTime::parse_from_rfc3339(timestamp)
+        .map_err(|_| AppError::bad_request("invalid job cursor"))?
+        .with_timezone(&Utc);
+    let id = Uuid::parse_str(id).map_err(|_| AppError::bad_request("invalid job cursor"))?;
+    Ok((timestamp, id))
+}
+
+fn encode_job_cursor(job: &JobView) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(format!("{}|{}", job.created_at.to_rfc3339(), job.job_id).as_bytes())
+}
+
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Query(query): Query<JobListQuery>,
+) -> AppResult<Json<JobListResponse>> {
+    let limit = i64::from(query.limit.unwrap_or(20).clamp(1, 100));
+    if let Some(status) = query.status.as_deref() {
+        if !matches!(
+            status,
+            "QUEUED" | "CLAIMED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED"
+        ) {
+            return Err(AppError::bad_request("invalid job status filter"));
+        }
+    }
+    let (cursor_time, cursor_id) = match query.cursor.as_deref() {
+        Some(value) => {
+            let (time, id) = decode_job_cursor(value)?;
+            (Some(time), Some(id))
+        }
+        None => (None, None),
+    };
+    let rows = sqlx::query(
+        r#"
+        SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,
+               attempts,max_attempts,last_error_code,created_at,updated_at
+        FROM kernel.pipeline_jobs
+        WHERE ($1::text IS NULL OR pipeline_id=$1)
+          AND ($2::text IS NULL OR status=$2)
+          AND ($3::timestamptz IS NULL OR (created_at,job_id) < ($3,$4::uuid))
+        ORDER BY created_at DESC, job_id DESC
+        LIMIT $5
+        "#,
+    )
+    .bind(query.pipeline_id.as_deref())
+    .bind(query.status.as_deref())
+    .bind(cursor_time)
+    .bind(cursor_id)
+    .bind(limit + 1)
+    .fetch_all(&state.db)
+    .await?;
+    let has_more = rows.len() as i64 > limit;
+    let visible = if has_more {
+        &rows[..rows.len() - 1]
+    } else {
+        &rows[..]
+    };
+    let items: Vec<JobView> = visible
+        .iter()
+        .map(JobView::from_row)
+        .collect::<Result<_, _>>()?;
+    let next_cursor = if has_more {
+        items.last().map(encode_job_cursor)
+    } else {
+        None
+    };
+    Ok(Json(JobListResponse { items, next_cursor }))
 }
 
 pub async fn get_job(

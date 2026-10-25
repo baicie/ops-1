@@ -227,7 +227,7 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/pipelines/{pipeline_id}/revisions/{revision}/plan",
             get(jobs::get_plan),
         )
-        .route("/api/v1/jobs", post(jobs::submit_job))
+        .route("/api/v1/jobs", get(jobs::list_jobs).post(jobs::submit_job))
         .route("/api/v1/jobs/{job_id}", get(jobs::get_job))
         .route("/api/v1/jobs/{job_id}/cancel", post(jobs::cancel_job))
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))

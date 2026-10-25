@@ -5,10 +5,6 @@ import type { PipelineDefinition, PipelineDetail, PipelineList, PipelineRevision
 import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
-import { GraphCanvas } from '../studio/GraphCanvas';
-import { toGraph, fromGraph } from '../studio/ir/adapter';
-import type { GraphEdge, GraphNode } from '../studio/ir/types';
-import { validatePipeline } from '../studio/ir/validation';
 
 export function PipelinesPage() {
   useDocumentTitle('Pipelines');
@@ -118,7 +114,7 @@ export function PipelineDetailPage() {
         eyebrow="Pipeline"
         title={detail.name}
         description={<span className="mono">{detail.pipelineId}</span>}
-        actions={<><Link className="btn btn-secondary" to="/pipelines"><Icon name="arrowRight" size={15} /> All pipelines</Link><Link className="btn btn-primary" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> Open Studio</Link></>}
+        actions={<><Link className="btn btn-secondary" to="/pipelines"><Icon name="arrowRight" size={15} /> All pipelines</Link><Link className="btn btn-primary" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> Run pipeline</Link><Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> Open Studio</Link></>}
       />
       <section className="summary-grid">
         <div className="panel metric-card"><span className="metric-label">Latest revision</span><strong className="metric-value">r{detail.latestRevision}</strong></div>
@@ -140,113 +136,4 @@ export function PipelineDetailPage() {
   );
 }
 
-export function PipelineEditorPage() {
-  const { pipelineId = '' } = useParams();
-  useDocumentTitle('Pipeline Studio');
-  const [revision, setRevision] = useState<PipelineRevision | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-  const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [history, setHistory] = useState<Array<{ nodes: GraphNode[]; edges: GraphEdge[] }>>([]);
-  const [future, setFuture] = useState<Array<{ nodes: GraphNode[]; edges: GraphEdge[] }>>([]);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setRevision(null);
-    setGraph(null);
-    setError(null);
-    setSelectedId(null);
-    setHistory([]);
-    setFuture([]);
-    setConnectionError(null);
-    api.get<PipelineDetail>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}`)
-      .then((detail) => {
-        if (cancelled) return;
-        if (!detail.latest) { setError(new Error('No published revision')); return; }
-        setRevision(detail.latest);
-        setGraph(toGraph(detail.latest.definition));
-      })
-      .catch((cause) => { if (!cancelled) setError(cause as Error); });
-    return () => { cancelled = true; };
-  }, [pipelineId]);
-
-  if (error) return <ErrorState error={error} />;
-  if (!revision || !graph) return <Skeleton rows={8} />;
-  const definition = fromGraph(revision.definition, graph);
-  const validation = validatePipeline(definition);
-  const selected = definition.nodes.find((node) => node.nodeId === selectedId) || null;
-  const irKey = (value: { nodes: unknown[]; edges: unknown[] }) => JSON.stringify([value.nodes, value.edges]);
-  const dirty = irKey(definition) !== irKey(revision.definition);
-  const update = (next: { nodes: GraphNode[]; edges: GraphEdge[] }) => {
-    setHistory((items) => [...items.slice(-19), graph]);
-    setFuture([]);
-    setGraph(next);
-  };
-  const undo = () => {
-    const previous = history[history.length - 1];
-    if (!previous) return;
-    setFuture((items) => [graph, ...items]);
-    setGraph(previous);
-    setHistory((items) => items.slice(0, -1));
-  };
-  const redo = () => {
-    const next = future[0];
-    if (!next) return;
-    setHistory((items) => [...items, graph]);
-    setGraph(next);
-    setFuture((items) => items.slice(1));
-  };
-  const connect = (connection: { source?: string | null; target?: string | null; sourceHandle?: string | null; targetHandle?: string | null }) => {
-    const source = graph.nodes.find((node) => node.id === connection.source);
-    const target = graph.nodes.find((node) => node.id === connection.target);
-    if (!source || !target) return { ok: false, error: 'Connection endpoints are missing' };
-    const from = source.data.ir.outputs.find((port) => port.name === connection.sourceHandle);
-    const to = target.data.ir.inputs.find((port) => port.name === connection.targetHandle);
-    if (!from || !to) {
-      setConnectionError('Handle does not exist on the selected node');
-      return { ok: false, error: 'Port does not exist' };
-    }
-    const id = `${source.id}:${from.name}->${target.id}:${to.name}`;
-    if (graph.edges.some((edge) => edge.id === id)) {
-      setConnectionError('This connection already exists');
-      return { ok: false, error: 'Duplicate edge' };
-    }
-    const candidateEdge: GraphEdge = {
-      id, source: source.id, target: target.id, sourceHandle: from.name, targetHandle: to.name,
-      label: from.dataType,
-      data: { ir: { fromNode: source.id, fromPort: from.name, toNode: target.id, toPort: to.name, dataType: from.dataType } },
-    };
-    const candidate = fromGraph(revision.definition, { nodes: graph.nodes, edges: [...graph.edges, candidateEdge] });
-    const result = validatePipeline(candidate);
-    if (result.errors.length > 0) {
-      const first = result.errors[0];
-      setConnectionError(`${first.code}: ${first.message}`);
-      return { ok: false, error: first.message };
-    }
-    setConnectionError(null);
-    return { ok: true };
-  };
-  return (
-    <div className="page-stack">
-      <PageHeader eyebrow="Studio" title={revision.definition.name} description={<span className="mono">{pipelineId} · r{revision.revision} · {dirty ? 'local changes' : 'published revision'}</span>} actions={<><button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> Undo</button><button className="btn btn-secondary" onClick={redo} disabled={!future.length}>Redo</button><Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>Pipeline detail</Link><button className="btn btn-primary" disabled title="Draft save API is delivered in the Draft phase">Save draft unavailable</button></>} />
-      <div className="studio-shell">
-        <aside className="panel panel-pad studio-palette">
-          <h2>Node palette</h2><p className="muted small">Typed nodes from the published revision.</p>
-          {revision.definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{node.nodeId}</strong><small className="mono">{node.type}</small></span></div>)}
-        </aside>
-        <section className="panel studio-canvas" aria-label="Pipeline canvas">
-          <GraphCanvas nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />
-          {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
-          <p className="studio-note"><Icon name="alert" size={13} /> Local draft. The server remains authoritative for digest, validation and publish.</p>
-        </section>
-        <aside className="panel panel-pad studio-inspector">
-          <h2>Inspector</h2>
-          {selected ? <><p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · typeVersion {selected.typeVersion}</p><h3>Config</h3><pre>{JSON.stringify(selected.config, null, 2)}</pre><h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>input{port.required ? ' · required' : ''}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>output{port.nullable ? ' · nullable' : ''}</small></li>)}</ul></> : <p className="muted small">Select a node to inspect its typed config.</p>}
-          <h3>Validation <span className={validation.valid ? 'text-ok' : 'text-danger'}>{validation.errors.length}</span></h3>
-          {validation.errors.length === 0 ? <p className="muted small">No local graph errors.</p> : <ul className="validation-list">{validation.errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
-        </aside>
-      </div>
-    </div>
-  );
-}
+export { PipelineEditorPage } from '../studio/PipelineEditor';
