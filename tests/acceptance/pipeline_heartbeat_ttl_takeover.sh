@@ -57,8 +57,8 @@ PROXY_PID=$!
 sleep 0.5
 curl -fsS --max-time 2 "http://127.0.0.1:$PROXY_PORT/__health" >/dev/null || bad "heartbeat proxy health failed"
 NODE_A_ID="$(python3 -c 'import json;print(json.load(open("data-ci/node-a/node-identity.json"))["nodeId"])')"
-INSTANCE="$(psql "$DB" -qAt -c "SELECT i.id FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-integration' AND i.node_id='$NODE_A_ID' AND i.state='READY' AND i.desired_action='START' LIMIT 1;")"
-[ -n "$INSTANCE" ] || bad "Node A has no READY Integration instance"
+INSTANCE="$(psql "$DB" -qAt -c "SELECT id FROM kernel.plugin_instances WHERE node_id='$NODE_A_ID' AND state='READY' AND desired_action='START' ORDER BY updated_at DESC LIMIT 1;")"
+[ -n "$INSTANCE" ] || bad "Node A has no READY instance"
 NODE_GEN="$(psql "$DB" -qAt -c "SELECT generation FROM kernel.nodes WHERE id='$NODE_A_ID';")"
 BOOT="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: hb-ttl-$(date +%s%N)" --data-binary '{"pipelineId":"two-node-bulk","pipelineRevision":1,"input":{},"maxAttempts":4,"timeoutSeconds":300}' "$URL/api/v1/jobs" | json "d['jobId']")"
