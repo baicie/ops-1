@@ -2,16 +2,16 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `26ee107`  
+Code HEAD: `4610d90`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40175757611](https://github.com/baicie/ops-1/actions/runs/40175757611) — SUCCESS, attempts 1 and 2
-- Runtime workflow: [40175757474](https://github.com/baicie/ops-1/actions/runs/40175757474) — SUCCESS, attempts 1 and 2
-- Standard CI: run `40175757451` on `26ee107` — SUCCESS
-- Typed Pipeline Contracts: run `40175757466` on `26ee107` — SUCCESS
+- Data Foundation OCI: [40181826085](https://github.com/baicie/ops-1/actions/runs/40181826085) — SUCCESS, attempts 1 and 2
+- Runtime workflow: [40181826131](https://github.com/baicie/ops-1/actions/runs/40181826131) — SUCCESS, attempts 1 and 2
+- Standard CI: run `40181826140` on `4610d90` — SUCCESS
+- Typed Pipeline Contracts: run `40181826088` on `4610d90` — SUCCESS
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
@@ -31,7 +31,7 @@ The second run was a clean rerun of the same commit, not a code change.
 | Supervisor Lifecycle | **PASS** | marker, Worker SIGKILL/crash loop, Instance STOP/recovery, generation quarantine/release, SIGINT/SIGTERM active Jobs, SIGTERM in backoff, revocation/quarantine, orphan |
 | Source Security | **PASS** | deterministic DNS/TCP/slow/infinite/redirect/proxy tests + OCI timeout→no-Sink gate |
 | Heartbeat Fault Injection | **PASS** | 3 real 503s (intervals 2.003s), autonomous exit, natural 60s Lease, Node B takeover oldFence=1→2, attempts=2, 1001/3/1, activeLeases=0 |
-| Deadline-vs-Sink A/B | **PARTIAL** | Case B PASS (`f|JOB_DEADLINE_EXCEEDED` after lock wait); Case A currently proves authorization linearization only, not a real Receipt/Records commit after the deadline |
+| Deadline-vs-Sink A/B | **PASS** | Case A real HTTP 201 with COMMITTED Receipt, 2 Records, 1 Lineage; barrier entered before and exited after deadline. Case B real HTTP 409 STALE_FENCE/JOB_DEADLINE_EXCEEDED with 0 Receipt/Records/Lineage |
 | Deadline-vs-Sink C/D/E | **PASS** | existing `catalog_fenced_sink` stale fence/receipt replay and terminalization late-result tests |
 | SIGTERM in restart backoff | **PASS** | fake crash-loop child; shutdown duration 2013ms, children=0 |
 | Result Correctness | **PASS** | exactly one Result in terminalization, orphan and timeout tests |
@@ -127,14 +127,21 @@ stale: heartbeat=409 result=409 results=1 records=1001 effects=3 activeLeases=0
 PASS Heartbeat TTL Takeover
 ```
 
-## Deadline vs Sink A/B evidence
+## Deadline vs Sink real HTTP evidence
 
 ```text
-Case B start=07:32:00Z deadline=07:32:02.797841Z obtained after deadline=07:32:05Z
-result=f|JOB_DEADLINE_EXCEEDED
-Case A decision=t|OK commit_after_deadline=t|OK
-PASS Deadline vs Sink Case A/B (no unauthorized Catalog write; documented linearization)
+Case A request_start=09:57:35Z request_end=09:57:42Z deadline=09:57:39.758666Z
+code=201 receipt=COMMITTED|2 barrier_before_deadline=1 barrier_after_deadline=1
+PASS Deadline/Sink Case A real HTTP commit across deadline
+
+Case B HTTP=409 code=STALE_FENCE message=JOB_DEADLINE_EXCEEDED
+receipts=0 records=0 lineage=0
+PASS Deadline/Sink Case B real HTTP lock-wait rejection
 ```
+
+`catalog_effect_receipts.committed_at` is transaction `now()` (transaction start);
+the after-deadline proof is the test-only barrier’s `clock_timestamp()` row plus
+the actual HTTP response completion, not that column.
 
 Case A intentionally remains open after the deadline only because authorization
 completed before it; documented linearization contract. Case B rechecked
@@ -162,9 +169,10 @@ Supervisor Backoff SIGTERM: PASS
 ## Release Decision
 
 ```text
-PARTIAL_NOT_READY
+READY_FOR_REVIEW
 ```
 
-Terminalization, Supervisor, Source Security, Heartbeat fault/TTL, Deadline-vs-Sink
-and all required CI gates now have executed PASS evidence. The remaining items are
-P2 backlog variants. PR #2 stays Draft until independent review accepts it.
+Terminalization, Supervisor, Source Security, Heartbeat fault/TTL and
+Deadline-vs-Sink Case A/B now have executed PASS evidence on the final code HEAD.
+The remaining items are explicitly P2 backlog, not 0.0.3 release gates.
+PR #2 stays Draft until an independent reviewer accepts it.

@@ -1,7 +1,7 @@
 # OpsWeave 0.0.3 — Final PR Code Review
 
-Reviewed range: `git diff a434a79...26ee107`  
-Code HEAD: `26ee107`  
+Reviewed range: `git diff a434a79...4610d90`  
+Code HEAD: `4610d90`  
 Branch: `feat/0.0.3-typed-pipeline`  
 PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
@@ -80,10 +80,11 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Problem:** SQL uses `clock_timestamp()` and row locks, but there is no
   two-transaction test for (A) sink holding the authority row before Deadline and
   (B) sink waiting for the row until after Deadline.
-- **Status:** **PARTIAL** on `26ee107`. Case B is PASS
-  (`JOB_DEADLINE_EXCEEDED` after the lock wait). Case A currently exercises only
-  `fence_authorize_effect()` authorization across the deadline, not a real
-  Receipt/Records commit in the held transaction.
+- **Status:** **PASS** on `4610d90`.
+- **Case A:** real HTTP Fenced Sink returns 201 with COMMITTED Receipt, 2 Records
+  and 1 Lineage; test-only barrier entered before and exited after the deadline.
+- **Case B:** real HTTP request waits on the Job row lock and returns 409
+  `STALE_FENCE` / `JOB_DEADLINE_EXCEEDED`; no Receipt, Records or Lineage.
 - **Risk:** a code change could accidentally use statement/transaction time or
   skip the recheck after waiting; current code review found no such defect, but
   the gate is not proven by execution.
@@ -119,15 +120,15 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
 ## Residual risk
 
-Deadline Case A remains a P1 evidence gap: the authorization race is tested, but
-the actual fenced Receipt/Records commit crossing the deadline is not. P2 items
-are optional SIGTERM variants, Reaper pressure, source subprocess isolation and
-Retry-After. The reviewer conclusion is PARTIAL_NOT_READY; PR stays Draft.
+All required P0/P1 review items now have executed evidence. Remaining P2 items
+are optional SIGTERM variants, Reaper 100/101/1000 pressure, source subprocess
+isolation and Retry-After. The reviewer conclusion is READY_FOR_REVIEW; PR stays
+Draft.
 
 ## CI for this review
 
-- Data Foundation: `40175757611` — attempts 1 and 2 SUCCESS on `26ee107`
-- Runtime: `40175757474` — attempts 1 and 2 SUCCESS on `26ee107`
-- Standard CI: `40175757451` on `26ee107` — SUCCESS
-- Contracts: `40175757466` on `26ee107` — SUCCESS
+- Data Foundation: `40181826085` — attempts 1 and 2 SUCCESS on `4610d90`
+- Runtime: `40181826131` — attempts 1 and 2 SUCCESS on `4610d90`
+- Standard CI: `40181826140` on `4610d90` — SUCCESS
+- Contracts: `40181826088` on `4610d90` — SUCCESS
 - Code: `a1d9184`; docs-only report commit follows.
