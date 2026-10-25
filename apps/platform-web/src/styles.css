@@ -668,3 +668,5 @@ input::placeholder { color: var(--ow-text-muted); }
 .validation-list button { width: 100%; text-align: left; border: 1px solid var(--ow-border); background: var(--ow-surface-2); border-radius: 6px; padding: 7px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; }
 .validation-list strong { color: var(--ow-danger); font-size: 10px; }
 .validation-list span { font-size: 11px; }
+.react-flow__node { visibility: visible !important; opacity: 1 !important; }
+.studio-rf-node { visibility: visible !important; opacity: 1 !important; }
