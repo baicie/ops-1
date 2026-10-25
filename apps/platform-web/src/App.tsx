@@ -17,6 +17,7 @@ import { DiagnosticsPage } from './pages/Diagnostics';
 import { SettingsPage } from './pages/Settings';
 import { OpsCenterPage } from './pages/OpsCenter';
 import { NotFoundPage } from './pages/NotFound';
+import { PipelinesPage, PipelineDetailPage, PipelineEditorPage } from './pages/Pipelines';
 
 function Splash() {
   return (
@@ -49,6 +50,9 @@ export function App() {
                 <Route path="/plugins" element={<PluginsPage />} />
                 <Route path="/plugins/install" element={<InstallWizardPage />} />
                 <Route path="/plugins/:id" element={<PluginDetailPage />} />
+                <Route path="/pipelines" element={<PipelinesPage />} />
+                <Route path="/pipelines/:pipelineId" element={<PipelineDetailPage />} />
+                <Route path="/pipelines/:pipelineId/editor" element={<PipelineEditorPage />} />
                 <Route path="/nodes" element={<NodesPage />} />
                 <Route path="/nodes/:id" element={<NodeDetailPage />} />
                 <Route path="/instances/:id/logs" element={<InstanceLogsPage />} />
