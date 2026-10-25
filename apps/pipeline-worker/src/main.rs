@@ -15,10 +15,12 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+const HEARTBEAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const LEASE_TTL: Duration = Duration::from_secs(60);
 const MAX_RECORDS: usize = 10_000;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -234,28 +236,46 @@ impl Worker {
         let worker = self.clone();
         tokio::spawn(async move {
             let mut transient_failures = 0u32;
+            let mut delay = interval;
+            let mut last_success = Instant::now();
             loop {
-                tokio::time::sleep(interval).await;
+                // A retry waits only the bounded backoff; it must not add a full
+                // normal heartbeat interval on top of the failed attempt.
+                tokio::time::sleep(delay).await;
                 if cancelled.load(Ordering::SeqCst) {
                     return;
                 }
-                let action = match worker.heartbeat_status(job_id, &lease).await {
-                    Ok(status) => heartbeat_action(status),
-                    Err(_) => HeartbeatAction::Retry,
+                let action = match tokio::time::timeout(
+                    HEARTBEAT_REQUEST_TIMEOUT,
+                    worker.heartbeat_status(job_id, &lease),
+                )
+                .await
+                {
+                    Ok(Ok(status)) => heartbeat_action(status),
+                    Ok(Err(_)) | Err(_) => HeartbeatAction::Retry,
                 };
                 match action {
-                    HeartbeatAction::Success => transient_failures = 0,
+                    HeartbeatAction::Success => {
+                        transient_failures = 0;
+                        last_success = Instant::now();
+                        delay = interval;
+                    }
                     HeartbeatAction::Fatal => {
                         cancelled.store(true, Ordering::SeqCst);
                         return;
                     }
                     HeartbeatAction::Retry => {
                         transient_failures = transient_failures.saturating_add(1);
-                        if transient_failures >= max_transient_failures {
+                        // Local retries cannot prove the server renewed the
+                        // Lease. Once the conservative TTL is exhausted, stop
+                        // before any further side effect.
+                        if transient_failures >= max_transient_failures
+                            || last_success.elapsed() + backoff >= LEASE_TTL
+                        {
                             cancelled.store(true, Ordering::SeqCst);
                             return;
                         }
-                        tokio::time::sleep(backoff).await;
+                        delay = backoff;
                     }
                 }
             }
@@ -1690,15 +1710,14 @@ mod tests {
         let _guard = ENV_LOCK.lock().await;
         let (proxy_addr, count) = proxy_counter().await;
         let proxy = format!("http://{}", proxy_addr);
-        let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"];
+        let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
         let old: Vec<_> = names
             .iter()
             .map(|name| (name, std::env::var(name).ok()))
             .collect();
         for name in names {
-            std::env::set_var(name, &proxy);
+            std::env::set_var(name, if name == "NO_PROXY" { "" } else { &proxy });
         }
-        std::env::set_var("NO_PROXY", "");
         let url =
             serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n[{\"id\":1}]".to_vec()).await;
         let records = test_worker().fetch_source(&url).await;
@@ -1708,7 +1727,6 @@ mod tests {
                 None => std::env::remove_var(name),
             }
         }
-        std::env::remove_var("NO_PROXY");
         assert!(records.is_ok(), "{records:?}");
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(count.load(Ordering::SeqCst), 0, "source request used proxy");

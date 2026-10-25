@@ -76,13 +76,31 @@ for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 touch "$MARKER"
 WORKER="$(wait_worker)" || { echo "FAIL worker did not recover after generation restore"; exit 1; }
 echo "PASS Node generation quarantine released; worker pid=$WORKER"
+# SIGINT and SIGTERM use the same graceful path. Exercise SIGINT first, restart,
+# then SIGTERM; both must stop and reap the live worker.
+kill -INT "$NODE_A_PID" 2>/dev/null || true
+for _ in $(seq 1 60); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; done
+if kill -0 "$NODE_A_PID" 2>/dev/null; then echo "FAIL Node A survived SIGINT pid=$NODE_A_PID"; exit 1; fi
+if kill -0 "$WORKER" 2>/dev/null; then echo "FAIL SIGINT left live worker pid=$WORKER"; exit 1; fi
+echo "PASS Node SIGINT terminated Node A and worker (pid=$WORKER)"
+NODE_A_PID="$(tests/runtime/start_node.sh node-a 9101)"
+for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
+[ "$(instance_ready)" = "1" ] || { echo "FAIL instance did not recover after SIGINT restart"; exit 1; }
+touch "$MARKER"
+WORKER="$(wait_worker)" || { echo "FAIL worker did not recover after SIGINT restart"; exit 1; }
+echo "PASS Node SIGINT recovery worker pid=$WORKER"
 # Node SIGTERM: the Node process must exit and not leave an unowned live Worker.
 kill -TERM "$NODE_A_PID" 2>/dev/null || true
 for _ in $(seq 1 60); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; done
 if kill -0 "$NODE_A_PID" 2>/dev/null; then echo "FAIL Node A survived SIGTERM pid=$NODE_A_PID"; exit 1; fi
 echo "PASS Node SIGTERM terminated Node A pid=$NODE_A_PID"
 if [ -n "$WORKER" ] && kill -0 "$WORKER" 2>/dev/null; then
-  echo "orphan worker after Node SIGTERM pid=$WORKER ppid=$(ps -o ppid= -p "$WORKER" | tr -d ' ')"
-  kill -9 "$WORKER" 2>/dev/null || true
+  echo "FAIL Node SIGTERM left a live worker pid=$WORKER ppid=$(ps -o ppid= -p "$WORKER" | tr -d ' ')"
+  exit 1
 fi
+if ps -o stat= -p "$WORKER" 2>/dev/null | grep -q '^Z'; then
+  echo "FAIL Node SIGTERM left a zombie worker pid=$WORKER"
+  exit 1
+fi
+echo "PASS Node SIGTERM left no live or zombie worker (pid=$WORKER reaped)"
 echo "Supervisor Instance STOP/Generation/SIGTERM: PASS"

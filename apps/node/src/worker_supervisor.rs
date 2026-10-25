@@ -9,6 +9,30 @@ use std::sync::{atomic::Ordering, Arc};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+async fn terminate_child(child: &mut tokio::process::Child) -> bool {
+    let Some(pid) = child.id() else {
+        return false;
+    };
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as i32, libc::SIGTERM);
+    }
+    #[cfg(not(unix))]
+    let _ = child.start_kill();
+    match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+        Ok(Ok(status)) => {
+            tracing::info!(%status, %pid, "worker exited on SIGTERM");
+            true
+        }
+        _ => {
+            tracing::warn!(%pid, "worker did not exit within 5s; SIGKILL and reap");
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            false
+        }
+    }
+}
+
 pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         if std::env::var("OPSWEAVE_NODE_WORKER_ENABLED").as_deref() != Ok("1") {
@@ -20,9 +44,16 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
         let identity_path = shared.args.state_dir.join("node-identity.json");
         let enable_marker = shared.args.state_dir.join("worker-enabled");
         let mut failures = 0u32;
+        let mut shutdown = shared.shutdown.subscribe();
         loop {
+            if *shutdown.borrow() {
+                break;
+            }
             if !enable_marker.exists() || shared.quarantined.load(Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                    changed = shutdown.changed() => { if changed.is_err() || *shutdown.borrow() { break; } }
+                }
                 continue;
             }
             let ready_instance = {
@@ -33,7 +64,10 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
                     .map(|runtime| runtime.workload.instance_id)
             };
             let Some(instance_id) = ready_instance else {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                    changed = shutdown.changed() => { if changed.is_err() || *shutdown.borrow() { break; } }
+                }
                 continue;
             };
             let generation = shared.identity.read().await.generation;
@@ -59,11 +93,19 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
                 Err(error) => {
                     failures = failures.saturating_add(1);
                     tracing::error!(%error, bin, "failed to start node-managed pipeline worker");
-                    backoff(failures).await;
+                    tokio::select! {
+                        _ = backoff(failures) => {}
+                        changed = shutdown.changed() => { if changed.is_err() || *shutdown.borrow() { break; } }
+                    }
                     continue;
                 }
             };
             loop {
+                if *shutdown.borrow() {
+                    tracing::info!(%instance_id, "worker supervisor shutdown");
+                    let _ = terminate_child(&mut child).await;
+                    return;
+                }
                 let instance_ready = {
                     let runtimes = shared.runtimes.read().await;
                     runtimes
@@ -84,7 +126,12 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
                         tracing::warn!(%status, "node-managed pipeline worker exited");
                         break;
                     }
-                    Ok(None) => tokio::time::sleep(Duration::from_millis(500)).await,
+                    Ok(None) => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+                            changed = shutdown.changed() => { if changed.is_err() || *shutdown.borrow() { break; } }
+                        }
+                    }
                     Err(error) => {
                         tracing::error!(%error, "worker status check failed");
                         let _ = child.start_kill();
@@ -93,12 +140,19 @@ pub fn spawn(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
                     }
                 }
             }
+            if *shutdown.borrow() {
+                let _ = terminate_child(&mut child).await;
+                break;
+            }
             failures = if started.elapsed() > Duration::from_secs(60) {
                 0
             } else {
                 failures.saturating_add(1)
             };
-            backoff(failures).await;
+            tokio::select! {
+                _ = backoff(failures) => {}
+                changed = shutdown.changed() => { if changed.is_err() || *shutdown.borrow() { break; } }
+            }
         }
     })
 }
