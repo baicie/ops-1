@@ -76,10 +76,11 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
   return (
     <div className="studio-rf-wrap">
       <ReactFlow
+        style={{ width: '100%', height: '100%' }}
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes as any}
-        fitView
+        fitView={false}
         minZoom={0.25}
         maxZoom={1.75}
         onNodeClick={(_, node) => onSelect(node.id)}

@@ -640,7 +640,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .palette-item span { display: flex; flex-direction: column; min-width: 0; }
 .palette-item strong { font-size: var(--ow-type-sm); }
 .palette-item small { overflow-wrap: anywhere; }
-.studio-canvas { min-height: 460px; position: relative; overflow: auto; background-image: radial-gradient(var(--ow-border) 1px, transparent 1px); background-size: 18px 18px; }
+.studio-canvas { height: 520px; min-height: 460px; position: relative; overflow: auto; background-image: radial-gradient(var(--ow-border) 1px, transparent 1px); background-size: 18px 18px; }
 .studio-canvas-grid { position: relative; min-height: 400px; }
 .studio-node { position: absolute; min-width: 150px; padding: 10px 12px; border: 1px solid var(--ow-accent); border-radius: 8px; background: var(--ow-surface); box-shadow: var(--ow-shadow-sm); display: flex; flex-direction: column; gap: 4px; }
 .studio-node small { color: var(--ow-text-muted); }
@@ -651,7 +651,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .studio-inspector pre { max-height: 160px; overflow: auto; font-size: 11px; background: var(--ow-surface-2); padding: 8px; border-radius: 6px; }
 @media (max-width: 1050px) { .studio-shell { grid-template-columns: 180px minmax(0, 1fr); } .studio-inspector { grid-column: 1 / -1; position: static; max-height: none; } }
 @media (max-width: 700px) { .studio-shell { grid-template-columns: 1fr; } .studio-palette, .studio-inspector { position: static; max-height: none; } .revision-list li { grid-template-columns: 50px minmax(0, 1fr); } .revision-list li .status, .revision-list li time { grid-column: 2; } }
-.studio-rf-wrap { height: 520px; width: 100%; }
+.studio-rf-wrap { height: 100%; min-height: 460px; width: 100%; }
 .studio-rf-node { min-width: 170px; border: 1px solid var(--ow-accent); border-radius: 8px; background: var(--ow-surface); padding: 9px 11px; box-shadow: var(--ow-shadow-sm); }
 .studio-rf-node.selected { outline: 2px solid var(--ow-accent); }
 .studio-rf-node-head { display: flex; justify-content: space-between; gap: 8px; font-size: var(--ow-type-sm); }
