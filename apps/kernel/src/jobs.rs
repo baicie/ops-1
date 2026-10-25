@@ -31,6 +31,99 @@ pub struct PipelineResponse {
     pub plan: PipelineExecutionPlan,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineValidationIssue {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineValidationResponse {
+    pub valid: bool,
+    pub errors: Vec<PipelineValidationIssue>,
+    pub warnings: Vec<PipelineValidationIssue>,
+    pub canonical_order: Vec<String>,
+    pub plan_digest: Option<String>,
+    pub digest: Option<String>,
+}
+
+/// Pure server-side validation: no revision, job, receipt or catalog write.
+pub async fn validate_pipeline_definition(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Json(mut definition): Json<PipelineDefinition>,
+) -> AppResult<Json<PipelineValidationResponse>> {
+    auth.require_operator()?;
+    let catalog = match live_schema_catalog(&state, &mut definition).await {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            return Ok(Json(PipelineValidationResponse {
+                valid: false,
+                errors: vec![PipelineValidationIssue {
+                    code: error.code.to_string(),
+                    message: error.message,
+                    node_id: None,
+                    port: None,
+                }],
+                warnings: Vec::new(),
+                canonical_order: Vec::new(),
+                plan_digest: None,
+                digest: None,
+            }))
+        }
+    };
+    let definition_value = serde_json::to_value(&definition)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    definition.digest = digest_without_field(&definition_value, "digest");
+    let (registry, _) = match trusted_registry() {
+        Ok(registry) => registry,
+        Err(error) => {
+            return Ok(Json(PipelineValidationResponse {
+                valid: false,
+                errors: vec![PipelineValidationIssue {
+                    code: error.code,
+                    message: error.message,
+                    node_id: None,
+                    port: None,
+                }],
+                warnings: Vec::new(),
+                canonical_order: Vec::new(),
+                plan_digest: None,
+                digest: None,
+            }))
+        }
+    };
+    match validate_pipeline(&definition, &registry, &catalog) {
+        Ok(plan) => Ok(Json(PipelineValidationResponse {
+            valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            canonical_order: plan.ordered_nodes,
+            plan_digest: Some(plan.plan_digest),
+            digest: Some(definition.digest),
+        })),
+        Err(error) => Ok(Json(PipelineValidationResponse {
+            valid: false,
+            errors: vec![PipelineValidationIssue {
+                code: error.code,
+                message: error.message,
+                node_id: None,
+                port: None,
+            }],
+            warnings: Vec::new(),
+            canonical_order: Vec::new(),
+            plan_digest: None,
+            digest: None,
+        })),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerIdentity {
