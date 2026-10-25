@@ -15,12 +15,12 @@ check_blocked() {
   for attempt in $(seq 1 60); do
     http_code="$(curl -sS -o /tmp/data-ssrf-source.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' \
       "$INT/sources" -d "{\"name\":\"$name\",\"connectorType\":\"http-json\",\"endpoint\":\"$endpoint\",\"credential\":{\"credentialRef\":\"secret://local/http-json/$name\",\"kind\":\"none\",\"maskedHint\":\"local\"}}")"
-    [ "$http_code" = "200" ] && break
+    [ "$http_code" = "200" ] || [ "$http_code" = "201" ] && break
     # A restarted Node can report its plugin instance READY before the Gateway
     # route is installed; retry the harness request, never ignore a final 404.
     sleep 1
   done
-  [ "$http_code" = "200" ] || bad "$name source create returned $http_code after retry: $(cat /tmp/data-ssrf-source.json 2>/dev/null || true)"
+  [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || bad "$name source create returned $http_code after retry: $(cat /tmp/data-ssrf-source.json 2>/dev/null || true)"
   source="$(cat /tmp/data-ssrf-source.json)"
   local source_id
   source_id="$(printf '%s' "$source" | json "d['sourceId']")"
