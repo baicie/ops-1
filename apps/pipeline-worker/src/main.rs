@@ -296,11 +296,48 @@ impl Worker {
     }
 
     async fn heartbeat(&self, job_id: Uuid, lease: &ClaimResponse) -> Result<()> {
-        let status = self.heartbeat_status(job_id, lease).await?;
-        if !status.is_success() {
-            bail!("heartbeat failed ({status})");
+        // Synchronous checkpoint/sink authority checks must obey the same
+        // transient-vs-terminal policy as the dedicated heartbeat task; a single
+        // 503 must not abort a Job whose Lease may still be valid.
+        let mut last_status = None;
+        for attempt in 0..3 {
+            let status = match tokio::time::timeout(
+                HEARTBEAT_REQUEST_TIMEOUT,
+                self.heartbeat_status(job_id, lease),
+            )
+            .await
+            {
+                Ok(Ok(status)) => status,
+                Ok(Err(error)) => {
+                    if attempt == 2 {
+                        return Err(error).context("heartbeat request failed");
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+                Err(_) if attempt == 2 => bail!("heartbeat request timed out"),
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            match heartbeat_action(status) {
+                HeartbeatAction::Success => return Ok(()),
+                HeartbeatAction::Fatal => bail!("heartbeat rejected ({status})"),
+                HeartbeatAction::Retry => {
+                    last_status = Some(status);
+                    if attempt < 2 {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+                }
+            }
         }
-        Ok(())
+        bail!(
+            "heartbeat failed after 3 transient attempts ({})",
+            last_status
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "transport".into())
+        )
     }
 
     async fn checkpoint(
