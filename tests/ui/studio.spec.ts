@@ -54,12 +54,14 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeEnabled();
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByRole('status')).toContainText('Draft saved');
+  await page.screenshot({ path: path.join(OUT, 'pipeline-draft-saved.png'), fullPage: true });
   await page.reload();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('17');
   await page.getByRole('button', { name: 'Validate', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Server validation passed');
   await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled();
+  await page.screenshot({ path: path.join(OUT, 'pipeline-validated.png'), fullPage: true });
   await page.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
   await expect(page.locator('.metric-value').first()).not.toHaveText('r1');
@@ -77,4 +79,7 @@ test('submit a published revision and open real job detail', async ({ page }) =>
   await expect(page.locator('.metric-value').first()).toContainText(/Succeeded|SUCCEEDED/i, { timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Result' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'job-detail.png'), fullPage: true });
+  await page.goto('/jobs');
+  await expect(page.getByRole('heading', { name: 'Jobs', exact: true })).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, 'job-history.png'), fullPage: true });
 });
