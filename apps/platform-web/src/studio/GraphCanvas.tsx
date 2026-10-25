@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import {
-  Background, Controls, Handle, MiniMap, Position, ReactFlow,
+  Background, Controls, Handle, Position, ReactFlow,
   type Connection, type Edge, type Node, type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -100,7 +100,6 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         deleteKeyCode={['Backspace', 'Delete']}
       >
         <Background gap={18} size={1} />
-        <MiniMap pannable zoomable />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>
