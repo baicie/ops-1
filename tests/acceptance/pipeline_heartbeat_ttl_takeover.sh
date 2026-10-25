@@ -61,18 +61,12 @@ INSTANCE="$(psql "$DB" -qAt -c "SELECT i.id FROM kernel.plugin_instances i JOIN 
 [ -n "$INSTANCE" ] || bad "Node A has no READY Integration instance"
 NODE_GEN="$(psql "$DB" -qAt -c "SELECT generation FROM kernel.nodes WHERE id='$NODE_A_ID';")"
 BOOT="$(python3 -c 'import uuid;print(uuid.uuid4())')"
-OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-a/node-identity.json" \
-OPSWEAVE_WORKER_INSTANCE_ID="$INSTANCE" \
-OPSWEAVE_WORKER_NODE_GENERATION="$NODE_GEN" \
-OPSWEAVE_WORKER_BOOT_ID="$BOOT" \
-OPSWEAVE_WORKER_KERNEL_URL="http://127.0.0.1:$PROXY_PORT" \
-OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1" \
-OPSWEAVE_WORKER_BATCH_DELAY_MS=12000 \
-./target/debug/opsweave-pipeline-worker >"$WORKER_LOG" 2>&1 &
-WORKER_A=$!
-echo "standalone worker-a pid=$WORKER_A node-a=$NODE_A_ID instance=$INSTANCE boot=$BOOT"
 JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: hb-ttl-$(date +%s%N)" --data-binary '{"pipelineId":"two-node-bulk","pipelineRevision":1,"input":{},"maxAttempts":4,"timeoutSeconds":300}' "$URL/api/v1/jobs" | json "d['jobId']")"
 echo "heartbeat-ttl job=$JOB"
+OPSWEAVE_WORKER_JOB_ID="$JOB" OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-a/node-identity.json" OPSWEAVE_WORKER_INSTANCE_ID="$INSTANCE" OPSWEAVE_WORKER_NODE_GENERATION="$NODE_GEN" OPSWEAVE_WORKER_BOOT_ID="$BOOT" OPSWEAVE_WORKER_KERNEL_URL="http://127.0.0.1:$PROXY_PORT" OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1" OPSWEAVE_WORKER_BATCH_DELAY_MS=12000 ./target/debug/opsweave-pipeline-worker >"$WORKER_LOG" 2>&1 &
+WORKER_A=$!
+for _ in $(seq 1 40); do kill -0 "$WORKER_A" 2>/dev/null || bad "standalone Worker A exited before claiming"; sleep 0.25; done
+echo "standalone worker-a pid=$WORKER_A node-a=$NODE_A_ID instance=$INSTANCE boot=$BOOT"
 for _ in $(seq 1 180); do
   STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
   EFFECTS="$(psql "$DB" -qAt -c "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB';")"
