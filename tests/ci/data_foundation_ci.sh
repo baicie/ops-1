@@ -136,6 +136,7 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=0 OPSWEAVE_TEST_KERNEL_PID="$KERNEL_PID" tests/acceptance/data_token_refresh.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_heartbeat_ttl_takeover.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_race.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/capability_multi_provider.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/source_timeout_no_sink.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
