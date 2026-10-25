@@ -2,16 +2,17 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `a1d9184`  
+Code HEAD: `b2820d6`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40156093797](https://github.com/baicie/ops-1/actions/runs/40156093797) — SUCCESS, attempts 1 and 2
-- Runtime workflow: [40156093791](https://github.com/baicie/ops-1/actions/runs/40156093791) — SUCCESS, attempts 1 and 2
-- Standard CI: run on the same HEAD — SUCCESS
-- Typed Pipeline Contracts: run on the same HEAD — SUCCESS
+- Data Foundation OCI: [40156093797](https://github.com/baicie/ops-1/actions/runs/40156093797) — SUCCESS, attempts 1 and 2, on code `a1d9184`
+- Runtime workflow: [40156093791](https://github.com/baicie/ops-1/actions/runs/40156093791) — SUCCESS, attempts 1 and 2, on code `a1d9184`
+- Standard CI: run `40158381870` on `b2820d6` — SUCCESS
+- Typed Pipeline Contracts: run `40158381835` on `b2820d6` — SUCCESS
+- `b2820d6` differs from `a1d9184` only by the committed `libc` lockfile entry used by the already-tested Node shutdown path.
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
