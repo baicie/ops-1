@@ -1,7 +1,7 @@
 # OpsWeave 0.0.3 — Final PR Code Review
 
-Reviewed range: `git diff a434a79...4610d90`  
-Code HEAD: `4610d90`  
+Reviewed range: `git diff a434a79...30e792e`  
+Code HEAD: `30e792e`  
 Branch: `feat/0.0.3-typed-pipeline`  
 PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
@@ -51,6 +51,20 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Regression test:** the mock HTTP tests still assert actual request counts
   and cancellation; a timing assertion remains `NOT_RUN` in this iteration.
 - **Commit:** `856d730`
+
+### P1-2b — Checkpoint heartbeat aborted Job on one 503
+
+- **File:** `apps/pipeline-worker/src/main.rs`, `heartbeat()`
+- **Root cause:** synchronous checkpoint/sink authority heartbeat returned
+  immediately on a single transient 503, unlike the dedicated heartbeat task's
+  bounded retry policy.
+- **Failure scenario:** a transient Kernel 503 at a batch boundary failed the Job
+  instead of retrying; the TTL test observed exactly one injected 503.
+- **Fix:** three bounded attempts with 2s backoff and 5s per-request timeout,
+  terminal 401/403/404/409 still fatal.
+- **Regression:** TTL gate now records `heartbeat_503_count=3` and intervals
+  `2.003 2.003`; commit `30e792e`.
+- **CI:** `40186437693` / `40186437725` attempts 1 and 2.
 
 ### P1-3 — Source proxy test did not restore NO_PROXY
 
@@ -127,8 +141,8 @@ Draft.
 
 ## CI for this review
 
-- Data Foundation: `40181826085` — attempts 1 and 2 SUCCESS on `4610d90`
-- Runtime: `40181826131` — attempts 1 and 2 SUCCESS on `4610d90`
-- Standard CI: `40181826140` on `4610d90` — SUCCESS
-- Contracts: `40181826088` on `4610d90` — SUCCESS
+- Data Foundation: `40186437693` — attempts 1 and 2 SUCCESS on `30e792e`
+- Runtime: `40186437725` — attempts 1 and 2 SUCCESS on `30e792e`
+- Standard CI: `40186437628` on `30e792e` — SUCCESS
+- Contracts: `40186437712` on `30e792e` — SUCCESS
 - Code: `a1d9184`; docs-only report commit follows.

@@ -2,16 +2,16 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `4610d90`  
+Code HEAD: `30e792e`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40181826085](https://github.com/baicie/ops-1/actions/runs/40181826085) — SUCCESS, attempts 1 and 2
-- Runtime workflow: [40181826131](https://github.com/baicie/ops-1/actions/runs/40181826131) — SUCCESS, attempts 1 and 2
-- Standard CI: run `40181826140` on `4610d90` — SUCCESS
-- Typed Pipeline Contracts: run `40181826088` on `4610d90` — SUCCESS
+- Data Foundation OCI: [40186437693](https://github.com/baicie/ops-1/actions/runs/40186437693) — SUCCESS, attempts 1 and 2
+- Runtime workflow: [40186437725](https://github.com/baicie/ops-1/actions/runs/40186437725) — SUCCESS, attempts 1 and 2
+- Standard CI: run `40186437628` on `30e792e` — SUCCESS
+- Typed Pipeline Contracts: run `40186437712` on `30e792e` — SUCCESS
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
@@ -30,7 +30,7 @@ The second run was a clean rerun of the same commit, not a code change.
 | Orphan Worker | **PASS** | PPID=1 old worker; new fence=2; stale HTTP heartbeat/result rejected 403; results=1, records=1001, effects=3 |
 | Supervisor Lifecycle | **PASS** | marker, Worker SIGKILL/crash loop, Instance STOP/recovery, generation quarantine/release, SIGINT/SIGTERM active Jobs, SIGTERM in backoff, revocation/quarantine, orphan |
 | Source Security | **PASS** | deterministic DNS/TCP/slow/infinite/redirect/proxy tests + OCI timeout→no-Sink gate |
-| Heartbeat Fault Injection | **PASS** | 3 real 503s (intervals 2.003s), autonomous exit, natural 60s Lease, Node B takeover oldFence=1→2, attempts=2, 1001/3/1, activeLeases=0 |
+| Heartbeat Fault Injection | **PASS** | 3 real 503s (intervals 2.003s) from checkpoint authority, autonomous exit, natural TTL, Node B takeover; checkpoint heartbeat now uses bounded transient retries |
 | Deadline-vs-Sink A/B | **PASS** | Case A real HTTP 201 with COMMITTED Receipt, 2 Records, 1 Lineage; barrier entered before and exited after deadline. Case B real HTTP 409 STALE_FENCE/JOB_DEADLINE_EXCEEDED with 0 Receipt/Records/Lineage |
 | Deadline-vs-Sink C/D/E | **PASS** | existing `catalog_fenced_sink` stale fence/receipt replay and terminalization late-result tests |
 | SIGTERM in restart backoff | **PASS** | fake crash-loop child; shutdown duration 2013ms, children=0 |
