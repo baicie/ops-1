@@ -2,16 +2,16 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `f43c8c2`  
+Code HEAD: `4994193`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40163790834](https://github.com/baicie/ops-1/actions/runs/40163790834) — SUCCESS, attempt 1 and attempt 2
-- Runtime workflow: [40163790828](https://github.com/baicie/ops-1/actions/runs/40163790828) — SUCCESS, attempt 1 and attempt 2
-- Standard CI: run `40163790956` on `f43c8c2` — SUCCESS
-- Typed Pipeline Contracts: run `40163790827` on `f43c8c2` — SUCCESS
+- Data Foundation OCI: [40172247224](https://github.com/baicie/ops-1/actions/runs/40172247224) — SUCCESS, attempt 1 and attempt 2
+- Runtime workflow: [40172247250](https://github.com/baicie/ops-1/actions/runs/40172247250) — SUCCESS, attempt 1 and attempt 2
+- Standard CI: run `40172247221` on `4994193` — SUCCESS
+- Typed Pipeline Contracts: run `40172247239` on `4994193` — SUCCESS
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
@@ -28,9 +28,12 @@ The second run was a clean rerun of the same commit, not a code change.
 | Two-Node Natural Takeover | **PASS** | `takeover=64s oldLease=EXPIRED effects=3` |
 | Node Runtime SIGKILL | **PASS** | `takeover=64s`, replacement fence=2 |
 | Orphan Worker | **PASS** | PPID=1 old worker; new fence=2; stale HTTP heartbeat/result rejected 403; results=1, records=1001, effects=3 |
-| Supervisor Lifecycle | **PASS** | marker remove/restore; Worker SIGKILL; 3-round crash loop; Instance STOP and recovery; Node generation quarantine and release; SIGINT/SIGTERM during active Jobs stop+reap Worker; Node revocation/quarantine; orphan |
-| Source Security | **PASS** | 14 deterministic Worker source tests + OCI timeout→no-Sink gate: DNS rebinding/mixed answers, TCP peer pin, slow header/body, infinite chunked, redirects, proxy bypass/count, CL mismatch, malformed, normal |
-| Heartbeat Fault Injection | **PARTIAL** | mock HTTP matrix PASS; real Heartbeat-only 503 proxy + natural 60s Lease expiry + Node B takeover PASS (oldFence=1,newFence=2,attempts=2,1001/3/1,activeLeases=0); Deadline-vs-Sink, timestamp-gap and Retry-After NOT_RUN |
+| Supervisor Lifecycle | **PASS** | marker, Worker SIGKILL/crash loop, Instance STOP/recovery, generation quarantine/release, SIGINT/SIGTERM active Jobs, SIGTERM in backoff, revocation/quarantine, orphan |
+| Source Security | **PASS** | deterministic DNS/TCP/slow/infinite/redirect/proxy tests + OCI timeout→no-Sink gate |
+| Heartbeat Fault Injection | **PASS** | 3 real 503s (intervals 2.003s), autonomous exit, natural 60s Lease, Node B takeover oldFence=1→2, attempts=2, 1001/3/1, activeLeases=0; Deadline and Retry-After are separate |
+| Deadline-vs-Sink A/B | **PASS** | real PostgreSQL row-lock race; Case B waits past deadline then gets `f|JOB_DEADLINE_EXCEEDED`; Case A authorized before deadline and commits without duplicate/unauthorized write |
+| Deadline-vs-Sink C/D/E | **PASS** | existing `catalog_fenced_sink` stale fence/receipt replay and terminalization late-result tests |
+| SIGTERM in restart backoff | **PASS** | fake crash-loop child; shutdown duration 2013ms, children=0 |
 | Result Correctness | **PASS** | exactly one Result in terminalization, orphan and timeout tests |
 | Runtime CI | **PASS** | dedicated workflow green twice |
 | Data Foundation OCI | **PASS** | full two-node OCI golden path |
@@ -124,21 +127,44 @@ stale: heartbeat=409 result=409 results=1 records=1001 effects=3 activeLeases=0
 PASS Heartbeat TTL Takeover
 ```
 
+## Deadline vs Sink A/B evidence
+
+```text
+Case B start=07:32:00Z deadline=07:32:02.797841Z obtained after deadline=07:32:05Z
+result=f|JOB_DEADLINE_EXCEEDED
+Case A decision=t|OK commit_after_deadline=t|OK
+PASS Deadline vs Sink Case A/B (no unauthorized Catalog write; documented linearization)
+```
+
+Case A intentionally remains open after the deadline only because authorization
+completed before it; documented linearization contract. Case B rechecked
+`clock_timestamp()` after the row lock and rejected.
+
+## SIGTERM backoff evidence
+
+```text
+fake child exit observed; SIGTERM during backoff
+PASS SIGTERM during supervisor restart backoff: duration=2013ms children=0
+Supervisor Backoff SIGTERM: PASS
+```
+
 ## Remaining work
 
-1. Deadline-vs-Sink two-transaction concurrency: **NOT_RUN**.
-2. SIGTERM during restart backoff: **NOT_RUN**; active-Job SIGINT/SIGTERM and
-   Worker reaping are PASS.
-3. Heartbeat request timestamp-gap assertion and Retry-After: **NOT_RUN**.
+1. Optional fault-injection matrix variants: SIGTERM during spawn/wait/
+   quarantine/double-signal and full Reaper 100/101/1000 pressure are **NOT_RUN**
+   (P2 backlog; core shutdown and bounded Reaper paths are PASS).
+2. Source proxy tests still mutate process-global environment in one unit test
+   (P2 isolation follow-up).
+3. Retry-After is intentionally unsupported; fixed bounded backoff documented.
 4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    remain outside this RC.
 
 ## Release Decision
 
 ```text
-PARTIAL_NOT_READY
+READY_FOR_REVIEW
 ```
 
-Supervisor and Source Security now PASS, including graceful SIGINT/SIGTERM and
-Worker reaping. Heartbeat lifecycle/outage and Deadline-vs-Sink remain NOT_RUN;
-therefore the decision stays PARTIAL, not READY. PR #2 remains Draft.
+Terminalization, Supervisor, Source Security, Heartbeat fault/TTL, Deadline-vs-Sink
+and all required CI gates now have executed PASS evidence. The remaining items are
+P2 backlog variants. PR #2 stays Draft until independent review accepts it.

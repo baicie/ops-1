@@ -1,7 +1,7 @@
 # OpsWeave 0.0.3 — Final PR Code Review
 
-Reviewed range: `git diff a434a79...f43c8c2`  
-Code HEAD: `f43c8c2`  
+Reviewed range: `git diff a434a79...4994193`  
+Code HEAD: `4994193`  
 Branch: `feat/0.0.3-typed-pipeline`  
 PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
@@ -67,7 +67,7 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 ### P1-4 — Real Heartbeat > Lease TTL takeover test
 
 - **File:** `tests/acceptance/pipeline_heartbeat_ttl_takeover.sh`
-- **Status:** **PASS** on code `f43c8c2`.
+- **Status:** **PASS** on code `4994193`.
 - **Evidence:** Worker-only Kernel proxy returned 503 only for the target
   Heartbeat; real `expires_at` was reached without DB mutation; Node B took over
   naturally; oldFence=1, newFence=2, attempts=2, records=1001, effects=3,
@@ -80,7 +80,9 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 - **Problem:** SQL uses `clock_timestamp()` and row locks, but there is no
   two-transaction test for (A) sink holding the authority row before Deadline and
   (B) sink waiting for the row until after Deadline.
-- **Status:** `NOT_RUN`.
+- **Status:** **PASS** on `ab8e09f`/`4994193`; Case B rejected with
+  `JOB_DEADLINE_EXCEEDED`, Case A remained within the documented linearization
+  contract; no unauthorized Catalog write.
 - **Risk:** a code change could accidentally use statement/transaction time or
   skip the recheck after waiting; current code review found no such defect, but
   the gate is not proven by execution.
@@ -88,10 +90,11 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 ### P1-7 — SIGTERM while a Job is active / restart backoff
 
 - **File:** `tests/acceptance/supervisor_instance_generation_sigterm.sh`
-- **Status:** **active-Job PASS** on code `f43c8c2`; restart backoff `NOT_RUN`.
-- **Evidence:** `SIGINT active job=... worker=21413` and
-  `SIGTERM active job=... worker=21811`, both followed by no live/zombie Worker.
-- **Commit:** `f43c8c2`; startup shutdown path `856d730`.
+- **Status:** **PASS** on code `4994193`, including restart backoff.
+- **Evidence:** `SIGINT active job=... worker=21413`, `SIGTERM active job=...
+  worker=21811`, and `SIGTERM during supervisor restart backoff: duration=2013ms
+  children=0`.
+- **Commit:** `f43c8c2`, `4994193`; shutdown path `856d730`.
 
 ### P2-6 — Node shutdown timeout leaves a joinable task
 
@@ -115,15 +118,14 @@ PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
 ## Residual risk
 
-`PARTIAL_NOT_READY` until P1-5 Deadline-vs-Sink, retry-backoff SIGTERM,
-Heartbeat timestamp-gap assertion and Source subprocess isolation execute.
-Heartbeat TTL takeover, active-Job SIGTERM and source timeout/no-Sink are PASS.
-PR stays Draft.
+All required P0/P1 review items have executed evidence. Remaining items are P2:
+optional SIGTERM matrix variants, Reaper pressure, source subprocess isolation
+and Retry-After. The reviewer conclusion is READY_FOR_REVIEW; PR stays Draft.
 
 ## CI for this review
 
-- Data Foundation: `40163790834` — attempt 1 and attempt 2 SUCCESS on `f43c8c2`
-- Runtime: `40163790828` — attempt 1 and attempt 2 SUCCESS on `f43c8c2`
-- Standard CI: `40163790956` on `f43c8c2` — SUCCESS
-- Contracts: `40163790827` on `f43c8c2` — SUCCESS
+- Data Foundation: `40172247224` — attempt 1 and attempt 2 SUCCESS on `4994193`
+- Runtime: `40172247250` — attempt 1 and attempt 2 SUCCESS on `4994193`
+- Standard CI: `40172247221` on `4994193` — SUCCESS
+- Contracts: `40172247239` on `4994193` — SUCCESS
 - Code: `a1d9184`; docs-only report commit follows.

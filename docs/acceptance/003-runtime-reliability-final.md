@@ -141,12 +141,13 @@ Retry-After remain gaps.
 
 These are not claimed as PASS:
 
-1. Deadline-vs-Sink two-transaction race is not automated; the SQL authority
-   function rechecks `clock_timestamp()` after the Job row lock in code review.
-2. SIGTERM while a Job is active or during restart backoff is not automated;
-   idle SIGINT/SIGTERM stop+reap is automated.
-3. Heartbeat request timestamp-gap assertion and Retry-After remain gaps; the
-   retry scheduling code no longer adds the full normal interval.
+1. Optional SIGTERM variants during spawn/wait/quarantine/double-signal and full
+   Reaper 100/101/1000 pressure are P2 backlog; active-Job SIGTERM, backoff
+   SIGTERM and bounded Reaper behavior are covered.
+2. Source proxy tests still mutate process-global environment in one unit test;
+   subprocess isolation is a P2 cleanup.
+3. Retry-After is intentionally unsupported; fixed bounded backoff is the
+   protocol limit.
 4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    are outside this RC.
 
