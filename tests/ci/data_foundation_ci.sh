@@ -141,3 +141,4 @@ OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/c
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/source_timeout_no_sink.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_instance_generation_sigterm.sh
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_backoff_sigterm.sh
