@@ -54,10 +54,11 @@ do not mutate state.
 
 ## Screenshots
 
-Artifact `data-foundation-screenshots`, path `studio/`:
-- `pipeline-list.png` — 1280×729, real test DB includes Host Metrics Pipeline.
-- `pipeline-detail.png` — 1280×868, six typed nodes and revision history.
-- `pipeline-canvas.png` — 1280×752, six-node linear graph, selected source,
+Artifact `data-foundation-screenshots`, path `studio/`; copies committed under
+`docs/assets/0.0.4/`:
+- [pipeline-list.png](../assets/0.0.4/pipeline-list.png) — 1280×729, real test DB includes Host Metrics Pipeline.
+- [pipeline-detail.png](../assets/0.0.4/pipeline-detail.png) — 1280×868, six typed nodes and revision history.
+- [pipeline-canvas.png](../assets/0.0.4/pipeline-canvas.png) — 1280×752, six-node linear graph, selected source,
   inspector config and Validation=0.
 
 Browser: Playwright Chromium desktop (CI Linux). Viewport 1280×720.
@@ -95,6 +96,6 @@ Final code `0e19a65` (canvas complete; two clean runs):
 - Standard CI: `40203368001` SUCCESS.
 
 Final code `83fd1bb` (only list refresh/retry fix):
-- Data Foundation: `40205544299` attempt 1 SUCCESS; attempt 2 in progress.
-- Runtime: `40205544169` attempt 1 SUCCESS; attempt 2 in progress.
+- Data Foundation: `40205544299` attempts 1 and 2 SUCCESS.
+- Runtime: `40205544169` attempts 1 and 2 SUCCESS.
 - Standard CI: `40205544171` SUCCESS.
