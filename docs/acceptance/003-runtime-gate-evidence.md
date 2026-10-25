@@ -2,16 +2,16 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `6fd96c4`  
+Code HEAD: `f43c8c2`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40162404195](https://github.com/baicie/ops-1/actions/runs/40162404195) — SUCCESS, attempt 1 and attempt 2
-- Runtime workflow: [40162404173](https://github.com/baicie/ops-1/actions/runs/40162404173) — SUCCESS, attempt 1 and attempt 2
-- Standard CI: run `40162404171` on `6fd96c4` — SUCCESS
-- Typed Pipeline Contracts: run `40162404213` on `6fd96c4` — SUCCESS
+- Data Foundation OCI: [40163790834](https://github.com/baicie/ops-1/actions/runs/40163790834) — SUCCESS, attempt 1 and attempt 2
+- Runtime workflow: [40163790828](https://github.com/baicie/ops-1/actions/runs/40163790828) — SUCCESS, attempt 1 and attempt 2
+- Standard CI: run `40163790956` on `f43c8c2` — SUCCESS
+- Typed Pipeline Contracts: run `40163790827` on `f43c8c2` — SUCCESS
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
@@ -28,9 +28,9 @@ The second run was a clean rerun of the same commit, not a code change.
 | Two-Node Natural Takeover | **PASS** | `takeover=64s oldLease=EXPIRED effects=3` |
 | Node Runtime SIGKILL | **PASS** | `takeover=64s`, replacement fence=2 |
 | Orphan Worker | **PASS** | PPID=1 old worker; new fence=2; stale HTTP heartbeat/result rejected 403; results=1, records=1001, effects=3 |
-| Supervisor Lifecycle | **PASS** | marker remove/restore; Worker SIGKILL; 3-round crash loop; Instance STOP and recovery; Node generation quarantine and release; SIGINT and SIGTERM stop+reap Worker; Node revocation/quarantine; orphan |
+| Supervisor Lifecycle | **PASS** | marker remove/restore; Worker SIGKILL; 3-round crash loop; Instance STOP and recovery; Node generation quarantine and release; SIGINT/SIGTERM during active Jobs stop+reap Worker; Node revocation/quarantine; orphan |
 | Source Security | **PASS** | 14 deterministic Worker source tests + OCI timeout→no-Sink gate: DNS rebinding/mixed answers, TCP peer pin, slow header/body, infinite chunked, redirects, proxy bypass/count, CL mismatch, malformed, normal |
-| Heartbeat Fault Injection | **PARTIAL** | mock HTTP status matrix PASS; real Heartbeat-only 503 proxy + natural 60s Lease expiry + Node B takeover PASS (oldFence=1, newFence=2, attempts=2, 1001/3/1, activeLeases=0); Deadline-vs-Sink and Retry-After NOT_RUN |
+| Heartbeat Fault Injection | **PARTIAL** | mock HTTP matrix PASS; real Heartbeat-only 503 proxy + natural 60s Lease expiry + Node B takeover PASS (oldFence=1,newFence=2,attempts=2,1001/3/1,activeLeases=0); Deadline-vs-Sink, timestamp-gap and Retry-After NOT_RUN |
 | Result Correctness | **PASS** | exactly one Result in terminalization, orphan and timeout tests |
 | Runtime CI | **PASS** | dedicated workflow green twice |
 | Data Foundation OCI | **PASS** | full two-node OCI golden path |
@@ -46,10 +46,11 @@ PASS Instance STOP stopped supervised worker pid=19177
 PASS Instance STOP recovery started worker pid=19593
 PASS Node generation change (1 -> 2) stopped supervised worker pid=19593
 PASS Node generation quarantine released; worker pid=20044
-PASS Node SIGINT terminated Node A and worker (pid=20044)
-PASS Node SIGINT recovery worker pid=20405
-PASS Node SIGTERM terminated Node A pid=20143
-PASS Node SIGTERM left no live or zombie worker (pid=20405 reaped)
+SIGINT active job=34917917-90b7-4875-a575-69205ab7912d worker=21413
+PASS Node SIGINT terminated Node A and worker (pid=21413)
+PASS Node SIGINT recovery worker pid=... 
+SIGTERM active job=6adf4652-16d2-4f6d-ad35-77da6ac893f1 worker=21811
+PASS Node SIGTERM left no live or zombie worker (pid=21811 reaped)
 Supervisor Instance STOP/Generation/SIGTERM: PASS
 ```
 
@@ -125,9 +126,9 @@ PASS Heartbeat TTL Takeover
 
 ## Remaining work
 
-1. Deadline-vs-Sink concurrency: **NOT_RUN**.
-2. SIGTERM during an active Job and during restart backoff: **NOT_RUN**;
-   SIGINT/SIGTERM idle supervision and Worker reaping are PASS.
+1. Deadline-vs-Sink two-transaction concurrency: **NOT_RUN**.
+2. SIGTERM during restart backoff: **NOT_RUN**; active-Job SIGINT/SIGTERM and
+   Worker reaping are PASS.
 3. Heartbeat request timestamp-gap assertion and Retry-After: **NOT_RUN**.
 4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    remain outside this RC.
