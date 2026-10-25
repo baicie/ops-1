@@ -194,10 +194,18 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/plugin-storage/{plugin_id}/migrations",
             get(storage::list_migrations).post(storage::apply_migration),
         )
-        .route("/api/v1/pipelines", post(jobs::create_pipeline))
+        .route(
+            "/api/v1/pipelines",
+            get(jobs::list_pipelines).post(jobs::create_pipeline),
+        )
+        .route("/api/v1/pipelines/{pipeline_id}", get(jobs::get_pipeline))
         .route(
             "/api/v1/pipelines/{pipeline_id}/revisions",
-            post(jobs::publish_revision),
+            get(jobs::list_revisions).post(jobs::publish_revision),
+        )
+        .route(
+            "/api/v1/pipelines/{pipeline_id}/revisions/{revision}",
+            get(jobs::get_revision),
         )
         .route(
             "/api/v1/pipelines/{pipeline_id}/revisions/{revision}/plan",

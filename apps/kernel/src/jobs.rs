@@ -10,7 +10,7 @@ use crate::pipeline::{
     PipelineExecutionPlan, SchemaCatalog, SchemaDataset, SchemaField, SchemaRevision,
 };
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
@@ -409,6 +409,299 @@ async fn load_revision(
         definition,
         plan,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineListQuery {
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineSummary {
+    pub pipeline_id: String,
+    pub name: String,
+    pub latest_revision: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineListResponse {
+    pub items: Vec<PipelineSummary>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionSummary {
+    pub revision: i32,
+    pub digest: String,
+    pub status: String,
+    pub published_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionView {
+    pub pipeline_id: String,
+    pub revision: i32,
+    pub digest: String,
+    pub status: String,
+    pub published_at: DateTime<Utc>,
+    pub definition: Value,
+    pub plan: Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PipelineDetailResponse {
+    pub pipeline_id: String,
+    pub name: String,
+    pub latest_revision: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub latest: Option<RevisionView>,
+    pub revisions: Vec<RevisionSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionListQuery {
+    pub limit: Option<u32>,
+    pub before: Option<i32>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisionListResponse {
+    pub items: Vec<RevisionSummary>,
+    pub next_before: Option<i32>,
+}
+
+fn page_limit(limit: Option<u32>) -> i64 {
+    i64::from(limit.unwrap_or(20).clamp(1, 100))
+}
+
+fn decode_pipeline_cursor(cursor: &str) -> AppResult<Option<String>> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| AppError::bad_request("invalid pipeline cursor"))?;
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| AppError::bad_request("invalid pipeline cursor"))
+}
+
+fn encode_pipeline_cursor(pipeline_id: &str) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(pipeline_id.as_bytes())
+}
+
+fn revision_view(row: &sqlx::postgres::PgRow) -> RevisionView {
+    RevisionView {
+        pipeline_id: row.get("pipeline_id"),
+        revision: row.get("revision"),
+        digest: row.get("digest"),
+        status: row.get("status"),
+        published_at: row.get("published_at"),
+        definition: row.get("definition"),
+        plan: row.get("plan"),
+    }
+}
+
+pub async fn list_pipelines(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Query(query): Query<PipelineListQuery>,
+) -> AppResult<Json<PipelineListResponse>> {
+    let limit = page_limit(query.limit);
+    let after = match query.cursor.as_deref() {
+        Some(value) => decode_pipeline_cursor(value)?,
+        None => None,
+    };
+    // Fetch one extra row to produce a truthful next cursor. Pipeline IDs are
+    // stable, unique and used as the opaque cursor payload; no user fields leak.
+    let rows = sqlx::query(
+        r#"
+        SELECT d.pipeline_id, d.latest_revision, d.created_at, d.updated_at,
+               COALESCE(r.definition->>'name', d.pipeline_id) AS name
+        FROM kernel.pipeline_definitions d
+        LEFT JOIN kernel.pipeline_revisions r
+          ON r.pipeline_id=d.pipeline_id AND r.revision=d.latest_revision
+        WHERE ($1::text IS NULL OR d.pipeline_id > $1)
+        ORDER BY d.pipeline_id ASC
+        LIMIT $2
+        "#,
+    )
+    .bind(after)
+    .bind(limit + 1)
+    .fetch_all(&state.db)
+    .await?;
+    let has_more = rows.len() as i64 > limit;
+    let visible = if has_more {
+        &rows[..rows.len() - 1]
+    } else {
+        &rows[..]
+    };
+    let items: Vec<PipelineSummary> = visible
+        .iter()
+        .map(|row| PipelineSummary {
+            pipeline_id: row.get("pipeline_id"),
+            name: row.get("name"),
+            latest_revision: row.get("latest_revision"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+        .collect();
+    let next_cursor = if has_more {
+        items
+            .last()
+            .map(|item| encode_pipeline_cursor(&item.pipeline_id))
+    } else {
+        None
+    };
+    Ok(Json(PipelineListResponse { items, next_cursor }))
+}
+
+pub async fn get_pipeline(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(pipeline_id): Path<String>,
+) -> AppResult<Json<PipelineDetailResponse>> {
+    let row = sqlx::query(
+        r#"
+        SELECT d.pipeline_id, d.latest_revision, d.created_at, d.updated_at,
+               COALESCE(r.definition->>'name', d.pipeline_id) AS name
+        FROM kernel.pipeline_definitions d
+        LEFT JOIN kernel.pipeline_revisions r
+          ON r.pipeline_id=d.pipeline_id AND r.revision=d.latest_revision
+        WHERE d.pipeline_id=$1
+        "#,
+    )
+    .bind(&pipeline_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "PIPELINE_NOT_FOUND",
+            "pipeline not found",
+        )
+    })?;
+
+    let latest_row = sqlx::query(
+        "SELECT pipeline_id,revision,digest,status,published_at,definition,plan
+         FROM kernel.pipeline_revisions WHERE pipeline_id=$1 AND revision=$2",
+    )
+    .bind(&pipeline_id)
+    .bind(row.get::<i32, _>("latest_revision"))
+    .fetch_optional(&state.db)
+    .await?;
+    let revision_rows = sqlx::query(
+        "SELECT revision,digest,status,published_at FROM kernel.pipeline_revisions
+         WHERE pipeline_id=$1 ORDER BY revision DESC LIMIT 20",
+    )
+    .bind(&pipeline_id)
+    .fetch_all(&state.db)
+    .await?;
+    let revisions = revision_rows
+        .iter()
+        .map(|r| RevisionSummary {
+            revision: r.get("revision"),
+            digest: r.get("digest"),
+            status: r.get("status"),
+            published_at: r.get("published_at"),
+        })
+        .collect();
+    Ok(Json(PipelineDetailResponse {
+        pipeline_id: row.get("pipeline_id"),
+        name: row.get("name"),
+        latest_revision: row.get("latest_revision"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        latest: latest_row.as_ref().map(revision_view),
+        revisions,
+    }))
+}
+
+pub async fn list_revisions(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(pipeline_id): Path<String>,
+    Query(query): Query<RevisionListQuery>,
+) -> AppResult<Json<RevisionListResponse>> {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM kernel.pipeline_definitions WHERE pipeline_id=$1)",
+    )
+    .bind(&pipeline_id)
+    .fetch_one(&state.db)
+    .await?;
+    if !exists {
+        return Err(AppError::new(
+            StatusCode::NOT_FOUND,
+            "PIPELINE_NOT_FOUND",
+            "pipeline not found",
+        ));
+    }
+    let limit = page_limit(query.limit);
+    let before = query.before.unwrap_or(i32::MAX);
+    let rows = sqlx::query(
+        "SELECT revision,digest,status,published_at FROM kernel.pipeline_revisions
+         WHERE pipeline_id=$1 AND revision < $2 ORDER BY revision DESC LIMIT $3",
+    )
+    .bind(&pipeline_id)
+    .bind(before)
+    .bind(limit + 1)
+    .fetch_all(&state.db)
+    .await?;
+    let has_more = rows.len() as i64 > limit;
+    let visible = if has_more {
+        &rows[..rows.len() - 1]
+    } else {
+        &rows[..]
+    };
+    let items: Vec<RevisionSummary> = visible
+        .iter()
+        .map(|r| RevisionSummary {
+            revision: r.get("revision"),
+            digest: r.get("digest"),
+            status: r.get("status"),
+            published_at: r.get("published_at"),
+        })
+        .collect();
+    let next_before = if has_more {
+        items.last().map(|r| r.revision)
+    } else {
+        None
+    };
+    Ok(Json(RevisionListResponse { items, next_before }))
+}
+
+pub async fn get_revision(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path((pipeline_id, revision)): Path<(String, i32)>,
+) -> AppResult<Json<RevisionView>> {
+    let row = sqlx::query(
+        "SELECT pipeline_id,revision,digest,status,published_at,definition,plan
+         FROM kernel.pipeline_revisions WHERE pipeline_id=$1 AND revision=$2",
+    )
+    .bind(&pipeline_id)
+    .bind(revision)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "PIPELINE_REVISION_NOT_FOUND",
+            "revision not found",
+        )
+    })?;
+    Ok(Json(revision_view(&row)))
 }
 
 pub async fn create_pipeline(
@@ -1942,6 +2235,18 @@ mod terminalization_tests {
     use tokio::sync::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+    #[test]
+    fn pipeline_cursor_is_opaque_and_round_trips() {
+        let id = "host-metrics-pipeline";
+        let encoded = encode_pipeline_cursor(id);
+        assert_ne!(encoded, id);
+        assert_eq!(
+            decode_pipeline_cursor(&encoded).unwrap().as_deref(),
+            Some(id)
+        );
+        assert!(decode_pipeline_cursor("not*base64").is_err());
+    }
 
     fn test_url() -> Option<String> {
         std::env::var("OPSWEAVE_TEST_DATABASE_URL").ok()
