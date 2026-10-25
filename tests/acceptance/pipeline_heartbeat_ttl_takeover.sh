@@ -87,13 +87,17 @@ if kill -0 "$WORKER_A" 2>/dev/null; then
 fi
 echo "Worker A exited after Heartbeat fault at $(date -u +%FT%TZ)"
 INJECT_END="$(date +%s)"
-# Wait for the real Lease TTL; never update expires_at.
+# Wait for the real Lease TTL; never update expires_at. Lease expiry is lazy:
+# it becomes observable when Node B's Claim-Next runs, so wait for the wall-clock
+# expiry first and then enable the takeover Worker.
+OLD_EXPIRES="$(psql "$DB" -qAt -c "SELECT expires_at FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE';")"
 for _ in $(seq 1 180); do
-  ACTIVE="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_leases WHERE job_id='$JOB' AND status='ACTIVE';")"
-  [ "$ACTIVE" = "0" ] && break
+  EXPIRED="$(psql "$DB" -qAt -c "SELECT count(*) FROM kernel.pipeline_job_leases WHERE lease_id='$OLD_LEASE' AND expires_at <= clock_timestamp();")"
+  [ "$EXPIRED" = "1" ] && break
   sleep 1
 done
-[ "${ACTIVE:-1}" = "0" ] || bad "Lease did not expire naturally"
+[ "${EXPIRED:-0}" = "1" ] || bad "Lease did not reach its natural expires_at"
+echo "Lease TTL reached at $(date -u +%FT%TZ) expires_at=$OLD_EXPIRES"
 touch "$ROOT/data-ci/node-b/worker-enabled"
 for _ in $(seq 1 240); do
   STATUS="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB';")"
