@@ -49,7 +49,9 @@ jobs:
         if: always()
         with:
           name: data-foundation-screenshots
-          path: artifacts/ui/data-foundation/*.png
+          path: |
+            artifacts/ui/data-foundation/*.png
+            artifacts/ui/studio/*.png
           if-no-files-found: warn
   legacy-regression:
     runs-on: ubuntu-latest
