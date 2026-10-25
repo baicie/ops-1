@@ -20,6 +20,18 @@ wait_gone() {
   for _ in $(seq 1 80); do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.5; done
   return 1
 }
+start_active_job() {
+  local token job status
+  token="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
+  job="$(curl -fsS -H "Authorization: Bearer $token" -X POST -H 'content-type: application/json' -H "Idempotency-Key: supervisor-active-$(date +%s%N)" --data-binary '{"pipelineId":"two-node-bulk","pipelineRevision":1,"input":{},"maxAttempts":4,"timeoutSeconds":300}' "$URL/api/v1/jobs" | python3 -c 'import json,sys;print(json.load(sys.stdin)["jobId"])')"
+  for _ in $(seq 1 80); do
+    status="$(psql "$DB" -qAt -c "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$job';")"
+    [ "$status" = "RUNNING" ] && { echo "$job"; return 0; }
+    sleep 0.25
+  done
+  return 1
+}
+
 instance_ready() {
   psql "$DB" -qAt -c "SELECT count(*) FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.data-catalog' AND i.node_id='$NODE_A_ID' AND i.state='READY' AND i.desired_action='START';"
 }
@@ -70,12 +82,15 @@ echo "PASS Node generation change ($GENERATION -> $((GENERATION+1))) stopped sup
 psql "$DB" -qAt -c "UPDATE kernel.nodes SET generation=$GENERATION WHERE id='$NODE_A_ID';" >/dev/null
 kill -TERM "$NODE_A_PID" 2>/dev/null || true
 for _ in $(seq 1 40); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; done
-NODE_A_PID="$(tests/runtime/start_node.sh node-a 9101)"
+NODE_A_PID="$(OPSWEAVE_WORKER_BATCH_DELAY_MS=5000 tests/runtime/start_node.sh node-a 9101)"
 for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 [ "$(instance_ready)" = "1" ] || { echo "FAIL instance did not recover after generation restore"; exit 1; }
 touch "$MARKER"
 WORKER="$(wait_worker)" || { echo "FAIL worker did not recover after generation restore"; exit 1; }
 echo "PASS Node generation quarantine released; worker pid=$WORKER"
+# Active Job at SIGINT: do not merely test an idle child.
+ACTIVE_JOB="$(start_active_job)" || { echo "FAIL could not start active Job for SIGINT"; exit 1; }
+echo "SIGINT active job=$ACTIVE_JOB worker=$WORKER"
 # SIGINT and SIGTERM use the same graceful path. Exercise SIGINT first, restart,
 # then SIGTERM; both must stop and reap the live worker.
 kill -INT "$NODE_A_PID" 2>/dev/null || true
@@ -83,12 +98,15 @@ for _ in $(seq 1 60); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; 
 if kill -0 "$NODE_A_PID" 2>/dev/null; then echo "FAIL Node A survived SIGINT pid=$NODE_A_PID"; exit 1; fi
 if kill -0 "$WORKER" 2>/dev/null; then echo "FAIL SIGINT left live worker pid=$WORKER"; exit 1; fi
 echo "PASS Node SIGINT terminated Node A and worker (pid=$WORKER)"
-NODE_A_PID="$(tests/runtime/start_node.sh node-a 9101)"
+NODE_A_PID="$(OPSWEAVE_WORKER_BATCH_DELAY_MS=5000 tests/runtime/start_node.sh node-a 9101)"
 for _ in $(seq 1 120); do [ "$(instance_ready)" = "1" ] && break; sleep 1; done
 [ "$(instance_ready)" = "1" ] || { echo "FAIL instance did not recover after SIGINT restart"; exit 1; }
 touch "$MARKER"
 WORKER="$(wait_worker)" || { echo "FAIL worker did not recover after SIGINT restart"; exit 1; }
 echo "PASS Node SIGINT recovery worker pid=$WORKER"
+# Active Job at SIGTERM.
+ACTIVE_JOB2="$(start_active_job)" || { echo "FAIL could not start active Job for SIGTERM"; exit 1; }
+echo "SIGTERM active job=$ACTIVE_JOB2 worker=$WORKER"
 # Node SIGTERM: the Node process must exit and not leave an unowned live Worker.
 kill -TERM "$NODE_A_PID" 2>/dev/null || true
 for _ in $(seq 1 60); do kill -0 "$NODE_A_PID" 2>/dev/null || break; sleep 0.5; done
