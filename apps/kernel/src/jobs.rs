@@ -124,6 +124,240 @@ pub async fn validate_pipeline_definition(
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftView {
+    pub draft_id: Uuid,
+    pub pipeline_id: String,
+    pub base_revision: i32,
+    pub definition: Value,
+    pub definition_digest: String,
+    pub version: i64,
+    pub status: String,
+    pub created_by: Uuid,
+    pub updated_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDraftRequest {
+    #[serde(default)]
+    pub base_revision: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDraftRequest {
+    pub definition: PipelineDefinition,
+}
+
+fn draft_view(row: &sqlx::postgres::PgRow) -> DraftView {
+    DraftView {
+        draft_id: row.get("draft_id"),
+        pipeline_id: row.get("pipeline_id"),
+        base_revision: row.get("base_revision"),
+        definition: row.get("definition"),
+        definition_digest: row.get("definition_digest"),
+        version: row.get("version"),
+        status: row.get("status"),
+        created_by: row.get("created_by"),
+        updated_by: row.get("updated_by"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+fn draft_definition(
+    mut definition: PipelineDefinition,
+    pipeline_id: &str,
+) -> AppResult<(PipelineDefinition, Value, String)> {
+    definition.pipeline_id = pipeline_id.to_string();
+    definition.status = "DRAFT".to_string();
+    let mut value = serde_json::to_value(&definition)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    value["digest"] = Value::String(String::new());
+    let digest = digest_without_field(&value, "digest");
+    value["digest"] = Value::String(digest.clone());
+    definition.digest = digest.clone();
+    Ok((definition, value, digest))
+}
+
+pub async fn create_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(pipeline_id): Path<String>,
+    Json(request): Json<CreateDraftRequest>,
+) -> AppResult<(StatusCode, Json<DraftView>)> {
+    auth.require_operator()?;
+    let latest: Option<i32> = sqlx::query_scalar(
+        "SELECT latest_revision FROM kernel.pipeline_definitions WHERE pipeline_id=$1",
+    )
+    .bind(&pipeline_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let latest = latest.ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "PIPELINE_NOT_FOUND",
+            "pipeline not found",
+        )
+    })?;
+    let base_revision = request.base_revision.unwrap_or(latest as u32) as i32;
+    if base_revision < 1 || base_revision > latest {
+        return Err(AppError::bad_request("baseRevision is not published"));
+    }
+    let stored: Option<Value> = sqlx::query_scalar(
+        "SELECT definition FROM kernel.pipeline_revisions WHERE pipeline_id=$1 AND revision=$2",
+    )
+    .bind(&pipeline_id)
+    .bind(base_revision)
+    .fetch_optional(&state.db)
+    .await?;
+    let stored = stored.ok_or_else(|| AppError::bad_request("baseRevision is not published"))?;
+    let definition: PipelineDefinition = serde_json::from_value(stored)
+        .map_err(|error| AppError::bad_request(format!("stored definition is invalid: {error}")))?;
+    let (_, value, digest) = draft_definition(definition, &pipeline_id)?;
+    let row = sqlx::query(
+        "INSERT INTO kernel.pipeline_drafts
+           (pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by)
+         VALUES ($1,$2,$3,$4,1,'DRAFT',$5,$5)
+         RETURNING draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at",
+    )
+    .bind(&pipeline_id)
+    .bind(base_revision)
+    .bind(&value)
+    .bind(&digest)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await?;
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.draft_created",
+        "USER",
+        &auth.user_id.to_string(),
+        "pipeline_draft",
+        &row.get::<Uuid, _>("draft_id").to_string(),
+        "create",
+        "ACCEPTED",
+        json!({"pipelineId": pipeline_id, "baseRevision": base_revision}),
+        None,
+    )
+    .await;
+    Ok((StatusCode::CREATED, Json(draft_view(&row))))
+}
+
+pub async fn list_drafts(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(pipeline_id): Path<String>,
+) -> AppResult<Json<Vec<DraftView>>> {
+    auth.require_operator()?;
+    let rows = sqlx::query(
+        "SELECT draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at
+         FROM kernel.pipeline_drafts WHERE pipeline_id=$1 AND created_by=$2 ORDER BY updated_at DESC",
+    )
+    .bind(&pipeline_id)
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows.iter().map(draft_view).collect()))
+}
+
+pub async fn get_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((pipeline_id, draft_id)): Path<(String, Uuid)>,
+) -> AppResult<Json<DraftView>> {
+    auth.require_operator()?;
+    let row = sqlx::query(
+        "SELECT draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at
+         FROM kernel.pipeline_drafts WHERE pipeline_id=$1 AND draft_id=$2 AND (created_by=$3 OR $4)",
+    )
+    .bind(&pipeline_id)
+    .bind(draft_id)
+    .bind(auth.user_id)
+    .bind(auth.role.is_admin())
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "DRAFT_NOT_FOUND", "draft not found"))?;
+    Ok(Json(draft_view(&row)))
+}
+
+pub async fn update_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((pipeline_id, draft_id)): Path<(String, Uuid)>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateDraftRequest>,
+) -> AppResult<Json<DraftView>> {
+    auth.require_operator()?;
+    let if_match = headers
+        .get("if-match")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().trim_matches('"'))
+        .ok_or_else(|| AppError::bad_request("If-Match is required"))?;
+    let expected: i64 = if_match
+        .parse()
+        .map_err(|_| AppError::bad_request("If-Match must be a draft version"))?;
+    let (_, value, digest) = draft_definition(request.definition, &pipeline_id)?;
+    let row = sqlx::query(
+        "UPDATE kernel.pipeline_drafts
+         SET definition=$1,definition_digest=$2,version=version+1,updated_by=$3,updated_at=now()
+         WHERE pipeline_id=$4 AND draft_id=$5 AND version=$6 AND status='DRAFT'
+         RETURNING draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at",
+    )
+    .bind(&value)
+    .bind(&digest)
+    .bind(auth.user_id)
+    .bind(&pipeline_id)
+    .bind(draft_id)
+    .bind(expected)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some(row) = row else {
+        let exists: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM kernel.pipeline_drafts WHERE pipeline_id=$1 AND draft_id=$2 AND (created_by=$3 OR $4)",
+        )
+        .bind(&pipeline_id)
+        .bind(draft_id)
+        .bind(auth.user_id)
+        .bind(auth.role.is_admin())
+        .fetch_optional(&state.db)
+        .await?;
+        return match exists.as_deref() {
+            None => Err(AppError::new(
+                StatusCode::NOT_FOUND,
+                "DRAFT_NOT_FOUND",
+                "draft not found",
+            )),
+            Some("DRAFT") => Err(AppError::conflict(
+                "DRAFT_VERSION_CONFLICT",
+                "draft was updated by another editor",
+            )),
+            Some(_) => Err(AppError::conflict(
+                "DRAFT_NOT_EDITABLE",
+                "draft is no longer editable",
+            )),
+        };
+    };
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.draft_updated",
+        "USER",
+        &auth.user_id.to_string(),
+        "pipeline_draft",
+        &draft_id.to_string(),
+        "update",
+        "ACCEPTED",
+        json!({"pipelineId": pipeline_id, "version": row.get::<i64,_>("version")}),
+        None,
+    )
+    .await;
+    Ok(Json(draft_view(&row)))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerIdentity {

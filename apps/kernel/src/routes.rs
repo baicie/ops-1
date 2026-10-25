@@ -202,6 +202,14 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/pipelines/validate",
             post(jobs::validate_pipeline_definition),
         )
+        .route(
+            "/api/v1/pipelines/{pipeline_id}/drafts",
+            get(jobs::list_drafts).post(jobs::create_draft),
+        )
+        .route(
+            "/api/v1/pipelines/{pipeline_id}/drafts/{draft_id}",
+            get(jobs::get_draft).put(jobs::update_draft),
+        )
         .route("/api/v1/pipelines/{pipeline_id}", get(jobs::get_pipeline))
         .route(
             "/api/v1/pipelines/{pipeline_id}/revisions",
