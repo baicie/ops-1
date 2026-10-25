@@ -2,7 +2,7 @@
 
 Status: `READY_FOR_REVIEW` for PR1–PR3 read-only foundation; PR4 is `PARTIAL`.
 
-Base code: `ea8cc60` (0.0.3 branch `feat/0.0.3-typed-pipeline`, PR #2 Draft).
+Base code: `ea8cc60` (0.0.3 branch `feat/0.0.3-typed-pipeline`, PR #2 Draft); 0.0.3 code gate was `30e792e`.
 Studio branch: `feat/0.0.4-studio-foundation`.
 Draft PR: #3 (base `feat/0.0.3-typed-pipeline`, Draft; never merged by automation).
 
@@ -87,9 +87,14 @@ These are real Kernel-backed screenshots, not design mocks.
 - P2: no server-side validation endpoint; publish remains disabled rather than
   calling publish as a fake validate.
 
-## CI (final code `0e19a65`)
+## CI
 
-- Data Foundation: `40203367958` attempt 1 SUCCESS.
-- Runtime: `40203367943` attempt 1 SUCCESS.
+Final code `0e19a65` (canvas complete; two clean runs):
+- Data Foundation: `40203367958` attempts 1 and 2 SUCCESS.
+- Runtime: `40203367943` attempts 1 and 2 SUCCESS.
 - Standard CI: `40203368001` SUCCESS.
-- Second attempts: rerun in progress; update this line after completion.
+
+Final code `83fd1bb` (only list refresh/retry fix):
+- Data Foundation: `40205544299` attempt 1 SUCCESS; attempt 2 in progress.
+- Runtime: `40205544169` attempt 1 SUCCESS; attempt 2 in progress.
+- Standard CI: `40205544171` SUCCESS.
