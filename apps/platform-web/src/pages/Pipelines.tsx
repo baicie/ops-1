@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
-import type { PipelineDefinition, PipelineDetail, PipelineList, PipelineRevision } from '../types';
+import type { JobList, PipelineDefinition, PipelineDetail, PipelineList, PipelineRevision } from '../types';
 import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
@@ -97,11 +97,15 @@ export function PipelineDetailPage() {
   const { pipelineId = '' } = useParams();
   useDocumentTitle('Pipeline detail');
   const [detail, setDetail] = useState<PipelineDetail | null>(null);
+  const [jobs, setJobs] = useState<JobList | null>(null);
   const [error, setError] = useState<Error | null>(null);
   useEffect(() => {
     let cancelled = false;
-    api.get<PipelineDetail>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}`)
-      .then((result) => { if (!cancelled) { setDetail(result); setError(null); } })
+    Promise.all([
+      api.get<PipelineDetail>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}`),
+      api.get<JobList>(`/api/v1/jobs?pipelineId=${encodeURIComponent(pipelineId)}&limit=5`).catch(() => ({ items: [], nextCursor: null })),
+    ])
+      .then(([result, jobResult]) => { if (!cancelled) { setDetail(result); setJobs(jobResult); setError(null); } })
       .catch((cause) => { if (!cancelled) setError(cause as Error); });
     return () => { cancelled = true; };
   }, [pipelineId]);
@@ -131,7 +135,13 @@ export function PipelineDetailPage() {
           ))}</ul>
         )}
       </section>
-      <p className="table-footnote"><Icon name="alert" size={13} /> Studio currently reads published revisions. Draft editing and publishing are separate gates.</p>
+      <section className="panel panel-pad">
+        <div className="panel-head"><div><h2>Recent jobs</h2><p className="muted small">Latest durable executions for this pipeline.</p></div><Link className="btn btn-secondary btn-small" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> Submit job</Link></div>
+        {!jobs || jobs.items.length === 0 ? <p className="muted small">No jobs submitted for this pipeline.</p> : (
+          <ul className="revision-list">{jobs.items.map((job) => <li key={job.jobId}><Link className="mono small" to={`/jobs/${job.jobId}`}>{job.jobId}</Link><span className="mono muted small">r{job.pipelineRevision}</span><StatusBadge status={job.status} /><TimeAgo value={job.createdAt} /></li>)}</ul>
+        )}
+      </section>
+      <p className="table-footnote"><Icon name="alert" size={13} /> Published revisions are immutable. Draft editing and publishing are a separate gate.</p>
     </div>
   );
 }

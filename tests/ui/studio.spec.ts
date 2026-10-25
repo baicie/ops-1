@@ -57,7 +57,7 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await page.reload();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('17');
-  await page.getByRole('button', { name: 'Validate' }).click();
+  await page.getByRole('button', { name: 'Validate', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Server validation passed');
   await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled();
   await page.getByRole('button', { name: 'Publish' }).click();

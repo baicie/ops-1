@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
+import { newIdempotencyKey } from '../api';
 import type { JobList, JobView, PipelineDetail } from '../types';
 import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
@@ -51,16 +52,30 @@ export function JobDetailPage() {
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    api.get<JobView>(`/api/v1/jobs/${encodeURIComponent(jobId)}`)
-      .then((result) => { if (!cancelled) { setJob(result); setError(null); } })
+    const load = () => api.get<JobView>(`/api/v1/jobs/${encodeURIComponent(jobId)}`)
+      .then((result) => {
+        if (cancelled) return;
+        setJob(result); setError(null);
+        if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(result.status)) {
+          window.setTimeout(load, 3000);
+        }
+      })
       .catch((cause) => { if (!cancelled) setError(cause as Error); });
+    void load();
     return () => { cancelled = true; };
   }, [jobId, refresh]);
+
+  const cancel = async () => {
+    try {
+      await api.post(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {}, newIdempotencyKey());
+      setRefresh((value) => value + 1);
+    } catch (cause) { setError(cause as Error); }
+  };
   if (error) return <ErrorState error={error} onRetry={() => setRefresh((value) => value + 1)} />;
   if (!job) return <Skeleton rows={6} />;
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Job" title={<span className="mono">{job.jobId}</span>} description={`${job.pipelineId} · r${job.pipelineRevision}`} actions={<><button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-secondary" to="/jobs">All jobs</Link></>} />
+      <PageHeader eyebrow="Job" title={<span className="mono">{job.jobId}</span>} description={`${job.pipelineId} · r${job.pipelineRevision}`} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <button className="btn btn-danger" onClick={() => void cancel()}><Icon name="pause" size={15} /> Cancel</button>}<button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-secondary" to="/jobs">All jobs</Link></>} />
       <section className="summary-grid">
         <div className="panel metric-card"><span className="metric-label">Status</span><strong className="metric-value"><StatusBadge status={job.status} /></strong></div>
         <div className="panel metric-card"><span className="metric-label">Attempts</span><strong className="metric-value">{job.attempts} / {job.maxAttempts}</strong></div>
@@ -106,7 +121,4 @@ export function JobSubmitPage() {
   );
 }
 
-function newIdempotencyKey() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `job-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+
