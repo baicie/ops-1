@@ -160,20 +160,6 @@ paths:
           description: Atomic published revision (or the same revision for an idempotent retry).
         '400': { description: Validation failed }
         '409': { description: DRAFT_VERSION_CONFLICT or IDEMPOTENCY_CONFLICT }
-  /pipelines/{pipelineId}/validate:
-    post:
-      operationId: validatePipeline
-      parameters:
-        - $ref: '#/components/parameters/PipelineId'
-      responses:
-        '200':
-          description: Static validation result
-          content:
-            application/json:
-              schema:
-                $ref: ../schema/pipeline-ir.v1.schema.json#/$defs/ValidationResult
-        '404':
-          $ref: '#/components/responses/ContractError'
   /pipelines/{pipelineId}/revisions:
     post:
       operationId: publishPipelineRevision
