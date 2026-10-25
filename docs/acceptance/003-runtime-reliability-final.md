@@ -147,7 +147,8 @@ These are not claimed as PASS:
 2. Source proxy tests still mutate process-global environment in one unit test;
    subprocess isolation is a P2 cleanup.
 3. Retry-After is intentionally unsupported; fixed bounded backoff is the
-   protocol limit.
+   protocol limit. `pipeline_heartbeat_ttl_takeover.sh` asserts 3 real 503
+   injections at 2.003s spacing before autonomous exit.
 4. Physical multi-host, mTLS, rootless Docker, OCI attestation and production HA
    are outside this RC.
 

@@ -1,7 +1,7 @@
 # OpsWeave 0.0.3 — Final PR Code Review
 
-Reviewed range: `git diff a434a79...4994193`  
-Code HEAD: `4994193`  
+Reviewed range: `git diff a434a79...26ee107`  
+Code HEAD: `26ee107`  
 Branch: `feat/0.0.3-typed-pipeline`  
 PR: https://github.com/baicie/ops-1/pull/2 (Draft/Open)
 
@@ -124,8 +124,8 @@ and Retry-After. The reviewer conclusion is READY_FOR_REVIEW; PR stays Draft.
 
 ## CI for this review
 
-- Data Foundation: `40172247224` — attempt 1 and attempt 2 SUCCESS on `4994193`
-- Runtime: `40172247250` — attempt 1 and attempt 2 SUCCESS on `4994193`
-- Standard CI: `40172247221` on `4994193` — SUCCESS
-- Contracts: `40172247239` on `4994193` — SUCCESS
+- Data Foundation: `40175757611` — attempts 1 and 2 SUCCESS on `26ee107`
+- Runtime: `40175757474` — attempts 1 and 2 SUCCESS on `26ee107`
+- Standard CI: `40175757451` on `26ee107` — SUCCESS
+- Contracts: `40175757466` on `26ee107` — SUCCESS
 - Code: `a1d9184`; docs-only report commit follows.

@@ -2,16 +2,16 @@
 
 Branch: `feat/0.0.3-typed-pipeline`  
 Base: `a434a79`  
-Code HEAD: `4994193`  
+Code HEAD: `26ee107`  
 Report HEAD: this commit  
 PR #2: [Draft/Open](https://github.com/baicie/ops-1/pull/2) (not merged, not Ready).
 
 ## CI runs (same code HEAD)
 
-- Data Foundation OCI: [40172247224](https://github.com/baicie/ops-1/actions/runs/40172247224) — SUCCESS, attempt 1 and attempt 2
-- Runtime workflow: [40172247250](https://github.com/baicie/ops-1/actions/runs/40172247250) — SUCCESS, attempt 1 and attempt 2
-- Standard CI: run `40172247221` on `4994193` — SUCCESS
-- Typed Pipeline Contracts: run `40172247239` on `4994193` — SUCCESS
+- Data Foundation OCI: [40175757611](https://github.com/baicie/ops-1/actions/runs/40175757611) — SUCCESS, attempts 1 and 2
+- Runtime workflow: [40175757474](https://github.com/baicie/ops-1/actions/runs/40175757474) — SUCCESS, attempts 1 and 2
+- Standard CI: run `40175757451` on `26ee107` — SUCCESS
+- Typed Pipeline Contracts: run `40175757466` on `26ee107` — SUCCESS
 
 Both Data Foundation and Runtime have `run_attempt=2` and `conclusion=success`.
 The second run was a clean rerun of the same commit, not a code change.
@@ -30,7 +30,7 @@ The second run was a clean rerun of the same commit, not a code change.
 | Orphan Worker | **PASS** | PPID=1 old worker; new fence=2; stale HTTP heartbeat/result rejected 403; results=1, records=1001, effects=3 |
 | Supervisor Lifecycle | **PASS** | marker, Worker SIGKILL/crash loop, Instance STOP/recovery, generation quarantine/release, SIGINT/SIGTERM active Jobs, SIGTERM in backoff, revocation/quarantine, orphan |
 | Source Security | **PASS** | deterministic DNS/TCP/slow/infinite/redirect/proxy tests + OCI timeout→no-Sink gate |
-| Heartbeat Fault Injection | **PASS** | 3 real 503s (intervals 2.003s), autonomous exit, natural 60s Lease, Node B takeover oldFence=1→2, attempts=2, 1001/3/1, activeLeases=0; Deadline and Retry-After are separate |
+| Heartbeat Fault Injection | **PASS** | 3 real 503s (intervals 2.003s), autonomous exit, natural 60s Lease, Node B takeover oldFence=1→2, attempts=2, 1001/3/1, activeLeases=0 |
 | Deadline-vs-Sink A/B | **PASS** | real PostgreSQL row-lock race; Case B waits past deadline then gets `f|JOB_DEADLINE_EXCEEDED`; Case A authorized before deadline and commits without duplicate/unauthorized write |
 | Deadline-vs-Sink C/D/E | **PASS** | existing `catalog_fenced_sink` stale fence/receipt replay and terminalization late-result tests |
 | SIGTERM in restart backoff | **PASS** | fake crash-loop child; shutdown duration 2013ms, children=0 |
