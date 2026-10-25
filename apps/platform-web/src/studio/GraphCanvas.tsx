@@ -95,7 +95,11 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         onPaneClick={() => onSelect(null)}
         onNodesChange={handleNodesChange}
         onConnect={connect}
-        onNodesDelete={(deleted) => onNodesChange(nodes.filter((node) => !deleted.some((item) => item.id === node.id)))}
+        onNodesDelete={(deleted) => {
+          const removed = new Set(deleted.map((item) => item.id));
+          onNodesChange(nodes.filter((node) => !removed.has(node.id)));
+          onEdgesChange(edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)));
+        }}
         onEdgesDelete={(deleted) => onEdgesChange(edges.filter((edge) => !deleted.some((item) => item.id === edge.id)))}
         deleteKeyCode={['Backspace', 'Delete']}
       >

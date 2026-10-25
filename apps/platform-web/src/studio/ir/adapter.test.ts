@@ -16,6 +16,8 @@ describe('Pipeline IR adapter', () => {
     const restored = fromGraph(base, graph);
     expect(restored.nodes.map((node) => node.nodeId)).toEqual(base.nodes.map((node) => node.nodeId));
     expect(restored.edges.map((edge) => edgeId(edge))).toEqual(base.edges.map((edge) => edgeId(edge)));
+    expect(restored.status).toBe('DRAFT');
+    expect(restored.digest).toBe('');
     expect(restored).not.toHaveProperty('position');
     expect(JSON.stringify(restored)).not.toContain('"selected"');
   });

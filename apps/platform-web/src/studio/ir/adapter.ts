@@ -24,13 +24,17 @@ export function toGraph(definition: PipelineDefinition): StudioGraph {
   return { nodes, edges };
 }
 
-/** Canvas graph -> PipelineDefinition; discards position/selection/measure fields. */
+/**
+ * Canvas graph -> local editor Definition; discards position/selection/measure
+ * fields. A loaded Published digest/status must never describe local changes:
+ * the server must canonicalize and validate this DRAFT before persistence.
+ */
 export function fromGraph(definition: PipelineDefinition, graph: StudioGraph): PipelineDefinition {
   // Preserve server/author array order. The backend digest is not a frontend
   // authority; silently reordering arrays here would change a future digest.
   const nodes = graph.nodes.map((node) => clone(node.data.ir));
   const edges = graph.edges.map((edge) => clone(edge.data.ir));
-  return { ...definition, nodes, edges };
+  return { ...definition, nodes, edges, status: 'DRAFT', digest: '' };
 }
 
 export function edgeId(edge: PipelineEdge): string {
