@@ -7,7 +7,9 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 PIPE=host-metrics-pipeline
 bad() { echo "FAIL  $*"; exit 1; }
 PUB_BEFORE="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/pipelines/$PIPE/revisions/1" | sha256sum | cut -d' ' -f1)"
-CREATE="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -d '{}' "$URL/api/v1/pipelines/$PIPE/drafts")"
+CREATE_CODE="$(curl -sS -o /tmp/draft-create.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' -H 'accept: application/json' -d '{}' "$URL/api/v1/pipelines/$PIPE/drafts")"
+if [ "$CREATE_CODE" != "201" ]; then echo "FAIL  draft create expected 201 got $CREATE_CODE: $(cat /tmp/draft-create.json)"; exit 1; fi
+CREATE="$(cat /tmp/draft-create.json)"
 DRAFT_ID="$(printf '%s' "$CREATE" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="DRAFT" and d["version"]==1; print(d["draftId"])')"
 DEF="$(printf '%s' "$CREATE" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["definition"]))')"
 EDIT="$(printf '%s' "$DEF" | python3 -c 'import json,sys; d=json.load(sys.stdin); n=next(n for n in d["nodes"] if n["type"]=="builtin.map.fields"); n["config"]["mappings"]=[{"from":"host","to":"host"}]; print(json.dumps(d))')"
