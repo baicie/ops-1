@@ -17,6 +17,7 @@ export function PipelinesPage() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -27,7 +28,7 @@ export function PipelinesPage() {
       .catch((cause) => { if (!cancelled) setError(cause as Error); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [cursor]);
+  }, [cursor, reloadToken]);
 
   const items = (data?.items || []).filter((item) =>
     `${item.name} ${item.pipelineId}`.toLowerCase().includes(query.toLowerCase()));
@@ -37,13 +38,13 @@ export function PipelinesPage() {
       <PageHeader
         title="Pipelines"
         description="Published typed pipelines and their immutable revisions. Editing is the next Studio milestone."
-        actions={<button className="btn btn-secondary" onClick={() => setCursor(null)}><Icon name="refresh" size={15} /> Refresh</button>}
+        actions={<button className="btn btn-secondary" onClick={() => setReloadToken((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button>}
       />
       <section className="toolbar">
         <div className="search-box"><Icon name="search" size={16} /><input aria-label="Search pipelines" placeholder="Search by name or pipeline id" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
         <span className="toolbar-count">{items.length} shown</span>
       </section>
-      {loading && !data ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => setCursor(cursor)} /> : items.length === 0 ? (
+      {loading && !data ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => setReloadToken((value) => value + 1)} /> : items.length === 0 ? (
         <EmptyState icon="file" title={data?.items.length ? 'No pipelines match this filter' : 'No pipelines yet'} description={data?.items.length ? 'Clear the search or refresh the list.' : 'Create a pipeline through the typed-pipeline API. The Studio editor is the next milestone.'} />
       ) : (
         <section className="panel table-panel">
