@@ -670,3 +670,4 @@ input::placeholder { color: var(--ow-text-muted); }
 .validation-list span { font-size: 11px; }
 .react-flow__node { visibility: visible !important; opacity: 1 !important; }
 .studio-rf-node { visibility: visible !important; opacity: 1 !important; }
+.react-flow__nodes, .react-flow__node { display: block !important; visibility: visible !important; opacity: 1 !important; }
