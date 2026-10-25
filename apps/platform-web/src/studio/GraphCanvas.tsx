@@ -49,13 +49,20 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
   }));
   const handleNodesChange = useCallback((changes: any[]) => {
     const next = [...nodes];
+    let changed = false;
     for (const change of changes) {
       if (change.type === 'position' && change.position && !change.dragging) {
         const index = next.findIndex((node) => node.id === change.id);
-        if (index >= 0) next[index] = { ...next[index], position: change.position };
+        if (index >= 0) {
+          const current = next[index];
+          if (current.position.x !== change.position.x || current.position.y !== change.position.y) {
+            next[index] = { ...current, position: change.position };
+            changed = true;
+          }
+        }
       }
     }
-    onNodesChange(next);
+    if (changed) onNodesChange(next);
   }, [nodes, onNodesChange]);
   const connect = useCallback((connection: Connection) => {
     const result = onConnectAttempt(connection);
@@ -80,7 +87,8 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes as any}
-        fitView={false}
+        fitView
+        fitViewOptions={{ padding: 0.15 }}
         minZoom={0.25}
         maxZoom={1.75}
         onNodeClick={(_, node) => onSelect(node.id)}
