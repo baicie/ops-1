@@ -116,3 +116,26 @@ test('pipeline list remains usable at laptop, mobile and dark mode', async ({ br
   await page.screenshot({ path: path.join(OUT, 'pipeline-list-dark.png'), fullPage: true });
   await context.close();
 });
+
+test('draft conflict preserves local edits and offers resolution', async ({ page, context }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  await login(page);
+  const created = await page.request.post(`/api/v1/pipelines/${PIPELINE}/drafts`, { data: {} });
+  expect(created.status()).toBe(201);
+  const draft = await created.json();
+  const pageB = await context.newPage();
+  await page.goto(`/pipelines/${PIPELINE}/editor?draft=${draft.draftId}`);
+  await pageB.goto(`/pipelines/${PIPELINE}/editor?draft=${draft.draftId}`);
+  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  await pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  await page.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('18');
+  await pageB.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('19');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await pageB.getByRole('button', { name: 'Save draft' }).click();
+  await expect(pageB.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
+  await expect(pageB.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('19');
+  await expect(pageB.getByRole('button', { name: 'Use local & retry' })).toBeVisible();
+  await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png'), fullPage: true });
+  await pageB.close();
+});
