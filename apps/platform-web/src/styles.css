@@ -668,9 +668,6 @@ input::placeholder { color: var(--ow-text-muted); }
 .validation-list button { width: 100%; text-align: left; border: 1px solid var(--ow-border); background: var(--ow-surface-2); border-radius: 6px; padding: 7px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; }
 .validation-list strong { color: var(--ow-danger); font-size: 10px; }
 .validation-list span { font-size: 11px; }
-.react-flow__node { visibility: visible !important; opacity: 1 !important; }
-.studio-rf-node { visibility: visible !important; opacity: 1 !important; }
-.react-flow__nodes, .react-flow__node { display: block !important; visibility: visible !important; opacity: 1 !important; }
 
 /* Draft editing */
 .studio-banner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--ow-ok); background: color-mix(in srgb, var(--ow-ok) 10%, var(--ow-surface)); border-radius: 8px; font-size: var(--ow-type-sm); }
@@ -893,7 +890,6 @@ details.panel.advanced > summary { padding: 14px 18px; }
 
 /* Remove the temporary headless visibility hacks. Explicit workspace sizing and
    node dimensions now give xyflow a measured viewport. */
-.react-flow__nodes, .react-flow__node { display: revert !important; visibility: visible !important; opacity: 1 !important; }
 
 /* Studio is a focused workspace: at desktop widths the global nav collapses
    to an icon rail so the canvas keeps the primary visual area. */
