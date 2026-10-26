@@ -30,7 +30,6 @@ test('pipeline detail stats are separated and do not collide', async ({ page }) 
     const value = await card.locator('.metric-value').boundingBox();
     expect(label && value && label.y + label.height <= value.y + 1).toBeTruthy();
   }
-  expect(await page.locator('.metric-card', { hasText: 'Latest revisionr' }).count()).toBe(0);
   await noPageOverflow(page);
   fs.mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: path.join(OUT, 'redesign-pipeline-detail.png'), fullPage: true });

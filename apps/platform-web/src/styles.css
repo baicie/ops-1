@@ -894,3 +894,20 @@ details.panel.advanced > summary { padding: 14px 18px; }
 /* Remove the temporary headless visibility hacks. Explicit workspace sizing and
    node dimensions now give xyflow a measured viewport. */
 .react-flow__nodes, .react-flow__node { display: revert !important; visibility: visible !important; opacity: 1 !important; }
+
+/* Studio is a focused workspace: at desktop widths the global nav collapses
+   to an icon rail so the canvas keeps the primary visual area. */
+@media (min-width: 1200px) {
+  .shell:has(.studio-page) .sidebar { width: 64px; }
+  .shell:has(.studio-page) .main-column { margin-left: 64px; }
+  .shell:has(.studio-page) .brand-word,
+  .shell:has(.studio-page) .workspace-pill span:last-child,
+  .shell:has(.studio-page) .nav-section-label,
+  .shell:has(.studio-page) .nav-link span,
+  .shell:has(.studio-page) .nav-extension,
+  .shell:has(.studio-page) .sidebar-foot .muted { display: none; }
+  .shell:has(.studio-page) .nav-link { justify-content: center; }
+  .shell:has(.studio-page) .sidebar { padding-left: 8px; padding-right: 8px; }
+  .shell:has(.studio-page) .sidebar-foot { justify-content: center; }
+  .shell:has(.studio-page) .collapse-btn { display: none; }
+}
