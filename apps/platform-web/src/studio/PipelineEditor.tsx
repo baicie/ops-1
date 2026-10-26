@@ -59,7 +59,7 @@ export function PipelineEditorPage() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
-  const [layoutDirection, setLayoutDirection] = useState<'horizontal' | 'vertical'>('vertical');
+  const [layoutDirection, setLayoutDirection] = useState<'horizontal' | 'vertical'>(() => typeof window !== 'undefined' && window.innerWidth < 768 ? 'vertical' : 'horizontal');
   const [mobileView, setMobileView] = useState<'nodes' | 'canvas'>('canvas');
   const loadSeq = useRef(0);
   useEffect(() => {
@@ -92,7 +92,7 @@ export function PipelineEditorPage() {
       setDraft(active);
       const source = active?.definition || pipeline.latest?.definition;
       if (!source) throw new Error('No published revision or draft is available');
-      setGraph(toGraph(source));
+      setGraph(toGraph(source, layoutDirection));
       setBaseline(irKey(source));
       setSelectedId(null);
       setHistory([]);
@@ -148,7 +148,7 @@ export function PipelineEditorPage() {
     try {
       const created = await api.post<PipelineDraft>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}/drafts`, { baseRevision: detail.latestRevision });
       setDraft(created); setDrafts((items) => [created, ...items]);
-      setGraph(toGraph(created.definition)); setBaseline(irKey(created.definition));
+      setGraph(toGraph(created.definition, layoutDirection)); setBaseline(irKey(created.definition));
       setHistory([]); setFuture([]); setSelectedId(null); setServerValidation(null);
       setNotice(`Draft created · version ${created.version}`);
       navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
@@ -164,7 +164,7 @@ export function PipelineEditorPage() {
         { 'if-match': String(overrideVersion ?? draft.version) },
       );
       setDraft(saved);
-      setGraph(toGraph(saved.definition));
+      setGraph(toGraph(saved.definition, layoutDirection));
       setBaseline(irKey(saved.definition));
       setHistory([]); setFuture([]); setServerValidation(null);
       setNotice(`Draft saved · version ${saved.version}`);
