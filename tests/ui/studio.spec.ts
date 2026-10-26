@@ -83,3 +83,14 @@ test('submit a published revision and open real job detail', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Jobs', exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'job-history.png'), fullPage: true });
 });
+
+test('server preview runs pure transforms and reports node outputs', async ({ page }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  await login(page);
+  await page.goto(`/pipelines/${PIPELINE}/editor`);
+  await page.getByRole('button', { name: 'Run preview' }).click();
+  await expect(page.getByLabel('Preview panel')).toContainText('COMPLETED');
+  await expect(page.getByLabel('Preview panel')).toContainText('records');
+  await expect(page.locator('.preview-node').first()).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, 'pipeline-preview.png'), fullPage: true });
+});

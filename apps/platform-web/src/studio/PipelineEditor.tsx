@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, newIdempotencyKey } from '../api';
-import type { PipelineDetail, PipelineDraft, PipelineRevision, PipelineValidation } from '../types';
+import type { PipelineDetail, PipelineDraft, PipelinePreview, PipelineRevision, PipelineValidation } from '../types';
 import { Icon } from '../components/Icons';
 import { ErrorState, PageHeader, Skeleton } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
@@ -41,6 +41,10 @@ export function PipelineEditorPage() {
   const [busy, setBusy] = useState<'create' | 'save' | 'validate' | 'publish' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
+  const [sampleInput, setSampleInput] = useState('[{"id":"1","name":"alpha","n":2}]');
+  const [preview, setPreview] = useState<PipelinePreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const loadSeq = useRef(0);
 
   const load = async (draftId?: string | null) => {
@@ -190,6 +194,15 @@ export function PipelineEditorPage() {
     setConnectionError(null); return { ok: true };
   };
 
+  const runPreview = async () => {
+    setPreviewBusy(true); setPreviewError(null); setPreview(null);
+    try {
+      let parsed: unknown;
+      try { parsed = JSON.parse(sampleInput); } catch { throw new Error('Sample input must be valid JSON'); }
+      const result = await api.post<PipelinePreview>('/api/v1/pipelines/preview', { definition, sampleInput: parsed, maxRecords: 50 });
+      setPreview(result);
+    } catch (cause) { setPreviewError((cause as Error).message); } finally { setPreviewBusy(false); }
+  };
   return (
     <div className="page-stack">
       <PageHeader
@@ -234,6 +247,17 @@ export function PipelineEditorPage() {
           {serverValidation && <p className="muted small">{serverValidation.valid ? `Server validated · ${serverValidation.planDigest}` : 'Server rejected this graph'}</p>}
         </aside>
       </div>
+      <section className="panel panel-pad studio-preview" aria-label="Preview panel">
+        <div className="panel-head"><div><h2>Preview</h2><p className="muted small">Server-side pure transforms on bounded sample input. No Source IO and no Catalog writes.</p></div><button className="btn btn-secondary" onClick={() => void runPreview()} disabled={previewBusy}>{previewBusy ? 'Previewing…' : 'Run preview'}</button></div>
+        <label className="preview-input"><span>Sample input (JSON object or array)</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
+        {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
+        {preview && <>
+          <div className="preview-summary"><strong>{preview.status}</strong><span>{preview.processedRecords} records</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">TRUNCATED</span>}</div>
+          {preview.errors.length > 0 && <ul className="validation-list">{preview.errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
+          <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">in {node.inputCount} → out {node.outputCount} · {node.durationMs} ms</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
+        </>}
+        {!preview && !previewError && <p className="muted small">Preview is not a job. It cannot produce a Sink Effect or Receipt.</p>}
+      </section>
     </div>
   );
 }

@@ -390,3 +390,29 @@ export interface JobResultView {
   resultDigest?: string | null;
   completedAt: string;
 }
+
+export interface PreviewIssue {
+  code: string;
+  message: string;
+  nodeId?: string;
+}
+
+export interface PreviewNodeOutput {
+  nodeId: string;
+  nodeType: string;
+  inputCount: number;
+  outputCount: number;
+  sampleRows: Array<Record<string, unknown>>;
+  durationMs: number;
+  errors: PreviewIssue[];
+}
+
+export interface PipelinePreview {
+  previewId: string;
+  status: string;
+  nodeOutputs: PreviewNodeOutput[];
+  errors: PreviewIssue[];
+  processedRecords: number;
+  elapsedMs: number;
+  truncated: boolean;
+}
