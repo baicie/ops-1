@@ -15,6 +15,8 @@ export function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [query, setQuery] = useState('');
+  const [pipelineFilter, setPipelineFilter] = useState('ALL');
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -27,16 +29,20 @@ export function JobsPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [status, cursor, reload]);
+  const visibleJobs = (data?.items || []).filter((job) => (pipelineFilter === 'ALL' || job.pipelineId === pipelineFilter) && `${job.jobId} ${job.pipelineId}`.toLowerCase().includes(query.toLowerCase()));
+  const pipelines = Array.from(new Set((data?.items || []).map((job) => job.pipelineId))).sort();
   return (
     <div className="page-stack">
       <PageHeader title="Jobs" description="Durable typed-pipeline executions and their current lifecycle state." actions={<button className="btn btn-secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button>} />
       <section className="toolbar">
+        <div className="search-box"><Icon name="search" size={16} /><input aria-label="Search jobs" placeholder="Search job ID or pipeline" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+        <select aria-label="Filter by pipeline" value={pipelineFilter} onChange={(event) => setPipelineFilter(event.target.value)} style={{ maxWidth: 240 }}><option value="ALL">All pipelines</option>{pipelines.map((pipeline) => <option key={pipeline} value={pipeline}>{pipeline}</option>)}</select>
         <div className="segmented">{['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].map((value) => <button key={value} className={status === value ? 'active' : ''} onClick={() => { setStatus(value); setCursor(null); }}>{value === 'ALL' ? 'All' : value}</button>)}</div>
-        <span className="toolbar-count">{data?.items.length ?? 0} shown</span>
+        <span className="toolbar-count">{visibleJobs.length} of {data?.items.length ?? 0} shown</span>
       </section>
-      {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : (data?.items.length ?? 0) === 0 ? <EmptyState icon="clock" title="No jobs" description="Publish a revision and submit a run from its Pipeline detail page." /> : (
-        <section className="panel table-panel"><table className="data-table"><thead><tr><th>Job</th><th>Pipeline</th><th>Revision</th><th>Status</th><th>Attempts</th><th>Created</th><th /></tr></thead><tbody>
-          {data?.items.map((job) => <tr key={job.jobId} className="clickable"><td className="job-id-cell"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td>{job.pipelineId}</td><td><span className="mono">r{job.pipelineRevision}</span></td><td><StatusBadge status={job.status} /></td><td>{job.attempts}/{job.maxAttempts}</td><td><TimeAgo value={job.createdAt} /></td><td className="row-action"><Icon name="chevron" size={16} /></td></tr>)}
+      {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : visibleJobs.length === 0 ? <EmptyState icon="clock" title={data?.items.length ? 'No jobs match this filter' : 'No jobs'} description={data?.items.length ? 'Clear search or choose another pipeline/status.' : 'Publish a revision and submit a run from its Pipeline detail page.'} /> : (
+        <section className="panel table-panel"><table className="data-table responsive-table"><thead><tr><th>Job</th><th>Pipeline</th><th>Revision</th><th>Status</th><th>Attempts</th><th>Created</th><th /></tr></thead><tbody>
+          {visibleJobs.map((job) => <tr key={job.jobId} className="clickable"><td data-label="Job" className="job-id-cell"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td data-label="Pipeline">{job.pipelineId}</td><td data-label="Revision"><span className="mono">r{job.pipelineRevision}</span></td><td data-label="Status"><StatusBadge status={job.status} /></td><td data-label="Attempts">{job.attempts}/{job.maxAttempts}</td><td data-label="Created"><TimeAgo value={job.createdAt} /></td><td className="row-action"><Icon name="chevron" size={16} /></td></tr>)}
         </tbody></table></section>
       )}
       <div className="pagination-row"><button className="btn btn-secondary" disabled={!cursor} onClick={() => setCursor(null)}>First page</button><button className="btn btn-secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor || null)}>Next page</button></div>

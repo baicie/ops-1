@@ -907,3 +907,18 @@ details.panel.advanced > summary { padding: 14px 18px; }
   .shell:has(.studio-page) .sidebar-foot { justify-content: center; }
   .shell:has(.studio-page) .collapse-btn { display: none; }
 }
+
+/* Mobile card tables: preserve complete fields instead of squeezing a desktop table. */
+@media (max-width: 620px) {
+  .responsive-table { min-width: 0; display: block; }
+  .responsive-table thead { display: none; }
+  .responsive-table tbody { display: flex; flex-direction: column; gap: 8px; }
+  .responsive-table tr { display: block; border: 1px solid var(--ow-border); border-radius: 8px; background: var(--ow-surface); padding: 4px 12px; }
+  .responsive-table td { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 6px 0; border-bottom: 1px solid var(--ow-border); max-width: none !important; width: auto !important; text-align: right; }
+  .responsive-table td:last-child { border-bottom: 0; }
+  .responsive-table td::before { content: attr(data-label); color: var(--ow-text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; text-align: left; flex: none; }
+  .responsive-table td:not([data-label])::before { content: ""; }
+  .responsive-table td .truncate, .responsive-table td a { max-width: 220px; margin-left: auto; }
+  .responsive-table .row-action { display: none; }
+  .job-mini-table tr { padding: 0 12px; }
+}

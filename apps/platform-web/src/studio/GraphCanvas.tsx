@@ -29,7 +29,6 @@ function PipelineNodeView({ data, selected }: NodeProps<Node<PipelineNodeData>>)
       <div className="studio-rf-node-head">
         <span className="node-type-icon"><Icon name={meta.icon} size={14} /></span>
         <div className="node-title"><strong>{meta.label}</strong><small>{node.nodeId}</small></div>
-        <span className="node-category">{meta.category}</span>
       </div>
       <p className="node-summary">{meta.summary(node.config)}</p>
       <div className="studio-rf-ports">

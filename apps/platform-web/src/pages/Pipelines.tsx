@@ -46,15 +46,15 @@ export function PipelinesPage() {
         <EmptyState icon="file" title={hasServerPage ? 'No pipelines match this page filter' : 'No pipelines yet'} description={hasServerPage ? 'Search is applied to the current server page. Clear the search, change pages, or refresh.' : 'Create a pipeline through the typed-pipeline API. The Studio editor is the next milestone.'} />
       ) : (
         <section className="panel table-panel">
-          <table className="data-table">
+          <table className="data-table responsive-table">
             <thead><tr><th>Pipeline</th><th>Revision</th><th>Created</th><th>Updated</th><th aria-label="Open" /></tr></thead>
             <tbody>
               {items.map((pipeline) => (
                 <tr key={pipeline.pipelineId} className="clickable" tabIndex={0}>
-                  <td><Link to={`/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></td>
-                  <td><span className="mono">r{pipeline.latestRevision}</span></td>
-                  <td><TimeAgo value={pipeline.createdAt} /></td>
-                  <td><TimeAgo value={pipeline.updatedAt} /></td>
+                  <td data-label="Pipeline"><Link to={`/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></td>
+                  <td data-label="Revision"><span className="mono">r{pipeline.latestRevision}</span></td>
+                  <td data-label="Created"><TimeAgo value={pipeline.createdAt} /></td>
+                  <td data-label="Updated"><TimeAgo value={pipeline.updatedAt} /></td>
                   <td className="row-action"><Icon name="chevron" size={16} /></td>
                 </tr>
               ))}
@@ -148,7 +148,7 @@ export function PipelineDetailPage() {
       <section className="panel panel-pad">
         <div className="panel-head"><div><h2>Recent jobs</h2><p className="muted small">Latest durable executions for this pipeline.</p></div><Link className="btn btn-secondary btn-small" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> Submit job</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">No jobs submitted for this pipeline.</p> : (
-          <div className="table-panel"><table className="data-table job-mini-table"><thead><tr><th>Job</th><th>Revision</th><th>Status</th><th>Created</th></tr></thead><tbody>{jobs.items.map((job) => <tr key={job.jobId}><td><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td><span className="mono">r{job.pipelineRevision}</span></td><td><StatusBadge status={job.status} /></td><td><TimeAgo value={job.createdAt} /></td></tr>)}</tbody></table></div>
+          <div className="table-panel"><table className="data-table job-mini-table responsive-table"><thead><tr><th>Job</th><th>Revision</th><th>Status</th><th>Created</th></tr></thead><tbody>{jobs.items.map((job) => <tr key={job.jobId}><td data-label="Job"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td data-label="Revision"><span className="mono">r{job.pipelineRevision}</span></td><td data-label="Status"><StatusBadge status={job.status} /></td><td data-label="Created"><TimeAgo value={job.createdAt} /></td></tr>)}</tbody></table></div>
         )}
       </section>
       <p className="table-footnote"><Icon name="alert" size={13} /> Published revisions are immutable. Draft editing and publishing are a separate gate.</p>
