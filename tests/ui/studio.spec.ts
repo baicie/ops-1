@@ -89,6 +89,7 @@ test('server preview runs pure transforms and reports node outputs', async ({ pa
   fs.mkdirSync(OUT, { recursive: true });
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/editor`);
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
   await page.getByRole('button', { name: 'Run preview' }).click();
   await expect(page.getByLabel('Preview panel')).toContainText('COMPLETED');
   await expect(page.getByLabel('Preview panel')).toContainText('records');

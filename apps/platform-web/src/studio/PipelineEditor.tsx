@@ -46,6 +46,7 @@ export function PipelineEditorPage() {
   const [preview, setPreview] = useState<PipelinePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const loadSeq = useRef(0);
   useEffect(() => {
     if (!graph) return;
@@ -209,6 +210,12 @@ export function PipelineEditorPage() {
     setConnectionError(null); return { ok: true };
   };
 
+  const autoLayout = () => {
+    const next = toGraph(definition);
+    setHistory((items) => [...items.slice(-29), { graph }]);
+    setFuture([]);
+    setGraph(next);
+  };
   const runPreview = async () => {
     setPreviewBusy(true); setPreviewError(null); setPreview(null);
     try {
@@ -219,7 +226,7 @@ export function PipelineEditorPage() {
     } catch (cause) { setPreviewError((cause as Error).message); } finally { setPreviewBusy(false); }
   };
   return (
-    <div className="page-stack">
+    <div className="page-stack studio-page">
       <PageHeader
         eyebrow="Studio"
         title={definition.name}
@@ -227,6 +234,8 @@ export function PipelineEditorPage() {
         actions={<>
           <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> Undo</button>
           <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>Redo</button>
+          <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> Auto layout</button>
+          <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> Preview</button>
           <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>Detail</Link>
           {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> Create draft</button> : <>
             <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty}><Icon name="save" size={15} /> {busy === 'save' ? 'Saving…' : 'Save draft'}</button>
@@ -262,8 +271,9 @@ export function PipelineEditorPage() {
           {selected ? <>
             {!hasDraft && <p className="muted small">Create a draft to edit this configuration.</p>}
             <p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · typeVersion {selected.typeVersion}</p>
-            <h3>Config</h3>
+            <h3>Configuration</h3>
             <NodeConfigForm key={selected.nodeId} node={selected} readOnly={!hasDraft} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
+            <details className="advanced"><summary>Advanced · type, ports and raw config</summary><p className="mono small">{selected.type} · v{selected.typeVersion}</p><pre>{JSON.stringify(selected.config, null, 2)}</pre></details>
             <h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>input{port.required ? ' · required' : ''}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>output{port.nullable ? ' · nullable' : ''}</small></li>)}</ul>
           </> : <p className="muted small">Select a node to edit its typed config.</p>}
           <h3>Validation <span className={errors.length === 0 ? 'text-ok' : 'text-danger'}>{errors.length}</span></h3>
@@ -271,7 +281,7 @@ export function PipelineEditorPage() {
           {serverValidation && <p className="muted small">{serverValidation.valid ? `Server validated · ${serverValidation.planDigest}` : 'Server rejected this graph'}</p>}
         </aside>
       </div>
-      <section className="panel panel-pad studio-preview" aria-label="Preview panel">
+      {previewOpen && <section className="panel panel-pad studio-preview" aria-label="Preview panel">
         <div className="panel-head"><div><h2>Preview</h2><p className="muted small">Server-side pure transforms on bounded sample input. No Source IO and no Catalog writes.</p></div><button className="btn btn-secondary" onClick={() => void runPreview()} disabled={previewBusy}>{previewBusy ? 'Previewing…' : 'Run preview'}</button></div>
         <label className="preview-input"><span>Sample input (JSON object or array)</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
         {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
@@ -281,7 +291,7 @@ export function PipelineEditorPage() {
           <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">in {node.inputCount} → out {node.outputCount} · {node.durationMs} ms</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
         </>}
         {!preview && !previewError && <p className="muted small">Preview is not a job. It cannot produce a Sink Effect or Receipt.</p>}
-      </section>
+      </section>}
     </div>
   );
 }

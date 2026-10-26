@@ -6,20 +6,35 @@ import {
 import '@xyflow/react/dist/style.css';
 import type { PipelineNode } from '../types';
 import type { GraphEdge, GraphNode } from './ir/types';
+import { Icon } from '../components/Icons';
 
 interface PipelineNodeData extends Record<string, unknown> {
   ir: PipelineNode;
 }
 
+const NODE_META: Record<string, { label: string; category: string; icon: string; summary: (config: Record<string, unknown>) => string }> = {
+  'builtin.source.http_json': { label: 'HTTP Source', category: 'source', icon: 'activity', summary: (config) => config.endpoint ? String(config.endpoint) : 'Endpoint not set' },
+  'builtin.parse.json': { label: 'Parse JSON', category: 'transform', icon: 'ops', summary: () => 'Bounded JSON parse' },
+  'builtin.map.fields': { label: 'Map Fields', category: 'transform', icon: 'ops', summary: (config) => config.mappings ? `${Object.keys(config.mappings as object).length} mapped fields` : 'Default id / name mapping' },
+  'builtin.filter.predicate': { label: 'Filter Records', category: 'transform', icon: 'filter', summary: (config) => config.field ? `${String(config.field)} ${String(config.op || 'eq')}` : 'No filter predicate' },
+  'builtin.validate.schema': { label: 'Validate Schema', category: 'validate', icon: 'check', summary: () => 'Dataset schema pin' },
+  'builtin.sink.dataset': { label: 'Dataset Sink', category: 'sink', icon: 'inbox', summary: (config) => config.datasetId ? 'Dataset configured' : 'Dataset not set' },
+};
+
 function PipelineNodeView({ data, selected }: NodeProps<Node<PipelineNodeData>>) {
   const node = data.ir;
+  const meta = NODE_META[node.type] || { label: node.type.split('.').slice(-1)[0], category: 'transform', icon: 'box', summary: () => 'Custom node' };
   return (
-    <div className={`studio-rf-node ${selected ? 'selected' : ''}`}>
-      <div className="studio-rf-node-head"><strong>{node.nodeId}</strong><span>{node.type.split('.').slice(-1)[0]}</span></div>
-      <small>{node.type}</small>
+    <div className={`studio-rf-node node-${meta.category} ${selected ? 'selected' : ''}`}>
+      <div className="studio-rf-node-head">
+        <span className="node-type-icon"><Icon name={meta.icon} size={14} /></span>
+        <div className="node-title"><strong>{meta.label}</strong><small>{node.nodeId}</small></div>
+        <span className="node-category">{meta.category}</span>
+      </div>
+      <p className="node-summary">{meta.summary(node.config)}</p>
       <div className="studio-rf-ports">
-        {node.inputs.map((port) => <span key={port.name} className="studio-rf-port input"><Handle type="target" position={Position.Left} id={port.name} />{port.name} · {port.dataType}</span>)}
-        {node.outputs.map((port) => <span key={port.name} className="studio-rf-port output"><Handle type="source" position={Position.Right} id={port.name} />{port.name} · {port.dataType}</span>)}
+        {node.inputs.map((port) => <span key={port.name} className="studio-rf-port input"><Handle type="target" position={Position.Left} id={port.name} /><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span></span>)}
+        {node.outputs.map((port) => <span key={port.name} className="studio-rf-port output"><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span><Handle type="source" position={Position.Right} id={port.name} /></span>)}
       </div>
     </div>
   );
@@ -88,7 +103,9 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         edges={flowEdges}
         nodeTypes={nodeTypes as any}
         fitView
-        fitViewOptions={{ padding: 0.15 }}
+        fitViewOptions={{ padding: 0.2, maxZoom: 1.15 }}
+        defaultEdgeOptions={{ type: 'smoothstep' }}
+        elevateEdgesOnSelect
         minZoom={0.25}
         maxZoom={1.75}
         onNodeClick={(_, node) => onSelect(node.id)}

@@ -79,15 +79,25 @@ export function PipelinesPage() {
 }
 
 function NodeSummary({ definition }: { definition: PipelineDefinition }) {
+  const meta: Record<string, string> = {
+    'builtin.source.http_json': 'HTTP Source',
+    'builtin.parse.json': 'Parse JSON',
+    'builtin.map.fields': 'Map Fields',
+    'builtin.filter.predicate': 'Filter',
+    'builtin.validate.schema': 'Validate',
+    'builtin.sink.dataset': 'Dataset Sink',
+  };
   return (
-    <div className="pipeline-node-grid">
-      {definition.nodes.map((node) => (
-        <div key={node.nodeId} className="panel pipeline-node-card">
-          <div className="pipeline-node-head"><strong>{node.nodeId}</strong><StatusBadge status="READY" label="typed" /></div>
-          <span className="mono small">{node.type}</span>
-          <div className="port-row"><span>inputs</span><code>{node.inputs.map((p) => p.name).join(', ') || '—'}</code></div>
-          <div className="port-row"><span>outputs</span><code>{node.outputs.map((p) => p.name).join(', ') || '—'}</code></div>
-        </div>
+    <div className="pipeline-flow" aria-label="Execution path">
+      {definition.nodes.map((node, index) => (
+        <React.Fragment key={node.nodeId}>
+          <div className="flow-step">
+            <span className="flow-index">{index + 1}</span>
+            <strong>{meta[node.type] || node.type.split('.').slice(-1)[0]}</strong>
+            <small>{node.nodeId}</small>
+          </div>
+          {index < definition.nodes.length - 1 && <span className="flow-arrow">→</span>}
+        </React.Fragment>
       ))}
     </div>
   );
@@ -120,11 +130,11 @@ export function PipelineDetailPage() {
         description={<span className="mono">{detail.pipelineId}</span>}
         actions={<><Link className="btn btn-secondary" to="/pipelines"><Icon name="arrowRight" size={15} /> All pipelines</Link><Link className="btn btn-primary" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> Run pipeline</Link><Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> Open Studio</Link></>}
       />
-      <section className="summary-grid">
+      <section className="summary-grid pipeline-stats">
         <div className="panel metric-card"><span className="metric-label">Latest revision</span><strong className="metric-value">r{detail.latestRevision}</strong></div>
         <div className="panel metric-card"><span className="metric-label">Nodes</span><strong className="metric-value">{latest?.definition.nodes.length ?? 0}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">Digest</span><strong className="metric-value mono small">{latest?.digest?.replace('sha256:', '').slice(0, 16) || '—'}…</strong></div>
-        <div className="panel metric-card"><span className="metric-label">Published</span><strong className="metric-value small"><TimeAgo value={latest?.publishedAt} /></strong></div>
+        <div className="panel metric-card"><span className="metric-label">Latest run</span><strong className="metric-value small">{jobs?.items[0] ? <StatusBadge status={jobs.items[0].status} /> : 'No runs'}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">Updated</span><strong className="metric-value small"><TimeAgo value={latest?.publishedAt} /></strong></div>
       </section>
       {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>Latest revision</h2><p className="muted small">{latest.definition.name} · {latest.digest}</p></div><StatusBadge status="READY" label="IMMUTABLE" /></div><NodeSummary definition={latest.definition} /></section> : <EmptyState icon="file" title="No published revision" />}
       <section className="panel panel-pad">
@@ -138,7 +148,7 @@ export function PipelineDetailPage() {
       <section className="panel panel-pad">
         <div className="panel-head"><div><h2>Recent jobs</h2><p className="muted small">Latest durable executions for this pipeline.</p></div><Link className="btn btn-secondary btn-small" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> Submit job</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">No jobs submitted for this pipeline.</p> : (
-          <ul className="revision-list">{jobs.items.map((job) => <li key={job.jobId}><Link className="mono small" to={`/jobs/${job.jobId}`}>{job.jobId}</Link><span className="mono muted small">r{job.pipelineRevision}</span><StatusBadge status={job.status} /><TimeAgo value={job.createdAt} /></li>)}</ul>
+          <div className="table-panel"><table className="data-table job-mini-table"><thead><tr><th>Job</th><th>Revision</th><th>Status</th><th>Created</th></tr></thead><tbody>{jobs.items.map((job) => <tr key={job.jobId}><td><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td><span className="mono">r{job.pipelineRevision}</span></td><td><StatusBadge status={job.status} /></td><td><TimeAgo value={job.createdAt} /></td></tr>)}</tbody></table></div>
         )}
       </section>
       <p className="table-footnote"><Icon name="alert" size={13} /> Published revisions are immutable. Draft editing and publishing are a separate gate.</p>

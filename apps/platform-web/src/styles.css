@@ -708,3 +708,189 @@ input::placeholder { color: var(--ow-text-muted); }
 .studio-conflict > div:nth-child(2) { display: flex; flex-direction: column; gap: 4px; }
 .studio-conflict pre { max-height: 90px; overflow: auto; margin: 4px 0 0; font-size: 11px; }
 .conflict-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+
+/* ============================================================
+   OpsWeave 0.0.4 UI redesign — semantic tokens and workspace
+   ============================================================ */
+:root {
+  --ow-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ow-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --ow-radius-control: 6px;
+  --ow-radius-card: 10px;
+  --ow-radius-dialog: 12px;
+  --ow-text-tertiary: #8a93a0;
+  --ow-edge: #b3bdca;
+  --ow-canvas-bg: #f8fafc;
+  --ow-success: var(--ow-ok);
+  --ow-success-soft: var(--ow-ok-soft);
+}
+html[data-theme="dark"] {
+  --ow-text-tertiary: #6f7c8d;
+  --ow-edge: #4a586a;
+  --ow-canvas-bg: #10151c;
+}
+body { font-family: var(--ow-font-sans); font-size: 13.5px; }
+h1, h2, h3 { letter-spacing: -.015em; }
+.panel { border-radius: var(--ow-radius-card); box-shadow: 0 1px 1px rgba(18,26,40,.035); }
+.page-header h1 { font-size: clamp(22px, 2.1vw, 26px); letter-spacing: -.03em; }
+.page-description { font-size: 13px; }
+.btn { border-radius: var(--ow-radius-control); font-weight: 560; }
+.btn.active { background: var(--ow-accent-soft); border-color: var(--ow-accent); color: var(--ow-accent); }
+.truncate { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copyable { cursor: copy; }
+.advanced { border-top: 1px solid var(--ow-border); margin-top: 14px; padding-top: 10px; }
+.advanced > summary { cursor: pointer; color: var(--ow-text-muted); font-size: var(--ow-type-sm); padding: 4px 0; }
+details.panel.advanced { border-top: 0; margin-top: 0; padding: 0; }
+details.panel.advanced > summary { padding: 14px 18px; }
+
+/* Summary metrics: label above, value below, no text collision */
+.summary-grid, .pipeline-stats, .job-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.metric-card {
+  display: flex; flex-direction: column; gap: 7px;
+  min-width: 0; min-height: 92px; padding: 14px 16px;
+  justify-content: space-between; overflow: hidden;
+}
+.metric-label { display: block; color: var(--ow-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .055em; text-transform: uppercase; white-space: nowrap; }
+.metric-value { display: flex; align-items: center; min-height: 30px; font-size: clamp(20px, 2vw, 26px); font-weight: 680; line-height: 1.1; letter-spacing: -.03em; color: var(--ow-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metric-value.small { font-size: 14px; font-weight: 560; letter-spacing: 0; }
+.metric-value.mono { font-family: var(--ow-font-mono); font-size: 13px; }
+.pipeline-stats .metric-value .mono, .job-stats .metric-value.mono { overflow: hidden; text-overflow: ellipsis; }
+.job-stats .metric-value.mono { font-size: 14px; }
+
+/* Execution path summary on Pipeline Detail */
+.pipeline-flow { display: flex; align-items: stretch; gap: 6px; overflow-x: auto; padding: 4px 0 6px; }
+.flow-step { display: flex; flex-direction: column; gap: 3px; min-width: 116px; padding: 11px 12px; border: 1px solid var(--ow-border); border-radius: 8px; background: var(--ow-surface-2); }
+.flow-step strong { font-size: 12px; font-weight: 620; white-space: nowrap; }
+.flow-step small { font-family: var(--ow-font-mono); font-size: 10px; color: var(--ow-text-muted); white-space: nowrap; }
+.flow-index { width: 18px; height: 18px; border-radius: 5px; background: var(--ow-accent-soft); color: var(--ow-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+.flow-arrow { align-self: center; color: var(--ow-text-tertiary); flex: none; }
+
+/* Table/UUID containment */
+.table-panel { overflow-x: auto; max-width: 100%; }
+.data-table { min-width: 620px; }
+.data-table td, .data-table th { min-width: 0; }
+.job-mini-table th:nth-child(1), .job-mini-table td:nth-child(1), .job-id-cell { width: 42%; max-width: 360px; }
+.job-mini-table .truncate, .job-id-cell .truncate { max-width: 100%; }
+.revision-list li { min-width: 0; }
+.revision-list .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Job detail hierarchy */
+.job-subtitle { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.job-short-id { font-family: var(--ow-font-mono); font-size: 12px; color: var(--ow-text-muted); }
+
+/* Studio workspace: full-bleed, canvas-first */
+.main-content:has(.studio-page) { max-width: none; padding: 0; }
+.studio-page { padding: 18px 22px 28px; gap: 12px; }
+.studio-page .page-header { align-items: center; padding: 2px 2px 10px; border-bottom: 1px solid var(--ow-border); }
+.studio-page .page-header h1 { font-size: 21px; }
+.studio-page .page-header .page-description { margin-top: 3px; color: var(--ow-text-muted); }
+.studio-page .page-actions { gap: 6px; }
+.studio-shell {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr) 326px;
+  gap: 10px;
+  align-items: stretch;
+  height: clamp(520px, calc(100vh - 236px), 820px);
+  min-height: 520px;
+}
+.studio-palette, .studio-inspector {
+  position: static; max-height: none; height: 100%; overflow: auto;
+  padding: 14px !important; gap: 10px;
+}
+.studio-palette h2, .studio-inspector h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--ow-text-muted); margin-bottom: 8px; }
+.palette-item { padding: 9px 8px; border-top: 0; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
+.palette-item:hover { background: var(--ow-surface-2); border-color: var(--ow-border); }
+.palette-item strong { font-size: 12px; }
+.palette-item small { font-size: 10px; }
+.studio-canvas { height: 100%; min-height: 0; border-radius: var(--ow-radius-card); overflow: hidden; position: relative; background-color: var(--ow-canvas-bg); background-image: radial-gradient(var(--ow-border) 1px, transparent 1px); background-size: 20px 20px; }
+.studio-rf-wrap { height: 100%; min-height: 0; width: 100%; }
+.studio-note { left: 12px; bottom: 8px; right: 190px; font-size: 11px; pointer-events: none; background: color-mix(in srgb, var(--ow-canvas-bg) 82%, transparent); padding: 3px 5px; border-radius: 4px; }
+.studio-error { bottom: 34px; }
+
+/* Workflow node cards */
+.studio-rf-node {
+  width: 202px; min-width: 202px; padding: 0; border: 1px solid var(--ow-border-strong);
+  border-radius: 9px; background: var(--ow-surface); box-shadow: 0 1px 2px rgba(18,26,40,.05), 0 6px 16px rgba(18,26,40,.035);
+  overflow: hidden; transition: border-color var(--ow-motion-fast), box-shadow var(--ow-motion-fast);
+}
+.studio-rf-node:hover { border-color: var(--ow-text-tertiary); box-shadow: 0 2px 4px rgba(18,26,40,.08), 0 10px 22px rgba(18,26,40,.06); }
+.studio-rf-node.selected { border-color: var(--ow-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ow-accent) 22%, transparent); }
+.studio-rf-node-head { display: flex; align-items: center; gap: 8px; padding: 10px 11px 8px; border-bottom: 1px solid var(--ow-border); }
+.node-type-icon { width: 26px; height: 26px; flex: none; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; background: var(--ow-surface-3); color: var(--ow-text-secondary); }
+.node-source .node-type-icon { background: var(--ow-info-soft); color: var(--ow-info); }
+.node-transform .node-type-icon { background: var(--ow-accent-soft); color: var(--ow-accent); }
+.node-validate .node-type-icon { background: var(--ow-ok-soft); color: var(--ow-ok); }
+.node-sink .node-type-icon { background: var(--ow-warn-soft); color: var(--ow-warn); }
+.node-title { min-width: 0; display: flex; flex-direction: column; gap: 1px; flex: 1; }
+.node-title strong { font-size: 12px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-title small { font-family: var(--ow-font-mono); font-size: 9.5px; color: var(--ow-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-category { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: var(--ow-text-tertiary); }
+.node-summary { padding: 8px 11px; margin: 0; font-size: 10.5px; line-height: 1.35; color: var(--ow-text-muted); min-height: 32px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.studio-rf-ports { padding: 0 0 9px; display: flex; flex-direction: column; gap: 5px; }
+.studio-rf-port { position: relative; display: flex; align-items: center; gap: 5px; min-height: 18px; padding: 0 13px; font-size: 9.5px; color: var(--ow-text-muted); }
+.studio-rf-port.output { justify-content: flex-end; text-align: right; }
+.port-label { font-family: var(--ow-font-mono); color: var(--ow-text-secondary); }
+.port-type { color: var(--ow-text-tertiary); font-size: 8.5px; }
+.react-flow__handle { width: 8px; height: 8px; border: 2px solid var(--ow-surface); background: var(--ow-accent); }
+.react-flow__node.selected .react-flow__handle { background: var(--ow-accent); }
+.react-flow__edge-path { stroke: var(--ow-edge); stroke-width: 1.5; }
+.react-flow__edge.selected .react-flow__edge-path, .react-flow__edge:hover .react-flow__edge-path { stroke: var(--ow-accent); stroke-width: 2; }
+.react-flow__edge-textbg { fill: var(--ow-surface); }
+.react-flow__edge-text { fill: var(--ow-text-muted); font-size: 9px; }
+.react-flow__controls { box-shadow: var(--ow-shadow); border: 1px solid var(--ow-border); border-radius: 7px; overflow: hidden; }
+.react-flow__controls-button { background: var(--ow-surface); border-bottom-color: var(--ow-border); color: var(--ow-text); }
+.react-flow__attribution { opacity: .45; }
+
+/* Inspector */
+.studio-inspector { font-size: var(--ow-type-sm); }
+.studio-inspector h3 { margin-top: 16px; margin-bottom: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .065em; color: var(--ow-text-muted); }
+.studio-inspector .config-form { gap: 10px; }
+.config-form label span { font-weight: 500; }
+.config-form input:not([type=checkbox]), .config-form textarea { background: var(--ow-surface); border-radius: 5px; }
+.studio-inspector pre { border: 1px solid var(--ow-border); max-height: 190px; }
+.port-list { border-top: 1px solid var(--ow-border); }
+.port-list li { padding: 6px 0; border-bottom: 1px solid var(--ow-border); }
+
+/* Draft / Preview console */
+.studio-preview { margin-top: 0; }
+.studio-preview .panel-head { padding: 12px 16px; }
+.studio-preview .panel-head h2 { font-size: 14px; }
+.preview-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.preview-node { border: 1px solid var(--ow-border); border-radius: 8px; box-shadow: none; }
+
+/* Responsive workspace */
+@media (max-width: 1320px) {
+  .studio-shell { grid-template-columns: 184px minmax(0, 1fr) 292px; }
+  .studio-page { padding: 14px 16px 24px; }
+}
+@media (max-width: 1080px) {
+  .studio-shell { grid-template-columns: minmax(0, 1fr) 280px; height: auto; min-height: 0; }
+  .studio-palette { display: none; }
+  .studio-canvas { height: 540px; }
+  .studio-inspector { max-height: 540px; }
+}
+@media (max-width: 760px) {
+  .main-content:has(.studio-page) { padding: 0; }
+  .studio-page { padding: 12px 10px 24px; }
+  .studio-page .page-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .studio-shell { grid-template-columns: 1fr; }
+  .studio-canvas { height: 420px; }
+  .studio-inspector { max-height: none; }
+  .studio-note { right: 12px; bottom: 8px; }
+  .summary-grid, .pipeline-stats, .job-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-card { min-height: 82px; padding: 12px; }
+  .metric-value { font-size: 21px; }
+}
+@media (max-width: 520px) {
+  .summary-grid, .pipeline-stats, .job-stats { grid-template-columns: 1fr; }
+  .page-actions { width: 100%; }
+  .data-table { min-width: 600px; }
+  .timeline li > div { gap: 5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+/* Remove the temporary headless visibility hacks. Explicit workspace sizing and
+   node dimensions now give xyflow a measured viewport. */
+.react-flow__nodes, .react-flow__node { display: revert !important; visibility: visible !important; opacity: 1 !important; }
