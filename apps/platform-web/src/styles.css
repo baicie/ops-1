@@ -784,7 +784,7 @@ details.panel.advanced > summary { padding: 14px 18px; }
 .studio-page .page-actions { gap: 6px; }
 .studio-shell {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr) 326px;
+  grid-template-columns: 200px minmax(0, 1fr) 300px;
   gap: 10px;
   align-items: stretch;
   height: clamp(520px, calc(100vh - 236px), 820px);
