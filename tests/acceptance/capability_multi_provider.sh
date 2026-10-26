@@ -9,6 +9,34 @@ AUTH=(-H "Authorization: Bearer $TOKEN")
 json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)"; }
 ok() { echo "PASS  $*"; }
 bad() { echo "FAIL  $*"; exit 1; }
+token_hash() { sha256sum | cut -d' ' -f1 | cut -c1-16; }
+token_file_hash() {
+  local cid
+  cid="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-integration/ {print $1; exit}')"
+  [ -n "$cid" ] || { echo "missing"; return 0; }
+  docker exec "$cid" cat /run/opsweave/capability-tokens.json 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("data.catalog.v1",""))' 2>/dev/null \
+    | token_hash
+}
+wait_token_not_authorized() {
+  local token="$1" code i
+  for i in $(seq 1 20); do
+    code="$(invoke_datasets "$token" /tmp/multi-revoked.json)"
+    if [ "$code" != "200" ]; then printf '%s' "$code"; return 0; fi
+    sleep 0.25
+  done
+  bad "revoked token still returned 200 after bounded polling"
+}
+wait_authorized() {
+  local code i token
+  for i in $(seq 1 40); do
+    token="$(current_token)"
+    code="$(invoke_datasets "$token" /tmp/multi-restored.json)"
+    if [ "$code" = "200" ]; then printf '%s' "$token"; return 0; fi
+    sleep 0.5
+  done
+  bad "capability did not become authorized after restore"
+}
 A="opsweave.data-catalog"
 B="opsweave.data-catalo"
 CAP="$URL/api/v1/capabilities/data.catalog.v1/1"
@@ -70,17 +98,23 @@ CODE_B="$(invoke_datasets "$TOKEN_CURRENT" /tmp/multi-b.json)"
 ok "unbounded Grant followed selected provider B"
 
 echo "== revoke and restore"
+# The Worker's capability token may legitimately disappear on revoke. Preserve the
+# pre-revoke token and prove it is rejected; never wait for revoke to reissue one.
+TOKEN_BEFORE_REVOKE="$(current_token)"
+TOKEN_HASH_BEFORE="$(printf '%s' "$TOKEN_BEFORE_REVOKE" | token_hash)"
+REVOKE_AT="$(date +%s%3N)"
 curl -fsS "${AUTH[@]}" -X DELETE "$URL/api/v1/capability-grants/$UNBOUND_ID" >/dev/null
-TOKEN_CURRENT="$(current_token)"
-REVOKE_CODE="$(invoke_datasets "$TOKEN_CURRENT" /tmp/multi-revoked.json)"
+TOKEN_FILE_AFTER="$(token_file_hash)"
+REVOKE_CODE="$(wait_token_not_authorized "$TOKEN_BEFORE_REVOKE")"
 [ "$REVOKE_CODE" = "403" ] || bad "revoked Grant returned $REVOKE_CODE"
 grep -q 'CAPABILITY_FORBIDDEN' /tmp/multi-revoked.json || bad "revoked Grant did not return CAPABILITY_FORBIDDEN"
+echo "revoke evidence: grant_delete_at=$REVOKE_AT token_before=sha256:$TOKEN_HASH_BEFORE file_after=sha256:$TOKEN_FILE_AFTER response=$REVOKE_CODE"
 curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
   -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write"]}' >/dev/null
-TOKEN_CURRENT="$(current_token)"
-RESTORED_CODE="$(invoke_datasets "$TOKEN_CURRENT" /tmp/multi-restored.json)"
-[ "$RESTORED_CODE" = "200" ] || bad "restored Grant returned $RESTORED_CODE"
-ok "Grant revoke and restore are immediate"
+TOKEN_AFTER_RESTORE="$(wait_authorized)"
+TOKEN_HASH_AFTER="$(printf '%s' "$TOKEN_AFTER_RESTORE" | token_hash)"
+echo "restore evidence: token_after=sha256:$TOKEN_HASH_AFTER authorized=200"
+ok "Grant revoke is immediate and restore re-issues an authorized token"
 
 echo "== no-provider capability fails closed at resolution"
 NO_PROVIDER="$(curl -sS -o /tmp/multi-no-provider.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/capabilities/data.catalog.v2/1/resolve")"
