@@ -23,13 +23,26 @@ function flatten(value: unknown, prefix = '', out: Record<string, string> = {}):
   return out;
 }
 
+// Conflict details must not become an accidental secret disclosure channel.
+// Only audited numeric schema fields are displayed. Unknown, nested, string and
+// credential-bearing fields are compared but their values stay hidden.
+const PUBLIC_NUMERIC_FIELDS = new Set(['typeVersion', 'timeoutSeconds', 'maxRecords', 'schemaRevision']);
+
+function visibleFieldValue(path: string, serialized: string | undefined): string {
+  if (serialized === undefined) return '(absent)';
+  if (!PUBLIC_NUMERIC_FIELDS.has(path) || !/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(serialized)) {
+    return '[REDACTED]';
+  }
+  return serialized;
+}
+
 function fieldChanges(localNode: PipelineNode, serverNode: PipelineNode): ConfigChange[] {
   const local = flatten({ ...localNode.config, typeVersion: localNode.typeVersion, inputs: localNode.inputs, outputs: localNode.outputs });
   const server = flatten({ ...serverNode.config, typeVersion: serverNode.typeVersion, inputs: serverNode.inputs, outputs: serverNode.outputs });
   return Array.from(new Set([...Object.keys(local), ...Object.keys(server)]))
     .filter((path) => local[path] !== server[path])
     .sort()
-    .map((path) => ({ path, local: local[path] ?? '(absent)', server: server[path] ?? '(absent)' }));
+    .map((path) => ({ path, local: visibleFieldValue(path, local[path]), server: visibleFieldValue(path, server[path]) }));
 }
 
 function edgeId(edge: { fromNode: string; toNode: string; fromPort: string; toPort: string }) {
