@@ -162,7 +162,7 @@ PASS Grant revoke is immediate and restore re-issues an authorized token
 
 ## Final CI (Code HEAD)
 
-- Data Foundation `40301176065` on `eef2a84`: **SUCCESS**
+- Data Foundation `40301176065` on `eef2a84`: **SUCCESS** (attempt 1 and attempt 2; two clean runs)
 - Runtime `40301176390` on `eef2a84`: **SUCCESS**
 - Standard CI `40301176232` on `eef2a84`: **SUCCESS**
 - Previous final candidate `827c0e4`: Data `40296422810`, Runtime `40296422689`, Standard `40296422569` all **SUCCESS**
