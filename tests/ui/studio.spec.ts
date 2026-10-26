@@ -120,12 +120,12 @@ test('pipeline list remains usable at laptop, mobile and dark mode', async ({ br
 test('draft conflict preserves local edits and offers resolution', async ({ page, context }) => {
   fs.mkdirSync(OUT, { recursive: true });
   await login(page);
-  const created = await page.request.post(`/api/v1/pipelines/${PIPELINE}/drafts`, { data: {} });
-  expect(created.status()).toBe(201);
-  const draft = await created.json();
+  await page.goto(`/pipelines/${PIPELINE}/editor`);
+  await page.getByRole('button', { name: 'Create draft' }).click();
+  await expect(page.getByRole('status')).toContainText('Draft created');
+  const draftUrl = page.url();
   const pageB = await context.newPage();
-  await page.goto(`/pipelines/${PIPELINE}/editor?draft=${draft.draftId}`);
-  await pageB.goto(`/pipelines/${PIPELINE}/editor?draft=${draft.draftId}`);
+  await pageB.goto(draftUrl);
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   await pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   await page.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('18');
