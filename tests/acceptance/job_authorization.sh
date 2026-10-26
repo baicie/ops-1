@@ -17,15 +17,18 @@ mkuser() {
     "$URL/api/v1/users" >/dev/null
 }
 login() {
-  curl -fsS -X POST -H 'content-type: application/json' \
-    -d "{\"email\":\"$1\",\"password\":\"$PASSWORD\"}" "$URL/api/v1/auth/login" | json_get 'd["token"]'
+  local jar="$1" email="$2"
+  rm -f "$jar"
+  curl -fsS -c "$jar" -X POST -H 'content-type: application/json' \
+    -d "{\"email\":\"$email\",\"password\":\"$PASSWORD\"}" "$URL/api/v1/auth/login" >/tmp/job-authz-login.json
+  cat /tmp/job-authz-login.json | json_get 'd["csrfToken"]'
 }
 mkuser "$B_EMAIL" 'Operator B' operator
 mkuser "$C_EMAIL" 'Viewer C' viewer
-B_TOKEN="$(login "$B_EMAIL")"
-C_TOKEN="$(login "$C_EMAIL")"
-B_AUTH=(-H "Authorization: Bearer $B_TOKEN")
-C_AUTH=(-H "Authorization: Bearer $C_TOKEN")
+B_CSRF="$(login /tmp/job-authz-b.cookies "$B_EMAIL")"
+C_CSRF="$(login /tmp/job-authz-c.cookies "$C_EMAIL")"
+B_AUTH=(-b /tmp/job-authz-b.cookies -H "x-csrf-token: $B_CSRF")
+C_AUTH=(-b /tmp/job-authz-c.cookies -H "x-csrf-token: $C_CSRF")
 DETAIL="$(curl -fsS "${ADMIN_AUTH[@]}" "$URL/api/v1/pipelines/$PIPE")"
 REV="$(printf '%s' "$DETAIL" | json_get 'd["latestRevision"]')"
 JOB="$(curl -fsS "${ADMIN_AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: authz-$STAMP" \
