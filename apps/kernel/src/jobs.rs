@@ -1406,7 +1406,7 @@ pub async fn submit_job(
         "input": request.input
     }));
     if let Some(existing) = sqlx::query_as::<_, JobView>(
-        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,created_at,updated_at FROM kernel.pipeline_jobs WHERE idempotency_key=$1",
+        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at FROM kernel.pipeline_jobs WHERE idempotency_key=$1",
     )
     .bind(&idempotency_key)
     .fetch_optional(&state.db)
@@ -1424,7 +1424,7 @@ pub async fn submit_job(
     let job_id = Uuid::new_v4();
     let mut tx = state.db.begin().await?;
     sqlx::query(
-        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds,deadline_at) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9, now() + make_interval(secs => $9))",
+        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds,submitted_by,deadline_at) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9,$10, now() + make_interval(secs => $9))",
     )
     .bind(job_id)
     .bind(&request.pipeline_id)
@@ -1435,6 +1435,7 @@ pub async fn submit_job(
     .bind(&request.input)
     .bind(request.max_attempts)
     .bind(request.timeout_seconds)
+    .bind(auth.user_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| {
@@ -1458,7 +1459,7 @@ pub async fn submit_job(
 
 async fn fetch_job(state: &AppState, job_id: Uuid) -> AppResult<JobView> {
     sqlx::query_as::<_, JobView>(
-        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,created_at,updated_at FROM kernel.pipeline_jobs WHERE job_id=$1",
+        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at FROM kernel.pipeline_jobs WHERE job_id=$1",
     )
     .bind(job_id)
     .fetch_optional(&state.db)
@@ -1506,7 +1507,7 @@ fn encode_job_cursor(job: &JobView) -> String {
 
 pub async fn list_jobs(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Query(query): Query<JobListQuery>,
 ) -> AppResult<Json<JobListResponse>> {
     let limit = i64::from(query.limit.unwrap_or(20).clamp(1, 100));
@@ -1528,19 +1529,22 @@ pub async fn list_jobs(
     let rows = sqlx::query(
         r#"
         SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,
-               attempts,max_attempts,last_error_code,created_at,updated_at
+               attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at
         FROM kernel.pipeline_jobs
         WHERE ($1::text IS NULL OR pipeline_id=$1)
           AND ($2::text IS NULL OR status=$2)
           AND ($3::timestamptz IS NULL OR (created_at,job_id) < ($3,$4::uuid))
+          AND ($5::boolean OR submitted_by=$6)
         ORDER BY created_at DESC, job_id DESC
-        LIMIT $5
+        LIMIT $7
         "#,
     )
     .bind(query.pipeline_id.as_deref())
     .bind(query.status.as_deref())
     .bind(cursor_time)
     .bind(cursor_id)
+    .bind(!auth.role.can_operate())
+    .bind(auth.user_id)
     .bind(limit + 1)
     .fetch_all(&state.db)
     .await?;
@@ -1576,9 +1580,10 @@ pub struct JobResultView {
 
 pub async fn get_job_result(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(job_id): Path<Uuid>,
 ) -> AppResult<Json<JobResultView>> {
+    require_job_access(&state, &auth, job_id, true).await?;
     let row = sqlx::query(
         "SELECT job_id,status,output,error_code,error_message,result_digest,completed_at
          FROM kernel.pipeline_job_results WHERE job_id=$1",
@@ -1604,11 +1609,52 @@ pub async fn get_job_result(
     }))
 }
 
+async fn job_owner(state: &AppState, job_id: Uuid) -> AppResult<Option<Uuid>> {
+    let owner: Option<Option<Uuid>> =
+        sqlx::query_scalar("SELECT submitted_by FROM kernel.pipeline_jobs WHERE job_id=$1")
+            .bind(job_id)
+            .fetch_optional(&state.db)
+            .await?;
+    owner.ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "JOB_NOT_FOUND", "job not found"))
+}
+
+async fn require_job_access(
+    state: &AppState,
+    auth: &AuthUser,
+    job_id: Uuid,
+    sensitive: bool,
+) -> AppResult<()> {
+    let owner = job_owner(state, job_id).await?;
+    if auth.role.is_admin() {
+        return Ok(());
+    }
+    if auth.role.can_operate() {
+        return if owner == Some(auth.user_id) {
+            Ok(())
+        } else {
+            Err(AppError::new(
+                StatusCode::NOT_FOUND,
+                "JOB_NOT_FOUND",
+                "job not found",
+            ))
+        };
+    }
+    // Viewers may read summary metadata only. Sensitive result/cancel access is
+    // explicitly forbidden rather than inferred from a hidden UI button.
+    if sensitive {
+        return Err(AppError::forbidden(
+            "job result requires operator ownership",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn get_job(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(job_id): Path<Uuid>,
 ) -> AppResult<Json<JobView>> {
+    require_job_access(&state, &auth, job_id, false).await?;
     Ok(Json(fetch_job(&state, job_id).await?))
 }
 
@@ -2807,6 +2853,7 @@ pub async fn cancel_job(
     Path(job_id): Path<Uuid>,
 ) -> AppResult<Json<JobView>> {
     auth.require_operator()?;
+    require_job_access(&state, &auth, job_id, true).await?;
     let mut tx = state.db.begin().await?;
     let outcome = match terminalize_job(
         &mut tx,
