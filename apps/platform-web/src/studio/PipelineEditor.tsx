@@ -47,6 +47,14 @@ export function PipelineEditorPage() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const loadSeq = useRef(0);
+  useEffect(() => {
+    if (!graph) return;
+    const local = irKey({ nodes: graph.nodes.map((node) => node.data.ir), edges: graph.edges.map((edge) => edge.data.ir) });
+    if (local === baseline) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [graph, baseline]);
 
   const load = async (draftId?: string | null) => {
     const seq = ++loadSeq.current;

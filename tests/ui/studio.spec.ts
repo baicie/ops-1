@@ -95,3 +95,22 @@ test('server preview runs pure transforms and reports node outputs', async ({ pa
   await expect(page.locator('.preview-node').first()).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-preview.png'), fullPage: true });
 });
+
+test('pipeline list remains usable at laptop, mobile and dark mode', async ({ browser }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  for (const [width, height, name] of [[1024, 768, 'laptop'], [390, 844, 'mobile']]) {
+    const context = await browser.newContext({ viewport: { width, height } });
+    const page = await context.newPage();
+    await login(page);
+    await page.goto('/pipelines');
+    await expect(page.getByRole('heading', { name: 'Pipelines', exact: true })).toBeVisible();
+    await page.screenshot({ path: path.join(OUT, `pipeline-list-${name}.png`), fullPage: true });
+    await context.close();
+  }
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const page = await context.newPage();
+  await login(page);
+  await page.goto('/pipelines');
+  await page.screenshot({ path: path.join(OUT, 'pipeline-list-dark.png'), fullPage: true });
+  await context.close();
+});
