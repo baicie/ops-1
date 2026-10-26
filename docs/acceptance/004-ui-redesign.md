@@ -112,3 +112,50 @@ None.
 - Preview console is intentionally bounded (no Source IO, no hard cancel).
 - The global icon rail auto-collapse uses `:has()` and modern Chromium; supported
   by the supported browser matrix.
+
+## Quality Closure (follow-up)
+
+### Capability revoke root cause
+
+`current_token()` waited up to 60s for `data.catalog.v1` **after** the Grant had
+been deleted. Revocation legitimately clears/rotates the Worker token file, so a
+revoked state could never satisfy that wait. The test now:
+
+1. saves the pre-revoke token and its masked SHA-256;
+2. deletes the Grant;
+3. records token-file state without requiring the old token to remain;
+4. invokes with the **saved token** and asserts bounded 403 + `CAPABILITY_FORBIDDEN`;
+5. recreates the Grant and polls observable authorization until 200;
+6. records both hashes and timings.
+
+CI evidence:
+
+```text
+revoke evidence: grant_delete_at=1793003312223
+  token_before=sha256:b13668908db27234
+  file_after=sha256:2777d88708620f9f response=403
+restore evidence: token_after=sha256:b13668908db27234 authorized=200
+PASS Grant revoke is immediate and restore re-issues an authorized token
+```
+
+### Additional closure
+
+- Sidebar workspace name wrapped in a span and hidden cleanly in the 64px rail;
+  full name remains available via tooltip.
+- Studio topological layout uses IR edges, not node array order. Deterministic
+  Kahn order with cycle/disconnected fallback; unit tests cover shuffled nodes,
+  shuffled edges and cycle.
+- Auto Layout calls `fitView` through a nonce without touching IR.
+- Preview screenshot is a clean element capture; sticky topbar is hidden only for
+  the artifact, Skip Link and keyboard behavior are unchanged.
+- Structured Draft Conflict Diff shows node-level and field-level local/server
+  values (e.g. `timeoutSeconds: 19` vs `18`) and explicit resolution actions.
+- Job Duration now uses real `JOB_STARTED` event + durable result `completed_at`;
+  queued uses `Queued`, running uses elapsed with “running”, missing timestamps
+  show `—`. Queue wait / total elapsed remain Advanced metadata.
+- Job History keeps Pipeline and Created columns on one line.
+- Mobile Studio adds Nodes/Canvas switch and node list; Inspector remains below.
+- Node deletion asks for confirmation (Escape/dialog focus already handled by the
+  shared Modal component).
+- Job Detail: Execution metric; Result digest moved to collapsed metadata; stale
+  “requires dedicated diagnostics API” copy removed.
