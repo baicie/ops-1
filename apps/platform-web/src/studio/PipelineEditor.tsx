@@ -59,6 +59,7 @@ export function PipelineEditorPage() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
+  const [layoutDirection, setLayoutDirection] = useState<'horizontal' | 'vertical'>('vertical');
   const [mobileView, setMobileView] = useState<'nodes' | 'canvas'>('canvas');
   const loadSeq = useRef(0);
   useEffect(() => {
@@ -223,8 +224,15 @@ export function PipelineEditorPage() {
     setConnectionError(null); return { ok: true };
   };
 
+  const changeLayout = (nextDirection: 'horizontal' | 'vertical') => {
+    setHistory((items) => [...items.slice(-29), { graph }]);
+    setFuture([]);
+    setLayoutDirection(nextDirection);
+    setGraph(toGraph(definition, nextDirection));
+    setLayoutNonce((value) => value + 1);
+  };
   const autoLayout = () => {
-    const next = toGraph(definition);
+    const next = toGraph(definition, layoutDirection);
     setHistory((items) => [...items.slice(-29), { graph }]);
     setFuture([]);
     setGraph(next);
@@ -249,6 +257,7 @@ export function PipelineEditorPage() {
           <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> Undo</button>
           <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>Redo</button>
           <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> Auto layout</button>
+          <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title="Toggle horizontal / vertical layout"><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? 'Horizontal' : 'Vertical'}</button>
           <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> Preview</button>
           <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>Detail</Link>
           {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> Create draft</button> : <>
@@ -292,7 +301,7 @@ export function PipelineEditorPage() {
             <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>Nodes</button>
             <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>Canvas</button>
           </div>
-          {mobileView === 'nodes' ? <div className="mobile-node-list">{definition.nodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{index + 1}</span><span><strong>{nodeLabel(node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{node.outputs.length} out</span></button>)}</div> : <GraphCanvas layoutNonce={layoutNonce} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{definition.nodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{index + 1}</span><span><strong>{nodeLabel(node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{node.outputs.length} out</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
           <p className="studio-note"><Icon name="alert" size={13} /> Local edits are not persisted until Save draft. Publish requires server validation.</p>
         </section>

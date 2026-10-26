@@ -104,3 +104,16 @@ describe('topological layout', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+describe('layout directions', () => {
+  it('horizontal layout increases X with topology and keeps Y', () => {
+    const positions = toGraph(base, 'horizontal').nodes.map((node) => node.position);
+    for (let i = 1; i < positions.length; i += 1) expect(positions[i].x).toBeGreaterThan(positions[i - 1].x);
+    expect(new Set(positions.map((p) => p.y)).size).toBe(1);
+  });
+
+  it('vertical layout increases Y without reverse edges', () => {
+    const positions = toGraph(base, 'vertical').nodes.map((node) => node.position);
+    for (let i = 1; i < positions.length; i += 1) expect(positions[i].y).toBeGreaterThan(positions[i - 1].y);
+  });
+});

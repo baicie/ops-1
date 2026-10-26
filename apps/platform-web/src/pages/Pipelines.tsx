@@ -5,6 +5,7 @@ import type { JobList, PipelineDefinition, PipelineDetail, PipelineList, Pipelin
 import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
+import { getPipelineExecutionOrder } from '../studio/ir/topology';
 
 export function PipelinesPage() {
   useDocumentTitle('Pipelines');
@@ -35,7 +36,7 @@ export function PipelinesPage() {
     <div className="page-stack">
       <PageHeader
         title="Pipelines"
-        description="Published typed pipelines and their immutable revisions. Editing is the next Studio milestone."
+        description="Published typed pipelines and their immutable revisions. Open a pipeline to inspect its execution path, preview transforms, or edit a draft in Studio."
         actions={<button className="btn btn-secondary" onClick={() => setReloadToken((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button>}
       />
       <section className="toolbar">
@@ -87,9 +88,13 @@ function NodeSummary({ definition }: { definition: PipelineDefinition }) {
     'builtin.validate.schema': 'Validate',
     'builtin.sink.dataset': 'Dataset Sink',
   };
+  const execution = getPipelineExecutionOrder(definition);
+  if (execution.topologyStatus !== 'VALID') {
+    return <div className="inline-error" role="alert"><strong>{execution.topologyStatus}</strong><span>{execution.diagnostics.join(' · ') || 'Pipeline topology is not a single linear path.'}</span></div>;
+  }
   return (
     <div className="pipeline-flow" aria-label="Execution path">
-      {definition.nodes.map((node, index) => (
+      {execution.orderedNodes.map((node, index) => (
         <React.Fragment key={node.nodeId}>
           <div className="flow-step">
             <span className="flow-index">{index + 1}</span>
