@@ -1312,7 +1312,7 @@ pub async fn publish_draft(
     .bind(serde_json::to_value(&plan).unwrap_or(Value::Null))
     .execute(&mut *tx)
     .await?;
-    sqlx::query(
+    if let Err(error) = sqlx::query(
         "UPDATE kernel.pipeline_drafts
          SET status='PUBLISHED', published_revision=$1, publish_idempotency_key=$2,
              version=version+1, updated_by=$3, updated_at=now()
@@ -1323,7 +1323,24 @@ pub async fn publish_draft(
     .bind(auth.user_id)
     .bind(draft_id)
     .execute(&mut *tx)
-    .await?;
+    .await
+    {
+        // A concurrent publish of a different draft may win the unique
+        // idempotency-key index between our pre-check and this UPDATE. Roll back
+        // the revision allocation and return a deterministic conflict.
+        let unique_violation = error
+            .as_database_error()
+            .map(|db| db.code().as_deref() == Some("23505"))
+            .unwrap_or(false);
+        tx.rollback().await?;
+        if unique_violation {
+            return Err(AppError::conflict(
+                "IDEMPOTENCY_CONFLICT",
+                "Idempotency-Key belongs to a different publish operation",
+            ));
+        }
+        return Err(AppError::internal(error));
+    }
     tx.commit().await?;
     let _ = crate::audit::record(
         &state.db,

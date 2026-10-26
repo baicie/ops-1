@@ -148,6 +148,7 @@ tests/acceptance/pipeline_read_api.sh
 tests/acceptance/pipeline_validation_api.sh
 tests/acceptance/pipeline_draft_api.sh
 tests/acceptance/pipeline_publish_api.sh
+python3 tests/acceptance/publish_concurrency.py "$OPSWEAVE_URL" "$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
 tests/acceptance/job_list_api.sh
 tests/acceptance/job_authorization.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=0 OPSWEAVE_TEST_KERNEL_PID="$KERNEL_PID" tests/acceptance/data_token_refresh.sh
