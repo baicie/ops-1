@@ -30,7 +30,7 @@ const PUBLIC_NUMERIC_FIELDS = new Set(['typeVersion', 'timeoutSeconds', 'maxReco
 
 function visibleFieldValue(path: string, serialized: string | undefined): string {
   if (serialized === undefined) return '(absent)';
-  if (!PUBLIC_NUMERIC_FIELDS.has(path) || !/^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(serialized)) {
+  if (!PUBLIC_NUMERIC_FIELDS.has(path) || !/^-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?$/.test(serialized)) {
     return '[REDACTED]';
   }
   return serialized;
