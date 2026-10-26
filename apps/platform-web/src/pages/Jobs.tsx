@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { newIdempotencyKey } from '../api';
-import type { JobList, JobResultView, JobView, PipelineDetail } from '../types';
+import type { JobDiagnostics, JobList, JobResultView, JobView, PipelineDetail } from '../types';
 import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
@@ -50,6 +50,7 @@ export function JobDetailPage() {
   const [job, setJob] = useState<JobView | null>(null);
   const [result, setResult] = useState<JobResultView | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<JobDiagnostics | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
@@ -65,6 +66,9 @@ export function JobDetailPage() {
             .then(setResult)
             .catch((cause) => setResultError((cause as Error).message));
         }
+        api.get<JobDiagnostics>(`/api/v1/jobs/${encodeURIComponent(jobId)}/diagnostics`)
+          .then(setDiagnostics)
+          .catch(() => undefined);
       })
       .catch((cause) => { if (!cancelled) setError(cause as Error); });
     void load();
@@ -89,6 +93,9 @@ export function JobDetailPage() {
         <div className="panel metric-card"><span className="metric-label">Lease</span><strong className="metric-value mono small">{job.currentLeaseId || '—'}</strong></div>
       </section>
       <section className="panel panel-pad"><h2>Lifecycle</h2><ul className="detail-list"><li><span>Created</span><TimeAgo value={job.createdAt} /></li><li><span>Updated</span><TimeAgo value={job.updatedAt} /></li><li><span>Error code</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">Attempt counts and the durable result are shown from Kernel records; checkpoint diagnostics require a dedicated diagnostics API.</p></section>
+      <section className="panel panel-pad"><h2>Timeline</h2>{!diagnostics ? <p className="muted small">Diagnostics unavailable.</p> : diagnostics.events.length === 0 ? <p className="muted small">No events recorded.</p> : <ol className="timeline">{diagnostics.events.map((event) => <li key={event.eventId}><span className="timeline-dot" /><div><strong>{event.eventType}</strong>{event.toStatus && <span className="tag">{event.toStatus}</span>}{event.fencingSequence != null && <span className="muted small">fence {event.fencingSequence}</span>}<TimeAgo value={event.occurredAt} /></div></li>)}</ol>}{diagnostics?.truncated && <p className="muted small">Timeline truncated at 500 events.</p>}</section>
+      {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>Attempts</h2><div className="table-panel"><table className="data-table"><thead><tr><th>Attempt</th><th>Status</th><th>Fence</th><th>Node</th><th>Started</th></tr></thead><tbody>{diagnostics.attempts.map((attempt) => <tr key={attempt.attemptNumber}><td>#{attempt.attemptNumber}</td><td><StatusBadge status={attempt.status} /></td><td className="mono">{attempt.fencingSequence}</td><td className="mono small">{attempt.nodeId}</td><td><TimeAgo value={attempt.startedAt} /></td></tr>)}</tbody></table></div></section>}
+      {diagnostics && diagnostics.checkpoints.length > 0 && <section className="panel panel-pad"><h2>Checkpoints</h2><ul className="detail-list">{diagnostics.checkpoints.map((checkpoint) => <li key={checkpoint.checkpointId}><span>Attempt {checkpoint.attemptNumber} · sequence {checkpoint.sequence}</span><code className="mono small">{checkpoint.stateDigest}</code></li>)}</ul></section>}
       {result ? <section className="panel panel-pad"><h2>Result</h2><p className="small">Status <StatusBadge status={result.status} /> · Digest <code className="mono">{result.resultDigest || '—'}</code></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre></section> : resultError ? <p className="muted small">Result: {resultError}</p> : null}
     </div>
   );

@@ -3171,6 +3171,185 @@ pub async fn result(
     Ok(Json(fetch_job(&state, job_id).await?))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobEventView {
+    pub event_id: i64,
+    pub event_type: String,
+    pub from_status: Option<String>,
+    pub to_status: Option<String>,
+    pub fencing_sequence: Option<i64>,
+    pub details: Value,
+    pub occurred_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobAttemptView {
+    pub attempt_number: i32,
+    pub worker_id: String,
+    pub node_id: Uuid,
+    pub instance_id: Uuid,
+    pub lease_id: Uuid,
+    pub fencing_sequence: i64,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobLeaseView {
+    pub lease_id: Uuid,
+    pub attempt_number: i32,
+    pub fencing_sequence: i64,
+    pub status: String,
+    pub acquired_at: DateTime<Utc>,
+    pub heartbeat_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobCheckpointView {
+    pub checkpoint_id: Uuid,
+    pub attempt_number: i32,
+    pub sequence: i64,
+    pub fencing_sequence: i64,
+    pub input_cursor: Option<String>,
+    pub state_digest: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobDiagnosticsView {
+    pub job_id: Uuid,
+    pub events: Vec<JobEventView>,
+    pub attempts: Vec<JobAttemptView>,
+    pub leases: Vec<JobLeaseView>,
+    pub checkpoints: Vec<JobCheckpointView>,
+    pub result: Option<JobResultView>,
+    pub truncated: bool,
+}
+
+pub async fn get_job_diagnostics(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(job_id): Path<Uuid>,
+) -> AppResult<Json<JobDiagnosticsView>> {
+    // Diagnostics include internal worker/node/lease identifiers and checkpoint
+    // digests, so they require owner/admin rather than Viewer summary access.
+    require_job_access(&state, &auth, job_id, true).await?;
+    let event_rows = sqlx::query(
+        "SELECT event_id,event_type,from_status,to_status,fencing_sequence,details,occurred_at
+         FROM kernel.pipeline_job_events WHERE job_id=$1 ORDER BY occurred_at ASC,event_id ASC LIMIT 501",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let event_truncated = event_rows.len() > 500;
+    let events = event_rows
+        .iter()
+        .take(500)
+        .map(|row| JobEventView {
+            event_id: row.get("event_id"),
+            event_type: row.get("event_type"),
+            from_status: row.get("from_status"),
+            to_status: row.get("to_status"),
+            fencing_sequence: row.get("fencing_sequence"),
+            details: row.get("details"),
+            occurred_at: row.get("occurred_at"),
+        })
+        .collect();
+    let attempt_rows = sqlx::query(
+        "SELECT attempt_number,worker_id,node_id,instance_id,lease_id,fencing_sequence,status,started_at,finished_at,error_code
+         FROM kernel.pipeline_job_attempts WHERE job_id=$1 ORDER BY attempt_number ASC LIMIT 50",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let attempts = attempt_rows
+        .iter()
+        .map(|row| JobAttemptView {
+            attempt_number: row.get("attempt_number"),
+            worker_id: row.get("worker_id"),
+            node_id: row.get("node_id"),
+            instance_id: row.get("instance_id"),
+            lease_id: row.get("lease_id"),
+            fencing_sequence: row.get("fencing_sequence"),
+            status: row.get("status"),
+            started_at: row.get("started_at"),
+            finished_at: row.get("finished_at"),
+            error_code: row.get("error_code"),
+        })
+        .collect();
+    let lease_rows = sqlx::query(
+        "SELECT lease_id,attempt_number,fencing_sequence,status,acquired_at,heartbeat_at,expires_at
+         FROM kernel.pipeline_job_leases WHERE job_id=$1 ORDER BY fencing_sequence ASC LIMIT 50",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let leases = lease_rows
+        .iter()
+        .map(|row| JobLeaseView {
+            lease_id: row.get("lease_id"),
+            attempt_number: row.get("attempt_number"),
+            fencing_sequence: row.get("fencing_sequence"),
+            status: row.get("status"),
+            acquired_at: row.get("acquired_at"),
+            heartbeat_at: row.get("heartbeat_at"),
+            expires_at: row.get("expires_at"),
+        })
+        .collect();
+    let checkpoint_rows = sqlx::query(
+        "SELECT checkpoint_id,attempt_number,sequence,fencing_sequence,input_cursor,state_digest,created_at
+         FROM kernel.pipeline_job_checkpoints WHERE job_id=$1 ORDER BY sequence ASC LIMIT 100",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let checkpoints = checkpoint_rows
+        .iter()
+        .map(|row| JobCheckpointView {
+            checkpoint_id: row.get("checkpoint_id"),
+            attempt_number: row.get("attempt_number"),
+            sequence: row.get("sequence"),
+            fencing_sequence: row.get("fencing_sequence"),
+            input_cursor: row.get("input_cursor"),
+            state_digest: row.get("state_digest"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+    let result = sqlx::query(
+        "SELECT job_id,status,output,error_code,error_message,result_digest,completed_at
+         FROM kernel.pipeline_job_results WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .map(|row| JobResultView {
+        job_id: row.get("job_id"),
+        status: row.get("status"),
+        output: row.get("output"),
+        error_code: row.get("error_code"),
+        error_message: row.get("error_message"),
+        result_digest: row.get("result_digest"),
+        completed_at: row.get("completed_at"),
+    });
+    Ok(Json(JobDiagnosticsView {
+        job_id,
+        events,
+        attempts,
+        leases,
+        checkpoints,
+        result,
+        truncated: event_truncated,
+    }))
+}
+
 pub async fn cancel_job(
     State(state): State<AppState>,
     auth: AuthUser,

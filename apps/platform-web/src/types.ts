@@ -416,3 +416,56 @@ export interface PipelinePreview {
   elapsedMs: number;
   truncated: boolean;
 }
+
+export interface JobEventView {
+  eventId: number;
+  eventType: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  fencingSequence?: number | null;
+  details: Record<string, unknown>;
+  occurredAt: string;
+}
+
+export interface JobAttemptView {
+  attemptNumber: number;
+  workerId: string;
+  nodeId: string;
+  instanceId: string;
+  leaseId: string;
+  fencingSequence: number;
+  status: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  errorCode?: string | null;
+}
+
+export interface JobLeaseView {
+  leaseId: string;
+  attemptNumber: number;
+  fencingSequence: number;
+  status: string;
+  acquiredAt: string;
+  heartbeatAt: string;
+  expiresAt: string;
+}
+
+export interface JobCheckpointView {
+  checkpointId: string;
+  attemptNumber: number;
+  sequence: number;
+  fencingSequence: number;
+  inputCursor?: string | null;
+  stateDigest: string;
+  createdAt: string;
+}
+
+export interface JobDiagnostics {
+  jobId: string;
+  events: JobEventView[];
+  attempts: JobAttemptView[];
+  leases: JobLeaseView[];
+  checkpoints: JobCheckpointView[];
+  result?: JobResultView | null;
+  truncated: boolean;
+}

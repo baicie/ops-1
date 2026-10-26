@@ -43,6 +43,10 @@ printf '%s' "$B_LIST" | python3 -c "import json,sys; assert all(x['jobId']!='$JO
 # Viewer may read summary but never result or cancel.
 CODE="$(curl -sS -o /tmp/authz-c-get.json -w '%{http_code}' "${C_AUTH[@]}" "$URL/api/v1/jobs/$JOB")"
 [ "$CODE" = "200" ] || bad "viewer summary=$CODE"
+CODE="$(curl -sS -o /tmp/authz-b-diagnostics.json -w '%{http_code}' "${B_AUTH[@]}" "$URL/api/v1/jobs/$JOB/diagnostics")"
+[ "$CODE" = "404" ] || bad "B diagnostics=$CODE"
+CODE="$(curl -sS -o /tmp/authz-c-diagnostics.json -w '%{http_code}' "${C_AUTH[@]}" "$URL/api/v1/jobs/$JOB/diagnostics")"
+[ "$CODE" = "403" ] || bad "viewer diagnostics=$CODE"
 CODE="$(curl -sS -o /tmp/authz-c-result.json -w '%{http_code}' "${C_AUTH[@]}" "$URL/api/v1/jobs/$JOB/result")"
 [ "$CODE" = "403" ] || bad "viewer result=$CODE"
 CODE="$(curl -sS -o /tmp/authz-c-cancel.json -w '%{http_code}' "${C_AUTH[@]}" -X POST "$URL/api/v1/jobs/$JOB/cancel")"
@@ -54,5 +58,7 @@ printf '%s' "$(cat /tmp/authz-admin-cancel.json)" | python3 -c 'import json,sys;
 CODE="$(curl -sS -o /tmp/authz-admin-result.json -w '%{http_code}' "${ADMIN_AUTH[@]}" "$URL/api/v1/jobs/$JOB/result")"
 [ "$CODE" = "200" ] || bad "admin result=$CODE"
 printf '%s' "$(cat /tmp/authz-admin-result.json)" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="CANCELLED"' || bad "result status"
+DIAG="$(curl -fsS "${ADMIN_AUTH[@]}" "$URL/api/v1/jobs/$JOB/diagnostics")"
+printf '%s' "$DIAG" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["jobId"]; assert len(d["events"])>=1; assert d["result"]["status"]=="CANCELLED"' || bad "diagnostics payload"
 echo "PASS Job authorization owner/admin/viewer, list isolation, 404/403, admin cancel/result"
 echo "Job Authorization: PASS"
