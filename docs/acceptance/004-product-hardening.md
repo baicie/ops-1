@@ -146,10 +146,13 @@ Full green runs:
 - Standard CI `40260648441` on `65775ef` failed only because `Cargo.lock` was
   missing the new workspace crate; fixed by `3d9b5c0`.
 - Standard CI on `a818b67` succeeded (`40263910776`).
-- Data Foundation `40263910759` attempt 1 failed in the pre-existing
-  `capability_multi_provider` revoke test (after all hardening tests passed);
-  attempt 2 result is recorded in the final report.
+- Data Foundation `40263910759` on `a818b67`: attempt 1 failed in the pre-existing
+  `capability_multi_provider` revoke test after all hardening tests passed;
+  attempt 2 **SUCCESS**. This is one complete green run on the final code SHA.
 - Runtime `40263910815` on `a818b67`: **SUCCESS**.
+- Standard CI `40263910776` on `a818b67`: **SUCCESS**.
+- Docs head `63c5415` has no product-code delta; its Data/Runtime reruns were in
+  progress at report time.
 
 ## Screenshots
 
