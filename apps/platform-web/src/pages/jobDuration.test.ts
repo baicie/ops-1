@@ -34,7 +34,23 @@ describe('job execution duration', () => {
     expect(spanLabel(undefined, '2026-01-01T00:00:00Z')).toBe('—');
     expect(spanLabel('invalid', '2026-01-01T00:00:00Z')).toBe('—');
   });
-  it('does not produce a negative duration for invalid ordering', () => {
-    expect(spanLabel('2026-01-01T00:00:10Z', '2026-01-01T00:00:00Z')).toBe('0 ms');
+  it('rejects an impossible negative duration', () => {
+    expect(spanLabel('2026-01-01T00:00:10Z', '2026-01-01T00:00:00Z')).toBe('—');
   });
+  it('does not call a terminal job running when its finishedAt is missing', () => {
+    const startedAt = '2026-01-01T00:00:10Z';
+    for (const status of ['SUCCEEDED', 'FAILED', 'CANCELLED'] as const) {
+      expect(executionLabel({ ...base, status, startedAt }, Date.parse('2026-01-01T00:01:00Z'))).toBe('—');
+    }
+  });
+
+  it('rejects an invalid terminal end before its start', () => {
+    expect(executionLabel({
+      ...base,
+      status: 'FAILED',
+      startedAt: '2026-01-01T00:01:00Z',
+      finishedAt: '2026-01-01T00:00:00Z',
+    })).toBe('—');
+  });
+
 });
