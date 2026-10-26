@@ -107,10 +107,12 @@ test('pipeline list remains usable at laptop, mobile and dark mode', async ({ br
     await page.screenshot({ path: path.join(OUT, `pipeline-list-${name}.png`), fullPage: true });
     await context.close();
   }
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => localStorage.setItem('opsweave-theme', 'dark'));
   const page = await context.newPage();
   await login(page);
   await page.goto('/pipelines');
+  await expect(page.getByRole('button', { name: 'Switch to light theme' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-list-dark.png'), fullPage: true });
   await context.close();
 });
