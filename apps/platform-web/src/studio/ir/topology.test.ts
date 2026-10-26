@@ -48,6 +48,29 @@ describe('pipeline execution order', () => {
     expect(getPipelineExecutionOrder(definition).topologyStatus).toBe('MULTIPLE_SOURCES');
   });
 
+  it('refuses to invent a linear path for a one-source one-sink branch/join', () => {
+    const definition = clone();
+    // Keeps one source and one sink, but skips parse to join at map.
+    definition.edges.push({
+      fromNode: definition.nodes[0].nodeId,
+      fromPort: definition.nodes[0].outputs[0].name,
+      toNode: definition.nodes[2].nodeId,
+      toPort: definition.nodes[2].inputs[0].name,
+      dataType: definition.nodes[0].outputs[0].dataType,
+    });
+    expect(getPipelineExecutionOrder(definition).topologyStatus).toBe('NON_LINEAR');
+  });
+
+  it('reports a dangling edge instead of claiming the path is valid', () => {
+    const definition = clone();
+    definition.edges.push({
+      ...definition.edges[0],
+      toNode: 'missing-node',
+    });
+    const result = getPipelineExecutionOrder(definition);
+    expect(result.topologyStatus).toBe('INVALID_EDGE');
+  });
+
   it('reports multiple sources and sinks', () => {
     const definition = clone();
     definition.edges = [];
