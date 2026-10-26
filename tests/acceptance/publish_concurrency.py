@@ -86,15 +86,10 @@ status, final = call("GET", f"/api/v1/pipelines/{PIPE}")
 assert final["latestRevision"] == before_rev + 2, final["latestRevision"]
 assert len(final["revisions"]) == before_count + 2
 
-# Lost-response replay uses the same revision.
-winner = next(payload for code, payload in results if code == 200)
-replay_status, replay = call(
-    "POST",
-    f"/api/v1/pipelines/{PIPE}/drafts/{winner.get('definition', {}).get('pipelineId', '')}/publish",
-    {},
-) if False else (None, None)
-# The actual draft id is whichever branch produced the 200.
-winning_draft = d1 if results[0][0] == 200 else d2
+# Lost-response replay uses the same draft, key and revision.
+winning_index = codes.index(200)
+winner = results[winning_index][1]
+winning_draft = d1 if winning_index % 2 == 0 else d2
 replay_status, replay = publish(winning_draft, key)
 assert replay_status == 200, (replay_status, replay)
 assert replay["revision"] == winner["revision"]
