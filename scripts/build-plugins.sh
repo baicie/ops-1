@@ -10,8 +10,8 @@ TS_VERSION="${OPSWEAVE_HELLO_VERSION:-0.0.1}"
 TS_V2_VERSION="${OPSWEAVE_HELLO_V2_VERSION:-0.0.2}"
 ARCH="$(docker info --format '{{.Architecture}}' 2>/dev/null || echo arm64)"
 case "$ARCH" in
-  aarch64|arm64) GOARCH=arm64; JRE_ARCH=aarch64; JRE_SHA256=14be1f35ebdbd1f6e8d57eb911a3ffb74d6d9aa255abc5daf2b1302002cf2cf2 ;;
-  x86_64|amd64) GOARCH=amd64; JRE_ARCH=x64; JRE_SHA256=2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500 ;;
+  aarch64|arm64) GOARCH=arm64; JRE_ARCH=aarch64; JRE_SHA256=b1734db7ade49c3f6acc6ae06233b8c2dd90e3e2f00f67000ae1c972aaa64d8c ;;
+  x86_64|amd64) GOARCH=amd64; JRE_ARCH=x64; JRE_SHA256=a535a1df9c6284d9618872984e026ae0352d1f7e9e0605425c0e6114f47351dd ;;
   *) echo "unsupported local architecture: $ARCH" >&2; exit 1 ;;
 esac
 TS_CAP=sha256:16720c5f7a1cac3268d2cd20b72be3f0b4306734a6a087088e30ce2d8e96cf17
@@ -64,7 +64,8 @@ echo "== Java OCI image"
 if [ ! -x plugins/hello-java/jre/bin/java ]; then
   echo "Downloading pinned Temurin 21 JRE for linux/$JRE_ARCH" >&2
   mkdir -p plugins/hello-java/jre
-  curl -fsSL --max-time 240 "https://mirrors.tuna.tsinghua.edu.cn/Adoptium/21/jre/${JRE_ARCH}/linux/OpenJDK21U-jre_${JRE_ARCH}_linux_hotspot_21.0.12.1_1.tar.gz" -o /tmp/opsweave-jre21.tar.gz
+  JRE_FILE="OpenJDK21U-jre_${JRE_ARCH}_linux_hotspot_21.0.13_9.tar.gz"
+  curl -fsSL --max-time 240 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/${JRE_FILE}" -o /tmp/opsweave-jre21.tar.gz
   verify_sha256 /tmp/opsweave-jre21.tar.gz "$JRE_SHA256"
   tar xzf /tmp/opsweave-jre21.tar.gz -C plugins/hello-java/jre --strip-components=1
 fi
