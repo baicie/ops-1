@@ -7,6 +7,12 @@ import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
 
+function durationLabel(job: JobView) {
+  const ms = Math.max(0, new Date(job.updatedAt).getTime() - new Date(job.createdAt).getTime());
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
 export function JobsPage() {
   useDocumentTitle('Jobs');
   const [data, setData] = useState<JobList | null>(null);
@@ -41,8 +47,8 @@ export function JobsPage() {
         <span className="toolbar-count">{visibleJobs.length} of {data?.items.length ?? 0} shown</span>
       </section>
       {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : visibleJobs.length === 0 ? <EmptyState icon="clock" title={data?.items.length ? 'No jobs match this filter' : 'No jobs'} description={data?.items.length ? 'Clear search or choose another pipeline/status.' : 'Publish a revision and submit a run from its Pipeline detail page.'} /> : (
-        <section className="panel table-panel"><table className="data-table responsive-table"><thead><tr><th>Job</th><th>Pipeline</th><th>Revision</th><th>Status</th><th>Attempts</th><th>Created</th><th /></tr></thead><tbody>
-          {visibleJobs.map((job) => <tr key={job.jobId} className="clickable"><td data-label="Job" className="job-id-cell"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td data-label="Pipeline">{job.pipelineId}</td><td data-label="Revision"><span className="mono">r{job.pipelineRevision}</span></td><td data-label="Status"><StatusBadge status={job.status} /></td><td data-label="Attempts">{job.attempts}/{job.maxAttempts}</td><td data-label="Created"><TimeAgo value={job.createdAt} /></td><td className="row-action"><Icon name="chevron" size={16} /></td></tr>)}
+        <section className="panel table-panel"><table className="data-table responsive-table"><thead><tr><th>Job</th><th>Pipeline</th><th>Revision</th><th>Status</th><th>Attempts</th><th>Duration</th><th>Created</th><th /></tr></thead><tbody>
+          {visibleJobs.map((job) => <tr key={job.jobId} className="clickable"><td data-label="Job" className="job-id-cell"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td data-label="Pipeline">{job.pipelineId}</td><td data-label="Revision"><span className="mono">r{job.pipelineRevision}</span></td><td data-label="Status"><StatusBadge status={job.status} /></td><td data-label="Attempts">{job.attempts}/{job.maxAttempts}</td><td data-label="Duration"><span className="mono">{durationLabel(job)}</span></td><td data-label="Created"><TimeAgo value={job.createdAt} /></td><td className="row-action"><Icon name="chevron" size={16} /></td></tr>)}
         </tbody></table></section>
       )}
       <div className="pagination-row"><button className="btn btn-secondary" disabled={!cursor} onClick={() => setCursor(null)}>First page</button><button className="btn btn-secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor || null)}>Next page</button></div>
