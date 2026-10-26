@@ -110,7 +110,12 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         elevateEdgesOnSelect
         minZoom={0.25}
         maxZoom={1.75}
-        onInit={setFlow}
+        onInit={(instance) => {
+          setFlow(instance);
+          // A second tab can mount React Flow before its container has a measured
+          // viewport; fit again after layout/paint so nodes are never off-screen.
+          window.setTimeout(() => void instance.fitView({ padding: 0.2 }), 100);
+        }}
         onNodeClick={(_, node) => onSelect(node.id)}
         onPaneClick={() => onSelect(null)}
         onNodesChange={handleNodesChange}
