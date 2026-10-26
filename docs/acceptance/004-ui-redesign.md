@@ -162,15 +162,15 @@ PASS Grant revoke is immediate and restore re-issues an authorized token
 
 ## Final CI (Code HEAD)
 
-- Data Foundation `40296422810` on `827c0e4`: **SUCCESS** (attempt 1)
-- Runtime `40296422689` on `827c0e4`: **SUCCESS**
-- Standard CI `40296422569` on `827c0e4`: **SUCCESS**
+- Data Foundation `40301176065` on `eef2a84`: **SUCCESS**
+- Runtime `40301176390` on `eef2a84`: **SUCCESS**
+- Standard CI `40301176232` on `eef2a84`: **SUCCESS**
+- Previous final candidate `827c0e4`: Data `40296422810`, Runtime `40296422689`, Standard `40296422569` all **SUCCESS**
 - Legacy E2E inside Data Foundation: `PASS=21 FAIL=0`
 - Visual Layout / Playwright: 15 passed
 - Prior full green: `40283692688` on `538cf27` (attempt 1 and attempt 2 both **SUCCESS**)
 - Previous full green: `40293429004` on `4b426f6`
-- Final screenshots in this document are from `40296422810` / `827c0e4`.
+- Final screenshots in this document are from `40301176065` / `eef2a84`.
 
 The failed c28 run (`40288868889` attempt 1) timed out in the draft-conflict
-browser test after 14 other browser tests passed; attempt 2 and the later final
-SHA were green. The capability revoke test itself passed in every c28/final run.
+browser test after 14 other browser tests passed; attempt 2 and the later final SHAs were green. The capability revoke test itself passed in every c28/final run.
