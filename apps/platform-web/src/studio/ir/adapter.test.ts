@@ -30,6 +30,35 @@ describe('Pipeline IR adapter', () => {
     expect(new Set(restored.edges.map((edge) => edgeId(edge)))).toEqual(new Set(base.edges.map((edge) => edgeId(edge))));
   });
 
+  it('preserves byte-significant IR array order after visual topology layout', () => {
+    const definition = clone();
+    definition.nodes = [...definition.nodes].reverse();
+    definition.edges = [...definition.edges].reverse();
+    const originalNodes = JSON.stringify(definition.nodes);
+    const originalEdges = JSON.stringify(definition.edges);
+    const rendered = toGraph(definition, 'horizontal');
+    // Presentation is topology-ordered, while persistence must remain stable.
+    expect(rendered.nodes[0].id).toBe(base.nodes[0].nodeId);
+    for (const direction of ['horizontal', 'vertical'] as const) {
+      const restored = fromGraph(definition, toGraph(definition, direction));
+      expect(JSON.stringify(restored.nodes)).toBe(originalNodes);
+      expect(JSON.stringify(restored.edges)).toBe(originalEdges);
+    }
+  });
+
+  it('retains new graph elements after the persisted elements', () => {
+    const definition = clone();
+    const rendered = toGraph(definition);
+    const extra = structuredClone(rendered.nodes[1]);
+    extra.id = 'new-transform';
+    extra.data.ir.nodeId = 'new-transform';
+    rendered.nodes.unshift(extra);
+    const restored = fromGraph(definition, rendered);
+    expect(restored.nodes.slice(0, definition.nodes.length).map((node) => node.nodeId))
+      .toEqual(definition.nodes.map((node) => node.nodeId));
+    expect(restored.nodes.at(-1)?.nodeId).toBe('new-transform');
+  });
+
   it('rejects an unknown node type', () => {
     const definition = clone();
     definition.nodes[0].type = 'builtin.unknown.node';
