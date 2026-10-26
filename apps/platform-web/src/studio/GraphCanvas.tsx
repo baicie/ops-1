@@ -53,7 +53,7 @@ export interface GraphCanvasProps {
 }
 
 export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect, layoutNonce = 0 }: GraphCanvasProps) {
-  const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
+  const [flow, setFlow] = useState<ReactFlowInstance<Node<PipelineNodeData>, Edge> | null>(null);
   useEffect(() => { if (layoutNonce > 0) void flow?.fitView({ padding: 0.2 }); }, [layoutNonce, flow]);
   const flowNodes: Array<Node<PipelineNodeData>> = nodes.map((node) => ({
     id: node.id, type: 'pipeline', position: node.position,
