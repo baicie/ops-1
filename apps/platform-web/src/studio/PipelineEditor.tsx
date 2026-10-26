@@ -41,6 +41,7 @@ export function PipelineEditorPage() {
   const [busy, setBusy] = useState<'create' | 'save' | 'validate' | 'publish' | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
+  const [conflictLatest, setConflictLatest] = useState<PipelineDraft | null>(null);
   const [sampleInput, setSampleInput] = useState('[{"id":"1","name":"alpha","n":2}]');
   const [preview, setPreview] = useState<PipelinePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -75,6 +76,7 @@ export function PipelineEditorPage() {
       setFuture([]);
       setServerValidation(null);
       setConnectionError(null);
+      setConflictLatest(null);
     } catch (cause) {
       if (seq === loadSeq.current) setError(cause as Error);
     } finally {
@@ -129,14 +131,14 @@ export function PipelineEditorPage() {
       navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
     } catch (cause) { setError(cause as Error); } finally { setBusy(null); }
   };
-  const saveDraft = async () => {
+  const saveDraft = async (overrideVersion?: number) => {
     if (!draft) return;
     setBusy('save'); setConflict(null); setNotice(null);
     try {
       const saved = await api.put<PipelineDraft>(
         `/api/v1/pipelines/${encodeURIComponent(pipelineId)}/drafts/${draft.draftId}`,
         { definition },
-        { 'if-match': String(draft.version) },
+        { 'if-match': String(overrideVersion ?? draft.version) },
       );
       setDraft(saved);
       setGraph(toGraph(saved.definition));
@@ -144,8 +146,13 @@ export function PipelineEditorPage() {
       setHistory([]); setFuture([]); setServerValidation(null);
       setNotice(`Draft saved · version ${saved.version}`);
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) setConflict(cause.message);
-      else setError(cause as Error);
+      if (cause instanceof ApiError && cause.status === 409) {
+        setConflict(cause.message);
+        try {
+          const latest = await api.get<PipelineDraft>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}/drafts/${draft.draftId}`);
+          setConflictLatest(latest);
+        } catch { setConflictLatest(null); }
+      } else setError(cause as Error);
     } finally { setBusy(null); }
   };
   const validate = async () => {
@@ -221,7 +228,16 @@ export function PipelineEditorPage() {
         </>}
       />
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
-      {conflict && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {conflict} <button className="btn btn-secondary btn-small" onClick={() => void load(draftParam)}>Reload latest</button></div>}
+      {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
+        <Icon name="warning" size={14} />
+        <div><strong>{conflict}</strong><span>Local changes are preserved. Server version: {conflictLatest ? `v${conflictLatest.version}` : 'unknown'}.</span>
+          {conflictLatest && <pre>{JSON.stringify({ localNodes: definition.nodes.length, serverNodes: conflictLatest.definition.nodes.length, localEdges: definition.edges.length, serverEdges: conflictLatest.definition.edges.length }, null, 2)}</pre>}</div>
+        <div className="conflict-actions">
+          <button className="btn btn-secondary btn-small" onClick={() => setConflict(null)}>Keep editing</button>
+          <button className="btn btn-secondary btn-small" onClick={() => { if (window.confirm('Discard local changes and load the latest server draft?')) { setConflict(null); void load(draft?.draftId); } }}>Reload latest</button>
+          <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => { if (window.confirm('Overwrite the newer server draft with your local version?')) { setConflict(null); void saveDraft(conflictLatest?.version); } }}>Use local &amp; retry</button>
+        </div>
+      </div>}
       {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>Saved drafts</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
       <div className="studio-shell">
         <aside className="panel panel-pad studio-palette">
