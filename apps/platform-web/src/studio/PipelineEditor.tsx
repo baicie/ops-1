@@ -155,7 +155,7 @@ export function PipelineEditorPage() {
       setNotice(`Draft saved · version ${saved.version}`);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
-        setConflict(cause.message);
+        setConflict(`${cause.code}: ${cause.message}`);
         try {
           const latest = await api.get<PipelineDraft>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}/drafts/${draft.draftId}`);
           setConflictLatest(latest);
