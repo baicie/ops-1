@@ -1867,7 +1867,7 @@ pub async fn list_jobs(
     .bind(query.status.as_deref())
     .bind(cursor_time)
     .bind(cursor_id)
-    .bind(!auth.role.can_operate())
+    .bind(auth.role.is_admin() || !auth.role.can_operate())
     .bind(auth.user_id)
     .bind(limit + 1)
     .fetch_all(&state.db)
