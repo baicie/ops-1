@@ -6,15 +6,19 @@ export function spanLabel(start?: string | null, end?: string | null, now = Date
   if (!Number.isFinite(startMs)) return '—';
   const endMs = end ? new Date(end).getTime() : now;
   if (!Number.isFinite(endMs)) return '—';
-  const ms = Math.max(0, endMs - startMs);
+  if (endMs < startMs) return '—';
+  const ms = endMs - startMs;
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
 /** Execution window; includes retry/recovery gaps, not summed CPU time. */
 export function executionLabel(job: JobView, now = Date.now()) {
   if (job.status === 'QUEUED') return 'Queued';
-  if (job.finishedAt) return spanLabel(job.startedAt, job.finishedAt, now);
-  if (job.startedAt) return `${spanLabel(job.startedAt, null, now)} running`;
   if (job.status === 'CLAIMED') return 'Claimed';
-  return '—';
+  if (job.status === 'RUNNING') {
+    return job.startedAt ? `${spanLabel(job.startedAt, null, now)} running` : '—';
+  }
+  // Missing completion timestamps are unknown, not evidence that a terminal
+  // job is still running. Never substitute the current clock for a terminal end.
+  return job.finishedAt ? spanLabel(job.startedAt, job.finishedAt, now) : '—';
 }
