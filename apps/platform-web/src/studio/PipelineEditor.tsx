@@ -15,6 +15,16 @@ interface HistoryEntry { graph: EditorGraph }
 
 const irKey = (value: { nodes: unknown[]; edges: unknown[] }) => JSON.stringify([value.nodes, value.edges]);
 
+const NODE_LABEL: Record<string, string> = {
+  'builtin.source.http_json': 'HTTP Source',
+  'builtin.parse.json': 'Parse JSON',
+  'builtin.map.fields': 'Map Fields',
+  'builtin.filter.predicate': 'Filter Records',
+  'builtin.validate.schema': 'Validate Schema',
+  'builtin.sink.dataset': 'Dataset Sink',
+};
+function nodeLabel(type: string) { return NODE_LABEL[type] || type.split('.').slice(-1)[0]; }
+
 function configValue(nodeType: string, key: string, value: unknown) {
   return { nodeType, key, value };
 }
@@ -259,7 +269,7 @@ export function PipelineEditorPage() {
       <div className="studio-shell">
         <aside className="panel panel-pad studio-palette">
           <h2>Node palette</h2><p className="muted small">Typed nodes from the current revision.</p>
-          {definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{node.nodeId}</strong><small className="mono">{node.type}</small></span></div>)}
+          {definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{nodeLabel(node.type)}</strong><small className="mono">{node.nodeId}</small></span></div>)}
         </aside>
         <section className="panel studio-canvas" aria-label="Pipeline canvas">
           <GraphCanvas nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />

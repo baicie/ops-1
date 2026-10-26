@@ -1,7 +1,7 @@
 import type { PipelineDefinition, PipelineEdge, PipelineNode } from '../../types';
 import type { GraphEdge, GraphNode, StudioGraph } from './types';
 
-const X_GAP = 200;
+const X_GAP = 260;
 const Y_GAP = 140;
 
 /** Server IR -> canvas graph. Position is editor-only, never persisted. */

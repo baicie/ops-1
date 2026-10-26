@@ -85,7 +85,7 @@ export function JobDetailPage() {
   if (!job) return <Skeleton rows={6} />;
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Job" title={<span className="mono">{job.jobId}</span>} description={`${job.pipelineId} · r${job.pipelineRevision}`} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <button className="btn btn-danger" onClick={() => void cancel()}><Icon name="pause" size={15} /> Cancel</button>}<button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-secondary" to="/jobs">All jobs</Link></>} />
+      <PageHeader eyebrow="Run" title={job.pipelineId} description={<span className="job-subtitle"><StatusBadge status={job.status} /><span>Revision r{job.pipelineRevision}</span><span className="job-short-id" title={job.jobId}>Run {job.jobId.slice(0, 8)}</span></span>} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <button className="btn btn-danger" onClick={() => void cancel()}><Icon name="pause" size={15} /> Cancel</button>}<button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-secondary" to="/jobs">All jobs</Link></>} />
       <section className="summary-grid job-stats">
         <div className="panel metric-card"><span className="metric-label">Status</span><strong className="metric-value"><StatusBadge status={job.status} /></strong></div>
         <div className="panel metric-card"><span className="metric-label">Attempts</span><strong className="metric-value">{job.attempts} / {job.maxAttempts}</strong></div>
