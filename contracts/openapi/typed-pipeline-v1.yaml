@@ -71,6 +71,41 @@ paths:
                   digest: { type: string, nullable: true }
         '401': { description: Unauthenticated }
         '403': { description: Operator role required }
+  /pipelines/preview:
+    post:
+      operationId: previewPipeline
+      summary: Bounded pure-transform preview; never writes Catalog/Job/Receipt state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition, sampleInput]
+              properties:
+                definition: { $ref: ../schema/pipeline-ir.v1.schema.json }
+                sampleInput: { type: [object, array] }
+                maxRecords: { type: integer, minimum: 1, maximum: 100 }
+                startNodeId: { type: string }
+                stopNodeId: { type: string }
+      responses:
+        '200':
+          description: Bounded preview result; status COMPLETED, FAILED or INVALID.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [previewId, status, nodeOutputs, errors, processedRecords, elapsedMs, truncated]
+                properties:
+                  previewId: { type: string, format: uuid }
+                  status: { type: string, enum: [COMPLETED, FAILED, INVALID] }
+                  nodeOutputs: { type: array, items: { type: object } }
+                  errors: { type: array, items: { type: object } }
+                  processedRecords: { type: integer, minimum: 0 }
+                  elapsedMs: { type: integer, minimum: 0 }
+                  truncated: { type: boolean }
+        '401': { description: Unauthenticated }
+        '403': { description: Operator role required }
   /pipelines/{pipelineId}/drafts:
     get:
       operationId: listPipelineDrafts
@@ -257,6 +292,28 @@ paths:
                   nextCursor: { type: string, nullable: true }
         '400': { description: Invalid status/cursor }
         '401': { description: Unauthenticated }
+  /jobs/{jobId}/result:
+    get:
+      operationId: getJobResult
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Durable terminal result; owner/admin only (Viewer 403, non-owner 404).
+        '401': { description: Unauthenticated }
+        '403': { description: Sensitive Job result requires operator ownership }
+        '404': { description: Job not found or result not available }
+  /jobs/{jobId}/diagnostics:
+    get:
+      operationId: getJobDiagnostics
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Authorized timeline, attempts, leases and checkpoints.
+        '401': { description: Unauthenticated }
+        '403': { description: Diagnostics require owner/admin }
+        '404': { description: Job not found }
   /jobs/{jobId}/claim:
     post:
       operationId: claimJob
