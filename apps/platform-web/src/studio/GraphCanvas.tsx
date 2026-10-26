@@ -162,7 +162,7 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         edges={flowEdges}
         nodeTypes={nodeTypes as any}
         fitView
-        fitViewOptions={{ padding: 0.2, minZoom: 0.4, maxZoom: 1.15 }}
+        fitViewOptions={{ padding: 0.2, minZoom: 0.8, maxZoom: 1.15 }}
         defaultEdgeOptions={{ type: 'smoothstep' }}
         elevateEdgesOnSelect
         minZoom={0.25}
