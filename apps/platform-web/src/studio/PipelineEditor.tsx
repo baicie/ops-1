@@ -59,7 +59,7 @@ export function PipelineEditorPage() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
-  const [layoutDirection, setLayoutDirection] = useState<'horizontal' | 'vertical'>(() => typeof window !== 'undefined' && window.innerWidth < 768 ? 'vertical' : 'horizontal');
+  const [layoutDirection, setLayoutDirection] = useState<'horizontal' | 'vertical'>('vertical');
   const [mobileView, setMobileView] = useState<'nodes' | 'canvas'>('canvas');
   const loadSeq = useRef(0);
   useEffect(() => {

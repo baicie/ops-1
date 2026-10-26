@@ -78,17 +78,39 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         }
       });
     };
-    fitWhenMeasured();
-    const observer = new ResizeObserver(fitWhenMeasured);
+    let frames = 0;
+    const measureAndFit = () => {
+      if (fittedRef.current || userMovedRef.current) return;
+      const rect = element.getBoundingClientRect();
+      const nodeElements = Array.from(element.querySelectorAll('.react-flow__node'));
+      const measured = nodes.length > 0 && nodeElements.length >= nodes.length
+        && nodeElements.every((node) => node.getBoundingClientRect().width > 0);
+      if (rect.width > 0 && rect.height > 0 && measured) {
+        rafRef.current = window.requestAnimationFrame(() => {
+          rafRef.current = null;
+          if (!fittedRef.current && !userMovedRef.current) {
+            void flow.fitView({ padding: 0.2 });
+            fittedRef.current = true;
+          }
+        });
+        return;
+      }
+      if (frames < 240) {
+        frames += 1;
+        rafRef.current = window.requestAnimationFrame(measureAndFit);
+      }
+    };
+    measureAndFit();
+    const observer = new ResizeObserver(() => { if (!fittedRef.current) measureAndFit(); });
     observer.observe(element);
-    const onVisibility = () => { if (!document.hidden) fitWhenMeasured(); };
+    const onVisibility = () => { if (!document.hidden && !fittedRef.current) measureAndFit(); };
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       observer.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
     };
-  }, [flow]);
+  }, [flow, nodes.length]);
   useEffect(() => { if (layoutNonce > 0) { fittedRef.current = true; void flow?.fitView({ padding: 0.2 }); } }, [layoutNonce, flow]);
   const flowNodes: Array<Node<PipelineNodeData>> = nodes.map((node) => ({
     id: node.id, type: 'pipeline', position: node.position,
@@ -140,7 +162,7 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         edges={flowEdges}
         nodeTypes={nodeTypes as any}
         fitView
-        fitViewOptions={{ padding: 0.2, minZoom: 0.65, maxZoom: 1.15 }}
+        fitViewOptions={{ padding: 0.2, minZoom: 0.4, maxZoom: 1.15 }}
         defaultEdgeOptions={{ type: 'smoothstep' }}
         elevateEdgesOnSelect
         minZoom={0.25}
