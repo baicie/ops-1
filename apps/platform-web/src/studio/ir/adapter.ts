@@ -40,8 +40,17 @@ export function toGraph(definition: PipelineDefinition, direction: LayoutDirecti
 export function fromGraph(definition: PipelineDefinition, graph: StudioGraph): PipelineDefinition {
   // Preserve server/author array order. The backend digest is not a frontend
   // authority; silently reordering arrays here would change a future digest.
-  const nodes = graph.nodes.map((node) => clone(node.data.ir));
-  const edges = graph.edges.map((edge) => clone(edge.data.ir));
+  // The canvas is topology-sorted for presentation, but editing an existing
+  // Definition must not silently reserialize its IR arrays. Keep the persisted
+  // order for surviving items; append newly inserted items in editor order.
+  const originalNodeOrder = new Map(definition.nodes.map((node, index) => [node.nodeId, index]));
+  const originalEdgeOrder = new Map(definition.edges.map((edge, index) => [edgeId(edge), index]));
+  const nodes = [...graph.nodes]
+    .sort((a, b) => (originalNodeOrder.get(a.id) ?? Infinity) - (originalNodeOrder.get(b.id) ?? Infinity))
+    .map((node) => clone(node.data.ir));
+  const edges = [...graph.edges]
+    .sort((a, b) => (originalEdgeOrder.get(a.id) ?? Infinity) - (originalEdgeOrder.get(b.id) ?? Infinity))
+    .map((edge) => clone(edge.data.ir));
   return { ...definition, nodes, edges, status: 'DRAFT', digest: '' };
 }
 
