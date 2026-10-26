@@ -159,3 +159,18 @@ PASS Grant revoke is immediate and restore re-issues an authorized token
   shared Modal component).
 - Job Detail: Execution metric; Result digest moved to collapsed metadata; stale
   “requires dedicated diagnostics API” copy removed.
+
+## Final CI (Code HEAD)
+
+- Data Foundation `40296422810` on `827c0e4`: **SUCCESS** (attempt 1)
+- Runtime `40296422689` on `827c0e4`: **SUCCESS**
+- Standard CI `40296422569` on `827c0e4`: **SUCCESS**
+- Legacy E2E inside Data Foundation: `PASS=21 FAIL=0`
+- Visual Layout / Playwright: 15 passed
+- Prior full green: `40283692688` on `538cf27` (attempt 1 and attempt 2 both **SUCCESS**)
+- Previous full green: `40293429004` on `4b426f6`
+- Final screenshots in this document are from `40296422810` / `827c0e4`.
+
+The failed c28 run (`40288868889` attempt 1) timed out in the draft-conflict
+browser test after 14 other browser tests passed; attempt 2 and the later final
+SHA were green. The capability revoke test itself passed in every c28/final run.
