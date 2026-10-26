@@ -145,16 +145,27 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await pageB.close();
 });
 
-test('mobile studio node list opens inspector at 390', async ({ browser }) => {
+test('mobile studio completes draft save validation and publish at 390', async ({ browser }) => {
+  test.setTimeout(90000);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/editor`);
-  const nodesToggle = page.getByRole('button', { name: 'Nodes', exact: true });
-  await expect(nodesToggle).toBeVisible();
-  await nodesToggle.click();
+  const create = page.getByRole('button', { name: 'Create draft' });
+  if (await create.isVisible()) await create.click();
+  await page.getByRole('button', { name: 'Nodes', exact: true }).click();
   await page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first().click();
-  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toBeVisible();
+  await page.getByLabel('timeoutSeconds').fill('21');
+  await page.getByRole('button', { name: /Save draft/ }).click();
+  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await page.reload();
+  await page.getByRole('button', { name: 'Nodes', exact: true }).click();
+  await page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first().click();
+  await expect(page.getByLabel('timeoutSeconds')).toHaveValue('21');
+  await page.getByRole('button', { name: /Validate/ }).click();
+  await expect(page.getByRole('status')).toContainText('Server validation passed');
+  await page.getByRole('button', { name: /Publish/ }).click();
+  await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
   await page.screenshot({ path: path.join(OUT, 'mobile-studio.png') });

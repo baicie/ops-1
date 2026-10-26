@@ -55,9 +55,10 @@ export interface GraphCanvasProps {
   onSelect: (nodeId: string | null) => void;
   layoutNonce?: number;
   direction?: 'horizontal' | 'vertical';
+  viewMode?: 'readable' | 'all';
 }
 
-export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect, layoutNonce = 0, direction = 'horizontal' }: GraphCanvasProps) {
+export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect, layoutNonce = 0, direction = 'horizontal', viewMode = 'readable' }: GraphCanvasProps) {
   const [flow, setFlow] = useState<ReactFlowInstance<Node<PipelineNodeData>, Edge> | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const fittedRef = useRef(false);
@@ -65,22 +66,16 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
   const rafRef = useRef<number | null>(null);
   useEffect(() => {
     if (!flow || !wrapRef.current) return;
+    if (layoutNonce > 0) { fittedRef.current = false; userMovedRef.current = false; }
     const element = wrapRef.current;
-    const fitWhenMeasured = () => {
-      if (fittedRef.current || userMovedRef.current) return;
-      const rect = element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0 || rafRef.current !== null) return;
-      rafRef.current = window.requestAnimationFrame(() => {
-        rafRef.current = null;
-        if (!fittedRef.current && !userMovedRef.current) {
-          void flow.fitView({ padding: 0.2 });
-          fittedRef.current = true;
-        }
-      });
-    };
     let frames = 0;
+    const applyView = () => {
+      if (viewMode === 'all') void flow.fitView({ padding: 0.2, minZoom: 0.05 });
+      else flow.setViewport({ x: 14, y: 14, zoom: 0.9 });
+      fittedRef.current = true;
+    };
     const measureAndFit = () => {
-      if (fittedRef.current || userMovedRef.current) return;
+      if (fittedRef.current) return;
       const rect = element.getBoundingClientRect();
       const nodeElements = Array.from(element.querySelectorAll('.react-flow__node'));
       const measured = nodes.length > 0 && nodeElements.length >= nodes.length
@@ -88,10 +83,7 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
       if (rect.width > 0 && rect.height > 0 && measured) {
         rafRef.current = window.requestAnimationFrame(() => {
           rafRef.current = null;
-          if (!fittedRef.current && !userMovedRef.current) {
-            void flow.fitView({ padding: 0.2 });
-            fittedRef.current = true;
-          }
+          if (!fittedRef.current) applyView();
         });
         return;
       }
@@ -110,8 +102,7 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
       document.removeEventListener('visibilitychange', onVisibility);
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
     };
-  }, [flow, nodes.length]);
-  useEffect(() => { if (layoutNonce > 0) { fittedRef.current = true; void flow?.fitView({ padding: 0.2 }); } }, [layoutNonce, flow]);
+  }, [flow, nodes.length, layoutNonce, viewMode, direction]);
   const flowNodes: Array<Node<PipelineNodeData>> = nodes.map((node) => ({
     id: node.id, type: 'pipeline', position: node.position,
     data: { ir: node.data.ir, direction }, selected: node.id === selectedId,
@@ -161,8 +152,7 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes as any}
-        fitView
-        fitViewOptions={{ padding: 0.2, minZoom: 0.4, maxZoom: 1.15 }}
+        fitView={false}
         defaultEdgeOptions={{ type: 'smoothstep' }}
         elevateEdgesOnSelect
         minZoom={0.25}
