@@ -106,7 +106,24 @@ ok "missing capability failed closed and was restored"
 echo "== lineage and dependency protection"
 LINEAGE="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage")"
 printf '%s' "$LINEAGE" | grep -q "$RUN_ID" || bad "batch lineage missing run id"
-ok "batch lineage"
+python3 - "$LINEAGE" <<'PY2'
+import json, sys
+payload = json.loads(sys.argv[1])
+items = payload.get("items") if isinstance(payload, dict) else payload
+assert items, "lineage response has no items"
+enriched = [item for item in items if item.get("pipeline") and item.get("job")]
+assert enriched, f"no fence-enriched lineage in {items[:2]}"
+item = enriched[0]
+assert item["pipeline"]["pipelineId"], "lineage missing pipelineId"
+assert item["job"]["jobId"], "lineage missing jobId"
+assert item["fencingSequence"] >= 1, "lineage missing fencing sequence"
+assert item["receiptId"], "lineage missing receipt id"
+assert item["metadataStatus"] == "AVAILABLE", item["metadataStatus"]
+assert "nextCursor" in payload
+PY2
+LIMIT_CODE="$(curl -sS -o /tmp/data-lineage-limit.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage?limit=999")"
+[ "$LIMIT_CODE" = "400" ] || bad "lineage limit was not rejected: $LIMIT_CODE"
+ok "batch lineage with job/pipeline/receipt enrichment"
 DISABLE_CODE="$(curl -sS -o /tmp/data-disable.json -w '%{http_code}' "${AUTH[@]}" -X POST "$URL/api/v1/plugins/opsweave.data-catalog/disable" -H 'content-type: application/json' -H 'Idempotency-Key: data-disable-0001' -d '{"reason":"golden path dependency check"}')"
 [ "$DISABLE_CODE" = "409" ] || bad "catalog disable returned $DISABLE_CODE, expected 409 DEPENDENCY_BLOCKED"
 grep -q 'DEPENDENCY_BLOCKED' /tmp/data-disable.json || bad "catalog disable did not return DEPENDENCY_BLOCKED"

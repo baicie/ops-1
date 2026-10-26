@@ -216,8 +216,50 @@ async function initDb() {
       unknown integer NOT NULL,
       occurred_at timestamptz NOT NULL DEFAULT now()
     );
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS pipeline_id text;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS pipeline_revision integer;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS job_id uuid;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS attempt integer;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS fencing_sequence bigint;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS effect_id text;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS receipt_id uuid;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS source_identity text;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS metadata_status text NOT NULL DEFAULT 'NOT_CAPTURED';
+    CREATE INDEX IF NOT EXISTS catalog_lineage_page_idx ON catalog_lineage (dataset_id, occurred_at DESC, lineage_id DESC);
+    CREATE INDEX IF NOT EXISTS catalog_lineage_job_idx ON catalog_lineage (job_id);
   `);
   ready = true;
+}
+
+function lineageView(row) {
+  return {
+    lineageId: row.lineage_id,
+    dataset: { datasetId: row.dataset_id, schemaRevision: row.schema_revision },
+    source: row.source,
+    sourceIdentity: row.source_identity || null,
+    sourceBatchKey: row.source_batch_key,
+    ingestionRunId: row.ingestion_run_id,
+    pipeline: row.pipeline_id ? { pipelineId: row.pipeline_id, revision: row.pipeline_revision } : null,
+    job: row.job_id ? { jobId: row.job_id, attempt: row.attempt } : null,
+    fencingSequence: row.fencing_sequence ? Number(row.fencing_sequence) : null,
+    effectId: row.effect_id || null,
+    receiptId: row.receipt_id || null,
+    accepted: row.accepted, rejected: row.rejected, unknown: row.unknown,
+    metadataStatus: row.metadata_status,
+    occurredAt: row.occurred_at.toISOString(),
+  };
+}
+
+function encodeLineageCursor(row) {
+  return Buffer.from(JSON.stringify({ occurredAt: row.occurred_at.toISOString(), lineageId: row.lineage_id }), 'utf8').toString('base64url');
+}
+function decodeLineageCursor(value) {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (typeof parsed.occurredAt !== 'string' || typeof parsed.lineageId !== 'string') return null;
+    if (Number.isNaN(new Date(parsed.occurredAt).getTime())) return null;
+    return parsed;
+  } catch { return null; }
 }
 
 function datasetView(row) {
@@ -448,7 +490,17 @@ async function handle(req, res) {
         for (const record of acceptedRecords) {
           await client.query('INSERT INTO catalog_records (record_id,dataset_id,schema_revision,source_batch_key,payload) VALUES ($1,$2,$3,$4,$5)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, JSON.stringify(record)]);
         }
-        await client.query('INSERT INTO catalog_lineage (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,accepted,rejected,unknown) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, body.jobId || null, JSON.stringify(body.source || {}), acceptedRecords.length, errors.length]);
+        await client.query(
+          `INSERT INTO catalog_lineage
+            (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,
+             accepted,rejected,unknown,pipeline_id,pipeline_revision,job_id,fencing_sequence,
+             effect_id,receipt_id,source_identity,metadata_status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,$10,$11,$12,$13,$14,$15,'AVAILABLE')`,
+          [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, fence.jobId,
+           JSON.stringify(body.source || {}), acceptedRecords.length, errors.length,
+           body.pipelineId, body.pipelineRevision, fence.jobId, fence.fencingSequence,
+           body.effectId, receiptId, body.source?.identity || body.source?.url || body.sourceBatchKey],
+        );
         await client.query('COMMIT');
         return send(res, 201, effectReceiptView(receipt.rows[0]), requestId);
       } catch (error) {
@@ -495,7 +547,15 @@ async function handle(req, res) {
         await client.query('BEGIN');
         const receipt = await client.query('INSERT INTO catalog_receipts (receipt_id,dataset_id,schema_revision,source_batch_key,request_digest,status,accepted,rejected,unknown,errors) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9) RETURNING *', [receiptId, datasetId, body.schemaRevision, body.sourceBatchKey, requestDigest, status, acceptedRecords.length, errors.length, JSON.stringify(errors)]);
         for (const record of acceptedRecords) await client.query('INSERT INTO catalog_records (record_id,dataset_id,schema_revision,source_batch_key,payload) VALUES ($1,$2,$3,$4,$5)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, JSON.stringify(record)]);
-        await client.query('INSERT INTO catalog_lineage (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,accepted,rejected,unknown) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, body.ingestionRunId || null, JSON.stringify(body.source || {}), acceptedRecords.length, errors.length]);
+        await client.query(
+          `INSERT INTO catalog_lineage
+            (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,
+             accepted,rejected,unknown,source_identity,metadata_status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,'PARTIAL')`,
+          [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey,
+           body.ingestionRunId || null, JSON.stringify(body.source || {}), acceptedRecords.length,
+           errors.length, body.source?.identity || body.source?.url || body.sourceBatchKey],
+        );
         await client.query('COMMIT');
         return send(res, 201, receiptView(receipt.rows[0]), requestId);
       } catch (error) {
@@ -514,8 +574,51 @@ async function handle(req, res) {
       return send(res, 200, { items: rows.rows.map((row) => ({ recordId: row.record_id, ...row.payload })), nextCursor: null }, requestId);
     }
     if (tail === 'lineage' && req.method === 'GET') {
-      const rows = await pool.query('SELECT * FROM catalog_lineage WHERE dataset_id=$1 ORDER BY occurred_at DESC LIMIT 100', [datasetId]);
-      return send(res, 200, rows.rows.map((row) => ({ lineageId: row.lineage_id, dataset: { datasetId: row.dataset_id, schemaRevision: row.schema_revision }, source: row.source, sourceBatchKey: row.source_batch_key, ingestionRunId: row.ingestion_run_id, accepted: row.accepted, rejected: row.rejected, unknown: row.unknown, occurredAt: row.occurred_at.toISOString() })), requestId);
+      const limitRaw = Number(url.searchParams.get('limit') || 50);
+      if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 200) return fail(res, 400, 'INVALID_REQUEST', 'limit must be 1..200', requestId);
+      const cursorRaw = url.searchParams.get('cursor');
+      const cursor = cursorRaw ? decodeLineageCursor(cursorRaw) : null;
+      if (cursorRaw && !cursor) return fail(res, 400, 'INVALID_CURSOR', 'cursor is invalid', requestId);
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      const fromAt = from ? new Date(from) : null;
+      const toAt = to ? new Date(to) : null;
+      if ((fromAt && Number.isNaN(fromAt.getTime())) || (toAt && Number.isNaN(toAt.getTime()))) return fail(res, 400, 'INVALID_REQUEST', 'from/to must be ISO timestamps', requestId);
+      const values = [datasetId];
+      const clauses = ['dataset_id=$1'];
+      const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
+      if (fromAt) add('occurred_at >= ?', fromAt.toISOString());
+      if (toAt) add('occurred_at <= ?', toAt.toISOString());
+      const pipelineId = url.searchParams.get('pipelineId');
+      const jobId = url.searchParams.get('jobId');
+      const schemaRevision = url.searchParams.get('schemaRevision');
+      const sourceBatchKey = url.searchParams.get('sourceBatchKey');
+      if (pipelineId) add('pipeline_id = ?', pipelineId);
+      if (jobId) {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(jobId)) return fail(res, 400, 'INVALID_REQUEST', 'jobId must be a UUID', requestId);
+        add('job_id = ?', jobId);
+      }
+      if (schemaRevision) {
+        const revision = Number(schemaRevision);
+        if (!Number.isInteger(revision) || revision < 1) return fail(res, 400, 'INVALID_REQUEST', 'schemaRevision must be a positive integer', requestId);
+        add('schema_revision = ?', revision);
+      }
+      if (sourceBatchKey) add('source_batch_key = ?', sourceBatchKey);
+      if (cursor) {
+        values.push(cursor.occurredAt, cursor.lineageId);
+        clauses.push(`(occurred_at,lineage_id) < ($${values.length - 1}::timestamptz,$${values.length}::uuid)`);
+      }
+      values.push(limitRaw + 1);
+      const rows = await pool.query(`SELECT * FROM catalog_lineage WHERE ${clauses.join(' AND ')} ORDER BY occurred_at DESC,lineage_id DESC LIMIT $${values.length}`, values);
+      const hasMore = rows.rows.length > limitRaw;
+      const page = rows.rows.slice(0, limitRaw);
+      return send(res, 200, { items: page.map(lineageView), nextCursor: hasMore ? encodeLineageCursor(page[page.length - 1]) : null }, requestId);
+    }
+    const lineageMatch = tail.match(/^lineage\/([0-9a-f-]{36})$/);
+    if (lineageMatch && req.method === 'GET') {
+      const row = await pool.query('SELECT * FROM catalog_lineage WHERE dataset_id=$1 AND lineage_id=$2', [datasetId, lineageMatch[1]]);
+      if (!row.rows[0]) return fail(res, 404, 'LINEAGE_NOT_FOUND', 'lineage record not found', requestId);
+      return send(res, 200, lineageView(row.rows[0]), requestId);
     }
   }
   return fail(res, 404, 'NOT_FOUND', 'route not found', requestId);
