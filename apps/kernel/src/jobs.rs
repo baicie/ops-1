@@ -7,7 +7,7 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::pipeline::{
     canonical_json, digest_without_field, trusted_registry, validate_pipeline, PipelineDefinition,
-    PipelineExecutionPlan, SchemaCatalog, SchemaDataset, SchemaField, SchemaRevision,
+    PipelineExecutionPlan, PipelineNode, SchemaCatalog, SchemaDataset, SchemaField, SchemaRevision,
 };
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
@@ -15,6 +15,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
+use opsweave_pipeline_transform::{apply_filter, apply_mapping, validate_records};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, Row};
@@ -1379,6 +1380,312 @@ pub async fn get_plan(
     .await?;
     plan.map(Json)
         .ok_or_else(|| AppError::not_found("pipeline revision not found"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewRequest {
+    pub definition: PipelineDefinition,
+    #[serde(default)]
+    pub sample_input: Value,
+    #[serde(default)]
+    pub max_records: Option<usize>,
+    #[serde(default)]
+    pub start_node_id: Option<String>,
+    #[serde(default)]
+    pub stop_node_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewIssue {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewNodeOutput {
+    pub node_id: String,
+    pub node_type: String,
+    pub input_count: usize,
+    pub output_count: usize,
+    pub sample_rows: Vec<Value>,
+    pub duration_ms: u64,
+    pub errors: Vec<PreviewIssue>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewResponse {
+    pub preview_id: Uuid,
+    pub status: String,
+    pub node_outputs: Vec<PreviewNodeOutput>,
+    pub errors: Vec<PreviewIssue>,
+    pub processed_records: usize,
+    pub elapsed_ms: u64,
+    pub truncated: bool,
+}
+
+fn preview_records(sample_input: &Value) -> Result<Vec<Value>, PreviewIssue> {
+    let records = match sample_input {
+        Value::Array(items) => items.clone(),
+        Value::Object(_) => vec![sample_input.clone()],
+        _ => {
+            return Err(PreviewIssue {
+                code: "PREVIEW_INPUT_INVALID".into(),
+                message: "sampleInput must be an object or an array of objects".into(),
+                node_id: None,
+            })
+        }
+    };
+    if records.iter().any(|record| !record.is_object()) {
+        return Err(PreviewIssue {
+            code: "PREVIEW_INPUT_INVALID".into(),
+            message: "every sample record must be a JSON object".into(),
+            node_id: None,
+        });
+    }
+    Ok(records)
+}
+
+fn preview_error(status: &str, error: PreviewIssue) -> Json<PreviewResponse> {
+    Json(PreviewResponse {
+        preview_id: Uuid::new_v4(),
+        status: status.to_string(),
+        node_outputs: Vec::new(),
+        errors: vec![error],
+        processed_records: 0,
+        elapsed_ms: 0,
+        truncated: false,
+    })
+}
+
+/// Bounded, side-effect-free preview. It never creates a Job, Revision, Receipt,
+/// Catalog Effect or Dataset record, and it never performs Source IO.
+pub async fn preview_pipeline(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Json(request): Json<PreviewRequest>,
+) -> AppResult<Json<PreviewResponse>> {
+    auth.require_operator()?;
+    const MAX_PREVIEW_RECORDS: usize = 100;
+    const MAX_PREVIEW_BYTES: usize = 262_144;
+    const MAX_PREVIEW_NODES: usize = 64;
+    const MAX_SAMPLE_ROWS: usize = 10;
+    let started = std::time::Instant::now();
+    let raw = serde_json::to_vec(&request.sample_input)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    if raw.len() > MAX_PREVIEW_BYTES {
+        return Ok(preview_error(
+            "INVALID",
+            PreviewIssue {
+                code: "PREVIEW_INPUT_TOO_LARGE".into(),
+                message: format!("sampleInput exceeds {MAX_PREVIEW_BYTES} bytes"),
+                node_id: None,
+            },
+        ));
+    }
+    let records = match preview_records(&request.sample_input) {
+        Ok(records) => records,
+        Err(error) => return Ok(preview_error("INVALID", error)),
+    };
+    let max_records = request
+        .max_records
+        .unwrap_or(50)
+        .clamp(1, MAX_PREVIEW_RECORDS);
+    if records.len() > max_records {
+        return Ok(preview_error(
+            "INVALID",
+            PreviewIssue {
+                code: "PREVIEW_RECORD_LIMIT".into(),
+                message: format!(
+                    "sampleInput has {} records; maxRecords={max_records}",
+                    records.len()
+                ),
+                node_id: None,
+            },
+        ));
+    }
+    let mut definition = request.definition;
+    if definition.nodes.len() > MAX_PREVIEW_NODES {
+        return Ok(preview_error(
+            "INVALID",
+            PreviewIssue {
+                code: "PREVIEW_NODE_LIMIT".into(),
+                message: format!("pipeline has more than {MAX_PREVIEW_NODES} nodes"),
+                node_id: None,
+            },
+        ));
+    }
+    let plan = match validate_and_plan(&state, &mut definition).await {
+        Ok(plan) => plan,
+        Err(error) => {
+            return Ok(preview_error(
+                "INVALID",
+                PreviewIssue {
+                    code: error.code.to_string(),
+                    message: error.message,
+                    node_id: None,
+                },
+            ))
+        }
+    };
+    if let Some(start) = request.start_node_id.as_deref() {
+        if start
+            != definition
+                .nodes
+                .first()
+                .map(|node| node.node_id.as_str())
+                .unwrap_or_default()
+        {
+            return Ok(preview_error(
+                "INVALID",
+                PreviewIssue {
+                    code: "PREVIEW_START_UNSUPPORTED".into(),
+                    message: "startNodeId must be the source node in this MVP".into(),
+                    node_id: Some(start.to_string()),
+                },
+            ));
+        }
+    }
+    let node_map: std::collections::BTreeMap<String, &PipelineNode> = definition
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.clone(), node))
+        .collect();
+    let mut output_records = records;
+    let mut node_outputs: Vec<PreviewNodeOutput> = Vec::new();
+    let mut errors: Vec<PreviewIssue> = Vec::new();
+    let mut processed_records = output_records.len();
+    let truncated = false;
+    for node_id in &plan.ordered_nodes {
+        let Some(node) = node_map.get(node_id) else {
+            errors.push(PreviewIssue {
+                code: "UNSUPPORTED_PREVIEW_NODE".into(),
+                message: "plan references an unknown node".into(),
+                node_id: Some(node_id.clone()),
+            });
+            break;
+        };
+        let input_count = output_records.len();
+        let node_started = std::time::Instant::now();
+        let mut node_error: Option<PreviewIssue> = None;
+        match node.node_type.as_str() {
+            "builtin.source.http_json" | "builtin.parse.json" => {}
+            "builtin.map.fields" => match apply_mapping(output_records.clone(), &node.config) {
+                Ok(records) => output_records = records,
+                Err(error) => {
+                    node_error = Some(PreviewIssue {
+                        code: "PREVIEW_TRANSFORM_FAILED".into(),
+                        message: error.to_string(),
+                        node_id: Some(node_id.clone()),
+                    })
+                }
+            },
+            "builtin.filter.predicate" => {
+                match apply_filter(output_records.clone(), &node.config) {
+                    Ok(records) => output_records = records,
+                    Err(error) => {
+                        node_error = Some(PreviewIssue {
+                            code: "PREVIEW_TRANSFORM_FAILED".into(),
+                            message: error.to_string(),
+                            node_id: Some(node_id.clone()),
+                        })
+                    }
+                }
+            }
+            "builtin.validate.schema" => {
+                if let Err(error) = validate_records(&output_records, &node.config) {
+                    node_error = Some(PreviewIssue {
+                        code: "PREVIEW_VALIDATION_FAILED".into(),
+                        message: error.to_string(),
+                        node_id: Some(node_id.clone()),
+                    });
+                }
+            }
+            "builtin.sink.dataset" => {
+                node_outputs.push(PreviewNodeOutput {
+                    node_id: node_id.clone(),
+                    node_type: node.node_type.clone(),
+                    input_count,
+                    output_count: output_records.len(),
+                    sample_rows: output_records
+                        .iter()
+                        .take(MAX_SAMPLE_ROWS)
+                        .cloned()
+                        .collect(),
+                    duration_ms: node_started.elapsed().as_millis() as u64,
+                    errors: Vec::new(),
+                });
+                break;
+            }
+            other => {
+                node_error = Some(PreviewIssue {
+                    code: "UNSUPPORTED_PREVIEW_NODE".into(),
+                    message: format!("node type {other} is not previewable"),
+                    node_id: Some(node_id.clone()),
+                })
+            }
+        }
+        if let Some(error) = node_error {
+            errors.push(error.clone());
+            node_outputs.push(PreviewNodeOutput {
+                node_id: node_id.clone(),
+                node_type: node.node_type.clone(),
+                input_count,
+                output_count: input_count,
+                sample_rows: Vec::new(),
+                duration_ms: node_started.elapsed().as_millis() as u64,
+                errors: vec![error],
+            });
+            break;
+        }
+        processed_records = output_records.len();
+        node_outputs.push(PreviewNodeOutput {
+            node_id: node_id.clone(),
+            node_type: node.node_type.clone(),
+            input_count,
+            output_count: output_records.len(),
+            sample_rows: output_records
+                .iter()
+                .take(MAX_SAMPLE_ROWS)
+                .cloned()
+                .collect(),
+            duration_ms: node_started.elapsed().as_millis() as u64,
+            errors: Vec::new(),
+        });
+        if request.stop_node_id.as_deref() == Some(node_id.as_str()) {
+            break;
+        }
+    }
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let mut response = PreviewResponse {
+        preview_id: Uuid::new_v4(),
+        status: if errors.is_empty() {
+            "COMPLETED".into()
+        } else {
+            "FAILED".into()
+        },
+        node_outputs,
+        errors,
+        processed_records,
+        elapsed_ms,
+        truncated,
+    };
+    if serde_json::to_vec(&response)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX)
+        > MAX_PREVIEW_BYTES
+    {
+        for node in &mut response.node_outputs {
+            node.sample_rows.clear();
+        }
+        response.truncated = true;
+    }
+    Ok(Json(response))
 }
 
 pub async fn submit_job(
