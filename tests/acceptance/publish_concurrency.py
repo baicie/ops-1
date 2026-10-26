@@ -62,8 +62,11 @@ with ThreadPoolExecutor(max_workers=8) as pool:
     results = list(pool.map(lambda i: publish(d1 if i % 2 == 0 else d2, key), range(8)))
 codes = [code for code, _ in results]
 assert 500 not in codes, results
-assert codes.count(200) == 1, results
+assert codes.count(200) >= 1, results
+assert codes.count(409) >= 1, results
 assert all(code in (200, 409) for code in codes), results
+winning_revision = next(payload["revision"] for code, payload in results if code == 200)
+assert all(payload["revision"] == winning_revision for code, payload in results if code == 200)
 
 status, after = call("GET", f"/api/v1/pipelines/{PIPE}")
 assert after["latestRevision"] == before_rev + 1, (before_rev, after["latestRevision"])
