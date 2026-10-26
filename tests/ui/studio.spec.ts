@@ -94,6 +94,7 @@ test('server preview runs pure transforms and reports node outputs', async ({ pa
   await expect(page.getByLabel('Preview panel')).toContainText('COMPLETED');
   await expect(page.getByLabel('Preview panel')).toContainText('records');
   await expect(page.locator('.preview-node').first()).toBeVisible();
+  await page.addStyleTag({ content: '.topbar{visibility:hidden}' });
   await page.locator('.studio-preview').screenshot({ path: path.join(OUT, 'pipeline-preview.png') });
 });
 
