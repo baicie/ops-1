@@ -963,3 +963,5 @@ details.panel.advanced > summary { padding: 14px 18px; }
 .jobs-table td:nth-child(6) time { white-space: nowrap; }
 .jobs-table td:nth-child(7) time, .jobs-table td:nth-child(7) { white-space: nowrap; }
 .jobs-table th:nth-child(7) { width: 100px; }
+.link-button { border: 0; background: transparent; padding: 0; color: var(--ow-accent); cursor: pointer; text-align: left; border-radius: 4px; }
+.link-button:hover { text-decoration: underline; }

@@ -7,8 +7,8 @@
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test:studio": "vitest run src/studio",
-    "test": "vitest run src/studio"
+    "test:studio": "vitest run src/studio src/pages",
+    "test": "vitest run src/studio src/pages"
   },
   "dependencies": {
     "@vitest/ui": "^5.0.5",
