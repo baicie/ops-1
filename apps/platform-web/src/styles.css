@@ -922,3 +922,34 @@ details.panel.advanced > summary { padding: 14px 18px; }
   .responsive-table .row-action { display: none; }
   .job-mini-table tr { padding: 0 12px; }
 }
+
+/* Structured Draft Conflict diff */
+.conflict-copy { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.conflict-diff { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow: auto; padding: 2px 0; }
+.diff-node { border: 1px solid color-mix(in srgb, var(--ow-danger) 24%, var(--ow-border)); border-radius: 7px; background: var(--ow-surface); padding: 8px 10px; }
+.diff-node-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.diff-node-head strong { font-size: 12px; }
+.diff-node-head .mono { font-size: 10px; color: var(--ow-text-muted); }
+.diff-node-head .tag { margin-left: auto; }
+.diff-field { display: grid; grid-template-columns: minmax(120px, .8fr) 1fr 1fr; gap: 8px; padding: 5px 0; border-top: 1px dashed var(--ow-border); font-size: 11px; }
+.diff-field code { background: transparent; border: 0; padding: 0; color: var(--ow-text-muted); }
+.diff-field span { overflow-wrap: anywhere; }
+.diff-field em { color: var(--ow-text-muted); font-style: normal; display: block; font-size: 9px; text-transform: uppercase; }
+.diff-added { color: var(--ow-ok); border-color: var(--ow-ok); }
+.diff-removed { color: var(--ow-danger); border-color: var(--ow-danger); }
+.diff-changed { color: var(--ow-warn); border-color: var(--ow-warn); }
+@media (max-width: 620px) { .diff-field { grid-template-columns: 1fr; gap: 3px; } }
+
+/* Mobile Studio node list / canvas switch */
+.mobile-view-toggle { display: none; }
+@media (max-width: 760px) {
+  .mobile-view-toggle { display: flex; gap: 4px; padding: 8px 10px 0; }
+  .mobile-view-toggle button { flex: 1; min-height: 38px; border: 1px solid var(--ow-border); background: var(--ow-surface); border-radius: 6px; }
+  .mobile-view-toggle button.active { border-color: var(--ow-accent); color: var(--ow-accent); background: var(--ow-accent-soft); }
+  .mobile-node-list { display: flex; flex-direction: column; gap: 8px; padding: 10px; height: 100%; overflow: auto; }
+  .mobile-node-list button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 58px; padding: 10px; text-align: left; border: 1px solid var(--ow-border); background: var(--ow-surface); border-radius: 8px; }
+  .mobile-node-list button.active { border-color: var(--ow-accent); }
+  .mobile-node-list button > span:nth-child(2) { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .mobile-node-list strong { font-size: 13px; }
+  .mobile-node-list small { font-family: var(--ow-font-mono); font-size: 10px; color: var(--ow-text-muted); overflow: hidden; text-overflow: ellipsis; }
+}

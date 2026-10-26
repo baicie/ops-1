@@ -7,6 +7,7 @@ import { ErrorState, PageHeader, Skeleton } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
 import { GraphCanvas } from './GraphCanvas';
 import { toGraph, fromGraph } from './ir/adapter';
+import { definitionDiff } from './ir/diff';
 import type { GraphEdge, GraphNode } from './ir/types';
 import { validatePipeline } from './ir/validation';
 
@@ -57,6 +58,8 @@ export function PipelineEditorPage() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [layoutNonce, setLayoutNonce] = useState(0);
+  const [mobileView, setMobileView] = useState<'nodes' | 'canvas'>('canvas');
   const loadSeq = useRef(0);
   useEffect(() => {
     if (!graph) return;
@@ -225,6 +228,7 @@ export function PipelineEditorPage() {
     setHistory((items) => [...items.slice(-29), { graph }]);
     setFuture([]);
     setGraph(next);
+    setLayoutNonce((value) => value + 1);
   };
   const runPreview = async () => {
     setPreviewBusy(true); setPreviewError(null); setPreview(null);
@@ -257,8 +261,20 @@ export function PipelineEditorPage() {
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
         <Icon name="warning" size={14} />
-        <div><strong>{conflict}</strong><span>Local changes are preserved. Server version: {conflictLatest ? `v${conflictLatest.version}` : 'unknown'}.</span>
-          {conflictLatest && <pre>{JSON.stringify({ localNodes: definition.nodes.length, serverNodes: conflictLatest.definition.nodes.length, localEdges: definition.edges.length, serverEdges: conflictLatest.definition.edges.length }, null, 2)}</pre>}</div>
+        <div className="conflict-copy"><strong>{conflict}</strong><span>Local changes are preserved. Server version: {conflictLatest ? `v${conflictLatest.version}` : 'unknown'}.</span>
+          {conflictLatest && (() => {
+            const diff = definitionDiff(definition, conflictLatest.definition);
+            return <div className="conflict-diff" aria-label="Draft definition diff">
+              {diff.nodes.length === 0 && diff.edgesAdded.length === 0 && diff.edgesRemoved.length === 0 && <p className="muted small">No structural difference detected; the server revision changed independently.</p>}
+              {diff.nodes.map((entry) => <div key={entry.nodeId} className="diff-node">
+                <div className="diff-node-head"><strong>{entry.label}</strong><span className="mono">{entry.nodeId}</span><span className={`tag diff-${entry.kind}`}>{entry.kind}</span></div>
+                {entry.changes.map((change) => <div key={change.path} className="diff-field"><code>{change.path}</code><span><em>Yours</em> {change.local}</span><span><em>Server</em> {change.server}</span></div>)}
+              </div>)}
+              {diff.edgesAdded.length > 0 && <p className="small"><strong>Server-only edges:</strong> {diff.edgesAdded.join(', ')}</p>}
+              {diff.edgesRemoved.length > 0 && <p className="small"><strong>Local-only edges:</strong> {diff.edgesRemoved.join(', ')}</p>}
+            </div>;
+          })()}
+        </div>
         <div className="conflict-actions">
           <button className="btn btn-secondary btn-small" onClick={() => setConflict(null)}>Keep editing</button>
           <button className="btn btn-secondary btn-small" onClick={() => { if (window.confirm('Discard local changes and load the latest server draft?')) { setConflict(null); void load(draft?.draftId); } }}>Reload latest</button>
@@ -272,7 +288,11 @@ export function PipelineEditorPage() {
           {definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{nodeLabel(node.type)}</strong><small className="mono">{node.nodeId}</small></span></div>)}
         </aside>
         <section className="panel studio-canvas" aria-label="Pipeline canvas">
-          <GraphCanvas nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />
+          <div className="mobile-view-toggle" role="group" aria-label="Editor view">
+            <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>Nodes</button>
+            <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>Canvas</button>
+          </div>
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{definition.nodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{index + 1}</span><span><strong>{nodeLabel(node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{node.outputs.length} out</span></button>)}</div> : <GraphCanvas layoutNonce={layoutNonce} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
           <p className="studio-note"><Icon name="alert" size={13} /> Local edits are not persisted until Save draft. Publish requires server validation.</p>
         </section>

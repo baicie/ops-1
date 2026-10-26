@@ -516,6 +516,8 @@ pub struct JobView {
     pub attempts: i32,
     pub max_attempts: i32,
     pub last_error_code: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1730,7 +1732,10 @@ pub async fn submit_job(
         "input": request.input
     }));
     if let Some(existing) = sqlx::query_as::<_, JobView>(
-        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at FROM kernel.pipeline_jobs WHERE idempotency_key=$1",
+        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,
+ (SELECT min(occurred_at) FROM kernel.pipeline_job_events e WHERE e.job_id=pipeline_jobs.job_id AND e.event_type='JOB_STARTED') AS started_at,
+ (SELECT completed_at FROM kernel.pipeline_job_results r WHERE r.job_id=pipeline_jobs.job_id) AS finished_at,
+ created_at,updated_at FROM kernel.pipeline_jobs WHERE idempotency_key=$1",
     )
     .bind(&idempotency_key)
     .fetch_optional(&state.db)
@@ -1783,7 +1788,10 @@ pub async fn submit_job(
 
 async fn fetch_job(state: &AppState, job_id: Uuid) -> AppResult<JobView> {
     sqlx::query_as::<_, JobView>(
-        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at FROM kernel.pipeline_jobs WHERE job_id=$1",
+        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,
+ (SELECT min(occurred_at) FROM kernel.pipeline_job_events e WHERE e.job_id=pipeline_jobs.job_id AND e.event_type='JOB_STARTED') AS started_at,
+ (SELECT completed_at FROM kernel.pipeline_job_results r WHERE r.job_id=pipeline_jobs.job_id) AS finished_at,
+ created_at,updated_at FROM kernel.pipeline_jobs WHERE job_id=$1",
     )
     .bind(job_id)
     .fetch_optional(&state.db)
@@ -1853,7 +1861,12 @@ pub async fn list_jobs(
     let rows = sqlx::query(
         r#"
         SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,
-               attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at
+               attempts,max_attempts,last_error_code,submitted_by,
+               (SELECT min(occurred_at) FROM kernel.pipeline_job_events e
+                 WHERE e.job_id=pipeline_jobs.job_id AND e.event_type='JOB_STARTED') AS started_at,
+               (SELECT completed_at FROM kernel.pipeline_job_results r
+                 WHERE r.job_id=pipeline_jobs.job_id) AS finished_at,
+               created_at,updated_at
         FROM kernel.pipeline_jobs
         WHERE ($1::text IS NULL OR pipeline_id=$1)
           AND ($2::text IS NULL OR status=$2)

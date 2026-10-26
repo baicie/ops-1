@@ -39,7 +39,7 @@ test('studio renders published nodes and inspector selection', async ({ page }) 
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   await expect(page.locator('.studio-inspector')).toContainText('http_json');
   await expect(page.getByRole('heading', { name: 'Inspector' })).toBeVisible();
-  await page.screenshot({ path: path.join(OUT, 'pipeline-canvas.png'), fullPage: true });
+  await page.screenshot({ path: path.join(OUT, 'pipeline-canvas.png') });
 });
 
 test('draft edit, save, reload, validate and publish creates a revision', async ({ page }) => {
@@ -94,7 +94,8 @@ test('server preview runs pure transforms and reports node outputs', async ({ pa
   await expect(page.getByLabel('Preview panel')).toContainText('COMPLETED');
   await expect(page.getByLabel('Preview panel')).toContainText('records');
   await expect(page.locator('.preview-node').first()).toBeVisible();
-  await page.screenshot({ path: path.join(OUT, 'pipeline-preview.png'), fullPage: true });
+  await page.locator('.studio-preview').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(OUT, 'pipeline-preview.png') });
 });
 
 test('pipeline list remains usable at laptop, mobile and dark mode', async ({ browser }) => {
@@ -137,6 +138,9 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await expect(pageB.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
   await expect(pageB.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('19');
   await expect(pageB.getByRole('button', { name: 'Use local & retry' })).toBeVisible();
-  await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png'), fullPage: true });
+  await expect(pageB.locator('.conflict-diff')).toContainText('timeoutSeconds');
+  await expect(pageB.locator('.conflict-diff')).toContainText('19');
+  await expect(pageB.locator('.conflict-diff')).toContainText('18');
+  await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png') });
   await pageB.close();
 });

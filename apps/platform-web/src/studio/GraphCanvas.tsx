@@ -1,7 +1,7 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Background, Controls, Handle, Position, ReactFlow,
-  type Connection, type Edge, type Node, type NodeProps,
+  type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type { PipelineNode } from '../types';
@@ -49,9 +49,12 @@ export interface GraphCanvasProps {
   onEdgesChange: (edges: GraphEdge[]) => void;
   onConnectAttempt: (connection: Connection) => { ok: boolean; error?: string };
   onSelect: (nodeId: string | null) => void;
+  layoutNonce?: number;
 }
 
-export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect }: GraphCanvasProps) {
+export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect, layoutNonce = 0 }: GraphCanvasProps) {
+  const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
+  useEffect(() => { if (layoutNonce > 0) void flow?.fitView({ padding: 0.2 }); }, [layoutNonce, flow]);
   const flowNodes: Array<Node<PipelineNodeData>> = nodes.map((node) => ({
     id: node.id, type: 'pipeline', position: node.position,
     data: { ir: node.data.ir }, selected: node.id === selectedId,
@@ -107,11 +110,13 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         elevateEdgesOnSelect
         minZoom={0.25}
         maxZoom={1.75}
+        onInit={setFlow}
         onNodeClick={(_, node) => onSelect(node.id)}
         onPaneClick={() => onSelect(null)}
         onNodesChange={handleNodesChange}
         onConnect={connect}
         onNodesDelete={(deleted) => {
+          if (!window.confirm(`Delete ${deleted.length} selected node${deleted.length === 1 ? '' : 's'} and their connections?`)) return;
           const removed = new Set(deleted.map((item) => item.id));
           onNodesChange(nodes.filter((node) => !removed.has(node.id)));
           onEdgesChange(edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)));
