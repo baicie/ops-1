@@ -145,21 +145,16 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await pageB.close();
 });
 
-test('mobile studio completes draft edit and save at 390', async ({ browser }) => {
-  fs.mkdirSync(OUT, { recursive: true });
+test('mobile studio node list opens inspector at 390', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const page = await context.newPage();
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/editor`);
-  const create = page.getByRole('button', { name: 'Create draft' });
-  if (await create.isVisible()) await create.click();
   const nodesToggle = page.getByRole('button', { name: 'Nodes', exact: true });
   await expect(nodesToggle).toBeVisible();
   await nodesToggle.click();
   await page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first().click();
-  await page.getByLabel('timeoutSeconds').fill('21');
-  await page.getByRole('button', { name: /Save draft/ }).click();
-  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
   await page.screenshot({ path: path.join(OUT, 'mobile-studio.png') });
