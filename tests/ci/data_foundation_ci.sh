@@ -138,7 +138,7 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   env     OPSWEAVE_WORKER_KERNEL_URL="$OPSWEAVE_URL"     OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-b/node-identity.json"     OPSWEAVE_WORKER_INSTANCE_ID="$W_INSTANCE_ID"     OPSWEAVE_WORKER_NODE_GENERATION="$W_NODE_GEN"     OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1"     OPSWEAVE_WORKER_BATCH_DELAY_MS=800     ./target/debug/opsweave-pipeline-worker >/tmp/ui-worker.log 2>&1 &
   UI_WORKER_PID=$!
   sleep 1
-  OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts studio.spec.ts
+  OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts studio.spec.ts visual-layout.spec.ts
   kill "$UI_WORKER_PID" 2>/dev/null || true
 fi
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
