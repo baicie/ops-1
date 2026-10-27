@@ -14,7 +14,7 @@ This file separates three things that must never be conflated: **implemented cod
 | Container engine | Docker Desktop 29.7.2, linux/aarch64 containers |
 | Registry | `registry:2` at `127.0.0.1:5001` |
 | Node runtimes | two `opsweave-node` processes, data ports 9101/9102, same Docker daemon |
-| Plugins | TypeScript/Node 22, Go 1.25, Java 21.0.12.1 Spring Boot 3.3.5 |
+| Plugins | TypeScript/Node 22, Go 1.25, Java 21.0.13+9 Spring Boot 3.3.5 |
 
 The production reference target is **Linux amd64 + Rootless Docker + three physical hosts**. That target was not available and is **NOT_RUN**.
 

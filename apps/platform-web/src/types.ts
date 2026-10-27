@@ -260,3 +260,74 @@ export interface InstanceDetail {
   deploymentStatus: string;
   streamId: string;
 }
+
+export interface PipelineSummary {
+  pipelineId: string;
+  name: string;
+  latestRevision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PipelineList {
+  items: PipelineSummary[];
+  nextCursor?: string | null;
+}
+
+export interface PipelinePort {
+  name: string;
+  dataType: string;
+  required?: boolean;
+  nullable?: boolean;
+  schemaRevision?: number;
+  description?: string;
+}
+
+export interface PipelineNode {
+  nodeId: string;
+  type: string;
+  typeVersion: number;
+  inputs: PipelinePort[];
+  outputs: PipelinePort[];
+  config: Record<string, unknown>;
+}
+
+export interface PipelineEdge {
+  fromNode: string;
+  fromPort: string;
+  toNode: string;
+  toPort: string;
+  dataType: string;
+}
+
+export interface PipelineDefinition {
+  schemaVersion: string;
+  pipelineId: string;
+  name: string;
+  revision: number;
+  status: 'DRAFT' | 'PUBLISHED';
+  nodes: PipelineNode[];
+  edges: PipelineEdge[];
+  createdAt: string;
+  digest: string;
+}
+
+export interface PipelineRevision {
+  pipelineId: string;
+  revision: number;
+  digest: string;
+  status: string;
+  publishedAt: string;
+  definition: PipelineDefinition;
+  plan: Record<string, unknown>;
+}
+
+export interface PipelineDetail {
+  pipelineId: string;
+  name: string;
+  latestRevision: number;
+  createdAt: string;
+  updatedAt: string;
+  latest?: PipelineRevision | null;
+  revisions: Array<{ revision: number; digest: string; status: string; publishedAt: string }>;
+}

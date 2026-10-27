@@ -11,6 +11,7 @@ import { StatusBadge, TimeAgo } from './Ui';
 const coreNav = [
   { to: '/', label: 'Overview', icon: 'overview', end: true },
   { to: '/plugins', label: 'Plugins', icon: 'plugins' },
+  { to: '/pipelines', label: 'Pipelines', icon: 'pipeline' },
   { to: '/nodes', label: 'Nodes', icon: 'nodes' },
   { to: '/activity', label: 'Activity', icon: 'activity' },
   { to: '/access', label: 'Access', icon: 'access' },
@@ -21,6 +22,7 @@ const coreNav = [
 function titleFor(pathname: string) {
   if (pathname === '/') return 'Overview';
   if (pathname.startsWith('/plugins')) return 'Plugins';
+  if (pathname.startsWith('/pipelines')) return pathname.includes('/editor') ? 'Pipeline Studio' : 'Pipelines';
   if (pathname.startsWith('/nodes')) return 'Nodes';
   if (pathname.startsWith('/activity')) return 'Activity';
   if (pathname.startsWith('/access')) return 'Access';

@@ -16,7 +16,7 @@ This report records what was actually executed on the development host. It does 
 | Registry | `registry:2`, `127.0.0.1:5001` |
 | Kernel | `0.0.1`, bind `127.0.0.1:18181` |
 | Nodes | node-a + node-b, data ports 9101/9102 (two processes, one Docker daemon) |
-| Plugins | TS/Node 22, Go 1.25, Java 21.0.12.1 / Spring Boot 3.3.5 |
+| Plugins | TS/Node 22, Go 1.25, Java 21.0.13+9 / Spring Boot 3.3.5 |
 
 ## Signed bundles / OCI digests
 

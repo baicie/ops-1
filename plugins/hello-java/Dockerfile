@@ -1,4 +1,4 @@
-# Pinned Temurin 21.0.12.1 JRE for linux/aarch64 (development host). The same
+# Pinned Temurin 21.0.13+9 JRE for linux/aarch64 (development host). The same
 # jar is released for linux/amd64 by the production pipeline.
 ARG BASE_IMAGE=node:22-bookworm-slim
 FROM ${BASE_IMAGE}
