@@ -1390,6 +1390,7 @@ dependencies = [
  "mime_guess",
  "opsweave-bundle",
  "opsweave-contracts",
+ "opsweave-pipeline-transform",
  "rand 0.8.8",
  "regex",
  "reqwest",
@@ -1456,12 +1457,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "opsweave-pipeline-transform"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "opsweave-pipeline-worker"
 version = "0.0.3"
 dependencies = [
  "anyhow",
  "chrono",
  "hex",
+ "opsweave-pipeline-transform",
  "reqwest",
  "serde",
  "serde_json",

@@ -6,6 +6,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
+use opsweave_pipeline_transform::{apply_filter, apply_mapping, validate_records};
 use reqwest::{Client, Method, StatusCode};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -1045,102 +1046,6 @@ fn digest_without(value: &Value, field: &str) -> String {
     }
     digest(&copy)
 }
-
-fn apply_mapping(records: Vec<Value>, config: &Value) -> Result<Vec<Value>> {
-    let mappings = config.get("mappings").and_then(Value::as_object);
-    let Some(mappings) = mappings else {
-        return records
-            .into_iter()
-            .map(|record| {
-                let id = record
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| anyhow!("record id missing"))?;
-                let name = record
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| anyhow!("record name missing"))?;
-                Ok(json!({"id": id, "name": name}))
-            })
-            .collect();
-    };
-    records
-        .into_iter()
-        .map(|record| {
-            let mut output = serde_json::Map::new();
-            for (target, source) in mappings {
-                let path = source
-                    .as_str()
-                    .ok_or_else(|| anyhow!("mapping source must be a string"))?;
-                let value = path
-                    .split('.')
-                    .try_fold(&record, |current, segment| current.get(segment))
-                    .cloned()
-                    .ok_or_else(|| anyhow!("mapping source {path} is missing"))?;
-                output.insert(target.clone(), value);
-            }
-            Ok(Value::Object(output))
-        })
-        .collect()
-}
-
-fn apply_filter(records: Vec<Value>, config: &Value) -> Result<Vec<Value>> {
-    let Some(field) = config.get("field").and_then(Value::as_str) else {
-        return Ok(records);
-    };
-    let op = config.get("op").and_then(Value::as_str).unwrap_or("eq");
-    let expected = config.get("value").cloned().unwrap_or(Value::Null);
-    records
-        .into_iter()
-        .filter(|record| {
-            let actual = record.get(field).unwrap_or(&Value::Null);
-            match op {
-                "eq" => actual == &expected,
-                "ne" => actual != &expected,
-                "gt" => actual
-                    .as_f64()
-                    .zip(expected.as_f64())
-                    .is_some_and(|(a, b)| a > b),
-                "lt" => actual
-                    .as_f64()
-                    .zip(expected.as_f64())
-                    .is_some_and(|(a, b)| a < b),
-                "exists" => !actual.is_null(),
-                _ => false,
-            }
-        })
-        .collect::<Vec<_>>()
-        .pipe(Ok)
-}
-
-fn validate_records(records: &[Value], config: &Value) -> Result<()> {
-    let required = config
-        .get("required")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_else(|| vec![Value::from("id"), Value::from("name")]);
-    for record in records {
-        if !record.is_object() {
-            bail!("validated record is not an object");
-        }
-        for field in &required {
-            let field = field
-                .as_str()
-                .ok_or_else(|| anyhow!("required field must be a string"))?;
-            if record.get(field).is_none_or(|value| value.is_null()) {
-                bail!("required field {field} is missing");
-            }
-        }
-    }
-    Ok(())
-}
-
-trait Pipe: Sized {
-    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
-        f(self)
-    }
-}
-impl<T> Pipe for T {}
 
 fn canonical_json(value: &Value) -> String {
     match value {

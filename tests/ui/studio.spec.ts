@@ -78,8 +78,64 @@ test('submit a published revision and open real job detail', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Lifecycle' })).toBeVisible();
   await expect(page.locator('.metric-value').first()).toContainText(/Succeeded|SUCCEEDED/i, { timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Result' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'job-detail.png'), fullPage: true });
   await page.goto('/jobs');
   await expect(page.getByRole('heading', { name: 'Jobs', exact: true })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'job-history.png'), fullPage: true });
+});
+
+test('server preview runs pure transforms and reports node outputs', async ({ page }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  await login(page);
+  await page.goto(`/pipelines/${PIPELINE}/editor`);
+  await page.getByRole('button', { name: 'Run preview' }).click();
+  await expect(page.getByLabel('Preview panel')).toContainText('COMPLETED');
+  await expect(page.getByLabel('Preview panel')).toContainText('records');
+  await expect(page.locator('.preview-node').first()).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, 'pipeline-preview.png'), fullPage: true });
+});
+
+test('pipeline list remains usable at laptop, mobile and dark mode', async ({ browser }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  for (const [width, height, name] of [[1024, 768, 'laptop'], [390, 844, 'mobile']]) {
+    const context = await browser.newContext({ viewport: { width, height } });
+    const page = await context.newPage();
+    await login(page);
+    await page.goto('/pipelines');
+    await expect(page.getByRole('heading', { name: 'Pipelines', exact: true })).toBeVisible();
+    await page.screenshot({ path: path.join(OUT, `pipeline-list-${name}.png`), fullPage: true });
+    await context.close();
+  }
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => localStorage.setItem('opsweave-theme', 'dark'));
+  const page = await context.newPage();
+  await login(page);
+  await page.goto('/pipelines');
+  await expect(page.getByRole('button', { name: 'Switch to light theme' })).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, 'pipeline-list-dark.png'), fullPage: true });
+  await context.close();
+});
+
+test('draft conflict preserves local edits and offers resolution', async ({ page, context }) => {
+  fs.mkdirSync(OUT, { recursive: true });
+  await login(page);
+  await page.goto(`/pipelines/${PIPELINE}/editor`);
+  await page.getByRole('button', { name: 'Create draft' }).click();
+  await expect(page.getByRole('status')).toContainText('Draft created');
+  const draftUrl = page.url();
+  const pageB = await context.newPage();
+  await pageB.goto(draftUrl);
+  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  await pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  await page.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('18');
+  await pageB.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('19');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.getByRole('status')).toContainText('Draft saved');
+  await pageB.getByRole('button', { name: 'Save draft' }).click();
+  await expect(pageB.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
+  await expect(pageB.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('19');
+  await expect(pageB.getByRole('button', { name: 'Use local & retry' })).toBeVisible();
+  await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png'), fullPage: true });
+  await pageB.close();
 });

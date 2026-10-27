@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/contracts",
   "crates/bundle",
+  "crates/pipeline-transform",
   "apps/kernel",
   "apps/node",
   "apps/pipeline-worker",

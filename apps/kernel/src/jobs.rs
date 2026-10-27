@@ -7,7 +7,7 @@ use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::pipeline::{
     canonical_json, digest_without_field, trusted_registry, validate_pipeline, PipelineDefinition,
-    PipelineExecutionPlan, SchemaCatalog, SchemaDataset, SchemaField, SchemaRevision,
+    PipelineExecutionPlan, PipelineNode, SchemaCatalog, SchemaDataset, SchemaField, SchemaRevision,
 };
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
@@ -15,6 +15,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
+use opsweave_pipeline_transform::{apply_filter, apply_mapping, validate_records};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{FromRow, Row};
@@ -1312,7 +1313,7 @@ pub async fn publish_draft(
     .bind(serde_json::to_value(&plan).unwrap_or(Value::Null))
     .execute(&mut *tx)
     .await?;
-    sqlx::query(
+    if let Err(error) = sqlx::query(
         "UPDATE kernel.pipeline_drafts
          SET status='PUBLISHED', published_revision=$1, publish_idempotency_key=$2,
              version=version+1, updated_by=$3, updated_at=now()
@@ -1323,7 +1324,24 @@ pub async fn publish_draft(
     .bind(auth.user_id)
     .bind(draft_id)
     .execute(&mut *tx)
-    .await?;
+    .await
+    {
+        // A concurrent publish of a different draft may win the unique
+        // idempotency-key index between our pre-check and this UPDATE. Roll back
+        // the revision allocation and return a deterministic conflict.
+        let unique_violation = error
+            .as_database_error()
+            .map(|db| db.code().as_deref() == Some("23505"))
+            .unwrap_or(false);
+        tx.rollback().await?;
+        if unique_violation {
+            return Err(AppError::conflict(
+                "IDEMPOTENCY_CONFLICT",
+                "Idempotency-Key belongs to a different publish operation",
+            ));
+        }
+        return Err(AppError::internal(error));
+    }
     tx.commit().await?;
     let _ = crate::audit::record(
         &state.db,
@@ -1362,6 +1380,312 @@ pub async fn get_plan(
     .await?;
     plan.map(Json)
         .ok_or_else(|| AppError::not_found("pipeline revision not found"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewRequest {
+    pub definition: PipelineDefinition,
+    #[serde(default)]
+    pub sample_input: Value,
+    #[serde(default)]
+    pub max_records: Option<usize>,
+    #[serde(default)]
+    pub start_node_id: Option<String>,
+    #[serde(default)]
+    pub stop_node_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewIssue {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewNodeOutput {
+    pub node_id: String,
+    pub node_type: String,
+    pub input_count: usize,
+    pub output_count: usize,
+    pub sample_rows: Vec<Value>,
+    pub duration_ms: u64,
+    pub errors: Vec<PreviewIssue>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewResponse {
+    pub preview_id: Uuid,
+    pub status: String,
+    pub node_outputs: Vec<PreviewNodeOutput>,
+    pub errors: Vec<PreviewIssue>,
+    pub processed_records: usize,
+    pub elapsed_ms: u64,
+    pub truncated: bool,
+}
+
+fn preview_records(sample_input: &Value) -> Result<Vec<Value>, PreviewIssue> {
+    let records = match sample_input {
+        Value::Array(items) => items.clone(),
+        Value::Object(_) => vec![sample_input.clone()],
+        _ => {
+            return Err(PreviewIssue {
+                code: "PREVIEW_INPUT_INVALID".into(),
+                message: "sampleInput must be an object or an array of objects".into(),
+                node_id: None,
+            })
+        }
+    };
+    if records.iter().any(|record| !record.is_object()) {
+        return Err(PreviewIssue {
+            code: "PREVIEW_INPUT_INVALID".into(),
+            message: "every sample record must be a JSON object".into(),
+            node_id: None,
+        });
+    }
+    Ok(records)
+}
+
+fn preview_error(status: &str, error: PreviewIssue) -> Json<PreviewResponse> {
+    Json(PreviewResponse {
+        preview_id: Uuid::new_v4(),
+        status: status.to_string(),
+        node_outputs: Vec::new(),
+        errors: vec![error],
+        processed_records: 0,
+        elapsed_ms: 0,
+        truncated: false,
+    })
+}
+
+/// Bounded, side-effect-free preview. It never creates a Job, Revision, Receipt,
+/// Catalog Effect or Dataset record, and it never performs Source IO.
+pub async fn preview_pipeline(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Json(request): Json<PreviewRequest>,
+) -> AppResult<Json<PreviewResponse>> {
+    auth.require_operator()?;
+    const MAX_PREVIEW_RECORDS: usize = 100;
+    const MAX_PREVIEW_BYTES: usize = 262_144;
+    const MAX_PREVIEW_NODES: usize = 64;
+    const MAX_SAMPLE_ROWS: usize = 10;
+    let started = std::time::Instant::now();
+    let raw = serde_json::to_vec(&request.sample_input)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    if raw.len() > MAX_PREVIEW_BYTES {
+        return Ok(preview_error(
+            "INVALID",
+            PreviewIssue {
+                code: "PREVIEW_INPUT_TOO_LARGE".into(),
+                message: format!("sampleInput exceeds {MAX_PREVIEW_BYTES} bytes"),
+                node_id: None,
+            },
+        ));
+    }
+    let records = match preview_records(&request.sample_input) {
+        Ok(records) => records,
+        Err(error) => return Ok(preview_error("INVALID", error)),
+    };
+    let max_records = request
+        .max_records
+        .unwrap_or(50)
+        .clamp(1, MAX_PREVIEW_RECORDS);
+    if records.len() > max_records {
+        return Ok(preview_error(
+            "INVALID",
+            PreviewIssue {
+                code: "PREVIEW_RECORD_LIMIT".into(),
+                message: format!(
+                    "sampleInput has {} records; maxRecords={max_records}",
+                    records.len()
+                ),
+                node_id: None,
+            },
+        ));
+    }
+    let mut definition = request.definition;
+    if definition.nodes.len() > MAX_PREVIEW_NODES {
+        return Ok(preview_error(
+            "INVALID",
+            PreviewIssue {
+                code: "PREVIEW_NODE_LIMIT".into(),
+                message: format!("pipeline has more than {MAX_PREVIEW_NODES} nodes"),
+                node_id: None,
+            },
+        ));
+    }
+    let plan = match validate_and_plan(&state, &mut definition).await {
+        Ok(plan) => plan,
+        Err(error) => {
+            return Ok(preview_error(
+                "INVALID",
+                PreviewIssue {
+                    code: error.code.to_string(),
+                    message: error.message,
+                    node_id: None,
+                },
+            ))
+        }
+    };
+    if let Some(start) = request.start_node_id.as_deref() {
+        if start
+            != definition
+                .nodes
+                .first()
+                .map(|node| node.node_id.as_str())
+                .unwrap_or_default()
+        {
+            return Ok(preview_error(
+                "INVALID",
+                PreviewIssue {
+                    code: "PREVIEW_START_UNSUPPORTED".into(),
+                    message: "startNodeId must be the source node in this MVP".into(),
+                    node_id: Some(start.to_string()),
+                },
+            ));
+        }
+    }
+    let node_map: std::collections::BTreeMap<String, &PipelineNode> = definition
+        .nodes
+        .iter()
+        .map(|node| (node.node_id.clone(), node))
+        .collect();
+    let mut output_records = records;
+    let mut node_outputs: Vec<PreviewNodeOutput> = Vec::new();
+    let mut errors: Vec<PreviewIssue> = Vec::new();
+    let mut processed_records = output_records.len();
+    let truncated = false;
+    for node_id in &plan.ordered_nodes {
+        let Some(node) = node_map.get(node_id) else {
+            errors.push(PreviewIssue {
+                code: "UNSUPPORTED_PREVIEW_NODE".into(),
+                message: "plan references an unknown node".into(),
+                node_id: Some(node_id.clone()),
+            });
+            break;
+        };
+        let input_count = output_records.len();
+        let node_started = std::time::Instant::now();
+        let mut node_error: Option<PreviewIssue> = None;
+        match node.node_type.as_str() {
+            "builtin.source.http_json" | "builtin.parse.json" => {}
+            "builtin.map.fields" => match apply_mapping(output_records.clone(), &node.config) {
+                Ok(records) => output_records = records,
+                Err(error) => {
+                    node_error = Some(PreviewIssue {
+                        code: "PREVIEW_TRANSFORM_FAILED".into(),
+                        message: error.to_string(),
+                        node_id: Some(node_id.clone()),
+                    })
+                }
+            },
+            "builtin.filter.predicate" => {
+                match apply_filter(output_records.clone(), &node.config) {
+                    Ok(records) => output_records = records,
+                    Err(error) => {
+                        node_error = Some(PreviewIssue {
+                            code: "PREVIEW_TRANSFORM_FAILED".into(),
+                            message: error.to_string(),
+                            node_id: Some(node_id.clone()),
+                        })
+                    }
+                }
+            }
+            "builtin.validate.schema" => {
+                if let Err(error) = validate_records(&output_records, &node.config) {
+                    node_error = Some(PreviewIssue {
+                        code: "PREVIEW_VALIDATION_FAILED".into(),
+                        message: error.to_string(),
+                        node_id: Some(node_id.clone()),
+                    });
+                }
+            }
+            "builtin.sink.dataset" => {
+                node_outputs.push(PreviewNodeOutput {
+                    node_id: node_id.clone(),
+                    node_type: node.node_type.clone(),
+                    input_count,
+                    output_count: output_records.len(),
+                    sample_rows: output_records
+                        .iter()
+                        .take(MAX_SAMPLE_ROWS)
+                        .cloned()
+                        .collect(),
+                    duration_ms: node_started.elapsed().as_millis() as u64,
+                    errors: Vec::new(),
+                });
+                break;
+            }
+            other => {
+                node_error = Some(PreviewIssue {
+                    code: "UNSUPPORTED_PREVIEW_NODE".into(),
+                    message: format!("node type {other} is not previewable"),
+                    node_id: Some(node_id.clone()),
+                })
+            }
+        }
+        if let Some(error) = node_error {
+            errors.push(error.clone());
+            node_outputs.push(PreviewNodeOutput {
+                node_id: node_id.clone(),
+                node_type: node.node_type.clone(),
+                input_count,
+                output_count: input_count,
+                sample_rows: Vec::new(),
+                duration_ms: node_started.elapsed().as_millis() as u64,
+                errors: vec![error],
+            });
+            break;
+        }
+        processed_records = output_records.len();
+        node_outputs.push(PreviewNodeOutput {
+            node_id: node_id.clone(),
+            node_type: node.node_type.clone(),
+            input_count,
+            output_count: output_records.len(),
+            sample_rows: output_records
+                .iter()
+                .take(MAX_SAMPLE_ROWS)
+                .cloned()
+                .collect(),
+            duration_ms: node_started.elapsed().as_millis() as u64,
+            errors: Vec::new(),
+        });
+        if request.stop_node_id.as_deref() == Some(node_id.as_str()) {
+            break;
+        }
+    }
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let mut response = PreviewResponse {
+        preview_id: Uuid::new_v4(),
+        status: if errors.is_empty() {
+            "COMPLETED".into()
+        } else {
+            "FAILED".into()
+        },
+        node_outputs,
+        errors,
+        processed_records,
+        elapsed_ms,
+        truncated,
+    };
+    if serde_json::to_vec(&response)
+        .map(|bytes| bytes.len())
+        .unwrap_or(usize::MAX)
+        > MAX_PREVIEW_BYTES
+    {
+        for node in &mut response.node_outputs {
+            node.sample_rows.clear();
+        }
+        response.truncated = true;
+    }
+    Ok(Json(response))
 }
 
 pub async fn submit_job(
@@ -1406,7 +1730,7 @@ pub async fn submit_job(
         "input": request.input
     }));
     if let Some(existing) = sqlx::query_as::<_, JobView>(
-        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,created_at,updated_at FROM kernel.pipeline_jobs WHERE idempotency_key=$1",
+        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at FROM kernel.pipeline_jobs WHERE idempotency_key=$1",
     )
     .bind(&idempotency_key)
     .fetch_optional(&state.db)
@@ -1424,7 +1748,7 @@ pub async fn submit_job(
     let job_id = Uuid::new_v4();
     let mut tx = state.db.begin().await?;
     sqlx::query(
-        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds,deadline_at) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9, now() + make_interval(secs => $9))",
+        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds,submitted_by,deadline_at) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9,$10, now() + make_interval(secs => $9))",
     )
     .bind(job_id)
     .bind(&request.pipeline_id)
@@ -1435,6 +1759,7 @@ pub async fn submit_job(
     .bind(&request.input)
     .bind(request.max_attempts)
     .bind(request.timeout_seconds)
+    .bind(auth.user_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| {
@@ -1458,7 +1783,7 @@ pub async fn submit_job(
 
 async fn fetch_job(state: &AppState, job_id: Uuid) -> AppResult<JobView> {
     sqlx::query_as::<_, JobView>(
-        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,created_at,updated_at FROM kernel.pipeline_jobs WHERE job_id=$1",
+        "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at FROM kernel.pipeline_jobs WHERE job_id=$1",
     )
     .bind(job_id)
     .fetch_optional(&state.db)
@@ -1506,7 +1831,7 @@ fn encode_job_cursor(job: &JobView) -> String {
 
 pub async fn list_jobs(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Query(query): Query<JobListQuery>,
 ) -> AppResult<Json<JobListResponse>> {
     let limit = i64::from(query.limit.unwrap_or(20).clamp(1, 100));
@@ -1528,19 +1853,22 @@ pub async fn list_jobs(
     let rows = sqlx::query(
         r#"
         SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,
-               attempts,max_attempts,last_error_code,created_at,updated_at
+               attempts,max_attempts,last_error_code,submitted_by,created_at,updated_at
         FROM kernel.pipeline_jobs
         WHERE ($1::text IS NULL OR pipeline_id=$1)
           AND ($2::text IS NULL OR status=$2)
           AND ($3::timestamptz IS NULL OR (created_at,job_id) < ($3,$4::uuid))
+          AND ($5::boolean OR submitted_by=$6)
         ORDER BY created_at DESC, job_id DESC
-        LIMIT $5
+        LIMIT $7
         "#,
     )
     .bind(query.pipeline_id.as_deref())
     .bind(query.status.as_deref())
     .bind(cursor_time)
     .bind(cursor_id)
+    .bind(auth.role.is_admin() || !auth.role.can_operate())
+    .bind(auth.user_id)
     .bind(limit + 1)
     .fetch_all(&state.db)
     .await?;
@@ -1576,9 +1904,10 @@ pub struct JobResultView {
 
 pub async fn get_job_result(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(job_id): Path<Uuid>,
 ) -> AppResult<Json<JobResultView>> {
+    require_job_access(&state, &auth, job_id, true).await?;
     let row = sqlx::query(
         "SELECT job_id,status,output,error_code,error_message,result_digest,completed_at
          FROM kernel.pipeline_job_results WHERE job_id=$1",
@@ -1604,11 +1933,52 @@ pub async fn get_job_result(
     }))
 }
 
+async fn job_owner(state: &AppState, job_id: Uuid) -> AppResult<Option<Uuid>> {
+    let owner: Option<Option<Uuid>> =
+        sqlx::query_scalar("SELECT submitted_by FROM kernel.pipeline_jobs WHERE job_id=$1")
+            .bind(job_id)
+            .fetch_optional(&state.db)
+            .await?;
+    owner.ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "JOB_NOT_FOUND", "job not found"))
+}
+
+async fn require_job_access(
+    state: &AppState,
+    auth: &AuthUser,
+    job_id: Uuid,
+    sensitive: bool,
+) -> AppResult<()> {
+    let owner = job_owner(state, job_id).await?;
+    if auth.role.is_admin() {
+        return Ok(());
+    }
+    if auth.role.can_operate() {
+        return if owner == Some(auth.user_id) {
+            Ok(())
+        } else {
+            Err(AppError::new(
+                StatusCode::NOT_FOUND,
+                "JOB_NOT_FOUND",
+                "job not found",
+            ))
+        };
+    }
+    // Viewers may read summary metadata only. Sensitive result/cancel access is
+    // explicitly forbidden rather than inferred from a hidden UI button.
+    if sensitive {
+        return Err(AppError::forbidden(
+            "job result requires operator ownership",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn get_job(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(job_id): Path<Uuid>,
 ) -> AppResult<Json<JobView>> {
+    require_job_access(&state, &auth, job_id, false).await?;
     Ok(Json(fetch_job(&state, job_id).await?))
 }
 
@@ -2801,12 +3171,192 @@ pub async fn result(
     Ok(Json(fetch_job(&state, job_id).await?))
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobEventView {
+    pub event_id: i64,
+    pub event_type: String,
+    pub from_status: Option<String>,
+    pub to_status: Option<String>,
+    pub fencing_sequence: Option<i64>,
+    pub details: Value,
+    pub occurred_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobAttemptView {
+    pub attempt_number: i32,
+    pub worker_id: String,
+    pub node_id: Uuid,
+    pub instance_id: Uuid,
+    pub lease_id: Uuid,
+    pub fencing_sequence: i64,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobLeaseView {
+    pub lease_id: Uuid,
+    pub attempt_number: i32,
+    pub fencing_sequence: i64,
+    pub status: String,
+    pub acquired_at: DateTime<Utc>,
+    pub heartbeat_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobCheckpointView {
+    pub checkpoint_id: Uuid,
+    pub attempt_number: i32,
+    pub sequence: i64,
+    pub fencing_sequence: i64,
+    pub input_cursor: Option<String>,
+    pub state_digest: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobDiagnosticsView {
+    pub job_id: Uuid,
+    pub events: Vec<JobEventView>,
+    pub attempts: Vec<JobAttemptView>,
+    pub leases: Vec<JobLeaseView>,
+    pub checkpoints: Vec<JobCheckpointView>,
+    pub result: Option<JobResultView>,
+    pub truncated: bool,
+}
+
+pub async fn get_job_diagnostics(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(job_id): Path<Uuid>,
+) -> AppResult<Json<JobDiagnosticsView>> {
+    // Diagnostics include internal worker/node/lease identifiers and checkpoint
+    // digests, so they require owner/admin rather than Viewer summary access.
+    require_job_access(&state, &auth, job_id, true).await?;
+    let event_rows = sqlx::query(
+        "SELECT event_id,event_type,from_status,to_status,fencing_sequence,details,occurred_at
+         FROM kernel.pipeline_job_events WHERE job_id=$1 ORDER BY occurred_at ASC,event_id ASC LIMIT 501",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let event_truncated = event_rows.len() > 500;
+    let events = event_rows
+        .iter()
+        .take(500)
+        .map(|row| JobEventView {
+            event_id: row.get("event_id"),
+            event_type: row.get("event_type"),
+            from_status: row.get("from_status"),
+            to_status: row.get("to_status"),
+            fencing_sequence: row.get("fencing_sequence"),
+            details: row.get("details"),
+            occurred_at: row.get("occurred_at"),
+        })
+        .collect();
+    let attempt_rows = sqlx::query(
+        "SELECT attempt_number,worker_id,node_id,instance_id,lease_id,fencing_sequence,status,started_at,finished_at,error_code
+         FROM kernel.pipeline_job_attempts WHERE job_id=$1 ORDER BY attempt_number ASC LIMIT 50",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let attempts = attempt_rows
+        .iter()
+        .map(|row| JobAttemptView {
+            attempt_number: row.get("attempt_number"),
+            worker_id: row.get("worker_id"),
+            node_id: row.get("node_id"),
+            instance_id: row.get("instance_id"),
+            lease_id: row.get("lease_id"),
+            fencing_sequence: row.get("fencing_sequence"),
+            status: row.get("status"),
+            started_at: row.get("started_at"),
+            finished_at: row.get("finished_at"),
+            error_code: row.get("error_code"),
+        })
+        .collect();
+    let lease_rows = sqlx::query(
+        "SELECT lease_id,attempt_number,fencing_sequence,status,acquired_at,heartbeat_at,expires_at
+         FROM kernel.pipeline_job_leases WHERE job_id=$1 ORDER BY fencing_sequence ASC LIMIT 50",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let leases = lease_rows
+        .iter()
+        .map(|row| JobLeaseView {
+            lease_id: row.get("lease_id"),
+            attempt_number: row.get("attempt_number"),
+            fencing_sequence: row.get("fencing_sequence"),
+            status: row.get("status"),
+            acquired_at: row.get("acquired_at"),
+            heartbeat_at: row.get("heartbeat_at"),
+            expires_at: row.get("expires_at"),
+        })
+        .collect();
+    let checkpoint_rows = sqlx::query(
+        "SELECT checkpoint_id,attempt_number,sequence,fencing_sequence,input_cursor,state_digest,created_at
+         FROM kernel.pipeline_job_checkpoints WHERE job_id=$1 ORDER BY sequence ASC LIMIT 100",
+    )
+    .bind(job_id)
+    .fetch_all(&state.db)
+    .await?;
+    let checkpoints = checkpoint_rows
+        .iter()
+        .map(|row| JobCheckpointView {
+            checkpoint_id: row.get("checkpoint_id"),
+            attempt_number: row.get("attempt_number"),
+            sequence: row.get("sequence"),
+            fencing_sequence: row.get("fencing_sequence"),
+            input_cursor: row.get("input_cursor"),
+            state_digest: row.get("state_digest"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+    let result = sqlx::query(
+        "SELECT job_id,status,output,error_code,error_message,result_digest,completed_at
+         FROM kernel.pipeline_job_results WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .map(|row| JobResultView {
+        job_id: row.get("job_id"),
+        status: row.get("status"),
+        output: row.get("output"),
+        error_code: row.get("error_code"),
+        error_message: row.get("error_message"),
+        result_digest: row.get("result_digest"),
+        completed_at: row.get("completed_at"),
+    });
+    Ok(Json(JobDiagnosticsView {
+        job_id,
+        events,
+        attempts,
+        leases,
+        checkpoints,
+        result,
+        truncated: event_truncated,
+    }))
+}
+
 pub async fn cancel_job(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(job_id): Path<Uuid>,
 ) -> AppResult<Json<JobView>> {
     auth.require_operator()?;
+    require_job_access(&state, &auth, job_id, true).await?;
     let mut tx = state.db.begin().await?;
     let outcome = match terminalize_job(
         &mut tx,
