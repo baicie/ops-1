@@ -244,18 +244,47 @@ paths:
   /datasets/{datasetId}/lineage:
     get:
       operationId: listDatasetLineage
-      summary: Batch-level lineage for a dataset
+      summary: Cursor-paginated lineage for a dataset
       parameters:
         - { $ref: '#/components/parameters/DatasetId' }
-        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, required: false, schema: { type: string, maxLength: 512 } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: pipelineId, in: query, required: false, schema: { type: string, maxLength: 128 } }
+        - { name: jobId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: schemaRevision, in: query, required: false, schema: { type: integer, minimum: 1 } }
+        - { name: sourceBatchKey, in: query, required: false, schema: { type: string, maxLength: 128 } }
       responses:
         '200':
-          description: Lineage entries
+          description: Lineage page
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DataLineage' }
+                type: object
+                additionalProperties: false
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DataLineage' }
+                  nextCursor: { type: [string, 'null'], maxLength: 512 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /datasets/{datasetId}/lineage/{lineageId}:
+    get:
+      operationId: getDatasetLineage
+      summary: Single lineage record scoped to a dataset
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: lineageId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Lineage detail
+          content:
+            application/json:
+              schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DataLineage' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
 components:

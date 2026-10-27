@@ -420,12 +420,12 @@
         "lineageId",
         "sourceBatchKey",
         "source",
-        "ingestionRunId",
         "dataset",
         "accepted",
         "rejected",
         "unknown",
-        "occurredAt"
+        "occurredAt",
+        "metadataStatus"
       ],
       "properties": {
         "lineageId": {
@@ -439,24 +439,33 @@
         },
         "source": {
           "type": "object",
+          "additionalProperties": true
+        },
+        "sourceIdentity": { "type": ["string", "null"], "maxLength": 512 },
+        "pipeline": {
+          "type": ["object", "null"],
           "additionalProperties": false,
-          "required": [
-            "sourceId",
-            "sourceRevision"
-          ],
+          "required": ["pipelineId", "revision"],
           "properties": {
-            "sourceId": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "sourceRevision": {
-              "type": "integer",
-              "minimum": 1
-            }
+            "pipelineId": { "type": "string", "maxLength": 128 },
+            "revision": { "type": "integer", "minimum": 1 }
           }
         },
+        "job": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["jobId"],
+          "properties": {
+            "jobId": { "type": "string", "format": "uuid" },
+            "attempt": { "type": ["integer", "null"], "minimum": 1 }
+          }
+        },
+        "fencingSequence": { "type": ["integer", "null"], "minimum": 1 },
+        "effectId": { "type": ["string", "null"], "maxLength": 256 },
+        "receiptId": { "type": ["string", "null"], "format": "uuid" },
+        "metadataStatus": { "type": "string", "enum": ["AVAILABLE", "PARTIAL", "NOT_CAPTURED"] },
         "ingestionRunId": {
-          "type": "string",
+          "type": ["string", "null"],
           "format": "uuid"
         },
         "dataset": {

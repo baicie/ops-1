@@ -122,6 +122,12 @@ for item in items:
 PY2
 LIMIT_CODE="$(curl -sS -o /tmp/data-lineage-limit.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage?limit=999")"
 [ "$LIMIT_CODE" = "400" ] || bad "lineage limit was not rejected: $LIMIT_CODE"
+CURSOR_CODE="$(curl -sS -o /tmp/data-lineage-cursor.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage?cursor=%25%25%25")"
+[ "$CURSOR_CODE" = "400" ] || bad "invalid cursor was not rejected: $CURSOR_CODE"
+grep -q 'INVALID_CURSOR' /tmp/data-lineage-cursor.json || bad "invalid cursor error code missing"
+BAD_CURSOR="$(python3 -c 'import base64,json; print(base64.urlsafe_b64encode(json.dumps({"v":1,"occurredAt":"2026-01-01T00:00:00Z","lineageId":"not-a-uuid","filters":"0000000000000000"}).encode()).decode().rstrip("="))')"
+CURSOR_UUID_CODE="$(curl -sS -o /tmp/data-lineage-cursor-uuid.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage?cursor=$BAD_CURSOR")"
+[ "$CURSOR_UUID_CODE" = "400" ] || bad "invalid cursor UUID was not rejected: $CURSOR_UUID_CODE"
 ok "batch lineage with job/pipeline/receipt enrichment"
 DISABLE_CODE="$(curl -sS -o /tmp/data-disable.json -w '%{http_code}' "${AUTH[@]}" -X POST "$URL/api/v1/plugins/opsweave.data-catalog/disable" -H 'content-type: application/json' -H 'Idempotency-Key: data-disable-0001' -d '{"reason":"golden path dependency check"}')"
 [ "$DISABLE_CODE" = "409" ] || bad "catalog disable returned $DISABLE_CODE, expected 409 DEPENDENCY_BLOCKED"

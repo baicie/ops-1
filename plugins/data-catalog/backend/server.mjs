@@ -231,6 +231,17 @@ async function initDb() {
   ready = true;
 }
 
+function safeSourceIdentity(source, fallback) {
+  const raw = source && (source.identity || source.url);
+  if (typeof raw !== 'string' || !raw.trim()) return String(fallback || 'unknown').slice(0, 128);
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`.slice(0, 128);
+  } catch {
+    return raw.replace(/[?#].*$/, '').replace(/\/\/[^/@]*@/, '//').slice(0, 128);
+  }
+}
+
 function lineageView(row) {
   return {
     lineageId: row.lineage_id,
@@ -250,14 +261,30 @@ function lineageView(row) {
   };
 }
 
-function encodeLineageCursor(row) {
-  return Buffer.from(JSON.stringify({ occurredAt: row.occurred_at.toISOString(), lineageId: row.lineage_id }), 'utf8').toString('base64url');
+const LINEAGE_CURSOR_VERSION = 1;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function lineageFilterFingerprint(filters) {
+  return crypto.createHash('sha256').update(JSON.stringify(filters)).digest('hex').slice(0, 16);
+}
+function encodeLineageCursor(row, filters) {
+  return Buffer.from(JSON.stringify({
+    v: LINEAGE_CURSOR_VERSION,
+    occurredAt: new Date(row.occurred_at).toISOString(),
+    lineageId: row.lineage_id,
+    filters: lineageFilterFingerprint(filters),
+  }), 'utf8').toString('base64url');
 }
 function decodeLineageCursor(value) {
+  if (typeof value !== 'string' || value.length > 512) return null;
   try {
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
     const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
-    if (typeof parsed.occurredAt !== 'string' || typeof parsed.lineageId !== 'string') return null;
-    if (Number.isNaN(new Date(parsed.occurredAt).getTime())) return null;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (parsed.v !== LINEAGE_CURSOR_VERSION) return null;
+    if (typeof parsed.occurredAt !== 'string' || Number.isNaN(new Date(parsed.occurredAt).getTime())) return null;
+    if (typeof parsed.lineageId !== 'string' || !UUID_RE.test(parsed.lineageId)) return null;
+    if (typeof parsed.filters !== 'string' || !/^[a-f0-9]{16}$/.test(parsed.filters)) return null;
+    if (Object.keys(parsed).sort().join(',') !== 'filters,lineageId,occurredAt,v') return null;
     return parsed;
   } catch { return null; }
 }
@@ -496,10 +523,10 @@ async function handle(req, res) {
              accepted,rejected,unknown,pipeline_id,pipeline_revision,job_id,fencing_sequence,
              effect_id,receipt_id,source_identity,metadata_status)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,$10,$11,$12,$13,$14,$15,'AVAILABLE')`,
-          [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, fence.jobId,
+          [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, body.ingestionRunId || null,
            JSON.stringify(body.source || {}), acceptedRecords.length, errors.length,
            body.pipelineId, body.pipelineRevision, fence.jobId, fence.fencingSequence,
-           body.effectId, receiptId, body.source?.identity || body.source?.url || body.sourceBatchKey],
+           body.effectId, receiptId, safeSourceIdentity(body.source, body.sourceBatchKey)],
         );
         await client.query('COMMIT');
         return send(res, 201, effectReceiptView(receipt.rows[0]), requestId);
@@ -554,7 +581,7 @@ async function handle(req, res) {
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,'PARTIAL')`,
           [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey,
            body.ingestionRunId || null, JSON.stringify(body.source || {}), acceptedRecords.length,
-           errors.length, body.source?.identity || body.source?.url || body.sourceBatchKey],
+           errors.length, safeSourceIdentity(body.source, body.sourceBatchKey)],
         );
         await client.query('COMMIT');
         return send(res, 201, receiptView(receipt.rows[0]), requestId);
@@ -584,6 +611,10 @@ async function handle(req, res) {
       const fromAt = from ? new Date(from) : null;
       const toAt = to ? new Date(to) : null;
       if ((fromAt && Number.isNaN(fromAt.getTime())) || (toAt && Number.isNaN(toAt.getTime()))) return fail(res, 400, 'INVALID_REQUEST', 'from/to must be ISO timestamps', requestId);
+      const filters = { datasetId, from: fromAt ? fromAt.toISOString() : null, to: toAt ? toAt.toISOString() : null,
+        pipelineId: url.searchParams.get('pipelineId') || null, jobId: url.searchParams.get('jobId') || null,
+        schemaRevision: url.searchParams.get('schemaRevision') || null, sourceBatchKey: url.searchParams.get('sourceBatchKey') || null };
+      if (cursor && cursor.filters !== lineageFilterFingerprint(filters)) return fail(res, 400, 'INVALID_CURSOR', 'cursor does not match filters', requestId);
       const values = [datasetId];
       const clauses = ['dataset_id=$1'];
       const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
@@ -612,7 +643,7 @@ async function handle(req, res) {
       const rows = await pool.query(`SELECT * FROM catalog_lineage WHERE ${clauses.join(' AND ')} ORDER BY occurred_at DESC,lineage_id DESC LIMIT $${values.length}`, values);
       const hasMore = rows.rows.length > limitRaw;
       const page = rows.rows.slice(0, limitRaw);
-      return send(res, 200, { items: page.map(lineageView), nextCursor: hasMore ? encodeLineageCursor(page[page.length - 1]) : null }, requestId);
+      return send(res, 200, { items: page.map(lineageView), nextCursor: hasMore ? encodeLineageCursor(page[page.length - 1], filters) : null }, requestId);
     }
     const lineageMatch = tail.match(/^lineage\/([0-9a-f-]{36})$/);
     if (lineageMatch && req.method === 'GET') {

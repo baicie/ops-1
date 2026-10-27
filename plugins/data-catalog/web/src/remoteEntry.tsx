@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 declare const __PLUGIN_VERSION__: string;
 type HostApi = { get(path: string): Promise<any>; post(path: string, body: unknown, idempotencyKey?: string): Promise<any> };
@@ -61,12 +61,44 @@ function CatalogPage({ host }: { host: DataHost }) {
   const [name, setName] = useState('');
   const [fields, setFields] = useState(JSON.stringify(starterFields, null, 2));
   const [busy, setBusy] = useState(false);
+  const requestSeq = useRef(0);
   async function load() { setLoading(true); setError(null); try { const result = await host.api.get('/api/data-catalog/datasets'); setDatasets(result.items || []); } catch (cause: any) { setError(cause?.message || 'Could not load datasets'); } finally { setLoading(false); } }
-  async function open(dataset: any) { setSelected(dataset); try { const [s, l] = await Promise.all([host.api.get(`/api/data-catalog/datasets/${dataset.datasetId}/schemas`), host.api.get(`/api/data-catalog/datasets/${dataset.datasetId}/lineage?limit=50`)]); setSchemas(s || []); setLineage(l?.items || []); setLineageCursor(l?.nextCursor || null); const latest = (s || [])[0]; if (latest) { setDraftBase(latest.schemaRevision); setDraftFields(JSON.stringify(latest.fields, null, 2)); } } catch (cause: any) { setError(cause?.message || 'Could not load schema'); } }
+  async function open(dataset: any) {
+    const seq = ++requestSeq.current;
+    setSelected(dataset); setLineageDetail(null); setError(null);
+    try {
+      const [s, l] = await Promise.all([
+        host.api.get(`/api/data-catalog/datasets/${dataset.datasetId}/schemas`),
+        host.api.get(`/api/data-catalog/datasets/${dataset.datasetId}/lineage?limit=50`),
+      ]);
+      if (seq !== requestSeq.current) return;
+      setSchemas(s || []); setLineage(l?.items || []); setLineageCursor(l?.nextCursor || null);
+      const latest = (s || [])[0];
+      if (latest) { setDraftBase(latest.schemaRevision); setDraftFields(JSON.stringify(latest.fields, null, 2)); }
+    } catch (cause: any) {
+      if (seq === requestSeq.current) setError(cause?.message || 'Could not load schema');
+    }
+  }
   async function loadRecords() { if (!selected) return; setBusy(true); try { const result = await host.api.get(`/api/data-catalog/datasets/${selected.datasetId}/records?limit=100`); setRecords(result.items || []); } catch (cause: any) { setError(cause?.message || 'Could not load records'); } finally { setBusy(false); } }
   async function createDraft() { if (!selected) return; setBusy(true); setError(null); try { const draft = await host.api.post(`/api/data-catalog/datasets/${selected.datasetId}/schemas/drafts`, { baseRevision: draftBase, fields: JSON.parse(draftFields) }); setDraftRevision(draft.schemaRevision); const result = await host.api.get(`/api/data-catalog/datasets/${selected.datasetId}/schemas/${draft.schemaRevision}/diff?against=${draftBase}`); setDiff(result); await open(selected); } catch (cause: any) { setError(cause?.message || 'Could not create schema draft'); } finally { setBusy(false); } }
   async function publishDraft() { if (!selected || !draftRevision) return; setBusy(true); setError(null); try { await host.api.post(`/api/data-catalog/datasets/${selected.datasetId}/schemas/${draftRevision}/publish`, {}); setDraftRevision(null); setDiff(null); await open(selected); } catch (cause: any) { setError(cause?.message || 'Could not publish schema revision'); } finally { setBusy(false); } }
   async function create() { setBusy(true); setError(null); try { const parsed = JSON.parse(fields); const dataset = await host.api.post('/api/data-catalog/datasets', { name, fields: parsed, retentionPolicy: { mode: 'RETAIN', maxRecords: 10000, maxBytes: 16777216 } }); setName(''); await load(); await open(dataset); } catch (cause: any) { setError(cause?.message || 'Create failed'); } finally { setBusy(false); } }
+  async function loadMoreLineage() {
+    if (!selected || !lineageCursor || busy) return;
+    const seq = requestSeq.current;
+    setBusy(true);
+    try {
+      const page = await host.api.get(`/api/data-catalog/datasets/${selected.datasetId}/lineage?limit=50&cursor=${encodeURIComponent(lineageCursor)}`);
+      if (seq !== requestSeq.current) return;
+      setLineage((items) => {
+        const seen = new Set(items.map((item) => item.lineageId));
+        return [...items, ...(page.items || []).filter((item: any) => !seen.has(item.lineageId))];
+      });
+      setLineageCursor(page.nextCursor || null);
+    } catch (cause: any) {
+      if (seq === requestSeq.current) setError(cause?.message || 'Lineage page failed');
+    } finally { setBusy(false); }
+  }
   useEffect(() => { void load(); }, []);
   return <div className="dc">
     <header className="dc-head"><div><p className="dc-muted">data.catalog.v1 · {host.pluginId}</p><h1>Data Catalog</h1><p className="lead">Datasets own semantic Schema revisions. Schema revisions are immutable after publish; Preview and Ingestion are owned by Data Integration.</p></div><span className="dc-muted">revision {host.activationRevision}</span></header>
@@ -77,7 +109,7 @@ function CatalogPage({ host }: { host: DataHost }) {
     {selected && <section className="dc-card" data-testid="catalog-dataset-detail"><div className="dc-head"><h2>{selected.name}</h2><span className="dc-muted" data-testid="catalog-dataset-id">datasetId {selected.datasetId}</span></div><h3>Schema revisions</h3><pre data-testid="catalog-schema-revisions" className="dc-pre">{JSON.stringify(schemas, null, 2)}</pre><div className="dc-form"><label>Draft fields JSON (base r{draftBase})<textarea data-testid="catalog-draft-fields" value={draftFields} onChange={(event) => setDraftFields(event.target.value)} spellCheck={false} /></label><div className="dc-actions"><button data-testid="catalog-create-draft" className="dc-btn" onClick={() => void createDraft()} disabled={busy}>Create compatible draft</button>{draftRevision && <button data-testid="catalog-publish-draft" className="dc-btn primary" onClick={() => void publishDraft()} disabled={busy}>Publish r{draftRevision}</button>}</div></div>{diff && <pre data-testid="catalog-schema-diff" className="dc-pre">{JSON.stringify(diff, null, 2)}</pre>}<div className="dc-actions"><button data-testid="catalog-load-records" className="dc-btn" onClick={() => void loadRecords()} disabled={busy}>Load records</button></div>{records.length > 0 && <pre data-testid="catalog-records" className="dc-pre">{JSON.stringify(records, null, 2)}</pre>}<h3>Lineage</h3>
       <p className="dc-muted">Source → Pipeline → Dataset. Missing historical metadata is shown as UNKNOWN, never inferred.</p>
       {lineage.length === 0 ? <div className="dc-empty">No lineage yet. Run a pipeline into this dataset.</div> : <table className="dc-table"><thead><tr><th>Source</th><th>Pipeline</th><th>Job</th><th>Records</th><th>Metadata</th><th>Time</th></tr></thead><tbody>{lineage.map((item) => <tr className="dc-row" key={item.lineageId} onClick={() => void host.api.get(`/api/data-catalog/datasets/${selected.datasetId}/lineage/${item.lineageId}`).then(setLineageDetail).catch((cause: any) => setError(cause?.message || 'Lineage detail failed'))}><td data-label="Source">{item.sourceIdentity || item.sourceBatchKey}</td><td data-label="Pipeline">{item.pipeline ? `${item.pipeline.pipelineId} · r${item.pipeline.revision}` : 'UNKNOWN'}</td><td data-label="Job">{item.job?.jobId || 'UNKNOWN'}</td><td data-label="Records">{item.accepted} accepted / {item.rejected} rejected</td><td data-label="Metadata">{item.metadataStatus}</td><td data-label="Time">{new Date(item.occurredAt).toLocaleString()}</td></tr>)}</tbody></table>}
-      {lineageCursor && <button className="dc-btn" onClick={() => void host.api.get(`/api/data-catalog/datasets/${selected.datasetId}/lineage?limit=50&cursor=${encodeURIComponent(lineageCursor)}`).then((page) => { setLineage((items) => [...items, ...(page.items || [])]); setLineageCursor(page.nextCursor || null); }).catch((cause: any) => setError(cause?.message || 'Lineage page failed'))}>Load more</button>}
+      {lineageCursor && <button className="dc-btn" disabled={busy} onClick={() => void loadMoreLineage()}>Load more</button>}
       {lineageDetail && <div className="dc-card"><div className="dc-head"><h3>Lineage detail</h3><button className="dc-btn" onClick={() => setLineageDetail(null)}>Close</button></div><pre data-testid="catalog-lineage-detail" className="dc-pre">{JSON.stringify(lineageDetail, null, 2)}</pre></div>}
       <pre data-testid="catalog-lineage" className="dc-pre">{JSON.stringify(lineage, null, 2)}</pre></section>}
   </div>;

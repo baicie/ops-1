@@ -186,6 +186,8 @@ def main() -> int:
                 "/datasets", "/datasets/{datasetId}/schemas/drafts",
                 "/datasets/{datasetId}/schemas/{revision}/publish",
                 "/datasets/{datasetId}/records",
+                "/datasets/{datasetId}/lineage",
+                "/datasets/{datasetId}/lineage/{lineageId}",
             ],
             "data-integration-v1.yaml": [
                 "/sources", "/sources/{sourceId}/preview",
