@@ -372,6 +372,8 @@ export interface JobView {
   attempts: number;
   maxAttempts: number;
   lastErrorCode?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

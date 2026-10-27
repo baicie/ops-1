@@ -86,7 +86,7 @@ export function Layout() {
           </a>
           <button className="icon-btn sidebar-close" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><Icon name="close" /></button>
         </div>
-        <div className="workspace-pill"><span className="workspace-dot" /> default workspace</div>
+        <div className="workspace-pill" title="default workspace"><span className="workspace-dot" /><span>default workspace</span></div>
         <nav className="nav">
           <p className="nav-section-label">Platform</p>
           {coreNav.map((item) => (

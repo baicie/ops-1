@@ -7,6 +7,20 @@ import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
 
+function spanLabel(start?: string | null, end?: string | null) {
+  if (!start) return '—';
+  const finish = end ? new Date(end).getTime() : Date.now();
+  const ms = Math.max(0, finish - new Date(start).getTime());
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+function durationLabel(job: JobView) {
+  if (job.finishedAt) return spanLabel(job.startedAt, job.finishedAt);
+  if (job.startedAt) return `${spanLabel(job.startedAt)} running`;
+  if (job.status === 'QUEUED') return 'Queued';
+  return '—';
+}
+
 export function JobsPage() {
   useDocumentTitle('Jobs');
   const [data, setData] = useState<JobList | null>(null);
@@ -15,6 +29,8 @@ export function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [query, setQuery] = useState('');
+  const [pipelineFilter, setPipelineFilter] = useState('ALL');
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -27,16 +43,20 @@ export function JobsPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [status, cursor, reload]);
+  const visibleJobs = (data?.items || []).filter((job) => (pipelineFilter === 'ALL' || job.pipelineId === pipelineFilter) && `${job.jobId} ${job.pipelineId}`.toLowerCase().includes(query.toLowerCase()));
+  const pipelines = Array.from(new Set((data?.items || []).map((job) => job.pipelineId))).sort();
   return (
     <div className="page-stack">
       <PageHeader title="Jobs" description="Durable typed-pipeline executions and their current lifecycle state." actions={<button className="btn btn-secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button>} />
       <section className="toolbar">
+        <div className="search-box"><Icon name="search" size={16} /><input aria-label="Search jobs" placeholder="Search job ID or pipeline" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+        <select aria-label="Filter by pipeline" value={pipelineFilter} onChange={(event) => setPipelineFilter(event.target.value)} style={{ maxWidth: 240 }}><option value="ALL">All pipelines</option>{pipelines.map((pipeline) => <option key={pipeline} value={pipeline}>{pipeline}</option>)}</select>
         <div className="segmented">{['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].map((value) => <button key={value} className={status === value ? 'active' : ''} onClick={() => { setStatus(value); setCursor(null); }}>{value === 'ALL' ? 'All' : value}</button>)}</div>
-        <span className="toolbar-count">{data?.items.length ?? 0} shown</span>
+        <span className="toolbar-count">{visibleJobs.length} of {data?.items.length ?? 0} shown</span>
       </section>
-      {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : (data?.items.length ?? 0) === 0 ? <EmptyState icon="clock" title="No jobs" description="Publish a revision and submit a run from its Pipeline detail page." /> : (
-        <section className="panel table-panel"><table className="data-table"><thead><tr><th>Job</th><th>Pipeline</th><th>Revision</th><th>Status</th><th>Attempts</th><th>Created</th><th /></tr></thead><tbody>
-          {data?.items.map((job) => <tr key={job.jobId} className="clickable"><td><Link className="mono" to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td>{job.pipelineId}</td><td><span className="mono">r{job.pipelineRevision}</span></td><td><StatusBadge status={job.status} /></td><td>{job.attempts}/{job.maxAttempts}</td><td><TimeAgo value={job.createdAt} /></td><td className="row-action"><Icon name="chevron" size={16} /></td></tr>)}
+      {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : visibleJobs.length === 0 ? <EmptyState icon="clock" title={data?.items.length ? 'No jobs match this filter' : 'No jobs'} description={data?.items.length ? 'Clear search or choose another pipeline/status.' : 'Publish a revision and submit a run from its Pipeline detail page.'} /> : (
+        <section className="panel table-panel"><table className="data-table responsive-table jobs-table"><thead><tr><th>Job</th><th>Pipeline</th><th>Revision</th><th>Status</th><th>Attempts</th><th>Duration</th><th>Created</th><th /></tr></thead><tbody>
+          {visibleJobs.map((job) => <tr key={job.jobId} className="clickable"><td data-label="Job" className="job-id-cell"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td data-label="Pipeline">{job.pipelineId}</td><td data-label="Revision"><span className="mono">r{job.pipelineRevision}</span></td><td data-label="Status"><StatusBadge status={job.status} /></td><td data-label="Attempts">{job.attempts}/{job.maxAttempts}</td><td data-label="Duration"><span className="mono">{durationLabel(job)}</span></td><td data-label="Created"><TimeAgo value={job.createdAt} /></td><td className="row-action"><Icon name="chevron" size={16} /></td></tr>)}
         </tbody></table></section>
       )}
       <div className="pagination-row"><button className="btn btn-secondary" disabled={!cursor} onClick={() => setCursor(null)}>First page</button><button className="btn btn-secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor || null)}>Next page</button></div>
@@ -85,18 +105,19 @@ export function JobDetailPage() {
   if (!job) return <Skeleton rows={6} />;
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Job" title={<span className="mono">{job.jobId}</span>} description={`${job.pipelineId} · r${job.pipelineRevision}`} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <button className="btn btn-danger" onClick={() => void cancel()}><Icon name="pause" size={15} /> Cancel</button>}<button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-secondary" to="/jobs">All jobs</Link></>} />
-      <section className="summary-grid">
+      <PageHeader eyebrow="Run" title={job.pipelineId} description={<span className="job-subtitle"><StatusBadge status={job.status} /><span>Revision r{job.pipelineRevision}</span><span className="job-short-id" title={job.jobId}>Run {job.jobId.slice(0, 8)}</span></span>} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <button className="btn btn-danger" onClick={() => void cancel()}><Icon name="pause" size={15} /> Cancel</button>}<button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-secondary" to="/jobs">All jobs</Link></>} />
+      <section className="summary-grid job-stats">
         <div className="panel metric-card"><span className="metric-label">Status</span><strong className="metric-value"><StatusBadge status={job.status} /></strong></div>
-        <div className="panel metric-card"><span className="metric-label">Attempts</span><strong className="metric-value">{job.attempts} / {job.maxAttempts}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">Fence</span><strong className="metric-value mono">{job.currentFence}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">Lease</span><strong className="metric-value mono small">{job.currentLeaseId || '—'}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">Execution</span><strong className="metric-value mono">{durationLabel(job)}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">Pipeline</span><strong className="metric-value mono">{job.pipelineId}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">Revision</span><strong className="metric-value">r{job.pipelineRevision}</strong></div>
       </section>
-      <section className="panel panel-pad"><h2>Lifecycle</h2><ul className="detail-list"><li><span>Created</span><TimeAgo value={job.createdAt} /></li><li><span>Updated</span><TimeAgo value={job.updatedAt} /></li><li><span>Error code</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">Attempt counts and the durable result are shown from Kernel records; checkpoint diagnostics require a dedicated diagnostics API.</p></section>
+      <details className="advanced panel"><summary>Advanced · full Job ID, fence and lease</summary><div className="kv-grid"><div className="kv"><span className="kv-label">Job ID</span><span className="kv-value mono copyable" onClick={() => void navigator.clipboard?.writeText(job.jobId)} title="Click to copy">{job.jobId}</span></div><div className="kv"><span className="kv-label">Attempts</span><span className="kv-value mono">{job.attempts} / {job.maxAttempts}</span></div><div className="kv"><span className="kv-label">Fence</span><span className="kv-value mono">{job.currentFence}</span></div><div className="kv"><span className="kv-label">Lease</span><span className="kv-value mono">{job.currentLeaseId || '—'}</span></div><div className="kv"><span className="kv-label">Queue wait</span><span className="kv-value mono">{spanLabel(job.createdAt, job.startedAt)}</span></div><div className="kv"><span className="kv-label">Total elapsed</span><span className="kv-value mono">{spanLabel(job.createdAt, job.finishedAt)}</span></div><div className="kv"><span className="kv-label">Updated</span><span className="kv-value mono">{new Date(job.updatedAt).toISOString()}</span></div></div></details>
+      <section className="panel panel-pad"><h2>Lifecycle</h2><ul className="detail-list"><li><span>Created</span><TimeAgo value={job.createdAt} /></li><li><span>Updated</span><TimeAgo value={job.updatedAt} /></li><li><span>Error code</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">Attempts, timeline and checkpoints are read from Kernel records; full identifiers remain in Advanced.</p></section>
       <section className="panel panel-pad"><h2>Timeline</h2>{!diagnostics ? <p className="muted small">Diagnostics unavailable.</p> : diagnostics.events.length === 0 ? <p className="muted small">No events recorded.</p> : <ol className="timeline">{diagnostics.events.map((event) => <li key={event.eventId}><span className="timeline-dot" /><div><strong>{event.eventType}</strong>{event.toStatus && <span className="tag">{event.toStatus}</span>}{event.fencingSequence != null && <span className="muted small">fence {event.fencingSequence}</span>}<TimeAgo value={event.occurredAt} /></div></li>)}</ol>}{diagnostics?.truncated && <p className="muted small">Timeline truncated at 500 events.</p>}</section>
       {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>Attempts</h2><div className="table-panel"><table className="data-table"><thead><tr><th>Attempt</th><th>Status</th><th>Fence</th><th>Node</th><th>Started</th></tr></thead><tbody>{diagnostics.attempts.map((attempt) => <tr key={attempt.attemptNumber}><td>#{attempt.attemptNumber}</td><td><StatusBadge status={attempt.status} /></td><td className="mono">{attempt.fencingSequence}</td><td className="mono small">{attempt.nodeId}</td><td><TimeAgo value={attempt.startedAt} /></td></tr>)}</tbody></table></div></section>}
       {diagnostics && diagnostics.checkpoints.length > 0 && <section className="panel panel-pad"><h2>Checkpoints</h2><ul className="detail-list">{diagnostics.checkpoints.map((checkpoint) => <li key={checkpoint.checkpointId}><span>Attempt {checkpoint.attemptNumber} · sequence {checkpoint.sequence}</span><code className="mono small">{checkpoint.stateDigest}</code></li>)}</ul></section>}
-      {result ? <section className="panel panel-pad"><h2>Result</h2><p className="small">Status <StatusBadge status={result.status} /> · Digest <code className="mono">{result.resultDigest || '—'}</code></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre></section> : resultError ? <p className="muted small">Result: {resultError}</p> : null}
+      {result ? <section className="panel panel-pad"><h2>Result</h2><p className="small">Status <StatusBadge status={result.status} /></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre><details className="advanced"><summary>Result metadata</summary><p className="mono small">{result.resultDigest || 'No result digest'}</p></details></section> : resultError ? <p className="muted small">Result: {resultError}</p> : null}
     </div>
   );
 }

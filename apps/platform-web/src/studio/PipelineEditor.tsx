@@ -7,6 +7,7 @@ import { ErrorState, PageHeader, Skeleton } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
 import { GraphCanvas } from './GraphCanvas';
 import { toGraph, fromGraph } from './ir/adapter';
+import { definitionDiff } from './ir/diff';
 import type { GraphEdge, GraphNode } from './ir/types';
 import { validatePipeline } from './ir/validation';
 
@@ -14,6 +15,16 @@ interface EditorGraph { nodes: GraphNode[]; edges: GraphEdge[] }
 interface HistoryEntry { graph: EditorGraph }
 
 const irKey = (value: { nodes: unknown[]; edges: unknown[] }) => JSON.stringify([value.nodes, value.edges]);
+
+const NODE_LABEL: Record<string, string> = {
+  'builtin.source.http_json': 'HTTP Source',
+  'builtin.parse.json': 'Parse JSON',
+  'builtin.map.fields': 'Map Fields',
+  'builtin.filter.predicate': 'Filter Records',
+  'builtin.validate.schema': 'Validate Schema',
+  'builtin.sink.dataset': 'Dataset Sink',
+};
+function nodeLabel(type: string) { return NODE_LABEL[type] || type.split('.').slice(-1)[0]; }
 
 function configValue(nodeType: string, key: string, value: unknown) {
   return { nodeType, key, value };
@@ -46,6 +57,9 @@ export function PipelineEditorPage() {
   const [preview, setPreview] = useState<PipelinePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [layoutNonce, setLayoutNonce] = useState(0);
+  const [mobileView, setMobileView] = useState<'nodes' | 'canvas'>('canvas');
   const loadSeq = useRef(0);
   useEffect(() => {
     if (!graph) return;
@@ -209,6 +223,13 @@ export function PipelineEditorPage() {
     setConnectionError(null); return { ok: true };
   };
 
+  const autoLayout = () => {
+    const next = toGraph(definition);
+    setHistory((items) => [...items.slice(-29), { graph }]);
+    setFuture([]);
+    setGraph(next);
+    setLayoutNonce((value) => value + 1);
+  };
   const runPreview = async () => {
     setPreviewBusy(true); setPreviewError(null); setPreview(null);
     try {
@@ -219,7 +240,7 @@ export function PipelineEditorPage() {
     } catch (cause) { setPreviewError((cause as Error).message); } finally { setPreviewBusy(false); }
   };
   return (
-    <div className="page-stack">
+    <div className="page-stack studio-page">
       <PageHeader
         eyebrow="Studio"
         title={definition.name}
@@ -227,6 +248,8 @@ export function PipelineEditorPage() {
         actions={<>
           <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> Undo</button>
           <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>Redo</button>
+          <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> Auto layout</button>
+          <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> Preview</button>
           <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>Detail</Link>
           {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> Create draft</button> : <>
             <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty}><Icon name="save" size={15} /> {busy === 'save' ? 'Saving…' : 'Save draft'}</button>
@@ -238,8 +261,20 @@ export function PipelineEditorPage() {
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
         <Icon name="warning" size={14} />
-        <div><strong>{conflict}</strong><span>Local changes are preserved. Server version: {conflictLatest ? `v${conflictLatest.version}` : 'unknown'}.</span>
-          {conflictLatest && <pre>{JSON.stringify({ localNodes: definition.nodes.length, serverNodes: conflictLatest.definition.nodes.length, localEdges: definition.edges.length, serverEdges: conflictLatest.definition.edges.length }, null, 2)}</pre>}</div>
+        <div className="conflict-copy"><strong>{conflict}</strong><span>Local changes are preserved. Server version: {conflictLatest ? `v${conflictLatest.version}` : 'unknown'}.</span>
+          {conflictLatest && (() => {
+            const diff = definitionDiff(definition, conflictLatest.definition);
+            return <div className="conflict-diff" aria-label="Draft definition diff">
+              {diff.nodes.length === 0 && diff.edgesAdded.length === 0 && diff.edgesRemoved.length === 0 && <p className="muted small">No structural difference detected; the server revision changed independently.</p>}
+              {diff.nodes.map((entry) => <div key={entry.nodeId} className="diff-node">
+                <div className="diff-node-head"><strong>{entry.label}</strong><span className="mono">{entry.nodeId}</span><span className={`tag diff-${entry.kind}`}>{entry.kind}</span></div>
+                {entry.changes.map((change) => <div key={change.path} className="diff-field"><code>{change.path}</code><span><em>Yours</em> {change.local}</span><span><em>Server</em> {change.server}</span></div>)}
+              </div>)}
+              {diff.edgesAdded.length > 0 && <p className="small"><strong>Server-only edges:</strong> {diff.edgesAdded.join(', ')}</p>}
+              {diff.edgesRemoved.length > 0 && <p className="small"><strong>Local-only edges:</strong> {diff.edgesRemoved.join(', ')}</p>}
+            </div>;
+          })()}
+        </div>
         <div className="conflict-actions">
           <button className="btn btn-secondary btn-small" onClick={() => setConflict(null)}>Keep editing</button>
           <button className="btn btn-secondary btn-small" onClick={() => { if (window.confirm('Discard local changes and load the latest server draft?')) { setConflict(null); void load(draft?.draftId); } }}>Reload latest</button>
@@ -250,10 +285,14 @@ export function PipelineEditorPage() {
       <div className="studio-shell">
         <aside className="panel panel-pad studio-palette">
           <h2>Node palette</h2><p className="muted small">Typed nodes from the current revision.</p>
-          {definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{node.nodeId}</strong><small className="mono">{node.type}</small></span></div>)}
+          {definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{nodeLabel(node.type)}</strong><small className="mono">{node.nodeId}</small></span></div>)}
         </aside>
         <section className="panel studio-canvas" aria-label="Pipeline canvas">
-          <GraphCanvas nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />
+          <div className="mobile-view-toggle" role="group" aria-label="Editor view">
+            <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>Nodes</button>
+            <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>Canvas</button>
+          </div>
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{definition.nodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{index + 1}</span><span><strong>{nodeLabel(node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{node.outputs.length} out</span></button>)}</div> : <GraphCanvas layoutNonce={layoutNonce} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
           <p className="studio-note"><Icon name="alert" size={13} /> Local edits are not persisted until Save draft. Publish requires server validation.</p>
         </section>
@@ -262,8 +301,9 @@ export function PipelineEditorPage() {
           {selected ? <>
             {!hasDraft && <p className="muted small">Create a draft to edit this configuration.</p>}
             <p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · typeVersion {selected.typeVersion}</p>
-            <h3>Config</h3>
+            <h3>Configuration</h3>
             <NodeConfigForm key={selected.nodeId} node={selected} readOnly={!hasDraft} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
+            <details className="advanced"><summary>Advanced · type, ports and raw config</summary><p className="mono small">{selected.type} · v{selected.typeVersion}</p><pre>{JSON.stringify(selected.config, null, 2)}</pre></details>
             <h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>input{port.required ? ' · required' : ''}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>output{port.nullable ? ' · nullable' : ''}</small></li>)}</ul>
           </> : <p className="muted small">Select a node to edit its typed config.</p>}
           <h3>Validation <span className={errors.length === 0 ? 'text-ok' : 'text-danger'}>{errors.length}</span></h3>
@@ -271,7 +311,7 @@ export function PipelineEditorPage() {
           {serverValidation && <p className="muted small">{serverValidation.valid ? `Server validated · ${serverValidation.planDigest}` : 'Server rejected this graph'}</p>}
         </aside>
       </div>
-      <section className="panel panel-pad studio-preview" aria-label="Preview panel">
+      {previewOpen && <section className="panel panel-pad studio-preview" aria-label="Preview panel">
         <div className="panel-head"><div><h2>Preview</h2><p className="muted small">Server-side pure transforms on bounded sample input. No Source IO and no Catalog writes.</p></div><button className="btn btn-secondary" onClick={() => void runPreview()} disabled={previewBusy}>{previewBusy ? 'Previewing…' : 'Run preview'}</button></div>
         <label className="preview-input"><span>Sample input (JSON object or array)</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
         {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
@@ -281,7 +321,7 @@ export function PipelineEditorPage() {
           <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">in {node.inputCount} → out {node.outputCount} · {node.durationMs} ms</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
         </>}
         {!preview && !previewError && <p className="muted small">Preview is not a job. It cannot produce a Sink Effect or Receipt.</p>}
-      </section>
+      </section>}
     </div>
   );
 }

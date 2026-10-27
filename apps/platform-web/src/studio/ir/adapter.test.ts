@@ -81,3 +81,26 @@ describe('Pipeline IR adapter', () => {
     expect(parse.nodeId).toBeTruthy();
   });
 });
+
+describe('topological layout', () => {
+  it('orders nodes by edges even when the node array is shuffled', () => {
+    const definition = structuredClone(base);
+    definition.nodes = [definition.nodes[2], definition.nodes[0], definition.nodes[4], definition.nodes[1], definition.nodes[5], definition.nodes[3]];
+    const ordered = toGraph(definition).nodes.map((node) => node.id);
+    expect(ordered).toEqual(base.nodes.map((node) => node.nodeId));
+  });
+
+  it('orders nodes by edges even when the edge array is shuffled', () => {
+    const definition = structuredClone(base);
+    definition.edges = [...definition.edges].reverse();
+    expect(toGraph(definition).nodes.map((node) => node.id)).toEqual(base.nodes.map((node) => node.nodeId));
+  });
+
+  it('renders a cycle deterministically instead of dropping nodes', () => {
+    const definition = structuredClone(base);
+    definition.edges.push({ fromNode: definition.nodes[5].nodeId, toNode: definition.nodes[0].nodeId, fromPort: 'records', toPort: 'records', dataType: 'records' } as any);
+    const ids = toGraph(definition).nodes.map((node) => node.id);
+    expect(ids.sort()).toEqual(base.nodes.map((node) => node.nodeId).sort());
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
