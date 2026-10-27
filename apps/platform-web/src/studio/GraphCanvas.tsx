@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Background, Controls, Handle, Position, ReactFlow,
   type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance,
@@ -10,6 +10,7 @@ import { Icon } from '../components/Icons';
 
 interface PipelineNodeData extends Record<string, unknown> {
   ir: PipelineNode;
+  direction: 'horizontal' | 'vertical';
 }
 
 const NODE_META: Record<string, { label: string; category: string; icon: string; summary: (config: Record<string, unknown>) => string }> = {
@@ -23,6 +24,9 @@ const NODE_META: Record<string, { label: string; category: string; icon: string;
 
 function PipelineNodeView({ data, selected }: NodeProps<Node<PipelineNodeData>>) {
   const node = data.ir;
+  const vertical = data.direction === 'vertical';
+  const targetPos = vertical ? Position.Top : Position.Left;
+  const sourcePos = vertical ? Position.Bottom : Position.Right;
   const meta = NODE_META[node.type] || { label: node.type.split('.').slice(-1)[0], category: 'transform', icon: 'box', summary: () => 'Custom node' };
   return (
     <div className={`studio-rf-node node-${meta.category} ${selected ? 'selected' : ''}`}>
@@ -32,8 +36,8 @@ function PipelineNodeView({ data, selected }: NodeProps<Node<PipelineNodeData>>)
       </div>
       <p className="node-summary">{meta.summary(node.config)}</p>
       <div className="studio-rf-ports">
-        {node.inputs.map((port) => <span key={port.name} className="studio-rf-port input"><Handle type="target" position={Position.Left} id={port.name} /><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span></span>)}
-        {node.outputs.map((port) => <span key={port.name} className="studio-rf-port output"><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span><Handle type="source" position={Position.Right} id={port.name} /></span>)}
+        {node.inputs.map((port) => <span key={port.name} className="studio-rf-port input"><Handle type="target" position={targetPos} id={port.name} /><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span></span>)}
+        {node.outputs.map((port) => <span key={port.name} className="studio-rf-port output"><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span><Handle type="source" position={sourcePos} id={port.name} /></span>)}
       </div>
     </div>
   );
@@ -50,14 +54,58 @@ export interface GraphCanvasProps {
   onConnectAttempt: (connection: Connection) => { ok: boolean; error?: string };
   onSelect: (nodeId: string | null) => void;
   layoutNonce?: number;
+  direction?: 'horizontal' | 'vertical';
+  viewMode?: 'readable' | 'all';
 }
 
-export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect, layoutNonce = 0 }: GraphCanvasProps) {
+export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect, layoutNonce = 0, direction = 'horizontal', viewMode = 'readable' }: GraphCanvasProps) {
   const [flow, setFlow] = useState<ReactFlowInstance<Node<PipelineNodeData>, Edge> | null>(null);
-  useEffect(() => { if (layoutNonce > 0) void flow?.fitView({ padding: 0.2 }); }, [layoutNonce, flow]);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const fittedRef = useRef(false);
+  const userMovedRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!flow || !wrapRef.current) return;
+    if (layoutNonce > 0) { fittedRef.current = false; userMovedRef.current = false; }
+    const element = wrapRef.current;
+    let frames = 0;
+    const applyView = () => {
+      if (viewMode === 'all') void flow.fitView({ padding: 0.2, minZoom: 0.05 });
+      else flow.setViewport({ x: 14, y: 14, zoom: 0.9 });
+      fittedRef.current = true;
+    };
+    const measureAndFit = () => {
+      if (fittedRef.current) return;
+      const rect = element.getBoundingClientRect();
+      const nodeElements = Array.from(element.querySelectorAll('.react-flow__node'));
+      const measured = nodes.length > 0 && nodeElements.length >= nodes.length
+        && nodeElements.every((node) => node.getBoundingClientRect().width > 0);
+      if (rect.width > 0 && rect.height > 0 && measured) {
+        rafRef.current = window.requestAnimationFrame(() => {
+          rafRef.current = null;
+          if (!fittedRef.current) applyView();
+        });
+        return;
+      }
+      if (frames < 240) {
+        frames += 1;
+        rafRef.current = window.requestAnimationFrame(measureAndFit);
+      }
+    };
+    measureAndFit();
+    const observer = new ResizeObserver(() => { if (!fittedRef.current) measureAndFit(); });
+    observer.observe(element);
+    const onVisibility = () => { if (!document.hidden && !fittedRef.current) measureAndFit(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+    };
+  }, [flow, nodes.length, layoutNonce, viewMode, direction]);
   const flowNodes: Array<Node<PipelineNodeData>> = nodes.map((node) => ({
     id: node.id, type: 'pipeline', position: node.position,
-    data: { ir: node.data.ir }, selected: node.id === selectedId,
+    data: { ir: node.data.ir, direction }, selected: node.id === selectedId,
   }));
   const flowEdges: Edge[] = edges.map((edge) => ({
     id: edge.id, source: edge.source, target: edge.target,
@@ -98,24 +146,19 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
     }]);
   }, [edges, nodes, onConnectAttempt, onEdgesChange]);
   return (
-    <div className="studio-rf-wrap">
+    <div className="studio-rf-wrap" ref={wrapRef}>
       <ReactFlow
         style={{ width: '100%', height: '100%' }}
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes as any}
-        fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 1.15 }}
+        fitView={false}
         defaultEdgeOptions={{ type: 'smoothstep' }}
         elevateEdgesOnSelect
         minZoom={0.25}
         maxZoom={1.75}
-        onInit={(instance) => {
-          setFlow(instance);
-          // A second tab can mount React Flow before its container has a measured
-          // viewport; fit again after layout/paint so nodes are never off-screen.
-          window.setTimeout(() => void instance.fitView({ padding: 0.2 }), 100);
-        }}
+        onInit={setFlow}
+        onMoveStart={() => { userMovedRef.current = true; }}
         onNodeClick={(_, node) => onSelect(node.id)}
         onPaneClick={() => onSelect(null)}
         onNodesChange={handleNodesChange}

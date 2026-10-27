@@ -8,6 +8,7 @@ import { useDocumentTitle } from '../hooks';
 import { GraphCanvas } from './GraphCanvas';
 import { toGraph, fromGraph } from './ir/adapter';
 import { definitionDiff } from './ir/diff';
+import { getPipelineExecutionOrder } from './ir/topology';
 import type { GraphEdge, GraphNode } from './ir/types';
 import { validatePipeline } from './ir/validation';
 
@@ -59,7 +60,10 @@ export function PipelineEditorPage() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [layoutNonce, setLayoutNonce] = useState(0);
+  const [layoutDirection, setLayoutDirection] = useState<'horizontal' | 'vertical'>('vertical');
+  const [viewMode, setViewMode] = useState<'readable' | 'all'>('readable');
   const [mobileView, setMobileView] = useState<'nodes' | 'canvas'>('canvas');
+  const [configInvalid, setConfigInvalid] = useState(false);
   const loadSeq = useRef(0);
   useEffect(() => {
     if (!graph) return;
@@ -91,7 +95,7 @@ export function PipelineEditorPage() {
       setDraft(active);
       const source = active?.definition || pipeline.latest?.definition;
       if (!source) throw new Error('No published revision or draft is available');
-      setGraph(toGraph(source));
+      setGraph(toGraph(source, layoutDirection));
       setBaseline(irKey(source));
       setSelectedId(null);
       setHistory([]);
@@ -147,7 +151,7 @@ export function PipelineEditorPage() {
     try {
       const created = await api.post<PipelineDraft>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}/drafts`, { baseRevision: detail.latestRevision });
       setDraft(created); setDrafts((items) => [created, ...items]);
-      setGraph(toGraph(created.definition)); setBaseline(irKey(created.definition));
+      setGraph(toGraph(created.definition, layoutDirection)); setBaseline(irKey(created.definition));
       setHistory([]); setFuture([]); setSelectedId(null); setServerValidation(null);
       setNotice(`Draft created · version ${created.version}`);
       navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
@@ -163,7 +167,7 @@ export function PipelineEditorPage() {
         { 'if-match': String(overrideVersion ?? draft.version) },
       );
       setDraft(saved);
-      setGraph(toGraph(saved.definition));
+      setGraph(toGraph(saved.definition, layoutDirection));
       setBaseline(irKey(saved.definition));
       setHistory([]); setFuture([]); setServerValidation(null);
       setNotice(`Draft saved · version ${saved.version}`);
@@ -223,8 +227,15 @@ export function PipelineEditorPage() {
     setConnectionError(null); return { ok: true };
   };
 
+  const changeLayout = (nextDirection: 'horizontal' | 'vertical') => {
+    setHistory((items) => [...items.slice(-29), { graph }]);
+    setFuture([]);
+    setLayoutDirection(nextDirection);
+    setGraph(toGraph(definition, nextDirection));
+    setLayoutNonce((value) => value + 1);
+  };
   const autoLayout = () => {
-    const next = toGraph(definition);
+    const next = toGraph(definition, layoutDirection);
     setHistory((items) => [...items.slice(-29), { graph }]);
     setFuture([]);
     setGraph(next);
@@ -249,10 +260,13 @@ export function PipelineEditorPage() {
           <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> Undo</button>
           <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>Redo</button>
           <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> Auto layout</button>
+          <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title="Toggle horizontal / vertical layout"><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? 'Horizontal' : 'Vertical'}</button>
+          <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title="Readable zoom">Readable</button>
+          <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title="Fit all nodes">Fit all</button>
           <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> Preview</button>
           <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>Detail</Link>
           {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> Create draft</button> : <>
-            <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty}><Icon name="save" size={15} /> {busy === 'save' ? 'Saving…' : 'Save draft'}</button>
+            <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? 'Saving…' : 'Save draft'}</button>
             <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? 'Validating…' : 'Validate'}</button>
             <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? 'Run server validation first' : dirty ? 'Save before publish' : 'Publish this draft'}><Icon name="upload" size={15} /> {busy === 'publish' ? 'Publishing…' : 'Publish'}</button>
           </>}
@@ -292,7 +306,7 @@ export function PipelineEditorPage() {
             <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>Nodes</button>
             <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>Canvas</button>
           </div>
-          {mobileView === 'nodes' ? <div className="mobile-node-list">{definition.nodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{index + 1}</span><span><strong>{nodeLabel(node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{node.outputs.length} out</span></button>)}</div> : <GraphCanvas layoutNonce={layoutNonce} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : '?'}</span><span><strong>{nodeLabel(node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{node.outputs.length} out</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
           <p className="studio-note"><Icon name="alert" size={13} /> Local edits are not persisted until Save draft. Publish requires server validation.</p>
         </section>
@@ -302,7 +316,7 @@ export function PipelineEditorPage() {
             {!hasDraft && <p className="muted small">Create a draft to edit this configuration.</p>}
             <p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · typeVersion {selected.typeVersion}</p>
             <h3>Configuration</h3>
-            <NodeConfigForm key={selected.nodeId} node={selected} readOnly={!hasDraft} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
+            <NodeConfigForm key={selected.nodeId} node={selected} readOnly={!hasDraft} onValidityChange={setConfigInvalid} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
             <details className="advanced"><summary>Advanced · type, ports and raw config</summary><p className="mono small">{selected.type} · v{selected.typeVersion}</p><pre>{JSON.stringify(selected.config, null, 2)}</pre></details>
             <h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>input{port.required ? ' · required' : ''}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>output{port.nullable ? ' · nullable' : ''}</small></li>)}</ul>
           </> : <p className="muted small">Select a node to edit its typed config.</p>}
@@ -326,7 +340,7 @@ export function PipelineEditorPage() {
   );
 }
 
-function NodeConfigForm({ node, readOnly, onChange }: { node: { config: Record<string, unknown>; type: string }; readOnly: boolean; onChange: (key: string, value: unknown) => void }) {
+function NodeConfigForm({ node, readOnly, onChange, onValidityChange }: { node: { config: Record<string, unknown>; type: string }; readOnly: boolean; onChange: (key: string, value: unknown) => void; onValidityChange?: (invalid: boolean) => void }) {
   const entries = useMemo(() => Object.entries(node.config || {}), [node.config]);
   return (
     <div className="config-form">
@@ -336,8 +350,45 @@ function NodeConfigForm({ node, readOnly, onChange }: { node: { config: Record<s
         if (typeof value === 'number') return <label key={key} htmlFor={id}><span>{key}</span><input id={id} type="number" value={value} disabled={readOnly} onChange={(event) => onChange(key, Number(event.target.value))} /></label>;
         if (typeof value === 'boolean') return <label key={key} htmlFor={id} className="config-checkbox"><input id={id} type="checkbox" checked={value} disabled={readOnly} onChange={(event) => onChange(key, event.target.checked)} /><span>{key}</span></label>;
         if (typeof value === 'string') return <label key={key} htmlFor={id}><span>{key}</span><input id={id} value={value} disabled={readOnly} onChange={(event) => onChange(key, event.target.value)} /></label>;
-        return <label key={key} htmlFor={id}><span>{key} (JSON)</span><textarea id={id} rows={5} defaultValue={JSON.stringify(value, null, 2)} disabled={readOnly} onChange={(event) => { try { onChange(key, JSON.parse(event.target.value)); } catch { /* keep last valid value until JSON parses */ } }} /></label>;
+        return <JsonConfigField key={key} id={id} label={key} value={value} readOnly={readOnly} onChange={(parsed) => onChange(key, parsed)} onValidityChange={onValidityChange} />;
       })}
     </div>
+  );
+}
+
+
+function JsonConfigField({ id, label, value, readOnly, onChange, onValidityChange }: {
+  id: string; label: string; value: unknown; readOnly: boolean;
+  onChange: (value: unknown) => void; onValidityChange?: (invalid: boolean) => void;
+}) {
+  const serialized = JSON.stringify(value, null, 2);
+  const [text, setText] = useState(serialized);
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => { setText(serialized); setInvalid(false); onValidityChange?.(false); }, [serialized]);
+  return (
+    <label htmlFor={id}>
+      <span>{label} (JSON)</span>
+      <textarea
+        id={id}
+        rows={5}
+        value={text}
+        disabled={readOnly}
+        aria-invalid={invalid}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          try {
+            const parsed = JSON.parse(next);
+            setInvalid(false);
+            onValidityChange?.(false);
+            onChange(parsed);
+          } catch {
+            setInvalid(true);
+            onValidityChange?.(true);
+          }
+        }}
+      />
+      {invalid && <span className="text-danger small" role="alert">Invalid JSON; this field is not saved until it parses.</span>}
+    </label>
   );
 }

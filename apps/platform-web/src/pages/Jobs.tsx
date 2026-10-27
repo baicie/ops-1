@@ -6,20 +6,7 @@ import type { JobDiagnostics, JobList, JobResultView, JobView, PipelineDetail } 
 import { Icon } from '../components/Icons';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
-
-function spanLabel(start?: string | null, end?: string | null) {
-  if (!start) return '—';
-  const finish = end ? new Date(end).getTime() : Date.now();
-  const ms = Math.max(0, finish - new Date(start).getTime());
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
-}
-
-function durationLabel(job: JobView) {
-  if (job.finishedAt) return spanLabel(job.startedAt, job.finishedAt);
-  if (job.startedAt) return `${spanLabel(job.startedAt)} running`;
-  if (job.status === 'QUEUED') return 'Queued';
-  return '—';
-}
+import { executionLabel as durationLabel, spanLabel } from './jobDuration';
 
 export function JobsPage() {
   useDocumentTitle('Jobs');
@@ -112,7 +99,7 @@ export function JobDetailPage() {
         <div className="panel metric-card"><span className="metric-label">Pipeline</span><strong className="metric-value mono">{job.pipelineId}</strong></div>
         <div className="panel metric-card"><span className="metric-label">Revision</span><strong className="metric-value">r{job.pipelineRevision}</strong></div>
       </section>
-      <details className="advanced panel"><summary>Advanced · full Job ID, fence and lease</summary><div className="kv-grid"><div className="kv"><span className="kv-label">Job ID</span><span className="kv-value mono copyable" onClick={() => void navigator.clipboard?.writeText(job.jobId)} title="Click to copy">{job.jobId}</span></div><div className="kv"><span className="kv-label">Attempts</span><span className="kv-value mono">{job.attempts} / {job.maxAttempts}</span></div><div className="kv"><span className="kv-label">Fence</span><span className="kv-value mono">{job.currentFence}</span></div><div className="kv"><span className="kv-label">Lease</span><span className="kv-value mono">{job.currentLeaseId || '—'}</span></div><div className="kv"><span className="kv-label">Queue wait</span><span className="kv-value mono">{spanLabel(job.createdAt, job.startedAt)}</span></div><div className="kv"><span className="kv-label">Total elapsed</span><span className="kv-value mono">{spanLabel(job.createdAt, job.finishedAt)}</span></div><div className="kv"><span className="kv-label">Updated</span><span className="kv-value mono">{new Date(job.updatedAt).toISOString()}</span></div></div></details>
+      <details className="advanced panel"><summary>Advanced · full Job ID, fence and lease</summary><div className="kv-grid"><div className="kv"><span className="kv-label">Job ID</span><button type="button" className="link-button mono" title="Copy job ID" onClick={() => void navigator.clipboard?.writeText(job.jobId)}>{job.jobId}</button></div><div className="kv"><span className="kv-label">Attempts</span><span className="kv-value mono">{job.attempts} / {job.maxAttempts}</span></div><div className="kv"><span className="kv-label">Fence</span><span className="kv-value mono">{job.currentFence}</span></div><div className="kv"><span className="kv-label">Lease</span><span className="kv-value mono">{job.currentLeaseId || '—'}</span></div><div className="kv"><span className="kv-label">Queue wait</span><span className="kv-value mono">{spanLabel(job.createdAt, job.startedAt)}</span></div><div className="kv"><span className="kv-label">Total elapsed</span><span className="kv-value mono">{spanLabel(job.createdAt, job.finishedAt)}</span></div><div className="kv"><span className="kv-label">Updated</span><span className="kv-value mono">{new Date(job.updatedAt).toISOString()}</span></div></div></details>
       <section className="panel panel-pad"><h2>Lifecycle</h2><ul className="detail-list"><li><span>Created</span><TimeAgo value={job.createdAt} /></li><li><span>Updated</span><TimeAgo value={job.updatedAt} /></li><li><span>Error code</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">Attempts, timeline and checkpoints are read from Kernel records; full identifiers remain in Advanced.</p></section>
       <section className="panel panel-pad"><h2>Timeline</h2>{!diagnostics ? <p className="muted small">Diagnostics unavailable.</p> : diagnostics.events.length === 0 ? <p className="muted small">No events recorded.</p> : <ol className="timeline">{diagnostics.events.map((event) => <li key={event.eventId}><span className="timeline-dot" /><div><strong>{event.eventType}</strong>{event.toStatus && <span className="tag">{event.toStatus}</span>}{event.fencingSequence != null && <span className="muted small">fence {event.fencingSequence}</span>}<TimeAgo value={event.occurredAt} /></div></li>)}</ol>}{diagnostics?.truncated && <p className="muted small">Timeline truncated at 500 events.</p>}</section>
       {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>Attempts</h2><div className="table-panel"><table className="data-table"><thead><tr><th>Attempt</th><th>Status</th><th>Fence</th><th>Node</th><th>Started</th></tr></thead><tbody>{diagnostics.attempts.map((attempt) => <tr key={attempt.attemptNumber}><td>#{attempt.attemptNumber}</td><td><StatusBadge status={attempt.status} /></td><td className="mono">{attempt.fencingSequence}</td><td className="mono small">{attempt.nodeId}</td><td><TimeAgo value={attempt.startedAt} /></td></tr>)}</tbody></table></div></section>}

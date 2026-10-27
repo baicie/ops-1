@@ -144,3 +144,17 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png') });
   await pageB.close();
 });
+
+test('mobile studio node list opens inspector at 390', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  await login(page);
+  await page.goto(`/pipelines/${PIPELINE}/editor`);
+  await page.getByRole('button', { name: 'Nodes', exact: true }).click();
+  await page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first().click();
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: path.join(OUT, 'mobile-studio.png') });
+  await context.close();
+});

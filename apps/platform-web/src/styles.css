@@ -963,3 +963,14 @@ details.panel.advanced > summary { padding: 14px 18px; }
 .jobs-table td:nth-child(6) time { white-space: nowrap; }
 .jobs-table td:nth-child(7) time, .jobs-table td:nth-child(7) { white-space: nowrap; }
 .jobs-table th:nth-child(7) { width: 100px; }
+.link-button { border: 0; background: transparent; padding: 0; color: var(--ow-accent); cursor: pointer; text-align: left; border-radius: 4px; }
+.link-button:hover { text-decoration: underline; }
+
+/* Mobile toolbar wraps instead of clipping labels; node-list note stays in flow. */
+@media (max-width: 760px) {
+  .studio-page .page-actions { flex-wrap: wrap; overflow: visible; }
+  .studio-page .page-actions .btn { flex: 0 0 auto; }
+  .studio-page .studio-note { position: static; margin: 6px 10px 10px; }
+  .studio-page .studio-canvas { height: auto; min-height: 440px; }
+  .studio-page .mobile-node-list { max-height: 430px; }
+}
