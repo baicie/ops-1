@@ -92,6 +92,32 @@ QUALITY_UNKNOWN="$(printf '%s' "$QUALITY" | json "d['unknown']")"
 [ "$QUALITY_UNKNOWN" = "0" ] || bad "quality unknown is $QUALITY_UNKNOWN, expected 0"
 ok "quality total=$QUALITY_TOTAL unknown=$QUALITY_UNKNOWN"
 
+echo "== quality rules and persistent run"
+QRULE="$(api -X POST -H 'content-type: application/json' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-rules" \
+  -d '{"ruleType":"RECORD_COUNT","config":{"min":100,"max":10000},"severity":"HIGH","schemaRevision":2}')"
+QRULE_ID="$(printf '%s' "$QRULE" | json "d['ruleId']")"
+[ -n "$QRULE_ID" ] || bad "quality rule creation returned no id"
+QRUN="$(api -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
+  -d '{"schemaRevision":2}')"
+QRUN_ID="$(printf '%s' "$QRUN" | json "d['runId']")"
+QRUN_ID_2="$(api -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
+  -d '{"schemaRevision":2}' | json "d['runId']")"
+[ "$QRUN_ID" = "$QRUN_ID_2" ] || bad "quality idempotency created a second run"
+for _ in $(seq 1 40); do
+  QSTATUS="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID" | json "d['status']")"
+  case "$QSTATUS" in PASSED|FAILED|ERROR|CANCELLED) break ;; esac
+  sleep 0.25
+done
+[ "$QSTATUS" = "FAILED" ] || bad "quality run expected FAILED, got $QSTATUS"
+QDETAIL="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID")"
+printf '%s' "$QDETAIL" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="FAILED"; assert d["recordsExamined"]>0; assert d["results"] and d["results"][0]["failed"]==1; assert d["ruleSetDigest"].startswith("sha256:")' || bad "quality result shape mismatch"
+CANCEL_CODE="$(curl -sS -o /tmp/quality-cancel.json -w '%{http_code}' "${AUTH[@]}" -X POST "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID/cancel")"
+[ "$CANCEL_CODE" = "409" ] || bad "terminal quality cancel returned $CANCEL_CODE"
+ok "quality rule $QRULE_ID run $QRUN_ID FAILED and history/result persisted"
+
 echo "== Catalog capability unavailable fails closed"
 GRANT_ID="$(api "$URL/api/v1/capability-grants" | json "next(g['id'] for g in d if g['name']=='data.catalog.v1' and g['state']=='ACTIVE')")"
 api -X DELETE "$URL/api/v1/capability-grants/$GRANT_ID" >/dev/null
