@@ -363,14 +363,15 @@ function qualityRuleView(row) {
 function qualityRunView(row, results) {
   return { runId: row.run_id, datasetId: row.dataset_id, schemaRevision: row.schema_revision,
     status: row.status, ruleSetDigest: row.rule_set_digest, recordsExamined: row.records_examined,
-    recordsFailed: row.records_failed, ruleFailureCount: (results || []).reduce((total, result) => total + Number(result.failed || 0), 0), errorCode: row.error_code, attempt: row.attempt,
+    recordsFailed: row.records_failed, ruleFailureCount: (results || []).reduce((total, result) => total + Number(result.failed || 0), 0), failedRuleCount: (results || []).filter((result) => result.status === 'FAILED').length, errorCode: row.error_code, attempt: row.attempt,
     startedAt: row.started_at ? row.started_at.toISOString() : null,
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
     createdAt: row.created_at.toISOString(), results: results || [] };
 }
 function qualityResultView(row) {
   return { ruleId: row.rule_id, ruleVersion: row.rule_version, status: row.status,
-    examined: row.examined, failed: row.failed, summary: row.summary };
+    examined: row.examined, failed: row.failed, summary: row.summary,
+    aggregateFailed: Boolean(row.summary && row.summary.aggregateFailed) };
 }
 
 async function markQualityError(runId, owner, token, code) {
@@ -421,10 +422,10 @@ async function executeQualityRun(runId) {
     const write = await pool.connect();
     try {
       await write.query('BEGIN');
-      const current = await write.query("SELECT status,fencing_token,lease_owner,lease_expires_at FROM catalog_quality_runs WHERE run_id=$1 FOR UPDATE", [runId]);
+      const current = await write.query("SELECT status,fencing_token,lease_owner,lease_expires_at > now() AS lease_valid FROM catalog_quality_runs WHERE run_id=$1 FOR UPDATE", [runId]);
       const currentRun = current.rows[0];
       if (!currentRun || currentRun.status !== 'RUNNING' || Number(currentRun.fencing_token) !== token
-        || currentRun.lease_owner !== owner || !currentRun.lease_expires_at || new Date(currentRun.lease_expires_at).getTime() <= Date.now()) {
+        || currentRun.lease_owner !== owner || currentRun.lease_valid !== true) {
         await write.query('ROLLBACK');
         return;
       }

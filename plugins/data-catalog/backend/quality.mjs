@@ -87,7 +87,7 @@ export function evaluateRule(rule, records) {
     });
   } else if (rule.ruleType === 'RECORD_COUNT') {
     failed = records.length < config.min || records.length > config.max ? 1 : 0;
-    return { status: failed ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes: [], aggregateFailed: Boolean(failed), summary: { min: config.min, max: config.max, observed: records.length } };
+    return { status: failed ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes: [], aggregateFailed: Boolean(failed), summary: { min: config.min, max: config.max, observed: records.length, aggregateFailed: Boolean(failed) } };
   }
   return { status: failed > 0 ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes, summary: { failed } };
 }
