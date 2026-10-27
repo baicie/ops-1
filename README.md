@@ -44,6 +44,25 @@ BUILD=0 scripts/demo_up.sh
 
 Open <http://127.0.0.1:18181>. The bootstrap admin is `admin@opsweave.local` / `OpsWeave!2026` in the local demo only. Change it in any shared environment.
 
+### Lifecycle helper
+
+For day-to-day local operation use the wrapper instead of remembering each script:
+
+```bash
+./scripts/opsweave.sh doctor     # prerequisites + DB + bundle checks
+./scripts/opsweave.sh plugins    # build signed reference plugin bundles
+./scripts/opsweave.sh init       # destructive first-time/reset, asks for confirmation
+./scripts/opsweave.sh data       # build + activate Data Catalog / Integration
+./scripts/opsweave.sh start      # resume an existing local environment (non-destructive)
+./scripts/opsweave.sh status     # Kernel / Node / plugin state
+./scripts/opsweave.sh logs kernel
+./scripts/opsweave.sh dev        # Vite HMR after Kernel is running
+./scripts/opsweave.sh stop       # stop host processes + managed containers
+./scripts/opsweave.sh down       # stop + docker compose down
+```
+
+`start` deliberately does **not** reset the database. Use `FORCE=1 ./scripts/opsweave.sh init` only for disposable local state. `WITH_DATA=1` installs the data plugins during start/init.
+
 ### Reproduce the acceptance checks
 
 ```bash

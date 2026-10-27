@@ -1,4 +1,4 @@
-.PHONY: build test contract web demo-up demo-data demo-down clean
+.PHONY: build test contract web demo-up demo-data demo-down clean ops-up ops-init ops-stop ops-status ops-doctor ops-data
 build:
 	cargo build -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
 web:
@@ -17,5 +17,19 @@ demo-data:
 	scripts/demo_data_up.sh
 demo-down:
 	scripts/demo_down.sh
+
+# OpsWeave local lifecycle wrapper (see scripts/opsweave.sh help).
+ops-up:
+	./scripts/opsweave.sh start
+ops-init:
+	./scripts/opsweave.sh init
+ops-stop:
+	./scripts/opsweave.sh stop
+ops-status:
+	./scripts/opsweave.sh status
+ops-doctor:
+	./scripts/opsweave.sh doctor
+ops-data:
+	./scripts/opsweave.sh data
 clean:
 	cargo clean
