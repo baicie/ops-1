@@ -63,6 +63,16 @@ curl -fsS "${ADMIN[@]}" -X POST -H 'content-type: application/json' "$CAT/datase
 VIEW_CODE="$(cookie_status "$VIEWER_JAR" "$VIEWER_CSRF" POST "$CAT/datasets/$ADMIN_DATASET_ID/schemas/2/publish" /tmp/authz-viewer-publish.json)"
 [ "$VIEW_CODE" = "403" ] || bad "viewer schema publish returned $VIEW_CODE, expected 403"
 
+ADMIN_RULE="$(curl -fsS "${ADMIN[@]}" -X POST -H 'content-type: application/json' "$CAT/datasets/$ADMIN_DATASET_ID/quality-rules" -d '{"ruleType":"RECORD_COUNT","config":{"min":0,"max":100},"severity":"LOW","schemaRevision":1}')"
+ADMIN_RULE_ID="$(printf '%s' "$ADMIN_RULE" | json "d['ruleId']")"
+[ -n "$ADMIN_RULE_ID" ] || bad "admin quality rule creation failed"
+VIEW_CODE="$(cookie_status "$VIEWER_JAR" "$VIEWER_CSRF" GET "$CAT/datasets/$ADMIN_DATASET_ID/quality-rules" /tmp/authz-viewer-rules.json)"
+[ "$VIEW_CODE" = "200" ] || bad "viewer quality rule read returned $VIEW_CODE, expected 200"
+VIEW_CODE="$(cookie_status "$VIEWER_JAR" "$VIEWER_CSRF" POST "$CAT/datasets/$ADMIN_DATASET_ID/quality-rules" /tmp/authz-viewer-rule-write.json '{"ruleType":"RECORD_COUNT","config":{"min":0,"max":10},"schemaRevision":1}')"
+[ "$VIEW_CODE" = "403" ] || bad "viewer quality rule write returned $VIEW_CODE, expected 403"
+VIEW_CODE="$(cookie_status "$VIEWER_JAR" "$VIEWER_CSRF" POST "$CAT/datasets/$ADMIN_DATASET_ID/quality-runs" /tmp/authz-viewer-quality-run.json '{"schemaRevision":1}')"
+[ "$VIEW_CODE" = "403" ] || bad "viewer quality run returned $VIEW_CODE, expected 403"
+
 SOURCE_BODY="{\"name\":\"authz-admin-source\",\"connectorType\":\"http-json\",\"endpoint\":\"$FIXTURE\",\"credential\":{\"credentialRef\":\"secret://local/http-json/authz\",\"kind\":\"none\",\"maskedHint\":\"local\"}}"
 ADMIN_SOURCE="$(curl -fsS "${ADMIN[@]}" -X POST -H 'content-type: application/json' -H 'Idempotency-Key: authz-admin-source-0001' "$INT/sources" -d "$SOURCE_BODY")"
 ADMIN_SOURCE_ID="$(printf '%s' "$ADMIN_SOURCE" | json "d['sourceId']")"
@@ -76,6 +86,14 @@ VIEW_CODE="$(cookie_status "$VIEWER_JAR" "$VIEWER_CSRF" POST "$INT/ingestion-spe
 # cookie_status does not send Idempotency-Key; auth must be checked before this validation.
 [ "$VIEW_CODE" = "403" ] || bad "viewer ingestion run returned $VIEW_CODE, expected 403"
 ok "Viewer write endpoints rejected"
+
+NODE_ID="$(curl -fsS "${ADMIN[@]}" "$URL/api/v1/nodes" | json "d[0]['id']")"
+[ -n "$NODE_ID" ] || bad "no node available for history authz"
+VIEW_CODE="$(cookie_status "$VIEWER_JAR" "$VIEWER_CSRF" GET "$URL/api/v1/nodes/$NODE_ID/resource-history?limit=5" /tmp/authz-viewer-node-history.json)"
+[ "$VIEW_CODE" = "200" ] || bad "viewer node history returned $VIEW_CODE, expected 200"
+ANON_CODE="$(curl -sS -o /tmp/authz-anon-node-history.json -w '%{http_code}' "$URL/api/v1/nodes/$NODE_ID/resource-history?limit=5")"
+[ "$ANON_CODE" = "401" ] || bad "anonymous node history returned $ANON_CODE, expected 401"
+ok "Node history authorization matrix"
 
 echo "== Operator legal write path still works"
 OP_DATASET_BODY='{"name":"authz-operator-dataset","description":"operator fixture","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0}],"retentionPolicy":{"mode":"RETAIN","maxRecords":100,"maxBytes":1048576}}'
