@@ -94,6 +94,12 @@ function validateFields(fields) {
   }
   return fields.slice().sort((a, b) => a.ordinal - b.ordinal);
 }
+function validateRuleFields(config, fields) {
+  const available = new Set(fields.map((field) => field.name));
+  const names = config.fields || (config.field ? [config.field] : []);
+  for (const name of names) if (!available.has(name)) throw new Error(`rule field ${name} is not in the published schema`);
+}
+
 function schemaDigest(fields) { return digest(validateFields(fields).slice().sort((a, b) => a.name.localeCompare(b.name))); }
 function compareSchemas(from, to) {
   const changes = [];
@@ -113,8 +119,9 @@ function compareSchemas(from, to) {
 function validateRecord(fields, record) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return 'record must be an object';
   for (const field of fields) {
-    const value = record[field.name];
-    if (value === undefined || value === null) {
+    const own = Object.prototype.hasOwnProperty.call(record, field.name);
+    const value = own ? record[field.name] : undefined;
+    if (!own || value === undefined || value === null) {
       if (!field.nullable) return `missing required field ${field.name}`;
       continue;
     }
@@ -160,6 +167,7 @@ async function initDb() {
       payload jsonb NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now()
     );
+    CREATE INDEX IF NOT EXISTS catalog_records_dataset_revision_idx ON catalog_records (dataset_id, schema_revision, record_id);
     CREATE TABLE IF NOT EXISTS catalog_receipts (
       receipt_id uuid PRIMARY KEY,
       dataset_id uuid NOT NULL,
@@ -253,6 +261,7 @@ async function initDb() {
       request_digest text,
       records_examined integer NOT NULL DEFAULT 0,
       records_failed integer NOT NULL DEFAULT 0,
+      failed_rule_count integer NOT NULL DEFAULT 0,
       error_code text,
       created_by text,
       fencing_token bigint NOT NULL DEFAULT 0,
@@ -266,6 +275,7 @@ async function initDb() {
       UNIQUE (dataset_id, idempotency_key)
     );
     ALTER TABLE catalog_quality_runs ADD COLUMN IF NOT EXISTS request_digest text;
+    ALTER TABLE catalog_quality_runs ADD COLUMN IF NOT EXISTS failed_rule_count integer NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS catalog_quality_runs_dataset_idx ON catalog_quality_runs (dataset_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS catalog_quality_runs_claim_idx ON catalog_quality_runs (status, created_at);
     CREATE TABLE IF NOT EXISTS catalog_quality_results (
@@ -363,7 +373,7 @@ function qualityRuleView(row) {
 function qualityRunView(row, results) {
   return { runId: row.run_id, datasetId: row.dataset_id, schemaRevision: row.schema_revision,
     status: row.status, ruleSetDigest: row.rule_set_digest, recordsExamined: row.records_examined,
-    recordsFailed: row.records_failed, ruleFailureCount: (results || []).reduce((total, result) => total + Number(result.failed || 0), 0), failedRuleCount: (results || []).filter((result) => result.status === 'FAILED').length, errorCode: row.error_code, attempt: row.attempt,
+    recordsFailed: row.records_failed, ruleFailureCount: (results || []).reduce((total, result) => total + Number(result.failed || 0), 0), failedRuleCount: results && results.length ? results.filter((result) => result.status === 'FAILED').length : Number(row.failed_rule_count || 0), errorCode: row.error_code, attempt: row.attempt,
     startedAt: row.started_at ? row.started_at.toISOString() : null,
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
     createdAt: row.created_at.toISOString(), results: results || [] };
@@ -400,7 +410,14 @@ async function executeQualityRun(runId) {
     leaseTimer = setInterval(() => {
       pool.query("UPDATE catalog_quality_runs SET lease_expires_at=now()+interval '5 minutes', updated_at=now() WHERE run_id=$1 AND status='RUNNING' AND lease_owner=$2 AND fencing_token=$3", [runId, owner, token])
         .then((renewed) => { if (renewed.rowCount === 0) leaseLost = true; })
-        .catch(() => { leaseLost = true; });
+        .catch(async () => {
+          // A transient connection error is not proof that the lease was lost.
+          try {
+            const check = await pool.query("SELECT status,lease_owner,fencing_token,lease_expires_at > now() AS lease_valid FROM catalog_quality_runs WHERE run_id=$1", [runId]);
+            const row = check.rows[0];
+            if (!row || row.status !== 'RUNNING' || row.lease_owner !== owner || Number(row.fencing_token) !== token || row.lease_valid !== true) leaseLost = true;
+          } catch { /* completion transaction will make the final DB-authoritative decision */ }
+        });
     }, 15000);
     leaseTimer.unref();
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
@@ -441,10 +458,10 @@ async function executeQualityRun(runId) {
       }
       const finalized = await write.query(
         `UPDATE catalog_quality_runs SET status=$2, completed_at=now(), updated_at=now(),
-           records_examined=$3, records_failed=$4, lease_expires_at=NULL
-         WHERE run_id=$1 AND status='RUNNING' AND fencing_token=$5 AND lease_owner=$6 AND lease_expires_at > now()
+           records_examined=$3, records_failed=$4, failed_rule_count=$5, lease_expires_at=NULL
+         WHERE run_id=$1 AND status='RUNNING' AND fencing_token=$6 AND lease_owner=$7 AND lease_expires_at > now()
          RETURNING run_id`,
-        [runId, evaluation.status, records.length, evaluation.recordsFailed || 0, token, owner],
+        [runId, evaluation.status, records.length, evaluation.recordsFailed || 0, evaluation.failedRules || 0, token, owner],
       );
       if (finalized.rowCount !== 1) { await write.query('ROLLBACK'); return; }
       await write.query('COMMIT');
@@ -882,8 +899,11 @@ async function handle(req, res) {
       if (input.ruleType === 'RECORD_COUNT' && input.config.max > 10000) return fail(res, 400, 'INVALID_RULE', 'RECORD_COUNT max is bounded by the 10000 scan budget', requestId);
       const revision = body.schemaRevision === undefined ? dataset.rows[0].schema_revision : Number(body.schemaRevision);
       if (!Number.isInteger(revision) || revision < 1) return fail(res, 400, 'INVALID_REQUEST', 'schemaRevision invalid', requestId);
-      const schema = await pool.query("SELECT 1 FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status='PUBLISHED'", [datasetId, revision]);
+      const schema = await pool.query("SELECT fields FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status='PUBLISHED'", [datasetId, revision]);
       if (!schema.rows[0]) return fail(res, 409, 'SCHEMA_NOT_PUBLISHED', 'schema revision is not published', requestId);
+      try { validateRuleFields(input.config, schema.rows[0].fields); } catch (error) { return fail(res, 400, 'INVALID_RULE', error.message, requestId); }
+      const enabledCount = await pool.query('SELECT count(*)::int AS count FROM catalog_quality_rules WHERE dataset_id=$1 AND schema_revision=$2 AND enabled=true', [datasetId, revision]);
+      if (enabledCount.rows[0].count >= 100) return fail(res, 400, 'RULE_LIMIT_EXCEEDED', 'at most 100 enabled rules', requestId);
       const row = await pool.query(
         `INSERT INTO catalog_quality_rules (rule_id,dataset_id,schema_revision,rule_type,config,severity,enabled,version,created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8) RETURNING *`,
@@ -905,6 +925,12 @@ async function handle(req, res) {
         if (!Number.isInteger(body.version) || body.version < 1) return fail(res, 400, 'INVALID_REQUEST', 'version is required', requestId);
         let input;
         try { input = normalizeRuleInput(body); } catch (error) { return fail(res, 400, 'INVALID_RULE', error.message, requestId); }
+        if (input.ruleType === 'RECORD_COUNT' && input.config.max > 10000) return fail(res, 400, 'INVALID_RULE', 'RECORD_COUNT max is bounded by the 10000 scan budget', requestId);
+        const existingRule = await pool.query('SELECT schema_revision FROM catalog_quality_rules WHERE dataset_id=$1 AND rule_id=$2', [datasetId, ruleId]);
+        if (!existingRule.rows[0]) return fail(res, 404, 'RULE_NOT_FOUND', 'quality rule not found', requestId);
+        const schemaForRule = await pool.query('SELECT fields FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status=\'PUBLISHED\'', [datasetId, existingRule.rows[0].schema_revision]);
+        if (!schemaForRule.rows[0]) return fail(res, 409, 'SCHEMA_NOT_PUBLISHED', 'rule schema is not published', requestId);
+        try { validateRuleFields(input.config, schemaForRule.rows[0].fields); } catch (error) { return fail(res, 400, 'INVALID_RULE', error.message, requestId); }
         const updated = await pool.query(
           `UPDATE catalog_quality_rules SET rule_type=$3,config=$4,severity=$5,enabled=$6,version=version+1,updated_at=now()
            WHERE dataset_id=$1 AND rule_id=$2 AND version=$7 RETURNING *`,
