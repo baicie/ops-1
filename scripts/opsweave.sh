@@ -91,6 +91,84 @@ install_data() {
   ok "Data plugins are active"
 }
 
+
+ensure_docker() {
+  have docker || die "docker is required; install Docker Desktop"
+  if docker info >/dev/null 2>&1; then ok "docker daemon running"; return; fi
+  warn "docker daemon is not running"
+  if [ "$(uname -s)" = "Darwin" ] && [ -d "/Applications/Docker.app" ]; then
+    say "starting Docker Desktop"
+    open -a Docker >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+      if docker info >/dev/null 2>&1; then ok "docker daemon ready"; return; fi
+      sleep 2
+    done
+  fi
+  die "start Docker Desktop and retry"
+}
+
+ensure_postgres() {
+  if have pg_isready && pg_isready -q 2>/dev/null; then ok "PostgreSQL server is running"; return; fi
+  if [ "$(uname -s)" = "Darwin" ] && have brew; then
+    for formula in postgresql@17 postgresql@16 postgresql; do
+      if brew list --formula "$formula" >/dev/null 2>&1; then
+        say "starting $formula"
+        brew services start "$formula" >/dev/null 2>&1 || true
+        for _ in $(seq 1 30); do
+          if pg_isready -q 2>/dev/null; then ok "PostgreSQL ready"; return; fi
+          sleep 1
+        done
+      fi
+    done
+  fi
+  die "PostgreSQL is not running; start it or set OPSWEAVE_DATABASE_URL"
+}
+
+ensure_build() {
+  if [ "${REBUILD:-0}" = "1" ] || [ ! -x ./target/debug/opsweave-kernel ] || [ ! -f apps/platform-web/dist/index.html ]; then
+    cmd_build
+  else
+    ok "Rust binaries and Web Shell present"
+  fi
+}
+
+ensure_plugins() {
+  local missing=0
+  for bundle in     dist/plugins/hello-ops-0.0.1.plugin.zip     dist/plugins/hello-ops-0.0.2.plugin.zip     dist/plugins/hello-go-0.0.1.plugin.zip     dist/plugins/hello-java-0.0.1.plugin.zip; do
+    [ -f "$bundle" ] || missing=1
+  done
+  if [ "${REBUILD:-0}" = "1" ] || [ "$missing" = "1" ]; then
+    cmd_plugins
+  else
+    ok "reference plugin bundles present"
+  fi
+}
+
+database_initialized() {
+  have psql || return 1
+  psql "$DATABASE_URL" -tAc "SELECT to_regclass('kernel.pipeline_jobs')" 2>/dev/null | grep -q pipeline_jobs
+}
+
+cmd_up() {
+  say "bootstrapping OpsWeave (one command; first run may take several minutes)"
+  ensure_docker
+  ensure_postgres
+  start_registry
+  ensure_build
+  ensure_plugins
+  local reset=0
+  if ! database_initialized; then reset=1; fi
+  start_platform "$reset"
+  if [ "${WITH_DATA:-1}" = "1" ]; then
+    if ! ./target/debug/opsctl --url "$URL" plugins 2>/dev/null | grep -q 'opsweave.data-catalog'; then
+      install_data
+    else
+      ok "Data Catalog already installed"
+    fi
+  fi
+  cmd_status
+}
+
 cmd_start() {
   start_platform 0
   if [ "${WITH_DATA:-0}" = "1" ]; then install_data; fi
@@ -215,7 +293,8 @@ OpsWeave local lifecycle helper
 Usage: ./scripts/opsweave.sh <command> [options]
 
 Commands:
-  start          Start/reuse Kernel + Nodes (non-destructive)
+  up             One-command bootstrap: dependencies, build, plugins, start, data
+  start          Start/reuse existing environment (non-destructive)
   init           DESTRUCTIVE first-time/reset: recreate local DB + Nodes
   restart        Stop and start existing environment
   stop           Stop Kernel/Nodes/managed plugin containers
@@ -233,10 +312,12 @@ Environment:
   OPSWEAVE_PORT=18181
   OPSWEAVE_DB=opsweave
   OPSWEAVE_DATABASE_URL=postgres://localhost/opsweave?sslmode=disable
-  WITH_DATA=1 ./scripts/opsweave.sh start   # also install data plugins
+  WITH_DATA=0 ./scripts/opsweave.sh up      # skip Data Catalog/Integration
+  REBUILD=1 ./scripts/opsweave.sh up        # force rebuild images/web/bundles
   FORCE=1 ./scripts/opsweave.sh init       # no confirmation prompt
 
 Examples:
+  ./scripts/opsweave.sh up
   ./scripts/opsweave.sh doctor
   ./scripts/opsweave.sh init
   ./scripts/opsweave.sh data
@@ -249,7 +330,8 @@ main() {
   local cmd="${1:-help}"
   shift || true
   case "$cmd" in
-    start|up) cmd_start ;;
+    up|bootstrap) cmd_up ;;
+    start) cmd_start ;;
     init|reset) cmd_init ;;
     restart) cmd_restart ;;
     stop) cmd_stop ;;

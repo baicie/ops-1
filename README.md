@@ -49,17 +49,19 @@ Open <http://127.0.0.1:18181>. The bootstrap admin is `admin@opsweave.local` / `
 For day-to-day local operation use the wrapper instead of remembering each script:
 
 ```bash
-./scripts/opsweave.sh doctor     # prerequisites + DB + bundle checks
-./scripts/opsweave.sh plugins    # build signed reference plugin bundles
-./scripts/opsweave.sh init       # destructive first-time/reset, asks for confirmation
-./scripts/opsweave.sh data       # build + activate Data Catalog / Integration
-./scripts/opsweave.sh start      # resume an existing local environment (non-destructive)
+./scripts/opsweave.sh up         # ONE COMMAND: deps, build, plugins, DB, start, data
 ./scripts/opsweave.sh status     # Kernel / Node / plugin state
 ./scripts/opsweave.sh logs kernel
 ./scripts/opsweave.sh dev        # Vite HMR after Kernel is running
 ./scripts/opsweave.sh stop       # stop host processes + managed containers
 ./scripts/opsweave.sh down       # stop + docker compose down
 ```
+
+The first `up` may take several minutes because it builds Rust, Web Shell, signed
+plugin images and bundles. Subsequent `up` calls are fast. It starts Docker
+Desktop on macOS when needed, starts a Homebrew PostgreSQL service, creates the
+local demo database, and installs Data Catalog/Data Integration (`WITH_DATA=0`
+skips the data plugins). `REBUILD=1 ./scripts/opsweave.sh up` forces rebuilds.
 
 `start` deliberately does **not** reset the database. Use `FORCE=1 ./scripts/opsweave.sh init` only for disposable local state. `WITH_DATA=1` installs the data plugins during start/init.
 

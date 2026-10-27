@@ -20,7 +20,7 @@ demo-down:
 
 # OpsWeave local lifecycle wrapper (see scripts/opsweave.sh help).
 ops-up:
-	./scripts/opsweave.sh start
+	./scripts/opsweave.sh up
 ops-init:
 	./scripts/opsweave.sh init
 ops-stop:
