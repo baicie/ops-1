@@ -287,6 +287,17 @@ paths:
               schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DataLineage' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /governance-summary:
+    get:
+      operationId: getGovernanceSummary
+      summary: Authoritative bounded governance summary
+      responses:
+        '200':
+          description: Full dataset and latest-quality counts, 24h lineage window and recent failures
+          content:
+            application/json:
+              schema: { type: object }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
   /datasets/{datasetId}/quality-rules:
     get:
       operationId: listQualityRules

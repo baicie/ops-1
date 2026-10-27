@@ -40,3 +40,14 @@ test('rule set digest is stable across object key order', () => {
   const reordered = [{ ruleId: 'r1', version: 1, ruleType: 'REQUIRED_FIELD', config: { emptyStringFails: false, field: 'id' } }];
   assert.equal(ruleSetDigest(base), ruleSetDigest(reordered));
 });
+
+
+test('recordsFailed is distinct records, ruleFailureCount is per-rule failures', () => {
+  const result = evaluateRules([
+    rule('REQUIRED_FIELD', { field: 'id' }),
+    rule('REQUIRED_FIELD', { field: 'name' }),
+  ], [{ id: null, name: null }, { id: '1', name: 'ok' }]);
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.recordsFailed, 1);
+  assert.equal(result.results.reduce((total, item) => total + item.result.failed, 0), 2);
+});

@@ -33,6 +33,12 @@ COMPATIBLE="$(printf '%s' "$DIFF_JSON" | json "d['compatible']")"
 api -X POST "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/$REV2/publish" >/dev/null
 ok "schema revision $REV2 published; old revision 1 remains"
 
+echo "== write a revision-1 record after revision 2 is current"
+api -X POST -H 'content-type: application/json' -H 'Idempotency-Key: data-r1-record-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/records" \
+  -d '{"schemaRevision":1,"sourceBatchKey":"legacy-revision-one-0001","records":[{"id":"legacy-1","name":"legacy","cpu_percent":1,"observed_at":"2026-10-27T00:00:00Z"}]}' >/dev/null
+ok "revision-1 record persisted alongside revision-2 dataset"
+
 echo "== reject incompatible schema change"
 BAD_CODE="$(curl -sS -o /tmp/data-bad-schema.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' \
   "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/drafts" \
@@ -113,10 +119,26 @@ for _ in $(seq 1 40); do
 done
 [ "$QSTATUS" = "FAILED" ] || bad "quality run expected FAILED, got $QSTATUS"
 QDETAIL="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID")"
-printf '%s' "$QDETAIL" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="FAILED"; assert d["recordsExamined"]>0; assert d["results"] and d["results"][0]["failed"]==1; assert d["ruleSetDigest"].startswith("sha256:")' || bad "quality result shape mismatch"
+printf '%s' "$QDETAIL" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="FAILED"; assert d["recordsExamined"]==2; assert d["results"] and d["results"][0]["failed"]==1; assert d["ruleSetDigest"].startswith("sha256:")' || bad "quality result shape mismatch"
 CANCEL_CODE="$(curl -sS -o /tmp/quality-cancel.json -w '%{http_code}' "${AUTH[@]}" -X POST "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID/cancel")"
 [ "$CANCEL_CODE" = "409" ] || bad "terminal quality cancel returned $CANCEL_CODE"
 ok "quality rule $QRULE_ID run $QRUN_ID FAILED and history/result persisted"
+
+echo "== quality idempotency semantic conflict"
+api -X POST -H 'content-type: application/json' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-rules/$QRULE_ID" \
+  -d '{"version":1,"ruleType":"RECORD_COUNT","config":{"min":1,"max":2},"severity":"HIGH","enabled":true}' >/dev/null
+QCONFLICT="$(curl -sS -o /tmp/quality-idempotency-conflict.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
+  -d '{"schemaRevision":2,"idempotencyKey":"quality-run-data-foundation-0001"}')"
+[ "$QCONFLICT" = "409" ] || bad "quality semantic idempotency returned $QCONFLICT, expected 409"
+grep -q 'IDEMPOTENCY_CONFLICT' /tmp/quality-idempotency-conflict.json || bad "quality idempotency conflict code missing"
+ok "quality idempotency key rejects different rule semantics"
+
+echo "== governance summary"
+GOV="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/governance-summary")"
+printf '%s' "$GOV" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["datasetCount"]>=1; assert set(("passed","failed","error","pending","unknown")) <= set(d["latestQuality"]); assert isinstance(d["recentFailures"],list); assert d["lineageWindow"]=="24h"' || bad "governance summary shape mismatch"
+ok "governance summary is server-authoritative"
 
 echo "== node resource history"
 NODE_ID="$(api "$URL/api/v1/nodes" | json "d[0]['id']")"

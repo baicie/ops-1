@@ -60,36 +60,40 @@ function hasValue(record, field) { return Object.prototype.hasOwnProperty.call(r
 export function evaluateRule(rule, records) {
   const config = normalizeRuleConfig(rule.ruleType, rule.config);
   let failed = 0;
+  const failedIndexes = [];
   if (rule.ruleType === 'REQUIRED_FIELD') {
-    for (const record of records) {
-      if (!hasValue(record, config.field)) failed += 1;
-      else if (config.emptyStringFails && record[config.field] === '') failed += 1;
-    }
+    records.forEach((record, index) => {
+      if (!hasValue(record, config.field) || (config.emptyStringFails && record[config.field] === '')) {
+        failed += 1; failedIndexes.push(index);
+      }
+    });
   } else if (rule.ruleType === 'NULL_RATE') {
     let missing = 0;
-    for (const record of records) if (!hasValue(record, config.field)) missing += 1;
+    records.forEach((record, index) => { if (!hasValue(record, config.field)) { missing += 1; failedIndexes.push(index); } });
     const rate = records.length === 0 ? null : missing / records.length;
     failed = rate !== null && rate > config.threshold ? missing : 0;
-    return { status: failed > 0 ? 'FAILED' : 'PASSED', examined: records.length, failed, summary: { missing, nullRate: rate, threshold: config.threshold } };
+    return { status: failed > 0 ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes: failed > 0 ? failedIndexes : [], summary: { missing, nullRate: rate, threshold: config.threshold } };
   } else if (rule.ruleType === 'UNIQUE_KEY') {
     const seen = new Set();
-    for (const record of records) {
+    records.forEach((record, index) => {
       const values = config.fields.map((field) => record[field]);
-      if (config.nullPolicy === 'IGNORE' && values.some((value) => value === null || value === undefined)) continue;
+      if (config.nullPolicy === 'IGNORE' && values.some((value) => value === null || value === undefined)) return;
       const key = canonical(values);
-      if (seen.has(key)) failed += 1; else seen.add(key);
-    }
+      if (seen.has(key)) { failed += 1; failedIndexes.push(index); } else seen.add(key);
+    });
   } else if (rule.ruleType === 'RECORD_COUNT') {
     failed = records.length < config.min || records.length > config.max ? 1 : 0;
-    return { status: failed ? 'FAILED' : 'PASSED', examined: records.length, failed, summary: { min: config.min, max: config.max, observed: records.length } };
+    return { status: failed ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes: failed ? [0] : [], summary: { min: config.min, max: config.max, observed: records.length } };
   }
-  return { status: failed > 0 ? 'FAILED' : 'PASSED', examined: records.length, failed, summary: { failed } };
+  return { status: failed > 0 ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes, summary: { failed } };
 }
 
 export function evaluateRules(rules, records) {
   const results = rules.map((rule) => ({ rule, result: evaluateRule(rule, records) }));
   const failed = results.some((item) => item.result.status === 'FAILED');
-  return { status: failed ? 'FAILED' : 'PASSED', results, failedRules: results.filter((item) => item.result.status === 'FAILED').length };
+  const failedRecords = new Set();
+  for (const item of results) for (const index of item.result.failedIndexes || []) failedRecords.add(index);
+  return { status: failed ? 'FAILED' : 'PASSED', results, failedRules: results.filter((item) => item.result.status === 'FAILED').length, recordsFailed: failedRecords.size };
 }
 
 export const QUALITY_RULE_TYPES = [...TYPES];

@@ -13,7 +13,15 @@ use opsweave_contracts::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
+
+static RESOURCE_SAMPLE_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+fn resource_sample_semaphore() -> &'static Arc<Semaphore> {
+    RESOURCE_SAMPLE_SEMAPHORE.get_or_init(|| Arc::new(Semaphore::new(64)))
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, FromRow)]
@@ -417,40 +425,55 @@ pub async fn heartbeat(
     .execute(&state.db)
     .await?;
 
-    let sample = &payload.resource_snapshot;
-    if let Err(error) = sqlx::query(
-        r#"
-        INSERT INTO kernel.node_resource_samples
-          (node_id,generation,observed_at,sampled_at,cpu_utilization,memory_used_bytes,
-           memory_total_bytes,cpu_cores,filesystem_used_bytes,filesystem_total_bytes)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-        ON CONFLICT (node_id, sampled_at) DO NOTHING
-        "#,
-    )
-    .bind(node_id)
-    .bind(payload.generation)
-    .bind(observed_at)
-    .bind(sample.sampled_at)
-    .bind(sample.cpu_utilization)
-    .bind(sample.memory_used_bytes)
-    .bind(sample.memory_total_bytes)
-    .bind(sample.cpu_cores)
-    .bind(sample.filesystem_used_bytes)
-    .bind(sample.filesystem_total_bytes)
-    .execute(&state.db)
-    .await
-    {
-        tracing::warn!(%node_id, error = %error, "node resource sample was not persisted; heartbeat remains authoritative");
-    }
-    // Retention is best-effort and must never block the authoritative heartbeat.
-    if let Err(error) = sqlx::query(
-        "DELETE FROM kernel.node_resource_samples WHERE node_id=$1 AND observed_at < now() - interval '7 days'",
-    )
-    .bind(node_id)
-    .execute(&state.db)
-    .await
-    {
-        tracing::warn!(%node_id, error = %error, "node resource sample retention cleanup failed");
+    // Resource telemetry is lower-authority than the heartbeat. It runs in a
+    // bounded background task; a full queue drops telemetry rather than delaying
+    // the authoritative heartbeat.
+    let semaphore = resource_sample_semaphore().clone();
+    match semaphore.try_acquire_owned() {
+        Ok(permit) => {
+            let db = state.db.clone();
+            let sample = payload.resource_snapshot.clone();
+            let generation = payload.generation;
+            tokio::spawn(async move {
+                let _permit = permit;
+                if let Err(error) = sqlx::query(
+                    r#"
+                    INSERT INTO kernel.node_resource_samples
+                      (node_id,generation,observed_at,sampled_at,cpu_utilization,memory_used_bytes,
+                       memory_total_bytes,cpu_cores,filesystem_used_bytes,filesystem_total_bytes)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                    ON CONFLICT (node_id, sampled_at) DO NOTHING
+                    "#,
+                )
+                .bind(node_id)
+                .bind(generation)
+                .bind(observed_at)
+                .bind(sample.sampled_at)
+                .bind(sample.cpu_utilization)
+                .bind(sample.memory_used_bytes)
+                .bind(sample.memory_total_bytes)
+                .bind(sample.cpu_cores)
+                .bind(sample.filesystem_used_bytes)
+                .bind(sample.filesystem_total_bytes)
+                .execute(&db)
+                .await
+                {
+                    tracing::warn!(%node_id, error = %error, "node resource sample was not persisted; heartbeat remains authoritative");
+                }
+                if let Err(error) = sqlx::query(
+                    "DELETE FROM kernel.node_resource_samples WHERE node_id=$1 AND observed_at < now() - interval '7 days'",
+                )
+                .bind(node_id)
+                .execute(&db)
+                .await
+                {
+                    tracing::warn!(%node_id, error = %error, "node resource sample retention cleanup failed");
+                }
+            });
+        }
+        Err(_) => {
+            tracing::warn!(%node_id, "node resource telemetry queue is full; sample dropped");
+        }
     }
 
     for observation in &payload.instances {
