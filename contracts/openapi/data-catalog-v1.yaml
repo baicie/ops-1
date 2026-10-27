@@ -287,6 +287,131 @@ paths:
               schema: { $ref: '../schema/data-catalog.v1.schema.json#/$defs/DataLineage' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /datasets/{datasetId}/quality-rules:
+    get:
+      operationId: listQualityRules
+      summary: List quality rules pinned to dataset schema revisions
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: schemaRevision, in: query, required: false, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Quality rules
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { type: object } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    post:
+      operationId: createQualityRule
+      summary: Create a bounded declarative quality rule
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ruleType, config]
+              properties:
+                ruleType: { enum: [REQUIRED_FIELD, NULL_RATE, UNIQUE_KEY, RECORD_COUNT] }
+                config: { type: object }
+                severity: { enum: [LOW, MEDIUM, HIGH] }
+                enabled: { type: boolean }
+                schemaRevision: { type: integer, minimum: 1 }
+      responses:
+        '201': { description: Quality rule created, content: { application/json: { schema: { type: object } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /datasets/{datasetId}/quality-rules/{ruleId}:
+    parameters:
+      - { $ref: '#/components/parameters/DatasetId' }
+      - { name: ruleId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getQualityRule
+      responses:
+        '200': { description: Quality rule, content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: updateQualityRule
+      summary: Update a quality rule using version CAS
+      parameters:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, ruleType, config]
+              properties:
+                version: { type: integer, minimum: 1 }
+                ruleType: { enum: [REQUIRED_FIELD, NULL_RATE, UNIQUE_KEY, RECORD_COUNT] }
+                config: { type: object }
+                severity: { enum: [LOW, MEDIUM, HIGH] }
+                enabled: { type: boolean }
+      responses:
+        '200': { description: Quality rule updated, content: { application/json: { schema: { type: object } } } }
+        '409': { description: Version conflict, content: { application/json: { schema: { type: object } } } }
+  /datasets/{datasetId}/quality-runs:
+    get:
+      operationId: listQualityRuns
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: Quality run history
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { type: object } }
+    post:
+      operationId: createQualityRun
+      summary: Snapshot enabled rules and enqueue a bounded persistent run
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                schemaRevision: { type: integer, minimum: 1 }
+      responses:
+        '202': { description: Quality run accepted, content: { application/json: { schema: { type: object } } } }
+        '409': { description: No enabled rules or schema not published, content: { application/json: { schema: { type: object } } } }
+  /datasets/{datasetId}/quality-runs/{runId}:
+    get:
+      operationId: getQualityRun
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Quality run with immutable rule results, content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /datasets/{datasetId}/quality-runs/{runId}/cancel:
+    post:
+      operationId: cancelQualityRun
+      parameters:
+        - { $ref: '#/components/parameters/DatasetId' }
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Quality run cancelled, content: { application/json: { schema: { type: object } } } }
+        '409': { description: Run already terminal, content: { application/json: { schema: { type: object } } } }
 components:
   securitySchemes:
     cookieSession:

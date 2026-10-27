@@ -442,6 +442,16 @@ pub async fn heartbeat(
     {
         tracing::warn!(%node_id, error = %error, "node resource sample was not persisted; heartbeat remains authoritative");
     }
+    // Retention is best-effort and must never block the authoritative heartbeat.
+    if let Err(error) = sqlx::query(
+        "DELETE FROM kernel.node_resource_samples WHERE node_id=$1 AND observed_at < now() - interval '7 days'",
+    )
+    .bind(node_id)
+    .execute(&state.db)
+    .await
+    {
+        tracing::warn!(%node_id, error = %error, "node resource sample retention cleanup failed");
+    }
 
     for observation in &payload.instances {
         if observation.deployment_id.is_nil() {
@@ -614,6 +624,7 @@ pub struct ResourceHistoryQuery {
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
     pub limit: Option<i64>,
+    pub resolution: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -640,23 +651,52 @@ pub async fn resource_history(
 ) -> AppResult<Json<Vec<NodeResourceSampleView>>> {
     let _ = fetch_node(&state, node_id).await?;
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
-    let rows = sqlx::query_as::<_, NodeResourceSampleView>(
-        r#"
-        SELECT sample_id,node_id,generation,observed_at,sampled_at,cpu_utilization,
-               memory_used_bytes,memory_total_bytes,cpu_cores,filesystem_used_bytes,
-               filesystem_total_bytes
-        FROM kernel.node_resource_samples
-        WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
-          AND ($3::timestamptz IS NULL OR observed_at <= $3)
-        ORDER BY observed_at DESC, sample_id DESC LIMIT $4
-        "#,
-    )
-    .bind(node_id)
-    .bind(query.from)
-    .bind(query.to)
-    .bind(limit)
-    .fetch_all(&state.db)
-    .await?;
+    let resolution = query.resolution.as_deref().unwrap_or("raw");
+    let rows = if resolution == "hour" {
+        sqlx::query_as::<_, NodeResourceSampleView>(
+            r#"
+            SELECT min(sample_id) AS sample_id,node_id,max(generation) AS generation,
+                   date_trunc('hour', observed_at) AS observed_at,max(sampled_at) AS sampled_at,
+                   avg(cpu_utilization)::float8 AS cpu_utilization,
+                   max(memory_used_bytes) AS memory_used_bytes,
+                   max(memory_total_bytes) AS memory_total_bytes,
+                   max(cpu_cores) AS cpu_cores,
+                   max(filesystem_used_bytes) AS filesystem_used_bytes,
+                   max(filesystem_total_bytes) AS filesystem_total_bytes
+            FROM kernel.node_resource_samples
+            WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
+              AND ($3::timestamptz IS NULL OR observed_at <= $3)
+            GROUP BY node_id, date_trunc('hour', observed_at)
+            ORDER BY observed_at DESC LIMIT $4
+            "#,
+        )
+        .bind(node_id)
+        .bind(query.from)
+        .bind(query.to)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await?
+    } else if resolution == "raw" {
+        sqlx::query_as::<_, NodeResourceSampleView>(
+            r#"
+            SELECT sample_id,node_id,generation,observed_at,sampled_at,cpu_utilization,
+                   memory_used_bytes,memory_total_bytes,cpu_cores,filesystem_used_bytes,
+                   filesystem_total_bytes
+            FROM kernel.node_resource_samples
+            WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
+              AND ($3::timestamptz IS NULL OR observed_at <= $3)
+            ORDER BY observed_at DESC, sample_id DESC LIMIT $4
+            "#,
+        )
+        .bind(node_id)
+        .bind(query.from)
+        .bind(query.to)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await?
+    } else {
+        return Err(AppError::bad_request("resolution must be raw or hour"));
+    };
     Ok(Json(rows))
 }
 

@@ -123,7 +123,19 @@ NODE_ID="$(api "$URL/api/v1/nodes" | json "d[0]['id']")"
 [ -n "$NODE_ID" ] || bad "node history has no enrolled node"
 NODE_HISTORY="$(api "$URL/api/v1/nodes/$NODE_ID/resource-history?limit=5")"
 printf '%s' "$NODE_HISTORY" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,list) and d; assert d[0]["nodeId"] and d[0]["sampledAt"] and "generation" in d[0]' || bad "node resource history shape mismatch"
-ok "node $NODE_ID resource history persisted"
+NODE_HOUR="$(api "$URL/api/v1/nodes/$NODE_ID/resource-history?limit=5&resolution=hour")"
+printf '%s' "$NODE_HOUR" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,list)' || bad "node hourly aggregation shape mismatch"
+BAD_RES="$(curl -sS -o /tmp/node-bad-resolution.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/nodes/$NODE_ID/resource-history?resolution=minute")"
+[ "$BAD_RES" = "400" ] || bad "invalid node resolution returned $BAD_RES"
+ok "node $NODE_ID resource history persisted; hourly aggregate and invalid resolution checked"
+
+echo "== quality negative validation"
+QBAD="$(curl -sS -o /tmp/quality-bad-config.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-rules" \
+  -d '{"ruleType":"NULL_RATE","config":{"field":"name","threshold":2}}')"
+[ "$QBAD" = "400" ] || bad "invalid quality threshold returned $QBAD"
+grep -q 'INVALID_RULE' /tmp/quality-bad-config.json || bad "invalid quality rule error code missing"
+ok "invalid quality rule config rejected"
 
 echo "== Catalog capability unavailable fails closed"
 GRANT_ID="$(api "$URL/api/v1/capability-grants" | json "next(g['id'] for g in d if g['name']=='data.catalog.v1' and g['state']=='ACTIVE')")"

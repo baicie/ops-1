@@ -248,6 +248,8 @@ input::placeholder { color: var(--ow-text-muted); }
 .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 3px; }
 .table-panel { overflow: hidden; }
 .summary-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.governance-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .governance-grid { grid-template-columns: 1fr; } }
 .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 24px; padding: 10px 18px 14px; }
 .kv { display: flex; flex-direction: column; gap: 3px; padding: 8px 0; border-bottom: 1px dashed var(--ow-border); min-width: 0; }
 .kv-label { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }

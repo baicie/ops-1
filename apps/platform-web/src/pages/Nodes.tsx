@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
@@ -101,7 +101,17 @@ export function NodeDetailPage() {
   const { user } = useAuth();
   const { data, error, loading, reload } = usePolling(() => api.get<NodeView>(`/api/v1/nodes/${id}`), 5000);
   const { data: instances, reload: reloadInstances } = usePolling(() => api.get<any[]>(`/api/v1/nodes/${id}/instances`), 5000);
-  const { data: history } = usePolling(() => api.get<any[]>(`/api/v1/nodes/${id}/resource-history?limit=100`), 5000);
+  const [history, setHistory] = useState<any[]>([]);
+  const [historyWindow, setHistoryWindow] = useState(1);
+  useEffect(() => {
+    let cancelled = false;
+    const from = new Date(Date.now() - historyWindow * 3600_000).toISOString();
+    const resolution = historyWindow <= 1 ? 'raw' : 'hour';
+    void api.get<any[]>(`/api/v1/nodes/${id}/resource-history?limit=100&resolution=${resolution}&from=${encodeURIComponent(from)}`)
+      .then((items) => { if (!cancelled) setHistory(items || []); })
+      .catch(() => { if (!cancelled) setHistory([]); });
+    return () => { cancelled = true; };
+  }, [id, historyWindow]);
   const { data: events } = usePolling(() => api.get<AuditEvent[]>(`/api/v1/audit?subjectType=node&subjectId=${id}&limit=20`), 0);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -162,7 +172,7 @@ export function NodeDetailPage() {
         </section>
       </div>
       <section className="panel" data-testid="node-resource-history">
-        <div className="panel-head"><div><h2>Resource history</h2><p>Persisted heartbeat samples. Gaps are shown as gaps, not zero.</p></div></div>
+        <div className="panel-head"><div><h2>Resource history</h2><p>Persisted heartbeat samples. Gaps are shown as gaps, not zero.</p></div><div className="segmented" aria-label="History window">{[1, 6, 24].map((hours) => <button key={hours} className={`btn btn-small ${historyWindow === hours ? 'active' : ''}`} onClick={() => setHistoryWindow(hours)}>{hours}h</button>)}</div></div>
         {!history?.length ? <EmptyState icon="activity" title="No samples yet" description="Samples appear after the next authenticated node heartbeat." /> : (
           <div className="resource-history">
             <svg viewBox="0 0 400 80" role="img" aria-label="CPU utilization history" preserveAspectRatio="none">
