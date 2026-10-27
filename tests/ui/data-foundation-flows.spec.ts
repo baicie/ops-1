@@ -85,7 +85,7 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   await page.getByLabel('Rule type').selectOption('RECORD_COUNT');
   await page.getByTestId('quality-rule-config').fill('{"min":100,"max":10000}');
   await page.getByTestId('quality-create-rule').click();
-  await expect(page.getByText('RECORD_COUNT', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'RECORD_COUNT' })).toBeVisible();
   await page.getByTestId('quality-start-run').click();
   await expect(page.getByTestId('quality-run-detail')).toContainText('FAILED', { timeout: 15000 });
   await page.getByTestId('quality-run-detail').screenshot({ path: path.join(OUT, 'quality-run-failed.png') });
