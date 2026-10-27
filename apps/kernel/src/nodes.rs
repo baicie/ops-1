@@ -23,6 +23,30 @@ fn resource_sample_semaphore() -> &'static Arc<Semaphore> {
     RESOURCE_SAMPLE_SEMAPHORE.get_or_init(|| Arc::new(Semaphore::new(64)))
 }
 
+pub fn spawn_resource_retention(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            match sqlx::query(
+                "DELETE FROM kernel.node_resource_samples WHERE sample_id IN (SELECT sample_id FROM kernel.node_resource_samples WHERE observed_at < now() - interval '7 days' ORDER BY sample_id LIMIT 10000)",
+            )
+            .execute(&state.db)
+            .await
+            {
+                Ok(result) => {
+                    if result.rows_affected() > 0 {
+                        tracing::info!(deleted = result.rows_affected(), "node resource retention batch deleted");
+                    }
+                    if result.rows_affected() >= 10000 {
+                        continue;
+                    }
+                }
+                Err(error) => tracing::warn!(error = %error, "node resource retention cleanup failed"),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        }
+    });
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, FromRow)]
 pub struct NodeRow {
@@ -459,15 +483,6 @@ pub async fn heartbeat(
                 .await
                 {
                     tracing::warn!(%node_id, error = %error, "node resource sample was not persisted; heartbeat remains authoritative");
-                }
-                if let Err(error) = sqlx::query(
-                    "DELETE FROM kernel.node_resource_samples WHERE node_id=$1 AND observed_at < now() - interval '7 days'",
-                )
-                .bind(node_id)
-                .execute(&db)
-                .await
-                {
-                    tracing::warn!(%node_id, error = %error, "node resource sample retention cleanup failed");
                 }
             });
         }
