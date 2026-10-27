@@ -719,7 +719,7 @@ pub async fn resource_history(
                      (array_agg(generation ORDER BY observed_at, sample_id))[1] AS generation_start,
                      (array_agg(generation ORDER BY observed_at DESC, sample_id DESC))[1] AS generation_end,
                      count(DISTINCT generation)::int AS generation_distinct_count,
-                     sum(CASE WHEN previous_generation IS DISTINCT FROM generation THEN 1 ELSE 0 END)::int AS generation_changes,
+                     sum(CASE WHEN previous_generation IS NOT NULL AND previous_generation IS DISTINCT FROM generation THEN 1 ELSE 0 END)::int AS generation_changes,
                      max(sampled_at) AS sampled_at,
                      avg(cpu_utilization)::float8 AS cpu_utilization,
                      max(memory_used_bytes) AS memory_used_bytes,
@@ -740,10 +740,7 @@ pub async fn resource_history(
                    bucket AS window_start,bucket + interval '1 hour' AS window_end,
                    sample_count,cpu_min,cpu_max,cpu_avg,memory_peak_bytes,filesystem_peak_bytes,
                    generation_start,generation_end,generation_changes,generation_distinct_count
-            FROM kernel.node_resource_samples
-            WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
-              AND ($3::timestamptz IS NULL OR observed_at <= $3)
-            GROUP BY node_id, date_trunc('hour', observed_at)
+            FROM aggregated
             ORDER BY observed_at DESC LIMIT $4
             "#,
         )
