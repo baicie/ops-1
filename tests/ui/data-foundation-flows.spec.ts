@@ -100,7 +100,6 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   await page.goto('/governance');
   await expect(page.getByRole('heading', { name: 'Governance', exact: true })).toBeVisible();
   await expect(page.getByText(datasetName, { exact: true }).first()).toBeVisible();
-  await expect(page.getByText('QUALITY FAILED', { exact: false })).toBeVisible().catch(() => {});
   await page.screenshot({ path: path.join(OUT, 'governance-overview.png'), fullPage: true });
 
   await page.goto('/ext/trusted-team/data-catalog');
