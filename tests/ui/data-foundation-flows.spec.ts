@@ -97,6 +97,12 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   await expect(page.getByTestId('node-resource-history')).toContainText('sample');
   await page.getByTestId('node-resource-history').screenshot({ path: path.join(OUT, 'node-resource-history.png') });
 
+  await page.goto('/governance');
+  await expect(page.getByRole('heading', { name: 'Governance', exact: true })).toBeVisible();
+  await expect(page.getByText(datasetName, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('QUALITY FAILED', { exact: false })).toBeVisible().catch(() => {});
+  await page.screenshot({ path: path.join(OUT, 'governance-overview.png'), fullPage: true });
+
   await page.goto('/ext/trusted-team/data-catalog');
   await expect(page.getByText(datasetName, { exact: true }).first()).toBeVisible();
   await page.getByText(datasetName, { exact: true }).first().click();

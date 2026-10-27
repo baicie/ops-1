@@ -19,6 +19,7 @@ import { OpsCenterPage } from './pages/OpsCenter';
 import { NotFoundPage } from './pages/NotFound';
 import { PipelinesPage, PipelineDetailPage, PipelineEditorPage } from './pages/Pipelines';
 import { JobsPage, JobDetailPage, JobSubmitPage } from './pages/Jobs';
+import { GovernancePage } from './pages/Governance';
 
 function Splash() {
   return (
@@ -59,6 +60,7 @@ export function App() {
                 <Route path="/jobs/:jobId" element={<JobDetailPage />} />
                 <Route path="/nodes" element={<NodesPage />} />
                 <Route path="/nodes/:id" element={<NodeDetailPage />} />
+                <Route path="/governance" element={<GovernancePage />} />
                 <Route path="/instances/:id/logs" element={<InstanceLogsPage />} />
                 <Route path="/activity" element={<ActivityPage />} />
                 <Route path="/access" element={<AccessPage />} />

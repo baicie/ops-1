@@ -14,6 +14,7 @@ const coreNav = [
   { to: '/pipelines', label: 'Pipelines', icon: 'pipeline' },
   { to: '/jobs', label: 'Jobs', icon: 'clock' },
   { to: '/nodes', label: 'Nodes', icon: 'nodes' },
+  { to: '/governance', label: 'Governance', icon: 'shield' },
   { to: '/activity', label: 'Activity', icon: 'activity' },
   { to: '/access', label: 'Access', icon: 'access' },
   { to: '/settings', label: 'Settings', icon: 'settings', end: true },
@@ -26,6 +27,7 @@ function titleFor(pathname: string) {
   if (pathname.startsWith('/pipelines')) return pathname.includes('/editor') ? 'Pipeline Studio' : 'Pipelines';
   if (pathname.startsWith('/jobs')) return 'Jobs';
   if (pathname.startsWith('/nodes')) return 'Nodes';
+  if (pathname.startsWith('/governance')) return 'Governance';
   if (pathname.startsWith('/activity')) return 'Activity';
   if (pathname.startsWith('/access')) return 'Access';
   if (pathname.startsWith('/settings')) return 'Settings';
