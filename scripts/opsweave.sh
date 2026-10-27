@@ -37,14 +37,21 @@ start_registry() {
 }
 
 check_database() {
+  local reset="${1:-0}"
   if ! have psql; then
     warn "psql not found; using OPSWEAVE_DATABASE_URL=${DATABASE_URL}"
     return
   fi
-  if ! pg_isready -q -d "$DB" 2>/dev/null; then
-    die "PostgreSQL database '$DB' is not reachable. Start PostgreSQL or set OPSWEAVE_DATABASE_URL."
+  if pg_isready -q -d "$DB" 2>/dev/null; then
+    ok "PostgreSQL reachable ($DB)"
+    return
   fi
-  ok "PostgreSQL reachable ($DB)"
+  if [ "$reset" = "1" ] && have createdb; then
+    say "creating local database $DB"
+    createdb "$DB" 2>/dev/null || true
+    if pg_isready -q -d "$DB" 2>/dev/null; then ok "PostgreSQL ready ($DB)"; return; fi
+  fi
+  die "PostgreSQL database '$DB' is not reachable. Run 'createdb $DB', start PostgreSQL, or set OPSWEAVE_DATABASE_URL."
 }
 
 check_bundles() {
@@ -62,7 +69,7 @@ check_bundles() {
 start_platform() {
   local reset="${1:-0}"
   start_registry
-  check_database
+  check_database "$reset"
   check_bundles
   if [ "$reset" != "1" ] && kernel_alive; then
     ok "Kernel already running at $URL"
@@ -183,7 +190,7 @@ cmd_doctor() {
   done
   have psql && ok "psql: $(command -v psql)" || warn "psql: missing (needed by demo_up reset)"
   if have docker; then docker info >/dev/null 2>&1 && ok "docker daemon: running" || { warn "docker daemon: not running"; failed=1; }; fi
-  check_database || failed=1
+  check_database 0 || failed=1
   for f in dist/plugins/hello-ops-0.0.1.plugin.zip dist/plugins/data-catalog-0.0.1.plugin.zip; do
     [ -f "$f" ] && ok "bundle: $f" || warn "bundle missing: $f"
   done
