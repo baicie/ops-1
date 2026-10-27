@@ -2,7 +2,7 @@ use crate::audit;
 use crate::auth::{hash_token, random_token, AuthUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
@@ -417,6 +417,32 @@ pub async fn heartbeat(
     .execute(&state.db)
     .await?;
 
+    let sample = &payload.resource_snapshot;
+    if let Err(error) = sqlx::query(
+        r#"
+        INSERT INTO kernel.node_resource_samples
+          (node_id,generation,observed_at,sampled_at,cpu_utilization,memory_used_bytes,
+           memory_total_bytes,cpu_cores,filesystem_used_bytes,filesystem_total_bytes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT (node_id, sampled_at) DO NOTHING
+        "#,
+    )
+    .bind(node_id)
+    .bind(payload.generation)
+    .bind(observed_at)
+    .bind(sample.sampled_at)
+    .bind(sample.cpu_utilization)
+    .bind(sample.memory_used_bytes)
+    .bind(sample.memory_total_bytes)
+    .bind(sample.cpu_cores)
+    .bind(sample.filesystem_used_bytes)
+    .bind(sample.filesystem_total_bytes)
+    .execute(&state.db)
+    .await
+    {
+        tracing::warn!(%node_id, error = %error, "node resource sample was not persisted; heartbeat remains authoritative");
+    }
+
     for observation in &payload.instances {
         if observation.deployment_id.is_nil() {
             continue;
@@ -580,6 +606,58 @@ pub fn instance_state_str(state: opsweave_contracts::InstanceState) -> &'static 
         opsweave_contracts::InstanceState::Stopped => "STOPPED",
         opsweave_contracts::InstanceState::Unknown => "UNKNOWN",
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceHistoryQuery {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeResourceSampleView {
+    pub sample_id: i64,
+    pub node_id: Uuid,
+    pub generation: i64,
+    pub observed_at: DateTime<Utc>,
+    pub sampled_at: DateTime<Utc>,
+    pub cpu_utilization: Option<f64>,
+    pub memory_used_bytes: Option<i64>,
+    pub memory_total_bytes: Option<i64>,
+    pub cpu_cores: Option<i64>,
+    pub filesystem_used_bytes: Option<i64>,
+    pub filesystem_total_bytes: Option<i64>,
+}
+
+pub async fn resource_history(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(node_id): Path<Uuid>,
+    Query(query): Query<ResourceHistoryQuery>,
+) -> AppResult<Json<Vec<NodeResourceSampleView>>> {
+    let _ = fetch_node(&state, node_id).await?;
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let rows = sqlx::query_as::<_, NodeResourceSampleView>(
+        r#"
+        SELECT sample_id,node_id,generation,observed_at,sampled_at,cpu_utilization,
+               memory_used_bytes,memory_total_bytes,cpu_cores,filesystem_used_bytes,
+               filesystem_total_bytes
+        FROM kernel.node_resource_samples
+        WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
+          AND ($3::timestamptz IS NULL OR observed_at <= $3)
+        ORDER BY observed_at DESC, sample_id DESC LIMIT $4
+        "#,
+    )
+    .bind(node_id)
+    .bind(query.from)
+    .bind(query.to)
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows))
 }
 
 pub async fn node_instances(

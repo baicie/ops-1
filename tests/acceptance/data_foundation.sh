@@ -118,6 +118,13 @@ CANCEL_CODE="$(curl -sS -o /tmp/quality-cancel.json -w '%{http_code}' "${AUTH[@]
 [ "$CANCEL_CODE" = "409" ] || bad "terminal quality cancel returned $CANCEL_CODE"
 ok "quality rule $QRULE_ID run $QRUN_ID FAILED and history/result persisted"
 
+echo "== node resource history"
+NODE_ID="$(api "$URL/api/v1/nodes" | json "d[0]['id']")"
+[ -n "$NODE_ID" ] || bad "node history has no enrolled node"
+NODE_HISTORY="$(api "$URL/api/v1/nodes/$NODE_ID/resource-history?limit=5")"
+printf '%s' "$NODE_HISTORY" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,list) and d; assert d[0]["nodeId"] and d[0]["sampledAt"] and "generation" in d[0]' || bad "node resource history shape mismatch"
+ok "node $NODE_ID resource history persisted"
+
 echo "== Catalog capability unavailable fails closed"
 GRANT_ID="$(api "$URL/api/v1/capability-grants" | json "next(g['id'] for g in d if g['name']=='data.catalog.v1' and g['state']=='ACTIVE')")"
 api -X DELETE "$URL/api/v1/capability-grants/$GRANT_ID" >/dev/null

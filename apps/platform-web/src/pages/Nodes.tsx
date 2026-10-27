@@ -101,6 +101,7 @@ export function NodeDetailPage() {
   const { user } = useAuth();
   const { data, error, loading, reload } = usePolling(() => api.get<NodeView>(`/api/v1/nodes/${id}`), 5000);
   const { data: instances, reload: reloadInstances } = usePolling(() => api.get<any[]>(`/api/v1/nodes/${id}/instances`), 5000);
+  const { data: history } = usePolling(() => api.get<any[]>(`/api/v1/nodes/${id}/resource-history?limit=100`), 5000);
   const { data: events } = usePolling(() => api.get<AuditEvent[]>(`/api/v1/audit?subjectType=node&subjectId=${id}&limit=20`), 0);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -160,6 +161,18 @@ export function NodeDetailPage() {
           )}
         </section>
       </div>
+      <section className="panel" data-testid="node-resource-history">
+        <div className="panel-head"><div><h2>Resource history</h2><p>Persisted heartbeat samples. Gaps are shown as gaps, not zero.</p></div></div>
+        {!history?.length ? <EmptyState icon="activity" title="No samples yet" description="Samples appear after the next authenticated node heartbeat." /> : (
+          <div className="resource-history">
+            <svg viewBox="0 0 400 80" role="img" aria-label="CPU utilization history" preserveAspectRatio="none">
+              <polyline fill="none" stroke="var(--accent, #4f8cff)" strokeWidth="2" points={history.slice().reverse().map((sample, index) => `${(index * 400) / Math.max(1, history.length - 1)},${80 - Math.min(1, Math.max(0, sample.cpuUtilization ?? 0)) * 72}`).join(' ')} />
+            </svg>
+            <p className="muted small">{history.length} sample{history.length === 1 ? '' : 's'}; latest {formatDate(history[0].sampledAt)} · generation {history[0].generation}</p>
+            <table className="data-table"><thead><tr><th>Observed</th><th>CPU</th><th>Memory</th><th>Filesystem</th><th>Generation</th></tr></thead><tbody>{history.slice(0, 20).map((sample) => <tr key={sample.sampleId}><td data-label="Observed">{formatDate(sample.observedAt)}</td><td data-label="CPU">{sample.cpuUtilization === null ? 'No data' : `${(sample.cpuUtilization * 100).toFixed(0)}%`}</td><td data-label="Memory">{formatBytes(sample.memoryUsedBytes)} / {formatBytes(sample.memoryTotalBytes)}</td><td data-label="Filesystem">{formatBytes(sample.filesystemUsedBytes)} / {formatBytes(sample.filesystemTotalBytes)}</td><td data-label="Generation">{sample.generation}</td></tr>)}</tbody></table>
+          </div>
+        )}
+      </section>
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>Plugin instances</h2><p>Only instances the Kernel has placed on this node.</p></div></div>
         {!instances?.length ? <EmptyState icon="plugins" title="No instances on this node" description="Deploy a plugin with a selector that matches this node's labels." /> : (
