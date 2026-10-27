@@ -129,13 +129,26 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
     sleep 1
   done
   [ "$TOKEN_READY" = "1" ] || { echo "integration workload token file missing data.catalog.v1"; exit 1; }
+  # A real auto-claim worker lets the Studio browser flow observe a completed Job.
+  URL="$OPSWEAVE_URL"
+  TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
+  AUTH=(-H "Authorization: Bearer $TOKEN")
+  source tests/acceptance/pipeline_worker_auth.sh
+  load_worker node-b
+  env     OPSWEAVE_WORKER_KERNEL_URL="$OPSWEAVE_URL"     OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-b/node-identity.json"     OPSWEAVE_WORKER_INSTANCE_ID="$W_INSTANCE_ID"     OPSWEAVE_WORKER_NODE_GENERATION="$W_NODE_GEN"     OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1"     OPSWEAVE_WORKER_BATCH_DELAY_MS=800     ./target/debug/opsweave-pipeline-worker >/tmp/ui-worker.log 2>&1 &
+  UI_WORKER_PID=$!
+  sleep 1
   OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts studio.spec.ts
+  kill "$UI_WORKER_PID" 2>/dev/null || true
 fi
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_orphan_worker.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
 tests/acceptance/pipeline_read_api.sh
 tests/acceptance/pipeline_validation_api.sh
+tests/acceptance/pipeline_draft_api.sh
+tests/acceptance/pipeline_publish_api.sh
+tests/acceptance/job_list_api.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=0 OPSWEAVE_TEST_KERNEL_PID="$KERNEL_PID" tests/acceptance/data_token_refresh.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_heartbeat_ttl_takeover.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_race.sh

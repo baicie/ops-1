@@ -35,20 +35,131 @@ paths:
       responses:
         '200':
           description: Pipeline summaries
-  /pipelines/{pipelineId}/validate:
+  /pipelines/validate:
     post:
-      operationId: validatePipeline
+      operationId: validatePipelineDefinition
+      summary: Pure validation; no revision, job, receipt or catalog write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schema/pipeline-ir.v1.schema.json
+      responses:
+        '200':
+          description: Validation result; semantically invalid graphs return valid=false.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, errors, warnings, canonicalOrder]
+                properties:
+                  valid: { type: boolean }
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, message]
+                      properties:
+                        code: { type: string }
+                        message: { type: string }
+                        nodeId: { type: string }
+                        port: { type: string }
+                  warnings: { type: array, items: { type: object } }
+                  canonicalOrder: { type: array, items: { type: string } }
+                  planDigest: { type: string, nullable: true }
+                  digest: { type: string, nullable: true }
+        '401': { description: Unauthenticated }
+        '403': { description: Operator role required }
+  /pipelines/{pipelineId}/drafts:
+    get:
+      operationId: listPipelineDrafts
       parameters:
         - $ref: '#/components/parameters/PipelineId'
       responses:
         '200':
-          description: Static validation result
+          description: Current user's drafts for the pipeline.
           content:
             application/json:
-              schema:
-                $ref: ../schema/pipeline-ir.v1.schema.json#/$defs/ValidationResult
-        '404':
-          $ref: '#/components/responses/ContractError'
+              schema: { type: array, items: { $ref: '#/components/schemas/PipelineDraft' } }
+    post:
+      operationId: createPipelineDraft
+      parameters:
+        - $ref: '#/components/parameters/PipelineId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                baseRevision: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Draft created from a published base revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PipelineDraft' }
+        '400': { description: Invalid base revision }
+        '401': { description: Unauthenticated }
+        '403': { description: Operator role required }
+  /pipelines/{pipelineId}/drafts/{draftId}:
+    parameters:
+      - $ref: '#/components/parameters/PipelineId'
+      - $ref: '#/components/parameters/DraftId'
+    get:
+      operationId: getPipelineDraft
+      responses:
+        '200':
+          description: Draft owned by the current user (or by an admin).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PipelineDraft' }
+        '404': { description: Draft not found or not visible }
+    put:
+      operationId: updatePipelineDraft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: Current draft version for optimistic concurrency.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: ../schema/pipeline-ir.v1.schema.json }
+      responses:
+        '200':
+          description: Draft saved with an incremented version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PipelineDraft' }
+        '409': { description: DRAFT_VERSION_CONFLICT or DRAFT_NOT_EDITABLE }
+        '400': { description: Missing/invalid If-Match or malformed definition }
+  /pipelines/{pipelineId}/drafts/{draftId}/publish:
+    post:
+      operationId: publishPipelineDraft
+      parameters:
+        - $ref: '#/components/parameters/PipelineId'
+        - $ref: '#/components/parameters/DraftId'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: Atomic published revision (or the same revision for an idempotent retry).
+        '400': { description: Validation failed }
+        '409': { description: DRAFT_VERSION_CONFLICT or IDEMPOTENCY_CONFLICT }
   /pipelines/{pipelineId}/revisions:
     post:
       operationId: publishPipelineRevision
@@ -117,6 +228,35 @@ paths:
                 $ref: ../schema/durable-job.v1.schema.json
         '409':
           $ref: '#/components/responses/ContractError'
+  /jobs:
+    get:
+      operationId: listJobs
+      parameters:
+        - name: pipelineId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [QUEUED, CLAIMED, RUNNING, SUCCEEDED, FAILED, CANCELLED] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Durable job list, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { type: object } }
+                  nextCursor: { type: string, nullable: true }
+        '400': { description: Invalid status/cursor }
+        '401': { description: Unauthenticated }
   /jobs/{jobId}/claim:
     post:
       operationId: claimJob
@@ -211,6 +351,11 @@ components:
       in: path
       required: true
       schema: { type: string, pattern: '^[a-z][a-z0-9-]{2,63}$' }
+    DraftId:
+      name: draftId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     JobId:
       name: jobId
       in: path
@@ -236,6 +381,21 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    PipelineDraft:
+      type: object
+      required: [draftId, pipelineId, baseRevision, definition, definitionDigest, version, status]
+      properties:
+        draftId: { type: string, format: uuid }
+        pipelineId: { type: string }
+        baseRevision: { type: integer, minimum: 1 }
+        definition: { $ref: ../schema/pipeline-ir.v1.schema.json }
+        definitionDigest: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [DRAFT, PUBLISHED] }
+        createdBy: { type: string, format: uuid }
+        updatedBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     Error:
       type: object
       required: [code, message]

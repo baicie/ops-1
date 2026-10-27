@@ -124,6 +124,243 @@ pub async fn validate_pipeline_definition(
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftView {
+    pub draft_id: Uuid,
+    pub pipeline_id: String,
+    pub base_revision: i32,
+    pub definition: Value,
+    pub definition_digest: String,
+    pub version: i64,
+    pub status: String,
+    pub created_by: Uuid,
+    pub updated_by: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDraftRequest {
+    #[serde(default)]
+    pub base_revision: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDraftRequest {
+    pub definition: PipelineDefinition,
+}
+
+fn draft_view(row: &sqlx::postgres::PgRow) -> DraftView {
+    DraftView {
+        draft_id: row.get("draft_id"),
+        pipeline_id: row.get("pipeline_id"),
+        base_revision: row.get("base_revision"),
+        definition: row.get("definition"),
+        definition_digest: row.get("definition_digest"),
+        version: row.get("version"),
+        status: row.get("status"),
+        created_by: row.get("created_by"),
+        updated_by: row.get("updated_by"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+fn draft_definition(
+    mut definition: PipelineDefinition,
+    pipeline_id: &str,
+) -> AppResult<(PipelineDefinition, Value, String)> {
+    definition.pipeline_id = pipeline_id.to_string();
+    definition.status = "DRAFT".to_string();
+    let mut value = serde_json::to_value(&definition)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    value["digest"] = Value::String(String::new());
+    let digest = digest_without_field(&value, "digest");
+    value["digest"] = Value::String(digest.clone());
+    definition.digest = digest.clone();
+    Ok((definition, value, digest))
+}
+
+pub async fn create_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(pipeline_id): Path<String>,
+    Json(request): Json<CreateDraftRequest>,
+) -> AppResult<(StatusCode, Json<DraftView>)> {
+    auth.require_operator()?;
+    let latest: Option<i32> = sqlx::query_scalar(
+        "SELECT latest_revision FROM kernel.pipeline_definitions WHERE pipeline_id=$1",
+    )
+    .bind(&pipeline_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let latest = latest.ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "PIPELINE_NOT_FOUND",
+            "pipeline not found",
+        )
+    })?;
+    let base_revision = request.base_revision.unwrap_or(latest as u32) as i32;
+    if base_revision < 1 || base_revision > latest {
+        return Err(AppError::bad_request("baseRevision is not published"));
+    }
+    let stored: Option<Value> = sqlx::query_scalar(
+        "SELECT definition FROM kernel.pipeline_revisions WHERE pipeline_id=$1 AND revision=$2",
+    )
+    .bind(&pipeline_id)
+    .bind(base_revision)
+    .fetch_optional(&state.db)
+    .await?;
+    let stored = stored.ok_or_else(|| AppError::bad_request("baseRevision is not published"))?;
+    let definition: PipelineDefinition = serde_json::from_value(stored)
+        .map_err(|error| AppError::bad_request(format!("stored definition is invalid: {error}")))?;
+    let (_, value, digest) = draft_definition(definition, &pipeline_id)?;
+    let row = sqlx::query(
+        "INSERT INTO kernel.pipeline_drafts
+           (pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by)
+         VALUES ($1,$2,$3,$4,1,'DRAFT',$5,$5)
+         RETURNING draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at",
+    )
+    .bind(&pipeline_id)
+    .bind(base_revision)
+    .bind(&value)
+    .bind(&digest)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await?;
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.draft_created",
+        "USER",
+        &auth.user_id.to_string(),
+        "pipeline_draft",
+        &row.get::<Uuid, _>("draft_id").to_string(),
+        "create",
+        "ACCEPTED",
+        json!({"pipelineId": pipeline_id, "baseRevision": base_revision}),
+        None,
+    )
+    .await;
+    Ok((StatusCode::CREATED, Json(draft_view(&row))))
+}
+
+pub async fn list_drafts(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(pipeline_id): Path<String>,
+) -> AppResult<Json<Vec<DraftView>>> {
+    auth.require_operator()?;
+    let rows = sqlx::query(
+        "SELECT draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at
+         FROM kernel.pipeline_drafts WHERE pipeline_id=$1 AND created_by=$2 ORDER BY updated_at DESC",
+    )
+    .bind(&pipeline_id)
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows.iter().map(draft_view).collect()))
+}
+
+pub async fn get_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((pipeline_id, draft_id)): Path<(String, Uuid)>,
+) -> AppResult<Json<DraftView>> {
+    auth.require_operator()?;
+    let row = sqlx::query(
+        "SELECT draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at
+         FROM kernel.pipeline_drafts WHERE pipeline_id=$1 AND draft_id=$2 AND (created_by=$3 OR $4)",
+    )
+    .bind(&pipeline_id)
+    .bind(draft_id)
+    .bind(auth.user_id)
+    .bind(auth.role.is_admin())
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "DRAFT_NOT_FOUND", "draft not found"))?;
+    Ok(Json(draft_view(&row)))
+}
+
+pub async fn update_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((pipeline_id, draft_id)): Path<(String, Uuid)>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateDraftRequest>,
+) -> AppResult<Json<DraftView>> {
+    auth.require_operator()?;
+    let if_match = headers
+        .get("if-match")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().trim_matches('"'))
+        .ok_or_else(|| AppError::bad_request("If-Match is required"))?;
+    let expected: i64 = if_match
+        .parse()
+        .map_err(|_| AppError::bad_request("If-Match must be a draft version"))?;
+    let (_, value, digest) = draft_definition(request.definition, &pipeline_id)?;
+    let row = sqlx::query(
+        "UPDATE kernel.pipeline_drafts
+         SET definition=$1,definition_digest=$2,version=version+1,updated_by=$3,updated_at=now()
+         WHERE pipeline_id=$4 AND draft_id=$5 AND version=$6 AND status='DRAFT'
+           AND (created_by=$7 OR $8)
+         RETURNING draft_id,pipeline_id,base_revision,definition,definition_digest,version,status,created_by,updated_by,created_at,updated_at",
+    )
+    .bind(&value)
+    .bind(&digest)
+    .bind(auth.user_id)
+    .bind(&pipeline_id)
+    .bind(draft_id)
+    .bind(expected)
+    .bind(auth.user_id)
+    .bind(auth.role.is_admin())
+    .fetch_optional(&state.db)
+    .await?;
+    let Some(row) = row else {
+        let exists: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM kernel.pipeline_drafts WHERE pipeline_id=$1 AND draft_id=$2 AND (created_by=$3 OR $4)",
+        )
+        .bind(&pipeline_id)
+        .bind(draft_id)
+        .bind(auth.user_id)
+        .bind(auth.role.is_admin())
+        .fetch_optional(&state.db)
+        .await?;
+        return match exists.as_deref() {
+            None => Err(AppError::new(
+                StatusCode::NOT_FOUND,
+                "DRAFT_NOT_FOUND",
+                "draft not found",
+            )),
+            Some("DRAFT") => Err(AppError::conflict(
+                "DRAFT_VERSION_CONFLICT",
+                "draft was updated by another editor",
+            )),
+            Some(_) => Err(AppError::conflict(
+                "DRAFT_NOT_EDITABLE",
+                "draft is no longer editable",
+            )),
+        };
+    };
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.draft_updated",
+        "USER",
+        &auth.user_id.to_string(),
+        "pipeline_draft",
+        &draft_id.to_string(),
+        "update",
+        "ACCEPTED",
+        json!({"pipelineId": pipeline_id, "version": row.get::<i64,_>("version")}),
+        None,
+    )
+    .await;
+    Ok(Json(draft_view(&row)))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerIdentity {
@@ -959,6 +1196,158 @@ pub async fn publish_revision(
     }))
 }
 
+pub async fn publish_draft(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((pipeline_id, draft_id)): Path<(String, Uuid)>,
+    headers: HeaderMap,
+) -> AppResult<Json<PipelineResponse>> {
+    auth.require_operator()?;
+    let idempotency_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .ok_or_else(|| AppError::bad_request("Idempotency-Key is required"))?
+        .to_string();
+    let if_match = headers
+        .get("if-match")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim().trim_matches('"'))
+        .ok_or_else(|| AppError::bad_request("If-Match is required"))?;
+    let expected: i64 = if_match
+        .parse()
+        .map_err(|_| AppError::bad_request("If-Match must be a draft version"))?;
+
+    let mut tx = state.db.begin().await?;
+    let draft = sqlx::query(
+        "SELECT definition,version,status,created_by,published_revision,publish_idempotency_key
+         FROM kernel.pipeline_drafts
+         WHERE pipeline_id=$1 AND draft_id=$2 AND (created_by=$3 OR $4)
+         FOR UPDATE",
+    )
+    .bind(&pipeline_id)
+    .bind(draft_id)
+    .bind(auth.user_id)
+    .bind(auth.role.is_admin())
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::new(StatusCode::NOT_FOUND, "DRAFT_NOT_FOUND", "draft not found"))?;
+    if draft.get::<String, _>("status") == "PUBLISHED" {
+        let stored_key: Option<String> = draft.get("publish_idempotency_key");
+        if stored_key.as_deref() != Some(idempotency_key.as_str()) {
+            return Err(AppError::conflict(
+                "IDEMPOTENCY_CONFLICT",
+                "draft was already published with a different operation",
+            ));
+        }
+        let revision = draft
+            .get::<Option<i32>, _>("published_revision")
+            .ok_or_else(|| AppError::internal("published draft has no revision"))?;
+        tx.rollback().await?;
+        return load_revision(&state, &pipeline_id, revision as u32)
+            .await?
+            .map(Json)
+            .ok_or_else(|| AppError::internal("published revision is missing"));
+    }
+    if draft.get::<i64, _>("version") != expected {
+        return Err(AppError::conflict(
+            "DRAFT_VERSION_CONFLICT",
+            "draft was updated by another editor",
+        ));
+    }
+    let key_owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT draft_id FROM kernel.pipeline_drafts
+         WHERE publish_idempotency_key=$1 AND draft_id <> $2",
+    )
+    .bind(&idempotency_key)
+    .bind(draft_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if key_owner.is_some() {
+        return Err(AppError::conflict(
+            "IDEMPOTENCY_CONFLICT",
+            "Idempotency-Key belongs to a different publish operation",
+        ));
+    }
+    let stored_definition: Value = draft.get("definition");
+    let mut definition: PipelineDefinition = serde_json::from_value(stored_definition)
+        .map_err(|error| AppError::bad_request(format!("stored draft is invalid: {error}")))?;
+    let revision: i32 = sqlx::query_scalar(
+        "UPDATE kernel.pipeline_definitions
+         SET latest_revision=latest_revision+1, updated_at=now()
+         WHERE pipeline_id=$1
+         RETURNING latest_revision",
+    )
+    .bind(&pipeline_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "PIPELINE_NOT_FOUND",
+            "pipeline not found",
+        )
+    })?;
+    definition.pipeline_id = pipeline_id.clone();
+    definition.revision = revision as u32;
+    definition.status = "PUBLISHED".to_string();
+    let plan = match validate_and_plan(&state, &mut definition).await {
+        Ok(plan) => plan,
+        Err(error) => {
+            tx.rollback().await?;
+            return Err(error);
+        }
+    };
+    let definition_value = serde_json::to_value(&definition)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    sqlx::query(
+        "INSERT INTO kernel.pipeline_revisions (pipeline_id,revision,digest,definition,plan,status)
+         VALUES ($1,$2,$3,$4,$5,'PUBLISHED')",
+    )
+    .bind(&pipeline_id)
+    .bind(revision)
+    .bind(&definition.digest)
+    .bind(&definition_value)
+    .bind(serde_json::to_value(&plan).unwrap_or(Value::Null))
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE kernel.pipeline_drafts
+         SET status='PUBLISHED', published_revision=$1, publish_idempotency_key=$2,
+             version=version+1, updated_by=$3, updated_at=now()
+         WHERE draft_id=$4",
+    )
+    .bind(revision)
+    .bind(&idempotency_key)
+    .bind(auth.user_id)
+    .bind(draft_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    let _ = crate::audit::record(
+        &state.db,
+        "pipeline.draft_published",
+        "USER",
+        &auth.user_id.to_string(),
+        "pipeline",
+        &pipeline_id,
+        "publish",
+        "ACCEPTED",
+        json!({"revision": revision, "digest": definition.digest, "draftId": draft_id}),
+        None,
+    )
+    .await;
+    Ok(Json(PipelineResponse {
+        pipeline_id,
+        revision: revision as u32,
+        digest: definition.digest.clone(),
+        status: "PUBLISHED".to_string(),
+        definition,
+        plan,
+    }))
+}
+
 pub async fn get_plan(
     State(state): State<AppState>,
     _auth: AuthUser,
@@ -1075,6 +1464,144 @@ async fn fetch_job(state: &AppState, job_id: Uuid) -> AppResult<JobView> {
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::not_found("job not found"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobListQuery {
+    pub limit: Option<u32>,
+    pub cursor: Option<String>,
+    pub pipeline_id: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobListResponse {
+    pub items: Vec<JobView>,
+    pub next_cursor: Option<String>,
+}
+
+fn decode_job_cursor(cursor: &str) -> AppResult<(DateTime<Utc>, Uuid)> {
+    use base64::Engine;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| AppError::bad_request("invalid job cursor"))?;
+    let text = String::from_utf8(raw).map_err(|_| AppError::bad_request("invalid job cursor"))?;
+    let (timestamp, id) = text
+        .split_once('|')
+        .ok_or_else(|| AppError::bad_request("invalid job cursor"))?;
+    let timestamp = DateTime::parse_from_rfc3339(timestamp)
+        .map_err(|_| AppError::bad_request("invalid job cursor"))?
+        .with_timezone(&Utc);
+    let id = Uuid::parse_str(id).map_err(|_| AppError::bad_request("invalid job cursor"))?;
+    Ok((timestamp, id))
+}
+
+fn encode_job_cursor(job: &JobView) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(format!("{}|{}", job.created_at.to_rfc3339(), job.job_id).as_bytes())
+}
+
+pub async fn list_jobs(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Query(query): Query<JobListQuery>,
+) -> AppResult<Json<JobListResponse>> {
+    let limit = i64::from(query.limit.unwrap_or(20).clamp(1, 100));
+    if let Some(status) = query.status.as_deref() {
+        if !matches!(
+            status,
+            "QUEUED" | "CLAIMED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED"
+        ) {
+            return Err(AppError::bad_request("invalid job status filter"));
+        }
+    }
+    let (cursor_time, cursor_id) = match query.cursor.as_deref() {
+        Some(value) => {
+            let (time, id) = decode_job_cursor(value)?;
+            (Some(time), Some(id))
+        }
+        None => (None, None),
+    };
+    let rows = sqlx::query(
+        r#"
+        SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,
+               attempts,max_attempts,last_error_code,created_at,updated_at
+        FROM kernel.pipeline_jobs
+        WHERE ($1::text IS NULL OR pipeline_id=$1)
+          AND ($2::text IS NULL OR status=$2)
+          AND ($3::timestamptz IS NULL OR (created_at,job_id) < ($3,$4::uuid))
+        ORDER BY created_at DESC, job_id DESC
+        LIMIT $5
+        "#,
+    )
+    .bind(query.pipeline_id.as_deref())
+    .bind(query.status.as_deref())
+    .bind(cursor_time)
+    .bind(cursor_id)
+    .bind(limit + 1)
+    .fetch_all(&state.db)
+    .await?;
+    let has_more = rows.len() as i64 > limit;
+    let visible = if has_more {
+        &rows[..rows.len() - 1]
+    } else {
+        &rows[..]
+    };
+    let items: Vec<JobView> = visible
+        .iter()
+        .map(JobView::from_row)
+        .collect::<Result<_, _>>()?;
+    let next_cursor = if has_more {
+        items.last().map(encode_job_cursor)
+    } else {
+        None
+    };
+    Ok(Json(JobListResponse { items, next_cursor }))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobResultView {
+    pub job_id: Uuid,
+    pub status: String,
+    pub output: Value,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub result_digest: Option<String>,
+    pub completed_at: DateTime<Utc>,
+}
+
+pub async fn get_job_result(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(job_id): Path<Uuid>,
+) -> AppResult<Json<JobResultView>> {
+    let row = sqlx::query(
+        "SELECT job_id,status,output,error_code,error_message,result_digest,completed_at
+         FROM kernel.pipeline_job_results WHERE job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| {
+        AppError::new(
+            StatusCode::NOT_FOUND,
+            "JOB_RESULT_NOT_FOUND",
+            "job result not available",
+        )
+    })?;
+    Ok(Json(JobResultView {
+        job_id: row.get("job_id"),
+        status: row.get("status"),
+        output: row.get("output"),
+        error_code: row.get("error_code"),
+        error_message: row.get("error_message"),
+        result_digest: row.get("result_digest"),
+        completed_at: row.get("completed_at"),
+    }))
 }
 
 pub async fn get_job(

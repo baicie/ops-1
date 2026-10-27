@@ -58,6 +58,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  postWithHeaders: <T>(path: string, body: unknown, headers: Record<string, string>) =>
+    request<T>(path, { method: 'POST', body: JSON.stringify(body), headers }),
   post: <T>(path: string, body: unknown = {}, idempotencyKey?: string) =>
     request<T>(path, {
       method: 'POST',
@@ -66,6 +68,8 @@ export const api = {
     }),
   patch: <T>(path: string, body: unknown = {}) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  put: <T>(path: string, body: unknown = {}, extraHeaders: Record<string, string> = {}) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body), headers: extraHeaders }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   uploadPackage: async (file: File) => {
     const response = await fetch('/api/v1/plugins/packages', {

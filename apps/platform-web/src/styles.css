@@ -671,3 +671,24 @@ input::placeholder { color: var(--ow-text-muted); }
 .react-flow__node { visibility: visible !important; opacity: 1 !important; }
 .studio-rf-node { visibility: visible !important; opacity: 1 !important; }
 .react-flow__nodes, .react-flow__node { display: block !important; visibility: visible !important; opacity: 1 !important; }
+
+/* Draft editing */
+.studio-banner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--ow-ok); background: color-mix(in srgb, var(--ow-ok) 10%, var(--ow-surface)); border-radius: 8px; font-size: var(--ow-type-sm); }
+.studio-banner-error { border-color: var(--ow-danger); background: color-mix(in srgb, var(--ow-danger) 10%, var(--ow-surface)); color: var(--ow-danger); }
+.studio-banner-error .btn { margin-left: auto; }
+.studio-drafts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: var(--ow-type-sm); }
+.draft-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-small { padding: 4px 8px; font-size: var(--ow-type-sm); }
+.config-form { display: flex; flex-direction: column; gap: 9px; }
+.config-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.config-form input:not([type=checkbox]), .config-form textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--ow-border); border-radius: 5px; background: var(--ow-surface-2); color: var(--ow-text); font: inherit; }
+.config-form textarea { font-family: var(--ow-font-mono, monospace); font-size: 11px; }
+.config-form .config-checkbox { flex-direction: row; align-items: center; }
+.run-panel { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.run-panel label { display: flex; flex-direction: column; gap: 6px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.run-panel select, .run-panel textarea { padding: 8px 10px; border: 1px solid var(--ow-border); border-radius: 6px; background: var(--ow-surface-2); color: var(--ow-text); font: inherit; }
+.run-panel textarea { font-family: var(--ow-font-mono, monospace); }
+.detail-list { list-style: none; padding: 0; margin: 12px 0; display: flex; flex-direction: column; gap: 10px; }
+.detail-list li { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--ow-border); }
+.detail-list span:first-child { color: var(--ow-text-muted); }
+.result-json { max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--ow-border); border-radius: 6px; background: var(--ow-surface-2); font-size: 12px; }
