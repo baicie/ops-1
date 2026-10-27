@@ -76,8 +76,8 @@ export function evaluateRule(rule, records) {
   } else if (rule.ruleType === 'UNIQUE_KEY') {
     const seen = new Set();
     records.forEach((record, index) => {
-      const values = config.fields.map((field) => record[field]);
-      const hasNull = values.some((value) => value === null || value === undefined);
+      const values = config.fields.map((field) => hasValue(record, field) ? record[field] : null);
+      const hasNull = values.some((value) => value === null);
       if (hasNull) {
         if (config.nullPolicy === 'IGNORE') return;
         failed += 1; failedIndexes.push(index); return;

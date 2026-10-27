@@ -27,7 +27,7 @@ pub fn spawn_resource_retention(state: AppState) {
     tokio::spawn(async move {
         loop {
             match sqlx::query(
-                "DELETE FROM kernel.node_resource_samples WHERE sample_id IN (SELECT sample_id FROM kernel.node_resource_samples WHERE observed_at < now() - interval '7 days' ORDER BY sample_id LIMIT 10000)",
+                "DELETE FROM kernel.node_resource_samples WHERE sample_id IN (SELECT sample_id FROM kernel.node_resource_samples WHERE observed_at < now() - interval '7 days' ORDER BY observed_at, sample_id LIMIT 10000)",
             )
             .execute(&state.db)
             .await
@@ -707,12 +707,12 @@ pub async fn resource_history(
         sqlx::query_as::<_, NodeResourceSampleView>(
             r#"
             WITH filtered AS (
-              SELECT *, date_trunc('hour', observed_at) AS bucket
+              SELECT *, (date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS bucket
               FROM kernel.node_resource_samples
               WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
                 AND ($3::timestamptz IS NULL OR observed_at <= $3)
             ), ordered AS (
-              SELECT *, lag(generation) OVER (PARTITION BY bucket ORDER BY observed_at, sample_id) AS previous_generation
+              SELECT *, lag(generation) OVER (PARTITION BY node_id ORDER BY observed_at, sample_id) AS previous_generation
               FROM filtered
             ), aggregated AS (
               SELECT bucket,node_id,count(*)::int AS sample_count,min(sample_id) AS sample_id,

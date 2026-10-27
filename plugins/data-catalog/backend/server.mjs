@@ -422,6 +422,8 @@ async function executeQualityRun(runId) {
     const write = await pool.connect();
     try {
       await write.query('BEGIN');
+      await write.query("SET LOCAL lock_timeout = '2s'");
+      await write.query("SET LOCAL statement_timeout = '10s'");
       const current = await write.query("SELECT status,fencing_token,lease_owner,lease_expires_at > now() AS lease_valid FROM catalog_quality_runs WHERE run_id=$1 FOR UPDATE", [runId]);
       const currentRun = current.rows[0];
       if (!currentRun || currentRun.status !== 'RUNNING' || Number(currentRun.fencing_token) !== token
@@ -476,16 +478,37 @@ async function dispatchQualityRuns() {
   }
 }
 
+let maintenanceRunning = false;
 async function recoverExpiredQualityRuns() {
-  await pool.query("UPDATE catalog_quality_runs SET status='ERROR', error_code='INTERRUPTED', completed_at=now(), updated_at=now() WHERE status='RUNNING' AND lease_expires_at < now()");
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL lock_timeout = '2s'");
+    await client.query("SET LOCAL statement_timeout = '5s'");
+    await client.query("UPDATE catalog_quality_runs SET status='ERROR', error_code='INTERRUPTED', completed_at=now(), updated_at=now() WHERE status='RUNNING' AND lease_expires_at < now()");
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}
+
+function scheduleQualityMaintenance() {
+  setTimeout(async () => {
+    if (!maintenanceRunning) {
+      maintenanceRunning = true;
+      try { await recoverExpiredQualityRuns(); await dispatchQualityRuns(); }
+      catch (error) { console.error('quality dispatcher error', error); }
+      finally { maintenanceRunning = false; }
+    }
+    scheduleQualityMaintenance();
+  }, 5000).unref();
 }
 
 async function recoverQualityRuns() {
   await recoverExpiredQualityRuns();
   await dispatchQualityRuns();
-  setInterval(() => {
-    recoverExpiredQualityRuns().then(dispatchQualityRuns).catch((error) => console.error('quality dispatcher error', error));
-  }, 5000).unref();
+  scheduleQualityMaintenance();
 }
 
 function datasetView(row) {
@@ -562,32 +585,40 @@ async function handle(req, res) {
     if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'authentication required', requestId);
     if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
     const counts = await pool.query(`
-      WITH latest AS (
+      WITH latest_overall AS (
+        SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.run_id
+        FROM catalog_quality_runs r ORDER BY r.dataset_id, r.created_at DESC, r.run_id DESC
+      ), latest_terminal AS (
         SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.completed_at,r.error_code,r.run_id
-        FROM catalog_quality_runs r ORDER BY r.dataset_id, r.created_at DESC
+        FROM catalog_quality_runs r
+        WHERE r.status IN ('PASSED','FAILED','ERROR')
+        ORDER BY r.dataset_id, COALESCE(r.completed_at,r.created_at) DESC, r.run_id DESC
       )
       SELECT (SELECT count(*)::int FROM catalog_datasets) AS dataset_count,
-             (SELECT count(*)::int FROM latest) AS datasets_with_runs,
-             (SELECT count(*)::int FROM latest WHERE status='PASSED') AS passed,
-             (SELECT count(*)::int FROM latest WHERE status='FAILED') AS failed,
-             (SELECT count(*)::int FROM latest WHERE status='ERROR') AS errored,
-             (SELECT count(*)::int FROM latest WHERE status IN ('PENDING','RUNNING')) AS pending,
+             (SELECT count(*)::int FROM latest_overall) AS datasets_with_runs,
+             (SELECT count(*)::int FROM latest_terminal WHERE status='PASSED') AS passed,
+             (SELECT count(*)::int FROM latest_terminal WHERE status='FAILED') AS failed,
+             (SELECT count(*)::int FROM latest_terminal WHERE status='ERROR') AS errored,
+             (SELECT count(*)::int FROM latest_overall WHERE status IN ('PENDING','RUNNING')) AS pending,
+             (SELECT count(*)::int FROM latest_overall WHERE status='CANCELLED') AS cancelled,
              (SELECT count(*)::int FROM catalog_lineage WHERE occurred_at > now() - interval '24 hours') AS lineage_window_count
     `);
     const failures = await pool.query(`
-      WITH latest AS (
+      WITH latest_terminal AS (
         SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.completed_at,r.error_code,r.run_id
-        FROM catalog_quality_runs r ORDER BY r.dataset_id, r.created_at DESC
+        FROM catalog_quality_runs r
+        WHERE r.status IN ('PASSED','FAILED','ERROR')
+        ORDER BY r.dataset_id, COALESCE(r.completed_at,r.created_at) DESC, r.run_id DESC
       )
       SELECT l.run_id,l.dataset_id,d.name AS dataset_name,l.status,l.created_at,l.completed_at,l.error_code
-      FROM latest l JOIN catalog_datasets d ON d.dataset_id=l.dataset_id
+      FROM latest_terminal l JOIN catalog_datasets d ON d.dataset_id=l.dataset_id
       WHERE l.status IN ('FAILED','ERROR') ORDER BY COALESCE(l.completed_at,l.created_at) DESC LIMIT 8
     `);
     const row = counts.rows[0];
     return send(res, 200, {
       datasetCount: row.dataset_count,
       datasetsWithQualityRuns: row.datasets_with_runs,
-      latestQuality: { passed: row.passed, failed: row.failed, error: row.errored, pending: row.pending, unknown: row.dataset_count - row.datasets_with_runs },
+      latestQuality: { passed: row.passed, failed: row.failed, error: row.errored, pending: row.pending, cancelled: row.cancelled, unknown: row.dataset_count - row.datasets_with_runs },
       lineageWindowCount: row.lineage_window_count,
       lineageWindow: '24h',
       recentFailures: failures.rows.map((failure) => ({ runId: failure.run_id, datasetId: failure.dataset_id, datasetName: failure.dataset_name, status: failure.status, createdAt: failure.created_at.toISOString(), completedAt: failure.completed_at ? failure.completed_at.toISOString() : null, errorCode: failure.error_code })),
@@ -898,10 +929,11 @@ async function handle(req, res) {
       const existing = await pool.query('SELECT * FROM catalog_quality_runs WHERE dataset_id=$1 AND idempotency_key=$2', [datasetId, key]);
       if (existing.rows[0]) {
         const current = existing.rows[0];
-        const rulesForDigest = await pool.query('SELECT * FROM catalog_quality_rules WHERE dataset_id=$1 AND schema_revision=$2 AND enabled=true ORDER BY rule_id LIMIT 101', [datasetId, revision]);
+        if (body.schemaRevision !== undefined && Number(body.schemaRevision) !== current.schema_revision) return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'idempotency key is bound to a different schema revision', requestId);
+        const rulesForDigest = await pool.query('SELECT * FROM catalog_quality_rules WHERE dataset_id=$1 AND schema_revision=$2 AND enabled=true ORDER BY rule_id LIMIT 101', [datasetId, current.schema_revision]);
         const currentSnapshot = rulesForDigest.rows.map((rule) => ({ ruleId: rule.rule_id, version: rule.version, ruleType: rule.rule_type, config: rule.config, severity: rule.severity }));
-        const currentDigest = digest({ schemaRevision: revision, ruleSetDigest: ruleSetDigest(currentSnapshot) });
-        if (current.request_digest && current.request_digest !== currentDigest) return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'idempotency key was reused with different rule semantics', requestId);
+        const currentDigest = digest({ schemaRevision: current.schema_revision, ruleSetDigest: ruleSetDigest(currentSnapshot) });
+        if (current.request_digest ? current.request_digest !== currentDigest : current.rule_set_digest !== ruleSetDigest(currentSnapshot)) return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'idempotency key was reused with different rule semantics', requestId);
         return send(res, 200, qualityRunView(current, []), requestId);
       }
       const schema = await pool.query("SELECT 1 FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status='PUBLISHED'", [datasetId, revision]);
