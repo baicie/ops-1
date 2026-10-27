@@ -100,11 +100,11 @@ QRULE_ID="$(printf '%s' "$QRULE" | json "d['ruleId']")"
 [ -n "$QRULE_ID" ] || bad "quality rule creation returned no id"
 QRUN="$(api -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
   "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
-  -d '{"schemaRevision":2}')"
+  -d '{"schemaRevision":2,"idempotencyKey":"quality-run-data-foundation-0001"}')"
 QRUN_ID="$(printf '%s' "$QRUN" | json "d['runId']")"
 QRUN_ID_2="$(api -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
   "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
-  -d '{"schemaRevision":2}' | json "d['runId']")"
+  -d '{"schemaRevision":2,"idempotencyKey":"quality-run-data-foundation-0001"}' | json "d['runId']")"
 [ "$QRUN_ID" = "$QRUN_ID_2" ] || bad "quality idempotency created a second run"
 for _ in $(seq 1 40); do
   QSTATUS="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID" | json "d['status']")"
