@@ -290,7 +290,7 @@ function publicSourceSummary(source) {
   const result = {};
   for (const key of allowed) {
     const value = source[key];
-    if (typeof value === 'string' && value.length <= 128 && !/[\\r\\n]/.test(value)) result[key] = value;
+    if (typeof value === 'string' && value.length <= 128 && !/[\r\n]/.test(value)) result[key] = value;
     else if (Number.isInteger(value) && value >= 0) result[key] = value;
   }
   return result;
@@ -836,6 +836,8 @@ async function handle(req, res) {
       let input;
       try { input = normalizeRuleInput(body); } catch (error) { return fail(res, 400, 'INVALID_RULE', error.message, requestId); }
       if (input.ruleType === 'RECORD_COUNT' && input.config.max > 10000) return fail(res, 400, 'INVALID_RULE', 'RECORD_COUNT max is bounded by the 10000 scan budget', requestId);
+      const revision = body.schemaRevision === undefined ? dataset.rows[0].schema_revision : Number(body.schemaRevision);
+      if (!Number.isInteger(revision) || revision < 1) return fail(res, 400, 'INVALID_REQUEST', 'schemaRevision invalid', requestId);
       const schema = await pool.query("SELECT 1 FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status='PUBLISHED'", [datasetId, revision]);
       if (!schema.rows[0]) return fail(res, 409, 'SCHEMA_NOT_PUBLISHED', 'schema revision is not published', requestId);
       const row = await pool.query(
@@ -1003,6 +1005,7 @@ async function handle(req, res) {
 
 const server = http.createServer((req, res) => {
   handle(req, res).catch((error) => {
+    console.error('catalog request failed', error);
     const requestId = rid(req);
     const status = error.status || 500;
     fail(res, status, status === 400 ? 'INVALID_REQUEST' : status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL', status >= 500 ? 'internal catalog error' : error.message, requestId);
