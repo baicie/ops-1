@@ -679,6 +679,18 @@ pub struct NodeResourceSampleView {
     pub cpu_cores: Option<i64>,
     pub filesystem_used_bytes: Option<i64>,
     pub filesystem_total_bytes: Option<i64>,
+    pub resolution: Option<String>,
+    pub window_start: Option<DateTime<Utc>>,
+    pub window_end: Option<DateTime<Utc>>,
+    pub sample_count: Option<i32>,
+    pub cpu_min: Option<f64>,
+    pub cpu_max: Option<f64>,
+    pub cpu_avg: Option<f64>,
+    pub memory_peak_bytes: Option<i64>,
+    pub filesystem_peak_bytes: Option<i64>,
+    pub generation_start: Option<i64>,
+    pub generation_end: Option<i64>,
+    pub generation_changes: Option<i32>,
 }
 
 pub async fn resource_history(
@@ -700,7 +712,19 @@ pub async fn resource_history(
                    max(memory_total_bytes) AS memory_total_bytes,
                    max(cpu_cores) AS cpu_cores,
                    max(filesystem_used_bytes) AS filesystem_used_bytes,
-                   max(filesystem_total_bytes) AS filesystem_total_bytes
+                   max(filesystem_total_bytes) AS filesystem_total_bytes,
+                   'hour'::text AS resolution,
+                   date_trunc('hour', observed_at) AS window_start,
+                   date_trunc('hour', observed_at) + interval '1 hour' AS window_end,
+                   count(*)::int AS sample_count,
+                   min(cpu_utilization)::float8 AS cpu_min,
+                   max(cpu_utilization)::float8 AS cpu_max,
+                   avg(cpu_utilization)::float8 AS cpu_avg,
+                   max(memory_used_bytes) AS memory_peak_bytes,
+                   max(filesystem_used_bytes) AS filesystem_peak_bytes,
+                   min(generation) AS generation_start,
+                   max(generation) AS generation_end,
+                   count(DISTINCT generation)::int AS generation_changes
             FROM kernel.node_resource_samples
             WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
               AND ($3::timestamptz IS NULL OR observed_at <= $3)
@@ -719,7 +743,12 @@ pub async fn resource_history(
             r#"
             SELECT sample_id,node_id,generation,observed_at,sampled_at,cpu_utilization,
                    memory_used_bytes,memory_total_bytes,cpu_cores,filesystem_used_bytes,
-                   filesystem_total_bytes
+                   filesystem_total_bytes,'raw'::text AS resolution,
+                   NULL::timestamptz AS window_start,NULL::timestamptz AS window_end,
+                   NULL::int AS sample_count,NULL::float8 AS cpu_min,NULL::float8 AS cpu_max,
+                   NULL::float8 AS cpu_avg,NULL::bigint AS memory_peak_bytes,
+                   NULL::bigint AS filesystem_peak_bytes,NULL::bigint AS generation_start,
+                   NULL::bigint AS generation_end,NULL::int AS generation_changes
             FROM kernel.node_resource_samples
             WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
               AND ($3::timestamptz IS NULL OR observed_at <= $3)

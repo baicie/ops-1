@@ -279,6 +279,7 @@ async function initDb() {
       summary jsonb NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now()
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS catalog_quality_results_run_rule_idx ON catalog_quality_results (run_id, rule_id);
     CREATE INDEX IF NOT EXISTS catalog_quality_results_run_idx ON catalog_quality_results (run_id);
   `);
   ready = true;
@@ -420,8 +421,10 @@ async function executeQualityRun(runId) {
     const write = await pool.connect();
     try {
       await write.query('BEGIN');
-      const current = await write.query("SELECT status,fencing_token FROM catalog_quality_runs WHERE run_id=$1 FOR UPDATE", [runId]);
-      if (!current.rows[0] || current.rows[0].status !== 'RUNNING' || Number(current.rows[0].fencing_token) !== token) {
+      const current = await write.query("SELECT status,fencing_token,lease_owner,lease_expires_at FROM catalog_quality_runs WHERE run_id=$1 FOR UPDATE", [runId]);
+      const currentRun = current.rows[0];
+      if (!currentRun || currentRun.status !== 'RUNNING' || Number(currentRun.fencing_token) !== token
+        || currentRun.lease_owner !== owner || !currentRun.lease_expires_at || new Date(currentRun.lease_expires_at).getTime() <= Date.now()) {
         await write.query('ROLLBACK');
         return;
       }
@@ -433,12 +436,14 @@ async function executeQualityRun(runId) {
           [runId, item.rule.ruleId, item.rule.version, result.status, result.examined, result.failed, JSON.stringify(result.summary)],
         );
       }
-      await write.query(
+      const finalized = await write.query(
         `UPDATE catalog_quality_runs SET status=$2, completed_at=now(), updated_at=now(),
            records_examined=$3, records_failed=$4, lease_expires_at=NULL
-         WHERE run_id=$1 AND status='RUNNING' AND fencing_token=$5`,
-        [runId, evaluation.status, records.length, evaluation.recordsFailed || 0, token],
+         WHERE run_id=$1 AND status='RUNNING' AND fencing_token=$5 AND lease_owner=$6 AND lease_expires_at > now()
+         RETURNING run_id`,
+        [runId, evaluation.status, records.length, evaluation.recordsFailed || 0, token, owner],
       );
+      if (finalized.rowCount !== 1) { await write.query('ROLLBACK'); return; }
       await write.query('COMMIT');
     } catch (error) {
       await write.query('ROLLBACK');
@@ -470,10 +475,16 @@ async function dispatchQualityRuns() {
   }
 }
 
-async function recoverQualityRuns() {
+async function recoverExpiredQualityRuns() {
   await pool.query("UPDATE catalog_quality_runs SET status='ERROR', error_code='INTERRUPTED', completed_at=now(), updated_at=now() WHERE status='RUNNING' AND lease_expires_at < now()");
+}
+
+async function recoverQualityRuns() {
+  await recoverExpiredQualityRuns();
   await dispatchQualityRuns();
-  setInterval(() => { dispatchQualityRuns().catch((error) => console.error('quality dispatcher error', error)); }, 5000).unref();
+  setInterval(() => {
+    recoverExpiredQualityRuns().then(dispatchQualityRuns).catch((error) => console.error('quality dispatcher error', error));
+  }, 5000).unref();
 }
 
 function datasetView(row) {
@@ -548,6 +559,7 @@ async function handle(req, res) {
   if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'caller identity required', requestId);
   if (url.pathname === '/api/data-catalog/governance-summary' && req.method === 'GET') {
     if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'authentication required', requestId);
+    if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
     const counts = await pool.query(`
       WITH latest AS (
         SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.completed_at,r.error_code,r.run_id

@@ -95,6 +95,12 @@ ANON_CODE="$(curl -sS -o /tmp/authz-anon-node-history.json -w '%{http_code}' "$U
 [ "$ANON_CODE" = "401" ] || bad "anonymous node history returned $ANON_CODE, expected 401"
 ok "Node history authorization matrix"
 
+VIEW_CODE="$(cookie_status "$VIEWER_JAR" "$VIEWER_CSRF" GET "$CAT/governance-summary" /tmp/authz-viewer-governance.json)"
+[ "$VIEW_CODE" = "200" ] || bad "viewer governance summary returned $VIEW_CODE, expected 200"
+ANON_CODE="$(curl -sS -o /tmp/authz-anon-governance.json -w '%{http_code}' "$CAT/governance-summary")"
+[ "$ANON_CODE" = "401" ] || bad "anonymous governance summary returned $ANON_CODE, expected 401"
+ok "Governance summary authorization"
+
 echo "== Operator legal write path still works"
 OP_DATASET_BODY='{"name":"authz-operator-dataset","description":"operator fixture","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0}],"retentionPolicy":{"mode":"RETAIN","maxRecords":100,"maxBytes":1048576}}'
 OP_CODE="$(cookie_status "$OPERATOR_JAR" "$OPERATOR_CSRF" POST "$CAT/datasets" /tmp/authz-operator-dataset.json "$OP_DATASET_BODY")"
