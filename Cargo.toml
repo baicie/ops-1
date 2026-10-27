@@ -5,6 +5,7 @@ members = [
   "crates/bundle",
   "apps/kernel",
   "apps/node",
+  "apps/pipeline-worker",
   "apps/opsctl",
 ]
 

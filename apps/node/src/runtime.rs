@@ -120,6 +120,8 @@ pub struct Shared {
     pub quarantined: Arc<AtomicBool>,
     pub quarantine_error: Arc<StdMutex<Option<String>>>,
     pub lease_deadline: Arc<StdMutex<Option<Instant>>>,
+    /// Set exactly once by the Unix signal handler; all supervision loops observe it.
+    pub shutdown: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 pub struct TaskEntry {
@@ -1237,6 +1239,7 @@ mod tests {
             quarantined: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             quarantine_error: Arc::new(StdMutex::new(None)),
             lease_deadline: Arc::new(StdMutex::new(None)),
+            shutdown: Arc::new(tokio::sync::watch::channel(false).0),
         })
     }
 

@@ -1421,6 +1421,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures",
+ "libc",
  "opsweave-contracts",
  "rand 0.8.8",
  "reqwest",
@@ -1450,6 +1451,21 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "opsweave-pipeline-worker"
+version = "0.0.3"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
  "tokio",
  "uuid",
 ]

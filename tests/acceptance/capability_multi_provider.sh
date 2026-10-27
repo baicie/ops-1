@@ -14,10 +14,17 @@ B="opsweave.data-catalo"
 CAP="$URL/api/v1/capabilities/data.catalog.v1/1"
 
 current_token() {
-  local cid
+  local cid token
   cid="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-integration/ {print $1; exit}')"
   [ -n "$cid" ] || bad "data-integration container not found"
-  docker exec "$cid" cat /run/opsweave/capability-tokens.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["data.catalog.v1"])'
+  # Node Runtime restarts can adopt the container before its workload token file
+  # is refreshed. Wait for the Catalog token instead of assuming immediate state.
+  for _ in $(seq 1 60); do
+    token="$(docker exec "$cid" cat /run/opsweave/capability-tokens.json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("data.catalog.v1",""))' 2>/dev/null || true)"
+    [ -n "$token" ] && { printf '%s' "$token"; return 0; }
+    sleep 1
+  done
+  bad "data-integration workload token file has no data.catalog.v1"
 }
 
 invoke_datasets() {

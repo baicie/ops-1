@@ -1,0 +1,171 @@
+{
+  "pipelineId": "host-metrics-pipeline",
+  "revision": 1,
+  "digest": "sha256:f4a7f2999318cee8c302a5fd95c0a0a42db9e1703e0c6be7ae79e9205f1f31cc",
+  "status": "PUBLISHED",
+  "definition": {
+    "schemaVersion": "pipeline.opsweave.io/v1",
+    "pipelineId": "host-metrics-pipeline",
+    "name": "Host Metrics Pipeline",
+    "revision": 1,
+    "status": "PUBLISHED",
+    "nodes": [
+      {
+        "nodeId": "source",
+        "type": "builtin.source.http_json",
+        "typeVersion": 1,
+        "inputs": [],
+        "outputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "nullable": false
+          }
+        ],
+        "config": {
+          "maxRecords": 10000,
+          "timeoutSeconds": 15,
+          "endpoint": "http://172.17.0.1:18090/data-hosts.json"
+        }
+      },
+      {
+        "nodeId": "parse",
+        "type": "builtin.parse.json",
+        "typeVersion": 1,
+        "inputs": [
+          {
+            "name": "raw",
+            "dataType": "json",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "nullable": false
+          }
+        ],
+        "config": {}
+      },
+      {
+        "nodeId": "map",
+        "type": "builtin.map.fields",
+        "typeVersion": 1,
+        "inputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "nullable": false
+          }
+        ],
+        "config": {}
+      },
+      {
+        "nodeId": "filter",
+        "type": "builtin.filter.predicate",
+        "typeVersion": 1,
+        "inputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "nullable": false
+          }
+        ],
+        "config": {}
+      },
+      {
+        "nodeId": "validate",
+        "type": "builtin.validate.schema",
+        "typeVersion": 1,
+        "inputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "nullable": false
+          }
+        ],
+        "config": {}
+      },
+      {
+        "nodeId": "sink",
+        "type": "builtin.sink.dataset",
+        "typeVersion": 1,
+        "inputs": [
+          {
+            "name": "records",
+            "dataType": "json",
+            "required": true
+          }
+        ],
+        "outputs": [],
+        "config": {
+          "datasetId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "schemaRevision": 1
+        }
+      }
+    ],
+    "edges": [
+      {
+        "fromNode": "source",
+        "fromPort": "records",
+        "toNode": "parse",
+        "toPort": "raw",
+        "dataType": "json"
+      },
+      {
+        "fromNode": "parse",
+        "fromPort": "records",
+        "toNode": "map",
+        "toPort": "records",
+        "dataType": "json"
+      },
+      {
+        "fromNode": "map",
+        "fromPort": "records",
+        "toNode": "filter",
+        "toPort": "records",
+        "dataType": "json"
+      },
+      {
+        "fromNode": "filter",
+        "fromPort": "records",
+        "toNode": "validate",
+        "toPort": "records",
+        "dataType": "json"
+      },
+      {
+        "fromNode": "validate",
+        "fromPort": "records",
+        "toNode": "sink",
+        "toPort": "records",
+        "dataType": "json"
+      }
+    ],
+    "createdAt": "2026-10-23T00:00:00Z",
+    "digest": "sha256:f4a7f2999318cee8c302a5fd95c0a0a42db9e1703e0c6be7ae79e9205f1f31cc"
+  },
+  "publishedAt": "2026-10-23T00:00:00Z",
+  "publishedBy": "reviewer"
+}

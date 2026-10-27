@@ -3,6 +3,7 @@ mod config;
 mod docker;
 mod logs;
 mod runtime;
+mod worker_supervisor;
 
 use crate::config::Args;
 use crate::docker::DockerAdapter;
@@ -41,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
         max_instances: args.max_instances,
         desired: vec![],
     };
+    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
     let shared = Arc::new(Shared {
         args: args.clone(),
         http,
@@ -55,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         quarantined: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         quarantine_error: Arc::new(StdMutex::new(None)),
         lease_deadline: Arc::new(StdMutex::new(None)),
+        shutdown: Arc::new(shutdown_tx),
     });
 
     let listener = tokio::net::TcpListener::bind(&args.data_bind)
@@ -77,12 +80,22 @@ async fn main() -> anyhow::Result<()> {
     });
     let heartbeat = tokio::spawn(runtime::heartbeat_loop(shared.clone()));
     let lease_watchdog = tokio::spawn(runtime::lease_watchdog(shared.clone()));
+    let worker_supervisor = worker_supervisor::spawn(shared.clone());
 
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("shutdown signal received");
+    wait_for_shutdown_signal().await?;
+    tracing::info!("shutdown signal received; stopping supervision");
+    let _ = shared.shutdown.send(true);
     heartbeat.abort();
     lease_watchdog.abort();
     api_task.abort();
+    // The supervisor observes the watch channel, sends SIGTERM to its child,
+    // waits with a hard bound, then SIGKILLs and reaps. Do not abort it before
+    // it has completed that sequence.
+    match tokio::time::timeout(std::time::Duration::from_secs(20), worker_supervisor).await {
+        Ok(Ok(())) => tracing::info!("worker supervisor shut down"),
+        Ok(Err(error)) => tracing::error!(%error, "worker supervisor join failed"),
+        Err(_) => tracing::error!("worker supervisor shutdown exceeded 20s bound"),
+    }
     if args.stop_workloads_on_exit {
         let tasks = shared.tasks.lock().await;
         for task in tasks.values() {
@@ -93,6 +106,25 @@ async fn main() -> anyhow::Result<()> {
     } else {
         tracing::info!("leaving managed containers running for re-adoption on restart");
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() -> anyhow::Result<()> {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    tokio::select! {
+        _ = terminate.recv() => {}
+        _ = interrupt.recv() => {}
+        result = tokio::signal::ctrl_c() => { result?; }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() -> anyhow::Result<()> {
+    tokio::signal::ctrl_c().await?;
     Ok(())
 }
 
