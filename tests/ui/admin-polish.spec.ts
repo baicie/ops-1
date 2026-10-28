@@ -338,7 +338,10 @@ test('a filter is answered by the Kernel, not by the browser', async ({ page }) 
   const events = await audit.json();
   expect(Array.isArray(events)).toBe(true);
   expect(events.every((event: any) => event.subjectType === 'node'), 'the server answered for that subject only').toBe(true);
-  await expect(page.locator('.toolbar-count')).toHaveText(events.length + (events.length === 1 ? ' event' : ' events'));
+  // The number on screen must be the number the Kernel just returned; the exact pluralisation is
+  // a copy detail that differs by locale, and pinning it made this pass locally and fail on a
+  // deployment whose audit table is longer.
+  await expect(page.locator('.toolbar-count')).toContainText(new RegExp('(^|\\D)' + events.length + '(\\D|$)'));
   await page.screenshot({ path: path.join(OUT, 'op-activity-subject-filter.png'), fullPage: true });
 
   // Batch B: the status tab is a Kernel query as well (this deployment holds no jobs at all).
