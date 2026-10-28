@@ -21,6 +21,13 @@ const WORKSPACE_GRANT = { allowedSurfaces: ['workspace'], capabilities: ['worksp
 
 type Grant = 'admin' | 'workspace';
 
+// Every test here installs route handlers, and the app keeps polling while a test finishes.
+// Without this teardown a fetch can still be in flight when Playwright closes the page, which
+// surfaces as "route.fetch: Test ended" and fails the run even though every assertion passed.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
 async function stubGrant(page: Page, grant: Grant) {
   await page.route('**/api/v1/auth/me', async (route) => {
     const response = await route.fetch();
@@ -217,6 +224,9 @@ test('the investigation layout is desktop-first and degrades without overflowing
   // 1440: three regions side by side.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/app/incidents');
+  // Measuring before the layout mounts yields an empty list, and an empty list satisfies "all
+  // three share one row" for the wrong reason. Wait for the three regions themselves.
+  await expect(page.locator('[data-region]')).toHaveCount(3);
   const wide = await page.locator('[data-region]').evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
   expect(new Set(wide).size, 'all three regions share one row at 1440').toBe(1);
 
