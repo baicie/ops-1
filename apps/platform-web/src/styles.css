@@ -1276,5 +1276,8 @@ details.panel.advanced > summary { padding: 14px 18px; }
   background: var(--ow-bg);
 }
 .forbidden-page .page-stack { width: 100%; max-width: 640px; }
-.panel-pad { padding: 18px 20px; display: grid; gap: 14px; }
+/* Scoped to the forbidden page on purpose: .panel-pad has no other definition, and several
+   studio panels already use the class. A global grid here re-flowed the pipeline editor's
+   drafts, palette and inspector, which broke a draft-conflict test two workflows away. */
+.forbidden-page .panel-pad { padding: 18px 20px; display: grid; gap: 14px; }
 .forbidden-page .page-actions { display: flex; flex-wrap: wrap; gap: 10px; }
