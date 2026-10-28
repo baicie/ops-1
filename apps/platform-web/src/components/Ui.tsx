@@ -1,6 +1,9 @@
-import React, { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { Icon } from './Icons';
+import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
+import { Label } from './ui/label';
 import { useT } from '../i18n';
+import { STATUS_MAP, glyphForTone } from './status-tone';
 import type { MessageKey } from '../i18n';
 
 export function PageHeader({
@@ -26,38 +29,15 @@ export function PageHeader({
   );
 }
 
-/** One mapping for every status code the shell renders; the code stays the wire value. */
-const statusMap: Record<string, { tone: string; labelKey: MessageKey }> = {
-  READY: { tone: 'ok', labelKey: 'status.ready' },
-  ACTIVE: { tone: 'ok', labelKey: 'status.active' },
-  INSTALLED: { tone: 'ok', labelKey: 'status.installed' },
-  CONFIRMED: { tone: 'ok', labelKey: 'status.confirmed' },
-  STAGED: { tone: 'info', labelKey: 'status.staged' },
-  VERIFIED: { tone: 'info', labelKey: 'status.verified' },
-  AVAILABLE: { tone: 'neutral', labelKey: 'status.available' },
-  PENDING: { tone: 'warn', labelKey: 'status.pending' },
-  PREPARING: { tone: 'warn', labelKey: 'status.preparing' },
-  STARTING: { tone: 'warn', labelKey: 'status.starting' },
-  DRAINING: { tone: 'warn', labelKey: 'status.draining' },
-  DEGRADED: { tone: 'warn', labelKey: 'status.degraded' },
-  ATTENTION: { tone: 'warn', labelKey: 'status.attention' },
-  UNHEALTHY: { tone: 'danger', labelKey: 'status.unhealthy' },
-  FAILED: { tone: 'danger', labelKey: 'status.failed' },
-  REJECTED: { tone: 'danger', labelKey: 'status.rejected' },
-  DISABLED: { tone: 'neutral', labelKey: 'status.disabled' },
-  UNINSTALLED: { tone: 'neutral', labelKey: 'status.uninstalled' },
-  STOPPED: { tone: 'neutral', labelKey: 'status.stopped' },
-  UNREACHABLE: { tone: 'danger', labelKey: 'status.unreachable' },
-  UNKNOWN: { tone: 'unknown', labelKey: 'status.unknown' },
-  ONLINE: { tone: 'ok', labelKey: 'status.online' },
-};
+// The wire code -> tone/label contract lives in status-tone.ts so the shadcn Badge in the
+// migrated pages and this legacy pill can never disagree about it.
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
   const t = useT();
   const code = status?.toUpperCase();
-  const known = code ? statusMap[code] : undefined;
+  const known = code ? STATUS_MAP[code] : undefined;
   const tone = known?.tone || 'unknown';
-  const glyph = tone === 'ok' ? 'check' : tone === 'danger' ? 'warning' : tone === 'warn' ? 'alert' : 'clock';
+  const glyph = glyphForTone(tone);
   // A code this mapping does not know is protocol data, not copy: render it verbatim
   // (only a missing code becomes a localized "Unknown"). data-status keeps the value
   // machine-readable so selectors never depend on localized text.
@@ -154,6 +134,55 @@ export function CopyButton({ value, label }: { value?: string | null; label?: st
   );
 }
 
+/**
+ * The one dialog body both exports below render. The Radix dialog primitive owns what the
+ * hand-written version scripted by hand — Escape, overlay click, focus trap, focus restore and
+ * scroll lock — while the markup keeps the pre-migration .modal* structure and insets, so the
+ * pages that only pass open/onClose/title keep rendering exactly what they rendered before.
+ */
+function DialogShell({
+  open,
+  onClose,
+  title,
+  size = 'medium',
+  footer,
+  testId,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  size?: 'small' | 'medium' | 'large';
+  footer?: React.ReactNode;
+  testId?: string;
+  children: React.ReactNode;
+}) {
+  const t = useT();
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        // p-0/gap-0: .modal-head, .modal-body and .modal-foot already carry the insets, and
+        // .modal-body stays the only scroll container of the box.
+        className={`modal modal-${size} gap-0 overflow-y-hidden p-0`}
+        // Nothing renders a dialog description, so the primitive must not point at one.
+        aria-describedby={undefined}
+        // Radix hides the rest of the page from assistive technology instead of marking the
+        // layer modal; the exported contract has always spelled out aria-modal, so keep it.
+        aria-modal="true"
+        data-testid={testId}
+      >
+        <div className="modal-head">
+          {/* font-bold/leading-normal keep the h2 the primitive would otherwise restyle. */}
+          <DialogTitle className="font-bold leading-normal">{title}</DialogTitle>
+          <button className="icon-btn" onClick={onClose} aria-label={t('aria.closeDialog')}><Icon name="close" /></button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-foot">{footer}</div>}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function Modal({
   open,
   onClose,
@@ -169,42 +198,10 @@ export function Modal({
   footer?: React.ReactNode;
   size?: 'small' | 'medium' | 'large';
 }) {
-  const t = useT();
-  const titleId = useId();
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-      if (event.key === 'Tab' && ref.current) {
-        const focusable = Array.from(ref.current.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).filter((node) => !node.hasAttribute('disabled'));
-        if (!focusable.length) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    window.setTimeout(() => ref.current?.querySelector<HTMLElement>('button, input, select, textarea')?.focus(), 30);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      previous?.focus();
-    };
-  }, [open, onClose]);
-  if (!open) return null;
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className={`modal modal-${size}`} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>
-        <div className="modal-head">
-          <h2 id={titleId}>{title}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label={t('aria.closeDialog')}><Icon name="close" /></button>
-        </div>
-        <div className="modal-body">{children}</div>
-        {footer && <div className="modal-foot">{footer}</div>}
-      </div>
-    </div>
+    <DialogShell open={open} onClose={onClose} title={title} size={size} footer={footer}>
+      {children}
+    </DialogShell>
   );
 }
 
@@ -230,11 +227,12 @@ export function ConfirmDialog({
   const t = useT();
   const resolvedConfirmLabel = confirmLabel ?? t('action.confirm');
   return (
-    <Modal
+    <DialogShell
       open={open}
       onClose={onClose}
       title={title}
       size="small"
+      testId="confirm-dialog"
       footer={<>
         <button className="btn btn-secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</button>
         <button className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm} disabled={busy}>
@@ -243,7 +241,7 @@ export function ConfirmDialog({
       </>}
     >
       <div className="confirm-copy">{description}</div>
-    </Modal>
+    </DialogShell>
   );
 }
 
@@ -281,12 +279,16 @@ export function useToast() {
 }
 
 export function Field({ label, hint, children, htmlFor }: { label: string; hint?: string; children: React.ReactNode; htmlFor?: string }) {
+  // The Radix label primitive stays the field's wrapper element on purpose: no caller passes
+  // htmlFor yet, so nesting the caller's own control is what associates the two. The primitive's
+  // shadcn typography is neutralised in .field (src/styles.css) — those utilities would otherwise
+  // reach the nested <input>/<select> through the global `font: inherit`.
   return (
-    <label className="field" htmlFor={htmlFor}>
+    <Label className="field" htmlFor={htmlFor}>
       <span className="field-label">{label}</span>
       {children}
       {hint && <span className="field-hint">{hint}</span>}
-    </label>
+    </Label>
   );
 }
 

@@ -16,6 +16,7 @@ module.exports = {
       colors: {
         background: token('ow-bg'),
         foreground: token('ow-text'),
+        'foreground-secondary': token('ow-text-secondary'),
         card: { DEFAULT: token('ow-surface'), foreground: token('ow-text') },
         popover: { DEFAULT: token('ow-surface'), foreground: token('ow-text') },
         primary: { DEFAULT: token('ow-accent'), foreground: token('ow-accent-text') },
