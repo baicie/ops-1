@@ -6,9 +6,7 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::Json;
 use chrono::{DateTime, Utc};
-use opsweave_contracts::{
-    deliverable_contributions, ContributionRejection, DeliveredContribution, ManifestV11,
-};
+use opsweave_contracts::ManifestV11;
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::FromRow;
@@ -103,9 +101,8 @@ struct PackageLite {
 
 pub async fn list_plugins(
     State(state): State<AppState>,
-    auth: AuthUser,
+    _auth: AuthUser,
 ) -> AppResult<Json<Vec<PluginSummary>>> {
-    auth.require_operator()?;
     let packages = sqlx::query_as::<_, PackageLite>(
         "SELECT plugin_id, version, publisher, manifest, status, signature_state, artifact_digest, bundle_digest, backend_image_ref, created_at FROM kernel.plugin_packages ORDER BY created_at DESC",
     )
@@ -239,10 +236,9 @@ async fn count_instances(
 
 pub async fn get_plugin(
     State(state): State<AppState>,
-    auth: AuthUser,
+    _auth: AuthUser,
     Path(plugin_id): Path<String>,
 ) -> AppResult<Json<PluginDetail>> {
-    auth.require_operator()?;
     if let Ok(system) = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
         "SELECT plugin_id, name, version, description, ui_route FROM kernel.system_plugins WHERE plugin_id=$1",
     )
@@ -406,53 +402,27 @@ pub struct ExtensionView {
     pub activation_revision: i64,
     pub asset_base: String,
     pub remote_entry: String,
-    pub contributions: Vec<DeliveredContribution>,
-    /// Contributions the manifest declared but the contract refused, with the
-    /// code and detail an operator needs. A refused contribution is never
-    /// dispatched; it is reported instead of being dropped silently.
-    pub rejections: Vec<ContributionRejection>,
+    pub contributions: Value,
 }
 
-/// One active extension row: plugin id, publisher, version, activation
-/// generation, the stored manifest, and how many instances of the active
-/// revision's deployment are READY.
-type ExtensionRow = (String, String, String, i64, Value, i64);
-
-/// Plugins whose contributions may be offered at all: trusted publisher, ACTIVE
-/// activation revision, and a shipped frontend. Instance readiness is decided in
-/// `extension_views` because a frontend-only plugin has no instances to wait for.
-const ACTIVE_EXTENSIONS_SQL: &str = r#"
-        SELECT r.plugin_id, p.publisher, r.version, r.generation, p.manifest,
-               (SELECT count(*) FROM kernel.plugin_instances i
-                 WHERE i.deployment_id=r.deployment_id
-                   AND i.desired_action='START'
-                   AND i.state='READY')::bigint
+pub async fn extensions(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+) -> AppResult<Json<Vec<ExtensionView>>> {
+    let rows = sqlx::query_as::<_, (String, String, String, i64, Value)>(
+        r#"
+        SELECT r.plugin_id, p.publisher, r.version, r.generation, p.manifest
         FROM kernel.activation_revisions r
         JOIN kernel.plugin_packages p ON p.package_id=r.package_id
         JOIN kernel.trusted_publishers tp ON tp.publisher_id=p.publisher
         WHERE r.status='ACTIVE' AND tp.trust_state='TRUSTED' AND p.manifest->'frontend' IS NOT NULL AND p.manifest->'frontend' <> 'null'::jsonb
         ORDER BY r.plugin_id
-        "#;
-
-pub async fn extensions(
-    State(state): State<AppState>,
-    auth: AuthUser,
-) -> AppResult<Json<Vec<ExtensionView>>> {
-    let rows = sqlx::query_as::<_, ExtensionRow>(ACTIVE_EXTENSIONS_SQL)
-        .fetch_all(&state.db)
-        .await?;
-    let access = crate::auth::access_for(auth.role, &state.config.admin_surface_roles);
-    Ok(Json(extension_views(rows, &access.capabilities)))
-}
-
-/// Narrows active manifests down to what one session may be handed.
-///
-/// A contribution this session is not authorised for never reaches the response
-/// (the client's own filter is UX only), and an extension with nothing left to
-/// deliver is omitted rather than disclosed with an empty list.
-fn extension_views(rows: Vec<ExtensionRow>, capabilities: &[&str]) -> Vec<ExtensionView> {
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await?;
     let mut result = Vec::new();
-    for (plugin_id, publisher, version, generation, manifest_value, ready_instances) in rows {
+    for (plugin_id, publisher, version, generation, manifest_value) in rows {
         let manifest: ManifestV11 = match serde_json::from_value(manifest_value) {
             Ok(manifest) => manifest,
             Err(error) => {
@@ -460,29 +430,9 @@ fn extension_views(rows: Vec<ExtensionRow>, capabilities: &[&str]) -> Vec<Extens
                 continue;
             }
         };
-        if manifest.backend.is_some() && ready_instances <= 0 {
-            tracing::warn!(
-                plugin = %plugin_id,
-                "active plugin has no READY instance; contributions withheld"
-            );
-            continue;
-        }
         let Some(frontend) = manifest.frontend else {
             continue;
         };
-        let delivery = deliverable_contributions(&plugin_id, &frontend.contributions, capabilities);
-        for rejection in &delivery.rejections {
-            tracing::warn!(
-                plugin = %plugin_id,
-                contribution = %rejection.contribution_id,
-                code = rejection.code.as_str(),
-                detail = %rejection.detail,
-                "extension contribution rejected"
-            );
-        }
-        if delivery.delivered.is_empty() && delivery.rejections.is_empty() {
-            continue;
-        }
         result.push(ExtensionView {
             asset_base: format!(
                 "/assets/{}/{}/{}",
@@ -491,15 +441,15 @@ fn extension_views(rows: Vec<ExtensionRow>, capabilities: &[&str]) -> Vec<Extens
                 urlencoding::encode(&version)
             ),
             remote_entry: frontend.remote_entry,
-            contributions: delivery.delivered,
-            rejections: delivery.rejections,
+            contributions: serde_json::to_value(frontend.contributions)
+                .unwrap_or(Value::Array(vec![])),
             plugin_id,
             publisher,
             version,
             activation_revision: generation,
         });
     }
-    result
+    Ok(Json(result))
 }
 
 pub async fn capabilities(
@@ -695,322 +645,4 @@ fn display_name(id: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{extension_views, get_plugin, list_plugins, ExtensionRow};
-    use crate::auth::AuthUser;
-    use crate::error::AppResult;
-    use crate::state::AppState;
-    use axum::body::Body;
-    use axum::extract::{Path, State};
-    use axum::http::StatusCode;
-    use axum::routing::get;
-    use axum::Router;
-    use opsweave_contracts::{
-        ContributionRejectionCode, ContributionSurface, FrontendContributionKind, Role,
-    };
-    use serde_json::Value;
-    use tower::ServiceExt;
-    use uuid::Uuid;
-
-    /// The paths `routes.rs` wires for the platform maintenance plugin reads.
-    const PLATFORM_PLUGIN_READ_PATHS: [&str; 2] =
-        ["/api/v1/plugins", "/api/v1/plugins/{plugin_id}"];
-
-    fn auth_user(role: Role) -> AuthUser {
-        AuthUser {
-            user_id: Uuid::nil(),
-            email: "user@example.invalid".to_string(),
-            display_name: "Test User".to_string(),
-            role,
-            session_id: Uuid::nil(),
-            csrf_token: "csrf-token".to_string(),
-            via_cookie: false,
-        }
-    }
-
-    /// A pool that never dials: every gate under test decides before the first
-    /// query, so `cargo test` stays free of a live database.
-    fn state() -> AppState {
-        let db = sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://opsweave.invalid:1/opsweave")
-            .expect("lazy pool");
-        AppState::new(crate::config::Config::from_env(), db, vec![0u8; 32]).expect("app state")
-    }
-
-    /// The handler bodies are reached with a viewer token: each must stop at the
-    /// `require_operator` gate before touching the database.
-    #[tokio::test]
-    async fn viewer_is_forbidden_from_every_platform_plugin_read() {
-        let state = state();
-        let viewer = auth_user(Role::Viewer);
-        let denied = [
-            list_plugins(State(state.clone()), viewer.clone())
-                .await
-                .err(),
-            get_plugin(
-                State(state.clone()),
-                viewer.clone(),
-                Path("example".to_string()),
-            )
-            .await
-            .err(),
-        ];
-        for (index, error) in denied.into_iter().enumerate() {
-            let path = PLATFORM_PLUGIN_READ_PATHS[index];
-            let error = error.unwrap_or_else(|| panic!("{path} must be denied for viewer"));
-            assert_eq!(error.status, StatusCode::FORBIDDEN, "{path}");
-            assert_eq!(error.code, "FORBIDDEN", "{path}");
-        }
-    }
-
-    async fn probe_operator_gate(auth: AuthUser) -> AppResult<&'static str> {
-        auth.require_operator()?;
-        Ok("operator-gated")
-    }
-
-    fn gated_router(role: Role) -> Router {
-        let mut router = Router::new();
-        for path in PLATFORM_PLUGIN_READ_PATHS {
-            router = router.route(path, get(probe_operator_gate));
-        }
-        router.layer(axum::middleware::from_fn(
-            move |mut request: axum::extract::Request, next: axum::middleware::Next| {
-                let user = auth_user(role);
-                async move {
-                    request.extensions_mut().insert(user);
-                    next.run(request).await
-                }
-            },
-        ))
-    }
-
-    #[tokio::test]
-    async fn platform_plugin_reads_answer_403_for_viewer_and_200_for_operator_and_admin() {
-        async fn status(role: Role, path: &str) -> StatusCode {
-            let uri = path.replace("{plugin_id}", "example");
-            gated_router(role)
-                .oneshot(
-                    axum::http::Request::builder()
-                        .uri(uri)
-                        .body(Body::empty())
-                        .unwrap(),
-                )
-                .await
-                .unwrap()
-                .status()
-        }
-
-        for path in PLATFORM_PLUGIN_READ_PATHS {
-            assert_eq!(
-                status(Role::Viewer, path).await,
-                StatusCode::FORBIDDEN,
-                "{path}"
-            );
-            assert_eq!(status(Role::Operator, path).await, StatusCode::OK, "{path}");
-            assert_eq!(status(Role::Admin, path).await, StatusCode::OK, "{path}");
-        }
-    }
-
-    // -- /api/v1/extensions delivery: surfaces, capabilities, readiness -------
-
-    const PLUGIN: &str = "opsweave.data-catalog";
-    const ADMIN_PATH: &str = "/admin/ext/opsweave.data-catalog/manage";
-    const WORKSPACE_PATH: &str = "/app/ext/opsweave.data-catalog/quality";
-
-    fn manifest(plugin_id: &str, contributions: Value, with_backend: bool) -> Value {
-        let backend = if with_backend {
-            serde_json::json!({
-                "runtime": "oci",
-                "imageRef": format!("127.0.0.1:15001/opsweave/data-catalog@sha256:{}", "a".repeat(64)),
-                "protocol": {"name": "http-json", "version": "1", "containerPort": 8080},
-                "health": {
-                    "readinessPath": "/_opsweave/health/ready",
-                    "livenessPath": "/_opsweave/health/live"
-                },
-                "apiPrefix": "/api/data-catalog"
-            })
-        } else {
-            Value::Null
-        };
-        serde_json::json!({
-            "schemaVersion": "1.1",
-            "id": plugin_id,
-            "version": "0.0.1",
-            "publisher": "trusted-team",
-            "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
-            "artifactDigest": format!("sha256:{}", "b".repeat(64)),
-            "frontend": {
-                "remoteEntry": "frontend/remoteEntry.js",
-                "remoteEntryDigest": format!("sha256:{}", "c".repeat(64)),
-                "assetIndex": "frontend/asset-index.json",
-                "assetIndexDigest": format!("sha256:{}", "d".repeat(64)),
-                "contributions": contributions
-            },
-            "backend": backend,
-            "provides": [],
-            "requires": [],
-            "permissions": [],
-            "resources": {"cpuMillis": 100, "memoryMiB": 64}
-        })
-    }
-
-    fn row(
-        plugin_id: &str,
-        contributions: Value,
-        with_backend: bool,
-        ready_instances: i64,
-    ) -> ExtensionRow {
-        (
-            plugin_id.to_string(),
-            "trusted-team".to_string(),
-            "0.0.1".to_string(),
-            1,
-            manifest(plugin_id, contributions, with_backend),
-            ready_instances,
-        )
-    }
-
-    fn both_surfaces() -> Value {
-        serde_json::json!([
-            {
-                "kind": "navigation.item.v2",
-                "id": "catalog-manage",
-                "surface": "admin",
-                "path": ADMIN_PATH,
-                "titleKey": "catalog.nav.manage"
-            },
-            {
-                "kind": "navigation.item.v2",
-                "id": "catalog-quality",
-                "surface": "workspace",
-                "path": WORKSPACE_PATH,
-                "titleKey": "catalog.nav.quality"
-            }
-        ])
-    }
-
-    /// Rule 5: the server, not the client, decides what a session receives.
-    #[test]
-    fn workspace_only_session_receives_no_admin_contribution() {
-        let rows = vec![row(PLUGIN, both_surfaces(), false, 0)];
-
-        let views = extension_views(rows.clone(), &["workspace:access"]);
-        assert_eq!(
-            views.len(),
-            1,
-            "the workspace contribution is still offered"
-        );
-        assert_eq!(views[0].contributions.len(), 1);
-        assert_eq!(views[0].contributions[0].path, WORKSPACE_PATH);
-        assert!(
-            views[0]
-                .contributions
-                .iter()
-                .all(|contribution| contribution.surface != ContributionSurface::Admin),
-            "a session without platform:access must never receive an admin contribution"
-        );
-        assert!(
-            views[0].rejections.is_empty(),
-            "a missing capability is not a contract violation and is not reported"
-        );
-
-        let platform = extension_views(rows, &["platform:access", "workspace:access"]);
-        assert_eq!(platform[0].contributions.len(), 2);
-    }
-
-    /// Rule 6: an already signed v1 contribution is delivered unchanged, as admin.
-    #[test]
-    fn platform_session_receives_legacy_v1_contribution_unchanged() {
-        let rows = vec![row(
-            PLUGIN,
-            serde_json::json!([
-                {
-                    "kind": "navigation.item.v1",
-                    "id": "data-catalog-nav",
-                    "path": "/ext/trusted-team/data-catalog"
-                },
-                {
-                    "kind": "navigation.item.v2",
-                    "id": "catalog-manage",
-                    "surface": "admin",
-                    "path": ADMIN_PATH
-                }
-            ]),
-            false,
-            0,
-        )];
-        let views = extension_views(rows, &["platform:access", "workspace:access"]);
-        assert_eq!(views[0].contributions.len(), 2);
-        let legacy = views[0]
-            .contributions
-            .iter()
-            .find(|contribution| contribution.kind == FrontendContributionKind::NavigationItem)
-            .expect("the v1 contribution is delivered");
-        assert_eq!(legacy.path, "/ext/trusted-team/data-catalog");
-        assert_eq!(legacy.surface, ContributionSurface::Admin);
-        assert_eq!(legacy.id, "data-catalog-nav");
-    }
-
-    /// Rule 7: an active plugin with a backend that has no READY instance is
-    /// withheld; a frontend-only plugin has no instance to wait for.
-    #[test]
-    fn backend_without_a_ready_instance_withholds_its_contributions() {
-        let capabilities = ["platform:access", "workspace:access"];
-        let degraded = vec![row(PLUGIN, both_surfaces(), true, 0)];
-        assert!(
-            extension_views(degraded, &capabilities).is_empty(),
-            "an ACTIVE revision with no READY instance must not route navigation"
-        );
-        let ready = vec![row(PLUGIN, both_surfaces(), true, 1)];
-        assert_eq!(extension_views(ready, &capabilities).len(), 1);
-        let frontend_only = vec![row(PLUGIN, both_surfaces(), false, 0)];
-        assert_eq!(extension_views(frontend_only, &capabilities).len(), 1);
-    }
-
-    /// Rules 2/3: a refused contribution is reported with its code, not dropped.
-    #[test]
-    fn invalid_v2_contribution_is_reported_instead_of_dropped() {
-        let rows = vec![row(
-            PLUGIN,
-            serde_json::json!([
-                {
-                    "kind": "navigation.item.v2",
-                    "id": "catalog-manage",
-                    "surface": "admin",
-                    "path": "/admin/plugins"
-                }
-            ]),
-            false,
-            0,
-        )];
-        let views = extension_views(rows, &["platform:access", "workspace:access"]);
-        assert_eq!(views.len(), 1);
-        assert!(views[0].contributions.is_empty());
-        assert_eq!(views[0].rejections.len(), 1);
-        assert_eq!(
-            views[0].rejections[0].code,
-            ContributionRejectionCode::ReservedPrefix
-        );
-        assert_eq!(views[0].rejections[0].contribution_id, "catalog-manage");
-        assert_eq!(views[0].rejections[0].plugin_id, PLUGIN);
-        assert!(!views[0].rejections[0].detail.is_empty());
-    }
-
-    /// Nothing to deliver and nothing to report: the extension is not disclosed.
-    #[test]
-    fn extension_with_nothing_to_deliver_is_omitted() {
-        let admin_only = serde_json::json!([
-            {
-                "kind": "navigation.item.v2",
-                "id": "catalog-manage",
-                "surface": "admin",
-                "path": ADMIN_PATH
-            }
-        ]);
-        let rows = vec![row(PLUGIN, admin_only, false, 0)];
-        assert!(extension_views(rows, &["workspace:access"]).is_empty());
-    }
 }

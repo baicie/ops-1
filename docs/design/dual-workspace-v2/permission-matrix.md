@@ -158,3 +158,21 @@ grep -rn 'require_admin()\|require_operator()\|require_operator(&' apps/kernel/s
 - 负向测试：`apps/kernel/src/auth.rs` 的 `viewer_receives_403_from_admin_and_operator_gated_routes`（router 级：viewer→admin/operator handler 均 403；operator→admin handler 403、→operator handler 200），以及 `viewer_is_forbidden_by_every_existing_role_gate`（错误码 `FORBIDDEN` / 403）。
 - 本轮追加的收紧（§6.2 第 36–41 行）另配 4 个测试：`nodes::tests::*` 与 `plugins::tests::*` 各两个（真实 handler 对 viewer 403 `FORBIDDEN`；router 级 viewer 403 / operator 200 / admin 200）。证据与数据库边界见 `auth-surface-contract.md` §9.7。
 
+
+## 10. 更正（2026-10-28，回退 §6.2 第 36–41 行）
+
+本文档 §6.2 曾把 6 个平台只读端点（nodes 列表/详情/资源历史/实例、plugins 列表/详情）记为
+`operator + admin`。**该收紧已回退**，这些端点恢复为「任何已认证会话可读」。
+
+原因：`tests/acceptance/data_authz.sh` 是产品自己的授权验收脚本，逐条规定 viewer 的读策略为 200
+（第 55/70/93/99 行），而 `tests/ci/data_foundation_ci.sh` 会在 CI 中执行它。为让实现通过而修改
+该断言，等于静默变更授权策略。
+
+准确的现有策略分两层：
+
+| 层 | 判定依据 | 现状 |
+|---|---|---|
+| 能否进入 Admin 控制台 | `access.capabilities` 含 `platform:access` | admin-only（可经 `OPSWEAVE_ADMIN_SURFACE_ROLES` 放宽），有浏览器 403 与 API 证据 |
+| 能否读数据 | 已认证即可读；写操作按角色 | 由 `data_authz.sh` 验收，测试覆盖 |
+
+细节与后续若要收紧的前置条件见 `auth-surface-contract.md §9`。

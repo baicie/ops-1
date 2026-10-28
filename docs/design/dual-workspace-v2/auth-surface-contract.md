@@ -134,106 +134,59 @@ curl -sS -b /tmp/jar -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8081/api/
 2. **`session` 镜像的收敛**：G05 前不存在该对象；待前端全部改读 `access` 后，应评估是否废弃顶层 `csrfToken`，避免两处漂移（当前由同一次序列化保证同值）。
 3. **`access` 不是授权本身**：任何后端 handler 都不得以 `access` 作为放行依据；放行仍只由 `require_admin`/`require_operator` 决定。
 
-## 9. 平台维护类只读接口收紧（G05 验收补强，本轮）
+## 9. 平台维护类只读接口：收紧尝试与回退（2026-10-28）
 
-§1 的 `access` 只声明「能否进 Admin 控制台」，不参与放行。因此 G05 之前，平台的**维护类只读**端点对任何已认证角色都开放：这些 handler 只取 `AuthUser`、没有 `require_*`。用真实 viewer 会话在 Staging 实测后暴露了缺口，本节记录收紧决策。
+### 9.1 触发事实
 
-### 9.1 实测证据（Staging，真实 viewer 会话，本轮改造前）
+用真实 viewer 会话在 Staging 直接请求管理接口（served SHA `0697be0`）：
 
-| 请求 | 改造前实测 | 期望 |
-|---|---|---|
-| `POST /api/v1/plugins/packages` | 403 ✅ | 403 |
-| `POST /api/v1/users` | 403 ✅ | 403 |
-| `POST /api/v1/nodes/enrollment-tokens` | 403 ✅ | 403 |
-| `GET /api/v1/nodes` | **200** ❌ | 后台敏感请求不应成功 |
-| `GET /api/v1/plugins` | **200** ❌ | 同上 |
-| `GET /api/v1/audit` | **200** ⚠️ | 本轮不动，见 §9.5 |
-
-设计包 G05 验收原文：「viewer 输入 `/admin/nodes` → 403，**后台敏感请求不应成功**」。节点清单含主机名、节点身份、CPU/内存、心跳时间，属平台维护数据；插件清单/详情暴露平台安装与部署拓扑。两者都不属于「已认证即可读」的业务数据，所以前端路由守卫被绕过时（直连 API）也不该成功。
-
-### 9.2 决策
-
-把**平台维护类只读接口**收紧到 `operator` + `admin`（handler 内 `auth.require_operator()?`，与既有 23 个 operator+admin 调用点同一把锁）。**operator 现有能力不变**——它本就有这 6 个只读端点的访问权，本轮只是把它从「隐式人人可读」变成「显式 operator+admin」。
-
-| 端点 | handler | 改造后角色 |
-|---|---|---|
-| `GET /api/v1/nodes` | `nodes.rs:321` `list_nodes` | operator, admin |
-| `GET /api/v1/nodes/{node_id}` | `nodes.rs:355` `get_node` | operator, admin |
-| `GET /api/v1/nodes/{node_id}/resource-history` | `nodes.rs:705` `resource_history` | operator, admin |
-| `GET /api/v1/nodes/{node_id}/instances` | `nodes.rs:790` `node_instances` | operator, admin |
-| `GET /api/v1/plugins` | `plugins.rs:106` `list_plugins` | operator, admin |
-| `GET /api/v1/plugins/{plugin_id}` | `plugins.rs:243` `get_plugin` | operator, admin |
-
-拒绝语义沿用既有实现：`403` + 稳定错误码 `FORBIDDEN`（`AppError::forbidden`，见 `auth.rs` 的 `AuthUser::require_operator`）。未认证仍是 `401`（鉴权中间件先拒绝，行为未变）。
-
-**契约一致性（关键旁证）**：`contracts/openapi/kernel-v1.yaml` 早就为 `GET /plugins`（`:51`）与 `GET /nodes`（`:99`）声明了 `'403': Forbidden`，只是实现漏了守卫——所以本次是**让实现追平既有契约**，不需要改 `contracts/`。同一文件里 `GET /nodes/{nodeId}`（`:100`）尚无 403 声明，属契约侧遗留，需另行补齐（不在本轮允许改动的文件范围内）。
-
-### 9.3 影响面
-
-1. **operator 不变**：管理端点从 23 个增加到 29 个（新增的 6 个正是它改造前就能读的只读端点）。没有任何既有授权被提高或降低。
-2. **viewer 失去上述 6 个只读端点**：现在返回 403 `FORBIDDEN`。这是本轮唯一的权限收窄。
-3. **写操作端点零改动**：`POST /api/v1/plugins/packages`、`POST /api/v1/users`、`POST /api/v1/nodes/enrollment-tokens`、`DELETE /api/v1/nodes/{node_id}` 等保持原判定。
-4. **不影响 workspace 面**：前端引用这 6 个端点的页面都在 Admin 控制台（`Nodes.tsx`、`OpsCenter.tsx`、`Governance.tsx`、`Plugins.tsx`、`PluginDetail.tsx`、`InstallWizard.tsx`），viewer/operator 默认拿不到 `admin` surface，本轮不改前端即自洽（页面守卫 403 + API 403 双层）。
-5. **未来业务侧资源视图需另立授权**：若以后要在 workspace 面展示「我的节点/资源摘要」「可用插件」这类视图，**不得**放宽本节的 6 个端点，也不得让前端直连 Kernel 维护接口；必须新立一个带资源范围的业务侧端点与权限模型（见 `permission-matrix.md` §5 的过渡差异）。
-6. `access.allowedSurfaces` / `capabilities` 不变：这轮收紧不改 `/api/v1/auth/me` 的任何一个字节。
-
-### 9.4 本轮**没有**收紧的端点（明确保持现状）
-
-| 端点 | 现状 | 原因 |
-|---|---|---|
-| `GET /api/v1/audit` | 三角色均 200（`diagnostics.rs:120` 是**空守卫**：`if auth.role == Role::Viewer { /* 注释 */ }`，不产生拒绝） | 另一决策，本轮不动，见 §9.5 |
-| `GET /api/v1/plugins/{plugin_id}/packages`、`/deployments`、`/activations` | 已认证即可 | 属插件详情子资源，不在本轮决策范围；与 §9.3-5 同属待评审项 |
-| `GET /api/v1/deployments`、`GET /api/v1/deployments/{id}`、`GET /api/v1/publishers` | 已认证即可 | 部署拓扑与信任根清单也属平台维护数据；本轮按「不扩大范围」保留 |
-| `GET /api/v1/plugin-storage/{plugin_id}`、`/migrations` | 已认证即可 | 同上 |
-| `GET /api/v1/health`、`/api/v1/overview`、`/api/v1/extensions`、`/api/v1/capabilities` | 已认证即可 | 概况/文案/能力声明，不含节点身份与心跳等维护数据 |
-
-### 9.5 遗留项：`/api/v1/audit` 仍对 viewer 开放
-
-`diagnostics.rs:120` 的 viewer 分支只有注释、没有 `return Err`，所以审计事件列表对三种角色都返回 200（详情字段在写入时已脱敏）。它看起来像 admin-only，实际是**空守卫**，不能当作已保护。本轮按决策**保持现状**，并把该遗留显式登记在此：
-
-- 风险：viewer 可读审计事件元数据（`permission-matrix.md` §7 已记录同一事实）。
-- 不做的原因：审计可见性涉及合规口径（谁能看谁的审计），需与 Incident 领域授权模型一起定，不并入本次「平台维护类只读」收紧。
-- 若下一轮收紧，判定点只有一个：给 `audit_events` 加 `auth.require_operator()?`（或按合规口径收更紧），并同步更新本节与 `permission-matrix.md` §7。
-
-### 9.6 验收与回滚
-
-- 正向：admin 与 operator 打上述 6 个端点仍 200（operator 能力不变）。
-- 反向：viewer 打上述 6 个端点 403 `FORBIDDEN`；写操作端点维持原有 403。
-- 回滚：撤掉 6 处 `auth.require_operator()?` 即回到「已认证即可读」，无数据迁移、无契约字段变化。
-
-### 9.7 验证记录（本轮实际执行）
-
-| 命令 | 结果 |
+| 探测 | viewer |
 |---|---|
-| `cargo fmt --check` | 通过（无输出，exit 0） |
-| `cargo clippy -p opsweave-kernel --all-targets -- -D warnings` | 通过（`Finished dev profile`，无 warning） |
-| `cargo test -p opsweave-kernel` | `63 passed; 0 failed`（G05 轮 59，本轮 +4） |
+| `POST /api/v1/plugins/packages`、`POST /api/v1/users`、`POST /api/v1/nodes/enrollment-tokens` | 403 |
+| `GET /api/v1/nodes`、`GET /api/v1/plugins`、`GET /api/v1/audit` | 200 |
 
-新增测试（截至本轮）：
+而同一会话在浏览器里访问 `/admin/nodes` 得到 403。表面上看是「UI 拒绝、API 放行」。
 
-| 测试 | 证明什么 |
-|---|---|
-| `nodes::tests::viewer_is_forbidden_from_every_platform_node_read` | 直接调用 4 个真实 handler（`list_nodes`/`get_node`/`node_instances`/`resource_history`），viewer 一律 `403` + `FORBIDDEN`，且在第一条 SQL 前就被拒 |
-| `nodes::tests::platform_node_reads_answer_403_for_viewer_and_200_for_operator_and_admin` | 4 条真实路由路径 × 3 角色：viewer 403、operator 200、admin 200（router 级，写法与 `auth::tests::viewer_receives_403_from_admin_and_operator_gated_routes` 一致） |
-| `plugins::tests::viewer_is_forbidden_from_every_platform_plugin_read` | `list_plugins`/`get_plugin` 对 viewer 同样 `403` + `FORBIDDEN` |
-| `plugins::tests::platform_plugin_reads_answer_403_for_viewer_and_200_for_operator_and_admin` | 2 条真实路由路径 × 3 角色：viewer 403、operator 200、admin 200 |
+### 9.2 当时的处置
 
-测试的数据库边界（必须如实记录）：Kernel 没有数据库测试夹具（全仓无 `sqlx::test` / 连接池 fixture），因此
+据此把 6 个平台只读 handler（nodes 列表/详情/资源历史/实例、plugins 列表/详情）加了 `require_operator`，
+并配了 4 条 Rust 测试与 Staging 复测（viewer 403 / admin 200 均成立）。
 
-- 「viewer → 403」是**真实 handler 调用**，用 `connect_lazy` 的不拨号连接池构造 `AppState`；守卫在第一条 SQL 之前返回，所以断言的是生产代码路径本身；
-- 「operator → 200 / admin → 200」是 router 级断言（与既有 G05 写法一致），证明这两角色过同一把 `require_operator` 锁后不再被拒；**未**证明这两个端点在真实数据库上的完整响应体。补齐方式：部署后按 §9.1 同样的 curl 复测（本轮禁止服务器操作，未执行）。
+### 9.3 为什么回退（决定性证据）
 
-部署后复测命令（viewer 与 operator 各跑一次）：
+CI 的 `golden-path` 与 `runtime-golden-path` 在 `tests/ci/data_foundation_ci.sh` 上失败：
 
-```bash
-for role in viewer operator; do
-  # 各自登录后
-  for p in /api/v1/nodes /api/v1/plugins; do
-    printf '%s %s -> ' "$role" "$p"
-    curl -sS -b /tmp/$role.jar -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:8081$p"
-  done
-done
-# 期望：viewer 403 / 403，operator 200 / 200
+```
+FAIL  viewer node history returned 403, expected 200
 ```
 
+该断言来自 `tests/acceptance/data_authz.sh`——**产品自己的授权验收脚本**，它逐条规定 viewer 的
+策略是「读全部允许、写全部拒绝」：
 
+| `data_authz.sh` 行 | 端点 | 期望 |
+|---|---|---|
+| 55 | `GET` catalog `/datasets` | **200** |
+| 58 | `POST` catalog `/datasets` | 403 `FORBIDDEN` |
+| 70 | `GET` `/quality-rules` | **200** |
+| 72 | `POST` `/quality-rules` | 403 |
+| 93 | `GET` node resource history | **200** |
+| 99 | `GET` governance summary | **200** |
+
+### 9.4 结论：这不是安全缺口，是两层不同的边界
+
+1. **谁能进 Admin 控制台** = 角色/capability 决定（`platform:access`），本轮已闭环并有 403 证据。
+2. **谁能读数据** = 既有策略：任何已认证会话可读、写操作受角色限制。这是 `data_authz.sh` 明确测试过的产品决定。
+
+设计包 G05 的「后台敏感请求不应成功」在本项目里的落实方式是第 1 层（管理控制台与写操作），
+**不是**把只读接口收成 admin-only。我此前把两层混为一谈，是判断错误，已回退代码。
+
+### 9.5 如果将来要收紧，需要先改什么
+
+- 改 `tests/acceptance/data_authz.sh` 里对应的期望值（这是产品决策的记录处），而不是改测试来迁就实现；
+- 同步评估业务侧 `/app/resources`（资源与拓扑）是否需要只读节点数据，若要，应另立业务作用域的只读接口，而不是复用管理接口。
+
+### 9.6 仍然开放的既有事实（本轮未动）
+
+`GET /api/v1/audit` 三角色可读（`diagnostics.rs:120` 空守卫）；publishers、deployments、
+插件子资源只读同样对已认证会话开放。按 9.3 的策略它们是一致的，**不再列为缺口**，
+但若产品改变策略，这里是要一起改的地方。
