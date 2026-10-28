@@ -9,6 +9,10 @@ name: staging-preview
 #   optional vars OPSWEAVE_PREVIEW_URL (browser-facing preview origin; defaults to port 3000, the
 #     port the kernel listens on, and must name the same origin as STAGING_BASE_URL)
 # A missing secret fails the deploy job with an explicit error; the deployment is never skipped.
+#
+# workflow_dispatch verify_only=true certifies whatever staging already serves: build and deploy are
+# skipped, and the expected commit falls back to the dispatched ref HEAD (inputs.sha wins if given).
+# Keep it out of a run that is deploying - the "staging-preview" concurrency group cancels in progress.
 
 on:
   push:
@@ -23,6 +27,11 @@ on:
         type: string
       skip_image_transfer:
         description: Skip shipping the image over SSH (use when the exact SHA image is already on the host, e.g. after an out-of-band transfer)
+        required: false
+        type: boolean
+        default: false
+      verify_only:
+        description: Run only the acceptance suites against the already-deployed staging host; the expected commit is the dispatched ref HEAD
         required: false
         type: boolean
         default: false
@@ -42,6 +51,7 @@ env:
 jobs:
   build:
     name: build image
+    if: ${{ inputs.verify_only != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -130,6 +140,8 @@ jobs:
   deploy:
     name: deploy to staging host
     needs: build
+    # verify_only certifies the deployment that is already live; it never re-deploys.
+    if: ${{ inputs.verify_only != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment:
@@ -285,10 +297,15 @@ jobs:
 
   smoke:
     name: smoke the preview
-    needs: deploy
+    # build is a direct need on purpose: the needs context only exposes direct dependencies, so
+    # needs.build.outputs.sha resolves to nothing (and the first smoke case fails closed) whenever
+    # build is only reached through deploy.
+    needs: [build, deploy]
     runs-on: ubuntu-24.04
     timeout-minutes: 50
-    if: always() && needs.deploy.result == 'success'
+    # The suites certify whatever staging serves, so a failed or skipped deploy must not suppress
+    # them. verify_only always runs; every other event keeps the deploy-success requirement.
+    if: always() && (inputs.verify_only == true || needs.deploy.result == 'success')
     environment:
       name: staging
       url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
@@ -298,7 +315,7 @@ jobs:
       # Shared by every browser step below: one preview origin, one credential, one expected commit.
       OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
       # The commit this run built; staging-smoke.spec.ts fails when the preview does not serve it.
-      OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha }}
+      OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
       OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
       OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
     steps:
@@ -422,7 +439,7 @@ jobs:
         if: steps.mode.outputs.mode == 'http'
         env:
           STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
-          EXPECTED_SHA: ${{ needs.build.outputs.sha }}
+          EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
@@ -537,7 +554,7 @@ jobs:
           DEPLOY_RESULT: ${{ needs.deploy.result }}
           SMOKE_RESULT: ${{ needs.smoke.result }}
           SMOKE_MODE: ${{ needs.smoke.outputs.mode }}
-          TARGET_SHA: ${{ needs.build.outputs.sha }}
+          TARGET_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
           PREVIOUS_SHA: ${{ needs.deploy.outputs.previous_sha }}
           PREVIEW_URL: ${{ secrets.STAGING_BASE_URL }}
         run: |
@@ -610,7 +627,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          TARGET_SHA: ${{ needs.build.outputs.sha }}
+          TARGET_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
         run: |
           set -euo pipefail
           pr=""
