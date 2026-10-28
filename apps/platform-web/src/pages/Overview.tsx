@@ -5,7 +5,7 @@ import { usePolling } from '../hooks';
 import type { Overview } from '../types';
 import { Icon } from '../components/Icons';
 import { Badge, type BadgeVariant } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
+import { Button, buttonVariants } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { cn } from '../lib/utils';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
@@ -37,7 +37,7 @@ export function OverviewPage() {
       <PageHeader
         title={t('page.overview')}
         description={t('overview.description')}
-        actions={<><Button variant="outline" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className="btn btn-primary" to="/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link></>}
+        actions={<><Button variant="outline" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants()} to="/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link></>}
       />
       <section className={`attention-banner tone-${healthTone}`} aria-label={t('overview.health.aria')}>
         <div className="attention-icon"><Icon name={data.health === 'READY' ? 'check' : 'warning'} size={20} /></div>
@@ -46,7 +46,7 @@ export function OverviewPage() {
           <p>{data.attention.length ? data.attention[0].detail : t('overview.health.allClearDetail')}</p>
         </div>
         <Badge variant={healthBadge} className="ml-auto shrink-0">{data.health}</Badge>
-        {data.attention.length > 0 && <a className="btn btn-secondary" href="#attention">{t('overview.action.reviewIssues')}</a>}
+        {data.attention.length > 0 && <a className={buttonVariants({ variant: 'secondary' })} href="#attention">{t('overview.action.reviewIssues')}</a>}
       </section>
       <section className="kpi-grid" aria-label={t('overview.kpi.aria')}>
         <Kpi label={t('overview.kpi.healthyNodes')} value={`${data.nodesReady} / ${data.nodesTotal}`} detail={data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')} />

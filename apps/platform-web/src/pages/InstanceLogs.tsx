@@ -3,11 +3,18 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
 import type { InstanceDetail, LogEvent } from '../types';
 import { Icon } from '../components/Icons';
-import { EmptyState, ErrorState, StatusBadge, TimeAgo } from '../components/Ui';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { EmptyState, ErrorState } from '../components/Ui';
 import { formatDate } from '../format';
 import { useT } from '../i18n';
+import { cn } from '../lib/utils';
+import { StatusPill } from './table-kit';
 
 type Gap = { code: string; message: string; firstSequence?: number | null; lastSequence?: number | null };
+
+const LEVELS = ['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG', 'TRACE', 'UNKNOWN'];
 
 export function InstanceLogsPage() {
   const t = useT();
@@ -95,31 +102,34 @@ export function InstanceLogsPage() {
             <span className="mono">{detail.id}</span>
             <span><Icon name="server" size={13} /> {detail.nodeName}</span>
             <span>{t('instanceLogs.slot', { slot: detail.slot })}</span>
-            <StatusBadge status={detail.state} />
+            <StatusPill status={detail.state} />
             <span className={connection === 'connected' ? 'text-ok' : 'text-warn'}><span className={`live-dot ${connection}`} /> {connection === 'connected' ? t('instanceLogs.connection.connected') : connection === 'disconnected' ? t('instanceLogs.connection.disconnected') : t('instanceLogs.connection.connecting')}</span>
           </div>
         </div>
         <div className="log-actions">
-          <button className={`btn btn-secondary ${paused ? 'btn-warn' : ''}`} onClick={() => setPaused(!paused)}><Icon name={paused ? 'play' : 'pause'} size={15} /> {paused ? t('instanceLogs.action.resume', { count: Math.max(0, events.length - freezeCount) }) : t('instanceLogs.action.pause')}</button>
-          <button className={`btn btn-secondary ${follow ? 'btn-active' : ''}`} onClick={() => setFollow(!follow)}><Icon name="logs" size={15} /> {t('instanceLogs.action.follow')}</button>
-          <button className="btn btn-secondary" onClick={() => setReconnectKey((key) => key + 1)}><Icon name="refresh" size={15} /> {t('instanceLogs.action.reconnect')}</button>
+          <Button variant="secondary" className={cn(paused && 'border-warning text-warning')} onClick={() => setPaused(!paused)}><Icon name={paused ? 'play' : 'pause'} size={15} /> {paused ? t('instanceLogs.action.resume', { count: Math.max(0, events.length - freezeCount) }) : t('instanceLogs.action.pause')}</Button>
+          <Button variant="secondary" className={cn(follow && 'border-ring bg-accent text-accent-foreground')} onClick={() => setFollow(!follow)}><Icon name="logs" size={15} /> {t('instanceLogs.action.follow')}</Button>
+          <Button variant="secondary" onClick={() => setReconnectKey((key) => key + 1)}><Icon name="refresh" size={15} /> {t('instanceLogs.action.reconnect')}</Button>
         </div>
       </header>
 
       <div className="log-toolbar">
-        <div className="search-box"><Icon name="search" size={15} /><input value={contains} onChange={(event) => setContains(event.target.value)} placeholder={t('instanceLogs.search.placeholder')} aria-label={t('instanceLogs.search.aria')} /></div>
-        <select value={level} onChange={(event) => setLevel(event.target.value)} aria-label={t('instanceLogs.filter.aria')}>
-          {['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG', 'TRACE', 'UNKNOWN'].map((value) => <option key={value}>{value}</option>)}
-        </select>
+        <div className="search-box"><Icon name="search" size={15} /><Input value={contains} onChange={(event) => setContains(event.target.value)} placeholder={t('instanceLogs.search.placeholder')} aria-label={t('instanceLogs.search.aria')} /></div>
+        <Select value={level} onValueChange={setLevel}>
+          <SelectTrigger aria-label={t('instanceLogs.filter.aria')} className="h-8 w-[132px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {LEVELS.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <span className="log-count">{t('instanceLogs.count', { shown: visible.length, buffered: events.length })}</span>
-        <button className="btn btn-small" onClick={() => navigator.clipboard.writeText(visible.map((event) => `${event.observedAt} ${event.level} ${event.message}`).join('\n')).catch(() => undefined)}><Icon name="copy" size={14} /> {t('action.copy')}</button>
+        <Button variant="secondary" size="sm" onClick={() => navigator.clipboard.writeText(visible.map((event) => `${event.observedAt} ${event.level} ${event.message}`).join('\n')).catch(() => undefined)}><Icon name="copy" size={14} /> {t('action.copy')}</Button>
       </div>
 
       {gap && (
         <div className="gap-banner" role="alert">
           <Icon name="warning" size={18} />
           <div><strong>{t('instanceLogs.gap.title', { code: gap.code })}</strong><p>{gap.message}</p></div>
-          <button className="btn btn-small" onClick={() => { setGap(null); setReconnectKey((key) => key + 1); }}>{t('instanceLogs.gap.reconnect')}</button>
+          <Button variant="secondary" size="sm" onClick={() => { setGap(null); setReconnectKey((key) => key + 1); }}>{t('instanceLogs.gap.reconnect')}</Button>
         </div>
       )}
       {streamError && !gap && <div className="inline-error"><Icon name="warning" size={16} /> {streamError}</div>}

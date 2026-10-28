@@ -3,10 +3,32 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
 import type { JobList, PipelineDefinition, PipelineDetail, PipelineList, PipelineRevision } from '../types';
 import { Icon } from '../components/Icons';
-import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
+import { badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import type { StatusTone } from '../components/status-tone';
+import { Badge } from '../components/ui/badge';
+import { Button, buttonVariants } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { EmptyState, ErrorState, PageHeader, Skeleton, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
 import { getPipelineExecutionOrder } from '../studio/ir/topology';
 import { useT } from '../i18n';
+import { cn } from '../lib/utils';
+import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+
+/**
+ * The revision panels show a fixed copy line (and, for revisions, the wire status verbatim),
+ * not a status code StatusPill could map on its own — so the pill is painted here through the
+ * same shared tone map instead of growing a second label vocabulary.
+ */
+function TonePill({ tone, label, className }: { tone: StatusTone; label: string; className?: string }) {
+  return (
+    <Badge variant={badgeVariantForTone(tone)} className={className}>
+      <Icon name={glyphForTone(tone)} size={12} />
+      {label}
+    </Badge>
+  );
+}
 
 export function PipelinesPage() {
   const t = useT();
@@ -39,43 +61,54 @@ export function PipelinesPage() {
       <PageHeader
         title={t('page.pipelines')}
         description={t('pipelines.description')}
-        actions={<button className="btn btn-secondary" onClick={() => setReloadToken((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</button>}
+        actions={<Button variant="secondary" onClick={() => setReloadToken((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
       />
       <section className="toolbar">
-        <div className="search-box"><Icon name="search" size={16} /><input aria-label={t('pipelines.search.aria')} placeholder={t('pipelines.search.placeholder')} value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+        <div className="relative flex min-w-[260px] max-w-[460px] flex-1 items-center">
+          <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
+          <Input aria-label={t('pipelines.search.aria')} placeholder={t('pipelines.search.placeholder')} value={query} onChange={(event) => setQuery(event.target.value)} className="pl-[33px]" />
+        </div>
         <span className="toolbar-count">{t('pipelines.count', { count: items.length })}</span>
       </section>
       {loading && !data ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => setReloadToken((value) => value + 1)} /> : items.length === 0 ? (
         <EmptyState icon="file" title={hasServerPage ? t('pipelines.empty.filtered.title') : t('pipelines.empty.none.title')} description={hasServerPage ? t('pipelines.empty.filtered.description') : t('pipelines.empty.none.description')} />
       ) : (
         <section className="panel table-panel">
-          <table className="data-table responsive-table">
-            <thead><tr><th>{t('table.pipeline')}</th><th>{t('table.revision')}</th><th>{t('table.created')}</th><th>{t('table.updated')}</th><th aria-label={t('table.open')} /></tr></thead>
-            <tbody>
+          <Table className={stackTable}>
+            <TableHeader className={stackHead}>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t('table.pipeline')}</TableHead>
+                <TableHead>{t('table.revision')}</TableHead>
+                <TableHead>{t('table.created')}</TableHead>
+                <TableHead>{t('table.updated')}</TableHead>
+                <TableHead aria-label={t('table.open')} />
+              </TableRow>
+            </TableHeader>
+            <TableBody className={stackBody}>
               {items.map((pipeline) => (
-                <tr key={pipeline.pipelineId} className="clickable" tabIndex={0}>
-                  <td data-label={t('table.pipeline')}><Link to={`/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></td>
-                  <td data-label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></td>
-                  <td data-label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></td>
-                  <td data-label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></td>
-                  <td className="row-action"><Icon name="chevron" size={16} /></td>
-                </tr>
+                <TableRow key={pipeline.pipelineId} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} tabIndex={0}>
+                  <StackCell label={t('table.pipeline')}><Link to={`/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
+                  <StackCell label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
+                  <StackCell label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></StackCell>
+                  <StackCell label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></StackCell>
+                  <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </section>
       )}
       <div className="pagination-row">
-        <button className="btn btn-secondary" disabled={!cursor} onClick={() => { setCursor(null); setCursorHistory([]); }}>{t('pipelines.pagination.first')}</button>
-        <button className="btn btn-secondary" disabled={!cursorHistory.length} onClick={() => {
+        <Button variant="secondary" disabled={!cursor} onClick={() => { setCursor(null); setCursorHistory([]); }}>{t('pipelines.pagination.first')}</Button>
+        <Button variant="secondary" disabled={!cursorHistory.length} onClick={() => {
           const previous = cursorHistory[cursorHistory.length - 1];
           setCursor(previous);
           setCursorHistory((items) => items.slice(0, -1));
-        }}>{t('pipelines.pagination.previous')}</button>
-        <button className="btn btn-secondary" disabled={!data?.nextCursor} onClick={() => {
+        }}>{t('pipelines.pagination.previous')}</Button>
+        <Button variant="secondary" disabled={!data?.nextCursor} onClick={() => {
           setCursorHistory((items) => [...items, cursor]);
           setCursor(data?.nextCursor || null);
-        }}>{t('pipelines.pagination.next')} <Icon name="arrowRight" size={14} /></button>
+        }}>{t('pipelines.pagination.next')} <Icon name="arrowRight" size={14} /></Button>
       </div>
     </div>
   );
@@ -137,27 +170,30 @@ export function PipelineDetailPage() {
         eyebrow={t('pipelines.eyebrow')}
         title={detail.name}
         description={<span className="mono">{detail.pipelineId}</span>}
-        actions={<><Link className="btn btn-secondary" to="/pipelines"><Icon name="arrowRight" size={15} /> {t('pipelines.action.all')}</Link><Link className="btn btn-primary" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link><Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> {t('pipelines.action.openStudio')}</Link></>}
+        actions={<><Link className={buttonVariants({ variant: 'secondary' })} to="/pipelines"><Icon name="arrowRight" size={15} /> {t('pipelines.action.all')}</Link><Link className={buttonVariants()} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link><Link className={buttonVariants({ variant: 'secondary' })} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> {t('pipelines.action.openStudio')}</Link></>}
       />
       <section className="summary-grid pipeline-stats">
         <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRevision')}</span><strong className="metric-value">r{detail.latestRevision}</strong></div>
         <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.nodes')}</span><strong className="metric-value">{latest?.definition.nodes.length ?? 0}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRun')}</span><strong className="metric-value small">{jobs?.items[0] ? <StatusBadge status={jobs.items[0].status} /> : t('common.noRuns')}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRun')}</span><strong className="metric-value small">{jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')}</strong></div>
         <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.updated')}</span><strong className="metric-value small"><TimeAgo value={latest?.publishedAt} /></strong></div>
       </section>
-      {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>{t('pipelines.latestRevision.title')}</h2><p className="muted small">{latest.definition.name} · {latest.digest}</p></div><StatusBadge status="READY" label={t('pipelines.badge.immutable')} /></div><NodeSummary definition={latest.definition} /></section> : <EmptyState icon="file" title={t('pipelines.empty.noPublishedRevision')} />}
+      {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>{t('pipelines.latestRevision.title')}</h2>{/* The 64-char digest is unbreakable text: at 390 it forced a 122px page-level
+              horizontal overflow on this panel before (the same markup pre-dated the migration).
+              Breaking the hash only where it needs to wrap keeps the page inside the viewport. */}
+            <p className="muted small">{latest.definition.name} · <span className="break-all">{latest.digest}</span></p></div><TonePill tone="ok" label={t('pipelines.badge.immutable')} /></div><NodeSummary definition={latest.definition} /></section> : <EmptyState icon="file" title={t('pipelines.empty.noPublishedRevision')} />}
       <section className="panel panel-pad">
         <div className="panel-head"><div><h2>{t('pipelines.history.title')}</h2><p className="muted small">{t('pipelines.history.description')}</p></div></div>
         {detail.revisions.length === 0 ? <EmptyState icon="clock" title={t('pipelines.history.empty')} /> : (
           <ul className="revision-list">{detail.revisions.map((revision) => (
-            <li key={revision.revision}><span className="mono">r{revision.revision}</span><span className="mono muted small">{revision.digest}</span><StatusBadge status="READY" label={revision.status} /><TimeAgo value={revision.publishedAt} /></li>
+            <li key={revision.revision}><span className="mono">r{revision.revision}</span><span className="mono muted small">{revision.digest}</span><TonePill tone="ok" label={revision.status} className="max-[700px]:col-start-2" /><TimeAgo value={revision.publishedAt} /></li>
           ))}</ul>
         )}
       </section>
       <section className="panel panel-pad">
-        <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className="btn btn-secondary btn-small" to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
+        <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">{t('pipelines.jobs.empty')}</p> : (
-          <div className="table-panel"><table className="data-table job-mini-table responsive-table"><thead><tr><th>{t('table.job')}</th><th>{t('table.revision')}</th><th>{t('table.status')}</th><th>{t('table.created')}</th></tr></thead><tbody>{jobs.items.map((job) => <tr key={job.jobId}><td data-label={t('table.job')}><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td data-label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></td><td data-label="Status"><StatusBadge status={job.status} /></td><td data-label={t('table.created')}><TimeAgo value={job.createdAt} /></td></tr>)}</tbody></table></div>
+          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[760px]:!w-auto max-[760px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label="Status"><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
         )}
       </section>
       <p className="table-footnote"><Icon name="alert" size={13} /> {t('pipelines.footnote')}</p>

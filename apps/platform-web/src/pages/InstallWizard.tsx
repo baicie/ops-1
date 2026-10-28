@@ -3,11 +3,32 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../api';
 import type { DeploymentView, PackageResult, PluginDetail } from '../types';
 import { Icon } from '../components/Icons';
-import { ErrorState, Field, KV, PageHeader, Progress, StatusBadge, useToast } from '../components/Ui';
+import { Badge } from '../components/ui/badge';
+import { Button, buttonVariants } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import { ErrorState, Field, KV, PageHeader, Progress, useToast } from '../components/Ui';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
+import { StatusPill } from './table-kit';
 
 type Step = 1 | 2 | 3 | 4;
+
+/**
+ * The trust badge carries its own copy ("Signature verified") instead of the status label, so it
+ * cannot reuse StatusPill's label. The tone still comes from the shared mapping, never a second
+ * table of what a signature state means.
+ */
+function SignaturePill({ status, label }: { status: string; label: string }) {
+  const code = status?.toUpperCase();
+  const tone = (code ? STATUS_MAP[code] : undefined)?.tone ?? 'unknown';
+  return (
+    <Badge variant={badgeVariantForTone(tone)} data-status={code || undefined}>
+      <Icon name={glyphForTone(tone)} size={12} />
+      {label}
+    </Badge>
+  );
+}
 
 export function InstallWizardPage() {
   const t = useT();
@@ -105,7 +126,7 @@ export function InstallWizardPage() {
       <PageHeader
         title={t('install.title')}
         description={t('install.description')}
-        actions={<Link to="/plugins" className="btn btn-secondary">{t('action.cancel')}</Link>}
+        actions={<Link to="/plugins" className={buttonVariants({ variant: 'secondary' })}>{t('action.cancel')}</Link>}
       />
       <ol className="stepper" aria-label={t('install.steps.aria')}>
         {[
@@ -147,12 +168,12 @@ export function InstallWizardPage() {
       {step === 2 && pkg && (
         <>
           <section className="panel wizard-panel">
-            <div className="panel-head"><div><h2>{t('install.trust.title')}</h2><p>{t('install.trust.description')}</p></div><StatusBadge status={pkg.signatureState} label={t('install.trust.badge')} /></div>
+            <div className="panel-head"><div><h2>{t('install.trust.title')}</h2><p>{t('install.trust.description')}</p></div><SignaturePill status={pkg.signatureState} label={t('install.trust.badge')} /></div>
             <div className="kv-grid">
               <KV label={t('table.plugin')}><span className="mono">{pkg.pluginId}</span></KV>
               <KV label={t('table.version')}>{pkg.version}</KV>
               <KV label={t('table.publisher')}>{pkg.publisher}</KV>
-              <KV label={t('install.field.packageStatus')}><StatusBadge status={pkg.status} /></KV>
+              <KV label={t('install.field.packageStatus')}><StatusPill status={pkg.status} /></KV>
               <KV label={t('install.field.bundleDigest')} mono>{shortDigest(pkg.bundleDigest, 20)}</KV>
               <KV label={t('install.field.artifactDigest')} mono>{shortDigest(pkg.artifactDigest, 20)}</KV>
               <KV label={t('install.field.backendImage')} mono>{shortDigest(pkg.imageRef, 24)}</KV>
@@ -178,7 +199,7 @@ export function InstallWizardPage() {
             </div>
           </section>
           {contributions.length > 0 && <section className="panel"><div className="panel-head"><div><h2>{t('install.contributions.title')}</h2><p>{t('install.contributions.description')}</p></div></div><ul className="contribution-list">{contributions.map((contribution) => <li key={`${contribution.kind}:${contribution.id}`}><span className="tag">{contribution.kind}</span><code>{contribution.path}</code></li>)}</ul></section>}
-          <div className="wizard-actions"><button className="btn btn-secondary" onClick={() => setStep(1)}>{t('action.back')}</button><button className="btn btn-primary" onClick={() => setStep(3)}>{t('install.action.continuePlacement')}</button></div>
+          <div className="wizard-actions"><Button variant="secondary" onClick={() => setStep(1)}>{t('action.back')}</Button><Button onClick={() => setStep(3)}>{t('install.action.continuePlacement')}</Button></div>
         </>
       )}
 
@@ -186,17 +207,17 @@ export function InstallWizardPage() {
         <section className="panel wizard-panel">
           <div className="panel-head"><div><h2>{t('install.placement.title')}</h2><p>{t('install.placement.description')}</p></div></div>
           <div className="form-grid">
-            <Field label={t('field.desiredReplicas')} hint={t('install.field.desiredReplicas.hint')}><input type="number" min={0} max={20} value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} /></Field>
-            <Field label={t('field.nodeSelector')} hint={t('install.field.nodeSelector.hint')}><input value={selector} onChange={(event) => setSelector(event.target.value)} placeholder="role=node" /></Field>
+            <Field label={t('field.desiredReplicas')} hint={t('install.field.desiredReplicas.hint')}><Input type="number" min={0} max={20} value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} /></Field>
+            <Field label={t('field.nodeSelector')} hint={t('install.field.nodeSelector.hint')}><Input value={selector} onChange={(event) => setSelector(event.target.value)} placeholder="role=node" /></Field>
           </div>
           <div className="callout"><Icon name="nodes" size={16} /><p>{t('install.placement.note.before')} <strong>PENDING</strong>{t('install.placement.note.after')}</p></div>
-          <div className="wizard-actions"><button className="btn btn-secondary" onClick={() => setStep(2)}>{t('action.back')}</button><button className="btn btn-primary" onClick={() => void deploy()} disabled={busy}>{busy ? t('install.deploy.creating') : t('install.action.deployToNodes')}</button></div>
+          <div className="wizard-actions"><Button variant="secondary" onClick={() => setStep(2)}>{t('action.back')}</Button><Button onClick={() => void deploy()} disabled={busy}>{busy ? t('install.deploy.creating') : t('install.action.deployToNodes')}</Button></div>
         </section>
       )}
 
       {step === 4 && pkg && (
         <section className="panel wizard-panel">
-          <div className="panel-head"><div><h2>{t('install.readiness.title')}</h2><p>{t('install.readiness.description')}</p></div><StatusBadge status={deployment?.status || 'PENDING'} /></div>
+          <div className="panel-head"><div><h2>{t('install.readiness.title')}</h2><p>{t('install.readiness.description')}</p></div><StatusPill status={deployment?.status || 'PENDING'} /></div>
           {deploymentError && <div className="inline-error" role="alert"><Icon name="warning" size={16} /> {deploymentError}</div>}
           {deployment ? (
             <>
@@ -206,14 +227,14 @@ export function InstallWizardPage() {
               </div>
               <Progress value={deployment.readyInstances} max={Math.max(deployment.desiredReplicas, 1)} label={t('install.readiness.progressLabel')} />
               <div className="instance-mini-list">
-                {deployment.instances.map((instance) => <div className="instance-mini" key={instance.id}><span className="mono">#{instance.slot}</span><strong>{instance.nodeName}</strong><StatusBadge status={instance.state} /><span className="muted small">{t('install.restarts', { count: instance.restartCount })}</span></div>)}
+                {deployment.instances.map((instance) => <div className="instance-mini" key={instance.id}><span className="mono">#{instance.slot}</span><strong>{instance.nodeName}</strong><StatusPill status={instance.state} /><span className="muted small">{t('install.restarts', { count: instance.restartCount })}</span></div>)}
               </div>
               <div className={`callout ${deployment.status === 'READY' ? 'callout-ok' : ''}`}><Icon name={deployment.status === 'READY' ? 'check' : 'clock'} size={16} /><p>{deployment.status === 'READY' ? t('install.ready.note') : deployment.status === 'DEGRADED' || deployment.status === 'FAILED' ? t('install.blocked.note') : t('install.waiting.note')}</p></div>
             </>
           ) : <p className="muted pad">{t('install.deploy.creating')}</p>}
           <div className="wizard-actions">
-            <button className="btn btn-secondary" onClick={() => setStep(3)} disabled={busy}>{t('action.back')}</button>
-            <button className="btn btn-primary" onClick={() => void activate()} disabled={busy || deployment?.status !== 'READY'}>{busy ? t('install.activating') : t('pluginDetail.confirmActivate.confirm')}</button>
+            <Button variant="secondary" onClick={() => setStep(3)} disabled={busy}>{t('action.back')}</Button>
+            <Button onClick={() => void activate()} disabled={busy || deployment?.status !== 'READY'}>{busy ? t('install.activating') : t('pluginDetail.confirmActivate.confirm')}</Button>
           </div>
         </section>
       )}

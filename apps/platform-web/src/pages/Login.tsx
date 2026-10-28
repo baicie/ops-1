@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { Icon } from '../components/Icons';
+import { Button } from '../components/ui/button';
 import { useT } from '../i18n';
 
 export function LoginPage() {
@@ -66,7 +67,7 @@ export function LoginPage() {
             <span className="field-label">{t('login.field.password')}</span>
             <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
           </label>
-          <button type="submit" data-testid="login-submit" className="btn btn-primary btn-wide" disabled={busy}>{busy ? t('login.submitPending') : t('login.submit')}</button>
+          <Button type="submit" data-testid="login-submit" className="w-full" disabled={busy}>{busy ? t('login.submitPending') : t('login.submit')}</Button>
           <p className="login-help">{t('login.help')}</p>
         </form>
       </section>

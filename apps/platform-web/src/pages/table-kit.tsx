@@ -39,7 +39,9 @@ export const stackRow = 'max-[760px]:flex max-[760px]:flex-col max-[760px]:px-1 
 const stackCell =
   'max-[760px]:flex max-[760px]:items-start max-[760px]:justify-between max-[760px]:gap-3.5 ' +
   'max-[760px]:border-0 max-[760px]:px-3.5 max-[760px]:py-[5px] max-[760px]:text-right';
-const stackLabel = 'hidden text-muted-foreground max-[760px]:inline';
+// The legacy .data-table/.responsive-table label was a ::before with flex: none, so it never
+// shrank. Without shrink-0 a wide value on the right squeezes the label and wraps it ("任 / 务").
+const stackLabel = 'hidden shrink-0 whitespace-nowrap text-muted-foreground max-[760px]:inline';
 
 /** Table cell that keeps its data-label and prints that label inline only in the stacked layout. */
 export function StackCell({ label, className, children, ...props }: React.TdHTMLAttributes<HTMLTableCellElement> & { label: string }) {

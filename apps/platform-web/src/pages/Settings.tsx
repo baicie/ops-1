@@ -5,6 +5,7 @@ import { useAuth } from '../auth';
 import { useExtensions } from '../extensions';
 import { usePolling } from '../hooks';
 import { Icon } from '../components/Icons';
+import { buttonVariants } from '../components/ui/button';
 import { CopyButton, ErrorState, KV, PageHeader, Skeleton } from '../components/Ui';
 import { useT } from '../i18n';
 
@@ -21,7 +22,7 @@ export function SettingsPage() {
   );
   return (
     <div className="page-stack">
-      <PageHeader eyebrow={t('settings.eyebrow')} title={t('page.settings')} description={t('settings.description')} actions={<Link className="btn btn-secondary" to="/settings/diagnostics"><Icon name="terminal" size={15} /> {t('page.diagnostics')}</Link>} />
+      <PageHeader eyebrow={t('settings.eyebrow')} title={t('page.settings')} description={t('settings.description')} actions={<Link className={buttonVariants({ variant: 'secondary' })} to="/settings/diagnostics"><Icon name="terminal" size={15} /> {t('page.diagnostics')}</Link>} />
       <div className="summary-grid">
         <section className="panel">
           <div className="panel-head"><div><h2>{t('settings.general.title')}</h2><p>{t('settings.general.description')}</p></div></div>

@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
 import { useT } from '../i18n';
 import { STATUS_MAP, glyphForTone } from './status-tone';
+import { Button } from './ui/button';
 import type { MessageKey } from '../i18n';
 
 export function PageHeader({
@@ -79,7 +80,7 @@ export function ErrorState({ error, onRetry }: { error: Error | null; onRetry?: 
       <div>
         <h3>{t('error.loadTitle')}</h3>
         <p>{error?.message || t('error.unknown')}</p>
-        {onRetry && <button className="btn btn-secondary" onClick={onRetry}><Icon name="refresh" size={15} /> {t('action.retry')}</button>}
+        {onRetry && <Button variant="secondary" onClick={onRetry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>}
       </div>
     </div>
   );
@@ -234,10 +235,10 @@ export function ConfirmDialog({
       size="small"
       testId="confirm-dialog"
       footer={<>
-        <button className="btn btn-secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</button>
-        <button className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm} disabled={busy}>
+        <Button variant="secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</Button>
+        <Button variant={danger ? 'destructive' : 'default'} onClick={onConfirm} disabled={busy}>
           {busy ? t('action.working') : resolvedConfirmLabel}
-        </button>
+        </Button>
       </>}
     >
       <div className="confirm-copy">{description}</div>
