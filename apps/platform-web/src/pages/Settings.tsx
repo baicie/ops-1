@@ -6,20 +6,24 @@ import { useExtensions } from '../extensions';
 import { usePolling } from '../hooks';
 import { Icon } from '../components/Icons';
 import { buttonVariants } from '../components/ui/button';
-import { CopyButton, ErrorState, KV, PageHeader, Skeleton } from '../components/Ui';
+import { CopyButton, EmptyState, KV } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
+import { PageHeader } from '../components/app/page-header';
 import { useT } from '../i18n';
 
 export function SettingsPage() {
   const t = useT();
   const { user } = useAuth();
   const { extensions } = useExtensions();
+  const isAdmin = user?.role === 'admin';
   const { data, error, loading, reload } = usePolling<Record<string, number | string>>(
-    () => (user?.role === 'admin' ? api.get<Record<string, number | string>>('/api/v1/settings/runtime-policies') : Promise.resolve({})),
+    () => (isAdmin ? api.get<Record<string, number | string>>('/api/v1/settings/runtime-policies') : Promise.resolve({})),
     0,
   );
   const settingsContributions = extensions.flatMap((extension) =>
     extension.contributions.filter((contribution) => contribution.kind === 'settings.section.v1').map((contribution) => ({ extension, contribution })),
   );
+  const policyCount = data ? Object.keys(data).length : 0;
   return (
     <div className="page-stack">
       <PageHeader eyebrow={t('settings.eyebrow')} title={t('page.settings')} description={t('settings.description')} actions={<Link className={buttonVariants({ variant: 'secondary' })} to="/admin/settings/diagnostics"><Icon name="terminal" size={15} /> {t('page.diagnostics')}</Link>} />
@@ -37,7 +41,22 @@ export function SettingsPage() {
         </section>
         <section className="panel">
           <div className="panel-head"><div><h2>{t('common.runtimePolicies')}</h2><p>{t('settings.policies.description')}</p></div><CopyButton value={data ? JSON.stringify(data, null, 2) : ''} label={t('settings.policies.copy')} /></div>
-          {loading ? <Skeleton rows={3} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : !data || !Object.keys(data).length ? <p className="muted pad">{t('settings.policies.adminOnly')}</p> : <div className="kv-grid">{Object.entries(data).map(([key, value]) => <KV key={key} label={key}>{String(value)}</KV>)}</div>}
+          {/* Policies are a read-only GET contract, so this panel has three honest outcomes and no
+              save button: permission wall for a non-admin, an empty list for an admin whose
+              deployment reports none, and the values themselves. */}
+          <AsyncBoundary
+            loading={loading}
+            error={isAdmin ? error : null}
+            hasData={Boolean(data)}
+            isEmpty={policyCount === 0}
+            emptyState={isAdmin
+              ? <EmptyState icon="settings" title={t('settings.policies.none')} />
+              : <EmptyState icon="access" title={t('settings.policies.adminOnly')} />}
+            onRetry={() => void reload()}
+            skeletonRows={3}
+          >
+            <div className="kv-grid">{Object.entries(data || {}).map(([key, value]) => <KV key={key} label={key}>{String(value)}</KV>)}</div>
+          </AsyncBoundary>
         </section>
       </div>
       <section className="panel">

@@ -3,9 +3,13 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { usePolling } from '../hooks';
 import type { NodeView } from '../types';
+import { Icon } from '../components/Icons';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { EmptyState, ErrorState, PageHeader, Skeleton } from '../components/Ui';
+import { EmptyState } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
+import { PageHeader } from '../components/app/page-header';
+import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
 import { useT } from '../i18n';
 import { formatDate } from '../format';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
@@ -51,26 +55,30 @@ export function GovernancePage() {
 
   useEffect(() => { void load(); }, []);
 
-  const passed = summary?.latestQuality.passed ?? 0;
-  const failed = summary?.latestQuality.failed ?? 0;
-  const errored = summary?.latestQuality.error ?? 0;
-  const unknown = summary?.latestQuality.unknown ?? 0;
   const nodeList = nodes || [];
   const ready = nodeList.filter((node) => node.status === 'READY' && !node.stale).length;
   const unreachable = nodeList.filter((node) => node.status === 'UNREACHABLE' || node.stale).length;
   const recentFailures = summary?.recentFailures || [];
-  const lineageBatches = summary?.lineageWindowCount ?? 0;
+  const quality = summary?.latestQuality;
 
   return <div className="page-stack">
-    <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="secondary" onClick={() => { void load(); void reloadNodes(); }}>{t('action.refresh')}</Button>} />
-    {(loading || nodeLoading) && !datasets.length ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => void load()} /> : <>
+    <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="secondary" onClick={() => { void load(); void reloadNodes(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
+    {/* A policy summary is a count over observed runs: while no run has answered, the card says
+        UNKNOWN instead of printing a 0 that reads like "zero failures". */}
+    <AsyncBoundary
+      loading={loading || nodeLoading}
+      error={error}
+      hasData={Boolean(summary) || datasets.length > 0}
+      skeletonRows={5}
+      onRetry={() => { void load(); void reloadNodes(); }}
+    >
       {/* .metric-grid never had a rule in styles.css, so these cards stacked full width at
           every viewport. The grid lives here now, where this page's layout belongs. */}
       <div className="metric-grid grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.datasets')}</span><strong>{summary?.datasetCount ?? '—'}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.datasets.detail')}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.qualityPassed')}</span><strong>{passed}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.qualityPassed.detail', { failed, errored, unknown, pending: summary?.latestQuality.pending ?? 0 })}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.lineageBatches')}</span><strong>{lineageBatches}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.lineageBatches.detail', { window: summary?.lineageWindow || '24h' })}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.nodesReady')}</span><strong>{ready}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.nodesReady.detail', { unreachable, enrolled: nodeList.length })}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.datasets')}</span><strong>{Number.isFinite(summary?.datasetCount) ? summary!.datasetCount : <UnknownValue detail={t('ui.unknown.detail')} />}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.datasets.detail')}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.qualityPassed')}</span><strong>{quality ? quality.passed : <UnknownValue detail={t('ui.unknown.detail')} />}</strong><span className="text-sm text-muted-foreground">{quality ? t('governance.metric.qualityPassed.detail', { failed: quality.failed, errored: quality.error, unknown: quality.unknown, pending: quality.pending }) : t('ui.notObserved')}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.lineageBatches')}</span><strong>{Number.isFinite(summary?.lineageWindowCount) ? summary!.lineageWindowCount : <UnknownValue detail={t('ui.unknown.detail')} />}</strong>{/* The window is the server's answer; a missing one is UNKNOWN, never a "24h" of our own. */}<span className="text-sm text-muted-foreground">{summary?.lineageWindow ? t('governance.metric.lineageBatches.detail', { window: summary.lineageWindow }) : <UnknownValue detail={t('ui.unknown.detail')} />}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.nodesReady')}</span><strong>{nodes ? ready : <UnknownValue detail={t('ui.unknown.detail')} />}</strong><span className="text-sm text-muted-foreground">{nodes ? t('governance.metric.nodesReady.detail', { unreachable, enrolled: nodeList.length }) : t('ui.notObserved')}</span></div>
       </div>
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>{t('governance.quality.title')}</h2><p>{t('governance.quality.description')}</p></div><Link className="text-link" to="/admin/ext/trusted-team/data-catalog">{t('governance.quality.openCatalog')}</Link></div>
@@ -88,15 +96,16 @@ export function GovernancePage() {
             </TableHeader>
             <TableBody className={stackBody}>
               {datasets.map((dataset) => (
-                <TableRow key={dataset.datasetId} className={stackRow}>
+                <TableRow key={dataset.datasetId} className={stackRow} data-dataset={dataset.datasetId}>
                   <StackCell label={t('table.dataset')}>
                     <strong>{dataset.name}</strong>
                     <div className="mono text-sm text-muted-foreground">{dataset.datasetId.slice(0, 13)}…</div>
                   </StackCell>
                   <StackCell label={t('table.schema')}>r{dataset.schemaRevision}</StackCell>
                   <StackCell label={t('table.quality')}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <StatusPill status="UNKNOWN" />}</StackCell>
-                  <StackCell label={t('table.examined')}>{dataset.latest?.recordsExamined ?? '—'}</StackCell>
-                  <StackCell label={t('table.failed')}>{dataset.latest?.recordsFailed ?? '—'}</StackCell>
+                  {/* A run that examined no records reported nothing: NO_DATA, not a 0 count. */}
+                  <StackCell label={t('table.examined')}>{dataset.latest ? dataset.latest.recordsExamined : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                  <StackCell label={t('table.failed')}>{dataset.latest ? dataset.latest.recordsFailed : <NoData detail={t('ui.noData.detail')} />}</StackCell>
                   <StackCell label={t('table.latestRun')}>{dataset.latest ? <Link className="text-link" to="/admin/ext/trusted-team/data-catalog"><span className="mono">{dataset.latest.runId.slice(0, 8)}</span></Link> : <span className="text-muted-foreground">{t('common.noRuns')}</span>}</StackCell>
                 </TableRow>
               ))}
@@ -138,7 +147,9 @@ export function GovernancePage() {
               {nodeList.map((node) => (
                 <TableRow key={node.id} className={stackRow}>
                   <StackCell label={t('table.node')}><Link className="text-link" to={`/admin/nodes/${node.id}`}>{node.name}</Link></StackCell>
-                  <StackCell label={t('table.status')}><StatusPill status={node.stale ? 'UNREACHABLE' : node.status} /></StackCell>
+                  {/* docs/04 §4.5 C: a node that stopped reporting is STALE, which is a different
+                      answer from UNREACHABLE and from a green READY. */}
+                  <StackCell label={t('table.status')}><StatusIndicator state={indicatorStateForCode(node.status, { stale: node.stale, revoked: Boolean(node.revokedAt) })} /></StackCell>
                   <StackCell label={t('table.generation')}>{node.generation}</StackCell>
                 </TableRow>
               ))}
@@ -147,6 +158,6 @@ export function GovernancePage() {
         )}</section>
       </div>
       <div className="info-grid"><div className="callout"><p>{t('governance.footnote.before')} <strong>UNKNOWN</strong>{t('governance.footnote.after')}</p></div></div>
-    </>}
+    </AsyncBoundary>
   </div>;
 }

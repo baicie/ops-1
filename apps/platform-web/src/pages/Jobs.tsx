@@ -9,7 +9,10 @@ import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { EmptyState, ErrorState, PageHeader, Skeleton, TimeAgo } from '../components/Ui';
+import { EmptyState, TimeAgo } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
+import { ConfirmAction } from '../components/app/confirm-action';
+import { PageHeader } from '../components/app/page-header';
 import { useDocumentTitle } from '../hooks';
 import { executionLabel as durationLabel, spanLabel } from './jobDuration';
 import { useT } from '../i18n';
@@ -43,6 +46,9 @@ export function JobsPage() {
   }, [status, cursor, reload]);
   const visibleJobs = (data?.items || []).filter((job) => (pipelineFilter === 'ALL' || job.pipelineId === pipelineFilter) && `${job.jobId} ${job.pipelineId}`.toLowerCase().includes(query.toLowerCase()));
   const pipelines = Array.from(new Set((data?.items || []).map((job) => job.pipelineId))).sort();
+  /** The status tab is a Kernel query, so an empty answer under it is a filtered miss. */
+  const filtering = query !== '' || pipelineFilter !== 'ALL' || status !== 'ALL';
+  const clearFilters = () => { setQuery(''); setPipelineFilter('ALL'); setStatus('ALL'); setCursor(null); };
   return (
     <div className="page-stack">
       <PageHeader title={t('page.jobs')} description={t('jobs.description')} actions={<Button variant="secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
@@ -65,40 +71,72 @@ export function JobsPage() {
         </Tabs>
         <span className="toolbar-count">{t('jobs.count', { shown: visibleJobs.length, total: data?.items.length ?? 0 })}</span>
       </section>
-      {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : visibleJobs.length === 0 ? <EmptyState icon="clock" title={data?.items.length ? t('jobs.empty.filtered.title') : t('jobs.empty.none.title')} description={data?.items.length ? t('jobs.empty.filtered.description') : t('jobs.empty.none.description')} /> : (
-        <section className="panel table-panel">
-          <Table className={stackTable}>
-            <TableHeader className={stackHead}>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>{t('table.job')}</TableHead>
-                <TableHead>{t('table.pipeline')}</TableHead>
-                <TableHead>{t('table.revision')}</TableHead>
-                <TableHead>{t('table.status')}</TableHead>
-                <TableHead>{t('table.attempts')}</TableHead>
-                <TableHead>{t('table.duration')}</TableHead>
-                <TableHead>{t('table.created')}</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody className={stackBody}>
-              {visibleJobs.map((job) => (
-                <TableRow key={job.jobId} className={cn('cursor-pointer', stackRow)}>
-                  <StackCell label={t('table.job')} className="job-id-cell max-[760px]:w-auto max-[760px]:max-w-none"><Link className="mono min-w-0 truncate max-[760px]:max-w-[220px]" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
-                  <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[760px]:whitespace-normal">{job.pipelineId}</StackCell>
-                  <StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell>
-                  <StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell>
-                  <StackCell label={t('table.attempts')}>{job.attempts}/{job.maxAttempts}</StackCell>
-                  <StackCell label={t('table.duration')} className="whitespace-nowrap max-[760px]:whitespace-normal"><span className="mono">{durationLabel(job)}</span></StackCell>
-                  <StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell>
-                  <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+      <AsyncBoundary
+        loading={loading}
+        // A page that already shows rows keeps them when a later refresh fails; only a first
+        // load with nothing to show becomes the error panel.
+        error={data ? null : error}
+        hasData={Boolean(data)}
+        skeletonRows={6}
+        onRetry={() => setReload((value) => value + 1)}
+      >
+        {visibleJobs.length === 0 ? (
+          <div data-empty-state={filtering ? 'filtered' : 'none'}>
+            <EmptyState
+              icon="clock"
+              title={filtering ? t('jobs.empty.filtered.title') : t('jobs.empty.none.title')}
+              description={filtering ? t('jobs.empty.filtered.description') : t('jobs.empty.none.description')}
+              action={filtering ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button> : undefined}
+            />
+          </div>
+        ) : (
+          <section className="panel table-panel">
+            <Table className={stackTable}>
+              <TableHeader className={stackHead}>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>{t('table.job')}</TableHead>
+                  <TableHead>{t('table.pipeline')}</TableHead>
+                  <TableHead>{t('table.revision')}</TableHead>
+                  <TableHead>{t('table.status')}</TableHead>
+                  <TableHead>{t('table.attempts')}</TableHead>
+                  <TableHead>{t('table.duration')}</TableHead>
+                  <TableHead>{t('table.created')}</TableHead>
+                  <TableHead />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </section>
-      )}
+              </TableHeader>
+              <TableBody className={stackBody}>
+                {visibleJobs.map((job) => (
+                  <TableRow key={job.jobId} className={cn('cursor-pointer', stackRow)}>
+                    <StackCell label={t('table.job')} className="job-id-cell max-[760px]:w-auto max-[760px]:max-w-none"><Link className="mono min-w-0 truncate max-[760px]:max-w-[220px]" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
+                    <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[760px]:whitespace-normal">{job.pipelineId}</StackCell>
+                    <StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell>
+                    <StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell>
+                    <StackCell label={t('table.attempts')}>{job.attempts}/{job.maxAttempts}</StackCell>
+                    <StackCell label={t('table.duration')} className="whitespace-nowrap max-[760px]:whitespace-normal"><span className="mono">{durationLabel(job)}</span></StackCell>
+                    <StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell>
+                    <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </section>
+        )}
+      </AsyncBoundary>
       <div className="pagination-row"><Button variant="secondary" disabled={!cursor} onClick={() => setCursor(null)}>{t('pipelines.pagination.first')}</Button><Button variant="secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor || null)}>{t('pipelines.pagination.next')}</Button></div>
     </div>
+  );
+}
+
+/** The title block of every state of a job detail page, including the ones with no payload yet. */
+function JobDetailHeader({ jobId, subtitle, actions }: { jobId: string; subtitle?: React.ReactNode; actions?: React.ReactNode }) {
+  const t = useT();
+  return (
+    <PageHeader
+      eyebrow={t('jobs.eyebrow')}
+      title={t('page.jobDetail')}
+      description={<span className="job-subtitle"><span className="mono">{jobId}</span>{subtitle}</span>}
+      actions={actions}
+    />
   );
 }
 
@@ -112,6 +150,7 @@ export function JobDetailPage() {
   const [diagnostics, setDiagnostics] = useState<JobDiagnostics | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [cancelOpen, setCancelOpen] = useState(false);
   useEffect(() => {
     let cancelled = false;
     const load = () => api.get<JobView>(`/api/v1/jobs/${encodeURIComponent(jobId)}`)
@@ -134,17 +173,27 @@ export function JobDetailPage() {
     return () => { cancelled = true; };
   }, [jobId, refresh]);
 
-  const cancel = async () => {
-    try {
-      await api.post(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {}, newIdempotencyKey());
-      setRefresh((value) => value + 1);
-    } catch (cause) { setError(cause as Error); }
+  /** Cancelling ends the run for good: confirmation, one in-flight request, retry on failure. */
+  const cancelJob = async () => {
+    await api.post(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {}, newIdempotencyKey());
+    setRefresh((value) => value + 1);
   };
-  if (error) return <ErrorState error={error} onRetry={() => setRefresh((value) => value + 1)} />;
-  if (!job) return <Skeleton rows={6} />;
+  if (error) return (
+    <div className="page-stack">
+      <JobDetailHeader jobId={jobId} actions={<Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link>} />
+      <AsyncBoundary loading={false} error={error} hasData={false} onRetry={() => setRefresh((value) => value + 1)}>{null}</AsyncBoundary>
+    </div>
+  );
+  if (!job) return (
+    <div className="page-stack">
+      <JobDetailHeader jobId={jobId} actions={<Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link>} />
+      <AsyncBoundary loading hasData={false} error={null}>{null}</AsyncBoundary>
+    </div>
+  );
+  const cancellable = ['QUEUED', 'CLAIMED', 'RUNNING'].includes(job.status);
   return (
     <div className="page-stack">
-      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId}>{t('jobs.runShortId', { id: job.jobId.slice(0, 8) })}</span></span>} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <Button variant="destructive" onClick={() => void cancel()}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId}>{t('jobs.runShortId', { id: job.jobId.slice(0, 8) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
       <section className="summary-grid job-stats">
         <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><StatusPill status={job.status} /></strong></div>
         <div className="panel metric-card"><span className="metric-label">{t('jobs.metric.execution')}</span><strong className="metric-value mono">{durationLabel(job)}</strong></div>
@@ -157,6 +206,14 @@ export function JobDetailPage() {
       {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>{t('table.attempts')}</h2><div className="table-panel"><Table><TableHeader><TableRow className="hover:bg-transparent"><TableHead>{t('jobs.field.attempt')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('jobs.field.fence')}</TableHead><TableHead>{t('table.node')}</TableHead><TableHead>{t('table.started')}</TableHead></TableRow></TableHeader><TableBody>{diagnostics.attempts.map((attempt) => <TableRow key={attempt.attemptNumber}><TableCell>#{attempt.attemptNumber}</TableCell><TableCell><StatusPill status={attempt.status} /></TableCell><TableCell className="mono">{attempt.fencingSequence}</TableCell><TableCell className="mono text-sm">{attempt.nodeId}</TableCell><TableCell><TimeAgo value={attempt.startedAt} /></TableCell></TableRow>)}</TableBody></Table></div></section>}
       {diagnostics && diagnostics.checkpoints.length > 0 && <section className="panel panel-pad"><h2>{t('jobs.checkpoints.title')}</h2><ul className="detail-list">{diagnostics.checkpoints.map((checkpoint) => <li key={checkpoint.checkpointId}><span>{t('jobs.checkpoints.entry', { attempt: checkpoint.attemptNumber, sequence: checkpoint.sequence })}</span><code className="mono small">{checkpoint.stateDigest}</code></li>)}</ul></section>}
       {result ? <section className="panel panel-pad"><h2>{t('table.result')}</h2><p className="small">{t('table.status')} <StatusPill status={result.status} /></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre><details className="advanced"><summary>{t('jobs.result.metadata')}</summary><p className="mono small">{result.resultDigest || t('jobs.result.noDigest')}</p></details></section> : resultError ? <p className="muted small">{t('jobs.result.error', { message: resultError })}</p> : null}
+      <ConfirmAction
+        open={cancelOpen}
+        title={t('jobs.cancelConfirm.title', { id: job.jobId.slice(0, 8) })}
+        description={t('jobs.cancelConfirm.description')}
+        confirmLabel={t('jobs.cancelConfirm.confirm')}
+        onConfirm={cancelJob}
+        onClose={() => setCancelOpen(false)}
+      />
     </div>
   );
 }
@@ -172,7 +229,12 @@ export function JobSubmitPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => { api.get<PipelineDetail>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}`).then((value) => { setDetail(value); setRevision(value.latestRevision); }).catch((cause) => setError((cause as Error).message)); }, [pipelineId]);
-  if (!detail) return error ? <ErrorState error={new Error(error)} /> : <Skeleton rows={5} />;
+  if (!detail) return (
+    <div className="page-stack">
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={t('page.runPipeline')} description={t('jobs.submit.description', { pipelineId })} />
+      <AsyncBoundary loading={!error} error={error ? new Error(error) : null} hasData={false}>{null}</AsyncBoundary>
+    </div>
+  );
   const submit = async () => {
     setSubmitting(true); setError(null);
     try {

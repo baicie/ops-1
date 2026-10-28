@@ -11,7 +11,11 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { CopyButton, ErrorState, PageHeader, Skeleton, TimeAgo, useToast } from '../components/Ui';
+import { CopyButton, EmptyState, TimeAgo, useToast } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
+import { ConfirmAction } from '../components/app/confirm-action';
+import { PageHeader } from '../components/app/page-header';
+import { NoData } from '../components/app/status-indicator';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
@@ -53,7 +57,7 @@ export function AccessPage() {
   const { user } = useAuth();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<Publisher[]>('/api/v1/publishers'), 0);
-  const { data: users, reload: reloadUsers } = usePolling<ManagedUser[]>(
+  const { data: users, error: usersError, loading: usersLoading, reload: reloadUsers } = usePolling<ManagedUser[]>(
     () => (user?.role === 'admin' ? api.get<ManagedUser[]>('/api/v1/users') : Promise.resolve([])),
     0,
   );
@@ -64,6 +68,8 @@ export function AccessPage() {
   const [newRole, setNewRole] = useState('viewer');
   const [userBusy, setUserBusy] = useState(false);
   const [userError, setUserError] = useState<string | null>(null);
+  /** The account whose enabled/disabled state a confirmation is open for, and the target state. */
+  const [userTarget, setUserTarget] = useState<{ account: ManagedUser; disabled: boolean } | null>(null);
   const nameFieldId = useId();
   const emailFieldId = useId();
   const passwordFieldId = useId();
@@ -85,15 +91,16 @@ export function AccessPage() {
     } finally { setUserBusy(false); }
   }
 
-  async function toggleUser(target: ManagedUser) {
-    try {
-      await api.patch(`/api/v1/users/${target.id}`, { disabled: !target.disabled });
-      await reloadUsers();
-      toast.push({ tone: 'ok', title: target.disabled ? t('access.toast.userEnabled') : t('access.toast.userDisabled') });
-    } catch (cause: any) {
-      toast.push({ tone: 'danger', title: t('access.toast.userUpdateFailed'), detail: cause.message });
-    }
+  /**
+   * Enabling or disabling a user revokes their sessions on the next request, so it is a
+   * privilege change: it goes through ConfirmAction and only a server answer ends the dialog.
+   */
+  async function applyUserState(target: { account: ManagedUser; disabled: boolean }) {
+    await api.patch(`/api/v1/users/${target.account.id}`, { disabled: target.disabled });
+    await reloadUsers();
+    toast.push({ tone: 'ok', title: target.disabled ? t('access.toast.userDisabled') : t('access.toast.userEnabled') });
   }
+
   const [addOpen, setAddOpen] = useState(false);
   const [publisherId, setPublisherId] = useState('');
   const [publicKey, setPublicKey] = useState('');
@@ -116,15 +123,9 @@ export function AccessPage() {
 
   async function revokePublisher() {
     if (!revoke) return;
-    setBusy(true);
-    try {
-      await api.del(`/api/v1/publishers/${encodeURIComponent(revoke)}`);
-      toast.push({ tone: 'ok', title: t('access.toast.publisherRevoked'), detail: t('access.toast.publisherRevoked.detail') });
-      setRevoke(null);
-      await reload();
-    } catch (cause: any) {
-      toast.push({ tone: 'danger', title: t('common.revokeFailed'), detail: cause.message });
-    } finally { setBusy(false); }
+    await api.del(`/api/v1/publishers/${encodeURIComponent(revoke)}`);
+    toast.push({ tone: 'ok', title: t('access.toast.publisherRevoked'), detail: t('access.toast.publisherRevoked.detail') });
+    await reload();
   }
 
   return (
@@ -157,7 +158,15 @@ export function AccessPage() {
       {user?.role === 'admin' && (
         <section className="panel table-panel">
           <div className="panel-head"><div><h2>{t('access.users.title')}</h2><p>{t('access.users.description')}</p></div><Button variant="secondary" onClick={() => { setUserError(null); setUserOpen(true); }}><Icon name="plus" size={15} /> {t('access.users.add')}</Button></div>
-          {!users?.length ? <p className="muted pad">{t('access.users.empty')}</p> : (
+          <AsyncBoundary
+            loading={usersLoading}
+            error={usersError}
+            hasData={Boolean(users)}
+            isEmpty={Boolean(users && users.length === 0)}
+            emptyState={<EmptyState icon="access" title={t('access.users.empty')} />}
+            onRetry={() => void reloadUsers()}
+            skeletonRows={3}
+          >
             <Table className={stackTable}>
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
@@ -169,23 +178,31 @@ export function AccessPage() {
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
-                {users.map((item) => (
-                  <TableRow key={item.id} className={stackRow}>
+                {(users || []).map((item) => (
+                  <TableRow key={item.id} className={stackRow} data-user={item.id}>
                     <StackCell label={t('table.user')}><strong>{item.displayName}</strong><div className="text-sm text-muted-foreground">{item.email}</div></StackCell>
                     <StackCell label={t('table.role')}><span className="role-pill">{item.role}</span></StackCell>
                     <StackCell label={t('table.status')}><UserStatusPill disabled={item.disabled} /></StackCell>
                     <StackCell label={t('table.created')}><TimeAgo value={item.createdAt} /></StackCell>
-                    <StackCell label={t('table.actions')}>{item.id !== user?.id && <Button size="sm" onClick={() => void toggleUser(item)}>{item.disabled ? t('action.enable') : t('action.disable')}</Button>}</StackCell>
+                    <StackCell label={t('table.actions')}>{item.id !== user?.id && <Button size="sm" variant={item.disabled ? 'default' : 'destructive'} onClick={() => setUserTarget({ account: item, disabled: !item.disabled })}>{item.disabled ? t('action.enable') : t('action.disable')}</Button>}</StackCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          )}
+          </AsyncBoundary>
         </section>
       )}
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>{t('access.publishers.title')}</h2><p>{t('access.publishers.description')}</p></div></div>
-        {loading && !data ? <Skeleton rows={3} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : !data?.length ? <p className="muted pad">{t('access.publishers.empty')}</p> : (
+        <AsyncBoundary
+          loading={loading}
+          error={error}
+          hasData={Boolean(data)}
+          isEmpty={Boolean(data && data.length === 0)}
+          emptyState={<EmptyState icon="key" title={t('access.publishers.empty')} action={user?.role === 'admin' ? <Button variant="secondary" onClick={() => setAddOpen(true)}><Icon name="key" size={15} /> {t('access.action.addPublisher')}</Button> : undefined} />}
+          onRetry={() => void reload()}
+          skeletonRows={3}
+        >
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
@@ -198,19 +215,20 @@ export function AccessPage() {
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
-              {data.map((publisher) => (
+              {(data || []).map((publisher) => (
                 <TableRow key={publisher.publisherId} className={stackRow}>
                   <StackCell label={t('table.publisher')}><strong>{publisher.publisherId}</strong></StackCell>
                   <StackCell label={t('table.fingerprint')}><span className="mono text-sm">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
                   <StackCell label={t('table.trust')}><StatusPill status={publisher.trustState} /></StackCell>
                   <StackCell label={t('table.added')}><TimeAgo value={publisher.createdAt} /></StackCell>
-                  <StackCell label={t('table.note')}><span className="text-sm text-muted-foreground">{publisher.note || '—'}</span></StackCell>
+                  {/* An absent note is a missing record, not an empty one: the reserved token, never a dash. */}
+                  <StackCell label={t('table.note')}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
                   {user?.role === 'admin' && <StackCell label={t('table.actions')}>{publisher.trustState === 'TRUSTED' && <Button size="sm" variant="destructive" onClick={() => setRevoke(publisher.publisherId)}>{t('action.revoke')}</Button>}</StackCell>}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        )}
+        </AsyncBoundary>
       </section>
       <Dialog open={userOpen} onOpenChange={setUserOpen}>
         <DialogContent closeLabel={t('aria.closeDialog')}>
@@ -257,17 +275,25 @@ export function AccessPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Replaces the shared ConfirmDialog: same testid, same copy, same disabled-while-busy footer. */}
-      <Dialog open={Boolean(revoke)} onOpenChange={(open) => { if (!open) setRevoke(null); }}>
-        <DialogContent closeLabel={t('aria.closeDialog')} data-testid="confirm-dialog" className="max-w-[480px]">
-          <DialogHeader><DialogTitle>{t('access.confirmRevoke.title', { id: revoke ?? '' })}</DialogTitle></DialogHeader>
-          <div className="text-[var(--ow-text-secondary)] leading-relaxed">{t('access.confirmRevoke.description')}</div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setRevoke(null)} disabled={busy}>{t('action.cancel')}</Button>
-            <Button variant="destructive" onClick={() => void revokePublisher()} disabled={busy}>{busy ? t('action.working') : t('access.confirmRevoke.confirm')}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmAction
+        open={Boolean(userTarget)}
+        title={userTarget?.disabled
+          ? t('access.confirmDisable.title', { name: userTarget.account.displayName })
+          : t('access.confirmEnable.title', { name: userTarget?.account.displayName ?? '' })}
+        description={userTarget?.disabled ? t('access.confirmDisable.description') : t('access.confirmEnable.description')}
+        confirmLabel={userTarget?.disabled ? t('access.confirmDisable.confirm') : t('access.confirmEnable.confirm')}
+        danger={Boolean(userTarget?.disabled)}
+        onConfirm={() => applyUserState(userTarget!)}
+        onClose={() => setUserTarget(null)}
+      />
+      <ConfirmAction
+        open={Boolean(revoke)}
+        title={t('access.confirmRevoke.title', { id: revoke ?? '' })}
+        description={t('access.confirmRevoke.description')}
+        confirmLabel={t('access.confirmRevoke.confirm')}
+        onConfirm={revokePublisher}
+        onClose={() => setRevoke(null)}
+      />
     </div>
   );
 }
