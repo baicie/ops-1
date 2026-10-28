@@ -435,6 +435,10 @@ async function executeQualityRun(runId) {
       return;
     }
     const records = rows.rows.map((row) => row.payload);
+    // Test-only delay used by the isolated reliability harness to make a
+    // RUNNING window observable under real process fault injection.
+    const testDelay = Number(process.env.OPSWEAVE_QUALITY_TEST_DELAY_MS || 0);
+    if (Number.isFinite(testDelay) && testDelay > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(testDelay, 30000)));
     const evaluation = evaluateRules(rules, records);
     const write = await pool.connect();
     try {
