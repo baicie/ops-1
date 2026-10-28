@@ -35,12 +35,29 @@ pub struct CapabilityRef {
     pub major: i64,
 }
 
+/// One frontend contribution declared by a plugin manifest.
+///
+/// `navigation.item.v2` adds an explicit `surface`; the v1 kinds keep their
+/// historical wire shape. The v2-only fields serialise only when a
+/// contribution actually carries them, so an already signed v1 manifest
+/// canonicalises to exactly the bytes it did before these fields existed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FrontendContribution {
     pub kind: FrontendContributionKind,
     pub id: String,
     pub path: String,
+    /// v2 only: `admin` | `workspace`. Kept as the raw string so an unknown
+    /// value is reported as a structured per-contribution rejection instead of
+    /// failing the whole manifest during deserialisation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface: Option<String>,
+    /// v2 only: i18n message key for the navigation label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_key: Option<String>,
+    /// v2 only: capabilities the session must additionally hold.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,6 +68,369 @@ pub enum FrontendContributionKind {
     NavigationItem,
     #[serde(rename = "settings.section.v1")]
     SettingsSection,
+    #[serde(rename = "navigation.item.v2")]
+    NavigationItemV2,
+}
+
+impl FrontendContributionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RoutePage => "route.page.v1",
+            Self::NavigationItem => "navigation.item.v1",
+            Self::SettingsSection => "settings.section.v1",
+            Self::NavigationItemV2 => "navigation.item.v2",
+        }
+    }
+
+    /// v1 kinds keep their original meaning: the admin surface and the legacy
+    /// `/ext/<publisher>/<name>` paths that already signed bundles ship.
+    pub fn is_v1(self) -> bool {
+        !matches!(self, Self::NavigationItemV2)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Extension contribution contract (surfaces, namespaces, capabilities)
+// ---------------------------------------------------------------------------
+
+/// Capability vocabulary the platform knows how to grant today.
+///
+/// A contribution may only require a capability from this set. Extending the
+/// vocabulary is a contract change (ADR + tests), never an implicit grant.
+pub const CAPABILITY_PLATFORM_ACCESS: &str = "platform:access";
+pub const CAPABILITY_WORKSPACE_ACCESS: &str = "workspace:access";
+pub const KNOWN_CONTRIBUTION_CAPABILITIES: [&str; 2] =
+    [CAPABILITY_PLATFORM_ACCESS, CAPABILITY_WORKSPACE_ACCESS];
+
+/// Shell roots the Kernel owns. A plugin contribution may never occupy one, nor
+/// any path shallower than its own extension namespace below them.
+pub const RESERVED_SHELL_PREFIXES: [&str; 7] = [
+    "/admin",
+    "/app",
+    "/login",
+    "/api",
+    "/internal",
+    "/assets",
+    "/ext",
+];
+
+/// The two surfaces a v2 contribution may target.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ContributionSurface {
+    Admin,
+    Workspace,
+}
+
+impl ContributionSurface {
+    pub const ALL: [ContributionSurface; 2] = [Self::Admin, Self::Workspace];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Workspace => "workspace",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|surface| surface.as_str() == raw)
+    }
+
+    /// Shell root this surface owns.
+    pub fn root(self) -> &'static str {
+        match self {
+            Self::Admin => "/admin",
+            Self::Workspace => "/app",
+        }
+    }
+
+    /// The only path namespace a plugin may contribute into for this surface.
+    pub fn namespace(self, plugin_id: &str) -> String {
+        format!("{}/ext/{plugin_id}/", self.root())
+    }
+
+    /// Capability a session must hold before anything on this surface is
+    /// delivered at all.
+    pub fn required_capability(self) -> &'static str {
+        match self {
+            Self::Admin => CAPABILITY_PLATFORM_ACCESS,
+            Self::Workspace => CAPABILITY_WORKSPACE_ACCESS,
+        }
+    }
+}
+
+/// Why a declared contribution was refused. The code is stable and machine
+/// readable; the detail carries the offending value for an operator log.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContributionRejectionCode {
+    MissingSurface,
+    InvalidSurface,
+    ReservedPrefix,
+    NamespaceEscape,
+    InvalidPath,
+    UnknownCapability,
+    UnexpectedField,
+    InvalidPluginId,
+}
+
+impl ContributionRejectionCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingSurface => "MISSING_SURFACE",
+            Self::InvalidSurface => "INVALID_SURFACE",
+            Self::ReservedPrefix => "RESERVED_PREFIX",
+            Self::NamespaceEscape => "NAMESPACE_ESCAPE",
+            Self::InvalidPath => "INVALID_PATH",
+            Self::UnknownCapability => "UNKNOWN_CAPABILITY",
+            Self::UnexpectedField => "UNEXPECTED_FIELD",
+            Self::InvalidPluginId => "INVALID_PLUGIN_ID",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionRejection {
+    pub code: ContributionRejectionCode,
+    pub plugin_id: String,
+    pub contribution_id: String,
+    pub kind: String,
+    pub detail: String,
+}
+
+impl ContributionRejection {
+    fn new(
+        code: ContributionRejectionCode,
+        plugin_id: &str,
+        contribution: &FrontendContribution,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            plugin_id: plugin_id.to_string(),
+            contribution_id: contribution.id.clone(),
+            kind: contribution.kind.as_str().to_string(),
+            detail: detail.into(),
+        }
+    }
+}
+
+fn is_under(path: &str, prefix: &str) -> bool {
+    path == prefix || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
+}
+
+fn reserved_shell_prefix(path: &str) -> Option<&'static str> {
+    RESERVED_SHELL_PREFIXES
+        .into_iter()
+        .find(|prefix| is_under(path, prefix))
+}
+
+impl FrontendContribution {
+    /// Enforces the pinned contribution contract and returns the surface the
+    /// contribution is delivered under.
+    ///
+    /// v1 kinds keep their historical meaning (admin surface, legacy path form)
+    /// and are refused only when they smuggle v2-only fields, so an already
+    /// signed v1 bundle keeps loading unchanged.
+    pub fn validate_for_plugin(
+        &self,
+        plugin_id: &str,
+    ) -> Result<ContributionSurface, ContributionRejection> {
+        if !re(r"^[A-Za-z0-9._-]+$").is_match(plugin_id) {
+            return Err(ContributionRejection::new(
+                ContributionRejectionCode::InvalidPluginId,
+                plugin_id,
+                self,
+                format!("plugin id {plugin_id:?} cannot name a route namespace"),
+            ));
+        }
+        if self.kind.is_v1() {
+            if self.surface.is_some()
+                || self.title_key.is_some()
+                || !self.required_capabilities.is_empty()
+            {
+                return Err(ContributionRejection::new(
+                    ContributionRejectionCode::UnexpectedField,
+                    plugin_id,
+                    self,
+                    "v1 contributions cannot carry surface/titleKey/requiredCapabilities; publish a navigation.item.v2 contribution instead",
+                ));
+            }
+            if !re(r"^/(?:[A-Za-z0-9_./:-]+)?$").is_match(&self.path) {
+                return Err(ContributionRejection::new(
+                    ContributionRejectionCode::InvalidPath,
+                    plugin_id,
+                    self,
+                    format!("path {:?} is not a safe shell path", self.path),
+                ));
+            }
+            return Ok(ContributionSurface::Admin);
+        }
+
+        let raw_surface = self.surface.as_deref().ok_or_else(|| {
+            ContributionRejection::new(
+                ContributionRejectionCode::MissingSurface,
+                plugin_id,
+                self,
+                "navigation.item.v2 must declare surface (admin|workspace)",
+            )
+        })?;
+        let surface = ContributionSurface::parse(raw_surface).ok_or_else(|| {
+            ContributionRejection::new(
+                ContributionRejectionCode::InvalidSurface,
+                plugin_id,
+                self,
+                format!("surface {raw_surface:?} is not one of admin|workspace"),
+            )
+        })?;
+
+        let namespace = surface.namespace(plugin_id);
+        if self.path == namespace.trim_end_matches('/') {
+            return Err(ContributionRejection::new(
+                ContributionRejectionCode::InvalidPath,
+                plugin_id,
+                self,
+                format!(
+                    "path {:?} is the plugin namespace root, not a page below {namespace}",
+                    self.path
+                ),
+            ));
+        }
+        if self.path.starts_with(&namespace) {
+            let relative = &self.path[namespace.len()..];
+            if relative.is_empty()
+                || relative
+                    .split('/')
+                    .any(|segment| segment == "." || segment == "..")
+                || !re(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$").is_match(relative)
+            {
+                return Err(ContributionRejection::new(
+                    ContributionRejectionCode::InvalidPath,
+                    plugin_id,
+                    self,
+                    format!(
+                        "path {:?} must name a real page below {namespace}",
+                        self.path
+                    ),
+                ));
+            }
+        } else if is_under(&self.path, "/admin/ext") || is_under(&self.path, "/app/ext") {
+            return Err(ContributionRejection::new(
+                ContributionRejectionCode::NamespaceEscape,
+                plugin_id,
+                self,
+                format!(
+                    "path {:?} is outside the {surface} namespace {namespace}",
+                    self.path,
+                    surface = surface.as_str()
+                ),
+            ));
+        } else if let Some(prefix) = reserved_shell_prefix(&self.path) {
+            return Err(ContributionRejection::new(
+                ContributionRejectionCode::ReservedPrefix,
+                plugin_id,
+                self,
+                format!(
+                    "path {:?} occupies the reserved shell prefix {prefix}; {surface} contributions live below {namespace}",
+                    self.path,
+                    surface = surface.as_str()
+                ),
+            ));
+        } else {
+            return Err(ContributionRejection::new(
+                ContributionRejectionCode::NamespaceEscape,
+                plugin_id,
+                self,
+                format!(
+                    "path {:?} must start with the {surface} namespace {namespace}",
+                    self.path,
+                    surface = surface.as_str()
+                ),
+            ));
+        }
+
+        if let Some(unknown) = self
+            .required_capabilities
+            .iter()
+            .find(|required| !KNOWN_CONTRIBUTION_CAPABILITIES.contains(&required.as_str()))
+        {
+            return Err(ContributionRejection::new(
+                ContributionRejectionCode::UnknownCapability,
+                plugin_id,
+                self,
+                format!(
+                    "capability {unknown:?} is not in the platform vocabulary {KNOWN_CONTRIBUTION_CAPABILITIES:?}"
+                ),
+            ));
+        }
+        Ok(surface)
+    }
+}
+
+/// A contribution the Kernel is willing to hand to one session: validated and
+/// authorised, with the surface made explicit.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveredContribution {
+    pub kind: FrontendContributionKind,
+    pub id: String,
+    pub path: String,
+    pub surface: ContributionSurface,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContributionDelivery {
+    pub delivered: Vec<DeliveredContribution>,
+    pub rejections: Vec<ContributionRejection>,
+}
+
+/// Splits declared contributions into what this session receives and what the
+/// contract refused.
+///
+/// A contribution the session is not authorised for appears in neither list:
+/// it must not be dispatched (surface capability missing, or a required
+/// capability missing), and it must not be reported either, because the
+/// response would then disclose a surface the session cannot enter.
+pub fn deliverable_contributions(
+    plugin_id: &str,
+    contributions: &[FrontendContribution],
+    granted_capabilities: &[&str],
+) -> ContributionDelivery {
+    let mut delivery = ContributionDelivery::default();
+    for contribution in contributions {
+        let surface = match contribution.validate_for_plugin(plugin_id) {
+            Ok(surface) => surface,
+            Err(rejection) => {
+                delivery.rejections.push(rejection);
+                continue;
+            }
+        };
+        let holds = |capability: &str| granted_capabilities.contains(&capability);
+        if !holds(surface.required_capability())
+            || contribution
+                .required_capabilities
+                .iter()
+                .any(|required| !holds(required))
+        {
+            continue;
+        }
+        delivery.delivered.push(DeliveredContribution {
+            kind: contribution.kind,
+            id: contribution.id.clone(),
+            path: contribution.path.clone(),
+            surface,
+            title_key: contribution.title_key.clone(),
+            required_capabilities: contribution.required_capabilities.clone(),
+        });
+    }
+    delivery
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -175,6 +555,15 @@ impl ManifestV11 {
                     errors.push(format!(
                         "frontend contribution path is invalid: {}",
                         contribution.path
+                    ));
+                }
+                if let Err(rejection) = contribution.validate_for_plugin(&self.id) {
+                    errors.push(format!(
+                        "frontend contribution {} ({}) rejected: {} - {}",
+                        contribution.id,
+                        contribution.kind.as_str(),
+                        rejection.code.as_str(),
+                        rejection.detail
                     ));
                 }
             }
@@ -642,6 +1031,14 @@ fn re(pattern: &'static str) -> &'static Regex {
                 r"^[a-zA-Z0-9._:/-]+/[a-zA-Z0-9._/-]+@sha256:[a-f0-9]{64}$",
                 Regex::new(r"^[a-zA-Z0-9._:/-]+/[a-zA-Z0-9._/-]+@sha256:[a-f0-9]{64}$").unwrap(),
             );
+            map.insert(
+                r"^[A-Za-z0-9._-]+$",
+                Regex::new(r"^[A-Za-z0-9._-]+$").unwrap(),
+            );
+            map.insert(
+                r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+                Regex::new(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$").unwrap(),
+            );
             map
         })
         .get(pattern)
@@ -716,5 +1113,282 @@ mod tests {
             "a".repeat(64)
         )));
         assert!(!is_image_ref("localhost:5000/opsweave/hello:latest"));
+    }
+
+    // -- extension contribution contract (v1 compat + v2 surfaces) ----------
+
+    const PLUGIN: &str = "opsweave.data-catalog";
+
+    fn v2_contribution(
+        path: &str,
+        surface: Option<&str>,
+        required: &[&str],
+    ) -> FrontendContribution {
+        FrontendContribution {
+            kind: FrontendContributionKind::NavigationItemV2,
+            id: "catalog-manage".into(),
+            path: path.into(),
+            surface: surface.map(str::to_string),
+            title_key: Some("catalog.nav.manage".into()),
+            required_capabilities: required.iter().map(|name| name.to_string()).collect(),
+        }
+    }
+
+    fn rejection_code(contribution: &FrontendContribution) -> ContributionRejectionCode {
+        contribution
+            .validate_for_plugin(PLUGIN)
+            .expect_err("contribution must be refused")
+            .code
+    }
+
+    #[test]
+    fn rejects_unknown_surface_value() {
+        let contribution =
+            v2_contribution("/admin/ext/opsweave.data-catalog/manage", Some("root"), &[]);
+        let rejection = contribution
+            .validate_for_plugin(PLUGIN)
+            .expect_err("root is not a surface");
+        assert_eq!(rejection.code, ContributionRejectionCode::InvalidSurface);
+        assert!(rejection.detail.contains("root"), "{}", rejection.detail);
+    }
+
+    #[test]
+    fn rejects_v2_contribution_without_surface() {
+        let contribution = v2_contribution("/admin/ext/opsweave.data-catalog/manage", None, &[]);
+        assert_eq!(
+            rejection_code(&contribution),
+            ContributionRejectionCode::MissingSurface
+        );
+    }
+
+    #[test]
+    fn rejects_path_outside_the_plugin_namespace() {
+        for path in [
+            "/admin/ext/opsweave.data-integration/manage",
+            "/app/ext/opsweave.data-catalog/manage",
+            "/finance/report",
+        ] {
+            let contribution = v2_contribution(path, Some("admin"), &[]);
+            assert_eq!(
+                rejection_code(&contribution),
+                ContributionRejectionCode::NamespaceEscape,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_reserved_shell_prefix() {
+        for path in [
+            "/admin",
+            "/admin/plugins",
+            "/app",
+            "/login",
+            "/api/v1/extensions",
+            "/internal/secrets",
+            "/assets/payload.js",
+            "/ext/trusted-team/data-catalog",
+        ] {
+            let contribution = v2_contribution(path, Some("admin"), &[]);
+            assert_eq!(
+                rejection_code(&contribution),
+                ContributionRejectionCode::ReservedPrefix,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_path_traversal_and_the_bare_namespace() {
+        for path in [
+            "/admin/ext/opsweave.data-catalog/",
+            "/admin/ext/opsweave.data-catalog",
+            "/admin/ext/opsweave.data-catalog/../data-integration/manage",
+            "/admin/ext/opsweave.data-catalog//manage",
+        ] {
+            let contribution = v2_contribution(path, Some("admin"), &[]);
+            assert_eq!(
+                rejection_code(&contribution),
+                ContributionRejectionCode::InvalidPath,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_required_capability() {
+        let contribution = v2_contribution(
+            "/admin/ext/opsweave.data-catalog/manage",
+            Some("admin"),
+            &["business:quality:read"],
+        );
+        let rejection = contribution
+            .validate_for_plugin(PLUGIN)
+            .expect_err("business:quality:read does not exist");
+        assert_eq!(rejection.code, ContributionRejectionCode::UnknownCapability);
+        assert!(rejection.detail.contains("business:quality:read"));
+    }
+
+    #[test]
+    fn v1_contribution_cannot_carry_v2_fields() {
+        let contribution = FrontendContribution {
+            kind: FrontendContributionKind::NavigationItem,
+            id: "hello-nav".into(),
+            path: "/ext/trusted-team/hello".into(),
+            surface: Some("admin".into()),
+            title_key: None,
+            required_capabilities: vec![],
+        };
+        assert_eq!(
+            rejection_code(&contribution),
+            ContributionRejectionCode::UnexpectedField
+        );
+    }
+
+    #[test]
+    fn workspace_only_session_cannot_see_admin_contributions() {
+        let contributions = vec![
+            v2_contribution(
+                "/admin/ext/opsweave.data-catalog/manage",
+                Some("admin"),
+                &[],
+            ),
+            v2_contribution(
+                "/app/ext/opsweave.data-catalog/quality",
+                Some("workspace"),
+                &[],
+            ),
+        ];
+
+        let workspace_only =
+            deliverable_contributions(PLUGIN, &contributions, &["workspace:access"]);
+        assert_eq!(workspace_only.delivered.len(), 1);
+        assert_eq!(
+            workspace_only.delivered[0].path,
+            "/app/ext/opsweave.data-catalog/quality"
+        );
+        assert_eq!(
+            workspace_only.delivered[0].surface,
+            ContributionSurface::Workspace
+        );
+        assert!(
+            workspace_only
+                .delivered
+                .iter()
+                .all(|delivered| delivered.surface != ContributionSurface::Admin),
+            "an admin contribution must not reach a session without platform:access"
+        );
+        assert!(
+            workspace_only.rejections.is_empty(),
+            "authorisation is not a contract violation and must not be reported"
+        );
+
+        let platform = deliverable_contributions(
+            PLUGIN,
+            &contributions,
+            &["platform:access", "workspace:access"],
+        );
+        assert_eq!(platform.delivered.len(), 2);
+    }
+
+    #[test]
+    fn v1_contribution_keeps_its_legacy_wire_shape_and_admin_surface() {
+        let raw =
+            r#"{"kind":"navigation.item.v1","id":"hello-nav","path":"/ext/trusted-team/hello"}"#;
+        let contribution: FrontendContribution = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            serde_json::to_string(&contribution).unwrap(),
+            raw,
+            "a v1 contribution must round-trip byte for byte"
+        );
+        assert_eq!(
+            contribution.validate_for_plugin("opsweave.hello"),
+            Ok(ContributionSurface::Admin)
+        );
+
+        let delivery = deliverable_contributions(
+            "opsweave.hello",
+            std::slice::from_ref(&contribution),
+            &["platform:access", "workspace:access"],
+        );
+        assert_eq!(delivery.delivered.len(), 1);
+        assert_eq!(delivery.delivered[0].path, "/ext/trusted-team/hello");
+        assert_eq!(delivery.delivered[0].surface, ContributionSurface::Admin);
+
+        // v1 semantics are admin semantics: a workspace-only session receives
+        // nothing, and the omission is not reported as a contract violation.
+        let workspace_only = deliverable_contributions(
+            "opsweave.hello",
+            std::slice::from_ref(&contribution),
+            &["workspace:access"],
+        );
+        assert!(workspace_only.delivered.is_empty());
+        assert!(workspace_only.rejections.is_empty());
+    }
+
+    /// The pinned v1 manifest: adding the v2 contribution fields must not move a
+    /// single byte of the canonical manifest that publisher signatures cover.
+    #[test]
+    fn v1_manifest_canonicalises_to_the_same_bytes() {
+        let raw = r#"{
+  "schemaVersion": "1.1",
+  "id": "opsweave.hello",
+  "version": "0.0.1",
+  "publisher": "trusted-team",
+  "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+  "artifactDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "frontend": {
+    "remoteEntry": "frontend/remoteEntry.js",
+    "remoteEntryDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "assetIndex": "frontend/asset-index.json",
+    "assetIndexDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "contributions": [
+      {"kind": "route.page.v1", "id": "hello-page", "path": "/ext/trusted-team/hello"},
+      {"kind": "navigation.item.v1", "id": "hello-nav", "path": "/ext/trusted-team/hello"}
+    ]
+  },
+  "backend": null,
+  "provides": [],
+  "requires": [],
+  "permissions": [],
+  "resources": {"cpuMillis": 100, "memoryMiB": 64}
+}"#;
+        let original: Value = serde_json::from_str(raw).unwrap();
+        let manifest: ManifestV11 = serde_json::from_value(original.clone()).unwrap();
+        let reparsed = serde_json::to_value(&manifest).unwrap();
+        assert_eq!(canonical_json(&original), canonical_json(&reparsed));
+        assert!(manifest.validate().is_ok());
+    }
+
+    #[test]
+    fn manifest_validation_refuses_an_invalid_v2_contribution() {
+        let mut manifest: ManifestV11 = serde_json::from_value(serde_json::json!({
+            "schemaVersion": "1.1",
+            "id": "opsweave.data-catalog",
+            "version": "0.0.1",
+            "publisher": "trusted-team",
+            "compatibility": {"kernelApiMajor": 1, "webSdkMajor": 1},
+            "artifactDigest": format!("sha256:{}", "a".repeat(64)),
+            "frontend": {
+                "remoteEntry": "frontend/remoteEntry.js",
+                "remoteEntryDigest": format!("sha256:{}", "b".repeat(64)),
+                "assetIndex": "frontend/asset-index.json",
+                "assetIndexDigest": format!("sha256:{}", "c".repeat(64)),
+                "contributions": []
+            },
+            "backend": null,
+            "provides": [],
+            "requires": [],
+            "permissions": [],
+            "resources": {"cpuMillis": 100, "memoryMiB": 64}
+        }))
+        .unwrap();
+        let frontend = manifest.frontend.as_mut().unwrap();
+        frontend.contributions = vec![v2_contribution("/admin/plugins", Some("admin"), &[])];
+        let errors = manifest.validate().expect_err("reserved prefix must fail");
+        assert!(
+            errors.iter().any(|error| error.contains("RESERVED_PREFIX")),
+            "{errors:?}"
+        );
     }
 }

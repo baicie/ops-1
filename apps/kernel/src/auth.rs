@@ -54,9 +54,11 @@ impl AuthUser {
 /// Surfaces a session may enter, as declared by `GET /api/v1/auth/me`.
 pub const SURFACE_WORKSPACE: &str = "workspace";
 pub const SURFACE_ADMIN: &str = "admin";
-/// Capabilities derived from the same declaration.
-pub const CAPABILITY_PLATFORM_ACCESS: &str = "platform:access";
-pub const CAPABILITY_WORKSPACE_ACCESS: &str = "workspace:access";
+/// Capabilities derived from the same declaration. The vocabulary itself lives
+/// in the contract crate, so a contribution's requirement and a session's grant
+/// cannot drift apart.
+pub const CAPABILITY_PLATFORM_ACCESS: &str = opsweave_contracts::CAPABILITY_PLATFORM_ACCESS;
+pub const CAPABILITY_WORKSPACE_ACCESS: &str = opsweave_contracts::CAPABILITY_WORKSPACE_ACCESS;
 
 /// Server-authoritative surface declaration returned by `GET /api/v1/auth/me`.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
