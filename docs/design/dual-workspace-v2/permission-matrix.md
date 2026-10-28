@@ -4,7 +4,7 @@
 
 - 角色：`viewer` / `operator` / `admin`（`apps/kernel/src/auth.rs` 解析，无法识别时降级 `Viewer`）。
 - `/api/v1/auth/me` 返回 `{ user: { id, ... role ... } }`（页面已用它渲染角色药丸）。
-- 服务端校验点 `require_admin` / `require_operator`：**41 个生产调用点**（G05 审计时 35，本轮 +6：平台维护类只读接口收紧，见 §6.2 第 36–41 行与 `auth-surface-contract.md` §9），分布于 capabilities、packages、plugins、deployments、nodes、users 等模块。文本级 grep 会数到 58，差额分解见 §6。
+- 服务端校验点 `require_admin` / `require_operator`：**35 个生产调用点**（G05 审计时即为 35；曾一度记作 41，因为把 6 个平台只读端点的收紧算进来——该收紧已回退，见 §10 更正段），分布于 capabilities、packages、plugins、deployments、nodes、users 等模块。文本级 grep 会数到 44，差额分解见 §6。
 - **没有** `surface` 概念：一个 `admin` 角色可以访问全部已实现 API。
 
 ## 2. 目标（G05）
@@ -60,13 +60,14 @@ grep -rn 'require_admin()\|require_operator()\|require_operator(&' apps/kernel/s
 
 | 分类 | 数量 | 证据 |
 |---|---|---|
-| 文本出现总数 | 58 | 上面的 `grep -rno` 输出（G05 审计时 38；此后新增的调用点与测试都在其中） |
-| 其中：函数定义 | 3 | `auth.rs:35 fn require_operator`、`auth.rs:45 fn require_admin`、`capabilities.rs:846 fn require_operator`（模块内私有副本） |
-| 其中：注释/文档字符串里的提及 | 4 | `auth.rs:75` 两处，`nodes.rs` / `plugins.rs` 测试注释各一处 |
-| 其中：仅出现在 `#[cfg(test)]` 的调用 | 10 | `auth.rs` 测试 8 处（含 2 个 router 级 stub handler），`nodes.rs` / `plugins.rs` 各 1 个探针 handler |
-| 其中：**生产调用点** | **41** | 12 个 admin-only + 29 个 operator+admin，下表逐条列出 |
+| 文本出现总数 | 44 | 实测（命令见上）；含 `auth.rs` 测试模块内的调用与一处定义签名 |
+| 其中：`auth.rs` 测试模块内 | 8 | 含 2 个 router 级 stub handler |
+| 其中：函数定义 | 1 | `auth.rs:35 fn require_operator(&self)`；`require_admin(&self)` 与 `capabilities.rs:846 fn require_operator(auth:` 的签名形状不在本 grep 的匹配里，所以这 44 行不含它们 |
+| 其中：**生产调用点** | **35** | 12 个 admin-only（§6.1）+ 23 个 operator+admin（§6.2），下表逐条列出 |
 
-因此文本计数 58 ≠ 端点数；**受保护的生产调用点实为 41 个**（12 个 admin-only + 29 个 operator+admin）。本表以 `apps/kernel/src` 当前代码为准，行号为实测值。
+因此文本计数 44 ≠ 端点数；**受保护的生产调用点实为 35 个**（12 个 admin-only + 23 个 operator+admin）。行号是 `require_*` 的调用行，实测值；`storage.rs:543` 在 `storage.rs` 的 `mod tests` 之后，但它属于生产函数 `apply_migration`，因此计入 35。
+
+> 下表两侧的行号都是 `require_*` 的**调用行**（不是 `fn` 行）。第 36–41 行曾把 6 个平台只读端点记为收紧为「operator + admin」，**该收紧已回退**，计数回到 35，原因见 §10。
 
 ### 6.1 admin-only（12 个调用点，仅 `admin` 通过）
 
@@ -76,7 +77,7 @@ grep -rn 'require_admin()\|require_operator()\|require_operator(&' apps/kernel/s
 | 2 | `users.rs:54` | `create_user` | `POST /api/v1/users` | admin |
 | 3 | `users.rs:124` | `update_user` | `PATCH /api/v1/users/{user_id}` | admin |
 | 4 | `nodes.rs:146` | `create_enrollment_token` | `POST /api/v1/nodes/enrollment-tokens` | admin |
-| 5 | `nodes.rs:376` | `revoke_node` | `DELETE /api/v1/nodes/{node_id}` | admin |
+| 5 | `nodes.rs:374` | `revoke_node` | `DELETE /api/v1/nodes/{node_id}` | admin |
 | 6 | `publishers.rs:48` | `add_publisher` | `POST /api/v1/publishers` | admin |
 | 7 | `publishers.rs:102` | `revoke_publisher` | `DELETE /api/v1/publishers/{publisher_id}` | admin |
 | 8 | `storage.rs:72` | `ensure_binding` | `POST /api/v1/plugin-storage/{plugin_id}` | admin |
@@ -85,7 +86,7 @@ grep -rn 'require_admin()\|require_operator()\|require_operator(&' apps/kernel/s
 | 11 | `diagnostics.rs:39` | `diagnostics` | `GET /api/v1/diagnostics` | admin |
 | 12 | `diagnostics.rs:138` | `settings_policies` | `GET /api/v1/settings/runtime-policies` | admin |
 
-### 6.2 operator + admin（29 个调用点，`operator` 可用）
+### 6.2 operator + admin（23 个调用点，`operator` 可用）
 
 | # | 文件:行 | handler | 端点 | 允许角色 | 备注 |
 |---|---|---|---|---|---|
@@ -112,12 +113,6 @@ grep -rn 'require_admin()\|require_operator()\|require_operator(&' apps/kernel/s
 | 33 | `jobs.rs:1475` | `preview_pipeline` | `POST /api/v1/pipelines/preview` | operator, admin | |
 | 34 | `jobs.rs:1699` | `submit_job` | `POST /api/v1/jobs` | operator, admin | |
 | 35 | `jobs.rs:3371` | `cancel_job` | `POST /api/v1/jobs/{job_id}/cancel` | operator, admin | 之后再过 `require_job_access`（`jobs.rs:3372`，sensitive=true） |
-| 36 | `nodes.rs:321` | `list_nodes` | `GET /api/v1/nodes` | operator, admin | **本轮新增**（原无守卫） |
-| 37 | `nodes.rs:355` | `get_node` | `GET /api/v1/nodes/{node_id}` | operator, admin | 本轮新增（原无守卫） |
-| 38 | `nodes.rs:705` | `resource_history` | `GET /api/v1/nodes/{node_id}/resource-history` | operator, admin | 本轮新增（原无守卫） |
-| 39 | `nodes.rs:790` | `node_instances` | `GET /api/v1/nodes/{node_id}/instances` | operator, admin | 本轮新增（原无守卫） |
-| 40 | `plugins.rs:106` | `list_plugins` | `GET /api/v1/plugins` | operator, admin | 本轮新增（原无守卫） |
-| 41 | `plugins.rs:243` | `get_plugin` | `GET /api/v1/plugins/{plugin_id}` | operator, admin | 本轮新增（原无守卫） |
 
 ## 7. 不在 `require_*` 里的授权/可见性判定（同样不得放宽）
 
@@ -133,9 +128,9 @@ grep -rn 'require_admin()\|require_operator()\|require_operator(&' apps/kernel/s
 
 ## 8. 结论：operator 当前能用哪些管理 API？（表格证据）
 
-**operator 可用（29 个端点，凭 §6.2 证据）**——即「不改代码就已被授权的管理操作」：
+**operator 可用（29 个端点 = §6.2 的 23 个 + 6 个任何已认证会话可读的只读端点，凭 §6.2 与 §7 证据）**——即「不改代码就已被授权的管理操作」：
 
-- 平台维护类**只读**：节点清单/详情/实例列表/资源历史、插件清单/详情（本轮由「无守卫」收紧为 operator+admin，operator 的可用性不变）。
+- 平台维护类**只读**：节点清单/详情/实例列表/资源历史、插件清单/详情（任何已认证会话可读，见 §7；曾记为「收紧为 operator+admin」，该收紧已回退，operator 的可用性从未变过——见 §10）。
 - 插件生命周期：上传包、创建部署、激活、禁用、启用、回滚（**但不能 `uninstall`**，见 §6.1 #10）。
 - 运行时观测：实例详情、实例日志 SSE。
 - 能力治理：列出/创建/撤销 capability grant。
@@ -156,7 +151,7 @@ grep -rn 'require_admin()\|require_operator()\|require_operator(&' apps/kernel/s
 
 - `/api/v1/auth/me` 新增 `access` 字段：**纯追加**，不改 §6/§7 任何一条判定。
 - 负向测试：`apps/kernel/src/auth.rs` 的 `viewer_receives_403_from_admin_and_operator_gated_routes`（router 级：viewer→admin/operator handler 均 403；operator→admin handler 403、→operator handler 200），以及 `viewer_is_forbidden_by_every_existing_role_gate`（错误码 `FORBIDDEN` / 403）。
-- 本轮追加的收紧（§6.2 第 36–41 行）另配 4 个测试：`nodes::tests::*` 与 `plugins::tests::*` 各两个（真实 handler 对 viewer 403 `FORBIDDEN`；router 级 viewer 403 / operator 200 / admin 200）。证据与数据库边界见 `auth-surface-contract.md` §9.7。
+- §6.2 第 36–41 行的收紧已回退（§10），因此**不存在**与之配套的 4 个测试：`nodes.rs` 没有测试模块，`plugins.rs` 里只有扩展按权下发的测试（`plugins::tests::*`，与角色门无关）。当前真实存在的角色负向测试只有 `auth.rs` 的 `viewer_is_forbidden_by_every_existing_role_gate` 与 `viewer_receives_403_from_admin_and_operator_gated_routes`。
 
 
 ## 10. 更正（2026-10-28，回退 §6.2 第 36–41 行）

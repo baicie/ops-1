@@ -60,7 +60,8 @@ pub fn deliverable_contributions(plugin_id: &str, contributions: &[FrontendContr
 
 `ContributionRejection` 是结构化对象：`{ code, pluginId, contributionId, kind, detail }`，
 `code` 为 SCREAMING_SNAKE_CASE 稳定码，`detail` 说明被拒的取值与期望前缀。
-**被拒的贡献从不静默丢弃**：它在 `ExtensionView.rejections` 中返回，并写入 Kernel 警告日志。
+**被拒的贡献从不静默丢弃**：它在 `ExtensionView.rejections` 中返回。
+Kernel 目前**只下发、不单独记日志**（早先这里声称写警告日志，代码里没有，已改为如实描述）。
 `rejections` 是 manifest 诊断信息（插件 id 本就对已认证会话可见），**不是**授权状态；
 因能力不足被过滤的贡献绝不进入 `rejections`，否则等于披露该会话无权进入的 surface。
 
@@ -78,6 +79,11 @@ pub fn deliverable_contributions(plugin_id: &str, contributions: &[FrontendContr
 - 不满足的贡献**既不出现在 `contributions`，也不出现在 `rejections`**（否则等于披露该会话无权进入的 surface）；
 - 一个扩展若过滤后既无交付也无拒绝，整条扩展不下发（避免为一个空列表加载远端 UMD）。
 
+实现位置就是上面这套逻辑的**唯一**实现：`apps/kernel/src/plugins.rs` 的 `extension_view()`
+（`extensions()` 对每一行调用一次，SQL 只负责选行）；能力来自
+`auth::access_for(auth.role, config.admin_surface_roles)`，`crates/contracts` 只提供纯函数。
+该文件的 `mod tests` 直接调用 `extension_view()` 并断言下发的 JSON，因此"按权过滤"有测试守住。
+
 能力词表只有一个来源：`opsweave_contracts::{CAPABILITY_PLATFORM_ACCESS, CAPABILITY_WORKSPACE_ACCESS}`，
 `apps/kernel/src/auth.rs` 直接复用该常量，`KNOWN_CONTRIBUTION_CAPABILITIES` 即
 `{"platform:access","workspace:access"}`。**当前不存在** `business:quality:read` 之类的业务能力；
@@ -90,12 +96,12 @@ pub fn deliverable_contributions(plugin_id: &str, contributions: &[FrontendContr
 1. `activation_revisions.status = 'ACTIVE'`；
 2. 发布者 `trusted_publishers.trust_state = 'TRUSTED'`（沿用原有失败关闭语义）；
 3. plugin 有 frontend；
-4. **有 backend 的插件**：该激活版本的 deployment 至少有一个 `desired_action='START' AND state='READY'` 实例；
-   **纯前端插件**（`manifest.backend` 为空）没有实例可等，以 ACTIVE 为准。
-
-第 4 条是对"ACTIVE 且实例 READY"的落地：把 `desired_replicas=0` 的纯前端插件也要求 READY 会让现存
-前端扩展整批消失，那不是本 ADR 想要的兼容结果。就绪判定在 Rust 中完成（`extension_views`），
-SQL 只提供 READY 实例计数，便于离线单测。
+4. **（未实现）** 曾计划："有 backend 的插件，其激活版本至少有一个 READY 实例"。
+   现状：`extensions()` 的查询只要求 `activation_revisions.status='ACTIVE'`、发布者为 `TRUSTED`、
+   `manifest->'frontend'` 非空，**不读取 deployment 实例状态**；因此 backend 尚无就绪实例时，
+   该插件的（纯前端）贡献照样下发。本分支没有实现这一条，也没有为它写测试。
+   补齐它要先决定"无就绪实例"的语义（不下发 / 下发并标注"backend 未就绪"），以及
+   `desired_replicas=0` 的纯前端插件如何豁免——那是一个独立任务，不是本次修复。
 
 ### 2.5 签名 / 重签策略
 
@@ -133,19 +139,42 @@ Signed Manifest、RBAC、`requiredCapabilities` 过滤只能决定"是否加载�
 ## 4. 已知后果与跨任务依赖
 
 - v1 贡献按规则 6 归入 admin surface，因此**只有 `platform:access` 会话能看到旧 `/ext/*` 导航项**；
-  URL 与 manifest 不变，管理员不受影响。这是规则 5+6 的直接后果，不是回归。
-- 前端 `apps/platform-web/src/extensions.tsx` 现有的 `SHELL_RESERVED` 检查会把 `/admin/…`、`/app/…`
-  判为冲突，从而拒绝加载该扩展的远端模块。**v2 路径真正展示依赖 G06 前端任务同步更新该检查**；
-  本 ADR 只承诺服务端契约与下发，不承诺当前前端已能渲染 v2 路径。
-- `contracts/schema/plugin-manifest.v1.schema.json` 与 `contracts/examples/` 属本任务边界之外，
-  尚未加入 v2 字段；在补齐前，Schema 校验器会拒绝 v2 contribution（失败关闭，不会放行未校验字段）。
-- `ExtensionView` 新增 `rejections` 字段属加性变更；前端 `Extension` 类型忽略未知字段，无需改动即可继续工作。
+  URL 与 manifest 不变，管理员不受影响。这是规则 5+6 的直接后果，不是回归。本分支起这一点由
+  **服务端**执行（`extensions()` 里的按权过滤），此前只是前端的过滤，服务端并不区分会话。
+- **前端已经能渲染 v2 路径**：`apps/platform-web/src/extensions.tsx` 实现了同一套规则
+  （`SURFACE_NAMESPACE` 第 42 行、`RESERVED_ROOTS` 第 48 行、`href` 第 167 行），
+  旧的 `SHELL_RESERVED` 把 `/admin/…` 一律判为冲突的检查已经不在代码里。
+  前端仍保留自己的 surface 过滤，但服务端过滤只会更窄，不会让浏览器看到它原本看不到的东西。
+- **Schema 已经加入 v2 字段**：`contracts/schema/plugin-manifest.v1.schema.json` 定义了
+  `surface`（第 136 行）、`titleKey`（第 140 行）、`requiredCapabilities`（第 145 行），
+  并用 `allOf` 对三个 v1 kind 禁止携带这些字段（第 106–117 行），与 Rust 侧
+  `UNEXPECTED_FIELD` 对称，两边不会各说各话。
+  仍缺一处：**没有页面级 v2 kind**——schema 的 kind 枚举（第 121–126 行）与
+  `FrontendContributionKind` 都只有 `route.page.v1` / `navigation.item.v1` /
+  `settings.section.v1` / `navigation.item.v2`。前端测试夹具里出现的 `route.page.v2`
+  不是平台契约：真实服务端会以未知 kind 拒绝它（这条属于夹具与契约的偏差，已记录，未修）。
+- `ExtensionView` 的 `rejections` 字段**已实现并下发**（`apps/kernel/src/plugins.rs`，
+  类型为 `Vec<ContributionRejection>`）；前端 `types.ts` 的 `Extension.rejections?`
+  就是它的形状，`extensions.tsx` 读它做诊断。属加性变更。
+- **未实现、本 ADR 不承诺**：规则 7 第 4 条的就绪门（见 §2.4）、§3 的插件运行时隔离。
 
 ## 5. 验收证据（G06 服务端部分）
 
-- `cargo test -p opsweave-contracts`：v2 规则逐条负向用例、v1 字节级回归、能力过滤。
-- `cargo test -p opsweave-kernel`：`workspace_only_session_receives_no_admin_contribution`、
-  `platform_session_receives_legacy_v1_contribution_unchanged`、
-  `backend_without_a_ready_instance_withholds_its_contributions`、
-  `invalid_v2_contribution_is_reported_instead_of_dropped`、`extension_with_nothing_to_deliver_is_omitted`。
-- `cargo fmt --check`、`cargo clippy --workspace --all-targets -- -D warnings`。
+本节只列**真实跑过**的命令与输出。没有对应测试的条目就是缺失的验收，不是"以后再补"。
+
+- `cargo test -p opsweave-kernel`（本次修复后运行）：`running 64 tests`，
+  `test result: ok. 64 passed; 0 failed; 0 ignored`。与按权下发直接相关的 5 条都在
+  `apps/kernel/src/plugins.rs` 的 `mod tests` 里，调用的都是 `extensions()` 每一行都会调用的
+  `extension_view()`（不是 `crates/contracts` 里没人调用的私有函数）：
+  `workspace_only_session_receives_no_admin_contribution`、
+  `platform_session_receives_every_contribution`、
+  `admin_surface_roles_decide_the_grant_instead_of_the_role_name`、
+  `extension_with_nothing_to_deliver_is_omitted`、
+  `invalid_v2_contribution_is_reported_instead_of_dropped`。
+- `cargo fmt --check`：通过（无输出）；`cargo clippy --workspace --all-targets -- -D warnings`：通过。
+- **不存在**的测试（先前版本在这里列过，属于伪证据）：`platform_session_receives_legacy_v1_contribution_unchanged`、
+  `backend_without_a_ready_instance_withholds_its_contributions`。前者被 `crates/contracts` 的
+  `v1_contribution_keeps_its_legacy_wire_shape_and_admin_surface` 覆盖（名字不同），
+  后者对应的功能根本没有实现（§2.4），所以也不会有测试。
+- `crates/contracts` 这一层本分支**未做修改**，因此没有重跑 `cargo test -p opsweave-contracts`；
+  v2 规则负向用例与 v1 字节级回归的证据仍然只在那一层。

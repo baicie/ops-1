@@ -80,9 +80,15 @@ export function PluginDetailPage() {
   // was silently dropped on arrival.
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
-  const [tab, setTabState] = useState<Tab>(
-    TAB_IDS.includes(tabFromUrl as Tab) ? (tabFromUrl as Tab) : 'overview',
-  );
+  const urlTab: Tab = TAB_IDS.includes(tabFromUrl as Tab) ? (tabFromUrl as Tab) : 'overview';
+  const [tab, setTabState] = useState<Tab>(urlTab);
+  // Reading the parameter once into the initial state was not enough: a `Link` to
+  // `?tab=…` on this same route re-renders the page without remounting it, so the URL moved
+  // and the tab stayed behind. The URL is the source of truth whenever it changes from
+  // outside this component (deep link, in-page link, back/forward).
+  useEffect(() => {
+    setTabState(urlTab);
+  }, [urlTab]);
   const setTab = (next: Tab) => {
     setTabState(next);
     const params = new URLSearchParams(searchParams);
@@ -247,7 +253,7 @@ export function PluginDetailPage() {
             </section>
           </div>
           <section className="panel">
-            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
+            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" data-testid="plugin-detail-deployments-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
             <InstanceTable instances={activeDeployment?.instances || []} />
           </section>
         </TabsContent>
