@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { CopyButton, EmptyState, ErrorState, KV, PageHeader, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { formatDate, formatBytes, shortDigest } from '../format';
 import { useT } from '../i18n';
+import { describePlacementReason } from '../placement-reason';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
@@ -434,6 +435,7 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
 
 function DeploymentCard({ deployment, active, onActivate, onRollback }: { deployment: DeploymentView; active: boolean; onActivate(): void; onRollback(): void }) {
   const t = useT();
+  const reason = describePlacementReason(deployment.statusReason, t);
   return (
     <section className={`panel deployment-card ${active ? 'deployment-active' : ''}`}>
       <div className="panel-head">
@@ -449,9 +451,10 @@ function DeploymentCard({ deployment, active, onActivate, onRollback }: { deploy
         <KV label={t('status.ready')}>{deployment.readyInstances}/{deployment.desiredReplicas}</KV>
         <KV label={t('pluginDetail.deployment.cpuMemory')}>{deployment.resources?.cpuMillis ?? '—'} mCPU / {formatBytes((deployment.resources?.memoryMiB || 0) * 1024 * 1024)}</KV>
         <KV label={t('table.created')}>{formatDate(deployment.createdAt)}</KV>
-        <KV label={t('pluginDetail.deployment.fieldReason')}>{deployment.statusReason || '—'}</KV>
+        <KV label={t('pluginDetail.deployment.fieldReason')}>{reason?.title ?? '—'}</KV>
       </div>
-      {deployment.statusReason && <div className="callout"><Icon name="alert" size={15} /><p>{deployment.statusReason}</p></div>}
+      {reason && <div className="callout"><Icon name="alert" size={15} /><p>{reason.title}</p></div>}
+      {reason?.raw && <details className="advanced"><summary>{t('placement.reason.raw')}</summary><p className="mono small">{reason.raw}</p></details>}
       <InstanceTable instances={deployment.instances} />
     </section>
   );

@@ -62,11 +62,15 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   postWithHeaders: <T>(path: string, body: unknown, headers: Record<string, string>) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body), headers }),
+  // Every POST is one operator action, and the kernel refuses the deployment routes without
+  // this header - the install wizard could not deploy anything until it was sent. A caller
+  // that retries the *same* logical operation must pass its own stable key, which is exactly
+  // what the studio editor does for draft saves.
   post: <T>(path: string, body: unknown = {}, idempotencyKey?: string) =>
     request<T>(path, {
       method: 'POST',
       body: JSON.stringify(body),
-      headers: idempotencyKey ? { 'idempotency-key': idempotencyKey } : {},
+      headers: { 'idempotency-key': idempotencyKey ?? newIdempotencyKey() },
     }),
   patch: <T>(path: string, body: unknown = {}) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),

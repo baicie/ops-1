@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test:studio": "vitest run src/studio src/pages",
-    "test": "vitest run src/studio src/pages"
+    "test": "vitest run src"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.3.1",

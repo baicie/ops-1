@@ -10,6 +10,7 @@ import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/sta
 import { ErrorState, Field, KV, PageHeader, Progress, useToast } from '../components/Ui';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
+import { describePlacementReason } from '../placement-reason';
 import { StatusPill } from './table-kit';
 
 type Step = 1 | 2 | 3 | 4;
@@ -47,6 +48,7 @@ export function InstallWizardPage() {
 
   const manifest = pkg?.manifest;
   const contributions: any[] = manifest?.frontend?.contributions || [];
+  const placementReason = describePlacementReason(deployment?.statusReason, t);
 
   useEffect(() => {
     if (!deployment || !pkg || step !== 4) return;
@@ -223,7 +225,7 @@ export function InstallWizardPage() {
             <>
               <div className="readiness-block">
                 <div className="readiness-number">{deployment.readyInstances}<span>/{deployment.desiredReplicas}</span></div>
-                <div className="readiness-copy"><strong>{t('install.readiness.replicasReady')}</strong><p>{deployment.statusReason || t('install.readiness.waitingDetail')}</p></div>
+                <div className="readiness-copy"><strong>{t('install.readiness.replicasReady')}</strong><p>{placementReason ? placementReason.title : t('install.readiness.waitingDetail')}</p>{placementReason?.raw && <details className="advanced"><summary>{t('placement.reason.raw')}</summary><p className="mono small">{placementReason.raw}</p></details>}</div>
               </div>
               <Progress value={deployment.readyInstances} max={Math.max(deployment.desiredReplicas, 1)} label={t('install.readiness.progressLabel')} />
               <div className="instance-mini-list">
