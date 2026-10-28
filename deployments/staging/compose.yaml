@@ -76,7 +76,7 @@ services:
   # Node data_endpoint and only accepts plaintext http on loopback
   # (apps/kernel/src/nodes.rs:212-231), so a bridged container's 127.0.0.1
   # would be the container itself. With host networking the Kernel listens on
-  # 18080 directly and the node role is a real loopback peer.
+  # the preview port directly and the node role is a real loopback peer.
   # DATABASE_URL must therefore point at the bridge gateway, port 55432.
   # ---------------------------------------------------------------------------
   kernel:
@@ -87,13 +87,13 @@ services:
     env_file:
       - ${OPSWEAVE_ENV_FILE:-/srv/opsweave-staging/staging.env}
     environment:
-      OPSWEAVE_BIND: 0.0.0.0:18080
+      OPSWEAVE_BIND: 0.0.0.0:${OPSWEAVE_PREVIEW_PORT:-18080}
       OPSWEAVE_DATA_DIR: /app/data
       OPSWEAVE_WEB_DIST: /app/web
       # Plugin containers run on the default bridge; their report-back address
       # is the bridge gateway, never 127.0.0.1 (that would be themselves).
       OPSWEAVE_PLUGIN_DB_HOST: ${DOCKER_BRIDGE_IP:-172.17.0.1}
-      OPSWEAVE_PLUGIN_KERNEL_URL: http://${DOCKER_BRIDGE_IP:-172.17.0.1}:18080
+      OPSWEAVE_PLUGIN_KERNEL_URL: http://${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_PREVIEW_PORT:-18080}
       OPSWEAVE_BUILD_SHA: ${OPSWEAVE_BUILD_SHA:-unknown}
       OPSWEAVE_BUILD_TIME: ${OPSWEAVE_BUILD_TIME:-unknown}
       OPSWEAVE_ENVIRONMENT: STAGING
@@ -105,7 +105,7 @@ services:
       registry:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:18080/livez || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:${OPSWEAVE_PREVIEW_PORT:-18080}/livez || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -133,7 +133,7 @@ services:
     env_file:
       - ${OPSWEAVE_ENV_FILE:-/srv/opsweave-staging/staging.env}
     environment:
-      OPSWEAVE_KERNEL_URL: http://127.0.0.1:18080
+      OPSWEAVE_KERNEL_URL: http://127.0.0.1:${OPSWEAVE_PREVIEW_PORT:-18080}
       OPSWEAVE_DOCKER_HOST: unix:///var/run/docker.sock
       OPSWEAVE_NODE_STATE_DIR: /app/node-state
       OPSWEAVE_NODE_DATA_BIND: 127.0.0.1:9101

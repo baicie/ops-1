@@ -211,6 +211,23 @@ jobs:
           printf '%s\n' "$GHCR_TOKEN" | ssh -F "$SSH_CONFIG_FILE" -T "$SSH_HOST_ALIAS" "docker login ghcr.io --username '$GHCR_ACTOR' --password-stdin"
           echo "host authenticated to ghcr.io as $GHCR_ACTOR"
 
+      - name: Transfer the image to the host over SSH
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          TARGET_SHA: ${{ needs.build.outputs.sha }}
+        run: |
+          set -euo pipefail
+          set +x
+          # The host cannot reliably pull large blobs from ghcr.io: its route to the
+          # blob CDN stalls for minutes while the API itself answers. The runner
+          # therefore hands the image over the SSH channel that already works.
+          image="${IMAGE_REPO}:${TARGET_SHA}"
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin
+          docker pull "$image"
+          docker save "$image" | gzip -1 | ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'gunzip | sudo docker load'
+          ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect '$image' >/dev/null && echo 'image present on the host: $image'"
+
       - name: Deploy the release and verify health
         id: deploy
         env:

@@ -36,13 +36,30 @@ readonly BIN_DIR="$ROOT_DIR/bin"
 readonly GHCR_TOKEN_FILE="$ROOT_DIR/ghcr.token"
 readonly DEPLOY_DIR="$DATA_DIR/deployments"
 readonly IMAGE_REPO="${OPSWEAVE_IMAGE_REPO:-$DEFAULT_IMAGE_REPO}"
-readonly BASE_URL="${OPSWEAVE_BASE_URL:-http://127.0.0.1:18080}"
+
+# Some clouds allow exactly one inbound port, so the preview port is host
+# configuration rather than a code default. It lives in staging.env and is
+# exported here so `docker compose` interpolates exactly the port the probes
+# below use. Read before BASE_URL so the loopback probe follows the same value.
+if [ -z "${OPSWEAVE_PREVIEW_PORT:-}" ] && [ -r "$ENV_FILE" ]; then
+  OPSWEAVE_PREVIEW_PORT="$(sed -n 's/^OPSWEAVE_PREVIEW_PORT=//p' "$ENV_FILE" | tail -1 | tr -d '\r')"
+fi
+OPSWEAVE_PREVIEW_PORT="${OPSWEAVE_PREVIEW_PORT:-18080}"
+case "$OPSWEAVE_PREVIEW_PORT" in
+  ''|*[!0-9]*)
+    printf 'ERROR OPSWEAVE_PREVIEW_PORT must be numeric, got %s\n' "$OPSWEAVE_PREVIEW_PORT" >&2
+    exit 2
+    ;;
+esac
+export OPSWEAVE_PREVIEW_PORT
+readonly BASE_URL="${OPSWEAVE_BASE_URL:-http://127.0.0.1:$OPSWEAVE_PREVIEW_PORT}"
 readonly APP_SERVICE_CANDIDATES="${OPSWEAVE_APP_SERVICES:-kernel node}"
 readonly DEP_SERVICE_CANDIDATES="${OPSWEAVE_DEP_SERVICES:-postgres registry}"
 readonly HEALTH_TIMEOUT="${OPSWEAVE_HEALTH_TIMEOUT:-180}"
 readonly HEALTH_INTERVAL="${OPSWEAVE_HEALTH_INTERVAL:-3}"
 readonly KERNEL_READY_TIMEOUT="${OPSWEAVE_KERNEL_READY_TIMEOUT:-120}"
 readonly NODE_READY_TIMEOUT="${OPSWEAVE_NODE_READY_TIMEOUT:-120}"
+readonly POSTGRES_READY_TIMEOUT="${OPSWEAVE_PG_READY_TIMEOUT:-120}"
 readonly ROOT_MARKER='id="root"'
 readonly PG_USER_DEFAULT="opsweave"
 readonly PG_DB_DEFAULT="opsweave"
@@ -55,6 +72,7 @@ IMAGE_DIGEST=""
 IMAGE_DIGEST_SOURCE=""
 BACKUP_DIR=""
 BACKUP_DB="skipped"
+PG_READY_STATE="unknown"
 DEPLOY_STARTED_AT=""
 HEALTH_LIVEZ="fail"
 HEALTH_READYZ="fail"
@@ -404,6 +422,10 @@ prepare_bind_dir() {
 }
 
 prepare_bind_dirs() {
+  if [ -n "${OPSWEAVE_SKIP_BIND_DIR_PREP:-}" ] && [ -n "${OPSWEAVE_STAGING_ROOT:-}" ]; then
+    warn "OPSWEAVE_SKIP_BIND_DIR_PREP is set with an overridden staging root; skipping ownership preparation (rehearsal only)"
+    return 0
+  fi
   [ "$(id -u)" = "0" ] || die 1 "bind-mounted host directories must be prepared as root; re-run with sudo"
   prepare_bind_dir "$DATA_DIR/pg" 999 999 0750
   prepare_bind_dir "$DATA_DIR/registry" 0 0 0755
@@ -457,7 +479,14 @@ check_image_available() {
 
 pull_image() {
   local sha="$1" ref="$IMAGE_REPO:$1" output digests
-  if ! output="$(docker pull "$ref" 2>&1)"; then
+  # The tag is the full commit SHA, so an image already present on this host is
+  # immutable and needs no registry round trip. This matters because the blob
+  # CDN can stall for minutes on some hosts; the image can also have been
+  # transferred out of band (docker save | ssh | docker load).
+  # Set OPSWEAVE_REQUIRE_PULL=1 to force a registry pull anyway.
+  if docker image inspect "$ref" >/dev/null 2>&1 && [ "${OPSWEAVE_REQUIRE_PULL:-0}" != "1" ]; then
+    log "image $ref is already present on this host; skipping the registry pull (OPSWEAVE_REQUIRE_PULL=1 forces it)"
+  elif ! output="$(docker pull "$ref" 2>&1)"; then
     printf '%s\n' "$output" >&2
     warn "failed to pull $ref"
     return 1
@@ -482,6 +511,11 @@ ensure_dependencies() {
       continue
     fi
     log "starting dependency service $svc (its data volumes are reused, never recreated)"
+    if compose up -d --no-deps --wait --wait-timeout "$POSTGRES_READY_TIMEOUT" "$svc" >/dev/null 2>&1; then
+      log "dependency service $svc is up and healthy (compose --wait)"
+      continue
+    fi
+    log "compose --wait is unavailable or did not confirm $svc health; starting it and polling instead"
     if ! compose up -d --no-deps "$svc"; then
       die 1 "failed to start dependency service $svc"
     fi
@@ -519,6 +553,68 @@ verify_backup() {
   log "backup verified: $(wc -c <"$dump" | tr -d ' ') bytes, $(wc -l <"$toc" | tr -d ' ') table-of-content entries"
 }
 
+write_backup_manifest() {
+  local sha="$1"
+  {
+    printf 'release_sha=%s\n' "$sha"
+    printf 'created_at=%s\n' "$(iso_now)"
+    printf 'compose_file=%s\n' "$COMPOSE_FILE"
+    printf 'env_file=%s\n' "$ENV_FILE"
+    printf 'postgres_dump=%s\n' "$BACKUP_DB"
+    printf 'postgres_ready=%s\n' "$PG_READY_STATE"
+    printf 'previous_running_sha=%s\n' "$(current_sha || true)"
+  } >"$BACKUP_DIR/manifest.txt"
+  chmod 600 "$BACKUP_DIR/manifest.txt"
+}
+
+# First boot races initdb: while the temporary instance finishes, the server accepts connections and
+# even answers pg_isready, but the database named by POSTGRES_DB does not exist yet. Wait, bounded,
+# before dumping; then decide whether the database is genuinely missing or simply not created yet.
+wait_for_postgres() {
+  local deadline remaining next_note count
+  PG_READY_STATE="unknown"
+  deadline=$((SECONDS + POSTGRES_READY_TIMEOUT))
+  next_note=$((SECONDS + 10))
+  log "waiting up to ${POSTGRES_READY_TIMEOUT}s (every ${HEALTH_INTERVAL}s) for database $PG_DB to accept queries"
+  while :; do
+    if compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" -tAc 'select 1' >/dev/null 2>&1; then
+      PG_READY_STATE="ready"
+      log "database $PG_DB accepts queries"
+      return 0
+    fi
+    remaining=$((deadline - SECONDS))
+    if [ "$remaining" -le 0 ]; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$next_note" ]; then
+      log "  postgres is still initialising (${remaining}s left)"
+      next_note=$((SECONDS + 10))
+    fi
+    sleep "$HEALTH_INTERVAL"
+  done
+  # The maintenance database still answers while a target database is missing, which separates a
+  # not-yet-created database from an unreachable server.
+  count="$(compose exec -T postgres psql -U "$PG_USER" -d postgres -tAc "select count(*) from pg_database where datname='$PG_DB'" 2>/dev/null | tr -d '[:space:]')"
+  if [ -z "$count" ]; then
+    PG_READY_STATE="unreachable"
+    warn "postgres did not answer within ${POSTGRES_READY_TIMEOUT}s and the cluster cannot be queried either"
+    return 1
+  fi
+  if [ "$count" != "0" ]; then
+    PG_READY_STATE="database-unusable"
+    warn "the cluster knows $PG_DB but queries against it still fail after ${POSTGRES_READY_TIMEOUT}s"
+    return 1
+  fi
+  if [ -n "$(current_sha || true)" ]; then
+    PG_READY_STATE="database-missing"
+    warn "database $PG_DB is absent while a release is already deployed; refusing to continue without a backup"
+    return 1
+  fi
+  PG_READY_STATE="first-initialisation"
+  warn "the cluster has no $PG_DB database and no release has been deployed yet: first initialisation, nothing to back up"
+  return 0
+}
+
 create_backup() {
   local sha="$1" stamp
   stamp="$(utc_stamp)"
@@ -533,6 +629,15 @@ create_backup() {
     if ! service_running postgres; then
       die 1 "postgres is defined but not running; refusing to deploy without a database backup"
     fi
+    if ! wait_for_postgres; then
+      die 1 "postgres is not usable ($PG_READY_STATE) after ${POSTGRES_READY_TIMEOUT}s; aborting before any image change"
+    fi
+    if [ "$PG_READY_STATE" = "first-initialisation" ]; then
+      BACKUP_DB="skipped(first-initialisation)"
+      log "no database exists yet on this first deployment; recording backup=$BACKUP_DB and continuing"
+      write_backup_manifest "$sha"
+      return 0
+    fi
     log "dumping postgres database $PG_DB to $BACKUP_DIR/postgres.dump"
     if ! compose exec -T postgres pg_dump -Fc -U "$PG_USER" -d "$PG_DB" >"$BACKUP_DIR/postgres.dump"; then
       rm -f "$BACKUP_DIR/postgres.dump"
@@ -545,15 +650,7 @@ create_backup() {
   else
     log "compose project defines no postgres service; no database dump needed"
   fi
-  {
-    printf 'release_sha=%s\n' "$sha"
-    printf 'created_at=%s\n' "$(iso_now)"
-    printf 'compose_file=%s\n' "$COMPOSE_FILE"
-    printf 'env_file=%s\n' "$ENV_FILE"
-    printf 'postgres_dump=%s\n' "$BACKUP_DB"
-    printf 'previous_running_sha=%s\n' "$(current_sha || true)"
-  } >"$BACKUP_DIR/manifest.txt"
-  chmod 600 "$BACKUP_DIR/manifest.txt"
+  write_backup_manifest "$sha"
 }
 
 http_status() {
