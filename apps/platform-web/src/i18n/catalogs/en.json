@@ -90,6 +90,7 @@
   "status.uninstalled": "Uninstalled",
   "status.stopped": "Stopped",
   "status.unreachable": "Unreachable",
+  "status.passed": "PASSED",
   "status.unknown": "Unknown",
   "status.online": "Online",
   "time.justNow": "just now",

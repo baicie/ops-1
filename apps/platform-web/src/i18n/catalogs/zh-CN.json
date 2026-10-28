@@ -90,6 +90,7 @@
   "status.uninstalled": "已卸载",
   "status.stopped": "已停止",
   "status.unreachable": "不可达",
+  "status.passed": "通过",
   "status.unknown": "未知",
   "status.online": "在线",
   "time.justNow": "刚刚",

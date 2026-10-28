@@ -64,7 +64,9 @@ export function GovernancePage() {
   return <div className="page-stack">
     <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="secondary" onClick={() => { void load(); void reloadNodes(); }}>{t('action.refresh')}</Button>} />
     {(loading || nodeLoading) && !datasets.length ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => void load()} /> : <>
-      <div className="metric-grid">
+      {/* .metric-grid never had a rule in styles.css, so these cards stacked full width at
+          every viewport. The grid lives here now, where this page's layout belongs. */}
+      <div className="metric-grid grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="panel metric-card"><span className="metric-label">{t('governance.metric.datasets')}</span><strong>{summary?.datasetCount ?? '—'}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.datasets.detail')}</span></div>
         <div className="panel metric-card"><span className="metric-label">{t('governance.metric.qualityPassed')}</span><strong>{passed}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.qualityPassed.detail', { failed, errored, unknown, pending: summary?.latestQuality.pending ?? 0 })}</span></div>
         <div className="panel metric-card"><span className="metric-label">{t('governance.metric.lineageBatches')}</span><strong>{lineageBatches}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.lineageBatches.detail', { window: summary?.lineageWindow || '24h' })}</span></div>

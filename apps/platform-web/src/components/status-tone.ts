@@ -34,6 +34,10 @@ export const STATUS_MAP: Record<string, StatusEntry> = {
   FAILED: { tone: 'danger', labelKey: 'status.failed' },
   REJECTED: { tone: 'danger', labelKey: 'status.rejected' },
   UNREACHABLE: { tone: 'danger', labelKey: 'status.unreachable' },
+  // Quality runs are emitted by the data-catalog plugin, not by the kernel, so this code
+  // arrives as data. It is the one extra state the Governance page actually renders; any
+  // further plugin-defined code still degrades to the raw value in a dashed pill.
+  PASSED: { tone: 'ok', labelKey: 'status.passed' },
   UNKNOWN: { tone: 'unknown', labelKey: 'status.unknown' },
 };
 
