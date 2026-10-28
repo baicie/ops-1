@@ -1,3 +1,5 @@
+import { resolveInitialLocale, translate } from './i18n';
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -48,7 +50,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(
       response.status,
       body?.code || 'HTTP_ERROR',
-      body?.message || `Request failed (${response.status})`,
+      body?.message || translate(resolveInitialLocale(), 'api.requestFailed', { status: response.status }),
       body?.requestId,
       Boolean(body?.retryable),
     );
@@ -89,7 +91,7 @@ export const api = {
       throw new ApiError(
         response.status,
         body?.code || 'UPLOAD_FAILED',
-        body?.message || 'Package upload failed',
+        body?.message || translate(resolveInitialLocale(), 'api.packageUploadFailed'),
         body?.requestId,
         Boolean(body?.retryable),
       );

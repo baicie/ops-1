@@ -4,8 +4,14 @@ import { api } from '../api';
 import { usePolling } from '../hooks';
 import type { PluginSummary } from '../types';
 import { Icon } from '../components/Icons';
-import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
+import { Button, buttonVariants } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { EmptyState, ErrorState, PageHeader, Skeleton, TimeAgo } from '../components/Ui';
 import { useT } from '../i18n';
+import { cn } from '../lib/utils';
+import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 export function PluginsPage() {
   const t = useT();
@@ -25,43 +31,58 @@ export function PluginsPage() {
       <PageHeader
         title={t('page.plugins')}
         description={t('plugins.description')}
-        actions={<><button className="btn btn-secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</button><Link className="btn btn-primary" to="/plugins/install"><Icon name="plus" size={15} /> {t('plugins.action.installPackage')}</Link></>}
+        actions={<><Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants()} to="/plugins/install"><Icon name="plus" size={15} /> {t('plugins.action.installPackage')}</Link></>}
       />
       <section className="toolbar">
-        <div className="search-box"><Icon name="search" size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('plugins.search.placeholder')} aria-label={t('plugins.search.aria')} /></div>
-        <div className="segmented" role="group" aria-label={t('plugins.filter.aria')}>
-          {['ALL', 'INSTALLED', 'STAGED', 'DISABLED'].map((value) => (
-            <button key={value} className={state === value ? 'active' : ''} onClick={() => setState(value)}>{value === 'ALL' ? t('common.all') : value === 'INSTALLED' ? t('status.installed') : value === 'STAGED' ? t('status.staged') : t('status.disabled')}</button>
-          ))}
+        <div className="relative flex min-w-[260px] max-w-[460px] flex-1 items-center">
+          <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('plugins.search.placeholder')} aria-label={t('plugins.search.aria')} className="pl-[33px]" />
         </div>
+        <Tabs value={state} onValueChange={setState}>
+          <TabsList aria-label={t('plugins.filter.aria')}>
+            {['ALL', 'INSTALLED', 'STAGED', 'DISABLED'].map((value) => (
+              <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : value === 'INSTALLED' ? t('status.installed') : value === 'STAGED' ? t('status.staged') : t('status.disabled')}</TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
         <span className="toolbar-count">{t('plugins.count.summary', { filtered: filtered.length, total: plugins.length })}</span>
       </section>
       {loading && !data ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : filtered.length === 0 ? (
-        <EmptyState icon="plugins" title={plugins.length ? t('plugins.empty.filtered.title') : t('plugins.empty.none.title')} description={plugins.length ? t('plugins.empty.filtered.description') : t('plugins.empty.none.description')} action={<Link className="btn btn-primary" to="/plugins/install">{t('plugins.action.installPackage')}</Link>} />
+        <EmptyState icon="plugins" title={plugins.length ? t('plugins.empty.filtered.title') : t('plugins.empty.none.title')} description={plugins.length ? t('plugins.empty.filtered.description') : t('plugins.empty.none.description')} action={<Link className={buttonVariants()} to="/plugins/install">{t('plugins.action.installPackage')}</Link>} />
       ) : (
         <section className="panel table-panel">
-          <table className="data-table plugins-table">
-            <thead><tr><th>{t('table.plugin')}</th><th>{t('table.state')}</th><th>{t('table.active')}</th><th>{t('table.instances')}</th><th>{t('table.publisher')}</th><th>{t('table.updated')}</th><th aria-label={t('table.actions')} /></tr></thead>
-            <tbody>
+          <Table className={cn('plugins-table', stackTable)}>
+            <TableHeader className={stackHead}>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t('table.plugin')}</TableHead>
+                <TableHead>{t('table.state')}</TableHead>
+                <TableHead>{t('table.active')}</TableHead>
+                <TableHead>{t('table.instances')}</TableHead>
+                <TableHead>{t('table.publisher')}</TableHead>
+                <TableHead>{t('table.updated')}</TableHead>
+                <TableHead aria-label={t('table.actions')} />
+              </TableRow>
+            </TableHeader>
+            <TableBody className={stackBody}>
               {filtered.map((plugin) => (
-                <tr key={plugin.id} className="clickable" onClick={() => navigate(plugin.isSystem ? '/ops-center' : `/plugins/${plugin.id}`)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') navigate(plugin.isSystem ? '/ops-center' : `/plugins/${plugin.id}`); }}>
-                  <td data-label={t('table.plugin')}>
+                <TableRow key={plugin.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} onClick={() => navigate(plugin.isSystem ? '/ops-center' : `/plugins/${plugin.id}`)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') navigate(plugin.isSystem ? '/ops-center' : `/plugins/${plugin.id}`); }}>
+                  <StackCell label={t('table.plugin')}>
                     <div className="entity-cell">
                       <span className={`entity-icon ${plugin.isSystem ? 'system' : ''}`}><Icon name={plugin.isSystem ? 'ops' : 'box'} size={17} /></span>
                       <div><strong>{plugin.name}</strong><span className="mono">{plugin.id}</span></div>
                       {plugin.isSystem && <span className="tag">{t('common.tag.system')}</span>}
                     </div>
-                  </td>
-                  <td data-label={t('table.state')}><StatusBadge status={plugin.state} /></td>
-                  <td data-label={t('table.active')}><span className="mono">{plugin.activeVersion || plugin.latestVersion || '—'}</span></td>
-                  <td data-label={t('table.instances')}><span className={plugin.readyInstances < plugin.totalInstances ? 'text-warn' : ''}>{plugin.readyInstances}/{plugin.totalInstances}</span><span className="muted small"> READY</span></td>
-                  <td data-label={t('table.publisher')}><span className="muted">{plugin.publisher || '—'}</span></td>
-                  <td data-label={t('table.updated')}><TimeAgo value={plugin.updatedAt} /></td>
-                  <td className="row-action"><Icon name="chevron" size={16} /></td>
-                </tr>
+                  </StackCell>
+                  <StackCell label={t('table.state')}><StatusPill status={plugin.state} /></StackCell>
+                  <StackCell label={t('table.active')}><span className="mono">{plugin.activeVersion || plugin.latestVersion || '—'}</span></StackCell>
+                  <StackCell label={t('table.instances')}><span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : ''}>{plugin.readyInstances}/{plugin.totalInstances}</span><span className="text-sm text-muted-foreground"> READY</span></StackCell>
+                  <StackCell label={t('table.publisher')}><span className="text-muted-foreground">{plugin.publisher || '—'}</span></StackCell>
+                  <StackCell label={t('table.updated')}><TimeAgo value={plugin.updatedAt} /></StackCell>
+                  <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </section>
       )}
       <p className="table-footnote"><Icon name="alert" size={13} /> {t('plugins.footnote')}</p>

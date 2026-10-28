@@ -5,6 +5,7 @@ import type { PipelineDetail, PipelineDraft, PipelinePreview, PipelineRevision, 
 import { Icon } from '../components/Icons';
 import { ErrorState, PageHeader, Skeleton } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
+import { useT, type MessageKey, type TranslateParams } from '../i18n';
 import { GraphCanvas } from './GraphCanvas';
 import { toGraph, fromGraph } from './ir/adapter';
 import { definitionDiff } from './ir/diff';
@@ -17,15 +18,21 @@ interface HistoryEntry { graph: EditorGraph }
 
 const irKey = (value: { nodes: unknown[]; edges: unknown[] }) => JSON.stringify([value.nodes, value.edges]);
 
-const NODE_LABEL: Record<string, string> = {
-  'builtin.source.http_json': 'HTTP Source',
-  'builtin.parse.json': 'Parse JSON',
-  'builtin.map.fields': 'Map Fields',
-  'builtin.filter.predicate': 'Filter Records',
-  'builtin.validate.schema': 'Validate Schema',
-  'builtin.sink.dataset': 'Dataset Sink',
+type Translate = (key: MessageKey, params?: TranslateParams) => string;
+
+const NODE_LABEL_KEYS: Record<string, MessageKey> = {
+  'builtin.source.http_json': 'studio.nodeType.httpSource',
+  'builtin.parse.json': 'studio.nodeType.parseJson',
+  'builtin.map.fields': 'studio.nodeType.mapFields',
+  'builtin.filter.predicate': 'studio.nodeType.filter',
+  'builtin.validate.schema': 'studio.nodeType.validate',
+  'builtin.sink.dataset': 'studio.nodeType.datasetSink',
 };
-function nodeLabel(type: string) { return NODE_LABEL[type] || type.split('.').slice(-1)[0]; }
+/** A type the catalog does not know is protocol data: render its last segment verbatim. */
+function nodeLabel(t: Translate, type: string) {
+  const key = NODE_LABEL_KEYS[type];
+  return key ? t(key) : type.split('.').slice(-1)[0];
+}
 
 function configValue(nodeType: string, key: string, value: unknown) {
   return { nodeType, key, value };
@@ -36,7 +43,8 @@ export function PipelineEditorPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const draftParam = searchParams.get('draft');
-  useDocumentTitle('Pipeline Studio');
+  const t = useT();
+  useDocumentTitle(t('studio.pageTitle'));
 
   const [detail, setDetail] = useState<PipelineDetail | null>(null);
   const [draft, setDraft] = useState<PipelineDraft | null>(null);
@@ -94,7 +102,7 @@ export function PipelineEditorPage() {
       if (seq !== loadSeq.current) return;
       setDraft(active);
       const source = active?.definition || pipeline.latest?.definition;
-      if (!source) throw new Error('No published revision or draft is available');
+      if (!source) throw new Error(t('studio.error.noSource'));
       setGraph(toGraph(source, layoutDirection));
       setBaseline(irKey(source));
       setSelectedId(null);
@@ -114,7 +122,7 @@ export function PipelineEditorPage() {
 
   if (loading) return <Skeleton rows={8} />;
   if (error) return <ErrorState error={error} onRetry={() => void load(draftParam)} />;
-  if (!detail || !graph) return <ErrorState error={new Error('No pipeline data')} onRetry={() => void load(draftParam)} />;
+  if (!detail || !graph) return <ErrorState error={new Error(t('studio.error.noData'))} onRetry={() => void load(draftParam)} />;
   const published = detail.latest as PipelineRevision | null | undefined;
   const definition = fromGraph(draft?.definition || published?.definition || ({} as never), graph);
   const dirty = irKey(definition) !== baseline;
@@ -153,7 +161,7 @@ export function PipelineEditorPage() {
       setDraft(created); setDrafts((items) => [created, ...items]);
       setGraph(toGraph(created.definition, layoutDirection)); setBaseline(irKey(created.definition));
       setHistory([]); setFuture([]); setSelectedId(null); setServerValidation(null);
-      setNotice(`Draft created · version ${created.version}`);
+      setNotice(t('studio.notice.draftCreated', { version: created.version }));
       navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
     } catch (cause) { setError(cause as Error); } finally { setBusy(null); }
   };
@@ -170,7 +178,7 @@ export function PipelineEditorPage() {
       setGraph(toGraph(saved.definition, layoutDirection));
       setBaseline(irKey(saved.definition));
       setHistory([]); setFuture([]); setServerValidation(null);
-      setNotice(`Draft saved · version ${saved.version}`);
+      setNotice(t('studio.notice.draftSaved', { version: saved.version }));
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         setConflict(`${cause.code}: ${cause.message}`);
@@ -186,7 +194,7 @@ export function PipelineEditorPage() {
     try {
       const result = await api.post<PipelineValidation>('/api/v1/pipelines/validate', definition);
       setServerValidation(result);
-      setNotice(result.valid ? 'Server validation passed' : 'Server validation failed');
+      setNotice(result.valid ? t('studio.notice.validationPassed') : t('studio.notice.validationFailed'));
     } catch (cause) { setError(cause as Error); } finally { setBusy(null); }
   };
   const publish = async () => {
@@ -198,7 +206,7 @@ export function PipelineEditorPage() {
         {},
         { 'idempotency-key': newIdempotencyKey(), 'if-match': String(draft.version) },
       );
-      setNotice(`Published r${result.revision}`);
+      setNotice(t('studio.notice.published', { revision: result.revision }));
       navigate(`/pipelines/${encodeURIComponent(pipelineId)}`);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) setConflict(cause.message);
@@ -212,15 +220,17 @@ export function PipelineEditorPage() {
     });
     update({ ...graph, nodes });
   };
+  // Only the `error` texts set through setConnectionError reach the DOM; the returned
+  // `error` field is a caller-facing diagnostic that no view renders.
   const connect = (connection: { source?: string | null; target?: string | null; sourceHandle?: string | null; targetHandle?: string | null }) => {
     const source = graph.nodes.find((node) => node.id === connection.source);
     const target = graph.nodes.find((node) => node.id === connection.target);
     if (!source || !target) return { ok: false, error: 'Connection endpoints are missing' };
     const from = source.data.ir.outputs.find((port) => port.name === connection.sourceHandle);
     const to = target.data.ir.inputs.find((port) => port.name === connection.targetHandle);
-    if (!from || !to) { setConnectionError('Handle does not exist on the selected node'); return { ok: false, error: 'Port does not exist' }; }
+    if (!from || !to) { setConnectionError(t('studio.canvas.handleMissing')); return { ok: false, error: 'Port does not exist' }; }
     const id = `${source.id}:${from.name}->${target.id}:${to.name}`;
-    if (graph.edges.some((edge) => edge.id === id)) { setConnectionError('This connection already exists'); return { ok: false, error: 'Duplicate edge' }; }
+    if (graph.edges.some((edge) => edge.id === id)) { setConnectionError(t('studio.canvas.duplicateEdge')); return { ok: false, error: 'Duplicate edge' }; }
     const candidateEdge: GraphEdge = { id, source: source.id, target: target.id, sourceHandle: from.name, targetHandle: to.name, label: from.dataType, data: { ir: { fromNode: source.id, fromPort: from.name, toNode: target.id, toPort: to.name, dataType: from.dataType } } };
     const result = validatePipeline(fromGraph(draft?.definition || published?.definition || ({} as never), { nodes: graph.nodes, edges: [...graph.edges, candidateEdge] }));
     if (result.errors.length > 0) { setConnectionError(`${result.errors[0].code}: ${result.errors[0].message}`); return { ok: false, error: result.errors[0].message }; }
@@ -245,7 +255,7 @@ export function PipelineEditorPage() {
     setPreviewBusy(true); setPreviewError(null); setPreview(null);
     try {
       let parsed: unknown;
-      try { parsed = JSON.parse(sampleInput); } catch { throw new Error('Sample input must be valid JSON'); }
+      try { parsed = JSON.parse(sampleInput); } catch { throw new Error(t('studio.error.sampleJson')); }
       const result = await api.post<PipelinePreview>('/api/v1/pipelines/preview', { definition, sampleInput: parsed, maxRecords: 50 });
       setPreview(result);
     } catch (cause) { setPreviewError((cause as Error).message); } finally { setPreviewBusy(false); }
@@ -253,98 +263,99 @@ export function PipelineEditorPage() {
   return (
     <div className="page-stack studio-page">
       <PageHeader
-        eyebrow="Studio"
+        eyebrow={t('studio.eyebrow')}
         title={definition.name}
-        description={<span className="mono">{pipelineId} · r{definition.revision} · {draft ? `draft v${draft.version}` : 'published read-only'} · {dirty ? 'unsaved changes' : 'saved'}</span>}
+        description={<span className="mono">{pipelineId} · r{definition.revision} · {draft ? t('studio.header.draftVersion', { version: draft.version }) : t('studio.header.publishedReadOnly')} · {dirty ? t('studio.header.unsavedChanges') : t('studio.header.saved')}</span>}
         actions={<>
-          <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> Undo</button>
-          <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>Redo</button>
-          <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> Auto layout</button>
-          <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title="Toggle horizontal / vertical layout"><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? 'Horizontal' : 'Vertical'}</button>
-          <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title="Readable zoom">Readable</button>
-          <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title="Fit all nodes">Fit all</button>
-          <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> Preview</button>
-          <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>Detail</Link>
-          {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> Create draft</button> : <>
-            <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? 'Saving…' : 'Save draft'}</button>
-            <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? 'Validating…' : 'Validate'}</button>
-            <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? 'Run server validation first' : dirty ? 'Save before publish' : 'Publish this draft'}><Icon name="upload" size={15} /> {busy === 'publish' ? 'Publishing…' : 'Publish'}</button>
+          <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
+          <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
+          <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</button>
+          <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title={t('studio.action.layoutToggle')}><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? t('studio.action.horizontal') : t('studio.action.vertical')}</button>
+          <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
+          <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
+          <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
+          <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
+          {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button> : <>
+            <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
+            <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
+            <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</button>
           </>}
         </>}
       />
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
         <Icon name="warning" size={14} />
-        <div className="conflict-copy"><strong>{conflict}</strong><span>Local changes are preserved. Server version: {conflictLatest ? `v${conflictLatest.version}` : 'unknown'}.</span>
+        <div className="conflict-copy"><strong>{conflict}</strong><span>{t('studio.conflict.localPreserved', { version: conflictLatest ? `v${conflictLatest.version}` : t('studio.conflict.unknownVersion') })}</span>
           {conflictLatest && (() => {
             const diff = definitionDiff(definition, conflictLatest.definition);
-            return <div className="conflict-diff" aria-label="Draft definition diff">
-              {diff.nodes.length === 0 && diff.edgesAdded.length === 0 && diff.edgesRemoved.length === 0 && <p className="muted small">No structural difference detected; the server revision changed independently.</p>}
+            return <div className="conflict-diff" aria-label={t('studio.conflict.ariaLabel')}>
+              {diff.nodes.length === 0 && diff.edgesAdded.length === 0 && diff.edgesRemoved.length === 0 && <p className="muted small">{t('studio.conflict.noDifference')}</p>}
               {diff.nodes.map((entry) => <div key={entry.nodeId} className="diff-node">
                 <div className="diff-node-head"><strong>{entry.label}</strong><span className="mono">{entry.nodeId}</span><span className={`tag diff-${entry.kind}`}>{entry.kind}</span></div>
-                {entry.changes.map((change) => <div key={change.path} className="diff-field"><code>{change.path}</code><span><em>Yours</em> {change.local}</span><span><em>Server</em> {change.server}</span></div>)}
+                {entry.changes.map((change) => <div key={change.path} className="diff-field"><code>{change.path}</code><span><em>{t('studio.conflict.yours')}</em> {change.local}</span><span><em>{t('studio.conflict.server')}</em> {change.server}</span></div>)}
               </div>)}
-              {diff.edgesAdded.length > 0 && <p className="small"><strong>Server-only edges:</strong> {diff.edgesAdded.join(', ')}</p>}
-              {diff.edgesRemoved.length > 0 && <p className="small"><strong>Local-only edges:</strong> {diff.edgesRemoved.join(', ')}</p>}
+              {diff.edgesAdded.length > 0 && <p className="small"><strong>{t('studio.conflict.edgesServerOnly')}</strong> {diff.edgesAdded.join(', ')}</p>}
+              {diff.edgesRemoved.length > 0 && <p className="small"><strong>{t('studio.conflict.edgesLocalOnly')}</strong> {diff.edgesRemoved.join(', ')}</p>}
             </div>;
           })()}
         </div>
         <div className="conflict-actions">
-          <button className="btn btn-secondary btn-small" onClick={() => setConflict(null)}>Keep editing</button>
-          <button className="btn btn-secondary btn-small" onClick={() => { if (window.confirm('Discard local changes and load the latest server draft?')) { setConflict(null); void load(draft?.draftId); } }}>Reload latest</button>
-          <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => { if (window.confirm('Overwrite the newer server draft with your local version?')) { setConflict(null); void saveDraft(conflictLatest?.version); } }}>Use local &amp; retry</button>
+          <button className="btn btn-secondary btn-small" onClick={() => setConflict(null)}>{t('studio.action.keepEditing')}</button>
+          <button className="btn btn-secondary btn-small" onClick={() => { if (window.confirm(t('studio.conflict.discardConfirm'))) { setConflict(null); void load(draft?.draftId); } }}>{t('studio.action.reloadLatest')}</button>
+          <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => { if (window.confirm(t('studio.conflict.overwriteConfirm'))) { setConflict(null); void saveDraft(conflictLatest?.version); } }}>{t('studio.action.useLocalRetry')}</button>
         </div>
       </div>}
-      {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>Saved drafts</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
+      {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>{t('studio.drafts.title')}</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
       <div className="studio-shell">
         <aside className="panel panel-pad studio-palette">
-          <h2>Node palette</h2><p className="muted small">Typed nodes from the current revision.</p>
-          {definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{nodeLabel(node.type)}</strong><small className="mono">{node.nodeId}</small></span></div>)}
+          <h2>{t('studio.palette.title')}</h2><p className="muted small">{t('studio.palette.description')}</p>
+          {definition.nodes.map((node) => <div key={node.nodeId} className="palette-item" role="button" tabIndex={0} onClick={() => setSelectedId(node.nodeId)} onKeyDown={(event) => { if (event.key === 'Enter') setSelectedId(node.nodeId); }}><Icon name="box" size={15} /><span><strong>{nodeLabel(t, node.type)}</strong><small className="mono">{node.nodeId}</small></span></div>)}
         </aside>
-        <section className="panel studio-canvas" aria-label="Pipeline canvas">
-          <div className="mobile-view-toggle" role="group" aria-label="Editor view">
-            <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>Nodes</button>
-            <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>Canvas</button>
+        <section className="panel studio-canvas" aria-label={t('studio.canvas.ariaLabel')}>
+          <div className="mobile-view-toggle" role="group" aria-label={t('studio.canvas.viewGroupAria')}>
+            <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>{t('studio.canvas.viewNodes')}</button>
+            <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>{t('studio.canvas.viewCanvas')}</button>
           </div>
-          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : '?'}</span><span><strong>{nodeLabel(node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{node.outputs.length} out</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : '?'}</span><span><strong>{nodeLabel(t, node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{t('studio.canvas.nodeOutCount', { count: node.outputs.length })}</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
-          <p className="studio-note"><Icon name="alert" size={13} /> Local edits are not persisted until Save draft. Publish requires server validation.</p>
+          <p className="studio-note"><Icon name="alert" size={13} /> {t('studio.canvas.note')}</p>
         </section>
         <aside className="panel panel-pad studio-inspector">
-          <h2>Inspector</h2>
+          <h2>{t('studio.inspector.title')}</h2>
           {selected ? <>
-            {!hasDraft && <p className="muted small">Create a draft to edit this configuration.</p>}
-            <p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · typeVersion {selected.typeVersion}</p>
-            <h3>Configuration</h3>
+            {!hasDraft && <p className="muted small">{t('studio.inspector.needsDraft')}</p>}
+            <p className="mono small">{selected.nodeId}</p><p className="muted small">{selected.type} · {t('studio.inspector.typeVersion', { version: selected.typeVersion })}</p>
+            <h3>{t('studio.inspector.configuration')}</h3>
             <NodeConfigForm key={selected.nodeId} node={selected} readOnly={!hasDraft} onValidityChange={setConfigInvalid} onChange={(key, value) => updateConfig(selected.nodeId, key, value)} />
-            <details className="advanced"><summary>Advanced · type, ports and raw config</summary><p className="mono small">{selected.type} · v{selected.typeVersion}</p><pre>{JSON.stringify(selected.config, null, 2)}</pre></details>
-            <h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>input{port.required ? ' · required' : ''}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>output{port.nullable ? ' · nullable' : ''}</small></li>)}</ul>
-          </> : <p className="muted small">Select a node to edit its typed config.</p>}
-          <h3>Validation <span className={errors.length === 0 ? 'text-ok' : 'text-danger'}>{errors.length}</span></h3>
-          {errors.length === 0 ? <p className="muted small">No local graph errors.</p> : <ul className="validation-list">{errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
-          {serverValidation && <p className="muted small">{serverValidation.valid ? `Server validated · ${serverValidation.planDigest}` : 'Server rejected this graph'}</p>}
+            <details className="advanced"><summary>{t('studio.inspector.advanced')}</summary><p className="mono small">{selected.type} · v{selected.typeVersion}</p><pre>{JSON.stringify(selected.config, null, 2)}</pre></details>
+            <h3>Ports</h3><ul className="port-list">{selected.inputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>{port.required ? t('studio.port.inputRequired') : t('studio.port.input')}</small></li>)}{selected.outputs.map((port) => <li key={port.name}><span>{port.name}</span><code>{port.dataType}</code><small>{port.nullable ? t('studio.port.outputNullable') : t('studio.port.output')}</small></li>)}</ul>
+          </> : <p className="muted small">{t('studio.inspector.selectNode')}</p>}
+          <h3>{t('studio.inspector.validation')} <span className={errors.length === 0 ? 'text-ok' : 'text-danger'}>{errors.length}</span></h3>
+          {errors.length === 0 ? <p className="muted small">{t('studio.inspector.noErrors')}</p> : <ul className="validation-list">{errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
+          {serverValidation && <p className="muted small">{serverValidation.valid ? t('studio.inspector.serverValidated', { digest: String(serverValidation.planDigest) }) : t('studio.inspector.serverRejected')}</p>}
         </aside>
       </div>
-      {previewOpen && <section className="panel panel-pad studio-preview" aria-label="Preview panel">
-        <div className="panel-head"><div><h2>Preview</h2><p className="muted small">Server-side pure transforms on bounded sample input. No Source IO and no Catalog writes.</p></div><button className="btn btn-secondary" onClick={() => void runPreview()} disabled={previewBusy}>{previewBusy ? 'Previewing…' : 'Run preview'}</button></div>
-        <label className="preview-input"><span>Sample input (JSON object or array)</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
+      {previewOpen && <section className="panel panel-pad studio-preview" aria-label={t('studio.preview.ariaLabel')}>
+        <div className="panel-head"><div><h2>{t('studio.preview.title')}</h2><p className="muted small">{t('studio.preview.description')}</p></div><button className="btn btn-secondary" onClick={() => void runPreview()} disabled={previewBusy}>{previewBusy ? t('studio.preview.running') : t('studio.preview.run')}</button></div>
+        <label className="preview-input"><span>{t('studio.preview.sampleLabel')}</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
         {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
         {preview && <>
-          <div className="preview-summary"><strong>{preview.status}</strong><span>{preview.processedRecords} records</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">TRUNCATED</span>}</div>
+          <div className="preview-summary"><strong>{preview.status}</strong><span>{t('studio.preview.recordCount', { count: preview.processedRecords })}</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">{t('studio.preview.truncated')}</span>}</div>
           {preview.errors.length > 0 && <ul className="validation-list">{preview.errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
-          <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">in {node.inputCount} → out {node.outputCount} · {node.durationMs} ms</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
+          <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">{t('studio.preview.nodeFlow', { input: node.inputCount, output: node.outputCount, ms: node.durationMs })}</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
         </>}
-        {!preview && !previewError && <p className="muted small">Preview is not a job. It cannot produce a Sink Effect or Receipt.</p>}
+        {!preview && !previewError && <p className="muted small">{t('studio.preview.notAJob')}</p>}
       </section>}
     </div>
   );
 }
 
 function NodeConfigForm({ node, readOnly, onChange, onValidityChange }: { node: { config: Record<string, unknown>; type: string }; readOnly: boolean; onChange: (key: string, value: unknown) => void; onValidityChange?: (invalid: boolean) => void }) {
+  const t = useT();
   const entries = useMemo(() => Object.entries(node.config || {}), [node.config]);
   return (
     <div className="config-form">
-      {entries.length === 0 && <p className="muted small">This node has no configurable fields.</p>}
+      {entries.length === 0 && <p className="muted small">{t('studio.config.empty')}</p>}
       {entries.map(([key, value]) => {
         const id = `${node.type}-${key}`;
         if (typeof value === 'number') return <label key={key} htmlFor={id}><span>{key}</span><input id={id} type="number" value={value} disabled={readOnly} onChange={(event) => onChange(key, Number(event.target.value))} /></label>;
@@ -361,13 +372,14 @@ function JsonConfigField({ id, label, value, readOnly, onChange, onValidityChang
   id: string; label: string; value: unknown; readOnly: boolean;
   onChange: (value: unknown) => void; onValidityChange?: (invalid: boolean) => void;
 }) {
+  const t = useT();
   const serialized = JSON.stringify(value, null, 2);
   const [text, setText] = useState(serialized);
   const [invalid, setInvalid] = useState(false);
   useEffect(() => { setText(serialized); setInvalid(false); onValidityChange?.(false); }, [serialized]);
   return (
     <label htmlFor={id}>
-      <span>{label} (JSON)</span>
+      <span>{t('studio.config.jsonLabel', { label })}</span>
       <textarea
         id={id}
         rows={5}
@@ -388,7 +400,7 @@ function JsonConfigField({ id, label, value, readOnly, onChange, onValidityChang
           }
         }}
       />
-      {invalid && <span className="text-danger small" role="alert">Invalid JSON; this field is not saved until it parses.</span>}
+      {invalid && <span className="text-danger small" role="alert">{t('studio.config.invalidJson')}</span>}
     </label>
   );
 }

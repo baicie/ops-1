@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { usePolling } from '../hooks';
 import type { NodeView } from '../types';
-import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge } from '../components/Ui';
+import { Button } from '../components/ui/button';
+import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { EmptyState, ErrorState, PageHeader, Skeleton } from '../components/Ui';
 import { useT } from '../i18n';
 import { formatDate } from '../format';
+import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Dataset = { datasetId: string; name: string; schemaRevision: number; updatedAt: string };
 type QualityRun = { runId: string; datasetId: string; status: string; recordsExamined: number; recordsFailed: number; completedAt: string | null; createdAt: string };
@@ -59,21 +62,87 @@ export function GovernancePage() {
   const lineageBatches = summary?.lineageWindowCount ?? 0;
 
   return <div className="page-stack">
-    <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<button className="btn btn-secondary" onClick={() => { void load(); void reloadNodes(); }}>{t('action.refresh')}</button>} />
+    <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="secondary" onClick={() => { void load(); void reloadNodes(); }}>{t('action.refresh')}</Button>} />
     {(loading || nodeLoading) && !datasets.length ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => void load()} /> : <>
       <div className="metric-grid">
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.datasets')}</span><strong>{summary?.datasetCount ?? '—'}</strong><span className="muted small">{t('governance.metric.datasets.detail')}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.qualityPassed')}</span><strong>{passed}</strong><span className="muted small">{t('governance.metric.qualityPassed.detail', { failed, errored, unknown, pending: summary?.latestQuality.pending ?? 0 })}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.lineageBatches')}</span><strong>{lineageBatches}</strong><span className="muted small">{t('governance.metric.lineageBatches.detail', { window: summary?.lineageWindow || '24h' })}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.nodesReady')}</span><strong>{ready}</strong><span className="muted small">{t('governance.metric.nodesReady.detail', { unreachable, enrolled: nodeList.length })}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.datasets')}</span><strong>{summary?.datasetCount ?? '—'}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.datasets.detail')}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.qualityPassed')}</span><strong>{passed}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.qualityPassed.detail', { failed, errored, unknown, pending: summary?.latestQuality.pending ?? 0 })}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.lineageBatches')}</span><strong>{lineageBatches}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.lineageBatches.detail', { window: summary?.lineageWindow || '24h' })}</span></div>
+        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.nodesReady')}</span><strong>{ready}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.nodesReady.detail', { unreachable, enrolled: nodeList.length })}</span></div>
       </div>
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>{t('governance.quality.title')}</h2><p>{t('governance.quality.description')}</p></div><Link className="text-link" to="/ext/trusted-team/data-catalog">{t('governance.quality.openCatalog')}</Link></div>
-        {datasets.length === 0 ? <EmptyState icon="catalog" title={t('governance.quality.empty.title')} description={t('governance.quality.empty.description')} /> : <table className="data-table"><thead><tr><th>{t('table.dataset')}</th><th>{t('table.schema')}</th><th>{t('table.quality')}</th><th>{t('table.examined')}</th><th>{t('table.failed')}</th><th>{t('table.latestRun')}</th></tr></thead><tbody>{datasets.map((dataset) => <tr key={dataset.datasetId}><td data-label={t('table.dataset')}><strong>{dataset.name}</strong><div className="muted small mono">{dataset.datasetId.slice(0, 13)}…</div></td><td data-label={t('table.schema')}>r{dataset.schemaRevision}</td><td data-label={t('table.quality')}>{dataset.latest ? <StatusBadge status={dataset.latest.status} /> : <StatusBadge status="UNKNOWN" />}</td><td data-label={t('table.examined')}>{dataset.latest?.recordsExamined ?? '—'}</td><td data-label={t('table.failed')}>{dataset.latest?.recordsFailed ?? '—'}</td><td data-label={t('table.latestRun')}>{dataset.latest ? <Link className="text-link" to="/ext/trusted-team/data-catalog"><span className="mono">{dataset.latest.runId.slice(0, 8)}</span></Link> : <span className="muted">{t('common.noRuns')}</span>}</td></tr>)}</tbody></table>}
+        {datasets.length === 0 ? <EmptyState icon="catalog" title={t('governance.quality.empty.title')} description={t('governance.quality.empty.description')} /> : (
+          <Table className={stackTable}>
+            <TableHeader className={stackHead}>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t('table.dataset')}</TableHead>
+                <TableHead>{t('table.schema')}</TableHead>
+                <TableHead>{t('table.quality')}</TableHead>
+                <TableHead>{t('table.examined')}</TableHead>
+                <TableHead>{t('table.failed')}</TableHead>
+                <TableHead>{t('table.latestRun')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className={stackBody}>
+              {datasets.map((dataset) => (
+                <TableRow key={dataset.datasetId} className={stackRow}>
+                  <StackCell label={t('table.dataset')}>
+                    <strong>{dataset.name}</strong>
+                    <div className="mono text-sm text-muted-foreground">{dataset.datasetId.slice(0, 13)}…</div>
+                  </StackCell>
+                  <StackCell label={t('table.schema')}>r{dataset.schemaRevision}</StackCell>
+                  <StackCell label={t('table.quality')}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <StatusPill status="UNKNOWN" />}</StackCell>
+                  <StackCell label={t('table.examined')}>{dataset.latest?.recordsExamined ?? '—'}</StackCell>
+                  <StackCell label={t('table.failed')}>{dataset.latest?.recordsFailed ?? '—'}</StackCell>
+                  <StackCell label={t('table.latestRun')}>{dataset.latest ? <Link className="text-link" to="/ext/trusted-team/data-catalog"><span className="mono">{dataset.latest.runId.slice(0, 8)}</span></Link> : <span className="text-muted-foreground">{t('common.noRuns')}</span>}</StackCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </section>
       <div className="governance-grid">
-        <section className="panel table-panel"><div className="panel-head"><div><h2>{t('governance.failures.title')}</h2><p>{t('governance.failures.description')}</p></div></div>{recentFailures.length === 0 ? <EmptyState icon="check" title={t('governance.failures.empty.title')} /> : <table className="data-table"><thead><tr><th>{t('table.dataset')}</th><th>{t('table.status')}</th><th>{t('table.when')}</th></tr></thead><tbody>{recentFailures.map((run) => <tr key={run.runId}><td data-label={t('table.dataset')}>{run.datasetName}</td><td data-label={t('table.status')}><StatusBadge status={run.status} /></td><td data-label={t('table.when')}>{run.completedAt ? formatDate(run.completedAt) : formatDate(run.createdAt)}</td></tr>)}</tbody></table>}</section>
-        <section className="panel table-panel"><div className="panel-head"><div><h2>{t('governance.nodes.title')}</h2><p>{t('governance.nodes.description')}</p></div>{nodeError && <span className="muted small">{t('governance.nodes.unavailable')}</span>}</div>{nodeList.length === 0 ? <EmptyState icon="nodes" title={t('common.noNodes')} /> : <table className="data-table"><thead><tr><th>{t('table.node')}</th><th>{t('table.status')}</th><th>{t('table.generation')}</th></tr></thead><tbody>{nodeList.map((node) => <tr key={node.id}><td data-label={t('table.node')}><Link className="text-link" to={`/nodes/${node.id}`}>{node.name}</Link></td><td data-label={t('table.status')}><StatusBadge status={node.stale ? 'UNREACHABLE' : node.status} /></td><td data-label={t('table.generation')}>{node.generation}</td></tr>)}</tbody></table>}</section>
+        <section className="panel table-panel"><div className="panel-head"><div><h2>{t('governance.failures.title')}</h2><p>{t('governance.failures.description')}</p></div></div>{recentFailures.length === 0 ? <EmptyState icon="check" title={t('governance.failures.empty.title')} /> : (
+          <Table className={stackTable}>
+            <TableHeader className={stackHead}>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t('table.dataset')}</TableHead>
+                <TableHead>{t('table.status')}</TableHead>
+                <TableHead>{t('table.when')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className={stackBody}>
+              {recentFailures.map((run) => (
+                <TableRow key={run.runId} className={stackRow}>
+                  <StackCell label={t('table.dataset')}>{run.datasetName}</StackCell>
+                  <StackCell label={t('table.status')}><StatusPill status={run.status} /></StackCell>
+                  <StackCell label={t('table.when')}>{run.completedAt ? formatDate(run.completedAt) : formatDate(run.createdAt)}</StackCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}</section>
+        <section className="panel table-panel"><div className="panel-head"><div><h2>{t('governance.nodes.title')}</h2><p>{t('governance.nodes.description')}</p></div>{nodeError && <span className="text-sm text-muted-foreground">{t('governance.nodes.unavailable')}</span>}</div>{nodeList.length === 0 ? <EmptyState icon="nodes" title={t('common.noNodes')} /> : (
+          <Table className={stackTable}>
+            <TableHeader className={stackHead}>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t('table.node')}</TableHead>
+                <TableHead>{t('table.status')}</TableHead>
+                <TableHead>{t('table.generation')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className={stackBody}>
+              {nodeList.map((node) => (
+                <TableRow key={node.id} className={stackRow}>
+                  <StackCell label={t('table.node')}><Link className="text-link" to={`/nodes/${node.id}`}>{node.name}</Link></StackCell>
+                  <StackCell label={t('table.status')}><StatusPill status={node.stale ? 'UNREACHABLE' : node.status} /></StackCell>
+                  <StackCell label={t('table.generation')}>{node.generation}</StackCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}</section>
       </div>
       <div className="info-grid"><div className="callout"><p>{t('governance.footnote.before')} <strong>UNKNOWN</strong>{t('governance.footnote.after')}</p></div></div>
     </>}
