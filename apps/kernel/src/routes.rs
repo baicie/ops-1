@@ -254,16 +254,22 @@ pub fn build(state: AppState) -> Router {
             auth::auth_middleware,
         ));
 
-    let api = public
+    // Client routes answer 200 with the shell, missing resources stay 404, and
+    // the bundle is compressed and revalidatable; see `static_site`.
+    //
+    // The fallback is installed *before* the layers below, because `Router::layer`
+    // only wraps a fallback that already exists when it runs. Wrapping the SPA
+    // shell is not optional: it is the entry point of every page, so it needs the
+    // same CSP, `x-request-id` and trace span as an API response, and it gets them
+    // from this one stack rather than from a second copy of the header logic.
+    public
         .merge(protected)
+        .fallback_service(static_site::StaticSite::new(state.config.web_dist.clone()).router())
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn(request_id))
-        .layer(TraceLayer::new_for_http());
-
-    // Client routes answer 200 with the shell, missing resources stay 404, and
-    // the bundle is compressed and revalidatable; see `static_site`.
-    api.fallback_service(static_site::StaticSite::new(state.config.web_dist.clone()).router())
+        .layer(TraceLayer::new_for_http())
+        // Outermost, exactly as before: it wraps API and bundle alike.
         .layer(static_site::compression_layer())
         .with_state(state)
 }
@@ -366,6 +372,10 @@ fn _auth_marker(_: AuthUser) {}
 #[cfg(test)]
 mod tests {
     use super::BuildIdentity;
+    use super::*;
+    use axum::body::Body;
+    use std::path::PathBuf;
+    use tower::ServiceExt;
 
     #[test]
     fn version_payload_carries_exactly_the_five_contract_fields() {
@@ -393,5 +403,219 @@ mod tests {
         assert!(object["buildTime"].is_null());
         assert_eq!(object["environment"], "STAGING");
         assert_eq!(object["version"], "9.9.9");
+    }
+
+    // ---- Middleware parity: the static layer must be wrapped like the API ----
+
+    const SECURITY_HEADER_NAMES: [&str; 5] = [
+        "content-security-policy",
+        "x-frame-options",
+        "x-content-type-options",
+        "referrer-policy",
+        "x-request-id",
+    ];
+
+    const SHELL: &str = concat!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+        "<title>OpsWeave</title>",
+        "<script type=\"module\" crossorigin src=\"/assets/index-abc123.js\"></script>",
+        "</head><body><div id=\"root\"></div></body></html>"
+    );
+    const BUNDLE_LINE: &str = "console.log('opsweave kernel bundle');\n";
+
+    struct WebBundle {
+        root: PathBuf,
+    }
+
+    impl WebBundle {
+        fn new(name: &str) -> Self {
+            let root =
+                std::env::temp_dir().join(format!("opsweave-routes-{}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(root.join("assets")).unwrap();
+            std::fs::write(root.join("index.html"), SHELL).unwrap();
+            std::fs::write(root.join("assets/index-abc123.js"), BUNDLE_LINE.repeat(120)).unwrap();
+            Self { root }
+        }
+
+        /// The production router. The pool is lazy: an anonymous GET for a file or
+        /// the shell never issues a query, so no database is needed to read headers.
+        fn app(&self) -> Router {
+            let mut config = crate::config::Config::from_env();
+            config.web_dist = self.root.clone();
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
+                .connect_lazy("postgres://127.0.0.1:1/opsweave?sslmode=disable")
+                .expect("lazy pool");
+            let state = AppState::new(config, pool, vec![0u8; 32]).expect("app state");
+            build(state)
+        }
+    }
+
+    impl Drop for WebBundle {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    async fn get(app: &Router, path: &str, request_id: Option<&str>) -> Response {
+        let mut builder = axum::http::Request::builder().method(Method::GET).uri(path);
+        if let Some(id) = request_id {
+            builder = builder.header("x-request-id", id);
+        }
+        app.clone()
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    fn header_of(response: &Response, name: &str) -> Option<String> {
+        response
+            .headers()
+            .get(name)
+            .map(|value| value.to_str().unwrap().to_string())
+    }
+
+    /// Prints exactly what a browser receives, then hands the values back so the
+    /// caller can assert on them.
+    fn report(label: &str, path: &str, response: &Response) -> Vec<Option<String>> {
+        let values: Vec<Option<String>> = SECURITY_HEADER_NAMES
+            .iter()
+            .map(|name| header_of(response, name))
+            .collect();
+        println!("[{label}] GET {path} -> {}", response.status());
+        for (name, value) in SECURITY_HEADER_NAMES.iter().zip(values.iter()) {
+            println!(
+                "[{label}]   {name}: {}",
+                value.as_deref().unwrap_or("<absent>")
+            );
+        }
+        values
+    }
+
+    #[tokio::test]
+    async fn api_responses_carry_the_security_header_set() {
+        let bundle = WebBundle::new("api-headers");
+        let app = bundle.app();
+
+        let response = get(&app, "/api/v1/version", None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let values = report("api", "/api/v1/version", &response);
+        for (name, value) in SECURITY_HEADER_NAMES.iter().zip(values) {
+            assert!(value.is_some(), "API response is missing {name}");
+        }
+    }
+
+    /// The shell and the hashed bundle are entry points for every page, so they
+    /// must be wrapped by the same middleware stack as the API.
+    #[tokio::test]
+    async fn static_layer_carries_the_same_headers_as_the_api() {
+        let bundle = WebBundle::new("static-headers");
+        let app = bundle.app();
+
+        let api = get(&app, "/api/v1/version", None).await;
+        let api_values = report("api", "/api/v1/version", &api);
+
+        for path in ["/", "/admin/overview", "/assets/index-abc123.js"] {
+            let response = get(&app, path, None).await;
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            let values = report("static", path, &response);
+            for (index, name) in SECURITY_HEADER_NAMES.iter().enumerate() {
+                let (static_value, api_value) = (&values[index], &api_values[index]);
+                assert_eq!(
+                    static_value.is_some(),
+                    api_value.is_some(),
+                    "{path} disagrees with the API on whether {name} is set"
+                );
+                // `x-request-id` is per request by design; parity means "issued",
+                // and the echo itself is covered by the test below.
+                if *name != "x-request-id" {
+                    assert_eq!(
+                        static_value, api_value,
+                        "{path} must receive the same {name} policy value as the API"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The trace layer is installed by the same chain, so a static request has
+    /// to open one span exactly like an API request does.
+    #[tokio::test]
+    async fn static_layer_opens_a_trace_span() {
+        use std::sync::{Arc, Mutex};
+        use tracing::span::Attributes;
+        use tracing_subscriber::layer::{Context, SubscriberExt};
+        use tracing_subscriber::registry::LookupSpan;
+        use tracing_subscriber::Layer;
+
+        #[derive(Clone, Default)]
+        struct SpanNames(Arc<Mutex<Vec<String>>>);
+
+        impl<S> Layer<S> for SpanNames
+        where
+            S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
+        {
+            fn on_new_span(
+                &self,
+                attrs: &Attributes<'_>,
+                _id: &tracing::span::Id,
+                _ctx: Context<'_, S>,
+            ) {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(attrs.metadata().name().to_string());
+            }
+        }
+
+        let bundle = WebBundle::new("trace-span");
+        let app = bundle.app();
+        let names = SpanNames::default();
+        // A tokio test runs on the current-thread runtime, so the thread-local
+        // default stays installed for every await below.
+        let guard =
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(names.clone()));
+
+        let shell = get(&app, "/admin/overview", None).await;
+        let api = get(&app, "/api/v1/version", None).await;
+        drop(guard);
+
+        assert_eq!(shell.status(), StatusCode::OK);
+        assert_eq!(api.status(), StatusCode::OK);
+        let recorded = names.0.lock().unwrap().clone();
+        println!("trace spans opened: {recorded:?}");
+        assert_eq!(
+            recorded
+                .iter()
+                .filter(|name| name.as_str() == "request")
+                .count(),
+            2,
+            "the shell and the API must each open one request span: {recorded:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_id_is_echoed_on_the_static_layer() {
+        let bundle = WebBundle::new("request-id");
+        let app = bundle.app();
+
+        for path in ["/", "/assets/index-abc123.js"] {
+            let echoed = get(&app, path, Some("opsweave-probe-1")).await;
+            assert_eq!(
+                header_of(&echoed, "x-request-id").as_deref(),
+                Some("opsweave-probe-1"),
+                "{path} must echo the inbound request id"
+            );
+
+            let generated = get(&app, path, None).await;
+            let id = header_of(&generated, "x-request-id").unwrap_or_default();
+            assert_eq!(
+                id.len(),
+                36,
+                "{path} must mint a uuid request id, got {id:?}"
+            );
+            assert!(uuid::Uuid::parse_str(&id).is_ok(), "{path}: {id:?}");
+        }
     }
 }
