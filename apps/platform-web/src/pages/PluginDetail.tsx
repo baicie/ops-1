@@ -1,19 +1,74 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import React, { useEffect, useId, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
 import { usePolling } from '../hooks';
 import type { AuditEvent, DeploymentView, PluginDetail } from '../types';
 import { Icon } from '../components/Icons';
-import { ConfirmDialog, CopyButton, EmptyState, ErrorState, Field, KV, Modal, PageHeader, Progress, Skeleton, StatusBadge, TimeAgo, useToast } from '../components/Ui';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { CopyButton, EmptyState, ErrorState, KV, PageHeader, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { formatDate, formatBytes, shortDigest } from '../format';
 import { useT } from '../i18n';
+import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
+
+/** Label + control + hint, the shadcn replacement for the shared Field wrapper. */
+function FormField({ label, hint, htmlFor, children }: { label: string; hint?: string; htmlFor?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+      {hint && <span className="text-sm text-muted-foreground">{hint}</span>}
+    </div>
+  );
+}
+
+/** The shadcn Dialog replacement for the shared ConfirmDialog; same label, same test id. */
+function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel,
+  danger = false,
+  busy = false,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  description: React.ReactNode;
+  confirmLabel?: string;
+  danger?: boolean;
+  busy?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent closeLabel={t('aria.closeDialog')} aria-describedby={undefined} data-testid="confirm-dialog" className="max-w-[480px]">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        <div className="leading-relaxed text-foreground-secondary">{description}</div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</Button>
+          <Button variant={danger ? 'destructive' : 'default'} onClick={onConfirm} disabled={busy}>
+            {busy ? t('action.working') : confirmLabel ?? t('action.confirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function PluginDetailPage() {
   const t = useT();
   const { id = '' } = useParams();
-  const navigate = useNavigate();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`), 4000);
   const [events, setEvents] = useState<AuditEvent[]>([]);
@@ -25,6 +80,9 @@ export function PluginDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<null | 'activate' | 'disable' | 'uninstall' | 'rollback' | 'enable'>(null);
   const [rollbackVersion, setRollbackVersion] = useState('');
+  const versionFieldId = useId();
+  const replicasFieldId = useId();
+  const selectorFieldId = useId();
 
   useEffect(() => {
     if (!data) return;
@@ -112,30 +170,38 @@ export function PluginDetailPage() {
     <div className="page-stack">
       <PageHeader
         eyebrow={(data.publisher || t('pluginDetail.unknownPublisher')) + ' · ' + (data.isSystem ? t('pluginDetail.systemPlugin') : t('pluginDetail.trustedPackage'))}
-        title={<span className="title-with-status">{data.name}{data.isSystem ? <span className="tag">{t('common.tag.system')}</span> : null}</span>}
+        title={<span className="title-with-status">{data.name}{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}</span>}
         description={<><span className="mono">{data.id}</span> · {t('pluginDetail.effectiveVersion')} <strong>{activeVersion || t('pluginDetail.none')}</strong> · {t('pluginDetail.revision', { revision: data.activeRevision?.generation ?? 0 })}</>}
         actions={<>
-          {readyCandidate && <button className="btn btn-primary" onClick={() => setConfirm('activate')} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('pluginDetail.action.activateVersion', { version: readyCandidate.version })}</button>}
-          {!activeVersion && latestDeployment?.status !== 'READY' && versions[0] && <button className="btn btn-primary" onClick={() => { setDeployVersion(versions[0].version); setDeployOpen(true); }} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('action.deploy')}</button>}
-          {latestDeployment?.status === 'READY' && latestDeployment.version === activeVersion && <StatusBadge status="READY" label={t('status.ready')} />}
-          {activeVersion && <button className="btn btn-secondary" onClick={() => setConfirm('disable')} disabled={Boolean(busy)}><Icon name="stop" size={15} /> {t('action.disable')}</button>}
-          {!activeVersion && data.state === 'DISABLED' && <button className="btn btn-secondary" onClick={() => setConfirm('enable')} disabled={Boolean(busy)}><Icon name="rotate" size={15} /> {t('action.enable')}</button>}
-          <button className="btn btn-secondary" onClick={() => setTab('versions')}><Icon name="plugins" size={15} /> {t('pluginDetail.tab.versions')}</button>
+          {readyCandidate && <Button onClick={() => setConfirm('activate')} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('pluginDetail.action.activateVersion', { version: readyCandidate.version })}</Button>}
+          {!activeVersion && latestDeployment?.status !== 'READY' && versions[0] && <Button onClick={() => { setDeployVersion(versions[0].version); setDeployOpen(true); }} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('action.deploy')}</Button>}
+          {latestDeployment?.status === 'READY' && latestDeployment.version === activeVersion && <StatusPill status="READY" />}
+          {activeVersion && <Button variant="secondary" onClick={() => setConfirm('disable')} disabled={Boolean(busy)}><Icon name="stop" size={15} /> {t('action.disable')}</Button>}
+          {!activeVersion && data.state === 'DISABLED' && <Button variant="secondary" onClick={() => setConfirm('enable')} disabled={Boolean(busy)}><Icon name="rotate" size={15} /> {t('action.enable')}</Button>}
+          <Button variant="secondary" onClick={() => setTab('versions')}><Icon name="plugins" size={15} /> {t('pluginDetail.tab.versions')}</Button>
         </>}
       />
       <div className="detail-meta">
-        <StatusBadge status={data.state} />
+        <StatusPill status={data.state} />
         {data.activeRevision && <span className="meta-chip"><Icon name="activity" size={13} /> {t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })}</span>}
         {data.activeRevision?.activatedAt && <span className="meta-chip">{t('pluginDetail.meta.activated')} <TimeAgo value={data.activeRevision.activatedAt} /></span>}
         {data.isSystem && <span className="meta-chip"><Icon name="access" size={13} /> {t('pluginDetail.hostOwnedRecovery')}</span>}
       </div>
 
-      <div className="tabs" role="tablist">
-        {tabs.map((item) => <button key={item.id} role="tab" aria-selected={tab === item.id} className={tab === item.id ? 'active' : ''} onClick={() => setTab(item.id)}>{item.label}{item.count !== undefined ? <span className="tab-count">{item.count}</span> : null}</button>)}
-      </div>
+      {/* Tabs is controlled on the existing `tab` state, so the deploy flow can still land on
+          "deployments"; Radix owns role=tablist/tab, aria-selected, the roving tabindex and the
+          arrow/Home/End keys, and unmounts the inactive panels exactly like the old `&&` blocks. */}
+      <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
+        <TabsList className="h-auto w-full justify-start overflow-x-auto">
+          {tabs.map((item) => (
+            <TabsTrigger key={item.id} value={item.id}>
+              {item.label}
+              {item.count !== undefined ? <span className="ml-[5px] rounded-full border border-solid border-border bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{item.count}</span> : null}
+            </TabsTrigger>
+          ))}
+        </TabsList>
 
-      {tab === 'overview' && (
-        <>
+        <TabsContent value="overview" className="mt-[18px] flex flex-col gap-[18px]">
           <div className="summary-grid">
             <section className="panel">
               <div className="panel-head"><div><h2>{t('pluginDetail.effectiveState.title')}</h2><p>{t('pluginDetail.effectiveState.description')}</p></div></div>
@@ -145,7 +211,7 @@ export function PluginDetailPage() {
                 <KV label={t('pluginDetail.field.activeRevision')}>{data.activeRevision?.generation ?? 0}</KV>
                 <KV label={t('field.desiredReplicas')}>{activeDeployment?.desiredReplicas ?? latestDeployment?.desiredReplicas ?? 0}</KV>
                 <KV label="READY">{activeDeployment ? `${activeDeployment.readyInstances}/${activeDeployment.totalInstances}` : t('pluginDetail.noActiveDeployment')}</KV>
-                <KV label={t('pluginDetail.field.deploymentStatus')}>{activeDeployment ? <StatusBadge status={activeDeployment.status} /> : '—'}</KV>
+                <KV label={t('pluginDetail.field.deploymentStatus')}>{activeDeployment ? <StatusPill status={activeDeployment.status} /> : '—'}</KV>
               </div>
               {activeDeployment && <Progress value={activeDeployment.readyInstances} max={Math.max(activeDeployment.desiredReplicas, 1)} label={t('pluginDetail.readyReplicas')} />}
             </section>
@@ -154,7 +220,7 @@ export function PluginDetailPage() {
               {trustVersion ? (
                 <div className="kv-grid">
                   <KV label={t('table.publisher')}>{data.publisher}</KV>
-                  <KV label={t('table.signature')}><StatusBadge status={trustVersion.signatureState} /></KV>
+                  <KV label={t('table.signature')}><StatusPill status={trustVersion.signatureState} /></KV>
                   <KV label={t('pluginDetail.field.image')} mono>{shortDigest(trustVersion.imageRef, 22)} <CopyButton value={trustVersion.imageRef} /></KV>
                   <KV label={t('pluginDetail.field.bundle')} mono>{shortDigest(trustVersion.bundleDigest, 22)} <CopyButton value={trustVersion.bundleDigest} /></KV>
                   <KV label={t('pluginDetail.field.artifact')} mono>{shortDigest(trustVersion.artifactDigest, 22)} <CopyButton value={trustVersion.artifactDigest} /></KV>
@@ -167,85 +233,120 @@ export function PluginDetailPage() {
             <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" to={`/plugins/${data.id}/deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
             <InstanceTable instances={activeDeployment?.instances || []} />
           </section>
-        </>
-      )}
+        </TabsContent>
 
-      {tab === 'versions' && (
-        <section className="panel table-panel">
-          <div className="panel-head"><div><h2>{t('pluginDetail.versions.title')}</h2><p>{t('pluginDetail.versions.description')}</p></div><button className="btn btn-secondary" onClick={() => setDeployOpen(true)}><Icon name="plus" size={15} /> {t('pluginDetail.versions.deploy')}</button></div>
-          {versions.length === 0 ? <EmptyState icon="file" title={t('pluginDetail.versions.empty.title')} description={t('pluginDetail.versions.empty.description')} /> : (
-            <table className="data-table">
-              <thead><tr><th>{t('table.version')}</th><th>{t('table.status')}</th><th>{t('table.signature')}</th><th>{t('table.imageDigest')}</th><th>{t('table.published')}</th><th>{t('table.actions')}</th></tr></thead>
-              <tbody>
-                {versions.map((version) => {
-                  const deployment = data.deployments.find((item) => item.version === version.version);
-                  return (
-                    <tr key={version.version}>
-                      <td data-label={t('table.version')}><strong className="mono">{version.version}</strong>{version.version === activeVersion && <span className="tag tag-ok">{t('common.tag.active')}</span>}</td>
-                      <td data-label={t('table.status')}><StatusBadge status={version.status} /></td>
-                      <td data-label={t('table.signature')}><StatusBadge status={version.signatureState} /></td>
-                      <td data-label={t('table.imageDigest')}><span className="mono small">{shortDigest(version.imageRef, 18)}</span><CopyButton value={version.imageRef} /></td>
-                      <td data-label={t('table.published')}><TimeAgo value={version.createdAt} /></td>
-                      <td data-label={t('table.actions')} className="actions-cell">
-                        {deployment?.status === 'READY' && deployment.version !== activeVersion && <button className="btn btn-small btn-primary" onClick={() => { setRollbackVersion(version.version); setConfirm('activate'); }}>{t('action.activate')}</button>}
-                        {(!deployment || ['DISABLED', 'DEGRADED', 'FAILED'].includes(deployment.status)) && version.version !== activeVersion && <button className="btn btn-small" onClick={() => { setDeployVersion(version.version); setDeployOpen(true); }}>{deployment ? t('action.redeploy') : t('action.deploy')}</button>}
-                        {deployment?.status === 'READY' && deployment.version !== activeVersion && <button className="btn btn-small" onClick={() => { setRollbackVersion(version.version); setConfirm('rollback'); }}>{t('action.rollback')}</button>}
-                        {deployment && <StatusBadge status={deployment.status} />}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </section>
-      )}
+        <TabsContent value="versions" className="mt-[18px]">
+          <section className="panel table-panel">
+            <div className="panel-head"><div><h2>{t('pluginDetail.versions.title')}</h2><p>{t('pluginDetail.versions.description')}</p></div><Button variant="secondary" onClick={() => setDeployOpen(true)}><Icon name="plus" size={15} /> {t('pluginDetail.versions.deploy')}</Button></div>
+            {versions.length === 0 ? <EmptyState icon="file" title={t('pluginDetail.versions.empty.title')} description={t('pluginDetail.versions.empty.description')} /> : (
+              <Table className={stackTable}>
+                <TableHeader className={stackHead}>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>{t('table.version')}</TableHead>
+                    <TableHead>{t('table.status')}</TableHead>
+                    <TableHead>{t('table.signature')}</TableHead>
+                    <TableHead>{t('table.imageDigest')}</TableHead>
+                    <TableHead>{t('table.published')}</TableHead>
+                    <TableHead>{t('table.actions')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className={stackBody}>
+                  {versions.map((version) => {
+                    const deployment = data.deployments.find((item) => item.version === version.version);
+                    return (
+                      <TableRow key={version.version} className={stackRow}>
+                        <StackCell label={t('table.version')}><strong className="mono">{version.version}</strong>{version.version === activeVersion && <Badge variant="success">{t('common.tag.active')}</Badge>}</StackCell>
+                        <StackCell label={t('table.status')}><StatusPill status={version.status} /></StackCell>
+                        <StackCell label={t('table.signature')}><StatusPill status={version.signatureState} /></StackCell>
+                        <StackCell label={t('table.imageDigest')}><span className="mono text-sm">{shortDigest(version.imageRef, 18)}</span><CopyButton value={version.imageRef} /></StackCell>
+                        <StackCell label={t('table.published')}><TimeAgo value={version.createdAt} /></StackCell>
+                        <StackCell label={t('table.actions')} className="max-[760px]:flex-wrap">
+                          {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('activate'); }}>{t('action.activate')}</Button>}
+                          {(!deployment || ['DISABLED', 'DEGRADED', 'FAILED'].includes(deployment.status)) && version.version !== activeVersion && <Button variant="outline" size="sm" onClick={() => { setDeployVersion(version.version); setDeployOpen(true); }}>{deployment ? t('action.redeploy') : t('action.deploy')}</Button>}
+                          {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button variant="outline" size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('rollback'); }}>{t('action.rollback')}</Button>}
+                          {deployment && <StatusPill status={deployment.status} />}
+                        </StackCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
+          </section>
+        </TabsContent>
 
-      {tab === 'deployments' && (
-        <div className="stack-list">
-          {data.deployments.length === 0 ? <EmptyState icon="plugins" title={t('pluginDetail.deployments.empty.title')} description={t('pluginDetail.deployments.empty.description')} action={<button className="btn btn-primary" onClick={() => setDeployOpen(true)}>{t('pluginDetail.versions.deploy')}</button>} /> : data.deployments.map((deployment) => (
-            <DeploymentCard key={deployment.id} deployment={deployment} active={deployment.version === activeVersion} onActivate={() => { setRollbackVersion(deployment.version); setConfirm('activate'); }} onRollback={() => { setRollbackVersion(deployment.version); setConfirm('rollback'); }} />
-          ))}
-        </div>
-      )}
-
-      {tab === 'capabilities' && (
-        <div className="summary-grid">
-          <section className="panel"><div className="panel-head"><div><h2>{t('pluginDetail.capabilities.provides')}</h2><p>{t('pluginDetail.capabilities.provides.description')}</p></div></div>{data.provides.length ? <ul className="capability-list">{data.provides.map((capability) => <li key={capability.name}><code>{capability.name}</code><span>v{capability.major}</span></li>)}</ul> : <EmptyState icon="plugins" title={t('pluginDetail.capabilities.provides.empty')} />}</section>
-          <section className="panel"><div className="panel-head"><div><h2>{t('pluginDetail.capabilities.requires')}</h2><p>{t('pluginDetail.capabilities.requires.description')}</p></div></div>{data.requires.length ? <ul className="capability-list">{data.requires.map((capability) => <li key={capability.name}><code>{capability.name}</code><span>v{capability.major}</span></li>)}</ul> : <EmptyState icon="check" title={t('pluginDetail.capabilities.requires.empty')} />}</section>
-        </div>
-      )}
-
-      {tab === 'permissions' && (
-        <section className="panel"><div className="panel-head"><div><h2>{t('common.requestedPermissions')}</h2><p>{t('pluginDetail.permissions.description')}</p></div></div>
-          {data.permissions.length ? <ul className="permission-list">{data.permissions.map((permission) => <li key={permission}><Icon name="key" size={15} /><code>{permission}</code><span className="muted">{t('pluginDetail.permissions.declared')}</span></li>)}</ul> : <EmptyState icon="access" title={t('pluginDetail.permissions.empty')} />}
-          <div className="callout"><Icon name="alert" size={16} /><p>{t('pluginDetail.permissions.note')}</p></div>
-        </section>
-      )}
-
-      {tab === 'events' && (
-        <section className="panel table-panel">
-          <div className="panel-head"><div><h2>{t('pluginDetail.events.title')}</h2><p>{t('pluginDetail.events.description')}</p></div><Link className="text-link" to="/activity">{t('pluginDetail.events.global')} <Icon name="arrowRight" size={14} /></Link></div>
-          {events.length === 0 ? <EmptyState icon="activity" title={t('overview.events.empty.title')} /> : (
-            <table className="data-table"><thead><tr><th>{t('table.event')}</th><th>{t('table.result')}</th><th>{t('table.actor')}</th><th>{t('table.when')}</th></tr></thead><tbody>{events.map((event) => <tr key={event.id}><td data-label={t('table.event')}><strong>{event.eventType}</strong><div className="muted small">{event.action}</div></td><td data-label={t('table.result')}><StatusBadge status={event.result} /></td><td data-label={t('table.actor')}><span className="mono small">{event.actorType}:{event.actorId.slice(0, 8)}</span></td><td data-label={t('table.when')}><TimeAgo value={event.occurredAt} /></td></tr>)}</tbody></table>
-          )}
-        </section>
-      )}
-
-      <Modal open={deployOpen} onClose={() => setDeployOpen(false)} title={t('pluginDetail.deployModal.title', { name: data.name })} footer={<><button className="btn btn-secondary" onClick={() => setDeployOpen(false)}>{t('action.cancel')}</button><button className="btn btn-primary" onClick={() => void deploy()} disabled={busy === 'deploy'}>{busy === 'deploy' ? t('pluginDetail.deployModal.requesting') : t('action.deploy')}</button></>}>
-        <div className="form-stack">
-          <Field label={t('table.version')} hint={t('pluginDetail.deployModal.versionHint')}>
-            <select value={deployVersion} onChange={(event) => setDeployVersion(event.target.value)}>
-              {versions.map((version) => <option key={version.version} value={version.version}>{version.version} ({version.status})</option>)}
-            </select>
-          </Field>
-          <div className="form-grid">
-            <Field label={t('field.desiredReplicas')}><input type="number" min={0} max={20} value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} /></Field>
-            <Field label={t('field.nodeSelector')} hint={t('pluginDetail.deployModal.selectorHint')}><input value={selector} onChange={(event) => setSelector(event.target.value)} placeholder="role=node,zone=lab" /></Field>
+        <TabsContent value="deployments" className="mt-[18px]">
+          <div className="stack-list">
+            {data.deployments.length === 0 ? <EmptyState icon="plugins" title={t('pluginDetail.deployments.empty.title')} description={t('pluginDetail.deployments.empty.description')} action={<Button onClick={() => setDeployOpen(true)}>{t('pluginDetail.versions.deploy')}</Button>} /> : data.deployments.map((deployment) => (
+              <DeploymentCard key={deployment.id} deployment={deployment} active={deployment.version === activeVersion} onActivate={() => { setRollbackVersion(deployment.version); setConfirm('activate'); }} onRollback={() => { setRollbackVersion(deployment.version); setConfirm('rollback'); }} />
+            ))}
           </div>
-          <div className="callout"><Icon name="alert" size={16} /><p>{t('pluginDetail.deployModal.note')}</p></div>
-        </div>
-      </Modal>
+        </TabsContent>
+
+        <TabsContent value="capabilities" className="mt-[18px]">
+          <div className="summary-grid">
+            <section className="panel"><div className="panel-head"><div><h2>{t('pluginDetail.capabilities.provides')}</h2><p>{t('pluginDetail.capabilities.provides.description')}</p></div></div>{data.provides.length ? <ul className="capability-list">{data.provides.map((capability) => <li key={capability.name}><code>{capability.name}</code><span>v{capability.major}</span></li>)}</ul> : <EmptyState icon="plugins" title={t('pluginDetail.capabilities.provides.empty')} />}</section>
+            <section className="panel"><div className="panel-head"><div><h2>{t('pluginDetail.capabilities.requires')}</h2><p>{t('pluginDetail.capabilities.requires.description')}</p></div></div>{data.requires.length ? <ul className="capability-list">{data.requires.map((capability) => <li key={capability.name}><code>{capability.name}</code><span>v{capability.major}</span></li>)}</ul> : <EmptyState icon="check" title={t('pluginDetail.capabilities.requires.empty')} />}</section>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="permissions" className="mt-[18px]">
+          <section className="panel"><div className="panel-head"><div><h2>{t('common.requestedPermissions')}</h2><p>{t('pluginDetail.permissions.description')}</p></div></div>
+            {data.permissions.length ? <ul className="permission-list">{data.permissions.map((permission) => <li key={permission}><Icon name="key" size={15} /><code>{permission}</code><span className="text-muted-foreground">{t('pluginDetail.permissions.declared')}</span></li>)}</ul> : <EmptyState icon="access" title={t('pluginDetail.permissions.empty')} />}
+            <div className="callout"><Icon name="alert" size={16} /><p>{t('pluginDetail.permissions.note')}</p></div>
+          </section>
+        </TabsContent>
+
+        <TabsContent value="events" className="mt-[18px]">
+          <section className="panel table-panel">
+            <div className="panel-head"><div><h2>{t('pluginDetail.events.title')}</h2><p>{t('pluginDetail.events.description')}</p></div><Link className="text-link" to="/activity">{t('pluginDetail.events.global')} <Icon name="arrowRight" size={14} /></Link></div>
+            {events.length === 0 ? <EmptyState icon="activity" title={t('overview.events.empty.title')} /> : (
+              <Table className={stackTable}>
+                <TableHeader className={stackHead}>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>{t('table.event')}</TableHead>
+                    <TableHead>{t('table.result')}</TableHead>
+                    <TableHead>{t('table.actor')}</TableHead>
+                    <TableHead>{t('table.when')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className={stackBody}>
+                  {events.map((event) => (
+                    <TableRow key={event.id} className={stackRow}>
+                      <StackCell label={t('table.event')}><strong>{event.eventType}</strong><div className="text-sm text-muted-foreground">{event.action}</div></StackCell>
+                      <StackCell label={t('table.result')}><StatusPill status={event.result} /></StackCell>
+                      <StackCell label={t('table.actor')}><span className="mono text-sm">{event.actorType}:{event.actorId.slice(0, 8)}</span></StackCell>
+                      <StackCell label={t('table.when')}><TimeAgo value={event.occurredAt} /></StackCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </section>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={deployOpen} onOpenChange={setDeployOpen}>
+        <DialogContent closeLabel={t('aria.closeDialog')} aria-describedby={undefined}>
+          <DialogHeader><DialogTitle>{t('pluginDetail.deployModal.title', { name: data.name })}</DialogTitle></DialogHeader>
+          <div className="form-stack">
+            <FormField label={t('table.version')} hint={t('pluginDetail.deployModal.versionHint')} htmlFor={versionFieldId}>
+              <select id={versionFieldId} value={deployVersion} onChange={(event) => setDeployVersion(event.target.value)}>
+                {versions.map((version) => <option key={version.version} value={version.version}>{version.version} ({version.status})</option>)}
+              </select>
+            </FormField>
+            <div className="form-grid">
+              <FormField label={t('field.desiredReplicas')} htmlFor={replicasFieldId}><Input id={replicasFieldId} type="number" min={0} max={20} value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} /></FormField>
+              <FormField label={t('field.nodeSelector')} hint={t('pluginDetail.deployModal.selectorHint')} htmlFor={selectorFieldId}><Input id={selectorFieldId} value={selector} onChange={(event) => setSelector(event.target.value)} placeholder="role=node,zone=lab" /></FormField>
+            </div>
+            <div className="callout"><Icon name="alert" size={16} /><p>{t('pluginDetail.deployModal.note')}</p></div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDeployOpen(false)}>{t('action.cancel')}</Button>
+            <Button onClick={() => void deploy()} disabled={busy === 'deploy'}>{busy === 'deploy' ? t('pluginDetail.deployModal.requesting') : t('action.deploy')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={confirm === 'activate'}
@@ -304,20 +405,30 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
   const t = useT();
   if (!instances.length) return <EmptyState icon="nodes" title={t('pluginDetail.instances.empty.title')} description={t('pluginDetail.instances.empty.description')} />;
   return (
-    <table className="data-table">
-      <thead><tr><th>{t('table.slot')}</th><th>{t('table.node')}</th><th>{t('table.state')}</th><th>{t('table.container')}</th><th>{t('table.restarts')}</th><th>{t('table.observed')}</th><th>{t('table.logs')}</th></tr></thead>
-      <tbody>{instances.map((instance) => (
-        <tr key={instance.id}>
-          <td data-label={t('table.slot')}><span className="mono">#{instance.slot}</span></td>
-          <td data-label={t('table.node')}><strong>{instance.nodeName || instance.nodeId.slice(0, 8)}</strong><div className="muted small">{instance.nodeStatus}</div></td>
-          <td data-label={t('table.state')}><StatusBadge status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</td>
-          <td data-label={t('table.container')}><span className="mono small">{instance.containerId ? instance.containerId.slice(0, 12) : '—'}</span></td>
-          <td data-label={t('table.restarts')}>{instance.restartCount}</td>
-          <td data-label={t('table.observed')}><TimeAgo value={instance.observedAt} /></td>
-          <td data-label={t('table.logs')}><Link className="text-link" to={`/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></td>
-        </tr>
-      ))}</tbody>
-    </table>
+    <Table className={stackTable}>
+      <TableHeader className={stackHead}>
+        <TableRow className="hover:bg-transparent">
+          <TableHead>{t('table.slot')}</TableHead>
+          <TableHead>{t('table.node')}</TableHead>
+          <TableHead>{t('table.state')}</TableHead>
+          <TableHead>{t('table.container')}</TableHead>
+          <TableHead>{t('table.restarts')}</TableHead>
+          <TableHead>{t('table.observed')}</TableHead>
+          <TableHead>{t('table.logs')}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody className={stackBody}>{instances.map((instance) => (
+        <TableRow key={instance.id} className={stackRow}>
+          <StackCell label={t('table.slot')}><span className="mono">#{instance.slot}</span></StackCell>
+          <StackCell label={t('table.node')}><strong>{instance.nodeName || instance.nodeId.slice(0, 8)}</strong><div className="text-sm text-muted-foreground">{instance.nodeStatus}</div></StackCell>
+          <StackCell label={t('table.state')}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
+          <StackCell label={t('table.container')}><span className="mono text-sm">{instance.containerId ? instance.containerId.slice(0, 12) : '—'}</span></StackCell>
+          <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
+          <StackCell label={t('table.observed')}><TimeAgo value={instance.observedAt} /></StackCell>
+          <StackCell label={t('table.logs')}><Link className="text-link" to={`/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
+        </TableRow>
+      ))}</TableBody>
+    </Table>
   );
 }
 
@@ -326,10 +437,10 @@ function DeploymentCard({ deployment, active, onActivate, onRollback }: { deploy
   return (
     <section className={`panel deployment-card ${active ? 'deployment-active' : ''}`}>
       <div className="panel-head">
-        <div className="deployment-title"><h2 className="mono">{deployment.version}</h2><StatusBadge status={deployment.status} />{active && <span className="tag tag-ok">{t('common.tag.effective')}</span>}</div>
+        <div className="deployment-title"><h2 className="mono">{deployment.version}</h2><StatusPill status={deployment.status} />{active && <Badge variant="success">{t('common.tag.effective')}</Badge>}</div>
         <div className="page-actions">
-          {deployment.status === 'READY' && !active && <button className="btn btn-small btn-primary" onClick={onActivate}>{t('action.activate')}</button>}
-          {deployment.status === 'READY' && active && <button className="btn btn-small" onClick={onRollback}>{t('action.rollback')}</button>}
+          {deployment.status === 'READY' && !active && <Button size="sm" onClick={onActivate}>{t('action.activate')}</Button>}
+          {deployment.status === 'READY' && active && <Button variant="outline" size="sm" onClick={onRollback}>{t('action.rollback')}</Button>}
         </div>
       </div>
       <div className="kv-grid deployment-kv">
