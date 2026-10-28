@@ -15,10 +15,14 @@ const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 const OUT = path.resolve('../../artifacts/ui/g03-admin-pages');
 
+// Explicit /admin paths, not the legacy ones. Since G04 the root '/' resumes the last visited
+// admin path, which is the behaviour docs/03 asks for ("last surface / sensible default entry")
+// but makes '/' a non-deterministic target: after the loop visited /nodes, '/' landed on
+// /admin/nodes and the overflow measurement below silently ran against the wrong page.
 const PAGES = [
-  { route: '/', heading: 'Overview', slug: 'overview' },
-  { route: '/plugins', heading: 'Plugins', slug: 'plugins' },
-  { route: '/nodes', heading: 'Nodes', slug: 'nodes' },
+  { route: '/admin/overview', heading: 'Overview', slug: 'overview' },
+  { route: '/admin/plugins', heading: 'Plugins', slug: 'plugins' },
+  { route: '/admin/nodes', heading: 'Nodes', slug: 'nodes' },
 ] as const;
 
 const VIEWPORTS = [
