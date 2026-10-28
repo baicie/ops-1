@@ -135,12 +135,16 @@ services:
     environment:
       OPSWEAVE_KERNEL_URL: http://127.0.0.1:${OPSWEAVE_PREVIEW_PORT:-18080}
       OPSWEAVE_DOCKER_HOST: unix:///var/run/docker.sock
-      OPSWEAVE_NODE_STATE_DIR: /app/node-state
+      # Path-identical mount: the Node Runtime passes token-mount sources to the
+      # *host* docker daemon, so its state directory must have the same absolute
+      # path inside this container as it does on the host. Any other mapping makes
+      # every plugin instance fail with "bind source path does not exist".
+      OPSWEAVE_NODE_STATE_DIR: /var/lib/opsweave-staging/node
       OPSWEAVE_NODE_DATA_BIND: 127.0.0.1:9101
       OPSWEAVE_NODE_DATA_ENDPOINT: http://127.0.0.1:9101
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/opsweave-staging/node:/app/node-state
+      - /var/lib/opsweave-staging/node:/var/lib/opsweave-staging/node
     group_add:
       - "${DOCKER_GID:-999}"
     depends_on:
