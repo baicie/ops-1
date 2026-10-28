@@ -607,10 +607,22 @@ pull_image() {
   # Set OPSWEAVE_REQUIRE_PULL=1 to force a registry pull anyway.
   if docker image inspect "$ref" >/dev/null 2>&1 && [ "${OPSWEAVE_REQUIRE_PULL:-0}" != "1" ]; then
     log "image $ref is already present on this host; skipping the registry pull (OPSWEAVE_REQUIRE_PULL=1 forces it)"
-  elif ! output="$(docker pull "$ref" 2>&1)"; then
-    printf '%s\n' "$output" >&2
-    warn "failed to pull $ref"
-    return 1
+  else
+    # docker pull has no timeout of its own. On a host where the registry CDN stalls it can sit
+    # for hours, and because this runs while holding the deploy lock, every later deploy then
+    # waits out OPSWEAVE_LOCK_TIMEOUT and fails - which is exactly what happened on 2026-10-28
+    # and had to be cleared by killing the process. Bound it, fail loudly, release the lock.
+    local pull_status=0
+    output="$(timeout "${OPSWEAVE_PULL_TIMEOUT:-300}" docker pull "$ref" 2>&1)" || pull_status=$?
+    if [ "$pull_status" -ne 0 ]; then
+      printf '%s\n' "$output" >&2
+      if [ "$pull_status" -eq 124 ]; then
+        warn "pulling $ref did not finish within ${OPSWEAVE_PULL_TIMEOUT:-300}s; aborting instead of holding the deploy lock"
+      else
+        warn "failed to pull $ref"
+      fi
+      return 1
+    fi
   fi
   digests="$(docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$ref" 2>/dev/null || true)"
   if [ -n "$digests" ]; then
