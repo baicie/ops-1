@@ -12,6 +12,7 @@ use crate::packages;
 use crate::plugins;
 use crate::publishers;
 use crate::state::AppState;
+use crate::static_site;
 use crate::storage;
 use crate::users;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -20,7 +21,6 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
-use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 pub fn build(state: AppState) -> Router {
@@ -261,10 +261,11 @@ pub fn build(state: AppState) -> Router {
         .layer(middleware::from_fn(request_id))
         .layer(TraceLayer::new_for_http());
 
-    let index = state.config.web_dist.join("index.html");
-    let static_service =
-        ServeDir::new(&state.config.web_dist).not_found_service(ServeFile::new(index));
-    api.fallback_service(static_service).with_state(state)
+    // Client routes answer 200 with the shell, missing resources stay 404, and
+    // the bundle is compressed and revalidatable; see `static_site`.
+    api.fallback_service(static_site::StaticSite::new(state.config.web_dist.clone()).router())
+        .layer(static_site::compression_layer())
+        .with_state(state)
 }
 
 /// Build identity served by `GET /api/v1/version`.
