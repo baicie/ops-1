@@ -69,6 +69,68 @@ function focusFirst(panel: HTMLElement | null) {
   (target ?? panel)?.focus();
 }
 
+/**
+ * The nodes a Tab press can reach inside the panel, in document order. `getClientRects()` is
+ * the visibility test because it is the one the browser itself applies to sequential focus
+ * navigation, and the guards are skipped so the ring never hands focus back to a sentinel.
+ */
+const FOCUSABLE = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]',
+].join(',');
+
+function focusRing(panel: HTMLElement | null): HTMLElement[] {
+  if (!panel) return [];
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (element) =>
+      element.tabIndex >= 0 &&
+      !element.hasAttribute('data-sidebar-focus-guard') &&
+      element.getClientRects().length > 0,
+  );
+}
+
+function focusEdge(panel: HTMLElement | null, edge: 'first' | 'last') {
+  const ring = focusRing(panel);
+  const target = edge === 'first' ? ring[0] : ring[ring.length - 1];
+  (target ?? panel)?.focus();
+}
+
+/**
+ * One end of the trap. While the drawer is open nothing outside it is tabbable - the
+ * neighbours are inert and the scrim holds no control - so the browser's own sequence runs
+ * from the panel's first control to its last and then steps off the end of the document onto
+ * <body>, which is one stop the `aria-modal` claim does not allow. These two guards are the
+ * extra stops that close the ring: focus arriving on one is handed to the far edge of the
+ * panel, in both directions.
+ *
+ * They are deliberately not `aria-hidden`: hiding a focusable node from the accessibility
+ * tree would be its own violation, and this is the shape focus-scope libraries ship.
+ */
+function FocusGuard({
+  panel,
+  wrapTo,
+  active,
+}: {
+  panel: React.RefObject<HTMLElement | null>;
+  wrapTo: 'first' | 'last';
+  active: boolean;
+}) {
+  // Always rendered, only ever tabbable while the trap is on: keeping the node in place means
+  // opening the drawer never shifts the children's positions and never re-mounts navigation.
+  return (
+    <span
+      tabIndex={active ? 0 : -1}
+      data-sidebar-focus-guard={wrapTo}
+      onFocus={() => focusEdge(panel.current, wrapTo)}
+      style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+    />
+  );
+}
+
 export interface SidebarProps extends React.HTMLAttributes<HTMLElement> {
   /** Accessible name of the landmark; localized by the caller. */
   label: string;
@@ -151,7 +213,9 @@ export function Sidebar({ label, drawer = false, restoreFocusTo, className, chil
         data-open={open ? 'true' : 'false'}
         {...props}
       >
+        <FocusGuard panel={panelRef} wrapTo="last" active={open} />
         {children}
+        <FocusGuard panel={panelRef} wrapTo="first" active={open} />
       </aside>
     </>
   );

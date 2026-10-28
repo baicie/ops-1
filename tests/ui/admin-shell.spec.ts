@@ -121,9 +121,48 @@ test('the navigation becomes a drawer at 1024 and closes on Escape with focus re
   await expect(page.getByTestId('sidebar-scrim')).toBeVisible();
   await expect.poll(async () => Math.round((await sidebar.boundingBox())?.x ?? -1)).toBe(0);
 
+  // The modal claim the trap has to keep: dialog role, aria-modal, and every sibling inert.
+  await expect(sidebar).toHaveAttribute('role', 'dialog');
+  await expect(sidebar).toHaveAttribute('aria-modal', 'true');
+  await expect(page.locator('.main-column')).toHaveAttribute('inert');
+  await expect(page.locator('a.skip-link')).toHaveAttribute('inert');
+
+  // aria-modal is a promise that Tab never leaves the panel. Walking the ring is the only way
+  // to see it kept: before the focus guards existed one stop per cycle landed on <body>,
+  // because Chromium steps off the end of the document, and no assertion visited that step.
+  const walkRing = async (key: 'Tab' | 'Shift+Tab', steps: number) => {
+    const trail: string[] = [];
+    for (let step = 0; step < steps; step += 1) {
+      await page.keyboard.press(key);
+      trail.push(
+        await page.evaluate(() => {
+          const active = document.activeElement as HTMLElement | null;
+          if (!active || active === document.body) return 'body';
+          if (active === document.documentElement) return 'document';
+          const guard = active.getAttribute('data-sidebar-focus-guard');
+          if (guard) return 'guard:' + guard;
+          const panel = document.querySelector('.admin-sidebar');
+          return panel?.contains(active) ? 'panel:' + active.tagName.toLowerCase() : 'outside:' + active.tagName.toLowerCase();
+        }),
+      );
+    }
+    return trail;
+  };
+
+  const forward = await walkRing('Tab', 30);
+  console.log('drawer tab ring =', forward.join(' '));
+  expect(forward.filter((stop) => !stop.startsWith('panel:')), JSON.stringify(forward)).toEqual([]);
+  const backward = await walkRing('Shift+Tab', 30);
+  console.log('drawer shift+tab ring =', backward.join(' '));
+  expect(backward.filter((stop) => !stop.startsWith('panel:')), JSON.stringify(backward)).toEqual([]);
+
   await page.keyboard.press('Escape');
   await expect(sidebar).toHaveAttribute('data-open', 'false');
   await expect(page.getByTestId('sidebar-scrim')).toHaveCount(0);
+  // Parked again: no dialog role, no modal claim, and the siblings are interactive again.
+  await expect(sidebar).not.toHaveAttribute('role');
+  await expect(sidebar).not.toHaveAttribute('aria-modal');
+  await expect(page.locator('.main-column')).not.toHaveAttribute('inert');
   await expect(page.getByTestId('sidebar-trigger')).toBeFocused();
 
   // The scrim is the pointer affordance for the same state change.
@@ -287,14 +326,23 @@ test('the admin shell matrix is captured at 1440/1024/390 in both themes and loc
 
   await useLocale(page, 'zh-CN');
   await page.setViewportSize({ width: 390, height: 844 });
+  // The loop above ends on dark, which is how this shot came to be filed as "-light-" while
+  // rendering dark. The theme is now set explicitly, and the suffix is read back off the
+  // document, so the file name can not drift from the pixels again. It has to happen while the
+  // drawer is still parked: an open drawer marks the rest of the shell inert.
+  await useTheme(page, 'light');
+  const drawerTheme = await page.locator('html').getAttribute('data-theme');
+  expect(drawerTheme === 'light' || drawerTheme === 'dark').toBeTruthy();
   await page.getByTestId('sidebar-trigger').click();
   await expect(page.locator('.admin-sidebar')).toHaveAttribute('data-open', 'true');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', drawerTheme as string);
   // Wait for the drawer transition to settle before capturing, otherwise the shot shows an
   // empty scrim over a panel that is still sliding in.
   await expect.poll(async () => Math.round((await page.locator('.admin-sidebar').boundingBox())?.x ?? -1)).toBe(0);
   await page.waitForTimeout(120);
-  await page.screenshot({ path: path.join(OUT, 'admin-shell-390-zh-CN-light-drawer.png') });
-  shots.push(path.join(OUT, 'admin-shell-390-zh-CN-light-drawer.png'));
+  const drawerShot = path.join(OUT, 'admin-shell-390-zh-CN-' + drawerTheme + '-drawer.png');
+  await page.screenshot({ path: drawerShot });
+  shots.push(drawerShot);
 
   for (const file of shots) expect(fs.statSync(file).size, file).toBeGreaterThan(0);
   console.log('captured ' + shots.length + ' screenshots in ' + OUT);
