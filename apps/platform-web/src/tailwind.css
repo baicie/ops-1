@@ -1,0 +1,7 @@
+/* Tailwind entry. Loaded before styles.css (see the @import at its top) so the hand-written
+   design system of un-migrated pages still wins any same-specificity cascade tie.
+   Utilities resolve to the existing --ow-* design tokens, mapped once in tailwind.config.cjs;
+   html[data-theme="dark"] only re-declares those tokens, so no second token set exists. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

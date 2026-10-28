@@ -4,15 +4,21 @@ import { api } from '../api';
 import { usePolling } from '../hooks';
 import type { Overview } from '../types';
 import { Icon } from '../components/Icons';
+import { Badge, type BadgeVariant } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
+import { cn } from '../lib/utils';
 import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
 
 function Kpi({ label, value, detail, tone = '' }: { label: string; value: React.ReactNode; detail?: string; tone?: string }) {
   return (
-    <article className={`kpi ${tone}`}>
-      <p className="kpi-label">{label}</p>
-      <p className="kpi-value">{value}</p>
-      {detail && <p className="kpi-detail">{detail}</p>}
-    </article>
+    <Card className={cn('min-w-0', tone)}>
+      <CardContent className="p-3 sm:p-4">
+        <p className="kpi-label">{label}</p>
+        <p className="kpi-value">{value}</p>
+        {detail && <p className="kpi-detail">{detail}</p>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -23,12 +29,13 @@ export function OverviewPage() {
   if (!data) return null;
   const critical = data.attention.filter((item) => item.severity === 'critical');
   const healthTone = data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn';
+  const healthBadge: BadgeVariant = healthTone === 'ok' ? 'success' : healthTone === 'danger' ? 'destructive' : 'warning';
   return (
     <div className="page-stack">
       <PageHeader
         title="Overview"
         description="What needs attention now — not a wall of metrics."
-        actions={<><button className="btn btn-secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-primary" to="/plugins/install"><Icon name="plus" size={15} /> Install plugin</Link></>}
+        actions={<><Button variant="outline" onClick={() => void reload()}><Icon name="refresh" size={15} /> Refresh</Button><Link className="btn btn-primary" to="/plugins/install"><Icon name="plus" size={15} /> Install plugin</Link></>}
       />
       <section className={`attention-banner tone-${healthTone}`} aria-label="Platform health summary">
         <div className="attention-icon"><Icon name={data.health === 'READY' ? 'check' : 'warning'} size={20} /></div>
@@ -36,6 +43,7 @@ export function OverviewPage() {
           <h2>{data.health === 'READY' ? 'Platform is ready' : data.health === 'DEGRADED' ? `${critical.length} critical issue${critical.length === 1 ? '' : 's'} need attention` : 'Platform attention needed'}</h2>
           <p>{data.attention.length ? data.attention[0].detail : 'Every enrolled node is reachable, every desired replica is READY and no activation is blocked.'}</p>
         </div>
+        <Badge variant={healthBadge} className="ml-auto shrink-0">{data.health}</Badge>
         {data.attention.length > 0 && <a className="btn btn-secondary" href="#attention">Review issues</a>}
       </section>
       <section className="kpi-grid" aria-label="Platform counts">

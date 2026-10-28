@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { useI18n } from '../i18n';
+import type { MessageKey } from '../i18n';
 
 /**
  * Build identity reported by the Kernel at `GET /api/v1/version`.
@@ -13,19 +15,15 @@ type BuildIdentity = {
   startedAt?: string | null;
 };
 
-const UNKNOWN = 'UNKNOWN';
+/** Wire-level readiness codes from `/readyz`. These are protocol values, not display copy. */
+type ReadinessCode = 'READY' | 'NOT_READY' | 'UNKNOWN';
 
-function shortSha(sha: string | null | undefined): string {
-  return sha ? sha.slice(0, 7) : UNKNOWN;
-}
-
-function deployedAt(info: BuildIdentity | null): string {
-  const value = info?.buildTime || info?.startedAt;
-  if (!value) return UNKNOWN;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return `${parsed.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-}
+/** Only the rendered label is localized; the code above stays stable on the wire. */
+const READINESS_LABEL_KEYS: Record<ReadinessCode, MessageKey> = {
+  READY: 'badge.value.ready',
+  NOT_READY: 'badge.value.notReady',
+  UNKNOWN: 'badge.value.unknown',
+};
 
 function Chip({ field, label, value, title }: { field: string; label: string; value: string; title?: string }) {
   return (
@@ -44,8 +42,9 @@ function Chip({ field, label, value, title }: { field: string; label: string; va
  * or throw into the shell.
  */
 export function VersionBadge() {
+  const { t, formatDateTime } = useI18n();
   const [identity, setIdentity] = useState<BuildIdentity | null>(null);
-  const [status, setStatus] = useState<string>(UNKNOWN);
+  const [status, setStatus] = useState<ReadinessCode>('UNKNOWN');
 
   useEffect(() => {
     let cancelled = false;
@@ -67,7 +66,7 @@ export function VersionBadge() {
         });
         if (!cancelled) setStatus(ready.ok ? 'READY' : 'NOT_READY');
       } catch {
-        if (!cancelled) setStatus(UNKNOWN);
+        if (!cancelled) setStatus('UNKNOWN');
       }
     }
 
@@ -75,21 +74,28 @@ export function VersionBadge() {
     return () => { cancelled = true; };
   }, []);
 
-  const environment = identity?.environment || UNKNOWN;
+  // Compared before localization: the environment value is kernel data, never copy.
   // Guard kept for the day the wire contract grows a PRODUCTION member; today the
   // kernel can only answer STAGING, DEVELOPMENT or UNKNOWN.
-  if (environment === 'PRODUCTION') return null;
+  if (identity?.environment === 'PRODUCTION') return null;
+
+  const unknown = t('badge.value.unknown');
+  const environment = identity?.environment || unknown;
+  const commit = identity?.commitSha ? identity.commitSha.slice(0, 7) : unknown;
+  const deployedSource = identity?.buildTime || identity?.startedAt;
+  const deployedAt = deployedSource ? formatDateTime(deployedSource) : unknown;
 
   return (
     <footer
       className="toolbar version-badge"
+      /* Frozen: tests/ui/staging-smoke.spec.ts locates the badge by this accessible name. */
       aria-label="Deployment version"
       style={{ padding: '10px 28px 18px', borderTop: '1px solid var(--ow-border)' }}
     >
-      <Chip field="environment" label="Environment" value={environment} />
-      <Chip field="commit" label="Commit" value={shortSha(identity?.commitSha)} title={identity?.commitSha ?? undefined} />
-      <Chip field="deployedAt" label="Deployed At" value={deployedAt(identity)} />
-      <Chip field="status" label="Status" value={status} />
+      <Chip field="environment" label={t('badge.environment')} value={environment} />
+      <Chip field="commit" label={t('badge.commit')} value={commit} title={identity?.commitSha ?? undefined} />
+      <Chip field="deployedAt" label={t('badge.deployedAt')} value={deployedAt} />
+      <Chip field="status" label={t('badge.status')} value={t(READINESS_LABEL_KEYS[status])} />
     </footer>
   );
 }

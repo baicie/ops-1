@@ -1,5 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
 import { Icon } from './Icons';
+import { useT } from '../i18n';
+import type { MessageKey } from '../i18n';
 
 export function PageHeader({
   title,
@@ -24,38 +26,46 @@ export function PageHeader({
   );
 }
 
-const statusMap: Record<string, { tone: string; label: string }> = {
-  READY: { tone: 'ok', label: 'Ready' },
-  ACTIVE: { tone: 'ok', label: 'Active' },
-  INSTALLED: { tone: 'ok', label: 'Installed' },
-  CONFIRMED: { tone: 'ok', label: 'Confirmed' },
-  STAGED: { tone: 'info', label: 'Staged' },
-  VERIFIED: { tone: 'info', label: 'Verified' },
-  AVAILABLE: { tone: 'neutral', label: 'Available' },
-  PENDING: { tone: 'warn', label: 'Pending' },
-  PREPARING: { tone: 'warn', label: 'Preparing' },
-  STARTING: { tone: 'warn', label: 'Starting' },
-  DRAINING: { tone: 'warn', label: 'Draining' },
-  DEGRADED: { tone: 'warn', label: 'Degraded' },
-  ATTENTION: { tone: 'warn', label: 'Attention' },
-  UNHEALTHY: { tone: 'danger', label: 'Unhealthy' },
-  FAILED: { tone: 'danger', label: 'Failed' },
-  REJECTED: { tone: 'danger', label: 'Rejected' },
-  DISABLED: { tone: 'neutral', label: 'Disabled' },
-  UNINSTALLED: { tone: 'neutral', label: 'Uninstalled' },
-  STOPPED: { tone: 'neutral', label: 'Stopped' },
-  UNREACHABLE: { tone: 'danger', label: 'Unreachable' },
-  UNKNOWN: { tone: 'unknown', label: 'Unknown' },
-  ONLINE: { tone: 'ok', label: 'Online' },
+/** One mapping for every status code the shell renders; the code stays the wire value. */
+const statusMap: Record<string, { tone: string; labelKey: MessageKey }> = {
+  READY: { tone: 'ok', labelKey: 'status.ready' },
+  ACTIVE: { tone: 'ok', labelKey: 'status.active' },
+  INSTALLED: { tone: 'ok', labelKey: 'status.installed' },
+  CONFIRMED: { tone: 'ok', labelKey: 'status.confirmed' },
+  STAGED: { tone: 'info', labelKey: 'status.staged' },
+  VERIFIED: { tone: 'info', labelKey: 'status.verified' },
+  AVAILABLE: { tone: 'neutral', labelKey: 'status.available' },
+  PENDING: { tone: 'warn', labelKey: 'status.pending' },
+  PREPARING: { tone: 'warn', labelKey: 'status.preparing' },
+  STARTING: { tone: 'warn', labelKey: 'status.starting' },
+  DRAINING: { tone: 'warn', labelKey: 'status.draining' },
+  DEGRADED: { tone: 'warn', labelKey: 'status.degraded' },
+  ATTENTION: { tone: 'warn', labelKey: 'status.attention' },
+  UNHEALTHY: { tone: 'danger', labelKey: 'status.unhealthy' },
+  FAILED: { tone: 'danger', labelKey: 'status.failed' },
+  REJECTED: { tone: 'danger', labelKey: 'status.rejected' },
+  DISABLED: { tone: 'neutral', labelKey: 'status.disabled' },
+  UNINSTALLED: { tone: 'neutral', labelKey: 'status.uninstalled' },
+  STOPPED: { tone: 'neutral', labelKey: 'status.stopped' },
+  UNREACHABLE: { tone: 'danger', labelKey: 'status.unreachable' },
+  UNKNOWN: { tone: 'unknown', labelKey: 'status.unknown' },
+  ONLINE: { tone: 'ok', labelKey: 'status.online' },
 };
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
-  const value = statusMap[status?.toUpperCase()] || { tone: 'unknown', label: status || 'Unknown' };
-  const glyph = value.tone === 'ok' ? 'check' : value.tone === 'danger' ? 'warning' : value.tone === 'warn' ? 'alert' : 'clock';
+  const t = useT();
+  const code = status?.toUpperCase();
+  const known = code ? statusMap[code] : undefined;
+  const tone = known?.tone || 'unknown';
+  const glyph = tone === 'ok' ? 'check' : tone === 'danger' ? 'warning' : tone === 'warn' ? 'alert' : 'clock';
+  // A code this mapping does not know is protocol data, not copy: render it verbatim
+  // (only a missing code becomes a localized "Unknown"). data-status keeps the value
+  // machine-readable so selectors never depend on localized text.
+  const text = label || (known ? t(known.labelKey) : status || t('status.unknown'));
   return (
-    <span className={`status status-${value.tone}`}>
+    <span className={`status status-${tone}`} data-status={code || undefined}>
       <Icon name={glyph} size={12} />
-      {label || value.label}
+      {text}
     </span>
   );
 }
@@ -82,21 +92,23 @@ export function EmptyState({
 }
 
 export function ErrorState({ error, onRetry }: { error: Error | null; onRetry?: () => void }) {
+  const t = useT();
   return (
     <div className="error-state" role="alert">
       <div className="error-icon"><Icon name="warning" size={22} /></div>
       <div>
-        <h3>Could not load this view</h3>
-        <p>{error?.message || 'Unknown error'}</p>
-        {onRetry && <button className="btn btn-secondary" onClick={onRetry}><Icon name="refresh" size={15} /> Retry</button>}
+        <h3>{t('error.loadTitle')}</h3>
+        <p>{error?.message || t('error.unknown')}</p>
+        {onRetry && <button className="btn btn-secondary" onClick={onRetry}><Icon name="refresh" size={15} /> {t('action.retry')}</button>}
       </div>
     </div>
   );
 }
 
 export function Skeleton({ rows = 4 }: { rows?: number }) {
+  const t = useT();
   return (
-    <div className="skeleton-stack" aria-label="Loading" aria-busy="true">
+    <div className="skeleton-stack" aria-label={t('aria.loading')} aria-busy="true">
       {Array.from({ length: rows }).map((_, index) => (
         <div className="skeleton" key={index} style={{ width: `${92 - (index % 3) * 9}%` }} />
       ))}
@@ -105,25 +117,29 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
 }
 
 export function TimeAgo({ value }: { value?: string | null }) {
-  if (!value) return <span className="muted">Never</span>;
+  const t = useT();
+  if (!value) return <span className="muted">{t('time.never')}</span>;
   const date = new Date(value);
   const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  // Literal keys, never a template: scripts/check-i18n.mjs verifies every key is present in all locales.
   let relative = '';
-  if (seconds < 10) relative = 'just now';
-  else if (seconds < 60) relative = `${seconds}s ago`;
-  else if (seconds < 3600) relative = `${Math.floor(seconds / 60)}m ago`;
-  else if (seconds < 86400) relative = `${Math.floor(seconds / 3600)}h ago`;
-  else relative = `${Math.floor(seconds / 86400)}d ago`;
+  if (seconds < 10) relative = t('time.justNow');
+  else if (seconds < 60) relative = t('time.secondsAgo', { count: seconds });
+  else if (seconds < 3600) relative = t('time.minutesAgo', { count: Math.floor(seconds / 60) });
+  else if (seconds < 86400) relative = t('time.hoursAgo', { count: Math.floor(seconds / 3600) });
+  else relative = t('time.daysAgo', { count: Math.floor(seconds / 86400) });
   return <time dateTime={value} title={date.toISOString()}>{relative}</time>;
 }
 
-export function CopyButton({ value, label = 'Copy' }: { value?: string | null; label?: string }) {
+export function CopyButton({ value, label }: { value?: string | null; label?: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
+  const text = label || t('action.copy');
   return (
     <button
       className="icon-btn"
-      title={label}
-      aria-label={label}
+      title={text}
+      aria-label={text}
       disabled={!value}
       onClick={async (event) => {
         event.stopPropagation();
