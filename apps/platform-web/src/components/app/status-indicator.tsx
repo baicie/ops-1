@@ -8,6 +8,9 @@ import { cn } from '../../lib/utils';
  * The observational vocabulary of docs/09 §9.1, rendered as colour **plus** glyph **plus**
  * text. Colour alone never carries the meaning: every indicator prints its own label, and the
  * data-indicator attribute keeps the state machine-readable for tests and tooling.
+ *
+ * A state is never folded into a neighbour to save a colour: "stopped on purpose" (STOPPED)
+ * and "never configured" (DISABLED / UNINSTALLED) are different facts about a node.
  */
 export type IndicatorState =
   | 'ready'
@@ -16,6 +19,7 @@ export type IndicatorState =
   | 'stale'
   | 'unreachable'
   | 'revoked'
+  | 'stopped'
   | 'unknown'
   | 'noData'
   | 'partial'
@@ -32,6 +36,10 @@ const LABEL_KEYS: Record<IndicatorState, MessageKey> = {
   stale: 'state.stale',
   unreachable: 'state.unreachable',
   revoked: 'state.revoked',
+  // The label for a deliberately stopped process already exists in both catalogs as the
+  // per-code vocabulary shared with status-tone.ts; reusing it keeps one wording for
+  // STOPPED instead of a second copy that could drift.
+  stopped: 'status.stopped',
   unknown: 'state.unknown',
   noData: 'state.noData',
   partial: 'state.partial',
@@ -50,6 +58,8 @@ const GLYPHS: Record<IndicatorState, string> = {
   stale: 'clock',
   unreachable: 'stop',
   revoked: 'key',
+  // A square pause, not a stop sign and not a gear: parked is neither broken nor unconfigured.
+  stopped: 'pause',
   unknown: 'rotate',
   noData: 'file',
   partial: 'filter',
@@ -58,6 +68,20 @@ const GLYPHS: Record<IndicatorState, string> = {
   forbidden: 'access',
   conflict: 'copy',
   notConfigured: 'settings',
+};
+
+/**
+ * Presentation the shared stylesheet has no modifier class for yet, expressed from the same
+ * semantic tokens so the palette and the theme still come from one place. A parked process
+ * is neither running (`ready` green) nor broken (`error` red): muted text on the sunken
+ * surface with a solid outline reads "deliberately not running".
+ */
+const STATE_STYLES: Partial<Record<IndicatorState, React.CSSProperties>> = {
+  stopped: {
+    color: 'var(--ow-text-secondary)',
+    background: 'var(--ow-surface-3)',
+    borderColor: 'var(--ow-border-strong)',
+  },
 };
 
 /** Wire codes that mean the same observational state; a code outside this map is UNKNOWN. */
@@ -81,9 +105,12 @@ const CODE_STATES: Record<string, IndicatorState> = {
   FAILED: 'error',
   REJECTED: 'error',
   UNKNOWN: 'unknown',
+  // Never configured: there is nothing to observe yet.
   DISABLED: 'notConfigured',
   UNINSTALLED: 'notConfigured',
-  STOPPED: 'notConfigured',
+  // Configured and then stopped on purpose: a fact about the process, not about
+  // configuration, and not a healthy one - it must not be read as READY.
+  STOPPED: 'stopped',
 };
 
 /**
@@ -116,7 +143,11 @@ export function StatusIndicator({
 }) {
   const t = useT();
   return (
-    <span className={cn('status-indicator', `status-indicator--${state}`, className)} data-indicator={state}>
+    <span
+      className={cn('status-indicator', `status-indicator--${state}`, className)}
+      data-indicator={state}
+      style={STATE_STYLES[state]}
+    >
       <Icon name={GLYPHS[state]} size={12} />
       <span className="status-indicator-label">{label ?? t(LABEL_KEYS[state])}</span>
       {detail ? <span className="status-indicator-detail">{detail}</span> : null}

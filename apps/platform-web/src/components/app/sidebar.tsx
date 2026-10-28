@@ -94,6 +94,20 @@ export function Sidebar({ label, drawer = false, restoreFocusTo, className, chil
     focusFirst(panelRef.current);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // While it covers the page the drawer is a modal, so everything beside it leaves the tab
+    // order and the accessibility tree - the mirror image of the parked drawer marking
+    // *itself* inert. The scrim is skipped on purpose: it is the click-to-dismiss surface.
+    // None of this runs when the drawer is closed, so the desktop rail keeps behaving as the
+    // plain landmark it was.
+    const shell = panelRef.current?.parentElement;
+    const neighbours = shell
+      ? Array.from(shell.children).filter(
+          (element) =>
+            element !== panelRef.current && !element.classList.contains('sidebar-scrim'),
+        )
+      : [];
+    const wasInert = neighbours.map((element) => element.hasAttribute('inert'));
+    neighbours.forEach((element) => element.setAttribute('inert', ''));
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -103,6 +117,11 @@ export function Sidebar({ label, drawer = false, restoreFocusTo, className, chil
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
+      neighbours.forEach((element, index) => {
+        if (!wasInert[index]) element.removeAttribute('inert');
+      });
+      // Focus returns only once the shell is interactive again: focusing an inert element is
+      // a no-op, so restoring it earlier would leave the trigger without focus.
       restoreFocusTo?.current?.focus();
     };
   }, [open, restoreFocusTo, setMobileOpen]);
@@ -122,6 +141,9 @@ export function Sidebar({ label, drawer = false, restoreFocusTo, className, chil
         id="admin-sidebar"
         tabIndex={-1}
         aria-label={label}
+        // Modal only while it actually covers the page; the desktop rail stays a landmark.
+        role={open ? 'dialog' : undefined}
+        aria-modal={open ? true : undefined}
         // Out of the accessibility tree and out of the tab order while parked off-canvas.
         inert={drawer && !mobileOpen ? true : undefined}
         className={cn('sidebar admin-sidebar', drawer && 'sidebar-drawer', open && 'sidebar-open', className)}

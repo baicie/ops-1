@@ -26,7 +26,9 @@ ADR-UI-004 规定**不在已签名 manifest 中原地加字段**。但当前唯�
 ```
 
 `crates/contracts` 的 `FrontendContribution` 增加三个**可选**字段
-（`surface` / `titleKey` / `requiredCapabilities`），并新增 `FrontendContributionKind::NavigationItemV2`。
+（`surface` / `titleKey` / `requiredCapabilities`），并新增两个 v2 kind：
+`FrontendContributionKind::NavigationItemV2`（`navigation.item.v2`）与
+`FrontendContributionKind::RoutePageV2`（`route.page.v2`，页面侧的 v2 契约，见 §4）。
 v1 三种 kind（`route.page.v1`、`navigation.item.v1`、`settings.section.v1`）的报文形状、
 语义与 canonical 序列化结果保持不变。
 
@@ -53,7 +55,7 @@ pub fn deliverable_contributions(plugin_id: &str, contributions: &[FrontendContr
 | 1 | `surface` 必填且仅 `admin`/`workspace` | `MISSING_SURFACE` / `INVALID_SURFACE` |
 | 2 | 命名空间 `/admin/ext/<pluginId>/`、`/app/ext/<pluginId>/` | `NAMESPACE_ESCAPE` |
 | 3 | 保留前缀 `/admin`、`/app`、`/login`、`/api`、`/internal`、`/assets`、`/ext` 及更浅路径 | `RESERVED_PREFIX` |
-| 2' | 命名空间根自身、`//`、`.`、`..`、非页面段 | `INVALID_PATH` |
+| 2' | 命名空间根自身、`//`、`.`、`..`、非页面段；v1 分支只复用其中的 `.`/`..` 段级规则 | `INVALID_PATH` |
 | 4 | `requiredCapabilities` ⊆ 已知能力集合 | `UNKNOWN_CAPABILITY` |
 | 6 | v1 贡献携带 v2 字段 | `UNEXPECTED_FIELD` |
 | — | plugin id 不能命名命名空间 | `INVALID_PLUGIN_ID` |
@@ -146,13 +148,24 @@ Signed Manifest、RBAC、`requiredCapabilities` 过滤只能决定"是否加载�
   旧的 `SHELL_RESERVED` 把 `/admin/…` 一律判为冲突的检查已经不在代码里。
   前端仍保留自己的 surface 过滤，但服务端过滤只会更窄，不会让浏览器看到它原本看不到的东西。
 - **Schema 已经加入 v2 字段**：`contracts/schema/plugin-manifest.v1.schema.json` 定义了
-  `surface`（第 136 行）、`titleKey`（第 140 行）、`requiredCapabilities`（第 145 行），
+  `surface`（第 139 行）、`titleKey`（第 143 行）、`requiredCapabilities`（第 148 行），
   并用 `allOf` 对三个 v1 kind 禁止携带这些字段（第 106–117 行），与 Rust 侧
   `UNEXPECTED_FIELD` 对称，两边不会各说各话。
-  仍缺一处：**没有页面级 v2 kind**——schema 的 kind 枚举（第 121–126 行）与
-  `FrontendContributionKind` 都只有 `route.page.v1` / `navigation.item.v1` /
-  `settings.section.v1` / `navigation.item.v2`。前端测试夹具里出现的 `route.page.v2`
-  不是平台契约：真实服务端会以未知 kind 拒绝它（这条属于夹具与契约的偏差，已记录，未修）。
+- **页面级 v2 kind 已补齐**：kind 枚举（第 121–127 行）与 `FrontendContributionKind`
+  现在都有 `route.page.v2`；它是 v2 kind，走 §2.2 的同一套校验（`surface` 必填、
+  命名空间、保留前缀、能力词表），`is_v1()` 按枚举逐个列出而不再靠后缀推断。
+  覆盖它的测试是 `route_page_v2_is_a_v2_kind_with_the_same_surface_rules`。
+  此前 ADR 与 `tests/ui/plugin-surfaces.spec.ts` 夹具假定它存在、契约里却没有
+  （夹具先行于契约的偏差）。
+- **v1 路径不再允许 `..`**：v1 分支在历史报文正则之后复用与 v2 同一个段级规则
+  （`crates/contracts/src/lib.rs` 的 `traverses()`），`/ext/<publisher>/../<别处>`
+  现在是 `INVALID_PATH`。已签名 v1 manifest 的 `/ext/trusted-team/hello` 形状不受影响：
+  `v1_manifest_canonicalises_to_the_same_bytes`（字节不变）与
+  `v1_path_refuses_traversal_but_keeps_signed_paths_valid`（路径仍合法）分别覆盖。
+- **为什么补契约而不是改夹具**：前端 `apps/platform-web/src/extensions.tsx` 第 132 行
+  早已把 `route.page.v2` 当 v2 页面贡献解析，改夹具只会让浏览器与契约一起停在
+  “没有页面级 v2”的状态，并把 `ADR-UI-decisions` 里“版本化合同（`navigation.item.v2` 等）”
+  中那个“等”永久留空。补 kind 是加性变更，v1 字节兼容测试未改一行且仍通过。
 - `ExtensionView` 的 `rejections` 字段**已实现并下发**（`apps/kernel/src/plugins.rs`，
   类型为 `Vec<ContributionRejection>`）；前端 `types.ts` 的 `Extension.rejections?`
   就是它的形状，`extensions.tsx` 读它做诊断。属加性变更。
@@ -162,19 +175,45 @@ Signed Manifest、RBAC、`requiredCapabilities` 过滤只能决定"是否加载�
 
 本节只列**真实跑过**的命令与输出。没有对应测试的条目就是缺失的验收，不是"以后再补"。
 
-- `cargo test -p opsweave-kernel`（本次修复后运行）：`running 64 tests`，
-  `test result: ok. 64 passed; 0 failed; 0 ignored`。与按权下发直接相关的 5 条都在
-  `apps/kernel/src/plugins.rs` 的 `mod tests` 里，调用的都是 `extensions()` 每一行都会调用的
-  `extension_view()`（不是 `crates/contracts` 里没人调用的私有函数）：
-  `workspace_only_session_receives_no_admin_contribution`、
+补齐 `route.page.v2` 与 v1 段级校验这一轮，真实跑过的命令与输出：
+
+- `cargo test -p opsweave-contracts`（**改动前**先跑，作为 v1 字节兼容基线）：`running 14 tests`，
+  `test result: ok. 14 passed; 0 failed; 0 ignored`，其中包含
+  `v1_manifest_canonicalises_to_the_same_bytes` 与
+  `v1_contribution_keeps_its_legacy_wire_shape_and_admin_surface`。
+- `cargo test -p opsweave-contracts`（改动后）：`running 16 tests`，
+  `test result: ok. 16 passed; 0 failed; 0 ignored`。新增两条
+  `route_page_v2_is_a_v2_kind_with_the_same_surface_rules`、
+  `v1_path_refuses_traversal_but_keeps_signed_paths_valid`；上面那两条 v1 字节/形状测试
+  **一行未改**且仍然通过。
+- `cargo test --workspace`：`opsweave-bundle 4 passed`、`opsweave-contracts 16 passed`、
+  `opsweave-kernel 76 passed`、`opsweave-node 13 passed`、
+  `opsweave-pipeline-transform 2 passed`、`opsweave-pipeline-worker 18 passed`，全部 `0 failed`。
+  （kernel 的用例数比本节早先写的 64 多，是本分支后来新增的；这一轮对 kernel 只改了一行注释。）
+- `cargo fmt --all -- --check`：通过（无输出）；
+  `cargo clippy --workspace --all-targets -- -D warnings`：通过。
+- `python3 tests/contract/validate_contracts.py`：`contract validation passed`，
+  `schemas: 15`、`examples validated: 6`、4 个 bundle 均 `ok`。
+- schema 行为抽查（`jsonschema` 直接对 `contributions.items` 求值）：`route.page.v2` 带
+  `surface` 通过；缺 `surface` 被拒；路径含 `..` 被拒；`route.page.v1` 的
+  `/ext/trusted-team/hello` 通过；`route.page.v1` 含 `..` 被拒；`route.page.v1` 携带
+  `surface` 仍被拒（与 Rust 侧 `UNEXPECTED_FIELD` 对称）。
+- 与按权下发直接相关的 5 条测试仍在 `apps/kernel/src/plugins.rs` 的 `mod tests` 里，
+  调用的都是 `extensions()` 每一行都会调用的 `extension_view()`（不是 `crates/contracts`
+  里没人调用的私有函数）：`workspace_only_session_receives_no_admin_contribution`、
   `platform_session_receives_every_contribution`、
   `admin_surface_roles_decide_the_grant_instead_of_the_role_name`、
   `extension_with_nothing_to_deliver_is_omitted`、
   `invalid_v2_contribution_is_reported_instead_of_dropped`。
-- `cargo fmt --check`：通过（无输出）；`cargo clippy --workspace --all-targets -- -D warnings`：通过。
 - **不存在**的测试（先前版本在这里列过，属于伪证据）：`platform_session_receives_legacy_v1_contribution_unchanged`、
   `backend_without_a_ready_instance_withholds_its_contributions`。前者被 `crates/contracts` 的
   `v1_contribution_keeps_its_legacy_wire_shape_and_admin_surface` 覆盖（名字不同），
   后者对应的功能根本没有实现（§2.4），所以也不会有测试。
-- `crates/contracts` 这一层本分支**未做修改**，因此没有重跑 `cargo test -p opsweave-contracts`；
-  v2 规则负向用例与 v1 字节级回归的证据仍然只在那一层。
+- **本轮没有验的部分**：`tests/ui/plugin-surfaces.spec.ts` 与 `tests/ui/admin-shell.spec.ts`
+  需要运行中的 Kernel（`http://127.0.0.1:18181`），而本轮任务边界禁止启动服务器，
+  因此浏览器验收**未运行**；`route.page.v2` 的端到端渲染只经过 `tsc --noEmit`、
+  `vitest`、`vite build` 与代码审查，抽屉的模态语义同样未经真实浏览器确认。
+- **仍存在的夹具偏差（本轮未修）**：`tests/ui/plugin-surfaces.spec.ts` 的 FLAGGED 用例把
+  “`route.page.v2` 带 `titleKey`”标成服务端 `UNEXPECTED_FIELD` 拒绝。补上 v2 页面 kind 之后
+  这个 payload 已不对应真实服务端语义（`titleKey` 对 v2 kind 合法）；该用例检验的是
+  “服务端说不行就是不行”的客户端优先级，断言本身仍然有效，但夹具不再是契约样本。

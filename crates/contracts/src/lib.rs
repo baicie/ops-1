@@ -37,10 +37,11 @@ pub struct CapabilityRef {
 
 /// One frontend contribution declared by a plugin manifest.
 ///
-/// `navigation.item.v2` adds an explicit `surface`; the v1 kinds keep their
-/// historical wire shape. The v2-only fields serialise only when a
-/// contribution actually carries them, so an already signed v1 manifest
-/// canonicalises to exactly the bytes it did before these fields existed.
+/// The v2 kinds (`navigation.item.v2`, `route.page.v2`) add an explicit
+/// `surface`; the v1 kinds keep their historical wire shape. The v2-only
+/// fields serialise only when a contribution actually carries them, so an
+/// already signed v1 manifest canonicalises to exactly the bytes it did before
+/// these fields existed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FrontendContribution {
@@ -70,6 +71,11 @@ pub enum FrontendContributionKind {
     SettingsSection,
     #[serde(rename = "navigation.item.v2")]
     NavigationItemV2,
+    /// The page half of the v2 contract: what `route.page.v1` always meant,
+    /// now able to name the surface it belongs to. It is a v2 kind, so it
+    /// follows the same rules as `navigation.item.v2`.
+    #[serde(rename = "route.page.v2")]
+    RoutePageV2,
 }
 
 impl FrontendContributionKind {
@@ -79,13 +85,20 @@ impl FrontendContributionKind {
             Self::NavigationItem => "navigation.item.v1",
             Self::SettingsSection => "settings.section.v1",
             Self::NavigationItemV2 => "navigation.item.v2",
+            Self::RoutePageV2 => "route.page.v2",
         }
     }
 
     /// v1 kinds keep their original meaning: the admin surface and the legacy
     /// `/ext/<publisher>/<name>` paths that already signed bundles ship.
+    ///
+    /// The set is spelled out instead of inferred from a version suffix, so
+    /// adding a v2 kind can never silently re-classify an existing v1 one.
     pub fn is_v1(self) -> bool {
-        !matches!(self, Self::NavigationItemV2)
+        matches!(
+            self,
+            Self::RoutePage | Self::NavigationItem | Self::SettingsSection
+        )
     }
 }
 
@@ -222,6 +235,16 @@ fn is_under(path: &str, prefix: &str) -> bool {
     path == prefix || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
 }
 
+/// True when the path contains a `.` or `..` segment.
+///
+/// Both contract generations share this rule: a `.`/`..` segment is path
+/// traversal, never a page name, so neither branch may let one through. Keeping
+/// it in one function is what stops the v1 and v2 checks from drifting apart.
+fn traverses(path: &str) -> bool {
+    path.split('/')
+        .any(|segment| segment == "." || segment == "..")
+}
+
 fn reserved_shell_prefix(path: &str) -> Option<&'static str> {
     RESERVED_SHELL_PREFIXES
         .into_iter()
@@ -256,7 +279,7 @@ impl FrontendContribution {
                     ContributionRejectionCode::UnexpectedField,
                     plugin_id,
                     self,
-                    "v1 contributions cannot carry surface/titleKey/requiredCapabilities; publish a navigation.item.v2 contribution instead",
+                    "v1 contributions cannot carry surface/titleKey/requiredCapabilities; publish the v2 kind instead (route.page.v2 for pages, navigation.item.v2 for navigation)",
                 ));
             }
             if !re(r"^/(?:[A-Za-z0-9_./:-]+)?$").is_match(&self.path) {
@@ -265,6 +288,18 @@ impl FrontendContribution {
                     plugin_id,
                     self,
                     format!("path {:?} is not a safe shell path", self.path),
+                ));
+            }
+            // The pattern above is the historical v1 wire shape, which keeps `..`
+            // legal; the shared segment rule is what refuses traversal. Only a
+            // traversing path is newly refused, so every already signed v1
+            // manifest (/ext/<publisher>/<name>) stays valid byte for byte.
+            if traverses(&self.path) {
+                return Err(ContributionRejection::new(
+                    ContributionRejectionCode::InvalidPath,
+                    plugin_id,
+                    self,
+                    format!("path {:?} must not contain . or .. segments", self.path),
                 ));
             }
             return Ok(ContributionSurface::Admin);
@@ -302,9 +337,7 @@ impl FrontendContribution {
         if self.path.starts_with(&namespace) {
             let relative = &self.path[namespace.len()..];
             if relative.is_empty()
-                || relative
-                    .split('/')
-                    .any(|segment| segment == "." || segment == "..")
+                || traverses(relative)
                 || !re(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$").is_match(relative)
             {
                 return Err(ContributionRejection::new(
@@ -1389,6 +1422,126 @@ mod tests {
         assert!(
             errors.iter().any(|error| error.contains("RESERVED_PREFIX")),
             "{errors:?}"
+        );
+    }
+
+    /// `route.page.v2` is the page half of the v2 contract: the kind the shell
+    /// already renders, now with a surface on it. It must follow exactly the v2
+    /// rules, not the legacy page rules.
+    #[test]
+    fn route_page_v2_is_a_v2_kind_with_the_same_surface_rules() {
+        let admin: FrontendContribution = serde_json::from_str(
+            r#"{"kind":"route.page.v2","id":"hello-page","path":"/admin/ext/opsweave.hello/hello","surface":"admin"}"#,
+        )
+        .unwrap();
+        assert_eq!(admin.kind, FrontendContributionKind::RoutePageV2);
+        assert_eq!(admin.kind.as_str(), "route.page.v2");
+        assert!(!admin.kind.is_v1(), "route.page.v2 is a v2 kind");
+        assert_eq!(
+            admin.validate_for_plugin("opsweave.hello"),
+            Ok(ContributionSurface::Admin)
+        );
+
+        let workspace: FrontendContribution = serde_json::from_str(
+            r#"{"kind":"route.page.v2","id":"hello-page","path":"/app/ext/opsweave.hello/hello","surface":"workspace"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            workspace.validate_for_plugin("opsweave.hello"),
+            Ok(ContributionSurface::Workspace)
+        );
+
+        // surface is mandatory for a v2 page, and the rejection names the kind
+        // the manifest actually declared.
+        let anonymous = FrontendContribution {
+            surface: None,
+            ..admin.clone()
+        };
+        let rejection = anonymous
+            .validate_for_plugin("opsweave.hello")
+            .expect_err("a v2 page must declare its surface");
+        assert_eq!(rejection.code, ContributionRejectionCode::MissingSurface);
+        assert_eq!(rejection.kind, "route.page.v2");
+
+        let escaped = FrontendContribution {
+            path: "/admin/ext/opsweave.other/hello".into(),
+            ..admin.clone()
+        };
+        assert_eq!(
+            escaped
+                .validate_for_plugin("opsweave.hello")
+                .unwrap_err()
+                .code,
+            ContributionRejectionCode::NamespaceEscape
+        );
+
+        let traversal = FrontendContribution {
+            path: "/admin/ext/opsweave.hello/../opsweave.other/hello".into(),
+            ..admin
+        };
+        assert_eq!(
+            traversal
+                .validate_for_plugin("opsweave.hello")
+                .unwrap_err()
+                .code,
+            ContributionRejectionCode::InvalidPath
+        );
+
+        // The v2 field set is the v2 field set: what the v1 page kind refuses as
+        // UNEXPECTED_FIELD is legal here.
+        let tagged = FrontendContribution {
+            title_key: Some("hello.page.title".into()),
+            required_capabilities: vec![CAPABILITY_PLATFORM_ACCESS.to_string()],
+            ..workspace
+        };
+        assert_eq!(
+            tagged.validate_for_plugin("opsweave.hello"),
+            Ok(ContributionSurface::Workspace)
+        );
+    }
+
+    /// Both generations share one segment rule: a `.`/`..` segment is refused,
+    /// while the `/ext/<publisher>/<name>` shape already signed v1 bundles ship
+    /// keeps being accepted unchanged.
+    #[test]
+    fn v1_path_refuses_traversal_but_keeps_signed_paths_valid() {
+        for path in [
+            "/ext/trusted-team/../admin",
+            "/ext/trusted-team/./hello",
+            "/ext/trusted-team/hello/../../app/ext/other",
+        ] {
+            for kind in [
+                FrontendContributionKind::RoutePage,
+                FrontendContributionKind::NavigationItem,
+                FrontendContributionKind::SettingsSection,
+            ] {
+                let contribution = FrontendContribution {
+                    kind,
+                    id: "hello-nav".into(),
+                    path: path.into(),
+                    surface: None,
+                    title_key: None,
+                    required_capabilities: vec![],
+                };
+                let rejection = contribution
+                    .validate_for_plugin("opsweave.hello")
+                    .expect_err("a v1 path may not traverse");
+                assert_eq!(
+                    rejection.code,
+                    ContributionRejectionCode::InvalidPath,
+                    "{path}"
+                );
+            }
+        }
+
+        // The exact path the pinned v1 manifest ships is still a valid page.
+        let signed: FrontendContribution = serde_json::from_str(
+            r#"{"kind":"route.page.v1","id":"hello-page","path":"/ext/trusted-team/hello"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            signed.validate_for_plugin("opsweave.hello"),
+            Ok(ContributionSurface::Admin)
         );
     }
 }

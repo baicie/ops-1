@@ -711,7 +711,8 @@ mod tests {
         }
     }
 
-    // `navigation.item.v2` is the only v2 kind the contract knows; `route.page` has no v2.
+    // Both v2 kinds carry a surface; a page contribution is validated the same way as a
+    // navigation item, so one helper stands in for either.
     fn one_admin_and_one_workspace() -> FrontendSpec {
         frontend(vec![
             json!({

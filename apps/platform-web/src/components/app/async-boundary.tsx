@@ -24,10 +24,17 @@ export function useObservedPolling<T>(load: () => Promise<T>, intervalMs = 0) {
   return { data, error, loading, reload, observedAt };
 }
 
-/** Stale means "the newest observation is older than two polling rounds" — never a timer. */
+/**
+ * How many polling intervals a payload may age before it counts as stale. A poll that hits
+ * the wall twice still leaves headroom for one slow response; the third interval is already
+ * late enough that "we saw it recently" would be a guess.
+ */
+export const STALE_AFTER_INTERVALS = 2.5;
+
+/** Stale means "the newest observation is older than {@link STALE_AFTER_INTERVALS} polling rounds" — never a timer. */
 export function isStale(observedAt: string | null, intervalMs: number): boolean {
   if (!observedAt) return false;
-  return Date.now() - new Date(observedAt).getTime() > intervalMs * 2.5;
+  return Date.now() - new Date(observedAt).getTime() > intervalMs * STALE_AFTER_INTERVALS;
 }
 
 type AsyncState = 'loading' | 'ready' | 'empty' | 'error' | 'forbidden' | 'conflict';
