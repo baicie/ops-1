@@ -35,8 +35,13 @@ function navItem(page: Page) {
 test.describe.configure({ mode: 'serial' });
 
 test('a visitor with no stored preference lands on Chinese', async ({ browser }) => {
-  // No storage state: this is what a first-time visitor gets.
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  // Playwright merges the config's `use` into browser.newContext(), so an "empty"
+  // context still carries the pinned storage state. Clear it explicitly: that is what a
+  // first-time visitor actually gets.
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    storageState: { cookies: [], origins: [] },
+  });
   const page = await context.newPage();
   await login(page);
 
@@ -74,7 +79,10 @@ test('the pinned English locale is what the older specs see, and it switches bac
 });
 
 test('both locales stay inside a 390px viewport', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    storageState: { cookies: [], origins: [] },
+  });
   const page = await context.newPage();
   await login(page);
 
