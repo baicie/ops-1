@@ -212,7 +212,10 @@ test('out-of-contract contributions are dropped, logged, and never answer a host
   await page.goto('/admin');
   await expect(page).toHaveURL((url) => url.pathname === '/admin/overview');
   await expect(page.getByTestId('extension-rejected')).toHaveCount(0);
-  await expect(page.locator('a[href="/admin/nodes"]')).toBeVisible();
+  // Scoped to the sidebar: /admin/nodes is linked from the nav, from a module card's "open"
+  // action and from a metric, so an unscoped locator matches three elements and strict mode
+  // fails on a page that is behaving correctly.
+  await expect(page.locator('.admin-sidebar a[href="/admin/nodes"]')).toBeVisible();
 
   // (c) A contribution the server rejected is never mounted, even though it arrived well formed.
   await expect(page.locator(`a[href="${FLAGGED_PAGE}"]`)).toHaveCount(0);

@@ -37,21 +37,30 @@ interface WorkspaceNavItem {
   end?: boolean;
 }
 
+/**
+ * Three business groups, and nothing from the console's vocabulary in them: no Node, no
+ * Publisher, no OCI, no plugin installation, no deployment. The rail is the first thing that
+ * has to read as a different product from `/admin`, because it is the one surface a business
+ * user sees on every visit.
+ */
 const WORKSPACE_NAV_GROUPS: Array<{ id: SurfaceNavGroup; labelKey: MessageKey }> = [
   { id: 'work', labelKey: 'nav.section.work' },
   { id: 'discover', labelKey: 'nav.section.discover' },
+  { id: 'results', labelKey: 'nav.section.results' },
 ];
 
 /** Home is the only workspace destination that is not a capability (pages/workspace registry). */
 const WORKSPACE_NAV_ITEMS: WorkspaceNavItem[] = [
   { id: 'home', to: '/app/home', labelKey: 'workspace.nav.home', icon: 'overview', group: 'work', end: true },
-  ...SURFACE_CAPABILITY_ORDER.map((capability) => ({
-    id: capability,
-    to: SURFACE_CAPABILITIES[capability].to,
-    labelKey: SURFACE_CAPABILITIES[capability].labelKey,
-    icon: SURFACE_CAPABILITIES[capability].icon,
-    group: SURFACE_CAPABILITIES[capability].navGroup,
-  })),
+  ...SURFACE_CAPABILITY_ORDER
+    .filter((capability) => SURFACE_CAPABILITIES[capability].inNavigation)
+    .map((capability) => ({
+      id: capability,
+      to: SURFACE_CAPABILITIES[capability].to,
+      labelKey: SURFACE_CAPABILITIES[capability].labelKey,
+      icon: SURFACE_CAPABILITIES[capability].icon,
+      group: SURFACE_CAPABILITIES[capability].navGroup,
+    })),
 ];
 
 const TITLES: Array<{ test: RegExp; key: MessageKey }> = [
@@ -103,7 +112,7 @@ function WorkspaceSidebar({ compact, menuButtonRef }: { compact: boolean; menuBu
 
       <nav className="nav">
         {WORKSPACE_NAV_GROUPS.map((group) => (
-          <SidebarGroup key={group.id} label={t(group.labelKey)}>
+          <SidebarGroup key={group.id} label={t(group.labelKey)} className="nav-group-business">
             {WORKSPACE_NAV_ITEMS.filter((item) => item.group === group.id).map((item) => (
               <SidebarItem
                 key={item.id}

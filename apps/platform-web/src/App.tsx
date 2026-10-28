@@ -15,7 +15,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { AdminShell } from './shells/admin/AdminShell';
 import { WorkspaceShell } from './shells/workspace/WorkspaceShell';
 import { ForbiddenPage } from './shells/surface/SurfaceChrome';
-import { WorkspaceHomePage, SurfaceNotYetPage } from './pages/workspace';
+import { IncidentWorkspacePage, WorkspaceHomePage, SurfaceNotYetPage } from './pages/workspace';
 import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
 import { PluginsPage } from './pages/Plugins';
@@ -166,7 +166,8 @@ export function App() {
                     <Route path="/app" element={<WorkspaceShell />}>
                       <Route index element={<Navigate to="/app/home" replace />} />
                       <Route path="home" element={<WorkspaceHomePage />} />
-                      <Route path="incidents" element={<SurfaceNotYetPage capability="incidents" />} />
+                      {/* G07: the absence banner plus the investigation layout it will use. */}
+                      <Route path="incidents" element={<IncidentWorkspacePage />} />
                       <Route path="investigations" element={<SurfaceNotYetPage capability="investigations" />} />
                       <Route path="observability" element={<SurfaceNotYetPage capability="observability" />} />
                       <Route path="resources" element={<SurfaceNotYetPage capability="resources" />} />

@@ -1169,3 +1169,112 @@ details.panel.advanced > summary { padding: 14px 18px; }
   .notice-action { margin-left: 0; }
 }
 
+
+/* ---------------------------------------------------------------------------
+ * G07 - Business Workspace
+ *
+ * Two things are styled here: the home task space (four areas that state what they are
+ * waiting for) and the desktop-first investigation layout (three regions that are empty
+ * slots). Both reuse the token set above - no second palette, no second type scale.
+ * ------------------------------------------------------------------------- */
+
+.task-space { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.task-space-head h2 { font-size: var(--ow-type-lg); font-weight: 650; letter-spacing: -.01em; }
+.task-space-head p { margin-top: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-sm); max-width: 820px; }
+.task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; min-width: 0; }
+.task-panel { display: flex; flex-direction: column; min-width: 0; }
+.task-panel .panel-head { padding: 14px 16px; }
+.task-panel .panel-head h3 { font-size: var(--ow-type-base); font-weight: 650; letter-spacing: -.01em; }
+.task-panel .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 3px; }
+.task-panel .business-state { border-top: 0; }
+.task-link { color: var(--ow-accent); font-size: var(--ow-type-sm); font-weight: 600; }
+.task-scope { display: block; margin-top: 6px; }
+
+/* One state, one shape: name + what is being looked at + the only possible action. */
+.business-state { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; padding: 14px 16px; background: var(--ow-surface-2); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); min-width: 0; }
+.task-panel > .business-state { margin: 0; border: 0; border-top: 1px solid var(--ow-border); border-radius: 0 0 var(--ow-radius-md) var(--ow-radius-md); flex: 1; }
+.business-state > .status-indicator { flex: none; }
+.business-state-copy { flex: 1 1 200px; min-width: 0; }
+.business-state-title { font-size: var(--ow-type-base); font-weight: 600; color: var(--ow-text); }
+.business-state-detail { margin-top: 3px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); overflow-wrap: anywhere; }
+.business-state-action { flex: none; }
+.business-state[data-state="forbidden"] { background: var(--ow-danger-soft); border-color: color-mix(in srgb, var(--ow-danger) 32%, var(--ow-border)); }
+.business-state[data-state="unavailable"], .business-state[data-state="notFound"] { border-style: dashed; }
+
+.business-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0; }
+.business-card-slot { display: flex; flex-direction: column; gap: 8px; padding: 15px 16px; min-width: 0; border-right: 1px solid var(--ow-border); }
+.business-card-slot:last-child { border-right: 0; }
+.business-card-slot h3 { font-size: var(--ow-type-base); font-weight: 650; }
+.business-card-hint { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.business-card { min-width: 0; }
+.business-card > .business-state { background: var(--ow-surface); }
+.business-surface-card { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--ow-border); border-radius: 6px; color: var(--ow-text); }
+.business-surface-card:hover { background: var(--ow-surface-2); text-decoration: none; }
+.business-surface-card div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.business-surface-card strong { font-size: var(--ow-type-base); }
+.business-surface-card span { color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
+.business-surface-card svg:last-child { margin-left: auto; color: var(--ow-text-muted); }
+.business-entry-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.business-entry-list li { min-width: 0; }
+.business-entry-list a { display: inline-flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 5px; font-size: var(--ow-type-sm); overflow-wrap: anywhere; }
+.business-entry-list a:hover { background: var(--ow-surface-2); text-decoration: none; }
+.business-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 4px 16px; margin: 0; padding: 2px 0 0; }
+.business-kv div { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px dashed var(--ow-border); min-width: 0; }
+.business-kv dt { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.business-kv dd { margin: 0; font-size: var(--ow-type-sm); color: var(--ow-text); overflow-wrap: anywhere; }
+.business-card-slot .callout { margin: 0; }
+
+.capability-status-list { list-style: none; margin: 0; padding: 4px 18px 14px; }
+.capability-status-list li { display: grid; grid-template-columns: 18px minmax(0, 9rem) minmax(0, 7rem) minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--ow-border); font-size: var(--ow-type-sm); }
+.capability-status-list li:last-child { border-bottom: 0; }
+.capability-status-list li > svg { color: var(--ow-text-muted); align-self: center; }
+.capability-status-list a { font-size: var(--ow-type-base); color: var(--ow-text); font-weight: 550; }
+.capability-status-code { justify-self: start; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ow-text-secondary); background: var(--ow-surface-2); border: 1px dashed var(--ow-border-strong); border-radius: 4px; padding: 1px 6px; }
+.capability-status-missing { color: var(--ow-text-muted); overflow-wrap: anywhere; }
+
+/* Investigation workspace: three regions, desktop first, then two, then one. */
+.investigation-layout { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr) minmax(0, 300px); gap: 12px; padding: 14px 16px 18px; min-width: 0; }
+.investigation-notice { grid-column: 1 / -1; }
+.investigation-region { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); background: var(--ow-surface); overflow: hidden; }
+.investigation-region-head { padding: 11px 13px; border-bottom: 1px solid var(--ow-border); background: var(--ow-surface-2); }
+.investigation-region-head h3 { font-size: var(--ow-type-sm); font-weight: 700; letter-spacing: .01em; }
+.investigation-region-head p { margin-top: 3px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); overflow-wrap: anywhere; }
+.investigation-region-body { flex: 1; display: flex; min-width: 0; }
+.investigation-slot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; flex: 1; margin: 10px; padding: 22px 14px; min-height: 148px; text-align: center; border: 1.5px dashed var(--ow-border-strong); border-radius: var(--ow-radius-md); color: var(--ow-text-muted); }
+.investigation-slot-mark { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--ow-surface-2); border: 1px solid var(--ow-border); }
+.investigation-slot-title { font-size: var(--ow-type-sm); font-weight: 650; color: var(--ow-text-secondary); }
+.investigation-slot-line { font-size: var(--ow-type-xs); line-height: 1.45; max-width: 280px; overflow-wrap: anywhere; }
+
+@media (max-width: 1100px) {
+  .investigation-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
+  /* The detail region keeps a full row instead of shrinking: it is the region that grows. */
+  .investigation-region[data-region="detail"] { grid-column: 1 / -1; }
+  .business-card-slot { border-right: 0; border-bottom: 1px solid var(--ow-border); }
+  .business-card-slot:last-child { border-bottom: 0; }
+}
+@media (max-width: 760px) {
+  .task-grid { grid-template-columns: minmax(0, 1fr); }
+  .investigation-layout { grid-template-columns: minmax(0, 1fr); }
+  .investigation-region[data-region="detail"] { grid-column: auto; }
+  .investigation-slot { min-height: 120px; }
+  .capability-status-list { padding: 4px 14px 12px; }
+  .capability-status-list li { grid-template-columns: 18px minmax(0, 1fr); row-gap: 4px; }
+  .capability-status-code, .capability-status-missing { grid-column: 2; }
+}
+
+
+/* The /403 page is deliberately shell-less, so it cannot borrow the panel or header rules the
+   two shells provide. It had no rules of its own and rendered as unstyled text with the action
+   buttons overlapping the description. These four rules are the minimum that makes an
+   unauthenticated-adjacent page legible without giving it a navigation it must not have. */
+.forbidden-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: var(--ow-bg);
+}
+.forbidden-page .page-stack { width: 100%; max-width: 640px; }
+.panel-pad { padding: 18px 20px; display: grid; gap: 14px; }
+.forbidden-page .page-actions { display: flex; flex-wrap: wrap; gap: 10px; }
