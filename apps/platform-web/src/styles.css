@@ -1027,10 +1027,14 @@ details.panel.advanced > summary { padding: 14px 18px; }
 .topbar-command svg { flex: none; }
 .topbar-command-text { white-space: nowrap; }
 .kbd { font-family: inherit; font-size: 10px; line-height: 1; padding: 2px 4px; border: 1px solid var(--ow-border-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--ow-surface); color: var(--ow-text-secondary); }
-.user-menu-soon { display: flex; align-items: flex-start; gap: 8px; padding: 8px 9px; border-radius: 5px; color: var(--ow-text-muted); cursor: not-allowed; }
-.user-menu-soon-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.user-menu-soon-copy strong { font-size: var(--ow-type-sm); font-weight: 600; color: var(--ow-text-secondary); }
-.user-menu-soon-copy small { font-size: 10px; color: var(--ow-text-muted); }
+/* Surface switcher: a menu row that is a Link, so switching shells never reloads the page. */
+.user-menu-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 8px 9px; border-radius: 5px; color: var(--ow-text); }
+.user-menu-item:hover { background: var(--ow-surface-2); text-decoration: none; }
+.user-menu-item svg { flex: none; margin-top: 2px; color: var(--ow-text-muted); }
+.user-menu-item-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.user-menu-item-copy strong { font-size: var(--ow-type-sm); font-weight: 600; }
+.user-menu-item-copy small { font-size: 10px; color: var(--ow-text-muted); }
+.user-menu-surface { align-self: flex-start; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ow-accent); }
 .user-menu-sep { height: 1px; margin: 5px 4px; background: var(--ow-border); }
 
 /* Command palette (built on the existing dialog/sheet primitives). */

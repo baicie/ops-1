@@ -27,7 +27,24 @@ interface ExtensionContextValue {
 
 const ExtensionContext = createContext<ExtensionContextValue | null>(null);
 
-const SHELL_RESERVED = ['/plugins', '/nodes', '/activity', '/access', '/settings', '/ops-center', '/instances'];
+/**
+ * Paths a plugin may never own. `/admin` and `/app` are the surface roots from G04; the
+ * pre-G04 paths stay listed because the compatibility table still answers them, which
+ * would silently shadow a contribution registered there.
+ */
+const SHELL_RESERVED = ['/admin', '/app', '/plugins', '/nodes', '/activity', '/access', '/settings', '/ops-center', '/instances'];
+
+/**
+ * A contribution declares a shell-relative path (`/ext/acme/catalog`); the surface shell
+ * mounts it under `/admin` or `/app`. Matching and linking therefore work on the path
+ * with the surface prefix removed - plugin authors never write a surface prefix.
+ */
+const SURFACE_PREFIX = /^\/(?:admin|app)(?=\/|$)/;
+
+export function withoutSurfacePrefix(pathname: string): string {
+  const stripped = pathname.replace(SURFACE_PREFIX, '');
+  return stripped === '' ? '/' : stripped;
+}
 
 function loadScript(src: string, t: Translator): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -131,6 +148,8 @@ export function useExtensions() {
 
 export function ExtensionNavigation() {
   const { extensions, loaded } = useExtensions();
+  const { pathname } = useLocation();
+  const prefix = pathname.startsWith('/admin') ? '/admin' : '';
   const items: Array<{ path: string; label: string; pluginId: string }> = [];
   for (const extension of extensions) {
     for (const contribution of extension.contributions) {
@@ -141,7 +160,7 @@ export function ExtensionNavigation() {
       items.push({ path: contribution.path, label, pluginId: extension.pluginId });
     }
   }
-  return <>{items.map((item) => <Link key={`${item.pluginId}:${item.path}`} to={item.path} className="nav-extension">{item.label}</Link>)}</>;
+  return <>{items.map((item) => <Link key={`${item.pluginId}:${item.path}`} to={prefix + item.path} className="nav-extension">{item.label}</Link>)}</>;
 }
 
 export function ExtensionRoute() {
@@ -155,8 +174,9 @@ export function ExtensionRoute() {
       .filter((contribution) => contribution.kind === 'route.page.v1')
       .map((contribution) => ({ extension, contribution })),
   );
+  const contributionPath = withoutSurfacePrefix(location.pathname);
   const match = candidates
-    .filter(({ contribution }) => location.pathname === contribution.path || location.pathname.startsWith(contribution.path + '/'))
+    .filter(({ contribution }) => contributionPath === contribution.path || contributionPath.startsWith(contribution.path + '/'))
     .sort((a, b) => b.contribution.path.length - a.contribution.path.length)[0];
   if (!match) {
     return <EmptyState icon="plugins" title={t('extensions.empty.routeNotFound.title')} description={t('extensions.empty.routeNotFound.description')} />;

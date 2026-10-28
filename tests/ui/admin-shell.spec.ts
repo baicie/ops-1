@@ -91,8 +91,8 @@ test('the sidebar collapses to an icon rail, keeps tooltips and remembers the st
   expect(await page.evaluate(() => localStorage.getItem('opsweave-sidebar-collapsed'))).toBe('true');
 
   // Icon-only: the label leaves the visual tree but stays as the accessible name.
-  await expect(page.locator('.admin-sidebar a[href="/nodes"] .nav-link-label')).toBeHidden();
-  await page.locator('.admin-sidebar a[href="/nodes"]').hover();
+  await expect(page.locator('.admin-sidebar a[href="/admin/nodes"] .nav-link-label')).toBeHidden();
+  await page.locator('.admin-sidebar a[href="/admin/nodes"]').hover();
   await expect(page.getByRole('tooltip')).toContainText('节点');
 
   // Persisted across a full reload, and reversible.
@@ -151,7 +151,7 @@ test('the 390 layout keeps the drawer parked, the theme switchable and the page 
   await expect(sidebar).toHaveAttribute('data-drawer', 'true');
   // The nav link exists at phone width even while the drawer is closed: the shell never
   // unmounts navigation, so a closed drawer can not drop the current page from the DOM.
-  await expect(page.locator('.admin-sidebar a[href="/nodes"]')).toHaveCount(1);
+  await expect(page.locator('.admin-sidebar a[href="/admin/nodes"]')).toHaveCount(1);
   await noPageOverflow(page, '390 closed drawer');
 
   await useTheme(page, 'dark');
@@ -192,21 +192,25 @@ test('the pre-G02 shell contracts are preserved', async ({ page }) => {
   await expect(page.locator('select[data-testid="language-switcher"]')).toBeVisible();
   // tests/ui/i18n-locale.spec.ts locates a nav item by href and may match page content too,
   // so exactly one hit must come from the navigation rail itself.
-  await expect(page.locator('.admin-sidebar a[href="/nodes"]')).toHaveCount(1);
+  await expect(page.locator('.admin-sidebar a[href="/admin/nodes"]')).toHaveCount(1);
   // One navigation landmark, one skip link, one main region.
   await expect(page.locator('aside.sidebar[aria-label]')).toHaveCount(1);
   await expect(page.locator('a.skip-link')).toHaveAttribute('href', '#main-content');
   await expect(page.locator('main#main-content')).toHaveCount(1);
   // Ten destinations, unchanged from the pre-G02 navigation, and no invented route.
   await expect(page.locator('.admin-sidebar .nav-link')).toHaveCount(10);
-  await expect(page.locator('.admin-sidebar a[href="/deployments"]')).toHaveCount(0);
+  await expect(page.locator('.admin-sidebar a[href="/admin/deployments"]')).toHaveCount(0);
   // The health pill keeps its pre-G02 semantics.
   await expect(page.getByTestId('health-pill')).toBeVisible();
   // Theme and account controls keep their roles and accessible names.
   await expect(page.getByTestId('theme-toggle')).toHaveAttribute('aria-label', /theme/i);
   await page.getByTestId('user-menu-trigger').click();
-  await expect(page.getByTestId('surface-switcher-placeholder')).toHaveAttribute('aria-disabled', 'true');
-  await expect(page.locator('.user-menu [role="menuitem"]')).toHaveCount(3);
+  await expect(page.getByTestId('user-menu-trigger')).toHaveAttribute('aria-expanded', 'true');
+  // G04 replaced the aria-disabled "arrives later" placeholder with the real surface switch.
+  // Whether that entry renders depends on the server grant, which this spec never stubs:
+  // tests/ui/dual-surface.spec.ts owns the grant-dependent behaviour.
+  await expect(page.getByTestId('surface-switcher-placeholder')).toHaveCount(0);
+  await expect(page.locator('.user-menu [role="menuitem"]')).not.toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.locator('.user-menu')).toHaveCount(0);
 });

@@ -1,6 +1,22 @@
 import type { MessageKey } from '../../i18n';
 
-/** The two consoles the design pack defines. Only ADMIN exists as a shell in this round. */
+/**
+ * Every admin destination now lives under the /admin prefix (G04); the pre-G04 paths are
+ * answered by the compatibility table in src/surface.tsx.
+ */
+export const ADMIN_SURFACE_PREFIX = '/admin';
+
+/**
+ * Strips the shell prefix so path matching stays readable. `/admin` itself maps to `/`,
+ * which keeps every rule below identical to its pre-G04 form.
+ */
+export function adminRelativePath(pathname: string): string {
+  if (pathname === ADMIN_SURFACE_PREFIX) return '/';
+  if (pathname.startsWith(ADMIN_SURFACE_PREFIX + '/')) return pathname.slice(ADMIN_SURFACE_PREFIX.length);
+  return pathname;
+}
+
+/** Which shell a destination belongs to; declared in the metadata, never guessed per page. */
 export type AdminSurface = 'admin';
 
 export type AdminNavGroupId = 'platform' | 'runtime' | 'security';
@@ -40,32 +56,33 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
  * yet, and a menu entry that opens nothing is a lie in the UI.
  */
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
-  { id: 'overview', to: '/', labelKey: 'nav.overview', icon: 'overview', group: 'platform', surface: 'admin', end: true },
-  { id: 'plugins', to: '/plugins', labelKey: 'nav.plugins', icon: 'plugins', group: 'platform', surface: 'admin' },
-  { id: 'nodes', to: '/nodes', labelKey: 'nav.nodes', icon: 'nodes', group: 'platform', surface: 'admin' },
-  { id: 'pipelines', to: '/pipelines', labelKey: 'nav.pipelines', icon: 'pipeline', group: 'runtime', surface: 'admin' },
-  { id: 'jobs', to: '/jobs', labelKey: 'nav.jobs', icon: 'clock', group: 'runtime', surface: 'admin' },
-  { id: 'governance', to: '/governance', labelKey: 'nav.governance', icon: 'shield', group: 'runtime', surface: 'admin' },
-  { id: 'access', to: '/access', labelKey: 'nav.access', icon: 'access', group: 'security', surface: 'admin' },
-  { id: 'activity', to: '/activity', labelKey: 'nav.activity', icon: 'activity', group: 'security', surface: 'admin' },
-  { id: 'settings', to: '/settings', labelKey: 'nav.settings', icon: 'settings', group: 'security', surface: 'admin', end: true },
-  { id: 'opsCenter', to: '/ops-center', labelKey: 'nav.opsCenter', icon: 'ops', group: 'security', surface: 'admin' },
+  { id: 'overview', to: '/admin/overview', labelKey: 'nav.overview', icon: 'overview', group: 'platform', surface: 'admin', end: true },
+  { id: 'plugins', to: '/admin/plugins', labelKey: 'nav.plugins', icon: 'plugins', group: 'platform', surface: 'admin' },
+  { id: 'nodes', to: '/admin/nodes', labelKey: 'nav.nodes', icon: 'nodes', group: 'platform', surface: 'admin' },
+  { id: 'pipelines', to: '/admin/pipelines', labelKey: 'nav.pipelines', icon: 'pipeline', group: 'runtime', surface: 'admin' },
+  { id: 'jobs', to: '/admin/jobs', labelKey: 'nav.jobs', icon: 'clock', group: 'runtime', surface: 'admin' },
+  { id: 'governance', to: '/admin/governance', labelKey: 'nav.governance', icon: 'shield', group: 'runtime', surface: 'admin' },
+  { id: 'access', to: '/admin/access', labelKey: 'nav.access', icon: 'access', group: 'security', surface: 'admin' },
+  { id: 'activity', to: '/admin/activity', labelKey: 'nav.activity', icon: 'activity', group: 'security', surface: 'admin' },
+  { id: 'settings', to: '/admin/settings', labelKey: 'nav.settings', icon: 'settings', group: 'security', surface: 'admin', end: true },
+  { id: 'opsCenter', to: '/admin/ops-center', labelKey: 'nav.opsCenter', icon: 'ops', group: 'security', surface: 'admin' },
 ];
 
 /** Document title for the current route; unchanged mapping from the pre-G02 Layout. */
 export function titleKeyFor(pathname: string): MessageKey {
-  if (pathname === '/') return 'page.overview';
-  if (pathname.startsWith('/plugins')) return 'page.plugins';
-  if (pathname.startsWith('/pipelines')) return pathname.includes('/editor') ? 'page.pipelineStudio' : 'page.pipelines';
-  if (pathname.startsWith('/jobs')) return 'page.jobs';
-  if (pathname.startsWith('/nodes')) return 'page.nodes';
-  if (pathname.startsWith('/governance')) return 'page.governance';
-  if (pathname.startsWith('/activity')) return 'page.activity';
-  if (pathname.startsWith('/access')) return 'page.access';
-  if (pathname.startsWith('/settings')) return 'page.settings';
-  if (pathname.startsWith('/instances')) return 'page.instanceLogs';
-  if (pathname.startsWith('/ops-center')) return 'page.opsCenter';
-  if (pathname.startsWith('/ext/')) return 'page.extension';
+  const path = adminRelativePath(pathname);
+  if (path === '/') return 'page.overview';
+  if (path.startsWith('/plugins')) return 'page.plugins';
+  if (path.startsWith('/pipelines')) return path.includes('/editor') ? 'page.pipelineStudio' : 'page.pipelines';
+  if (path.startsWith('/jobs')) return 'page.jobs';
+  if (path.startsWith('/nodes')) return 'page.nodes';
+  if (path.startsWith('/governance')) return 'page.governance';
+  if (path.startsWith('/activity')) return 'page.activity';
+  if (path.startsWith('/access')) return 'page.access';
+  if (path.startsWith('/settings')) return 'page.settings';
+  if (path.startsWith('/instances')) return 'page.instanceLogs';
+  if (path.startsWith('/ops-center')) return 'page.opsCenter';
+  if (path.startsWith('/ext/')) return 'page.extension';
   return 'app.brand';
 }
 
@@ -97,15 +114,17 @@ function shorten(segment: string): string {
  * its trail, and an unknown deep link still renders a truthful path.
  */
 export function breadcrumbTrail(pathname: string): AdminBreadcrumbNode[] {
-  const segments = pathname.split('/').filter(Boolean);
-  if (segments.length === 0) return [{ labelKey: 'page.overview', to: '/' }];
-  const top = ADMIN_NAV_ITEMS.find((item) => item.to === '/' + segments[0]);
+  const segments = adminRelativePath(pathname).split('/').filter(Boolean);
+  const absolute = (parts: string[]) => ADMIN_SURFACE_PREFIX + '/' + parts.join('/');
+  if (segments.length === 0) return [{ labelKey: 'page.overview', to: '/admin/overview' }];
+  const top = ADMIN_NAV_ITEMS.find((item) => item.to === absolute([segments[0]]));
   const nodes: AdminBreadcrumbNode[] = [
-    { labelKey: top?.labelKey, text: top ? undefined : shorten(decodeURIComponent(segments[0])), to: '/' + segments[0] },
+    { labelKey: top?.labelKey, text: top ? undefined : shorten(decodeURIComponent(segments[0])), to: absolute([segments[0]]) },
   ];
   for (let index = 1; index < segments.length; index += 1) {
-    const to = '/' + segments.slice(0, index + 1).join('/');
-    const known = CHILD_TITLE_KEYS.find((entry) => entry.test.test(to));
+    const to = absolute(segments.slice(0, index + 1));
+    const relative = '/' + segments.slice(0, index + 1).join('/');
+    const known = CHILD_TITLE_KEYS.find((entry) => entry.test.test(relative));
     nodes.push({
       labelKey: known?.key,
       text: known ? undefined : shorten(decodeURIComponent(segments[index])),
