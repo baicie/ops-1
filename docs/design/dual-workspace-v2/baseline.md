@@ -92,3 +92,23 @@
 前端**已具备**扎实基础（12 原语、880 i18n 键、455 令牌、部分页面已迁 shadcn），**缺的**是 Shell 架构层：双 Surface 路由、Command Palette、Sidebar 复合件、Surface Switcher、插件 surface 合同、业务 Workspace。
 
 因此 G01 起的工作是**架构与体验层**，不是重写组件。
+
+## 9. 旧版视觉基线（真实截图，非现成图片）
+
+Staging 当前 served SHA：`bd21a9ef044136924e9c31efa40e75efc7b8485a`（`/api/v1/version` 实测，本轮隧道抓取）。
+
+| 截图 | 说明 |
+|---|---|
+| `artifacts/ui-baseline/v1-overview-1440-light.png` | 平台概览（当前单 Shell，无 Surface 概念） |
+| `artifacts/ui-baseline/v1-overview-1440-dark.png` | 暗色 |
+| `artifacts/ui-baseline/v1-overview-390-light.png` | 390 宽（侧栏收起为抽屉） |
+| `artifacts/ui-baseline/v1-plugins-{1440,390}-light.png` | 插件列表（shadcn Table 已迁） |
+| `artifacts/ui-baseline/v1-nodes-{1440,390}-light.png` | 节点列表 |
+| `artifacts/ui-baseline/v1-governance-{1440,390}-light.png` | 治理 |
+
+基线观察（G01/G02 的改进依据）：
+1. 侧栏是**扁平 10 项**，没有分组、没有折叠、没有 Surface 概念；扩展插件项直接混在业务导航里。
+2. 顶栏只有「健康胶囊 + 语言 + 用户」，**没有 Command Palette、没有面包屑、没有 Surface 切换器**。
+3. 页面标题区做法不统一（有的用 `PageHeader`，有的自绘），KPI 卡片与事件列表间距不一致。
+4. 事件流里 `ACCEPTED` 等状态仍是原始码药丸，视觉上比中文状态弱。
+5. 版本角标固定在最底部，信息密度与可读性都偏弱。
