@@ -17,7 +17,8 @@ import { dirname, extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Frozen by tests: Playwright specs assert English copy, so `en` must stay the default. */
-const DEFAULT_LOCALE = 'en';
+// Must match DEFAULT_LOCALE in apps/platform-web/src/i18n/index.tsx.
+const DEFAULT_LOCALE = 'zh-CN';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE_ROOT = join(ROOT, 'apps', 'platform-web', 'src');

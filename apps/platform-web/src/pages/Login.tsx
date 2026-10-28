@@ -66,7 +66,7 @@ export function LoginPage() {
             <span className="field-label">{t('login.field.password')}</span>
             <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
           </label>
-          <button className="btn btn-primary btn-wide" disabled={busy}>{busy ? t('login.submitPending') : t('login.submit')}</button>
+          <button type="submit" data-testid="login-submit" className="btn btn-primary btn-wide" disabled={busy}>{busy ? t('login.submitPending') : t('login.submit')}</button>
           <p className="login-help">{t('login.help')}</p>
         </form>
       </section>

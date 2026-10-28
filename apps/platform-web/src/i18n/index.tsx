@@ -11,8 +11,8 @@ export type Locale = 'en' | 'zh-CN';
 /** Named interpolation values; placeholders are written as `{name}` in the catalog. */
 export type TranslateParams = Record<string, string | number>;
 
-/** The default locale is frozen: existing UI tests and screenshots assert English copy. */
-export const DEFAULT_LOCALE: Locale = 'en';
+/** First paint for a visitor with no stored preference: the product ships Chinese. */
+export const DEFAULT_LOCALE: Locale = 'zh-CN';
 
 export const SUPPORTED_LOCALES: readonly Locale[] = ['en', 'zh-CN'];
 
