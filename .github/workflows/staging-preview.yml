@@ -19,6 +19,11 @@ on:
         description: Full 40-character commit SHA whose image is already published to ghcr.io
         required: false
         type: string
+      skip_image_transfer:
+        description: Skip shipping the image over SSH (use when the exact SHA image is already on the host, e.g. after an out-of-band transfer)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -212,6 +217,8 @@ jobs:
           echo "host authenticated to ghcr.io as $GHCR_ACTOR"
 
       - name: Transfer the image to the host over SSH
+        if: ${{ inputs.skip_image_transfer != true }}
+        timeout-minutes: 15
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
@@ -223,6 +230,10 @@ jobs:
           # blob CDN stalls for minutes while the API itself answers. The runner
           # therefore hands the image over the SSH channel that already works.
           image="${IMAGE_REPO}:${TARGET_SHA}"
+          if ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect '$image' >/dev/null 2>&1"; then
+            echo "the host already holds $image; nothing to transfer"
+            exit 0
+          fi
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin
           docker pull "$image"
           docker save "$image" | gzip -1 | ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'gunzip | sudo docker load'
