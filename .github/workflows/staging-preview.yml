@@ -287,13 +287,20 @@ jobs:
     name: smoke the preview
     needs: deploy
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     if: always() && needs.deploy.result == 'success'
     environment:
       name: staging
       url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
+    env:
+      # Shared by every browser step below: one preview origin, one credential, one expected commit.
+      OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
+      # The commit this run built; staging-smoke.spec.ts fails when the preview does not serve it.
+      OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha }}
+      OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
+      OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -327,23 +334,89 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 
-      - name: Run the browser smoke against the preview
+      # Which job covers which spec file. The lists are literal file filters - never a substring
+      # guess and never --grep - and every spec under tests/ui/ is owned by exactly one job:
+      #   this job, "core paths"           staging-smoke, dual-surface, admin-shell
+      #   this job, "admin, plugin, i18n"  admin-pages, admin-polish, plugin-surfaces,
+      #                                    plugin-detail-tabs, business-workspace, overview-partial,
+      #                                    async-stale, i18n-locale, dialog-a11y
+      #   data-foundation.yml (seeded)     studio, visual-layout, data-foundation,
+      #                                    data-foundation-flows
+      - name: Playwright core paths (staging smoke, dual surface, admin shell)
+        id: core
         if: steps.mode.outputs.mode == 'playwright'
-        env:
-          OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
-          # The commit this run built; staging-smoke.spec.ts fails when the preview does not serve it.
-          OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha }}
-          OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
-          OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
-          set +e
-          pnpm --filter @opsweave/ui-tests exec playwright test staging-smoke.spec.ts
-          code=$?
-          set -e
-          printf '{"mode": "playwright", "suite": "tests/ui/staging-smoke.spec.ts", "base_url": "${OPSWEAVE_URL}", "exit_code": %s}\n' "$code" > artifacts/staging-preview/health.json
-          exit "$code"
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/core \
+            staging-smoke.spec.ts \
+            dual-surface.spec.ts \
+            admin-shell.spec.ts
+
+      # Runs even when the core step failed: a red core path must not silently drop the remaining
+      # nine specs. Both outcomes are recorded separately in the next step and in the PR comment.
+      - name: Playwright admin, plugin and i18n surfaces
+        id: surfaces
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          # A separate --output keeps a failed core trace from being overwritten by this run.
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/surfaces \
+            admin-pages.spec.ts \
+            admin-polish.spec.ts \
+            plugin-surfaces.spec.ts \
+            plugin-detail-tabs.spec.ts \
+            business-workspace.spec.ts \
+            overview-partial.spec.ts \
+            async-stale.spec.ts \
+            i18n-locale.spec.ts \
+            dialog-a11y.spec.ts
+
+      - name: Record the browser suite results
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        env:
+          CORE_OUTCOME: ${{ steps.core.outcome }}
+          SURFACES_OUTCOME: ${{ steps.surfaces.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          python3 - <<'PY'
+          import json, os
+
+          GROUPS = [
+              ("core",
+               os.environ.get("CORE_OUTCOME", ""),
+               ["staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts"]),
+              ("admin-plugin-i18n",
+               os.environ.get("SURFACES_OUTCOME", ""),
+               ["admin-pages.spec.ts", "admin-polish.spec.ts", "plugin-surfaces.spec.ts",
+                "plugin-detail-tabs.spec.ts", "business-workspace.spec.ts", "overview-partial.spec.ts",
+                "async-stale.spec.ts", "i18n-locale.spec.ts", "dialog-a11y.spec.ts"]),
+          ]
+
+          checks = [
+              {"name": name, "ok": outcome == "success",
+               "detail": "%s: %s" % (outcome or "not-run", ", ".join(files))}
+              for name, outcome, files in GROUPS
+          ]
+          ok = all(check["ok"] for check in checks)
+          payload = {
+              "mode": "playwright",
+              "base_url": os.environ.get("OPSWEAVE_URL", ""),
+              "ok": ok,
+              "checks": checks,
+              "suite_groups": [{"name": name, "outcome": outcome, "files": files}
+                               for name, outcome, files in GROUPS],
+              "exit_code": 0 if ok else 1,
+          }
+          with open("artifacts/staging-preview/health.json", "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, indent=2)
+              handle.write("\n")
+          print(json.dumps(payload, indent=2))
+          PY
 
       - name: Inline HTTP smoke (fallback)
         if: steps.mode.outputs.mode == 'http'

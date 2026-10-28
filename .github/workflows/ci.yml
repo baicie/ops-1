@@ -32,6 +32,18 @@ jobs:
       - run: pnpm --filter @opsweave/data-integration-web build
       - run: node --check plugins/data-catalog/backend/server.mjs
       - run: node --check plugins/data-integration/backend/server.mjs
+  # The vitest suite of apps/platform-web (src/**/*.test.ts) used to run nowhere: the web job
+  # above only typechecks and builds, so a green pipeline never proved a unit test passed. It is
+  # its own job so a red unit run is reported as such instead of hiding behind a build failure.
+  web-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @opsweave/platform-web test
   contracts:
     runs-on: ubuntu-latest
     steps:
