@@ -35,6 +35,8 @@ readonly RELEASES_DIR="$ROOT_DIR/releases"
 readonly BIN_DIR="$ROOT_DIR/bin"
 readonly GHCR_TOKEN_FILE="$ROOT_DIR/ghcr.token"
 readonly DEPLOY_DIR="$DATA_DIR/deployments"
+readonly LOCK_FILE="$DATA_DIR/deploy.lock"
+readonly LOCK_TIMEOUT="${OPSWEAVE_LOCK_TIMEOUT:-600}"
 readonly IMAGE_REPO="${OPSWEAVE_IMAGE_REPO:-$DEFAULT_IMAGE_REPO}"
 
 # Some clouds allow exactly one inbound port, so the preview port is host
@@ -1052,9 +1054,24 @@ print_running_release() {
   log "  /api/v1/version reports commit: ${SERVED_SHA:-<unknown>} ($SERVED_SHA_STATE)"
 }
 
+# Exactly one deployment may mutate this host at a time. A CI run and a manual run that
+# overlap both call `docker compose up`, and the interleaving can leave a service created
+# but never started (observed on 2026-10-28: the kernel sat in Created and the preview port
+# had no listener). The lock is held for the whole mutation; --status stays lock-free so
+# monitoring never blocks on an in-flight deploy.
+acquire_deploy_lock() {
+  command -v flock >/dev/null 2>&1 || die 1 "flock is required to serialise deployments but is not installed"
+  exec 9>"$LOCK_FILE" || die 1 "cannot open the deploy lock $LOCK_FILE"
+  if ! flock -w "$LOCK_TIMEOUT" 9; then
+    die 1 "another deployment still holds $LOCK_FILE after waiting ${LOCK_TIMEOUT}s; refusing to run two deployments against the same host"
+  fi
+  log "deploy lock acquired ($LOCK_FILE)"
+}
+
 cmd_deploy() {
   local sha="$1" previous_running="" rollback_target="" healthy=0 stamp
   preflight
+  acquire_deploy_lock
   DEPLOY_STARTED_AT="$(iso_now)"
   stamp="$DEPLOY_STARTED_AT"
   previous_running="$(current_sha || true)"
@@ -1230,6 +1247,7 @@ cmd_status() {
 cmd_rollback() {
   local previous current started
   preflight
+  acquire_deploy_lock
   previous="$(pointer_value previous)"
   current="$(current_sha || true)"
   if ! [[ "$previous" =~ $SHA_RE ]]; then

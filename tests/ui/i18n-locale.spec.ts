@@ -31,25 +31,25 @@ test('default locale is English and the switcher localises the shell permanently
 
   // Default must stay English so the rest of the suite keeps passing.
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-  await expect(page.locator('a[href="/nodes"]')).toContainText('Nodes');
+  await expect(page.locator('a[href="/nodes"]:visible').first()).toContainText('Nodes');
   await shoot(page, 'en-1440', 'light');
   await shoot(page, 'en-1440', 'dark');
 
   // Switch through the UI, not by writing localStorage directly.
   await page.selectOption('[data-testid="language-switcher"]', 'zh-CN');
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-  await expect(page.locator('a[href="/nodes"]')).toContainText('节点');
+  await expect(page.locator('a[href="/nodes"]:visible').first()).toContainText('节点');
   await shoot(page, 'zh-1440', 'light');
   await shoot(page, 'zh-1440', 'dark');
 
   // A reload must keep the chosen locale.
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-  await expect(page.locator('a[href="/nodes"]')).toContainText('节点');
+  await expect(page.locator('a[href="/nodes"]:visible').first()).toContainText('节点');
 
   // Reset so the persisted choice cannot leak into a developer's next run.
   await page.selectOption('[data-testid="language-switcher"]', 'en');
-  await expect(page.locator('a[href="/nodes"]')).toContainText('Nodes');
+  await expect(page.locator('a[href="/nodes"]:visible').first()).toContainText('Nodes');
 });
 
 test('both locales stay inside a 390px viewport', async ({ browser }) => {
@@ -57,12 +57,12 @@ test('both locales stay inside a 390px viewport', async ({ browser }) => {
   const page = await context.newPage();
   await login(page);
 
-  await expect(page.locator('a[href="/nodes"]')).toContainText('Nodes');
+  await expect(page.locator('a[href="/nodes"]:visible').first()).toContainText('Nodes');
   await shoot(page, 'en-390', 'light');
   await shoot(page, 'en-390', 'dark');
 
   await page.selectOption('[data-testid="language-switcher"]', 'zh-CN');
-  await expect(page.locator('a[href="/nodes"]')).toContainText('节点');
+  await expect(page.locator('a[href="/nodes"]:visible').first()).toContainText('节点');
   await shoot(page, 'zh-390', 'light');
   await shoot(page, 'zh-390', 'dark');
 
