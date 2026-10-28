@@ -212,15 +212,53 @@ test('the pre-G02 shell contracts are preserved', async ({ page }) => {
 });
 
 test('the admin shell matrix is captured at 1440/1024/390 in both themes and locales', async ({ page }) => {
+  // Twelve full-page captures, plus the palette and rail states, against a remote host. It
+  // runs in seconds when the interactions happen at 1440 (see the ordering note below), so this
+  // is headroom for a slow tunnel, not a way to hide a hang.
+  test.setTimeout(120_000);
   fs.mkdirSync(OUT, { recursive: true });
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page);
+
+  // The two interaction states are captured first, while the viewport is still 1440. Opening
+  // the palette after the loop below was unreliable: at 390 the palette renders through the
+  // sheet, and resizing the page back up left the shortcut handler bound to the sheet variant,
+  // so the fill waited forever on an input that never mounted.
+  const shots: string[] = [];
+  await useLocale(page, 'en');
+  await useTheme(page, 'light');
+  await page.goto('/');
+  // The shortcut is a window listener that mounts with the shell. Pressing it straight after a
+  // navigation races the mount, which showed up as a 120s wait for an input that never appeared
+  // when the whole file ran and never when this test ran alone. Wait for the shell, then press,
+  // and fall back to the trigger button so the capture does not depend on winning that race.
+  await expect(page.getByTestId('health-pill')).toBeVisible();
+  await page.keyboard.press('Control+k');
+  const opened = await page
+    .getByTestId('command-input')
+    .waitFor({ state: 'visible', timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!opened) await page.getByTestId('command-trigger').click();
+  await expect(page.getByTestId('command-input')).toBeVisible();
+  await page.getByTestId('command-input').fill('nodes');
+  await expect(page.getByTestId('command-option').first()).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, 'admin-shell-1440-en-light-command.png') });
+  shots.push(path.join(OUT, 'admin-shell-1440-en-light-command.png'));
+  await page.keyboard.press('Escape');
+
+  await page.getByTestId('sidebar-collapse').click();
+  await expect.poll(() => widthOf(page.locator('.admin-sidebar'))).toBe(64);
+  await page.screenshot({ path: path.join(OUT, 'admin-shell-1440-en-light-collapsed.png') });
+  shots.push(path.join(OUT, 'admin-shell-1440-en-light-collapsed.png'));
+  await page.getByTestId('sidebar-collapse').click();
+  await expect.poll(() => widthOf(page.locator('.admin-sidebar'))).toBe(240);
+
   const sizes = [
     [1440, 900],
     [1024, 800],
     [390, 844],
   ] as const;
-  const shots: string[] = [];
 
   for (const [width, height] of sizes) {
     await page.setViewportSize({ width, height });
@@ -242,24 +280,6 @@ test('the admin shell matrix is captured at 1440/1024/390 in both themes and loc
       }
     }
   }
-
-  // Two interaction states that a static matrix can not show.
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await useLocale(page, 'en');
-  await useTheme(page, 'light');
-  await page.goto('/');
-  await page.keyboard.press('Control+k');
-  await page.getByTestId('command-input').fill('nodes');
-  await expect(page.getByTestId('command-option').first()).toBeVisible();
-  await page.screenshot({ path: path.join(OUT, 'admin-shell-1440-en-light-command.png') });
-  shots.push(path.join(OUT, 'admin-shell-1440-en-light-command.png'));
-  await page.keyboard.press('Escape');
-
-  await page.getByTestId('sidebar-collapse').click();
-  await expect.poll(() => widthOf(page.locator('.admin-sidebar'))).toBe(64);
-  await page.screenshot({ path: path.join(OUT, 'admin-shell-1440-en-light-collapsed.png') });
-  shots.push(path.join(OUT, 'admin-shell-1440-en-light-collapsed.png'));
-  await page.getByTestId('sidebar-collapse').click();
 
   await useLocale(page, 'zh-CN');
   await page.setViewportSize({ width: 390, height: 844 });
