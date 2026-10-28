@@ -14,7 +14,7 @@ use crate::publishers;
 use crate::state::AppState;
 use crate::storage;
 use crate::users;
-use axum::extract::{DefaultBodyLimit, Request};
+use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -27,6 +27,10 @@ pub fn build(state: AppState) -> Router {
     let public = Router::new()
         .route("/livez", get(diagnostics::livez))
         .route("/readyz", get(diagnostics::readyz))
+        // Unauthenticated by design: a staging preview must be able to prove
+        // which build it serves before anyone signs in. The payload is a closed
+        // set of five fields, so it cannot become an environment dump.
+        .route("/api/v1/version", get(version))
         .route(
             "/api/v1/auth/login",
             post(auth::login).layer(DefaultBodyLimit::max(64 * 1024)),
@@ -263,6 +267,34 @@ pub fn build(state: AppState) -> Router {
     api.fallback_service(static_service).with_state(state)
 }
 
+/// Build identity served by `GET /api/v1/version`.
+///
+/// Exactly five fields: version, commitSha, buildTime, environment, startedAt.
+/// Anything that would leak configuration (DSN, keys, env dump) is deliberately
+/// absent and must stay absent.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildIdentity {
+    pub version: &'static str,
+    pub commit_sha: Option<String>,
+    pub build_time: Option<String>,
+    pub environment: &'static str,
+    pub started_at: String,
+}
+
+async fn version(State(state): State<AppState>) -> Json<BuildIdentity> {
+    let config = state.config.as_ref();
+    Json(BuildIdentity {
+        version: env!("CARGO_PKG_VERSION"),
+        commit_sha: config.build_sha.clone(),
+        build_time: config.build_time.clone(),
+        environment: config.environment.as_str(),
+        started_at: config
+            .started_at
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    })
+}
+
 async fn api_not_found() -> Response {
     (
         StatusCode::NOT_FOUND,
@@ -329,3 +361,30 @@ fn _method_marker(_: Method) {}
 
 #[allow(dead_code)]
 fn _auth_marker(_: AuthUser) {}
+
+#[cfg(test)]
+mod tests {
+    use super::BuildIdentity;
+
+    #[test]
+    fn version_payload_carries_exactly_the_five_contract_fields() {
+        let payload = BuildIdentity {
+            version: "9.9.9",
+            commit_sha: Some("0123456789abcdef0123456789abcdef01234567".to_string()),
+            build_time: None,
+            environment: "STAGING",
+            started_at: "2026-10-28T15:29:00Z".to_string(),
+        };
+        let value = serde_json::to_value(&payload).unwrap();
+        let object = value.as_object().unwrap();
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["buildTime", "commitSha", "environment", "startedAt", "version"]
+        );
+        assert!(object["buildTime"].is_null());
+        assert_eq!(object["environment"], "STAGING");
+        assert_eq!(object["version"], "9.9.9");
+    }
+}

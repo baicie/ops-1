@@ -7,6 +7,7 @@ import { ExtensionNavigation } from '../extensions';
 import type { Overview } from '../types';
 import { Icon } from './Icons';
 import { StatusBadge, TimeAgo } from './Ui';
+import { VersionBadge } from './VersionBadge';
 
 const coreNav = [
   { to: '/', label: 'Overview', icon: 'overview', end: true },
@@ -143,6 +144,7 @@ export function Layout() {
         <main id="main-content" className="main-content">
           <Outlet />
         </main>
+        <VersionBadge />
       </div>
     </div>
   );

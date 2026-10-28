@@ -1,3 +1,4 @@
+use chrono::{DateTime, SecondsFormat, Utc};
 use std::env;
 use std::path::PathBuf;
 
@@ -28,6 +29,14 @@ pub struct Config {
     #[allow(dead_code)]
     pub plugin_kernel_url: String,
     pub plugin_source_allowed_hosts: String,
+    /// Full 40-char lowercase commit SHA of the running build; absent when the
+    /// build did not record one.
+    pub build_sha: Option<String>,
+    /// RFC 3339 timestamp of the running build, normalized to UTC seconds.
+    pub build_time: Option<String>,
+    pub environment: Environment,
+    /// Wall-clock instant this process read its configuration, i.e. kernel start.
+    pub started_at: DateTime<Utc>,
 }
 
 impl Config {
@@ -79,12 +88,77 @@ impl Config {
                 "http://host.docker.internal:18181",
             ),
             plugin_source_allowed_hosts: env_string("OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS", ""),
+            build_sha: parse_build_sha(&env_string("OPSWEAVE_BUILD_SHA", "")),
+            build_time: parse_build_time(&env_string("OPSWEAVE_BUILD_TIME", "")),
+            environment: Environment::from_env(),
+            started_at: Utc::now(),
         }
     }
 
     pub fn secure_cookies(&self) -> bool {
         self.public_url.starts_with("https://")
     }
+}
+
+/// Deployment environment reported by `GET /api/v1/version`.
+///
+/// Only the four contract members are ever emitted; any other value is reported
+/// as UNKNOWN rather than echoed back to the browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Environment {
+    Staging,
+    Development,
+    Production,
+    Unknown,
+}
+
+impl Environment {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Staging => "STAGING",
+            Self::Development => "DEVELOPMENT",
+            Self::Production => "PRODUCTION",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    fn from_env() -> Self {
+        parse_environment(&env_string("OPSWEAVE_ENVIRONMENT", ""))
+    }
+}
+
+/// Case-insensitive mapping onto the contract members; anything else is UNKNOWN.
+fn parse_environment(raw: &str) -> Environment {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "STAGING" => Environment::Staging,
+        "DEVELOPMENT" => Environment::Development,
+        "PRODUCTION" => Environment::Production,
+        _ => Environment::Unknown,
+    }
+}
+
+/// A commit SHA is only trusted as a full lowercase 40-char git digest; anything
+/// else (branch name, tag, typo, injected junk) is reported as absent.
+fn parse_build_sha(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    let valid = value.len() == 40
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    valid.then(|| value.to_string())
+}
+
+/// `buildTime` must parse as RFC 3339; it is re-emitted in UTC so an
+/// unparsable or ambiguous value can never reach the browser.
+fn parse_build_time(raw: &str) -> Option<String> {
+    let value = raw.trim();
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|parsed| {
+            parsed
+                .with_timezone(&Utc)
+                .to_rfc3339_opts(SecondsFormat::Secs, true)
+        })
 }
 
 fn env_string(key: &str, default: &str) -> String {
@@ -118,4 +192,52 @@ fn env_i64(key: &str, default: i64) -> i64 {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_build_sha, parse_build_time, parse_environment, Environment};
+
+    const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn build_sha_requires_a_full_lowercase_hex_digest() {
+        assert_eq!(parse_build_sha(SHA).as_deref(), Some(SHA));
+        assert_eq!(parse_build_sha(&format!("  {SHA}\n")).as_deref(), Some(SHA));
+        assert_eq!(parse_build_sha(""), None);
+        assert_eq!(parse_build_sha("main"), None);
+        assert_eq!(parse_build_sha(&SHA.to_uppercase()), None);
+        assert_eq!(parse_build_sha(&SHA[..39]), None);
+        assert_eq!(parse_build_sha(&format!("{SHA}0")), None);
+        assert_eq!(parse_build_sha(&format!("{}z", &SHA[..39])), None);
+    }
+
+    #[test]
+    fn environment_maps_only_contract_members_and_is_case_insensitive() {
+        assert_eq!(parse_environment("production"), Environment::Production);
+        assert_eq!(parse_environment("Production"), Environment::Production);
+        assert_eq!(parse_environment("PRODUCTION"), Environment::Production);
+        assert_eq!(parse_environment("  production\n"), Environment::Production);
+        assert_eq!(parse_environment("staging"), Environment::Staging);
+        assert_eq!(parse_environment("Development"), Environment::Development);
+        assert_eq!(parse_environment(""), Environment::Unknown);
+        assert_eq!(parse_environment("prod"), Environment::Unknown);
+        assert_eq!(parse_environment("preview"), Environment::Unknown);
+        assert_eq!(Environment::Production.as_str(), "PRODUCTION");
+    }
+
+    #[test]
+    fn build_time_is_normalized_to_utc_or_dropped() {
+        assert_eq!(
+            parse_build_time("2026-10-28T15:29:00Z").as_deref(),
+            Some("2026-10-28T15:29:00Z")
+        );
+        assert_eq!(
+            parse_build_time("2026-10-28T23:29:00+08:00").as_deref(),
+            Some("2026-10-28T15:29:00Z")
+        );
+        assert_eq!(parse_build_time(""), None);
+        assert_eq!(parse_build_time("not-a-timestamp"), None);
+        assert_eq!(parse_build_time("2026-10-28"), None);
+    }
 }
