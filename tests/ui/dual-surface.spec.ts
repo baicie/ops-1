@@ -54,6 +54,13 @@ async function switchSurface(page: Page, target: 'admin' | 'workspace') {
 
 test.describe.configure({ mode: 'serial' });
 
+// Handlers here outlive the test: one can still be awaiting route.fetch when the context tears
+// down, and in a serial file Playwright blames the next test for it - which turned a passing run
+// on staging into 1 failed plus 2 did not run, with no product assertion involved.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
 test('an admin moves between the console and the workspace on one session', async ({ page }) => {
   const navigations = trackNavigations(page);
   await stubGrant(page, 'admin');
