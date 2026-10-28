@@ -316,8 +316,9 @@ pub async fn redeem_enrollment(
 
 pub async fn list_nodes(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
 ) -> AppResult<Json<Vec<NodeView>>> {
+    auth.require_operator()?;
     let rows = sqlx::query_as::<_, NodeRow>("SELECT * FROM kernel.nodes ORDER BY name")
         .fetch_all(&state.db)
         .await?;
@@ -348,9 +349,10 @@ pub async fn list_nodes(
 
 pub async fn get_node(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(node_id): Path<Uuid>,
 ) -> AppResult<Json<NodeView>> {
+    auth.require_operator()?;
     let row = fetch_node(&state, node_id).await?;
     let counts: (i64, i64) = sqlx::query_as(
         "SELECT count(*) FILTER (WHERE i.state='READY')::bigint, count(*)::bigint FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE i.node_id=$1 AND i.desired_action='START' AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')",
@@ -696,10 +698,11 @@ pub struct NodeResourceSampleView {
 
 pub async fn resource_history(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(node_id): Path<Uuid>,
     Query(query): Query<ResourceHistoryQuery>,
 ) -> AppResult<Json<Vec<NodeResourceSampleView>>> {
+    auth.require_operator()?;
     let _ = fetch_node(&state, node_id).await?;
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
     let resolution = query.resolution.as_deref().unwrap_or("raw");
@@ -781,9 +784,10 @@ pub async fn resource_history(
 
 pub async fn node_instances(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(node_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<serde_json::Value>>> {
+    auth.require_operator()?;
     let _ = fetch_node(&state, node_id).await?;
     let rows = sqlx::query_as::<
         _,
@@ -832,4 +836,130 @@ pub async fn node_instances(
             })
             .collect(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{get_node, list_nodes, node_instances, resource_history, ResourceHistoryQuery};
+    use crate::auth::AuthUser;
+    use crate::error::AppResult;
+    use crate::state::AppState;
+    use axum::body::Body;
+    use axum::extract::{Path, Query, State};
+    use axum::http::StatusCode;
+    use axum::routing::get;
+    use axum::Router;
+    use opsweave_contracts::Role;
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    /// The paths `routes.rs` wires for the platform maintenance node reads.
+    const PLATFORM_NODE_READ_PATHS: [&str; 4] = [
+        "/api/v1/nodes",
+        "/api/v1/nodes/{node_id}",
+        "/api/v1/nodes/{node_id}/instances",
+        "/api/v1/nodes/{node_id}/resource-history",
+    ];
+
+    fn auth_user(role: Role) -> AuthUser {
+        AuthUser {
+            user_id: Uuid::nil(),
+            email: "user@example.invalid".to_string(),
+            display_name: "Test User".to_string(),
+            role,
+            session_id: Uuid::nil(),
+            csrf_token: "csrf-token".to_string(),
+            via_cookie: false,
+        }
+    }
+
+    /// A pool that never dials: every gate under test decides before the first
+    /// query, so `cargo test` stays free of a live database.
+    fn state() -> AppState {
+        let db = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://opsweave.invalid:1/opsweave")
+            .expect("lazy pool");
+        AppState::new(crate::config::Config::from_env(), db, vec![0u8; 32]).expect("app state")
+    }
+
+    /// The handler bodies are reached with a viewer token: each must stop at the
+    /// `require_operator` gate before touching the database.
+    #[tokio::test]
+    async fn viewer_is_forbidden_from_every_platform_node_read() {
+        let state = state();
+        let viewer = auth_user(Role::Viewer);
+        let node_id = Uuid::nil();
+        let history = Query(ResourceHistoryQuery {
+            from: None,
+            to: None,
+            limit: None,
+            resolution: None,
+        });
+        let denied = [
+            list_nodes(State(state.clone()), viewer.clone()).await.err(),
+            get_node(State(state.clone()), viewer.clone(), Path(node_id))
+                .await
+                .err(),
+            node_instances(State(state.clone()), viewer.clone(), Path(node_id))
+                .await
+                .err(),
+            resource_history(State(state.clone()), viewer.clone(), Path(node_id), history)
+                .await
+                .err(),
+        ];
+        for (index, error) in denied.into_iter().enumerate() {
+            let path = PLATFORM_NODE_READ_PATHS[index];
+            let error = error.unwrap_or_else(|| panic!("{path} must be denied for viewer"));
+            assert_eq!(error.status, StatusCode::FORBIDDEN, "{path}");
+            assert_eq!(error.code, "FORBIDDEN", "{path}");
+        }
+    }
+
+    async fn probe_operator_gate(auth: AuthUser) -> AppResult<&'static str> {
+        auth.require_operator()?;
+        Ok("operator-gated")
+    }
+
+    fn gated_router(role: Role) -> Router {
+        let mut router = Router::new();
+        for path in PLATFORM_NODE_READ_PATHS {
+            router = router.route(path, get(probe_operator_gate));
+        }
+        router.layer(axum::middleware::from_fn(
+            move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+                let user = auth_user(role);
+                async move {
+                    request.extensions_mut().insert(user);
+                    next.run(request).await
+                }
+            },
+        ))
+    }
+
+    #[tokio::test]
+    async fn platform_node_reads_answer_403_for_viewer_and_200_for_operator_and_admin() {
+        async fn status(role: Role, path: &str) -> StatusCode {
+            let uri = path.replace("{node_id}", &Uuid::nil().to_string());
+            gated_router(role)
+                .oneshot(
+                    axum::http::Request::builder()
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+        }
+
+        for path in PLATFORM_NODE_READ_PATHS {
+            assert_eq!(
+                status(Role::Viewer, path).await,
+                StatusCode::FORBIDDEN,
+                "{path}"
+            );
+            assert_eq!(status(Role::Operator, path).await, StatusCode::OK, "{path}");
+            assert_eq!(status(Role::Admin, path).await, StatusCode::OK, "{path}");
+        }
+    }
 }

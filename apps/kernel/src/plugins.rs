@@ -101,8 +101,9 @@ struct PackageLite {
 
 pub async fn list_plugins(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
 ) -> AppResult<Json<Vec<PluginSummary>>> {
+    auth.require_operator()?;
     let packages = sqlx::query_as::<_, PackageLite>(
         "SELECT plugin_id, version, publisher, manifest, status, signature_state, artifact_digest, bundle_digest, backend_image_ref, created_at FROM kernel.plugin_packages ORDER BY created_at DESC",
     )
@@ -236,9 +237,10 @@ async fn count_instances(
 
 pub async fn get_plugin(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
     Path(plugin_id): Path<String>,
 ) -> AppResult<Json<PluginDetail>> {
+    auth.require_operator()?;
     if let Ok(system) = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
         "SELECT plugin_id, name, version, description, ui_route FROM kernel.system_plugins WHERE plugin_id=$1",
     )
@@ -645,4 +647,119 @@ fn display_name(id: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{get_plugin, list_plugins};
+    use crate::auth::AuthUser;
+    use crate::error::AppResult;
+    use crate::state::AppState;
+    use axum::body::Body;
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use axum::routing::get;
+    use axum::Router;
+    use opsweave_contracts::Role;
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    /// The paths `routes.rs` wires for the platform maintenance plugin reads.
+    const PLATFORM_PLUGIN_READ_PATHS: [&str; 2] =
+        ["/api/v1/plugins", "/api/v1/plugins/{plugin_id}"];
+
+    fn auth_user(role: Role) -> AuthUser {
+        AuthUser {
+            user_id: Uuid::nil(),
+            email: "user@example.invalid".to_string(),
+            display_name: "Test User".to_string(),
+            role,
+            session_id: Uuid::nil(),
+            csrf_token: "csrf-token".to_string(),
+            via_cookie: false,
+        }
+    }
+
+    /// A pool that never dials: every gate under test decides before the first
+    /// query, so `cargo test` stays free of a live database.
+    fn state() -> AppState {
+        let db = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://opsweave.invalid:1/opsweave")
+            .expect("lazy pool");
+        AppState::new(crate::config::Config::from_env(), db, vec![0u8; 32]).expect("app state")
+    }
+
+    /// The handler bodies are reached with a viewer token: each must stop at the
+    /// `require_operator` gate before touching the database.
+    #[tokio::test]
+    async fn viewer_is_forbidden_from_every_platform_plugin_read() {
+        let state = state();
+        let viewer = auth_user(Role::Viewer);
+        let denied = [
+            list_plugins(State(state.clone()), viewer.clone())
+                .await
+                .err(),
+            get_plugin(
+                State(state.clone()),
+                viewer.clone(),
+                Path("example".to_string()),
+            )
+            .await
+            .err(),
+        ];
+        for (index, error) in denied.into_iter().enumerate() {
+            let path = PLATFORM_PLUGIN_READ_PATHS[index];
+            let error = error.unwrap_or_else(|| panic!("{path} must be denied for viewer"));
+            assert_eq!(error.status, StatusCode::FORBIDDEN, "{path}");
+            assert_eq!(error.code, "FORBIDDEN", "{path}");
+        }
+    }
+
+    async fn probe_operator_gate(auth: AuthUser) -> AppResult<&'static str> {
+        auth.require_operator()?;
+        Ok("operator-gated")
+    }
+
+    fn gated_router(role: Role) -> Router {
+        let mut router = Router::new();
+        for path in PLATFORM_PLUGIN_READ_PATHS {
+            router = router.route(path, get(probe_operator_gate));
+        }
+        router.layer(axum::middleware::from_fn(
+            move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+                let user = auth_user(role);
+                async move {
+                    request.extensions_mut().insert(user);
+                    next.run(request).await
+                }
+            },
+        ))
+    }
+
+    #[tokio::test]
+    async fn platform_plugin_reads_answer_403_for_viewer_and_200_for_operator_and_admin() {
+        async fn status(role: Role, path: &str) -> StatusCode {
+            let uri = path.replace("{plugin_id}", "example");
+            gated_router(role)
+                .oneshot(
+                    axum::http::Request::builder()
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+        }
+
+        for path in PLATFORM_PLUGIN_READ_PATHS {
+            assert_eq!(
+                status(Role::Viewer, path).await,
+                StatusCode::FORBIDDEN,
+                "{path}"
+            );
+            assert_eq!(status(Role::Operator, path).await, StatusCode::OK, "{path}");
+            assert_eq!(status(Role::Admin, path).await, StatusCode::OK, "{path}");
+        }
+    }
 }
