@@ -20,13 +20,15 @@ import { NotFoundPage } from './pages/NotFound';
 import { PipelinesPage, PipelineDetailPage, PipelineEditorPage } from './pages/Pipelines';
 import { JobsPage, JobDetailPage, JobSubmitPage } from './pages/Jobs';
 import { GovernancePage } from './pages/Governance';
+import { useT } from './i18n';
 
 function Splash() {
+  const t = useT();
   return (
     <div className="splash">
-      <div className="brand brand-large"><span className="brand-mark"><span /><span /><span /></span><span className="brand-word">OpsWeave</span></div>
+      <div className="brand brand-large"><span className="brand-mark"><span /><span /><span /></span><span className="brand-word">{t('app.brand')}</span></div>
       <span className="spinner" />
-      <p>Establishing authorized session…</p>
+      <p>{t('app.splash.establishing')}</p>
     </div>
   );
 }

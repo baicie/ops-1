@@ -6,10 +6,12 @@ import type { Publisher } from '../types';
 import { Icon } from '../components/Icons';
 import { ConfirmDialog, CopyButton, ErrorState, Field, Modal, PageHeader, Skeleton, StatusBadge, TimeAgo, useToast } from '../components/Ui';
 import { shortDigest } from '../format';
+import { useT } from '../i18n';
 
 type ManagedUser = { id: string; email: string; displayName: string; role: string; disabled: boolean; createdAt: string };
 
 export function AccessPage() {
+  const t = useT();
   const { user } = useAuth();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<Publisher[]>('/api/v1/publishers'), 0);
@@ -30,7 +32,7 @@ export function AccessPage() {
     setUserError(null);
     try {
       await api.post('/api/v1/users', { email: newEmail, displayName: newName, password: newPassword, role: newRole });
-      toast.push({ tone: 'ok', title: 'User created', detail: `${newEmail} can now sign in as ${newRole}` });
+      toast.push({ tone: 'ok', title: t('access.toast.userCreated'), detail: t('access.toast.userCreated.detail', { email: newEmail, role: newRole }) });
       setUserOpen(false); setNewEmail(''); setNewName(''); setNewPassword(''); setNewRole('viewer');
       await reloadUsers();
     } catch (cause: any) {
@@ -42,9 +44,9 @@ export function AccessPage() {
     try {
       await api.patch(`/api/v1/users/${target.id}`, { disabled: !target.disabled });
       await reloadUsers();
-      toast.push({ tone: 'ok', title: target.disabled ? 'User enabled' : 'User disabled' });
+      toast.push({ tone: 'ok', title: target.disabled ? t('access.toast.userEnabled') : t('access.toast.userDisabled') });
     } catch (cause: any) {
-      toast.push({ tone: 'danger', title: 'User update failed', detail: cause.message });
+      toast.push({ tone: 'danger', title: t('access.toast.userUpdateFailed'), detail: cause.message });
     }
   }
   const [addOpen, setAddOpen] = useState(false);
@@ -58,12 +60,12 @@ export function AccessPage() {
     setBusy(true);
     try {
       await api.post('/api/v1/publishers', { publisherId, publicKeyHex: publicKey.trim(), note });
-      toast.push({ tone: 'ok', title: 'Publisher trusted', detail: publisherId });
+      toast.push({ tone: 'ok', title: t('access.toast.publisherTrusted'), detail: publisherId });
       setAddOpen(false);
       setPublisherId(''); setPublicKey(''); setNote('');
       await reload();
     } catch (cause: any) {
-      toast.push({ tone: 'danger', title: 'Could not add publisher', detail: cause.message });
+      toast.push({ tone: 'danger', title: t('access.toast.addPublisherFailed'), detail: cause.message });
     } finally { setBusy(false); }
   }
 
@@ -72,82 +74,82 @@ export function AccessPage() {
     setBusy(true);
     try {
       await api.del(`/api/v1/publishers/${encodeURIComponent(revoke)}`);
-      toast.push({ tone: 'ok', title: 'Publisher revoked', detail: 'New installs from this publisher are rejected.' });
+      toast.push({ tone: 'ok', title: t('access.toast.publisherRevoked'), detail: t('access.toast.publisherRevoked.detail') });
       setRevoke(null);
       await reload();
     } catch (cause: any) {
-      toast.push({ tone: 'danger', title: 'Revoke failed', detail: cause.message });
+      toast.push({ tone: 'danger', title: t('common.revokeFailed'), detail: cause.message });
     } finally { setBusy(false); }
   }
 
   return (
     <div className="page-stack">
       <PageHeader
-        title="Access & trust"
-        description="Users, node identity and publisher keys are separate trust domains. One never substitutes for another."
-        actions={user?.role === 'admin' ? <button className="btn btn-primary" onClick={() => setAddOpen(true)}><Icon name="key" size={15} /> Add publisher</button> : undefined}
+        title={t('access.title')}
+        description={t('access.description')}
+        actions={user?.role === 'admin' ? <button className="btn btn-primary" onClick={() => setAddOpen(true)}><Icon name="key" size={15} /> {t('access.action.addPublisher')}</button> : undefined}
       />
       <div className="summary-grid">
         <section className="panel">
-          <div className="panel-head"><div><h2>User roles</h2><p>Single workspace RBAC for 0.0.1. Server-side checks always apply.</p></div></div>
+          <div className="panel-head"><div><h2>{t('access.roles.title')}</h2><p>{t('access.roles.description')}</p></div></div>
           <div className="role-list">
-            <div><span className="role-pill">Viewer</span><p>Read overview, plugins, nodes and activity. Cannot operate or read instance logs.</p></div>
-            <div><span className="role-pill">Operator</span><p>Install, deploy, activate, disable, read logs. Cannot manage publisher trust or revoke nodes.</p></div>
-            <div><span className="role-pill">Admin</span><p>Everything, including publisher keys, enrollment tokens, diagnostics and revocation.</p></div>
+            <div><span className="role-pill">Viewer</span><p>{t('access.roles.viewer.description')}</p></div>
+            <div><span className="role-pill">Operator</span><p>{t('access.roles.operator.description')}</p></div>
+            <div><span className="role-pill">Admin</span><p>{t('access.roles.admin.description')}</p></div>
           </div>
-          <div className="callout"><Icon name="access" size={16} /><p>Your session is a user session. It cannot be replayed as a Node credential or Workload Identity.</p></div>
+          <div className="callout"><Icon name="access" size={16} /><p>{t('access.sessionNote')}</p></div>
         </section>
         <section className="panel">
-          <div className="panel-head"><div><h2>Trust boundaries</h2><p>Each credential has a single purpose.</p></div></div>
+          <div className="panel-head"><div><h2>{t('access.trust.title')}</h2><p>{t('access.trust.description')}</p></div></div>
           <ul className="trust-list">
-            <li><Icon name="access" size={16} /><div><strong>User session</strong><span>HttpOnly cookie, CSRF-protected, role-scoped.</span></div></li>
-            <li><Icon name="server" size={16} /><div><strong>Node identity</strong><span>One-time enrollment, hashed control credential, revocable.</span></div></li>
-            <li><Icon name="key" size={16} /><div><strong>Publisher key</strong><span>Ed25519 trust root for signed bundle manifests and payloads.</span></div></li>
-            <li><Icon name="box" size={16} /><div><strong>Workload</strong><span>Instance identity minted for Gateway routes; no raw session token.</span></div></li>
+            <li><Icon name="access" size={16} /><div><strong>{t('access.trust.userSession')}</strong><span>{t('access.trust.userSession.detail')}</span></div></li>
+            <li><Icon name="server" size={16} /><div><strong>{t('access.trust.nodeIdentity')}</strong><span>{t('access.trust.nodeIdentity.detail')}</span></div></li>
+            <li><Icon name="key" size={16} /><div><strong>{t('access.trust.publisherKey')}</strong><span>{t('access.trust.publisherKey.detail')}</span></div></li>
+            <li><Icon name="box" size={16} /><div><strong>{t('access.trust.workload')}</strong><span>{t('access.trust.workload.detail')}</span></div></li>
           </ul>
         </section>
       </div>
       {user?.role === 'admin' && (
         <section className="panel table-panel">
-          <div className="panel-head"><div><h2>Workspace users</h2><p>Roles are enforced server-side on every request. Disabling a user revokes their sessions immediately.</p></div><button className="btn btn-secondary" onClick={() => { setUserError(null); setUserOpen(true); }}><Icon name="plus" size={15} /> Add user</button></div>
-          {!users?.length ? <p className="muted pad">No user records available.</p> : (
-            <table className="data-table"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
-              {users.map((item) => <tr key={item.id}><td data-label="User"><strong>{item.displayName}</strong><div className="muted small">{item.email}</div></td><td data-label="Role"><span className="role-pill">{item.role}</span></td><td data-label="Status"><StatusBadge status={item.disabled ? 'DISABLED' : 'READY'} label={item.disabled ? 'Disabled' : 'Active'} /></td><td data-label="Created"><TimeAgo value={item.createdAt} /></td><td data-label="Actions">{item.id !== user?.id && <button className="btn btn-small" onClick={() => void toggleUser(item)}>{item.disabled ? 'Enable' : 'Disable'}</button>}</td></tr>)}
+          <div className="panel-head"><div><h2>{t('access.users.title')}</h2><p>{t('access.users.description')}</p></div><button className="btn btn-secondary" onClick={() => { setUserError(null); setUserOpen(true); }}><Icon name="plus" size={15} /> {t('access.users.add')}</button></div>
+          {!users?.length ? <p className="muted pad">{t('access.users.empty')}</p> : (
+            <table className="data-table"><thead><tr><th>{t('table.user')}</th><th>{t('table.role')}</th><th>{t('table.status')}</th><th>{t('table.created')}</th><th>{t('table.actions')}</th></tr></thead><tbody>
+              {users.map((item) => <tr key={item.id}><td data-label={t('table.user')}><strong>{item.displayName}</strong><div className="muted small">{item.email}</div></td><td data-label={t('table.role')}><span className="role-pill">{item.role}</span></td><td data-label={t('table.status')}><StatusBadge status={item.disabled ? 'DISABLED' : 'READY'} label={item.disabled ? t('status.disabled') : t('status.active')} /></td><td data-label={t('table.created')}><TimeAgo value={item.createdAt} /></td><td data-label={t('table.actions')}>{item.id !== user?.id && <button className="btn btn-small" onClick={() => void toggleUser(item)}>{item.disabled ? t('action.enable') : t('action.disable')}</button>}</td></tr>)}
             </tbody></table>
           )}
         </section>
       )}
       <section className="panel table-panel">
-        <div className="panel-head"><div><h2>Trusted publishers</h2><p>Publisher revocation blocks new installs and preserves audit history.</p></div></div>
-        {loading && !data ? <Skeleton rows={3} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : !data?.length ? <p className="muted pad">No publishers in the trust store.</p> : (
-          <table className="data-table"><thead><tr><th>Publisher</th><th>Fingerprint</th><th>Trust</th><th>Added</th><th>Note</th>{user?.role === 'admin' && <th>Actions</th>}</tr></thead><tbody>
-            {data.map((publisher) => <tr key={publisher.publisherId}><td data-label="Publisher"><strong>{publisher.publisherId}</strong></td><td data-label="Fingerprint"><span className="mono small">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></td><td data-label="Trust"><StatusBadge status={publisher.trustState} /></td><td data-label="Added"><TimeAgo value={publisher.createdAt} /></td><td data-label="Note"><span className="muted small">{publisher.note || '—'}</span></td>{user?.role === 'admin' && <td data-label="Actions">{publisher.trustState === 'TRUSTED' && <button className="btn btn-small btn-danger" onClick={() => setRevoke(publisher.publisherId)}>Revoke</button>}</td>}</tr>)}
+        <div className="panel-head"><div><h2>{t('access.publishers.title')}</h2><p>{t('access.publishers.description')}</p></div></div>
+        {loading && !data ? <Skeleton rows={3} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : !data?.length ? <p className="muted pad">{t('access.publishers.empty')}</p> : (
+          <table className="data-table"><thead><tr><th>{t('table.publisher')}</th><th>{t('table.fingerprint')}</th><th>{t('table.trust')}</th><th>{t('table.added')}</th><th>{t('table.note')}</th>{user?.role === 'admin' && <th>{t('table.actions')}</th>}</tr></thead><tbody>
+            {data.map((publisher) => <tr key={publisher.publisherId}><td data-label={t('table.publisher')}><strong>{publisher.publisherId}</strong></td><td data-label={t('table.fingerprint')}><span className="mono small">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></td><td data-label={t('table.trust')}><StatusBadge status={publisher.trustState} /></td><td data-label={t('table.added')}><TimeAgo value={publisher.createdAt} /></td><td data-label={t('table.note')}><span className="muted small">{publisher.note || '—'}</span></td>{user?.role === 'admin' && <td data-label={t('table.actions')}>{publisher.trustState === 'TRUSTED' && <button className="btn btn-small btn-danger" onClick={() => setRevoke(publisher.publisherId)}>{t('action.revoke')}</button>}</td>}</tr>)}
           </tbody></table>
         )}
       </section>
-      <Modal open={userOpen} onClose={() => setUserOpen(false)} title="Add workspace user" footer={<><button className="btn btn-secondary" onClick={() => setUserOpen(false)}>Cancel</button><button className="btn btn-primary" onClick={() => void createUser()} disabled={userBusy || !newEmail || !newName || newPassword.length < 10}>{userBusy ? 'Creating…' : 'Create user'}</button></>}>
+      <Modal open={userOpen} onClose={() => setUserOpen(false)} title={t('access.modal.addUser.title')} footer={<><button className="btn btn-secondary" onClick={() => setUserOpen(false)}>{t('action.cancel')}</button><button className="btn btn-primary" onClick={() => void createUser()} disabled={userBusy || !newEmail || !newName || newPassword.length < 10}>{userBusy ? t('access.modal.addUser.creating') : t('access.modal.addUser.submit')}</button></>}>
         <div className="form-stack">
           {userError && <div className="inline-error"><Icon name="warning" size={16} /> {userError}</div>}
           <div className="form-grid">
-            <Field label="Display name"><input value={newName} onChange={(event) => setNewName(event.target.value)} /></Field>
-            <Field label="Email"><input type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} /></Field>
+            <Field label={t('access.field.displayName')}><input value={newName} onChange={(event) => setNewName(event.target.value)} /></Field>
+            <Field label={t('access.field.email')}><input type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} /></Field>
           </div>
           <div className="form-grid">
-            <Field label="Temporary password" hint="At least 10 characters"><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></Field>
-            <Field label="Role"><select value={newRole} onChange={(event) => setNewRole(event.target.value)}><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option></select></Field>
+            <Field label={t('access.field.temporaryPassword')} hint={t('access.field.temporaryPassword.hint')}><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></Field>
+            <Field label={t('access.field.role')}><select value={newRole} onChange={(event) => setNewRole(event.target.value)}><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option></select></Field>
           </div>
-          <div className="callout"><Icon name="access" size={16} /><p>Users are not tenants. 0.0.1 is a single-workspace internal environment; production multi-tenant isolation is explicitly out of scope.</p></div>
+          <div className="callout"><Icon name="access" size={16} /><p>{t('access.usersNote')}</p></div>
         </div>
       </Modal>
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Trust a publisher" footer={<><button className="btn btn-secondary" onClick={() => setAddOpen(false)}>Cancel</button><button className="btn btn-primary" onClick={() => void addPublisher()} disabled={busy || !publisherId || !publicKey}>{busy ? 'Adding…' : 'Trust publisher'}</button></>}>
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t('access.modal.trustPublisher.title')} footer={<><button className="btn btn-secondary" onClick={() => setAddOpen(false)}>{t('action.cancel')}</button><button className="btn btn-primary" onClick={() => void addPublisher()} disabled={busy || !publisherId || !publicKey}>{busy ? t('access.modal.trustPublisher.adding') : t('access.modal.trustPublisher.submit')}</button></>}>
         <div className="form-stack">
-          <Field label="Publisher ID" hint="Must match the publisher field in signed manifests"><input value={publisherId} onChange={(event) => setPublisherId(event.target.value)} placeholder="trusted-team" /></Field>
-          <Field label="Ed25519 public key" hint="64 hex characters; private keys never enter the Kernel"><input value={publicKey} onChange={(event) => setPublicKey(event.target.value)} placeholder="64 lowercase hex characters" className="mono" /></Field>
-          <Field label="Note"><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Owner, rotation or approval context" /></Field>
-          <div className="callout"><Icon name="alert" size={16} /><p>Trusting a key is a security decision. The platform verifies signatures, not the publisher's intent or code quality.</p></div>
+          <Field label={t('access.field.publisherId')} hint={t('access.field.publisherId.hint')}><input value={publisherId} onChange={(event) => setPublisherId(event.target.value)} placeholder="trusted-team" /></Field>
+          <Field label={t('access.field.publicKey')} hint={t('access.field.publicKey.hint')}><input value={publicKey} onChange={(event) => setPublicKey(event.target.value)} placeholder={t('access.field.publicKey.placeholder')} className="mono" /></Field>
+          <Field label={t('table.note')}><input value={note} onChange={(event) => setNote(event.target.value)} placeholder={t('access.field.note.placeholder')} /></Field>
+          <div className="callout"><Icon name="alert" size={16} /><p>{t('access.trustNote')}</p></div>
         </div>
       </Modal>
-      <ConfirmDialog open={Boolean(revoke)} title={`Revoke ${revoke}?`} description="New packages signed by this publisher will be rejected. Existing installed versions remain auditable; activation policy may still block them." confirmLabel="Revoke publisher" danger busy={busy} onConfirm={() => void revokePublisher()} onClose={() => setRevoke(null)} />
+      <ConfirmDialog open={Boolean(revoke)} title={t('access.confirmRevoke.title', { id: revoke ?? '' })} description={t('access.confirmRevoke.description')} confirmLabel={t('access.confirmRevoke.confirm')} danger busy={busy} onConfirm={() => void revokePublisher()} onClose={() => setRevoke(null)} />
     </div>
   );
 }

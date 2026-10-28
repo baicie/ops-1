@@ -1,7 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState, PageHeader } from '../components/Ui';
+import { useT } from '../i18n';
 
 export function NotFoundPage() {
-  return <div className="page-stack"><PageHeader title="Not found" /><EmptyState icon="search" title="This page does not exist" description="The route may belong to a plugin version that is no longer active." action={<Link className="btn btn-primary" to="/">Back to overview</Link>} /></div>;
+  const t = useT();
+  return <div className="page-stack"><PageHeader title={t('notFound.title')} /><EmptyState icon="search" title={t('notFound.empty.title')} description={t('notFound.empty.description')} action={<Link className="btn btn-primary" to="/">{t('notFound.action.backToOverview')}</Link>} /></div>;
 }

@@ -5,6 +5,11 @@ import { api } from './api';
 import { useAuth } from './auth';
 import type { Extension } from './types';
 import { EmptyState, ErrorState, Skeleton } from './components/Ui';
+import { useT } from './i18n';
+import type { MessageKey, TranslateParams } from './i18n';
+
+/** The `t` signature `useT()` returns; threaded into helpers that render error copy. */
+type Translator = (key: MessageKey, params?: TranslateParams) => string;
 
 type LoadedExtension = {
   extension: Extension;
@@ -24,13 +29,13 @@ const ExtensionContext = createContext<ExtensionContextValue | null>(null);
 
 const SHELL_RESERVED = ['/plugins', '/nodes', '/activity', '/access', '/settings', '/ops-center', '/instances'];
 
-function loadScript(src: string): Promise<void> {
+function loadScript(src: string, t: Translator): Promise<void> {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[data-opsweave-remote="${src}"]`);
     if (existing?.dataset.loaded === 'true') return resolve();
     if (existing) {
       existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
+      existing.addEventListener('error', () => reject(new Error(t('extensions.error.loadFailed', { src }))), { once: true });
       return;
     }
     const script = document.createElement('script');
@@ -38,20 +43,20 @@ function loadScript(src: string): Promise<void> {
     script.async = true;
     script.dataset.opsweaveRemote = src;
     script.onload = () => { script.dataset.loaded = 'true'; resolve(); };
-    script.onerror = () => reject(new Error(`Failed to load remote asset: ${src}`));
+    script.onerror = () => reject(new Error(t('extensions.error.loadAssetFailed', { src })));
     document.head.appendChild(script);
   });
 }
 
-async function loadRemote(extension: Extension) {
+async function loadRemote(extension: Extension, t: Translator) {
   (window as any).React = React;
   (window as any).ReactDOM = ReactDOM;
   const url = `${extension.assetBase}/${extension.remoteEntry}`;
-  await loadScript(url);
+  await loadScript(url, t);
   const registry = (window as any).__OPSWEAVE_REMOTES__;
   const module = registry?.[extension.pluginId];
   if (!module || typeof module.register !== 'function') {
-    throw new Error(`Remote ${extension.pluginId} did not register through window.__OPSWEAVE_REMOTES__`);
+    throw new Error(t('extensions.error.notRegistered', { pluginId: extension.pluginId }));
   }
   const host = {
     pluginId: extension.pluginId,
@@ -66,6 +71,7 @@ async function loadRemote(extension: Extension) {
 }
 
 export function ExtensionsProvider({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const { user } = useAuth();
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [loaded, setLoaded] = useState<Record<string, LoadedExtension>>({});
@@ -92,11 +98,11 @@ export function ExtensionsProvider({ children }: { children: React.ReactNode }) 
         for (const extension of result) {
           const rejected = extension.contributions.some((contribution) => SHELL_RESERVED.some((prefix) => contribution.path === prefix || contribution.path.startsWith(prefix + '/')));
           if (rejected) {
-            next[extension.pluginId] = { extension, registration: null, error: 'Contribution path conflicts with a shell-owned route and was rejected.' };
+            next[extension.pluginId] = { extension, registration: null, error: t('extensions.error.pathConflict') };
             continue;
           }
           try {
-            const registration = await loadRemote(extension);
+            const registration = await loadRemote(extension, t);
             next[extension.pluginId] = { extension, registration };
           } catch (cause) {
             next[extension.pluginId] = { extension, registration: null, error: (cause as Error).message };
@@ -139,6 +145,7 @@ export function ExtensionNavigation() {
 }
 
 export function ExtensionRoute() {
+  const t = useT();
   const location = useLocation();
   const { extensions, loaded, loading, error } = useExtensions();
   if (loading) return <Skeleton rows={5} />;
@@ -152,7 +159,7 @@ export function ExtensionRoute() {
     .filter(({ contribution }) => location.pathname === contribution.path || location.pathname.startsWith(contribution.path + '/'))
     .sort((a, b) => b.contribution.path.length - a.contribution.path.length)[0];
   if (!match) {
-    return <EmptyState icon="plugins" title="Extension route not found" description="The plugin manifest does not contribute this path." />;
+    return <EmptyState icon="plugins" title={t('extensions.empty.routeNotFound.title')} description={t('extensions.empty.routeNotFound.description')} />;
   }
   const loadedExtension = loaded[match.extension.pluginId];
   if (!loadedExtension) return <Skeleton rows={5} />;
@@ -160,13 +167,13 @@ export function ExtensionRoute() {
     return (
       <div className="extension-error">
         <ErrorState error={new Error(loadedExtension.error)} />
-        <p className="muted">The rest of the Shell remains available because remote extensions are isolated behind an error boundary.</p>
+        <p className="muted">{t('extensions.error.isolationNote')}</p>
       </div>
     );
   }
   const component = loadedExtension.registration?.components?.[match.contribution.id];
   if (!component) {
-    return <EmptyState icon="plugins" title="No remote component" description={`Contribution ${match.contribution.id} did not provide a component.`} />;
+    return <EmptyState icon="plugins" title={t('extensions.empty.noComponent.title')} description={t('extensions.empty.noComponent.description', { id: match.contribution.id })} />;
   }
   return <ExtensionBoundary>{React.createElement(component)}</ExtensionBoundary>;
 }
