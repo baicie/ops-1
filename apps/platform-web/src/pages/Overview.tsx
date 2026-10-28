@@ -29,6 +29,27 @@ const SEVERITY_LABEL: Record<string, MessageKey> = {
 };
 
 /**
+ * A data source has three outcomes, and only one of them is a verdict about the source.
+ *
+ * ANSWERED — the newest attempt returned a payload and did not throw.
+ * MISSING  — the newest attempt settled without a payload, or it threw. A 200 with an empty
+ *            body resolves to `null` rather than throwing (api.ts:42-45), so "no payload" has
+ *            to be judged on the data itself: an error-only test would pass that half answer
+ *            off as healthy.
+ * PENDING  — the first attempt has not settled. `loading` is exactly that flag: hooks.ts:19
+ *            clears it in the attempt's `finally`, so on the first paint it is the only honest
+ *            signal that we have simply not asked long enough, and a page that is still asking
+ *            must not claim a source declined to answer.
+ */
+type SourceState = 'answered' | 'missing' | 'pending';
+
+function sourceState(data: unknown, error: Error | null, loading: boolean): SourceState {
+  if (error) return 'missing';
+  if (data !== null && data !== undefined) return 'answered';
+  return loading ? 'pending' : 'missing';
+}
+
+/**
  * §4.5 A. Three layers, in this order: can the platform serve, what must an operator do,
  * what changed lately. Every number comes from the Kernel; a module the Kernel does not
  * report is UNKNOWN — never 0, never green.
@@ -47,8 +68,16 @@ export function OverviewPage() {
   const data = overview.data;
   const observedAt = overview.observedAt;
 
-  const modules = buildModules(t, data, diagnostics.data, diagnostics.error, isAdmin, observedAt);
-  const partialSource = isAdmin && (diagnostics.error || diagnostics.data === null);
+  const overviewSource = sourceState(data, overview.error, overview.loading);
+  const kernelSource = sourceState(diagnostics.data, diagnostics.error, diagnostics.loading);
+  const modules = buildModules(t, data, diagnostics.data, diagnostics.error, kernelSource, isAdmin, observedAt);
+  // Counted, not declared: these are the sources this view actually asked. A non-admin session
+  // never requests diagnostics (the loader above), so counting that route as unanswered would report a
+  // permission this page never sought as a broken source - it simply is not one of the sources.
+  const sourceStates: SourceState[] = isAdmin ? [overviewSource, kernelSource] : [overviewSource];
+  const sourcesAnswered = sourceStates.filter((state) => state === 'answered').length;
+  // PARTIAL means a source settled without answering. A source still pending is not a verdict.
+  const partialSource = sourceStates.includes('missing');
 
   return (
     <div className="page-stack">
@@ -96,7 +125,7 @@ export function OverviewPage() {
                   </li>
                 ))}
               </ul>
-              {partialSource ? <NoticeBar state="partial" title={t('state.partial')} detail={t('ui.partial.sources', { ok: 1, total: 2 })} /> : null}
+              {partialSource ? <NoticeBar state="partial" title={t('state.partial')} detail={t('ui.partial.sources', { ok: sourcesAnswered, total: sourceStates.length })} /> : null}
             </section>
 
             <section className="metric-grid" aria-label={t('overview.kpi.aria')}>
@@ -198,13 +227,18 @@ function buildModules(
   data: Overview | null,
   diagnostics: DiagnosticsView | null,
   diagnosticsError: Error | null,
+  kernelSource: SourceState,
   isAdmin: boolean,
   observedAt: string | null,
 ): ModuleRow[] {
   const kernel: ModuleRow = (() => {
     if (!isAdmin) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.denied'), observedAt: null };
     if (diagnosticsError) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.error'), observedAt: null };
-    if (!diagnostics) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'loading', detail: t('ui.notObserved'), observedAt: null };
+    // Still asking is LOADING; asked and settled with nothing (a 200 with an empty body) is UNKNOWN
+    // with the reason attached - the same rule the nodes and runtime cards already follow below.
+    if (!diagnostics) {
+      return { id: 'kernel', labelKey: 'overview.module.kernel', state: kernelSource === 'pending' ? 'loading' : 'unknown', detail: t('ui.notObserved'), observedAt: null };
+    }
     const database = diagnostics.kernel.database === 'connected' ? t('overview.module.kernel.dbConnected') : t('overview.module.kernel.dbUnavailable');
     return {
       id: 'kernel',
