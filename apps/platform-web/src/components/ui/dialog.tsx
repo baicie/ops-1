@@ -23,6 +23,10 @@ export const DialogContent = React.forwardRef<
     <DialogPrimitive.Overlay className={overlayClass} />
     <DialogPrimitive.Content
       ref={ref}
+      // Radix this version sets role and aria-labelledby but not aria-modal, and the exported
+      // contract of every dialog in this shell spells it out. Set it on the primitive so no
+      // consumer can forget; a caller that knows better can still override it below.
+      aria-modal="true"
       className={cn(
         'fixed left-1/2 top-1/2 z-[100] flex max-h-[92vh] w-[calc(100%-40px)] max-w-[640px] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto',
         'rounded-lg border border-solid border-border bg-card p-5 text-card-foreground shadow-[0_24px_70px_rgba(0,0,0,0.35)]',
