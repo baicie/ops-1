@@ -19,7 +19,8 @@
 |---|---|
 | `baseline.md` | 真实 HEAD/PR/CI、代码事实、已有与缺失、阻断项 P0/P1/P2 |
 | `route-map.md` | 20 条现状路由 → Surface 归属 → 迁移目标 → 旧 URL 兼容策略 |
-| `permission-matrix.md` | 角色/路由/API 拒绝矩阵、38 处校验点、过渡差异 |
+| `permission-matrix.md` | 角色/路由/API 拒绝矩阵、35 个真实鉴权调用点（文本计数 38）、G05 实测清单与 operator 结论、过渡差异 |
+| `auth-surface-contract.md` | G05 `/api/v1/auth/me` 的 `access` 字段契约、角色→surface 派生、`OPSWEAVE_ADMIN_SURFACE_ROLES` 开关、旧客户端兼容与降级策略 |
 | `design-token-audit.md` | 455 令牌、12 原语、G01/G02 缺口、状态矩阵与 a11y 现状 |
 | `implementation-plan.md` | Gate → 分支 → PR 计划、切片划分、风险与完成判定 |
 | `adr/ADR-UI-decisions.md` | ADR-UI-001…006 |

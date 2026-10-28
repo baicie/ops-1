@@ -51,6 +51,43 @@ impl AuthUser {
     }
 }
 
+/// Surfaces a session may enter, as declared by `GET /api/v1/auth/me`.
+pub const SURFACE_WORKSPACE: &str = "workspace";
+pub const SURFACE_ADMIN: &str = "admin";
+/// Capabilities derived from the same declaration.
+pub const CAPABILITY_PLATFORM_ACCESS: &str = "platform:access";
+pub const CAPABILITY_WORKSPACE_ACCESS: &str = "workspace:access";
+
+/// Server-authoritative surface declaration returned by `GET /api/v1/auth/me`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessView {
+    pub allowed_surfaces: Vec<&'static str>,
+    pub capabilities: Vec<&'static str>,
+}
+
+/// Derives the declared surfaces and capabilities for one role.
+///
+/// Every authenticated session may enter the workspace surface; the Admin
+/// Console surface is granted only to the roles listed by
+/// `OPSWEAVE_ADMIN_SURFACE_ROLES` (default `admin`, widened per deployment after
+/// an audit). This is a navigation and routing declaration only: it neither
+/// widens nor narrows any existing `require_admin`/`require_operator` API gate,
+/// and the browser must never derive it from `user.role` itself.
+pub fn access_for(role: Role, admin_surface_roles: &[Role]) -> AccessView {
+    if admin_surface_roles.contains(&role) {
+        AccessView {
+            allowed_surfaces: vec![SURFACE_WORKSPACE, SURFACE_ADMIN],
+            capabilities: vec![CAPABILITY_PLATFORM_ACCESS, CAPABILITY_WORKSPACE_ACCESS],
+        }
+    } else {
+        AccessView {
+            allowed_surfaces: vec![SURFACE_WORKSPACE],
+            capabilities: vec![CAPABILITY_WORKSPACE_ACCESS],
+        }
+    }
+}
+
 #[derive(Debug, FromRow)]
 struct SessionRow {
     session_id: Uuid,
@@ -336,21 +373,39 @@ pub async fn logout(State(state): State<AppState>, request: Request) -> AppResul
     Ok(response)
 }
 
-pub async fn me(request: Request) -> AppResult<Json<serde_json::Value>> {
-    let auth = request
-        .extensions()
-        .get::<AuthUser>()
-        .cloned()
-        .ok_or_else(|| AppError::unauthorized("Authentication required"))?;
-    Ok(Json(serde_json::json!({
+/// Payload of `GET /api/v1/auth/me`.
+///
+/// Additive only: `user` and the top-level `csrfToken` keep their pre-G05 names
+/// and values so old clients keep working; `session` groups the session-scoped
+/// facts under the agreed name; `access` is the server-authoritative surface
+/// declaration the browser must render navigation from, never `user.role`.
+pub fn me_payload(auth: &AuthUser, admin_surface_roles: &[Role]) -> serde_json::Value {
+    serde_json::json!({
         "user": {
             "id": auth.user_id,
             "email": auth.email,
             "displayName": auth.display_name,
             "role": auth.role,
         },
-        "csrfToken": auth.csrf_token
-    })))
+        "session": {
+            "csrfToken": auth.csrf_token,
+            "viaCookie": auth.via_cookie,
+        },
+        "csrfToken": auth.csrf_token,
+        "access": access_for(auth.role, admin_surface_roles),
+    })
+}
+
+pub async fn me(
+    State(state): State<AppState>,
+    request: Request,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = request
+        .extensions()
+        .get::<AuthUser>()
+        .cloned()
+        .ok_or_else(|| AppError::unauthorized("Authentication required"))?;
+    Ok(Json(me_payload(&auth, &state.config.admin_surface_roles)))
 }
 
 pub async fn seed_admin(state: &AppState) -> anyhow::Result<()> {
@@ -418,9 +473,32 @@ pub fn bearer_token(headers: &HeaderMap) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::client_ip;
-    use axum::http::HeaderMap;
+    use super::{
+        access_for, client_ip, AccessView, AuthUser, CAPABILITY_PLATFORM_ACCESS,
+        CAPABILITY_WORKSPACE_ACCESS, SURFACE_ADMIN, SURFACE_WORKSPACE,
+    };
+    use crate::config::parse_admin_surface_roles;
+    use crate::error::AppResult;
+    use axum::http::{HeaderMap, StatusCode};
+    use opsweave_contracts::Role;
     use std::net::SocketAddr;
+    use uuid::Uuid;
+
+    fn auth_user(role: Role) -> AuthUser {
+        AuthUser {
+            user_id: Uuid::nil(),
+            email: "user@example.invalid".to_string(),
+            display_name: "Test User".to_string(),
+            role,
+            session_id: Uuid::nil(),
+            csrf_token: "csrf-token".to_string(),
+            via_cookie: false,
+        }
+    }
+
+    fn access(role: Role, raw_env: &str) -> AccessView {
+        access_for(role, &parse_admin_surface_roles(raw_env))
+    }
 
     #[test]
     fn rate_limit_key_ignores_ephemeral_port() {
@@ -456,5 +534,200 @@ mod tests {
             ),
             "198.51.100.9".parse::<std::net::IpAddr>().unwrap()
         );
+    }
+
+    #[test]
+    fn access_matrix_under_the_default_admin_only_configuration() {
+        let admin = access(Role::Admin, "admin");
+        assert_eq!(
+            admin.allowed_surfaces,
+            vec![SURFACE_WORKSPACE, SURFACE_ADMIN]
+        );
+        assert_eq!(
+            admin.capabilities,
+            vec![CAPABILITY_PLATFORM_ACCESS, CAPABILITY_WORKSPACE_ACCESS]
+        );
+        for role in [Role::Operator, Role::Viewer] {
+            let declaration = access(role, "admin");
+            assert_eq!(declaration.allowed_surfaces, vec![SURFACE_WORKSPACE]);
+            assert_eq!(declaration.capabilities, vec![CAPABILITY_WORKSPACE_ACCESS]);
+        }
+    }
+
+    #[test]
+    fn access_declaration_serializes_to_the_contract_field_names() {
+        let value = serde_json::to_value(access(Role::Admin, "admin")).unwrap();
+        assert_eq!(
+            value["allowedSurfaces"],
+            serde_json::json!(["workspace", "admin"])
+        );
+        assert_eq!(
+            value["capabilities"],
+            serde_json::json!(["platform:access", "workspace:access"])
+        );
+        assert!(value.get("allowed_surfaces").is_none());
+    }
+
+    #[test]
+    fn operator_enters_the_admin_surface_only_through_the_env_override() {
+        let widened = access(Role::Operator, "operator");
+        assert_eq!(
+            widened.allowed_surfaces,
+            vec![SURFACE_WORKSPACE, SURFACE_ADMIN]
+        );
+        assert_eq!(
+            widened.capabilities,
+            vec![CAPABILITY_PLATFORM_ACCESS, CAPABILITY_WORKSPACE_ACCESS]
+        );
+        // Widening for operator must not disturb the other roles.
+        assert_eq!(
+            access(Role::Viewer, "operator").allowed_surfaces,
+            vec![SURFACE_WORKSPACE]
+        );
+        assert_eq!(
+            access(Role::Admin, "operator").capabilities,
+            vec![CAPABILITY_PLATFORM_ACCESS, CAPABILITY_WORKSPACE_ACCESS]
+        );
+    }
+
+    #[test]
+    fn invalid_admin_surface_env_never_widens_the_surface() {
+        for raw in ["", "operator,nope", "superuser"] {
+            assert_eq!(
+                access(Role::Operator, raw).allowed_surfaces,
+                vec![SURFACE_WORKSPACE],
+                "raw={raw:?}"
+            );
+            assert_eq!(
+                access(Role::Admin, raw).allowed_surfaces,
+                vec![SURFACE_WORKSPACE, SURFACE_ADMIN],
+                "raw={raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn me_payload_is_additive_and_carries_the_declared_access() {
+        let payload =
+            super::me_payload(&auth_user(Role::Admin), &parse_admin_surface_roles("admin"));
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "user": {
+                    "id": Uuid::nil(),
+                    "email": "user@example.invalid",
+                    "displayName": "Test User",
+                    "role": "admin",
+                },
+                "session": { "csrfToken": "csrf-token", "viaCookie": false },
+                "csrfToken": "csrf-token",
+                "access": {
+                    "allowedSurfaces": ["workspace", "admin"],
+                    "capabilities": ["platform:access", "workspace:access"],
+                },
+            })
+        );
+        // A role outside the admin surface hint declares the workspace only; the
+        // pre-G05 fields are byte-identical regardless of role.
+        let operator = super::me_payload(
+            &auth_user(Role::Operator),
+            &parse_admin_surface_roles("admin"),
+        );
+        assert_eq!(operator["csrfToken"], serde_json::json!("csrf-token"));
+        assert_eq!(
+            operator["session"]["csrfToken"],
+            serde_json::json!("csrf-token")
+        );
+        assert_eq!(
+            operator["access"],
+            serde_json::json!({
+                "allowedSurfaces": ["workspace"],
+                "capabilities": ["workspace:access"],
+            })
+        );
+    }
+
+    #[test]
+    fn viewer_is_forbidden_by_every_existing_role_gate() {
+        let viewer = auth_user(Role::Viewer);
+        let admin_gate = viewer.require_admin().unwrap_err();
+        assert_eq!(admin_gate.status, StatusCode::FORBIDDEN);
+        assert_eq!(admin_gate.code, "FORBIDDEN");
+        let operator_gate = viewer.require_operator().unwrap_err();
+        assert_eq!(operator_gate.status, StatusCode::FORBIDDEN);
+        assert_eq!(operator_gate.code, "FORBIDDEN");
+
+        // The gates themselves are unchanged: operator keeps its operator-level
+        // access and still cannot reach an admin-only handler.
+        let operator = auth_user(Role::Operator);
+        assert!(operator.require_operator().is_ok());
+        assert_eq!(
+            operator.require_admin().unwrap_err().status,
+            StatusCode::FORBIDDEN
+        );
+
+        let admin = auth_user(Role::Admin);
+        assert!(admin.require_admin().is_ok());
+        assert!(admin.require_operator().is_ok());
+    }
+
+    fn gated_router(role: Role) -> axum::Router {
+        async fn admin_handler(auth: AuthUser) -> AppResult<&'static str> {
+            auth.require_admin()?;
+            Ok("admin")
+        }
+        async fn operator_handler(auth: AuthUser) -> AppResult<&'static str> {
+            auth.require_operator()?;
+            Ok("operator")
+        }
+        axum::Router::new()
+            .route("/admin/gated", axum::routing::get(admin_handler))
+            .route("/operator/gated", axum::routing::get(operator_handler))
+            .layer(axum::middleware::from_fn(
+                move |mut request: axum::extract::Request, next: axum::middleware::Next| {
+                    let user = auth_user(role);
+                    async move {
+                        request.extensions_mut().insert(user);
+                        next.run(request).await
+                    }
+                },
+            ))
+    }
+
+    #[tokio::test]
+    async fn viewer_receives_403_from_admin_and_operator_gated_routes() {
+        use tower::ServiceExt;
+
+        async fn status(role: Role, path: &str) -> StatusCode {
+            gated_router(role)
+                .oneshot(
+                    axum::http::Request::builder()
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+        }
+
+        assert_eq!(
+            status(Role::Viewer, "/admin/gated").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status(Role::Viewer, "/operator/gated").await,
+            StatusCode::FORBIDDEN
+        );
+        // Unchanged existing behaviour: operator passes operator gates only.
+        assert_eq!(
+            status(Role::Operator, "/operator/gated").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(Role::Operator, "/admin/gated").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(status(Role::Admin, "/admin/gated").await, StatusCode::OK);
     }
 }
