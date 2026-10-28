@@ -169,6 +169,7 @@ export function Modal({
   footer?: React.ReactNode;
   size?: 'small' | 'medium' | 'large';
 }) {
+  const t = useT();
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -198,7 +199,7 @@ export function Modal({
       <div className={`modal modal-${size}`} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>
         <div className="modal-head">
           <h2 id={titleId}>{title}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close dialog"><Icon name="close" /></button>
+          <button className="icon-btn" onClick={onClose} aria-label={t('aria.closeDialog')}><Icon name="close" /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -211,7 +212,7 @@ export function ConfirmDialog({
   open,
   title,
   description,
-  confirmLabel = 'Confirm',
+  confirmLabel,
   danger = false,
   busy = false,
   onConfirm,
@@ -226,6 +227,8 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
+  const resolvedConfirmLabel = confirmLabel ?? t('action.confirm');
   return (
     <Modal
       open={open}
@@ -233,9 +236,9 @@ export function ConfirmDialog({
       title={title}
       size="small"
       footer={<>
-        <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+        <button className="btn btn-secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</button>
         <button className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm} disabled={busy}>
-          {busy ? 'Working…' : confirmLabel}
+          {busy ? t('action.working') : resolvedConfirmLabel}
         </button>
       </>}
     >
@@ -248,6 +251,7 @@ type Toast = { id: string; tone: 'ok' | 'danger' | 'info'; title: string; detail
 const ToastContext = createContext<{ push(t: Omit<Toast, 'id'>): void } | null>(null);
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const push = useCallback((toast: Omit<Toast, 'id'>) => {
     const id = Math.random().toString(36).slice(2);
@@ -262,7 +266,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           <div className={`toast toast-${toast.tone}`} key={toast.id}>
             <Icon name={toast.tone === 'ok' ? 'check' : toast.tone === 'danger' ? 'warning' : 'alert'} size={16} />
             <div><strong>{toast.title}</strong>{toast.detail && <p>{toast.detail}</p>}</div>
-            <button className="icon-btn" aria-label="Dismiss" onClick={() => setToasts((items) => items.filter((item) => item.id !== toast.id))}><Icon name="close" size={14} /></button>
+            <button className="icon-btn" aria-label={t('aria.dismiss')} onClick={() => setToasts((items) => items.filter((item) => item.id !== toast.id))}><Icon name="close" size={14} /></button>
           </div>
         ))}
       </div>
@@ -296,9 +300,10 @@ export function KV({ label, children, mono = false }: { label: string; children:
 }
 
 export function Progress({ value, max, label }: { value: number; max: number; label?: string }) {
+  const t = useT();
   const percent = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   return (
-    <div className="progress" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max} aria-label={label || 'Progress'}>
+    <div className="progress" role="progressbar" aria-valuenow={value} aria-valuemin={0} aria-valuemax={max} aria-label={label || t('aria.progress')}>
       <div className="progress-track"><div className="progress-fill" style={{ width: `${percent}%` }} /></div>
       <span className="progress-label">{value}/{max}</span>
     </div>

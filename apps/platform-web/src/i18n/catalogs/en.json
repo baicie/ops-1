@@ -102,5 +102,11 @@
   "action.retry": "Retry",
   "error.loadTitle": "Could not load this view",
   "error.unknown": "Unknown error",
-  "aria.loading": "Loading"
+  "aria.loading": "Loading",
+  "aria.closeDialog": "Close dialog",
+  "aria.dismiss": "Dismiss",
+  "aria.progress": "Progress",
+  "action.confirm": "Confirm",
+  "action.cancel": "Cancel",
+  "action.working": "Working…"
 }

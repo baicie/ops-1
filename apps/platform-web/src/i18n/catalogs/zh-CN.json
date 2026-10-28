@@ -102,5 +102,11 @@
   "action.retry": "重试",
   "error.loadTitle": "无法加载此视图",
   "error.unknown": "未知错误",
-  "aria.loading": "加载中"
+  "aria.loading": "加载中",
+  "aria.closeDialog": "关闭对话框",
+  "aria.dismiss": "关闭提示",
+  "aria.progress": "进度",
+  "action.confirm": "确认",
+  "action.cancel": "取消",
+  "action.working": "处理中…"
 }
