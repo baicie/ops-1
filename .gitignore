@@ -19,3 +19,4 @@ plugins/hello-go/hello-go-linux
 data-test/
 
 artifacts/reliability/
+artifacts/staging-preview/

@@ -188,8 +188,8 @@ jobs:
             exit 1
           fi
           ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'sudo -n install -d -m 0755 /srv/opsweave-staging /srv/opsweave-staging/bin'
-          scp -F "$SSH_CONFIG_FILE" -o BatchMode=yes scripts/deploy-staging.sh "¤SSH_HOST_ALIAS:/tmp/opsweave-deploy-staging.sh"
-          scp -F "$SSH_CONFIG_FILE" -o BatchMode=yes deployments/staging/compose.yaml "¤SSH_HOST_ALIAS:/tmp/opsweave-compose.yaml"
+          scp -F "$SSH_CONFIG_FILE" -o BatchMode=yes scripts/deploy-staging.sh "$SSH_HOST_ALIAS:/tmp/opsweave-deploy-staging.sh"
+          scp -F "$SSH_CONFIG_FILE" -o BatchMode=yes deployments/staging/compose.yaml "$SSH_HOST_ALIAS:/tmp/opsweave-compose.yaml"
           ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'sudo -n install -m 0755 /tmp/opsweave-deploy-staging.sh /srv/opsweave-staging/bin/deploy-staging.sh'
           ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'sudo -n install -m 0644 /tmp/opsweave-compose.yaml /srv/opsweave-staging/compose.yaml'
           ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'rm -f /tmp/opsweave-deploy-staging.sh /tmp/opsweave-compose.yaml && /srv/opsweave-staging/bin/deploy-staging.sh --help >/dev/null && echo "deploy script and compose contract installed"'
@@ -215,11 +215,16 @@ jobs:
         id: deploy
         env:
           TARGET_SHA: ${{ needs.build.outputs.sha }}
+          PUBLIC_URL: ${{ secrets.STAGING_BASE_URL }}
         run: |
           set -euo pipefail
           set +x
-          echo "deploying $TARGET_SHA to the staging host"
-          if ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo -n /srv/opsweave-staging/bin/deploy-staging.sh --sha '$TARGET_SHA'"; then
+          if ! printf '%s' "$PUBLIC_URL" | grep -Eq '^https?://[A-Za-z0-9._~:/?#@!&()*+,;=%-]+$'; then
+            echo "::error::STAGING_BASE_URL is not a usable http(s) URL; refusing to interpolate it into a remote command."
+            exit 1
+          fi
+          echo "deploying $TARGET_SHA to the staging host with public origin $PUBLIC_URL"
+          if ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo -n /srv/opsweave-staging/bin/deploy-staging.sh --sha '$TARGET_SHA' --base-url '$PUBLIC_URL'"; then
             echo "result=success" >> "$GITHUB_OUTPUT"
           else
             code=$?
