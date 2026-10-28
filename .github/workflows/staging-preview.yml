@@ -6,6 +6,8 @@ name: staging-preview
 # Required repository/environment configuration (GitHub Environment: staging):
 #   secrets STAGING_HOST, STAGING_USER, STAGING_SSH_KEY, STAGING_HOST_KEY, STAGING_BASE_URL
 #   optional STAGING_ADMIN_EMAIL, STAGING_ADMIN_PASSWORD (the browser smoke logs in with them)
+#   optional vars OPSWEAVE_PREVIEW_URL (browser-facing preview origin; defaults to port 3000, the
+#     port the kernel listens on, and must name the same origin as STAGING_BASE_URL)
 # A missing secret fails the deploy job with an explicit error; the deployment is never skipped.
 
 on:
@@ -132,7 +134,7 @@ jobs:
     timeout-minutes: 40
     environment:
       name: staging
-      url: http://82.156.234.84:18080
+      url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
     outputs:
       target_sha: ${{ needs.build.outputs.sha }}
       previous_sha: ${{ steps.previous.outputs.sha }}
@@ -289,7 +291,7 @@ jobs:
     if: always() && needs.deploy.result == 'success'
     environment:
       name: staging
-      url: http://82.156.234.84:18080
+      url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
     steps:
@@ -329,6 +331,8 @@ jobs:
         if: steps.mode.outputs.mode == 'playwright'
         env:
           OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
+          # The commit this run built; staging-smoke.spec.ts fails when the preview does not serve it.
+          OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha }}
           OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
           OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
         run: |
@@ -398,8 +402,12 @@ jobs:
                   served = (json.loads(body) or {}).get("commitSha") or ""
               except Exception:
                   served = ""
-          ok = status == 200 and (not expected or served == expected)
-          record("version", "/api/v1/version", status, ok, err or "served %s" % (served or "<none>"))
+          # Fail closed: an unknown expected SHA is a failed certification, not a skipped check.
+          ok = status == 200 and bool(expected) and served == expected
+          detail = err or ("served %s" % (served or "<none>"))
+          if not expected:
+              detail = "EXPECTED_SHA is empty; cannot certify the served commit"
+          record("version", "/api/v1/version", status, ok, detail)
 
           payload = {
               "mode": "http-only",
@@ -435,7 +443,7 @@ jobs:
     if: always()
     environment:
       name: staging
-      url: http://82.156.234.84:18080
+      url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
     permissions:
       contents: read
       pull-requests: write

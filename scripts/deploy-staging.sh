@@ -31,6 +31,25 @@ readonly BACKUP_ROOT="${OPSWEAVE_STAGING_BACKUPS:-/var/backups/opsweave-staging}
 readonly LOG_DIR="${OPSWEAVE_STAGING_LOGS:-/var/log/opsweave-staging}"
 readonly COMPOSE_FILE="$ROOT_DIR/compose.yaml"
 readonly ENV_FILE="$ROOT_DIR/staging.env"
+
+# Per-service runtime env files (ADR-014 §8). Each container mounts exactly one of them, so the
+# node never receives the database superuser password or the bootstrap admin password. staging.env
+# above carries compose interpolation values only and is never mounted into a container.
+readonly POSTGRES_ENV_FILE="$ROOT_DIR/postgres.env"
+readonly KERNEL_ENV_FILE="$ROOT_DIR/kernel.env"
+readonly NODE_ENV_FILE="$ROOT_DIR/node.env"
+
+# Allow lists used when the split files are derived from a legacy single staging.env. Keys that are
+# not listed are never copied, so a new key cannot leak into a service env file by accident.
+readonly POSTGRES_ENV_KEYS="POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD"
+readonly KERNEL_ENV_KEYS="DATABASE_URL OPSWEAVE_PUBLIC_URL OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD OPSWEAVE_BOOTSTRAP_ADMIN_NAME OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT OPSWEAVE_ALLOWED_NODE_DATA_HOSTS OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS OPSWEAVE_SESSION_HOURS OPSWEAVE_NODE_HEARTBEAT_SECONDS OPSWEAVE_NODE_STALE_SECONDS OPSWEAVE_REQUEST_TIMEOUT_SECONDS OPSWEAVE_TRUSTED_PROXY_IPS OPSWEAVE_DEV_PUBLISHER_ID OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY"
+readonly NODE_ENV_KEYS="OPSWEAVE_ENROLLMENT_TOKEN OPSWEAVE_NODE_NAME OPSWEAVE_NODE_LABELS OPSWEAVE_NODE_MAX_INSTANCES OPSWEAVE_NODE_LEASE_SECONDS"
+readonly POSTGRES_ENV_REQUIRED="POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD"
+readonly KERNEL_ENV_REQUIRED="DATABASE_URL"
+readonly NODE_ENV_REQUIRED=""
+# Anything here would give the node a privilege it does not need (database superuser, platform
+# admin, registry token). Checked by assert_service_env_boundary before every compose call.
+readonly NODE_ENV_FORBIDDEN_KEYS="POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD OPSWEAVE_BOOTSTRAP_ADMIN_NAME OPSWEAVE_GHCR_TOKEN"
 readonly RELEASES_DIR="$ROOT_DIR/releases"
 readonly BIN_DIR="$ROOT_DIR/bin"
 readonly GHCR_TOKEN_FILE="$ROOT_DIR/ghcr.token"
@@ -98,7 +117,12 @@ SHA_ARG=""
 BASE_URL_ARG=""
 JSON_ONLY=0
 
-export OPSWEAVE_ENV_FILE="$ENV_FILE"
+# compose resolves each service env_file through these variables. The deploy script always exports
+# absolute paths, so a stale value in the operator shell cannot point one service at another
+# service env file. staging.env reaches compose only through --env-file (interpolation).
+export OPSWEAVE_POSTGRES_ENV_FILE="$POSTGRES_ENV_FILE"
+export OPSWEAVE_KERNEL_ENV_FILE="$KERNEL_ENV_FILE"
+export OPSWEAVE_NODE_ENV_FILE="$NODE_ENV_FILE"
 
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 utc_stamp() { date -u +%Y%m%dT%H%M%SZ; }
@@ -143,7 +167,7 @@ Modes:
                        previous release is recorded.
 
 Options:
-  --base-url <url>     Public origin written to OPSWEAVE_PUBLIC_URL in staging.env (cookie security
+  --base-url <url>     Public origin written to OPSWEAVE_PUBLIC_URL in kernel.env (cookie security
                        and absolute links). Pass the address browsers use, e.g.
                        http://82.156.234.84:18080. Falls back to the value already in staging.env,
                        and to http://127.0.0.1:18080 when the file only holds a placeholder.
@@ -151,6 +175,13 @@ Options:
   -h, --help           Show this help.
 
 Exit codes: 0 success, 1 deployment/rollback failure, 2 usage error.
+
+Environment files (ADR-014 §8 - one file per service, nothing shared):
+  $ROOT_DIR/staging.env   compose interpolation only, never mounted (image, gateway, socket GID, port)
+  $ROOT_DIR/postgres.env  POSTGRES_*                        -> postgres container only
+  $ROOT_DIR/kernel.env    DATABASE_URL + bootstrap admin    -> kernel container only
+  $ROOT_DIR/node.env      node identity + enrolment token   -> node container only, no credentials
+  A legacy single staging.env is split into the three files on first run, then left alone.
 
 Credentials:
   GHCR pulls reuse the docker login performed by CI. For a manual run, place a registry token in
@@ -261,9 +292,11 @@ current_sha() {
   return 1
 }
 
-env_file_value() {
-  local key="$1" fallback="$2" value
-  value="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$ENV_FILE" 2>/dev/null | tail -n1)"
+# Read one key from an env file. A surrounding double quote pair is stripped because the legacy
+# single file was also shell-sourced.
+file_value() {
+  local file="$1" key="$2" fallback="${3-}" value
+  value="$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$file" 2>/dev/null | tail -n1)"
   value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/')"
   if [ -z "$value" ]; then
     value="$fallback"
@@ -271,20 +304,103 @@ env_file_value() {
   printf '%s' "$value"
 }
 
-# Rewrite one key in staging.env, preserving every other line and the file mode. The value travels
+env_file_value() { file_value "$ENV_FILE" "$1" "${2-}"; }
+
+# Rewrite one key in an env file, preserving every other line and the file mode. The value travels
 # through the environment, never through argv, so tokens are not readable from a process list.
-set_env_file_value() {
-  local key="$1" value="$2" tmp mode
-  tmp="$ENV_FILE.tmp.$$"
-  mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || printf '600')"
+set_file_value() {
+  local file="$1" key="$2" value="$3" tmp mode
+  [ -f "$file" ] || die 1 "cannot set $key: $file does not exist"
+  tmp="$file.tmp.$$"
+  mode="$(stat -c '%a' "$file" 2>/dev/null || printf '600')"
   OPSWEAVE_TMP_KEY="$key" OPSWEAVE_TMP_VALUE="$value" awk '
     BEGIN { k = ENVIRON["OPSWEAVE_TMP_KEY"]; v = ENVIRON["OPSWEAVE_TMP_VALUE"]; done = 0 }
     $0 ~ "^[[:space:]]*" k "[[:space:]]*=" && !done { print k "=" v; done = 1; next }
     { print }
     END { if (!done) print k "=" v }
-  ' "$ENV_FILE" >"$tmp"
+  ' "$file" >"$tmp"
   chmod "$mode" "$tmp"
-  mv -f "$tmp" "$ENV_FILE"
+  mv -f "$tmp" "$file"
+}
+
+# staging.env keeps the compose interpolation keys, which is what the remaining call sites touch.
+set_env_file_value() { set_file_value "$ENV_FILE" "$1" "$2"; }
+
+# Derive one service env file from a legacy single staging.env. Used once per host, right after the
+# split: after that the split file is authoritative and is never regenerated, so an operator edit
+# (rotating a password, emptying the enrolment token) is not overwritten by the legacy file.
+derive_service_env_file() {
+  local target="$1" service="$2" keys="$3" required="$4" key value tmp count=0
+  if [ -f "$target" ]; then
+    log "service env file present: $target ($service)"
+    return 0
+  fi
+  [ -r "$ENV_FILE" ] || die 1 "cannot derive $target: $ENV_FILE is not readable"
+  tmp="$target.tmp.$$"
+  : >"$tmp"
+  for key in $keys; do
+    value="$(file_value "$ENV_FILE" "$key" "")"
+    if [ -n "$value" ]; then
+      printf '%s=%s\n' "$key" "$value" >>"$tmp"
+      count="$((count + 1))"
+    fi
+  done
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$target"
+  log "derived $target for the $service service from $ENV_FILE ($count allow-listed keys)"
+  for key in $required; do
+    if [ -z "$(file_value "$target" "$key" "")" ]; then
+      warn "$target has no value for required key $key; check the $service service before the next release"
+    fi
+  done
+  return 0
+}
+
+# Least privilege is only real if it is checked. node.env must not define a database credential, a
+# bootstrap admin credential, a registry token, or anything matching *SECRET*; postgres.env must stay
+# POSTGRES_* only. Key names are printed, values never are.
+assert_service_env_boundary() {
+  local file="$1" service="$2" key hit
+  [ -f "$file" ] || die 1 "service env file missing: $file ($service)"
+  case "$service" in
+    node)
+      for key in $NODE_ENV_FORBIDDEN_KEYS; do
+        if grep -Eq "^[[:space:]]*\${key}[[:space:]]*=" "$file"; then
+          die 1 "$file must not define $key: the node needs the docker socket and a kernel URL, nothing else (ADR-014 §8)"
+        fi
+      done
+      hit="$(grep -Eo '^[[:space:]]*[A-Za-z0-9_]*SECRET[A-Za-z0-9_]*' "$file" | tr -d '[:space:]' | head -n1 || true)"
+      if [ -n "$hit" ]; then
+        die 1 "$file must not define $hit: node.env carries no secrets (ADR-014 §8)"
+      fi
+      ;;
+    postgres)
+      hit="$(grep -Eo '^[[:space:]]*[A-Za-z0-9_]+' "$file" | tr -d '[:space:]' | grep -Ev '^POSTGRES_[A-Z0-9_]+$' | head -n1 || true)"
+      if [ -n "$hit" ]; then
+        die 1 "$file must hold POSTGRES_* keys only, but defines $hit (ADR-014 §8)"
+      fi
+      ;;
+    kernel)
+      if grep -Eq '^[[:space:]]*POSTGRES_PASSWORD[[:space:]]*=' "$file"; then
+        die 1 "$file must not define POSTGRES_PASSWORD: the kernel reads DATABASE_URL, not the superuser password (ADR-014 §8)"
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# Runs before any compose call: compose validates env_file existence, and a service pointed at another
+# service env file would silently reintroduce the shared-secret exposure the split removes.
+ensure_service_env_files() {
+  derive_service_env_file "$POSTGRES_ENV_FILE" postgres "$POSTGRES_ENV_KEYS" "$POSTGRES_ENV_REQUIRED"
+  derive_service_env_file "$KERNEL_ENV_FILE" kernel "$KERNEL_ENV_KEYS" "$KERNEL_ENV_REQUIRED"
+  derive_service_env_file "$NODE_ENV_FILE" node "$NODE_ENV_KEYS" "$NODE_ENV_REQUIRED"
+  assert_service_env_boundary "$POSTGRES_ENV_FILE" postgres
+  assert_service_env_boundary "$KERNEL_ENV_FILE" kernel
+  assert_service_env_boundary "$NODE_ENV_FILE" node
+  if ! chmod 600 "$POSTGRES_ENV_FILE" "$KERNEL_ENV_FILE" "$NODE_ENV_FILE" 2>/dev/null; then
+    warn "cannot set 0600 on the service env files under $ROOT_DIR; check ownership and mode"
+  fi
 }
 
 record_field() {
@@ -308,16 +424,16 @@ persist_release_env() {
   set_env_file_value OPSWEAVE_BUILD_TIME "$2"
   # The origin the kernel advertises (cookie security, absolute links). CI passes the canonical
   # staging URL; a placeholder is reported instead of being silently shipped.
-  existing="$(env_file_value OPSWEAVE_PUBLIC_URL "")"
+  existing="$(file_value "$KERNEL_ENV_FILE" OPSWEAVE_PUBLIC_URL "")"
   public_url="${BASE_URL_ARG:-${OPSWEAVE_PUBLIC_URL_OVERRIDE:-$existing}}"
   case "$public_url" in
     ""|*__HOST_PUBLIC_IP__*|*__PLACEHOLDER__*)
       public_url="http://127.0.0.1:18080"
-      warn "$ENV_FILE has no usable OPSWEAVE_PUBLIC_URL; wrote the loopback default $public_url — pass --base-url with the address browsers use"
+      warn "$KERNEL_ENV_FILE has no usable OPSWEAVE_PUBLIC_URL; wrote the loopback default $public_url — pass --base-url with the address browsers use"
       ;;
   esac
   if [ "$public_url" != "$existing" ]; then
-    set_env_file_value OPSWEAVE_PUBLIC_URL "$public_url"
+    set_file_value "$KERNEL_ENV_FILE" OPSWEAVE_PUBLIC_URL "$public_url"
   fi
   export OPSWEAVE_PUBLIC_URL="$public_url"
   log "OPSWEAVE_PUBLIC_URL=$OPSWEAVE_PUBLIC_URL"
@@ -360,6 +476,9 @@ preflight() {
   fi
   [ -f "$COMPOSE_FILE" ] || die 1 "compose file not found: $COMPOSE_FILE (deployments/staging/compose.yaml must be installed under $ROOT_DIR first)"
   [ -f "$ENV_FILE" ] || die 1 "environment file not found: $ENV_FILE"
+  # Per-service env files first: compose refuses to resolve a service whose env_file is absent, and
+  # the boundary check is what keeps a secret out of node.env (ADR-014 §8).
+  ensure_service_env_files
   mkdir -p "$DEPLOY_DIR" "$BACKUP_ROOT" "$LOG_DIR" "$RELEASES_DIR" "$BIN_DIR"
   chmod 700 "$BACKUP_ROOT" "$DEPLOY_DIR"
   LOG_FILE="$LOG_DIR/deploy-$(utc_stamp).log"
@@ -367,8 +486,8 @@ preflight() {
     LOG_FILE=""
     warn "cannot write under $LOG_DIR; continuing without a log file"
   fi
-  PG_USER="$(env_file_value POSTGRES_USER "$PG_USER_DEFAULT")"
-  PG_DB="$(env_file_value POSTGRES_DB "$PG_DB_DEFAULT")"
+  PG_USER="$(file_value "$POSTGRES_ENV_FILE" POSTGRES_USER "$PG_USER_DEFAULT")"
+  PG_DB="$(file_value "$POSTGRES_ENV_FILE" POSTGRES_DB "$PG_DB_DEFAULT")"
   # The compose file marks OPSWEAVE_IMAGE as required, so give interpolation a value even before the
   # first release; read-only commands (ps, config) then keep working on a fresh host.
   if [ -z "${OPSWEAVE_IMAGE:-}" ]; then
@@ -562,6 +681,7 @@ write_backup_manifest() {
     printf 'created_at=%s\n' "$(iso_now)"
     printf 'compose_file=%s\n' "$COMPOSE_FILE"
     printf 'env_file=%s\n' "$ENV_FILE"
+    printf 'service_env_files=%s,%s,%s\n' "$POSTGRES_ENV_FILE" "$KERNEL_ENV_FILE" "$NODE_ENV_FILE"
     printf 'postgres_dump=%s\n' "$BACKUP_DB"
     printf 'postgres_ready=%s\n' "$PG_READY_STATE"
     printf 'previous_running_sha=%s\n' "$(current_sha || true)"
@@ -623,9 +743,17 @@ create_backup() {
   BACKUP_DIR="$BACKUP_ROOT/$stamp-${sha:0:8}"
   mkdir -p "$BACKUP_DIR"
   chmod 700 "$BACKUP_DIR"
+  local envfile
   install -m 600 "$ENV_FILE" "$BACKUP_DIR/staging.env"
+  # The three service env files hold the same credentials the legacy file used to hold; a backup that
+  # skips them cannot restore the host.
+  for envfile in "$POSTGRES_ENV_FILE" "$KERNEL_ENV_FILE" "$NODE_ENV_FILE"; do
+    if [ -f "$envfile" ]; then
+      install -m 600 "$envfile" "$BACKUP_DIR/$(basename "$envfile")"
+    fi
+  done
   install -m 600 "$COMPOSE_FILE" "$BACKUP_DIR/compose.yaml"
-  log "configuration backed up to $BACKUP_DIR"
+  log "configuration backed up to $BACKUP_DIR (staging.env + three service env files + compose.yaml)"
   BACKUP_DB="skipped"
   if service_exists postgres; then
     if ! service_running postgres; then
@@ -740,8 +868,10 @@ health_check() {
   done
 }
 
-# /api/v1/version reports the commit the kernel is actually serving. A mismatch means the container
-# is not running the release we just pinned; it is recorded here and enforced by the CI smoke job.
+# /api/v1/version reports the commit the kernel is actually serving. A container that answers every
+# health probe while running an older build is precisely the failure that must never be recorded as a
+# success, so this returns non-zero unless the served commit is positively known and equal to the
+# target: unreachable, commitSha absent and commitSha mismatched are all failures, not warnings.
 served_commit_check() {
   local target="${1-}" body
   SERVED_SHA=""
@@ -749,15 +879,15 @@ served_commit_check() {
   body="$(http_body "$BASE_URL/api/v1/version")"
   if [ -z "$body" ]; then
     SERVED_SHA_STATE="unavailable"
-    warn "/api/v1/version is not reachable"
-    return 0
+    warn "/api/v1/version is not reachable; the served commit cannot be verified"
+    return 1
   fi
   SERVED_SHA="$(json_field "$body" commitSha)"
   if [ -z "$SERVED_SHA" ] || [ "$SERVED_SHA" = "null" ]; then
     SERVED_SHA=""
     SERVED_SHA_STATE="absent"
-    warn "/api/v1/version does not report a commitSha"
-    return 0
+    warn "/api/v1/version does not report a commitSha; the served commit cannot be verified"
+    return 1
   fi
   if [ -z "$target" ]; then
     SERVED_SHA_STATE="observed"
@@ -766,11 +896,36 @@ served_commit_check() {
   if [ "$SERVED_SHA" = "$target" ]; then
     SERVED_SHA_STATE="match"
     log "kernel reports serving commit $SERVED_SHA"
-  else
-    SERVED_SHA_STATE="mismatch"
-    warn "kernel reports serving commit $SERVED_SHA but $target was deployed; OPSWEAVE_BUILD_SHA may not have reached the container"
+    return 0
   fi
-  return 0
+  SERVED_SHA_STATE="mismatch"
+  warn "kernel reports serving commit $SERVED_SHA but $target was deployed; OPSWEAVE_BUILD_SHA may not have reached the container"
+  return 1
+}
+
+# Fail-closed gate for a release that already passed its health checks. Returns 0 only when the kernel
+# positively reports the commit just deployed, so an uncertified release can never reach
+# commit_pointers, the healthy=true record or exit 0.
+certify_deployment() {
+  local target="$1"
+  if served_commit_check "$target"; then
+    return 0
+  fi
+  case "$SERVED_SHA_STATE" in
+    mismatch)
+      warn "served commit certification failed: kernel serves ${SERVED_SHA:-<none>}, expected $target"
+      ;;
+    unavailable)
+      warn "served commit certification failed: $BASE_URL/api/v1/version is unreachable"
+      ;;
+    absent)
+      warn "served commit certification failed: $BASE_URL/api/v1/version reports no commitSha"
+      ;;
+    *)
+      warn "served commit certification failed (state: $SERVED_SHA_STATE)"
+      ;;
+  esac
+  return 1
 }
 
 health_json() {
@@ -812,10 +967,10 @@ api_login() {
     return 0
   fi
   local email password body code csrf
-  email="$(env_file_value OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL "")"
-  password="$(env_file_value OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD "")"
+  email="$(file_value "$KERNEL_ENV_FILE" OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL "")"
+  password="$(file_value "$KERNEL_ENV_FILE" OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD "")"
   if [ -z "$email" ] || [ -z "$password" ]; then
-    BOOTSTRAP_DETAIL="OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL/PASSWORD not set in $ENV_FILE"
+    BOOTSTRAP_DETAIL="OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL/PASSWORD not set in $KERNEL_ENV_FILE"
     return 1
   fi
   if [ -z "$BOOTSTRAP_TMP" ] || [ ! -d "$BOOTSTRAP_TMP" ]; then
@@ -881,11 +1036,11 @@ bootstrap_node() {
       return 0
     fi
     local token code out
-    token="$(env_file_value OPSWEAVE_ENROLLMENT_TOKEN "")"
+    token="$(file_value "$NODE_ENV_FILE" OPSWEAVE_ENROLLMENT_TOKEN "")"
     if [ -n "$token" ]; then
       BOOTSTRAP_STATE="token-already-set"
-      BOOTSTRAP_DETAIL="OPSWEAVE_ENROLLMENT_TOKEN already present in $ENV_FILE"
-      log "reusing the enrolment token already stored in $ENV_FILE"
+      BOOTSTRAP_DETAIL="OPSWEAVE_ENROLLMENT_TOKEN already present in $NODE_ENV_FILE"
+      log "reusing the enrolment token already stored in $NODE_ENV_FILE"
     else
       # Equivalent to 'opsctl node-token --label staging --ttl-minutes 525600' (same endpoint the
       # CLI calls), used because opsctl login only accepts the password as an argv argument.
@@ -903,10 +1058,10 @@ bootstrap_node() {
         BOOTSTRAP_DETAIL="enrolment token response carried no token"
         return 1
       fi
-      set_env_file_value OPSWEAVE_ENROLLMENT_TOKEN "$token"
+      set_file_value "$NODE_ENV_FILE" OPSWEAVE_ENROLLMENT_TOKEN "$token"
       BOOTSTRAP_STATE="token-issued"
-      BOOTSTRAP_DETAIL="enrolment token stored in $ENV_FILE"
-      log "issued a node enrolment token and stored it in $ENV_FILE (value never printed)"
+      BOOTSTRAP_DETAIL="enrolment token stored in $NODE_ENV_FILE"
+      log "issued a node enrolment token and stored it in $NODE_ENV_FILE (value never printed)"
     fi
   fi
   log "starting the node service on this release"
@@ -1089,8 +1244,16 @@ cmd_deploy() {
     if wait_kernel_livez; then
       bootstrap_node || warn "node bootstrap reported a problem"
       node_readiness_check
-      if health_check; then healthy=1; fi
-      served_commit_check "$sha"
+      if health_check; then
+        healthy=1
+        # Health is necessary but not sufficient: a container can answer every probe while serving
+        # an older build. Certification runs before any success record or pointer update, and a
+        # failure here falls into the same rollback path a failed health check takes below.
+        if ! certify_deployment "$sha"; then
+          healthy=0
+          warn "release $sha answers every health probe but does not serve the pinned commit; treating it as unhealthy"
+        fi
+      fi
     else
       warn "kernel did not become live; skipping node bootstrap and readiness"
     fi
@@ -1115,7 +1278,9 @@ cmd_deploy() {
   fi
   log "rolling back to previous release $rollback_target"
   if rollback_to_release "$rollback_target"; then
-    served_commit_check "$rollback_target"
+    if ! certify_deployment "$rollback_target"; then
+      warn "rollback restored the containers but $rollback_target is not the served commit ($SERVED_SHA_STATE); the staging host needs manual attention"
+    fi
     write_record "$sha" false true "$rollback_target" "deploy"
     warn "release $sha was rolled back to $rollback_target"
     print_running_release
@@ -1236,7 +1401,9 @@ status_human() {
 cmd_status() {
   preflight
   health_probe_once || true
-  served_commit_check ""
+  # Observational only: an unreachable version endpoint is reported as state, never allowed to
+  # abort a read-only status call the way it aborts a deploy.
+  served_commit_check "" || true
   status_json
   if [ "$JSON_ONLY" -eq 0 ]; then
     status_human
@@ -1268,7 +1435,11 @@ cmd_rollback() {
     write_record "$previous" false true "" "manual-rollback"
     die 1 "rollback to $previous failed; the staging host needs manual attention"
   fi
-  served_commit_check "$previous"
+  # A manual rollback is recorded as healthy=true, so it passes the same gate a deploy does.
+  if ! certify_deployment "$previous"; then
+    write_record "$previous" false false "" "manual-rollback"
+    die 1 "rollback moved the containers to $previous but the kernel does not serve that commit ($SERVED_SHA_STATE); refusing to record it as a successful rollback"
+  fi
   if [[ "$current" =~ $SHA_RE ]]; then
     set_pointer previous "$current"
   fi

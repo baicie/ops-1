@@ -4,6 +4,8 @@ One image serves both roles: the Kernel (which also hosts the React Web Shell) a
 Node Runtime. The Node role is selected at run time by overriding the container command
 with `command: ["/usr/local/bin/opsweave-node"]`.
 Background and accepted trade-offs: `docs/adr/ADR-014-staging-preview-deployment.md`.
+Known exposure and the staging-only rule that forbids this shape in production: ADR-014 §8.
+Convergence plan for the shared-bridge exposure: ADR-014 §9.
 
 The target host has **no** rust/node/psql toolchain, so images are built in CI only.
 Image: `ghcr.io/baicie/opsweave:<40-char-sha>` - never `latest`. Rollback = the previous SHA.
@@ -36,6 +38,14 @@ sudo chown -R 10001:10001 /var/lib/opsweave-staging/kernel /var/lib/opsweave-sta
 sudo mkdir -p /srv/opsweave-staging
 sudo cp deployments/staging/staging.env.example /srv/opsweave-staging/staging.env
 sudo chmod 600 /srv/opsweave-staging/staging.env   # then edit every __PLACEHOLDER__
+
+# The three per-service env files (ADR-014 §8) are derived from staging.env by the deploy script on
+# its first run, with a deny-by-default allow list:
+#   postgres.env  POSTGRES_* only                     -> postgres container
+#   kernel.env    DATABASE_URL + bootstrap admin      -> kernel container
+#   node.env      node identity + enrolment token     -> node container, no credentials
+# To write them by hand instead, copy postgres.env.example / kernel.env.example / node.env.example.
+# staging.env itself is compose interpolation input only and is never mounted into a container.
 
 # Values the compose file must agree with:
 docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}'   # -> DOCKER_BRIDGE_IP
@@ -91,7 +101,10 @@ Verify: `curl -fsS http://127.0.0.1:18080/livez`, `curl -fsS http://127.0.0.1:18
 | `/var/lib/opsweave-staging/registry` | root | OCI blobs |
 | `/var/lib/opsweave-staging/kernel` | 10001:10001 | packages, backups |
 | `/var/lib/opsweave-staging/node` | 10001:10001 | `node-identity.json` (must persist) |
-| `/srv/opsweave-staging/staging.env` | root, 0600 | all runtime configuration |
+| `/srv/opsweave-staging/staging.env` | root, 0600 | compose interpolation only (image, gateway, socket GID, port); never mounted |
+| `/srv/opsweave-staging/postgres.env` | root, 0600 | `POSTGRES_*` only; mounted into `postgres` |
+| `/srv/opsweave-staging/kernel.env` | root, 0600 | `DATABASE_URL`, bootstrap admin, limits; mounted into `kernel` |
+| `/srv/opsweave-staging/node.env` | root, 0600 | node identity + enrolment token; mounted into `node`; no credentials allowed |
 
 Plugin containers are created by the Node on the default bridge and report back to
 `172.17.0.1:18080` / `172.17.0.1:55432`; that is why both services bind the docker gateway.
@@ -110,3 +123,9 @@ With a wrong `DOCKER_BRIDGE_IP` plugins start but cannot reach the Kernel or the
 - Stop without data loss: `docker compose -f deployments/staging/compose.yaml down`.
 - Known risk (staging only): the `node` service mounts `/var/run/docker.sock`, i.e. full
   host Docker control. Accepted for staging in ADR-014; do not reuse this file in production.
+- Known risk (staging only): postgres/registry are published on `172.17.0.1`, which every container
+  of every project on this host can reach. The host itself has no packet filter (`ufw inactive`), so
+  the cloud firewall is the only boundary. Registered as E2/E3 in ADR-014 §8; ADR-014 §9 is the
+  convergence plan (dedicated bridge + fixed gateway + `--network` on plugin containers).
+- `node.env` is checked before every compose call: a `POSTGRES_*`, `DATABASE_URL`,
+  `OPSWEAVE_BOOTSTRAP_ADMIN_*`, `OPSWEAVE_GHCR_TOKEN` or `*SECRET*` key there aborts the run.

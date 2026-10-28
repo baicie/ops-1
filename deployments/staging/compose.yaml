@@ -1,6 +1,16 @@
 # OpsWeave staging — single image, two roles, one Linux host.
 # Frozen contract: project name, 4 service names, bind paths, port bindings.
 # See deployments/staging/README.md for the operating procedure.
+#
+# Least privilege (ADR-014 §8): every service mounts its OWN env file. There
+# is no shared runtime env file any more — the node must not be able to read
+# POSTGRES_PASSWORD or OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD even though all four
+# containers come from one image and one host.
+#   postgres -> postgres.env   (POSTGRES_* only)
+#   kernel   -> kernel.env     (DATABASE_URL, bootstrap admin, runtime limits)
+#   node     -> node.env       (node identity + one-time enrolment token)
+# /srv/opsweave-staging/staging.env is interpolation input only (it feeds the
+# ${...} substitutions below); it is never mounted into a container.
 
 name: opsweave-staging
 
@@ -21,7 +31,7 @@ services:
     image: postgres:17
     restart: unless-stopped
     env_file:
-      - ${OPSWEAVE_ENV_FILE:-/srv/opsweave-staging/staging.env}
+      - ${OPSWEAVE_POSTGRES_ENV_FILE:-/srv/opsweave-staging/postgres.env}
     environment:
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
@@ -85,7 +95,7 @@ services:
     network_mode: host
     command: ["/usr/local/bin/opsweave-kernel"]
     env_file:
-      - ${OPSWEAVE_ENV_FILE:-/srv/opsweave-staging/staging.env}
+      - ${OPSWEAVE_KERNEL_ENV_FILE:-/srv/opsweave-staging/kernel.env}
     environment:
       OPSWEAVE_BIND: 0.0.0.0:${OPSWEAVE_PREVIEW_PORT:-18080}
       OPSWEAVE_DATA_DIR: /app/data
@@ -130,8 +140,9 @@ services:
     restart: unless-stopped
     network_mode: host
     command: ["/usr/local/bin/opsweave-node"]
+    # node.env only: no POSTGRES_*, no DATABASE_URL, no bootstrap admin password.
     env_file:
-      - ${OPSWEAVE_ENV_FILE:-/srv/opsweave-staging/staging.env}
+      - ${OPSWEAVE_NODE_ENV_FILE:-/srv/opsweave-staging/node.env}
     environment:
       OPSWEAVE_KERNEL_URL: http://127.0.0.1:${OPSWEAVE_PREVIEW_PORT:-18080}
       OPSWEAVE_DOCKER_HOST: unix:///var/run/docker.sock

@@ -13,6 +13,10 @@ import path from 'node:path';
 const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 const OUT = path.resolve('../../artifacts/staging-preview/screenshots');
+// The commit this workflow run built (build job output). Without it a green smoke proves only that
+// some build is up, which is exactly the failure that let a stale preview pass as a deployment.
+const EXPECTED_SHA = (process.env.OPSWEAVE_EXPECTED_SHA || '').trim();
+const ALLOW_UNPINNED = process.env.OPSWEAVE_ALLOW_UNPINNED === '1';
 
 test.describe.configure({ mode: 'serial' });
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -44,6 +48,30 @@ async function login(page: Page) {
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.waitForURL((url) => !url.pathname.startsWith('/login'));
 }
+
+// Declared first and serial, so an unpinned or stale preview fails before any screenshot is taken.
+test('the preview serves exactly the commit this run built', async ({ request }) => {
+  if (!EXPECTED_SHA) {
+    // Fail closed: a skipped identity check would report green for an unverified deployment.
+    expect(
+      ALLOW_UNPINNED,
+      'OPSWEAVE_EXPECTED_SHA is required to certify the served commit. Set it to the 40-character SHA this run built, or set OPSWEAVE_ALLOW_UNPINNED=1 for a deliberate unpinned smoke.',
+    ).toBe(true);
+    test.info().annotations.push({
+      type: 'warning',
+      description: 'unpinned smoke: OPSWEAVE_ALLOW_UNPINNED=1 was set, so the served commit is not verified',
+    });
+    return;
+  }
+  expect(EXPECTED_SHA, 'OPSWEAVE_EXPECTED_SHA must be a full 40-character commit SHA').toMatch(/^[0-9a-f]{40}$/);
+  const response = await request.get('/api/v1/version');
+  expect(response.status()).toBe(200);
+  const body = await response.json();
+  expect(
+    body.commitSha,
+    `/api/v1/version must report commitSha ${EXPECTED_SHA}; this preview is serving a different build`,
+  ).toBe(EXPECTED_SHA);
+});
 
 test('version endpoint is public and exposes build identity only', async ({ request }) => {
   // No session cookie: staging must be able to read the build before anyone signs in.
