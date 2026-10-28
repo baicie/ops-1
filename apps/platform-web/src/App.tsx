@@ -157,7 +157,7 @@ export function App() {
                       <Route path="settings" element={<SettingsPage />} />
                       <Route path="settings/diagnostics" element={<DiagnosticsPage />} />
                       <Route path="ops-center" element={<OpsCenterPage />} />
-                      <Route path="ext/*" element={<ExtensionRoute />} />
+                      <Route path="ext/*" element={<ExtensionRoute surface="admin" />} />
                       <Route path="*" element={<NotFoundPage />} />
                     </Route>
                   </Route>
@@ -172,6 +172,8 @@ export function App() {
                       <Route path="resources" element={<SurfaceNotYetPage capability="resources" />} />
                       <Route path="sources" element={<SurfaceNotYetPage capability="sources" />} />
                       <Route path="reports" element={<SurfaceNotYetPage capability="reports" />} />
+                      {/* G06: plugins whose contribution declares surface "workspace" (guard already ran). */}
+                      <Route path="ext/*" element={<ExtensionRoute surface="workspace" />} />
                       <Route path="*" element={<NotFoundPage />} />
                     </Route>
                   </Route>

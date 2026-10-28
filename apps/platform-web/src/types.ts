@@ -193,6 +193,26 @@ export interface Publisher {
   revokedAt?: string | null;
 }
 
+/** One contribution the server refused to honor; it is never mounted, only reported. */
+export interface ContributionRejection {
+  /** Stable code (MISSING_SURFACE, NAMESPACE_ESCAPE, UNEXPECTED_FIELD, ...). */
+  code: string;
+  pluginId: string;
+  contributionId: string;
+  kind: string;
+  detail: string;
+}
+
+export interface ExtensionContribution {
+  kind: string;
+  id: string;
+  path: string;
+  /** Stamped by the server on every shipped contribution; a v1 item reads 'admin'. */
+  surface?: 'admin' | 'workspace';
+  titleKey?: string;
+  requiredCapabilities?: string[];
+}
+
 export interface Extension {
   pluginId: string;
   publisher: string;
@@ -200,7 +220,9 @@ export interface Extension {
   activationRevision: number;
   assetBase: string;
   remoteEntry: string;
-  contributions: Array<{ kind: string; id: string; path: string }>;
+  contributions: ExtensionContribution[];
+  /** Contract violations only - an unauthorized contribution is withheld, not rejected. */
+  rejections?: ContributionRejection[];
 }
 
 export interface Diagnostics {

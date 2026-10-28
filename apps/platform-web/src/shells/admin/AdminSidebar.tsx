@@ -54,9 +54,7 @@ export function AdminSidebar({
           </SidebarGroup>
         ))}
         {/* Extension slots stay inside the shell: a plugin contributes an item, never chrome. */}
-        <SidebarGroup label={t('nav.section.extensions')} className="nav-extensions">
-          <ExtensionNavigation />
-        </SidebarGroup>
+        <ExtensionNavigation surface="admin" />
       </nav>
 
       <SidebarFooter className="sidebar-footer">

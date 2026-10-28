@@ -15,6 +15,7 @@ import {
   useSidebar,
 } from '../../components/app/sidebar';
 import { VersionBadge } from '../../components/VersionBadge';
+import { ExtensionNavigation } from '../../extensions';
 import { SURFACE_CAPABILITIES, SURFACE_CAPABILITY_ORDER, type SurfaceNavGroup } from '../../pages/workspace';
 import { AccountMenu, LanguageSwitcher, ThemeToggle, useCompactViewport } from '../surface/SurfaceChrome';
 
@@ -63,7 +64,9 @@ const TITLES: Array<{ test: RegExp; key: MessageKey }> = [
   { test: /^\/app\/reports/, key: 'page.workspaceReports' },
 ];
 
+/** A plugin page is titled by its surface; the plugin's own id is not a page title. */
 export function workspaceTitleKey(pathname: string): MessageKey {
+  if (pathname.startsWith('/app/ext/')) return 'page.workspaceExtension';
   return TITLES.find((entry) => entry.test.test(pathname))?.key ?? 'app.brand';
 }
 
@@ -113,6 +116,8 @@ function WorkspaceSidebar({ compact, menuButtonRef }: { compact: boolean; menuBu
             ))}
           </SidebarGroup>
         ))}
+        {/* Same slot as the console rail: a workspace plugin contributes an item, never chrome. */}
+        <ExtensionNavigation surface="workspace" />
       </nav>
 
       <SidebarFooter className="sidebar-footer">
