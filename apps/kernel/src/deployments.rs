@@ -1170,7 +1170,14 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
             map
         });
     let eligible_ids: HashSet<Uuid> = eligible.iter().map(|node| node.id).collect();
+    let placement = PlacementContext {
+        selector: &selector,
+        requested: &requested,
+        max_instances_per_deployment: max_per_node,
+        max_instances_per_node: state.config.max_instances_per_node as usize,
+    };
     let mut missing = 0_i32;
+    let mut placement_rejection: Option<(String, PlacementRejection)> = None;
 
     for slot in 0..deployment.desired_replicas {
         let current = by_slot.get(&slot).cloned();
@@ -1191,19 +1198,21 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         }
         let candidate = eligible
             .iter()
-            .filter(|node| used_nodes.get(&node.id).copied().unwrap_or(0) < max_per_node)
             .filter(|node| {
-                global_counts.get(&node.id).copied().unwrap_or(0)
-                    < state.config.max_instances_per_node as usize
-            })
-            .filter(|node| {
-                let (cpu_allocated, memory_allocated) =
-                    reserved.get(&node.id).copied().unwrap_or((0, 0));
-                node_has_capacity(
-                    node,
-                    cpu_allocated + requested.cpu_millis,
-                    memory_allocated + requested.memory_mib,
-                )
+                let usage = NodeUsage::of(node, &reserved, &used_nodes, &global_counts);
+                match evaluate_node(node, usage, &placement) {
+                    Ok(()) => true,
+                    Err(rejection) => {
+                        let furthest = placement_rejection
+                            .as_ref()
+                            .map(|(_, best)| rejection.progress() > best.progress())
+                            .unwrap_or(true);
+                        if furthest {
+                            placement_rejection = Some((node.name.clone(), rejection));
+                        }
+                        false
+                    }
+                }
             })
             .min_by_key(|node| {
                 (
@@ -1290,6 +1299,10 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
             reservation.1 += requested.memory_mib;
         }
     }
+    if missing > 0 && placement_rejection.is_none() {
+        placement_rejection =
+            diagnose_placement(state, &placement, &reserved, &used_nodes, &global_counts).await?;
+    }
     for row in existing
         .iter()
         .filter(|row| row.slot >= deployment.desired_replicas)
@@ -1330,7 +1343,10 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     } else if missing == deployment.desired_replicas {
         (
             "PENDING",
-            Some("No eligible healthy node matches the placement selector".to_string()),
+            Some(match placement_rejection.as_ref() {
+                Some((node_name, rejection)) => placement_failure_reason(node_name, rejection),
+                None => PLACEMENT_FAILURE.to_string(),
+            }),
         )
     } else if ready == deployment.desired_replicas {
         if is_effective {
@@ -1423,62 +1439,338 @@ fn transfer_placement(
     reservation.1 += request.memory_mib;
 }
 
-fn node_has_capacity(node: &NodeRow, requested_cpu_millis: i64, requested_memory_mib: i64) -> bool {
+const PLACEMENT_FAILURE: &str = "No eligible healthy node matches the placement selector";
+
+/// Why a node was refused a slot.
+///
+/// Placement is a boolean in the data model - an instance exists or it does
+/// not - so every distinct refusal reason has to survive as a value. Sharing
+/// one `false` between six unrelated causes is what made a PENDING deployment
+/// indistinguishable from an unreachable node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlacementRejection {
+    NodeNotReady {
+        status: String,
+    },
+    SelectorMismatch {
+        key: String,
+        expected: String,
+        actual: Option<String>,
+    },
+    InstanceCapacityExceeded {
+        scope: &'static str,
+        instances: usize,
+        limit: usize,
+    },
+    ResourceSnapshotMissing {
+        field: Option<&'static str>,
+    },
+    MemoryInsufficient {
+        requested_mib: i64,
+        available_mib: i64,
+        limit_mib: i64,
+    },
+    CpuInsufficient {
+        requested_millis: i64,
+        cores: i64,
+        limit_millis: i64,
+    },
+}
+
+impl PlacementRejection {
+    /// Stable machine-readable code. The frontend maps this code to localized
+    /// copy, so the spelling must not change once published.
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Self::NodeNotReady { .. } => "NODE_NOT_READY",
+            Self::SelectorMismatch { .. } => "SELECTOR_MISMATCH",
+            Self::InstanceCapacityExceeded { .. } => "INSTANCE_CAPACITY_EXCEEDED",
+            Self::ResourceSnapshotMissing { .. } => "RESOURCE_SNAPSHOT_MISSING",
+            Self::MemoryInsufficient { .. } => "MEMORY_INSUFFICIENT",
+            Self::CpuInsufficient { .. } => "CPU_INSUFFICIENT",
+        }
+    }
+
+    /// Operator-facing detail. Every variant names the numbers that produced
+    /// the decision: a reason without a value is another boolean in disguise.
+    pub(crate) fn detail(&self) -> String {
+        match self {
+            Self::NodeNotReady { status } => format!(
+                "node status is {status}, placement requires READY with a recent heartbeat"
+            ),
+            Self::SelectorMismatch {
+                key,
+                expected,
+                actual,
+            } => match actual {
+                Some(actual) => {
+                    format!("selector {key}={expected} does not match node label {key}={actual}")
+                }
+                None => format!("selector {key}={expected} does not match: node has no label {key}"),
+            },
+            Self::InstanceCapacityExceeded {
+                scope,
+                instances,
+                limit,
+            } => format!(
+                "{instances} instances already scheduled on this node against a {scope} limit of {limit}"
+            ),
+            Self::ResourceSnapshotMissing { field } => match field {
+                Some(field) => format!("resource snapshot has no {field}"),
+                None => "node has not reported a resource snapshot".to_string(),
+            },
+            Self::MemoryInsufficient {
+                requested_mib,
+                available_mib,
+                limit_mib,
+            } => format!(
+                "requested {requested_mib} MiB but only {limit_mib} MiB of the {available_mib} MiB available are budgetable (90% headroom)"
+            ),
+            Self::CpuInsufficient {
+                requested_millis,
+                cores,
+                limit_millis,
+            } => format!(
+                "requested {requested_millis}m of CPU but only {limit_millis}m of {cores} cores are budgetable (90% headroom)"
+            ),
+        }
+    }
+
+    /// How far the node got through the gate. Several nodes can be refused in
+    /// one decision; reporting the furthest one keeps the message useful
+    /// ("the only node ran out of CPU" beats "another node is not READY").
+    fn progress(&self) -> u8 {
+        match self {
+            Self::NodeNotReady { .. } => 0,
+            Self::SelectorMismatch { .. } => 1,
+            Self::InstanceCapacityExceeded { .. } => 2,
+            Self::ResourceSnapshotMissing { .. } => 3,
+            Self::MemoryInsufficient { .. } => 4,
+            Self::CpuInsufficient { .. } => 5,
+        }
+    }
+}
+
+/// Placement inputs that do not vary between nodes in one slot decision.
+struct PlacementContext<'a> {
+    selector: &'a BTreeMap<String, String>,
+    requested: &'a ResourceRequirements,
+    max_instances_per_deployment: usize,
+    max_instances_per_node: usize,
+}
+
+/// What a node already carries before this slot is added.
+#[derive(Debug, Clone, Copy, Default)]
+struct NodeUsage {
+    cpu_millis: i64,
+    memory_mib: i64,
+    deployment_instances: usize,
+    node_instances: usize,
+}
+
+impl NodeUsage {
+    fn of(
+        node: &NodeRow,
+        reserved: &HashMap<Uuid, (i64, i64)>,
+        used_nodes: &HashMap<Uuid, usize>,
+        global_counts: &HashMap<Uuid, usize>,
+    ) -> Self {
+        let (cpu_millis, memory_mib) = reserved.get(&node.id).copied().unwrap_or((0, 0));
+        Self {
+            cpu_millis,
+            memory_mib,
+            deployment_instances: used_nodes.get(&node.id).copied().unwrap_or(0),
+            node_instances: global_counts.get(&node.id).copied().unwrap_or(0),
+        }
+    }
+}
+
+/// The whole placement gate for one node and one slot, in the order the
+/// scheduler used to evaluate it inline, now answering *why* when it refuses.
+fn evaluate_node(
+    node: &NodeRow,
+    usage: NodeUsage,
+    placement: &PlacementContext<'_>,
+) -> Result<(), PlacementRejection> {
+    if node.revoked_at.is_some() {
+        return Err(PlacementRejection::NodeNotReady {
+            status: "REVOKED".to_string(),
+        });
+    }
+    if node.status != "READY" {
+        return Err(PlacementRejection::NodeNotReady {
+            status: node.status.clone(),
+        });
+    }
+    if let Some(mismatch) = selector_mismatch(node, placement.selector) {
+        return Err(mismatch);
+    }
+    if usage.deployment_instances >= placement.max_instances_per_deployment {
+        return Err(PlacementRejection::InstanceCapacityExceeded {
+            scope: "per-deployment",
+            instances: usage.deployment_instances,
+            limit: placement.max_instances_per_deployment,
+        });
+    }
+    if usage.node_instances >= placement.max_instances_per_node {
+        return Err(PlacementRejection::InstanceCapacityExceeded {
+            scope: "per-node",
+            instances: usage.node_instances,
+            limit: placement.max_instances_per_node,
+        });
+    }
+    node_has_capacity(
+        node,
+        usage.cpu_millis + placement.requested.cpu_millis,
+        usage.memory_mib + placement.requested.memory_mib,
+    )
+}
+
+/// Resource gate for one slot. The request includes the node's existing
+/// reservation, so the budget is compared against what the node would carry if
+/// this slot were placed.
+///
+/// `cpuCores`/`memoryTotalBytes` are host-schedulable totals, never the Node
+/// Runtime container's own cgroup limits: plugin containers are siblings of the
+/// node runtime on the host, so a container quota would shrink the budget for
+/// work that does not run inside it. Staging proved the cost of mixing the two:
+/// the node container is capped at 1 CPU (deployments/staging/compose.yaml)
+/// while /proc/meminfo reports the host's 3.7 GiB, so the kernel saw "1 core"
+/// and budgeted 900m for a 4 vCPU host.
+fn node_has_capacity(
+    node: &NodeRow,
+    requested_cpu_millis: i64,
+    requested_memory_mib: i64,
+) -> Result<(), PlacementRejection> {
     let Some(snapshot) = node.resource_snapshot.as_ref() else {
-        return false;
+        return Err(PlacementRejection::ResourceSnapshotMissing { field: None });
     };
     let Some(total) = snapshot.get("memoryTotalBytes").and_then(Value::as_i64) else {
-        return false;
+        return Err(PlacementRejection::ResourceSnapshotMissing {
+            field: Some("memoryTotalBytes"),
+        });
     };
     let Some(cores) = snapshot.get("cpuCores").and_then(Value::as_i64) else {
-        return false;
+        return Err(PlacementRejection::ResourceSnapshotMissing {
+            field: Some("cpuCores"),
+        });
     };
     let used = snapshot
         .get("memoryUsedBytes")
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let available_mib = (total - used).max(0) / (1024 * 1024);
-    if available_mib <= 0 || requested_memory_mib > available_mib * 9 / 10 {
-        return false;
+    let memory_budget_mib = available_mib * 9 / 10;
+    if available_mib <= 0 || requested_memory_mib > memory_budget_mib {
+        return Err(PlacementRejection::MemoryInsufficient {
+            requested_mib: requested_memory_mib,
+            available_mib,
+            limit_mib: memory_budget_mib,
+        });
     }
-    if cores <= 0 || requested_cpu_millis > cores * 1000 * 9 / 10 {
-        return false;
+    let cpu_budget_millis = cores * 1000 * 9 / 10;
+    if cores <= 0 || requested_cpu_millis > cpu_budget_millis {
+        return Err(PlacementRejection::CpuInsufficient {
+            requested_millis: requested_cpu_millis,
+            cores,
+            limit_millis: cpu_budget_millis,
+        });
     }
-    true
+    Ok(())
+}
+
+fn selector_mismatch(
+    node: &NodeRow,
+    selector: &BTreeMap<String, String>,
+) -> Option<PlacementRejection> {
+    let labels = node.labels.as_object();
+    for (key, expected) in selector {
+        let actual = labels.and_then(|map| map.get(key)).and_then(Value::as_str);
+        if actual != Some(expected.as_str()) {
+            return Some(PlacementRejection::SelectorMismatch {
+                key: key.clone(),
+                expected: expected.clone(),
+                actual: actual.map(str::to_string),
+            });
+        }
+    }
+    None
 }
 
 fn node_matches(node: &NodeRow, selector: &BTreeMap<String, String>) -> bool {
-    let labels = node.labels.as_object();
-    selector.iter().all(|(key, value)| {
-        labels
-            .and_then(|map| map.get(key))
-            .and_then(|value| value.as_str())
-            .map(|actual| actual == value)
-            .unwrap_or(false)
-    })
+    selector_mismatch(node, selector).is_none()
+}
+
+/// Re-evaluates every known node once a slot found no candidate. The scheduler
+/// only ever looks at READY, recently-seen nodes, so without this pass a
+/// deployment refused because its only node is UNREACHABLE waits forever with a
+/// reason that names nothing.
+async fn diagnose_placement(
+    state: &AppState,
+    placement: &PlacementContext<'_>,
+    reserved: &HashMap<Uuid, (i64, i64)>,
+    used_nodes: &HashMap<Uuid, usize>,
+    global_counts: &HashMap<Uuid, usize>,
+) -> anyhow::Result<Option<(String, PlacementRejection)>> {
+    let nodes = sqlx::query_as::<_, NodeRow>(
+        "SELECT * FROM kernel.nodes WHERE revoked_at IS NULL ORDER BY name",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut furthest: Option<(String, PlacementRejection)> = None;
+    for node in &nodes {
+        let usage = NodeUsage::of(node, reserved, used_nodes, global_counts);
+        let Err(rejection) = evaluate_node(node, usage, placement) else {
+            continue;
+        };
+        let further = furthest
+            .as_ref()
+            .map(|(_, best)| rejection.progress() > best.progress())
+            .unwrap_or(true);
+        if further {
+            furthest = Some((node.name.clone(), rejection));
+        }
+    }
+    Ok(furthest)
+}
+
+fn placement_failure_reason(node_name: &str, rejection: &PlacementRejection) -> String {
+    format!(
+        "{PLACEMENT_FAILURE} [{}] node {node_name}: {}",
+        rejection.code(),
+        rejection.detail()
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::node_has_capacity;
+    use super::{
+        evaluate_node, node_has_capacity, placement_failure_reason, NodeUsage, PlacementContext,
+        PlacementRejection,
+    };
     use crate::nodes::NodeRow;
     use chrono::Utc;
     use opsweave_contracts::ResourceRequirements;
     use serde_json::json;
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
-    fn node(snapshot: Option<serde_json::Value>) -> NodeRow {
+    fn node_row(
+        status: &str,
+        labels: serde_json::Value,
+        snapshot: Option<serde_json::Value>,
+    ) -> NodeRow {
         NodeRow {
             id: Uuid::new_v4(),
-            name: "test-node".into(),
+            name: "staging-node".into(),
             control_token_hash: String::new(),
             data_token: String::new(),
             generation: 1,
             os: "linux".into(),
             arch: "amd64".into(),
-            labels: json!({}),
+            labels,
             capabilities: json!([]),
-            status: "READY".into(),
+            status: status.into(),
             last_seen_at: Some(Utc::now()),
             data_endpoint: Some("http://127.0.0.1:9101".into()),
             runtime_adapter_version: Some("test".into()),
@@ -1486,6 +1778,47 @@ mod tests {
             enrolled_at: Utc::now(),
             revoked_at: None,
             cert_expires_at: None,
+        }
+    }
+
+    /// The resource totals staging actually reports: 3.7 GiB host memory and
+    /// 1.04 GiB in use.
+    fn staging_snapshot(cpu_cores: i64) -> serde_json::Value {
+        json!({
+            "cpuCores": cpu_cores,
+            "memoryTotalBytes": 3_904_065_536_i64,
+            "memoryUsedBytes": 1_119_035_392_i64,
+        })
+    }
+
+    fn staging_node(cpu_cores: i64) -> NodeRow {
+        node_row(
+            "READY",
+            json!({"role": "node", "zone": "staging"}),
+            Some(staging_snapshot(cpu_cores)),
+        )
+    }
+
+    fn selector() -> BTreeMap<String, String> {
+        BTreeMap::from([("role".to_string(), "node".to_string())])
+    }
+
+    fn request(cpu_millis: i64, memory_mib: i64) -> ResourceRequirements {
+        ResourceRequirements {
+            cpu_millis,
+            memory_mib,
+        }
+    }
+
+    fn placement<'a>(
+        selector: &'a BTreeMap<String, String>,
+        requested: &'a ResourceRequirements,
+    ) -> PlacementContext<'a> {
+        PlacementContext {
+            selector,
+            requested,
+            max_instances_per_deployment: 1,
+            max_instances_per_node: 4,
         }
     }
 
@@ -1562,34 +1895,253 @@ mod tests {
     }
 
     #[test]
-    fn capacity_is_fail_closed_and_enforces_memory_and_cpu() {
-        assert!(!node_has_capacity(&node(None), 500, 128));
-        assert!(!node_has_capacity(
-            &node(Some(json!({
-                "memoryTotalBytes": 1024_i64 * 1024 * 1024,
-                "memoryUsedBytes": 900_i64 * 1024 * 1024,
-                "cpuCores": 2
-            }))),
-            500,
-            256
-        ));
-        assert!(!node_has_capacity(
-            &node(Some(json!({
-                "memoryTotalBytes": 4_i64 * 1024 * 1024 * 1024,
+    fn placement_accepts_a_deployment_that_fits() {
+        let selector = selector();
+        let requested = request(500, 128);
+        let placement = placement(&selector, &requested);
+        assert_eq!(
+            evaluate_node(&staging_node(4), NodeUsage::default(), &placement),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn placement_rejects_a_node_that_is_not_ready() {
+        let selector = selector();
+        let requested = request(500, 128);
+        let placement = placement(&selector, &requested);
+        let node = node_row(
+            "UNREACHABLE",
+            json!({"role": "node"}),
+            Some(staging_snapshot(4)),
+        );
+        let rejection = evaluate_node(&node, NodeUsage::default(), &placement).unwrap_err();
+        assert_eq!(rejection.code(), "NODE_NOT_READY");
+        assert!(
+            rejection.detail().contains("UNREACHABLE"),
+            "{}",
+            rejection.detail()
+        );
+        let reason = placement_failure_reason("staging-node", &rejection);
+        assert!(reason.contains("[NODE_NOT_READY]"), "{reason}");
+    }
+
+    #[test]
+    fn placement_rejects_a_selector_mismatch() {
+        let selector = selector();
+        let requested = request(500, 128);
+        let placement = placement(&selector, &requested);
+        let worker = node_row(
+            "READY",
+            json!({"role": "worker"}),
+            Some(staging_snapshot(4)),
+        );
+        let rejection = evaluate_node(&worker, NodeUsage::default(), &placement).unwrap_err();
+        assert_eq!(rejection.code(), "SELECTOR_MISMATCH");
+        let detail = rejection.detail();
+        assert!(
+            detail.contains("role=node") && detail.contains("worker"),
+            "{detail}"
+        );
+        let bare = node_row(
+            "READY",
+            json!({"zone": "staging"}),
+            Some(staging_snapshot(4)),
+        );
+        let rejection = evaluate_node(&bare, NodeUsage::default(), &placement).unwrap_err();
+        assert_eq!(rejection.code(), "SELECTOR_MISMATCH");
+        assert!(
+            rejection.detail().contains("no label role"),
+            "{}",
+            rejection.detail()
+        );
+    }
+
+    #[test]
+    fn placement_rejects_a_missing_resource_snapshot() {
+        let selector = selector();
+        let requested = request(500, 128);
+        let placement = placement(&selector, &requested);
+        let no_snapshot = node_row("READY", json!({"role": "node"}), None);
+        let rejection = evaluate_node(&no_snapshot, NodeUsage::default(), &placement).unwrap_err();
+        assert_eq!(rejection.code(), "RESOURCE_SNAPSHOT_MISSING");
+        assert!(
+            rejection.detail().contains("has not reported"),
+            "{}",
+            rejection.detail()
+        );
+
+        let no_memory = node_row(
+            "READY",
+            json!({"role": "node"}),
+            Some(json!({"cpuCores": 4})),
+        );
+        let rejection = evaluate_node(&no_memory, NodeUsage::default(), &placement).unwrap_err();
+        assert_eq!(rejection.code(), "RESOURCE_SNAPSHOT_MISSING");
+        assert!(
+            rejection.detail().contains("memoryTotalBytes"),
+            "{}",
+            rejection.detail()
+        );
+
+        let no_cores = node_row(
+            "READY",
+            json!({"role": "node"}),
+            Some(json!({"memoryTotalBytes": 3_904_065_536_i64})),
+        );
+        let rejection = evaluate_node(&no_cores, NodeUsage::default(), &placement).unwrap_err();
+        assert_eq!(rejection.code(), "RESOURCE_SNAPSHOT_MISSING");
+        assert!(
+            rejection.detail().contains("cpuCores"),
+            "{}",
+            rejection.detail()
+        );
+    }
+
+    #[test]
+    fn placement_rejects_insufficient_memory_with_the_numbers() {
+        let selector = selector();
+        let requested = request(100, 1000);
+        let placement = placement(&selector, &requested);
+        let node = node_row(
+            "READY",
+            json!({"role": "node"}),
+            Some(json!({
+                "cpuCores": 4,
+                "memoryTotalBytes": 1_073_741_824_i64,
                 "memoryUsedBytes": 0,
-                "cpuCores": 2
-            }))),
-            1801,
-            256
-        ));
-        assert!(node_has_capacity(
-            &node(Some(json!({
-                "memoryTotalBytes": 4_i64 * 1024 * 1024 * 1024,
-                "memoryUsedBytes": 0,
-                "cpuCores": 2
-            }))),
-            800,
-            256
-        ));
+            })),
+        );
+        let rejection = evaluate_node(&node, NodeUsage::default(), &placement).unwrap_err();
+        assert_eq!(
+            rejection,
+            PlacementRejection::MemoryInsufficient {
+                requested_mib: 1000,
+                available_mib: 1024,
+                limit_mib: 921,
+            }
+        );
+        assert_eq!(rejection.code(), "MEMORY_INSUFFICIENT");
+        let detail = rejection.detail();
+        assert!(
+            detail.contains("1000 MiB")
+                && detail.contains("921 MiB")
+                && detail.contains("1024 MiB"),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn placement_rejects_insufficient_cpu_with_the_numbers() {
+        // The staging failure: the node reported the Node Runtime container's
+        // cgroup quota (1 core), so the budget was 900m while the incumbent
+        // plugin already held 500m of it.
+        let selector = selector();
+        let requested = request(500, 128);
+        let placement = placement(&selector, &requested);
+        let usage = NodeUsage {
+            cpu_millis: 500,
+            memory_mib: 128,
+            deployment_instances: 0,
+            node_instances: 1,
+        };
+        let rejection = evaluate_node(&staging_node(1), usage, &placement).unwrap_err();
+        assert_eq!(
+            rejection,
+            PlacementRejection::CpuInsufficient {
+                requested_millis: 1000,
+                cores: 1,
+                limit_millis: 900,
+            }
+        );
+        assert_eq!(rejection.code(), "CPU_INSUFFICIENT");
+        let detail = rejection.detail();
+        assert!(
+            detail.contains("1000m") && detail.contains("900m"),
+            "{detail}"
+        );
+    }
+
+    #[test]
+    fn placement_accepts_the_same_slot_once_the_node_reports_host_cores() {
+        let selector = selector();
+        let requested = request(500, 128);
+        let placement = placement(&selector, &requested);
+        let usage = NodeUsage {
+            cpu_millis: 500,
+            memory_mib: 128,
+            deployment_instances: 0,
+            node_instances: 1,
+        };
+        assert_eq!(evaluate_node(&staging_node(4), usage, &placement), Ok(()));
+    }
+
+    #[test]
+    fn placement_rejects_instance_capacity_exceeded() {
+        let selector = selector();
+        let requested = request(500, 128);
+        let placement = placement(&selector, &requested);
+        let per_deployment = NodeUsage {
+            deployment_instances: 1,
+            ..NodeUsage::default()
+        };
+        let rejection = evaluate_node(&staging_node(4), per_deployment, &placement).unwrap_err();
+        assert_eq!(
+            rejection,
+            PlacementRejection::InstanceCapacityExceeded {
+                scope: "per-deployment",
+                instances: 1,
+                limit: 1,
+            }
+        );
+        assert_eq!(rejection.code(), "INSTANCE_CAPACITY_EXCEEDED");
+        assert!(
+            rejection.detail().contains("per-deployment limit of 1"),
+            "{}",
+            rejection.detail()
+        );
+
+        let per_node = NodeUsage {
+            node_instances: 4,
+            ..NodeUsage::default()
+        };
+        let rejection = evaluate_node(&staging_node(4), per_node, &placement).unwrap_err();
+        assert_eq!(
+            rejection,
+            PlacementRejection::InstanceCapacityExceeded {
+                scope: "per-node",
+                instances: 4,
+                limit: 4,
+            }
+        );
+        assert!(
+            rejection.detail().contains("per-node limit of 4"),
+            "{}",
+            rejection.detail()
+        );
+    }
+
+    #[test]
+    fn capacity_gate_keeps_the_nine_tenths_headroom() {
+        // Staging: 3.7 GiB total, 1.04 GiB used -> 2656 MiB available, so the
+        // budget stays 2390 MiB; with host cores, 4 cores budget 3600m.
+        let node = staging_node(4);
+        assert_eq!(node_has_capacity(&node, 3600, 2390), Ok(()));
+        assert_eq!(
+            node_has_capacity(&node, 3601, 100),
+            Err(PlacementRejection::CpuInsufficient {
+                requested_millis: 3601,
+                cores: 4,
+                limit_millis: 3600,
+            })
+        );
+        assert_eq!(
+            node_has_capacity(&node, 100, 2391),
+            Err(PlacementRejection::MemoryInsufficient {
+                requested_mib: 2391,
+                available_mib: 2656,
+                limit_mib: 2390,
+            })
+        );
     }
 }

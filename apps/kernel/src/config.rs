@@ -152,13 +152,11 @@ fn parse_build_sha(raw: &str) -> Option<String> {
 /// unparsable or ambiguous value can never reach the browser.
 fn parse_build_time(raw: &str) -> Option<String> {
     let value = raw.trim();
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|parsed| {
-            parsed
-                .with_timezone(&Utc)
-                .to_rfc3339_opts(SecondsFormat::Secs, true)
-        })
+    DateTime::parse_from_rfc3339(value).ok().map(|parsed| {
+        parsed
+            .with_timezone(&Utc)
+            .to_rfc3339_opts(SecondsFormat::Secs, true)
+    })
 }
 
 fn env_string(key: &str, default: &str) -> String {

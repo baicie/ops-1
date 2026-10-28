@@ -381,7 +381,13 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["buildTime", "commitSha", "environment", "startedAt", "version"]
+            [
+                "buildTime",
+                "commitSha",
+                "environment",
+                "startedAt",
+                "version"
+            ]
         );
         assert!(object["buildTime"].is_null());
         assert_eq!(object["environment"], "STAGING");
