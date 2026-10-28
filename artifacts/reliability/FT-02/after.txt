@@ -1,6 +1,0 @@
-                run_id                | status | attempt | records_examined | records_failed 
---------------------------------------+--------+---------+------------------+----------------
- ab0f2ecc-28e3-48d8-bc27-a7755790d030 | ERROR  |       1 |                0 |              0
- ea0f436d-18b1-4978-bbb9-98f7f5f00f1b | ERROR  |       1 |                0 |              0
-(2 行记录)
-
