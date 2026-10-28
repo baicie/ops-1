@@ -202,7 +202,7 @@ export function NodesPage() {
                 const snapshot = node.resourceSnapshot;
                 const cpu = percentOf(snapshot?.cpuUtilization);
                 const memory = ratio(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes);
-                const open = () => navigate(`/nodes/${node.id}`);
+                const open = () => navigate(`/admin/nodes/${node.id}`);
                 return (
                   <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-node-state={nodeState(node)} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
                     <StackCell label={t('table.node')}><div className="entity-cell"><span className="entity-icon"><Icon name="server" size={17} /></span><div><strong>{node.name}</strong><span className="mono">{node.id.slice(0, 13)}…</span></div></div></StackCell>
@@ -412,7 +412,7 @@ export function NodeDetailPage() {
                   <StackCell label={t('table.state')}><StatusPill status={instance.state} /></StackCell>
                   <StackCell label={t('table.container')}><span className="mono text-sm">{instance.containerId ? instance.containerId.slice(0, 12) : '—'}</span></StackCell>
                   <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
-                  <StackCell label={t('table.logs')}><Link className="text-link" to={`/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
+                  <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
                 </TableRow>
               ))}
             </TableBody>

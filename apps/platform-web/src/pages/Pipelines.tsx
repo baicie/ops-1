@@ -87,7 +87,7 @@ export function PipelinesPage() {
             <TableBody className={stackBody}>
               {items.map((pipeline) => (
                 <TableRow key={pipeline.pipelineId} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} tabIndex={0}>
-                  <StackCell label={t('table.pipeline')}><Link to={`/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
+                  <StackCell label={t('table.pipeline')}><Link to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
                   <StackCell label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
                   <StackCell label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></StackCell>
                   <StackCell label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></StackCell>
@@ -170,7 +170,7 @@ export function PipelineDetailPage() {
         eyebrow={t('pipelines.eyebrow')}
         title={detail.name}
         description={<span className="mono">{detail.pipelineId}</span>}
-        actions={<><Link className={buttonVariants({ variant: 'secondary' })} to="/pipelines"><Icon name="arrowRight" size={15} /> {t('pipelines.action.all')}</Link><Link className={buttonVariants()} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link><Link className={buttonVariants({ variant: 'secondary' })} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> {t('pipelines.action.openStudio')}</Link></>}
+        actions={<><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/pipelines"><Icon name="arrowRight" size={15} /> {t('pipelines.action.all')}</Link><Link className={buttonVariants()} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link><Link className={buttonVariants({ variant: 'secondary' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> {t('pipelines.action.openStudio')}</Link></>}
       />
       <section className="summary-grid pipeline-stats">
         <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRevision')}</span><strong className="metric-value">r{detail.latestRevision}</strong></div>
@@ -191,9 +191,9 @@ export function PipelineDetailPage() {
         )}
       </section>
       <section className="panel panel-pad">
-        <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
+        <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">{t('pipelines.jobs.empty')}</p> : (
-          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[760px]:!w-auto max-[760px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label="Status"><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
+          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[760px]:!w-auto max-[760px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label="Status"><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
         )}
       </section>
       <p className="table-footnote"><Icon name="alert" size={13} /> {t('pipelines.footnote')}</p>

@@ -22,7 +22,7 @@ export function SettingsPage() {
   );
   return (
     <div className="page-stack">
-      <PageHeader eyebrow={t('settings.eyebrow')} title={t('page.settings')} description={t('settings.description')} actions={<Link className={buttonVariants({ variant: 'secondary' })} to="/settings/diagnostics"><Icon name="terminal" size={15} /> {t('page.diagnostics')}</Link>} />
+      <PageHeader eyebrow={t('settings.eyebrow')} title={t('page.settings')} description={t('settings.description')} actions={<Link className={buttonVariants({ variant: 'secondary' })} to="/admin/settings/diagnostics"><Icon name="terminal" size={15} /> {t('page.diagnostics')}</Link>} />
       <div className="summary-grid">
         <section className="panel">
           <div className="panel-head"><div><h2>{t('settings.general.title')}</h2><p>{t('settings.general.description')}</p></div></div>
@@ -47,9 +47,9 @@ export function SettingsPage() {
       <section className="panel">
         <div className="panel-head"><div><h2>{t('settings.recovery.title')}</h2><p>{t('settings.recovery.description')}</p></div></div>
         <div className="quick-grid">
-          <Link to="/settings/diagnostics" className="quick-card"><Icon name="terminal" /><div><strong>{t('common.bootstrapDiagnostics')}</strong><span>{t('settings.recovery.diagnostics.description')}</span></div><Icon name="arrowRight" size={15} /></Link>
+          <Link to="/admin/settings/diagnostics" className="quick-card"><Icon name="terminal" /><div><strong>{t('common.bootstrapDiagnostics')}</strong><span>{t('settings.recovery.diagnostics.description')}</span></div><Icon name="arrowRight" size={15} /></Link>
           <a href="/bootstrap" className="quick-card"><Icon name="file" /><div><strong>{t('settings.recovery.bootstrap.title')}</strong><span>{t('settings.recovery.bootstrap.description')}</span></div><Icon name="external" size={15} /></a>
-          <Link to="/activity" className="quick-card"><Icon name="activity" /><div><strong>{t('settings.recovery.audit.title')}</strong><span>{t('settings.recovery.audit.description')}</span></div><Icon name="arrowRight" size={15} /></Link>
+          <Link to="/admin/activity" className="quick-card"><Icon name="activity" /><div><strong>{t('settings.recovery.audit.title')}</strong><span>{t('settings.recovery.audit.description')}</span></div><Icon name="arrowRight" size={15} /></Link>
         </div>
       </section>
     </div>

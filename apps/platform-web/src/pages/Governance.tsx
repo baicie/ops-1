@@ -73,7 +73,7 @@ export function GovernancePage() {
         <div className="panel metric-card"><span className="metric-label">{t('governance.metric.nodesReady')}</span><strong>{ready}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.nodesReady.detail', { unreachable, enrolled: nodeList.length })}</span></div>
       </div>
       <section className="panel table-panel">
-        <div className="panel-head"><div><h2>{t('governance.quality.title')}</h2><p>{t('governance.quality.description')}</p></div><Link className="text-link" to="/ext/trusted-team/data-catalog">{t('governance.quality.openCatalog')}</Link></div>
+        <div className="panel-head"><div><h2>{t('governance.quality.title')}</h2><p>{t('governance.quality.description')}</p></div><Link className="text-link" to="/admin/ext/trusted-team/data-catalog">{t('governance.quality.openCatalog')}</Link></div>
         {datasets.length === 0 ? <EmptyState icon="catalog" title={t('governance.quality.empty.title')} description={t('governance.quality.empty.description')} /> : (
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
@@ -97,7 +97,7 @@ export function GovernancePage() {
                   <StackCell label={t('table.quality')}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <StatusPill status="UNKNOWN" />}</StackCell>
                   <StackCell label={t('table.examined')}>{dataset.latest?.recordsExamined ?? '—'}</StackCell>
                   <StackCell label={t('table.failed')}>{dataset.latest?.recordsFailed ?? '—'}</StackCell>
-                  <StackCell label={t('table.latestRun')}>{dataset.latest ? <Link className="text-link" to="/ext/trusted-team/data-catalog"><span className="mono">{dataset.latest.runId.slice(0, 8)}</span></Link> : <span className="text-muted-foreground">{t('common.noRuns')}</span>}</StackCell>
+                  <StackCell label={t('table.latestRun')}>{dataset.latest ? <Link className="text-link" to="/admin/ext/trusted-team/data-catalog"><span className="mono">{dataset.latest.runId.slice(0, 8)}</span></Link> : <span className="text-muted-foreground">{t('common.noRuns')}</span>}</StackCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -137,7 +137,7 @@ export function GovernancePage() {
             <TableBody className={stackBody}>
               {nodeList.map((node) => (
                 <TableRow key={node.id} className={stackRow}>
-                  <StackCell label={t('table.node')}><Link className="text-link" to={`/nodes/${node.id}`}>{node.name}</Link></StackCell>
+                  <StackCell label={t('table.node')}><Link className="text-link" to={`/admin/nodes/${node.id}`}>{node.name}</Link></StackCell>
                   <StackCell label={t('table.status')}><StatusPill status={node.stale ? 'UNREACHABLE' : node.status} /></StackCell>
                   <StackCell label={t('table.generation')}>{node.generation}</StackCell>
                 </TableRow>

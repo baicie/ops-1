@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
 import { usePolling } from '../hooks';
 import type { AuditEvent, DeploymentView, PluginDetail } from '../types';
@@ -18,6 +18,7 @@ import { describePlacementReason } from '../placement-reason';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
+const TAB_IDS: readonly Tab[] = ['overview', 'versions', 'deployments', 'capabilities', 'permissions', 'events'];
 
 /** Label + control + hint, the shadcn replacement for the shared Field wrapper. */
 function FormField({ label, hint, htmlFor, children }: { label: string; hint?: string; htmlFor?: string; children: React.ReactNode }) {
@@ -73,7 +74,22 @@ export function PluginDetailPage() {
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`), 4000);
   const [events, setEvents] = useState<AuditEvent[]>([]);
-  const [tab, setTab] = useState<Tab>('overview');
+  // The tab belongs in the URL. Two things already assumed it did: the legacy /plugins/:id
+  // redirect forwards ?tab= by allowlist, and this page links to its own deployments view. Without
+  // reading the parameter that link pointed at a route that does not exist, and the forwarded tab
+  // was silently dropped on arrival.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get('tab');
+  const [tab, setTabState] = useState<Tab>(
+    TAB_IDS.includes(tabFromUrl as Tab) ? (tabFromUrl as Tab) : 'overview',
+  );
+  const setTab = (next: Tab) => {
+    setTabState(next);
+    const params = new URLSearchParams(searchParams);
+    if (next === 'overview') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
   const [deployOpen, setDeployOpen] = useState(false);
   const [deployVersion, setDeployVersion] = useState('');
   const [replicas, setReplicas] = useState(2);
@@ -231,7 +247,7 @@ export function PluginDetailPage() {
             </section>
           </div>
           <section className="panel">
-            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" to={`/plugins/${data.id}/deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
+            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
             <InstanceTable instances={activeDeployment?.instances || []} />
           </section>
         </TabsContent>
@@ -300,7 +316,7 @@ export function PluginDetailPage() {
 
         <TabsContent value="events" className="mt-[18px]">
           <section className="panel table-panel">
-            <div className="panel-head"><div><h2>{t('pluginDetail.events.title')}</h2><p>{t('pluginDetail.events.description')}</p></div><Link className="text-link" to="/activity">{t('pluginDetail.events.global')} <Icon name="arrowRight" size={14} /></Link></div>
+            <div className="panel-head"><div><h2>{t('pluginDetail.events.title')}</h2><p>{t('pluginDetail.events.description')}</p></div><Link className="text-link" to="/admin/activity">{t('pluginDetail.events.global')} <Icon name="arrowRight" size={14} /></Link></div>
             {events.length === 0 ? <EmptyState icon="activity" title={t('overview.events.empty.title')} /> : (
               <Table className={stackTable}>
                 <TableHeader className={stackHead}>
@@ -426,7 +442,7 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
           <StackCell label={t('table.container')}><span className="mono text-sm">{instance.containerId ? instance.containerId.slice(0, 12) : '—'}</span></StackCell>
           <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
           <StackCell label={t('table.observed')}><TimeAgo value={instance.observedAt} /></StackCell>
-          <StackCell label={t('table.logs')}><Link className="text-link" to={`/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
+          <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
         </TableRow>
       ))}</TableBody>
     </Table>

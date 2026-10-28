@@ -103,7 +103,7 @@ export function PluginsPage() {
         title={t('page.plugins')}
         description={t('plugins.description')}
         actions={<Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
-        primary={<Link className={buttonVariants()} to="/plugins/install"><Icon name="plus" size={15} /> {t('plugins.action.installPackage')}</Link>}
+        primary={<Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('plugins.action.installPackage')}</Link>}
       />
       <AsyncBoundary loading={loading} error={error} hasData={Boolean(data)} onRetry={() => void reload()} skeletonRows={6}>
         <section className="ow-summary" aria-label={t('plugins.summary.aria')} data-testid="plugins-summary">
@@ -129,7 +129,7 @@ export function PluginsPage() {
           <span className="toolbar-count">{t('plugins.count.summary', { filtered: filtered.length, total: plugins.length })}</span>
         </section>
         {filtered.length === 0 ? (
-          <EmptyState icon="plugins" title={plugins.length ? t('plugins.empty.filtered.title') : t('plugins.empty.none.title')} description={plugins.length ? t('plugins.empty.filtered.description') : t('plugins.empty.none.description')} action={<Link className={buttonVariants()} to="/plugins/install">{t('plugins.action.installPackage')}</Link>} />
+          <EmptyState icon="plugins" title={plugins.length ? t('plugins.empty.filtered.title') : t('plugins.empty.none.title')} description={plugins.length ? t('plugins.empty.filtered.description') : t('plugins.empty.none.description')} action={<Link className={buttonVariants()} to="/admin/plugins/install">{t('plugins.action.installPackage')}</Link>} />
         ) : (
           <section className="panel table-panel">
             <Table className={cn('plugins-table', stackTable)}>
@@ -149,7 +149,7 @@ export function PluginsPage() {
                 {filtered.map((plugin) => {
                   const fact = facts[plugin.id];
                   const upgrade = Boolean(plugin.latestVersion && plugin.activeVersion && plugin.latestVersion !== plugin.activeVersion);
-                  const open = () => navigate(plugin.isSystem ? '/ops-center' : `/plugins/${plugin.id}`);
+                  const open = () => navigate(plugin.isSystem ? '/admin/ops-center' : `/admin/plugins/${plugin.id}`);
                   return (
                     <TableRow key={plugin.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-plugin={plugin.id} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
                       <StackCell label={t('table.plugin')}>
@@ -203,7 +203,7 @@ export function PluginsPage() {
                             <DropdownMenuItem onSelect={open}><Icon name="external" size={14} /> {t('plugins.action.details')}</DropdownMenuItem>
                             <DropdownMenuItem onSelect={() => void copyId(plugin.id)}><Icon name="copy" size={14} /> {t('plugins.action.copyId')}</DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onSelect={() => navigate('/plugins/install')}><Icon name="plus" size={14} /> {t('plugins.action.installPackage')}</DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => navigate('/admin/plugins/install')}><Icon name="plus" size={14} /> {t('plugins.action.installPackage')}</DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>

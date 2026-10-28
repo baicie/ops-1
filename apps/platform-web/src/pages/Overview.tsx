@@ -56,7 +56,7 @@ export function OverviewPage() {
         title={t('page.overview')}
         description={t('overview.description')}
         actions={<Button variant="secondary" onClick={() => { void overview.reload(); void diagnostics.reload(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
-        primary={<Link className={buttonVariants()} to="/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link>}
+        primary={<Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link>}
       />
       <AsyncBoundary
         loading={overview.loading}
@@ -105,28 +105,28 @@ export function OverviewPage() {
                 value={`${data.nodesReady} / ${data.nodesTotal}`}
                 detail={data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')}
                 sampledAt={observedAt}
-                href="/nodes"
+                href="/admin/nodes"
               />
               <MetricCard
                 label={t('overview.kpi.installedPlugins')}
                 value={data.pluginsInstalled}
                 detail={t(data.pluginsAvailable === 1 ? 'overview.kpi.installedPlugins.one' : 'overview.kpi.installedPlugins.many', { count: data.pluginsAvailable })}
                 sampledAt={observedAt}
-                href="/plugins"
+                href="/admin/plugins"
               />
               <MetricCard
                 label={t('common.readyInstances')}
                 value={`${data.instancesReady} / ${data.instancesTotal}`}
                 detail={t('overview.kpi.readyInstances.detail')}
                 sampledAt={observedAt}
-                href="/plugins"
+                href="/admin/plugins"
               />
               <MetricCard
                 label={t('overview.kpi.activeDeployments')}
                 value={data.activeDeployments}
                 detail={t('overview.kpi.activeDeployments.detail')}
                 sampledAt={observedAt}
-                href="/plugins"
+                href="/admin/plugins"
               />
             </section>
 
@@ -151,7 +151,7 @@ export function OverviewPage() {
                 )}
               </section>
               <section className="panel" data-testid="overview-audit">
-                <div className="panel-head"><div><h2>{t('overview.events.title')}</h2><p>{t('overview.events.description')}</p></div><Link className="text-link" to="/activity">{t('overview.events.viewAll')} <Icon name="arrowRight" size={14} /></Link></div>
+                <div className="panel-head"><div><h2>{t('overview.events.title')}</h2><p>{t('overview.events.description')}</p></div><Link className="text-link" to="/admin/activity">{t('overview.events.viewAll')} <Icon name="arrowRight" size={14} /></Link></div>
                 {data.recentEvents.length === 0 ? (
                   <EmptyState icon="activity" title={t('overview.events.empty.title')} description={t('overview.events.empty.description')} />
                 ) : (
@@ -215,28 +215,28 @@ function buildModules(
     };
   })();
   const nodes: ModuleRow = !data
-    ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'unknown', detail: t('ui.notObserved'), observedAt: null, href: '/nodes' }
+    ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'unknown', detail: t('ui.notObserved'), observedAt: null, href: '/admin/nodes' }
     : data.nodesTotal === 0
-      ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'notConfigured', detail: t('overview.module.nodes.none'), observedAt, href: '/nodes' }
+      ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'notConfigured', detail: t('overview.module.nodes.none'), observedAt, href: '/admin/nodes' }
       : {
           id: 'nodes',
           labelKey: 'overview.module.nodes',
           state: data.nodesReady === data.nodesTotal ? 'ready' : 'degraded',
           detail: t('overview.module.nodes.detail', { ready: data.nodesReady, total: data.nodesTotal }),
           observedAt,
-          href: '/nodes',
+          href: '/admin/nodes',
         };
   const runtime: ModuleRow = !data
-    ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'unknown', detail: t('ui.notObserved'), observedAt: null, href: '/plugins' }
+    ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'unknown', detail: t('ui.notObserved'), observedAt: null, href: '/admin/plugins' }
     : data.instancesTotal === 0
-      ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'notConfigured', detail: t('overview.module.runtime.none'), observedAt, href: '/plugins' }
+      ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'notConfigured', detail: t('overview.module.runtime.none'), observedAt, href: '/admin/plugins' }
       : {
           id: 'runtime',
           labelKey: 'overview.module.runtime',
           state: data.instancesReady === data.instancesTotal ? 'ready' : 'degraded',
           detail: t('overview.module.runtime.detail', { ready: data.instancesReady, total: data.instancesTotal, deployments: data.activeDeployments }),
           observedAt,
-          href: '/plugins',
+          href: '/admin/plugins',
         };
   // The Kernel exposes no Catalog health source. Marking it READY because plugins exist would
   // be exactly the inference §4.5 A forbids, so it stays UNKNOWN with the reason attached.

@@ -162,7 +162,7 @@ export function PipelineEditorPage() {
       setGraph(toGraph(created.definition, layoutDirection)); setBaseline(irKey(created.definition));
       setHistory([]); setFuture([]); setSelectedId(null); setServerValidation(null);
       setNotice(t('studio.notice.draftCreated', { version: created.version }));
-      navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
+      navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
     } catch (cause) { setError(cause as Error); } finally { setBusy(null); }
   };
   const saveDraft = async (overrideVersion?: number) => {
@@ -207,7 +207,7 @@ export function PipelineEditorPage() {
         { 'idempotency-key': newIdempotencyKey(), 'if-match': String(draft.version) },
       );
       setNotice(t('studio.notice.published', { revision: result.revision }));
-      navigate(`/pipelines/${encodeURIComponent(pipelineId)}`);
+      navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}`);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) setConflict(cause.message);
       else setError(cause as Error);
@@ -274,7 +274,7 @@ export function PipelineEditorPage() {
           <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
           <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
           <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
-          <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
+          <Link className="btn btn-secondary" to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
           {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button> : <>
             <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
             <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
@@ -305,7 +305,7 @@ export function PipelineEditorPage() {
           <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => { if (window.confirm(t('studio.conflict.overwriteConfirm'))) { setConflict(null); void saveDraft(conflictLatest?.version); } }}>{t('studio.action.useLocalRetry')}</button>
         </div>
       </div>}
-      {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>{t('studio.drafts.title')}</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
+      {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>{t('studio.drafts.title')}</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
       <div className="studio-shell">
         <aside className="panel panel-pad studio-palette">
           <h2>{t('studio.palette.title')}</h2><p className="muted small">{t('studio.palette.description')}</p>

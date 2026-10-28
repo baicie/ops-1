@@ -96,7 +96,7 @@ export function InstanceLogsPage() {
     <div className="log-page">
       <header className="log-header">
         <div>
-          <p className="eyebrow"><Link to={`/plugins/${detail.pluginId}`} className="text-link">{detail.pluginId}</Link> · {detail.version}</p>
+          <p className="eyebrow"><Link to={`/admin/plugins/${detail.pluginId}`} className="text-link">{detail.pluginId}</Link> · {detail.version}</p>
           <h1>{t('page.instanceLogs')}</h1>
           <div className="log-meta">
             <span className="mono">{detail.id}</span>

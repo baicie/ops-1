@@ -83,7 +83,7 @@ export function JobsPage() {
             <TableBody className={stackBody}>
               {visibleJobs.map((job) => (
                 <TableRow key={job.jobId} className={cn('cursor-pointer', stackRow)}>
-                  <StackCell label={t('table.job')} className="job-id-cell max-[760px]:w-auto max-[760px]:max-w-none"><Link className="mono min-w-0 truncate max-[760px]:max-w-[220px]" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
+                  <StackCell label={t('table.job')} className="job-id-cell max-[760px]:w-auto max-[760px]:max-w-none"><Link className="mono min-w-0 truncate max-[760px]:max-w-[220px]" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
                   <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[760px]:whitespace-normal">{job.pipelineId}</StackCell>
                   <StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell>
                   <StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell>
@@ -144,7 +144,7 @@ export function JobDetailPage() {
   if (!job) return <Skeleton rows={6} />;
   return (
     <div className="page-stack">
-      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId}>{t('jobs.runShortId', { id: job.jobId.slice(0, 8) })}</span></span>} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <Button variant="destructive" onClick={() => void cancel()}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/jobs">{t('jobs.action.allJobs')}</Link></>} />
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId}>{t('jobs.runShortId', { id: job.jobId.slice(0, 8) })}</span></span>} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <Button variant="destructive" onClick={() => void cancel()}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
       <section className="summary-grid job-stats">
         <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><StatusPill status={job.status} /></strong></div>
         <div className="panel metric-card"><span className="metric-label">{t('jobs.metric.execution')}</span><strong className="metric-value mono">{durationLabel(job)}</strong></div>
@@ -179,7 +179,7 @@ export function JobSubmitPage() {
       let parsed: unknown;
       try { parsed = JSON.parse(input); } catch { throw new Error(t('jobs.submit.invalidJson')); }
       const job = await api.post<JobView>('/api/v1/jobs', { pipelineId, pipelineRevision: revision, input: parsed }, newIdempotencyKey());
-      navigate(`/jobs/${job.jobId}`);
+      navigate(`/admin/jobs/${job.jobId}`);
     } catch (cause) { setError((cause as Error).message); } finally { setSubmitting(false); }
   };
   return (

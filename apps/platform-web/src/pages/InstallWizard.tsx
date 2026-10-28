@@ -114,7 +114,7 @@ export function InstallWizardPage() {
         expectedRevision: detail.activeRevision?.generation ?? 0,
       });
       toast.push({ tone: 'ok', title: t('install.toast.activated', { pluginId: pkg.pluginId }), detail: t('install.toast.activated.detail', { version: pkg.version }) });
-      navigate(`/plugins/${pkg.pluginId}`);
+      navigate(`/admin/plugins/${pkg.pluginId}`);
     } catch (cause) {
       const apiError = cause as ApiError;
       toast.push({ tone: 'danger', title: apiError.code || t('install.toast.activationFailed'), detail: apiError.message });
@@ -128,7 +128,7 @@ export function InstallWizardPage() {
       <PageHeader
         title={t('install.title')}
         description={t('install.description')}
-        actions={<Link to="/plugins" className={buttonVariants({ variant: 'secondary' })}>{t('action.cancel')}</Link>}
+        actions={<Link to="/admin/plugins" className={buttonVariants({ variant: 'secondary' })}>{t('action.cancel')}</Link>}
       />
       <ol className="stepper" aria-label={t('install.steps.aria')}>
         {[
