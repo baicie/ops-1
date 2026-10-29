@@ -50,14 +50,22 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.getByRole('status')).toContainText('Draft created');
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   const timeout = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
-  await timeout.fill('17');
+  // The edit has to differ from the value that is live right now. A fixed number only differed on
+  // the first run: this case publishes what it writes, so the second run found the published
+  // revision already at that value, the form was not dirty, Save correctly stayed disabled, and the
+  // case failed. Read the live value and write a different one, so every run makes a real edit -
+  // without teaching the product to save an unchanged form.
+  await expect(timeout).toBeVisible();
+  const liveTimeout = Number.parseInt(await timeout.inputValue(), 10);
+  const nextTimeout = (Number.isFinite(liveTimeout) && liveTimeout > 0 ? liveTimeout : 15) + 1;
+  await timeout.fill(String(nextTimeout));
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeEnabled();
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByRole('status')).toContainText('Draft saved');
   await page.screenshot({ path: path.join(OUT, 'pipeline-draft-saved.png'), fullPage: true });
   await page.reload();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
-  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('17');
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue(String(nextTimeout));
   await page.getByRole('button', { name: 'Validate', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Server validation passed');
   await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled();

@@ -608,16 +608,24 @@ pull_image() {
   if docker image inspect "$ref" >/dev/null 2>&1 && [ "${OPSWEAVE_REQUIRE_PULL:-0}" != "1" ]; then
     log "image $ref is already present on this host; skipping the registry pull (OPSWEAVE_REQUIRE_PULL=1 forces it)"
   else
-    # docker pull has no timeout of its own. On a host where the registry CDN stalls it can sit
-    # for hours, and because this runs while holding the deploy lock, every later deploy then
-    # waits out OPSWEAVE_LOCK_TIMEOUT and fails - which is exactly what happened on 2026-10-28
-    # and had to be cleared by killing the process. Bound it, fail loudly, release the lock.
+    # docker pull has no timeout of its own. On a host whose route to the blob CDN stalls it can
+    # sit for hours, and one such pull held the deploy lock until it was killed by hand
+    # (2026-10-28). Bound it and fail loudly.
+    #
+    # Why 900s and not 300s: the 300s budget was spent on a first pull from ghcr.io and the pull
+    # was aborted (run 40804203513), which rolled the deploy back and left the smoke job *skipped*
+    # instead of failed - CI could never go green. The timeout is not a bandwidth budget: once the
+    # bytes actually flow the whole image arrives in ~15s (measured on the host after a warm-up),
+    # so what it has to survive is the stall-and-retry cycle of a cold CDN route, and 300s covered
+    # too few of them before giving up. 900s (15 min, 3x the old budget) survives several full
+    # stalls while still bounding the step. It no longer lengthens the time the deploy lock is
+    # held, because cmd_deploy warms the image through prewarm_image *before* taking the lock.
     local pull_status=0
-    output="$(timeout "${OPSWEAVE_PULL_TIMEOUT:-300}" docker pull "$ref" 2>&1)" || pull_status=$?
+    output="$(timeout "${OPSWEAVE_PULL_TIMEOUT:-900}" docker pull "$ref" 2>&1)" || pull_status=$?
     if [ "$pull_status" -ne 0 ]; then
       printf '%s\n' "$output" >&2
       if [ "$pull_status" -eq 124 ]; then
-        warn "pulling $ref did not finish within ${OPSWEAVE_PULL_TIMEOUT:-300}s; aborting instead of holding the deploy lock"
+        warn "pulling $ref did not finish within ${OPSWEAVE_PULL_TIMEOUT:-900}s; aborting instead of holding the deploy lock"
       else
         warn "failed to pull $ref"
       fi
@@ -633,6 +641,28 @@ pull_image() {
     IMAGE_DIGEST_SOURCE="image-id"
   fi
   log "pulled $ref (digest: ${IMAGE_DIGEST:-unknown})"
+}
+
+# The registry round trip is the one step whose duration is set by the network, not by this host,
+# and it is the slowest thing a deploy does on a cold host. It runs before acquire_deploy_lock so
+# the critical section only ever covers work this host bounds itself (compose up, health, checks):
+# a slow pull can then never make a concurrent deploy exhaust OPSWEAVE_LOCK_TIMEOUT and fail, and a
+# pull that fails outright leaves the host untouched - no lock taken, no container replaced, so
+# there is nothing to roll back. The tag is the full commit SHA, so the image warmed here is the
+# exact one the locked section needs: pull_image finds it present and skips the registry entirely.
+prewarm_image() {
+  local sha="$1"
+  # OPSWEAVE_REQUIRE_PULL=1 means the operator wants a registry round trip whatever is cached, and
+  # pull_image honours that inside the lock. Warming here as well would pay for the transfer twice.
+  if [ "${OPSWEAVE_REQUIRE_PULL:-0}" = "1" ]; then
+    log "OPSWEAVE_REQUIRE_PULL=1; skipping the pre-lock warm-up, the pull happens inside the deploy lock"
+    return 0
+  fi
+  ensure_registry_auth || true
+  if pull_image "$sha"; then
+    return 0
+  fi
+  die 1 "cannot obtain $IMAGE_REPO:$sha from the registry; nothing on this host was changed (no deploy lock taken, no container replaced)"
 }
 
 ensure_dependencies() {
@@ -1238,6 +1268,7 @@ acquire_deploy_lock() {
 cmd_deploy() {
   local sha="$1" previous_running="" rollback_target="" healthy=0 stamp
   preflight
+  prewarm_image "$sha"
   acquire_deploy_lock
   DEPLOY_STARTED_AT="$(iso_now)"
   stamp="$DEPLOY_STARTED_AT"

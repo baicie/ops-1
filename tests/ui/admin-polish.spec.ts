@@ -344,7 +344,12 @@ test('a filter is answered by the Kernel, not by the browser', async ({ page }) 
   await expect(page.locator('.toolbar-count')).toContainText(new RegExp('(^|\\D)' + events.length + '(\\D|$)'));
   await page.screenshot({ path: path.join(OUT, 'op-activity-subject-filter.png'), fullPage: true });
 
-  // Batch B: the status tab is a Kernel query as well (this deployment holds no jobs at all).
+  // Batch B: the status tab is a Kernel query as well. Whether that query matches anything is a
+  // property of the deployment, not of the product: a host that has never run a failing job has
+  // nothing under FAILED, and one that has run a couple has rows there. Asserting a single one of
+  // those made this case pass on an empty host and fail on staging, where the Kernel answers with
+  // real failed jobs. The Kernel's own answer now decides which branch runs, and both branches
+  // check that the page shows exactly what the Kernel returned.
   await page.goto('/admin/jobs');
   await expect(page.locator('[data-async-state="ready"]')).toBeVisible();
   const jobsResponse = page.waitForResponse((response) =>
@@ -354,10 +359,26 @@ test('a filter is answered by the Kernel, not by the browser', async ({ page }) 
   expect(jobs.status(), 'the status tab is one jobs query').toBe(200);
   const body = await jobs.json();
   expect(Array.isArray(body.items)).toBe(true);
+  // The filter is the Kernel's, not the browser's: whatever the page renders next must be a subset
+  // the Kernel already narrowed, so a row that is not FAILED means the filter never left the client.
+  expect(body.items.every((job: { status?: string }) => job.status === 'FAILED'), 'the Kernel applied the status filter').toBe(true);
+  const failedCount: number = body.items.length;
   const filtered = page.locator('[data-empty-state="filtered"]');
-  await expect(filtered).toBeVisible();
-  await page.screenshot({ path: path.join(OUT, 'op-jobs-status-filter.png'), fullPage: true });
-  await filtered.getByRole('button', { name: 'Clear filters' }).click();
+  const rows = page.locator('tbody tr');
+  if (failedCount === 0) {
+    // The Kernel matched nothing, so the tab is a filtered miss: the copy, the Clear filters escape
+    // hatch, and no table body at all.
+    await expect(filtered).toBeVisible();
+    await expect(rows).toHaveCount(0);
+    await page.screenshot({ path: path.join(OUT, 'op-jobs-status-filter.png'), fullPage: true });
+    await filtered.getByRole('button', { name: 'Clear filters' }).click();
+  } else {
+    // The Kernel matched rows, so there is no miss and the table has to hold exactly those rows.
+    await expect(rows).toHaveCount(failedCount);
+    await expect(filtered, 'a non-empty answer must not render the filtered empty state').toHaveCount(0);
+    await page.screenshot({ path: path.join(OUT, 'op-jobs-status-filter.png'), fullPage: true });
+    await page.getByRole('tab', { name: 'All' }).click();
+  }
   await expect(page.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
 });
 
