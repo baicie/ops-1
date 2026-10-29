@@ -302,7 +302,11 @@ jobs:
     # build is only reached through deploy.
     needs: [build, deploy]
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    # Sized so that no step can be preempted by the job cap: 20 (core) + 40 (surfaces) + 15
+    # (seeded data) = 75 minutes of step caps plus the dependency install. The previous 50 was
+    # already below the sum of its own step caps (60), so a slow surfaces run was killed by the
+    # job timeout instead of by its own, losing the per-step outcome the record step reports.
+    timeout-minutes: 80
     # The suites certify whatever staging serves, so a failed or skipped deploy must not suppress
     # them. verify_only always runs; every other event keeps the deploy-success requirement.
     if: always() && (inputs.verify_only == true || needs.deploy.result == 'success')
@@ -356,9 +360,26 @@ jobs:
       #   this job, "core paths"           staging-smoke, dual-surface, admin-shell
       #   this job, "admin, plugin, i18n"  admin-pages, admin-polish, plugin-surfaces,
       #                                    plugin-detail-tabs, business-workspace, overview-partial,
-      #                                    async-stale, i18n-locale, dialog-a11y
-      #   data-foundation.yml (seeded)     studio, visual-layout, data-foundation,
-      #                                    data-foundation-flows
+      #                                    async-stale, i18n-locale, dialog-a11y,
+      #                                    g08-batch-c, g08-batch-c-mobile
+      #   this job, "seeded data"          studio, visual-layout - KNOWN-FLAKY, see the step below.
+      #                                    Both navigate to the literal id host-metrics-pipeline and
+      #                                    assert a published revision, a rendered node graph and a
+      #                                    job that reaches Succeeded. No step in this workflow
+      #                                    creates that data: it is seeded out of band through the
+      #                                    admin API plus a host-side demo source server
+      #                                    (deployments/staging/README.md, "DEMO source"). The step
+      #                                    runs them and records the outcome plus this reason, and
+      #                                    does not gate the job until a seeding step exists.
+      #   data-foundation.yml (seeded)     data-foundation, data-foundation-flows
+      #                                    (studio and visual-layout also run there against a locally
+      #                                    seeded stack, but that gate is path-filtered, so it never
+      #                                    fires on a frontend-only change)
+      #   uncovered, deliberately          visual.spec.ts - the 1440/1024/390 light+dark screenshot
+      #                                    matrix. It was left uncovered by 49f079f as "needs a
+      #                                    seeded staging deployment" and is still not wired
+      #                                    anywhere; it is listed here so that stays explicit
+      #                                    rather than silent.
       - name: Playwright core paths (staging smoke, dual surface, admin shell)
         id: core
         if: steps.mode.outputs.mode == 'playwright'
@@ -372,8 +393,8 @@ jobs:
             admin-shell.spec.ts
 
       # Runs even when the core step failed: a red core path must not silently drop the remaining
-      # nine specs. Both outcomes are recorded separately in the next step and in the PR comment.
-      - name: Playwright admin, plugin and i18n surfaces
+      # eleven specs. Both outcomes are recorded separately in the next step and in the PR comment.
+      - name: Playwright admin, plugin, i18n and g08 surfaces
         id: surfaces
         if: always() && steps.mode.outputs.mode == 'playwright'
         timeout-minutes: 40
@@ -390,43 +411,98 @@ jobs:
             overview-partial.spec.ts \
             async-stale.spec.ts \
             i18n-locale.spec.ts \
-            dialog-a11y.spec.ts
+            dialog-a11y.spec.ts \
+            g08-batch-c.spec.ts \
+            g08-batch-c-mobile.spec.ts
+
+      # The two suites that read the seeded staging pipeline, and the only ones whose data this
+      # workflow does not own. They run here rather than being skipped - an absent file list and
+      # --grep are both forbidden - and continue-on-error keeps a missing seed from reddening the
+      # deployment while the reason is still recorded in health.json and in a warning annotation.
+      # Removing the continue-on-error is the whole change once a seeding step lands.
+      - name: Playwright seeded-data suites (studio, visual layout) [known-flaky]
+        id: seeded
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        timeout-minutes: 15
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          # Its own --output so neither neighbouring group's traces are overwritten.
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded \
+            studio.spec.ts \
+            visual-layout.spec.ts
 
       - name: Record the browser suite results
         if: always() && steps.mode.outputs.mode == 'playwright'
         env:
           CORE_OUTCOME: ${{ steps.core.outcome }}
           SURFACES_OUTCOME: ${{ steps.surfaces.outcome }}
+          SEEDED_OUTCOME: ${{ steps.seeded.outcome }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
           python3 - <<'PY'
           import json, os
 
+          # Why the seeded-data group is allowed to fail. It names the data it needs so that a red
+          # run is self-explaining instead of needing a workflow read to interpret.
+          SEED_REASON = (
+              "seed-missing: studio and visual-layout read the literal id host-metrics-pipeline and "
+              "assert a published revision, a rendered node graph and a job that reaches Succeeded. "
+              "No step in this workflow creates that data - it is seeded out of band through the "
+              "admin API plus a host-side demo source server. Known-flaky until a seeding step lands."
+          )
+
+          # (group, outcome env, spec files, known_flaky, reason)
           GROUPS = [
               ("core",
                os.environ.get("CORE_OUTCOME", ""),
-               ["staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts"]),
+               ["staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts"],
+               False, ""),
               ("admin-plugin-i18n",
                os.environ.get("SURFACES_OUTCOME", ""),
                ["admin-pages.spec.ts", "admin-polish.spec.ts", "plugin-surfaces.spec.ts",
                 "plugin-detail-tabs.spec.ts", "business-workspace.spec.ts", "overview-partial.spec.ts",
-                "async-stale.spec.ts", "i18n-locale.spec.ts", "dialog-a11y.spec.ts"]),
+                "async-stale.spec.ts", "i18n-locale.spec.ts", "dialog-a11y.spec.ts",
+                "g08-batch-c.spec.ts", "g08-batch-c-mobile.spec.ts"],
+               False, ""),
+              ("seeded-data",
+               os.environ.get("SEEDED_OUTCOME", ""),
+               ["studio.spec.ts", "visual-layout.spec.ts"],
+               True, SEED_REASON),
           ]
 
-          checks = [
-              {"name": name, "ok": outcome == "success",
-               "detail": "%s: %s" % (outcome or "not-run", ", ".join(files))}
-              for name, outcome, files in GROUPS
-          ]
-          ok = all(check["ok"] for check in checks)
+          checks = []
+          for name, outcome, files, known_flaky, reason in GROUPS:
+              check = {
+                  "name": name,
+                  "ok": outcome == "success",
+                  "known_flaky": known_flaky,
+                  "detail": "%s: %s" % (outcome or "not-run", ", ".join(files)),
+              }
+              if reason:
+                  check["reason"] = reason
+              checks.append(check)
+
+          # A known-flaky group still runs and is still reported; it is only excluded from the gate.
+          ok = all(check["ok"] for check in checks if not check["known_flaky"])
+
+          # The reason must be visible in the run summary, not only in a downloaded artifact.
+          for check in checks:
+              if check.get("reason") and not check["ok"]:
+                  print("::warning::known-flaky suite group '%s' - %s (outcome: %s)"
+                        % (check["name"], check["reason"], check["detail"]))
+
           payload = {
               "mode": "playwright",
               "base_url": os.environ.get("OPSWEAVE_URL", ""),
               "ok": ok,
               "checks": checks,
-              "suite_groups": [{"name": name, "outcome": outcome, "files": files}
-                               for name, outcome, files in GROUPS],
+              "known_flaky_reasons": [reason for _n, _o, _f, _k, reason in GROUPS if reason],
+              "suite_groups": [{"name": name, "outcome": outcome, "files": files,
+                                "known_flaky": known_flaky}
+                               for name, outcome, files, known_flaky, reason in GROUPS],
               "exit_code": 0 if ok else 1,
           }
           with open("artifacts/staging-preview/health.json", "w", encoding="utf-8") as handle:
