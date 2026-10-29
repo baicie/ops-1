@@ -3470,14 +3470,53 @@ mod terminalization_tests {
         assert!(decode_pipeline_cursor("not*base64").is_err());
     }
 
-    /// Skipping is reserved for "no database configured". Once the variable is set, every way
+    /// CI sets this to "1" so that a missing OPSWEAVE_TEST_DATABASE_URL fails the run instead of
+    /// skipping it. Local development leaves it unset and keeps the skip.
+    const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+    /// Whether a missing OPSWEAVE_TEST_DATABASE_URL has to fail instead of skipping. Only a clear
+    /// no leaves the skip in place: a value that is neither a clear yes nor a clear no panics,
+    /// because a typo in CI must not quietly restore the skip this flag exists to remove.
+    fn database_required() -> bool {
+        match std::env::var(REQUIRE_DATABASE_ENV) {
+            Err(std::env::VarError::NotPresent) => false,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                panic!("{REQUIRE_DATABASE_ENV} is set but is not valid UTF-8")
+            }
+            Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+                "" | "0" | "false" | "no" => false,
+                "1" | "true" | "yes" => true,
+                other => panic!(
+                    "{REQUIRE_DATABASE_ENV} is set to {other:?}: use 1 to require the DB-backed \
+                     tests to run against a real database, or 0 to let them skip"
+                ),
+            },
+        }
+    }
+
+    /// Skipping is reserved for "no database configured and nobody asked for one". With
+    /// OPSWEAVE_REQUIRE_TEST_DATABASE=1 an unset URL panics, and once the URL is set every way
     /// the fixture can fail to reach the database panics: these tests used to report "ok" while
     /// asserting nothing whenever the URL was unset, the server was down or the migration failed,
     /// which made a green run meaningless.
     fn test_url() -> Option<String> {
         match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
             Ok(url) => Some(url),
-            Err(std::env::VarError::NotPresent) => None,
+            Err(std::env::VarError::NotPresent) => {
+                if database_required() {
+                    panic!(
+                        "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset: \
+                         this run requires the DB-backed kernel tests to really run, so skipping \
+                         them counts as a failure. Point OPSWEAVE_TEST_DATABASE_URL at a \
+                         reachable PostgreSQL instance, or unset {REQUIRE_DATABASE_ENV} for a \
+                         local run without a database."
+                    );
+                }
+                eprintln!(
+                    "skip: OPSWEAVE_TEST_DATABASE_URL is unset and {REQUIRE_DATABASE_ENV} is not 1"
+                );
+                None
+            }
             Err(std::env::VarError::NotUnicode(_)) => {
                 panic!("OPSWEAVE_TEST_DATABASE_URL is set but is not valid UTF-8")
             }

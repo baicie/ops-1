@@ -6,9 +6,11 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
-    # apps/kernel's DB-backed tests (src/jobs.rs, mod terminalization_tests) return early when
-    # OPSWEAVE_TEST_DATABASE_URL is unset, so they used to report "ok" in this job having
-    # asserted nothing. The service plus the two guard steps below are what make green mean it.
+    # apps/kernel's DB-backed tests (src/jobs.rs, mod terminalization_tests) skip only when
+    # OPSWEAVE_TEST_DATABASE_URL is genuinely unset; a set-but-unusable URL (bad syntax,
+    # unreachable server, rejected migrations) panics. This job also sets
+    # OPSWEAVE_REQUIRE_TEST_DATABASE=1, which turns even that skip into a failure, so a green run
+    # here can only mean the 10 DB tests really ran against the service below.
     services:
       postgres:
         image: postgres:17
@@ -25,14 +27,17 @@ jobs:
           --health-retries 20
     env:
       OPSWEAVE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
+      # Makes "no URL" a failure inside the fixture instead of a silent skip. Unset locally.
+      OPSWEAVE_REQUIRE_TEST_DATABASE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo fmt --all -- --check
-      # The fixture treats "no URL", "cannot connect" and "migration failed" identically: it
-      # returns None and the test returns early. So prove the URL is live before the run, and
-      # prove the fixture really reached it after the run.
+      # Only a genuinely unset URL makes the fixture skip, and OPSWEAVE_REQUIRE_TEST_DATABASE=1
+      # turns that skip into a failure too; connect and migration failures panic on their own.
+      # Keep both steps anyway: prove the URL is live before the run, and prove the fixture really
+      # reached it after the run, so deleting the env above cannot pass by skipping.
       - name: DB-backed kernel tests are armed
         run: |
           set -eu

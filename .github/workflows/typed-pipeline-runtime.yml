@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 60
     env:
       OPSWEAVE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
+      # Makes "no URL" a failure inside the kernel test fixture instead of a silent skip, so
+      # deleting the line above cannot turn the DB-backed tests green by not running them.
+      OPSWEAVE_REQUIRE_TEST_DATABASE: "1"
     services:
       postgres:
         image: postgres:17
@@ -45,6 +48,20 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: DB-backed kernel tests really connected
+        run: |
+          set -eu
+          # Same gate as .github/workflows/ci.yml. Nothing before this step migrates except the
+          # test fixture itself, so a ledger row proves test_pool() reached the database and ran
+          # sqlx::migrate! -- i.e. the 10 DB tests in jobs::terminalization_tests did not return
+          # early. Keep this step directly after cargo test: the acceptance scripts below migrate
+          # on their own and would make the check vacuous.
+          applied=$(psql "$OPSWEAVE_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc 'select count(*) from _sqlx_migrations')
+          echo "migrations applied by the test fixture: $applied"
+          test "$applied" -gt 0
+          present=$(psql "$OPSWEAVE_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "select to_regclass('kernel.pipeline_jobs') is not null")
+          echo "kernel.pipeline_jobs exists: $present"
+          test "$present" = "t"
       - run: python3 tests/contract/validate_typed_pipeline.py
       - run: tests/ci/data_foundation_ci.sh
       - uses: actions/upload-artifact@v4
