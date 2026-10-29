@@ -715,6 +715,16 @@ jobs:
           sys.exit(0 if payload["ok"] else 1)
           PY
 
+      # The core and surfaces steps above drive admin-pages, admin-polish, g08-batch-c*,
+      # overview-partial, async-stale, i18n-locale, dialog-a11y, business-workspace,
+      # plugin-surfaces and admin-shell. Every one of those specs writes full-page PNGs into
+      # artifacts/ui/ or artifacts/ui-admin-shell-v2/ rather than a temp dir, and admin-polish
+      # alone emits 84 of them as g08-<short-sha>-<page>-<viewport>-<theme>-<lang>.png. This was
+      # the only smoke/seeded job whose path list omitted those two trees, so a run's screenshots
+      # had no way off the runner except being committed - which is how nine successive g08 runs
+      # landed in the index. They are run output, not curated baselines: archive them here and let
+      # tests/ci/check-tracked-png-budget.mjs keep them out of the tree. The three seeded jobs
+      # below already upload artifacts/ui/ in exactly this shape.
       - name: Upload smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -722,6 +732,8 @@ jobs:
           name: staging-smoke
           path: |
             artifacts/staging-preview/
+            artifacts/ui/
+            artifacts/ui-admin-shell-v2/
             tests/ui/test-results/
           if-no-files-found: warn
 

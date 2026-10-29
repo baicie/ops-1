@@ -92,6 +92,21 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @opsweave/platform-web test
+  # V3 brief §9: "截图不允许无上限提交 Git；仅保留精选基线，其余归档为 CI Artifact."
+  # Nine runs of tests/ui/admin-polish.spec.ts accumulated 756 SHA-named screenshots (127.95 MB) of
+  # the same seven admin pages because no job ever looked at what the index was carrying. The
+  # capture specs still write into artifacts/ui/ - that is where they run from - and
+  # .github/workflows/staging-preview.yml now archives those trees instead of leaving committing
+  # them as the only way off the runner. This job is the gate: tests/ci/tracked-png-budget.json
+  # holds the budget, and the guard also fails on a dangling doc reference, because a screenshot a
+  # document cites is an evidence link. It needs no pnpm install - it only reads the git index.
+  artifact-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node tests/ci/check-tracked-png-budget.mjs
   contracts:
     runs-on: ubuntu-latest
     steps:

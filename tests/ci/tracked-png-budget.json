@@ -1,0 +1,88 @@
+{
+  "$comment": [
+    "Allowlist and budget for PNGs tracked in git (V3 brief §9: 截图不允许无上限提交 Git；仅保留精选基线，其余归档为 CI Artifact).",
+    "Read by tests/ci/check-tracked-png-budget.mjs; that script is the authority on how these numbers are applied.",
+    "A directory absent from `directories` is a violation, not a default - adding a new screenshot bucket is a",
+    "deliberate edit to this file, which is the review moment the budget exists to create.",
+    "maxFiles per directory is the exact count after the 2026-11 cleanup (1087 -> 331 tracked PNGs), so any single",
+    "new file in any bucket turns the guard red until someone raises that bucket's number on purpose.",
+    "Ceilings were taken from `git ls-files '*.png'` immediately after the cleanup; regenerate the byte ceilings with",
+    "the command in the $howToRegenerate line if a deliberate re-capture changes file sizes."
+  ],
+  "$howToRegenerate": "node tests/ci/check-tracked-png-budget.mjs --print-manifest",
+  "totals": {
+    "maxFiles": 331,
+    "maxBytes": 67108864
+  },
+  "directories": {
+    "artifacts/ui": {
+      "maxFiles": 18
+    },
+    "artifacts/ui-admin-shell-v2": {
+      "maxFiles": 15
+    },
+    "artifacts/ui-baseline": {
+      "maxFiles": 9
+    },
+    "artifacts/ui/g03-admin-pages": {
+      "maxFiles": 36
+    },
+    "artifacts/ui/g07-business-shell": {
+      "maxFiles": 25
+    },
+    "artifacts/ui/g08-admin-polish": {
+      "maxFiles": 11,
+      "filename": "^(state|op)-[a-z0-9-]+\\.png$"
+    },
+    "artifacts/ui/g08-batch-c": {
+      "maxFiles": 12
+    },
+    "artifacts/ui/g08-batch-c-mobile": {
+      "maxFiles": 3
+    },
+    "artifacts/ui/overview-partial": {
+      "maxFiles": 6
+    },
+    "artifacts/ui/studio": {
+      "maxFiles": 18
+    },
+    "artifacts/ui/visual-v3/audit": {
+      "maxFiles": 69
+    },
+    "artifacts/ui/visual-v3/flagship/after": {
+      "maxFiles": 36
+    },
+    "artifacts/ui/visual-v3/flagship/before": {
+      "maxFiles": 36
+    },
+    "artifacts/ui/visual-v3/token-layer/after": {
+      "maxFiles": 6
+    },
+    "artifacts/ui/visual-v3/token-layer/before": {
+      "maxFiles": 6
+    },
+    "docs/assets/0.0.4": {
+      "maxFiles": 8
+    },
+    "docs/assets/0.0.4/hardening": {
+      "maxFiles": 7
+    },
+    "docs/assets/0.0.4/ui-redesign": {
+      "maxFiles": 10
+    }
+  },
+  "knownMissingDocReferences": [
+    {
+      "ref": "artifacts/staging-preview/screenshots/dialog-zh-1440.png",
+      "why": "Pre-existing broken link in docs/acceptance/0.0.5-web-i18n-shadcn.md:111, unrelated to the PNG cleanup - that file was never committed."
+    },
+    {
+      "ref": "light.png",
+      "why": "Regex fragment of a markdown table header (`|-light.png|`) in docs/ui/visual-review.md, not a path."
+    },
+    {
+      "ref": "_editor.png",
+      "why": "Regex fragment of `r1440-light-en__..._editor.png` prose in docs/design/ui-visual-v3/visual-audit.md, not a path."
+    }
+  ]
+}
