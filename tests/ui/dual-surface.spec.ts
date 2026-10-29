@@ -37,8 +37,22 @@ function trackNavigations(page: Page): string[] {
   return seen;
 }
 
+/**
+ * Signs in through the form and waits for the app to leave /login.
+ *
+ * The bootstrap session probe is awaited *before* the credentials are typed. A cold
+ * `/auth/me` answers 401, and `api.ts` turns any 401 into `opsweave:unauthorized`, which
+ * clears the user again - so a probe that is still in flight when the login lands wipes the
+ * session that was just established and the app returns to /login with an empty form and no
+ * error. That is exactly what failed here on staging (run 40809470709): the stub's extra round
+ * trip put the 401 at 1289 ms, i.e. behind the login POST. What the probe answers is
+ * irrelevant to this file; only that it is over before a second session starts.
+ */
 async function signIn(page: Page) {
+  // Registered before the navigation: the probe fires while the bundle is still executing.
+  const bootstrapProbe = page.waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: 20_000 });
   await page.goto('/login');
+  await bootstrapProbe;
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.click('[data-testid="login-submit"]');

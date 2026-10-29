@@ -26,7 +26,7 @@ on:
         required: false
         type: string
       skip_image_transfer:
-        description: Skip shipping the image over SSH (use when the exact SHA image is already on the host, e.g. after an out-of-band transfer)
+        description: Never fall back to shipping the image over SSH when the host cannot pull it (the host pull is always the first and normal transport)
         required: false
         type: boolean
         default: false
@@ -150,7 +150,7 @@ jobs:
     outputs:
       target_sha: ${{ needs.build.outputs.sha }}
       previous_sha: ${{ steps.previous.outputs.sha }}
-      result: ${{ steps.deploy.outputs.result }}
+      result: ${{ steps.fallback.outputs.result || steps.deploy.outputs.result }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -230,34 +230,30 @@ jobs:
           printf '%s\n' "$GHCR_TOKEN" | ssh -F "$SSH_CONFIG_FILE" -T "$SSH_HOST_ALIAS" "docker login ghcr.io --username '$GHCR_ACTOR' --password-stdin"
           echo "host authenticated to ghcr.io as $GHCR_ACTOR"
 
-      - name: Transfer the image to the host over SSH
-        if: ${{ inputs.skip_image_transfer != true }}
-        timeout-minutes: 15
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHCR_ACTOR: ${{ github.actor }}
-          TARGET_SHA: ${{ needs.build.outputs.sha }}
-        run: |
-          set -euo pipefail
-          set +x
-          # The host cannot reliably pull large blobs from ghcr.io: its route to the
-          # blob CDN stalls for minutes while the API itself answers. The runner
-          # therefore hands the image over the SSH channel that already works.
-          image="${IMAGE_REPO}:${TARGET_SHA}"
-          if ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect '$image' >/dev/null 2>&1"; then
-            echo "the host already holds $image; nothing to transfer"
-            exit 0
-          fi
-          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin
-          docker pull "$image"
-          docker save "$image" | gzip -1 | ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'gunzip | sudo docker load'
-          ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect '$image' >/dev/null && echo 'image present on the host: $image'"
-
+      # Transport order: pull first, hand over only as a fallback.
+      #
+      # The host pulls the image itself. The deploy script warms it before taking the deploy lock
+      # (prewarm_image, scripts/deploy-staging.sh:653-666, called from cmd_deploy at :1271), with
+      # `docker pull` bounded by ${OPSWEAVE_PULL_TIMEOUT:-900} (:624), and a warm incremental pull
+      # is what makes a re-deploy finish in ~29 s. Handing the image over the SSH channel is the
+      # fallback: it runs only when this deploy failed *and* the host turned out to hold no image,
+      # i.e. only when the host's own pull is what failed. At the measured ~33 KB/s runner -> host
+      # rate a full 247 MB docker-save stream needs hours, so the SSH channel can never be the
+      # default path - which is why it is not simply given a longer timeout.
       - name: Deploy the release and verify health
         id: deploy
+        # Recoverable on purpose: the fallback step below can still obtain the image over SSH. A
+        # failure that nothing recovers stays a failure, because every following step is
+        # conditional on this outcome and the fallback step fails the job itself.
+        continue-on-error: true
         env:
           TARGET_SHA: ${{ needs.build.outputs.sha }}
           PUBLIC_URL: ${{ secrets.STAGING_BASE_URL }}
+          # The host-side prewarm reads ${OPSWEAVE_PULL_TIMEOUT:-900}. A workflow env never reaches
+          # the host (ssh needs SendEnv, and sudo resets the environment), so the value is also
+          # exported on the remote command line in front of sudo; when sudo drops it, the script's
+          # own default - the same 900 s - is what bounds the pull.
+          OPSWEAVE_PULL_TIMEOUT: '900'
         run: |
           set -euo pipefail
           set +x
@@ -266,7 +262,7 @@ jobs:
             exit 1
           fi
           echo "deploying $TARGET_SHA to the staging host with public origin $PUBLIC_URL"
-          if ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo -n /srv/opsweave-staging/bin/deploy-staging.sh --sha '$TARGET_SHA' --base-url '$PUBLIC_URL'"; then
+          if ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "OPSWEAVE_PULL_TIMEOUT=${OPSWEAVE_PULL_TIMEOUT:-900} sudo -n /srv/opsweave-staging/bin/deploy-staging.sh --sha '$TARGET_SHA' --base-url '$PUBLIC_URL'"; then
             echo "result=success" >> "$GITHUB_OUTPUT"
           else
             code=$?
@@ -274,6 +270,61 @@ jobs:
             echo "::error::The host deployment failed (exit $code). The host script attempted an automatic rollback; see the staging-deploy artifact for the recorded state."
             exit "$code"
           fi
+
+      - name: Hand the image over SSH after a failed host pull, then deploy again
+        id: fallback
+        if: ${{ steps.deploy.outcome == 'failure' }}
+        timeout-minutes: 20
+        env:
+          TARGET_SHA: ${{ needs.build.outputs.sha }}
+          PUBLIC_URL: ${{ secrets.STAGING_BASE_URL }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          SKIP_IMAGE_TRANSFER: ${{ inputs.skip_image_transfer }}
+          OPSWEAVE_PULL_TIMEOUT: '900'
+          # The hand-over gets the same 900 s the host pull gets, and it is bounded separately so a
+          # timed-out transfer is reported as one instead of being swallowed by the step cap.
+          TRANSFER_TIMEOUT: '900'
+        run: |
+          set -euo pipefail
+          set +x
+          # Same guard as the deploy step: this step interpolates the same secret into a remote
+          # command, and a deploy rejected for a malformed URL must not reach it unvalidated.
+          if ! printf '%s' "$PUBLIC_URL" | grep -Eq '^https?://[A-Za-z0-9._~:/?#@!&()*+,;=%-]+$'; then
+            echo "::error::STAGING_BASE_URL is not a usable http(s) URL; refusing to interpolate it into a remote command."
+            exit 1
+          fi
+          image="${IMAGE_REPO}:${TARGET_SHA}"
+
+          deploy_release() {
+            ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" \
+              "OPSWEAVE_PULL_TIMEOUT=${OPSWEAVE_PULL_TIMEOUT:-900} sudo -n /srv/opsweave-staging/bin/deploy-staging.sh --sha '$TARGET_SHA' --base-url '$PUBLIC_URL'"
+          }
+
+          # "The host holds no image" is the only evidence that the pull is what failed: prewarm
+          # exits before the deploy lock is taken and before anything on the host is touched, so a
+          # pull failure leaves the host exactly as it was. Any other failure must not be papered
+          # over with a transfer.
+          if ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect '$image' >/dev/null 2>&1"; then
+            echo "::error::The host already holds $image, so the failed deploy was not an image transport failure and nothing is transferred; read the deploy step above."
+            exit 1
+          fi
+          if [ "${SKIP_IMAGE_TRANSFER:-false}" = "true" ]; then
+            echo "::error::The host does not hold $image and skip_image_transfer disables the fallback transfer for this run; the release cannot be deployed."
+            exit 1
+          fi
+
+          echo "the host could not obtain $image on its own; handing it over the SSH channel (bounded to ${TRANSFER_TIMEOUT}s)"
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin
+          docker pull "$image"
+          # timeout bounds the transfer itself, and pipefail turns a killed transfer into a failed
+          # step instead of a deploy that waits for an image which never arrives.
+          docker save "$image" | gzip -1 | timeout "$TRANSFER_TIMEOUT" ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'gunzip | sudo docker load'
+          ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" "sudo docker image inspect '$image' >/dev/null && echo 'image present on the host: $image'"
+
+          echo "the host holds $image; deploying $TARGET_SHA again"
+          deploy_release
+          echo "result=success" >> "$GITHUB_OUTPUT"
 
       - name: Collect host status
         if: always()
