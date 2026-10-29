@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
@@ -101,6 +101,17 @@ export function NodeDetailPage() {
   const { user } = useAuth();
   const { data, error, loading, reload } = usePolling(() => api.get<NodeView>(`/api/v1/nodes/${id}`), 5000);
   const { data: instances, reload: reloadInstances } = usePolling(() => api.get<any[]>(`/api/v1/nodes/${id}/instances`), 5000);
+  const [history, setHistory] = useState<any[]>([]);
+  const [historyWindow, setHistoryWindow] = useState(1);
+  useEffect(() => {
+    let cancelled = false;
+    const from = new Date(Date.now() - historyWindow * 3600_000).toISOString();
+    const resolution = historyWindow <= 1 ? 'raw' : 'hour';
+    void api.get<any[]>(`/api/v1/nodes/${id}/resource-history?limit=100&resolution=${resolution}&from=${encodeURIComponent(from)}`)
+      .then((items) => { if (!cancelled) setHistory(items || []); })
+      .catch(() => { if (!cancelled) setHistory([]); });
+    return () => { cancelled = true; };
+  }, [id, historyWindow]);
   const { data: events } = usePolling(() => api.get<AuditEvent[]>(`/api/v1/audit?subjectType=node&subjectId=${id}&limit=20`), 0);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -160,6 +171,18 @@ export function NodeDetailPage() {
           )}
         </section>
       </div>
+      <section className="panel" data-testid="node-resource-history">
+        <div className="panel-head"><div><h2>Resource history</h2><p>Persisted heartbeat samples. Gaps are shown as gaps, not zero.</p></div><div className="segmented" aria-label="History window">{[1, 6, 24].map((hours) => <button key={hours} className={`btn btn-small ${historyWindow === hours ? 'active' : ''}`} onClick={() => setHistoryWindow(hours)}>{hours}h</button>)}</div></div>
+        {!history?.length ? <EmptyState icon="activity" title="No samples yet" description="Samples appear after the next authenticated node heartbeat." /> : (
+          <div className="resource-history">
+            <svg viewBox="0 0 400 80" role="img" aria-label="CPU utilization history; gaps are not zero" preserveAspectRatio="none">
+              {historySegments(history).map((points, index) => <polyline key={index} fill="none" stroke="var(--accent, #4f8cff)" strokeWidth="2" points={points} />)}
+            </svg>
+            <p className="muted small">{history.length} sample{history.length === 1 ? '' : 's'}; latest {formatDate(history[0].sampledAt)} · generation {history[0].generation}</p>
+            <table className="data-table"><thead><tr><th>Observed</th><th>CPU</th><th>Memory</th><th>Filesystem</th><th>Generation</th></tr></thead><tbody>{history.slice(0, 20).map((sample) => <tr key={sample.sampleId}><td data-label="Observed">{formatDate(sample.observedAt)}</td><td data-label="CPU">{sample.cpuUtilization === null ? 'No data' : `${(sample.cpuUtilization * 100).toFixed(0)}%`}</td><td data-label="Memory">{formatBytes(sample.memoryUsedBytes)} / {formatBytes(sample.memoryTotalBytes)}</td><td data-label="Filesystem">{formatBytes(sample.filesystemUsedBytes)} / {formatBytes(sample.filesystemTotalBytes)}</td><td data-label="Generation">{sample.generation}</td></tr>)}</tbody></table>
+          </div>
+        )}
+      </section>
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>Plugin instances</h2><p>Only instances the Kernel has placed on this node.</p></div></div>
         {!instances?.length ? <EmptyState icon="plugins" title="No instances on this node" description="Deploy a plugin with a selector that matches this node's labels." /> : (
@@ -175,6 +198,31 @@ export function NodeDetailPage() {
       <ConfirmDialog open={confirm} title={`Revoke ${data.name}?`} description={<>The node credential is invalidated immediately. New deployments and observations are rejected. Existing containers may keep running but the Gateway stops routing to them; no automatic data deletion occurs.</>} confirmLabel="Revoke node" danger busy={busy} onConfirm={() => void revoke()} onClose={() => setConfirm(false)} />
     </div>
   );
+}
+
+function historySegments(history: any[]) {
+  const ordered = history.slice().reverse().filter((sample) => sample.cpuUtilization !== null && sample.cpuUtilization !== undefined);
+  if (ordered.length === 0) return [] as string[];
+  const start = new Date(ordered[0].observedAt).getTime();
+  const end = new Date(ordered[ordered.length - 1].observedAt).getTime();
+  const span = Math.max(1, end - start);
+  const segments: string[] = [];
+  let current: string[] = [];
+  let previous: any = null;
+  for (const sample of ordered) {
+    const at = new Date(sample.observedAt).getTime();
+    const gap = previous ? at - new Date(previous.observedAt).getTime() : 0;
+    if (previous && (gap > 5 * 60_000 || sample.generation !== previous.generation)) {
+      if (current.length > 0) segments.push(current.join(' '));
+      current = [];
+    }
+    const x = ((at - start) / span) * 400;
+    const y = 80 - Math.min(1, Math.max(0, sample.cpuUtilization)) * 72;
+    current.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    previous = sample;
+  }
+  if (current.length > 0) segments.push(current.join(' '));
+  return segments;
 }
 
 function ProgressBar({ percent }: { percent: number | null }) {

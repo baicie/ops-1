@@ -1,6 +1,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import pg from 'pg';
+import { normalizeRuleInput, ruleSetDigest, evaluateRules, QUALITY_RULE_TYPES } from './quality.mjs';
 
 const PLUGIN_ID = process.env.OPSWEAVE_PLUGIN_ID || 'opsweave.data-catalog';
 const VERSION = process.env.OPSWEAVE_PLUGIN_VERSION || '0.0.1';
@@ -216,8 +217,263 @@ async function initDb() {
       unknown integer NOT NULL,
       occurred_at timestamptz NOT NULL DEFAULT now()
     );
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS pipeline_id text;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS pipeline_revision integer;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS job_id uuid;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS attempt integer;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS fencing_sequence bigint;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS effect_id text;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS receipt_id uuid;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS source_identity text;
+    ALTER TABLE catalog_lineage ADD COLUMN IF NOT EXISTS metadata_status text NOT NULL DEFAULT 'NOT_CAPTURED';
+    CREATE INDEX IF NOT EXISTS catalog_lineage_page_idx ON catalog_lineage (dataset_id, occurred_at DESC, lineage_id DESC);
+    CREATE INDEX IF NOT EXISTS catalog_lineage_job_idx ON catalog_lineage (job_id);
+    CREATE TABLE IF NOT EXISTS catalog_quality_rules (
+      rule_id uuid PRIMARY KEY,
+      dataset_id uuid NOT NULL REFERENCES catalog_datasets(dataset_id),
+      schema_revision integer NOT NULL,
+      rule_type text NOT NULL,
+      config jsonb NOT NULL,
+      severity text NOT NULL,
+      enabled boolean NOT NULL DEFAULT true,
+      version integer NOT NULL DEFAULT 1 CHECK (version >= 1),
+      created_by text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS catalog_quality_rules_dataset_idx ON catalog_quality_rules (dataset_id, schema_revision, enabled);
+    CREATE TABLE IF NOT EXISTS catalog_quality_runs (
+      run_id uuid PRIMARY KEY,
+      dataset_id uuid NOT NULL REFERENCES catalog_datasets(dataset_id),
+      schema_revision integer NOT NULL,
+      status text NOT NULL CHECK (status IN ('PENDING','RUNNING','PASSED','FAILED','ERROR','CANCELLED')),
+      idempotency_key text NOT NULL,
+      rule_set jsonb NOT NULL,
+      rule_set_digest text NOT NULL,
+      request_digest text,
+      records_examined integer NOT NULL DEFAULT 0,
+      records_failed integer NOT NULL DEFAULT 0,
+      error_code text,
+      created_by text,
+      fencing_token bigint NOT NULL DEFAULT 0,
+      attempt integer NOT NULL DEFAULT 0,
+      lease_owner text,
+      lease_expires_at timestamptz,
+      started_at timestamptz,
+      completed_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE (dataset_id, idempotency_key)
+    );
+    ALTER TABLE catalog_quality_runs ADD COLUMN IF NOT EXISTS request_digest text;
+    CREATE INDEX IF NOT EXISTS catalog_quality_runs_dataset_idx ON catalog_quality_runs (dataset_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS catalog_quality_runs_claim_idx ON catalog_quality_runs (status, created_at);
+    CREATE TABLE IF NOT EXISTS catalog_quality_results (
+      result_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      run_id uuid NOT NULL REFERENCES catalog_quality_runs(run_id),
+      rule_id uuid NOT NULL,
+      rule_version integer NOT NULL,
+      status text NOT NULL,
+      examined integer NOT NULL,
+      failed integer NOT NULL,
+      summary jsonb NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS catalog_quality_results_run_idx ON catalog_quality_results (run_id);
   `);
   ready = true;
+}
+
+function publicSourceSummary(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return {};
+  const allowed = ['pluginId', 'sourceId', 'sourceRevision', 'type', 'format'];
+  const result = {};
+  for (const key of allowed) {
+    const value = source[key];
+    if (typeof value === 'string' && value.length <= 128 && !/[\r\n]/.test(value)) result[key] = value;
+    else if (Number.isInteger(value) && value >= 0) result[key] = value;
+  }
+  return result;
+}
+
+function safeSourceIdentity(source, fallback) {
+  const raw = source && (source.identity || source.url);
+  if (typeof raw !== 'string' || !raw.trim()) return String(fallback || 'unknown').slice(0, 128);
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`.slice(0, 128);
+  } catch {
+    return raw.replace(/[?#].*$/, '').replace(/\/\/[^/@]*@/, '//').slice(0, 128);
+  }
+}
+
+function lineageView(row) {
+  return {
+    lineageId: row.lineage_id,
+    dataset: { datasetId: row.dataset_id, schemaRevision: row.schema_revision },
+    source: publicSourceSummary(row.source),
+    sourceIdentity: row.source_identity || null,
+    sourceBatchKey: row.source_batch_key,
+    ingestionRunId: row.ingestion_run_id,
+    pipeline: row.pipeline_id ? { pipelineId: row.pipeline_id, revision: row.pipeline_revision } : null,
+    job: row.job_id ? { jobId: row.job_id, attempt: row.attempt } : null,
+    fencingSequence: row.fencing_sequence ? Number(row.fencing_sequence) : null,
+    effectId: row.effect_id || null,
+    receiptId: row.receipt_id || null,
+    accepted: row.accepted, rejected: row.rejected, unknown: row.unknown,
+    metadataStatus: row.metadata_status,
+    occurredAt: row.occurred_at.toISOString(),
+  };
+}
+
+const LINEAGE_CURSOR_VERSION = 1;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function lineageFilterFingerprint(filters) {
+  return crypto.createHash('sha256').update(JSON.stringify(filters)).digest('hex').slice(0, 16);
+}
+function encodeLineageCursor(row, filters) {
+  return Buffer.from(JSON.stringify({
+    v: LINEAGE_CURSOR_VERSION,
+    occurredAt: new Date(row.occurred_at).toISOString(),
+    lineageId: row.lineage_id,
+    filters: lineageFilterFingerprint(filters),
+  }), 'utf8').toString('base64url');
+}
+function decodeLineageCursor(value) {
+  if (typeof value !== 'string' || value.length > 512) return null;
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (parsed.v !== LINEAGE_CURSOR_VERSION) return null;
+    if (typeof parsed.occurredAt !== 'string' || Number.isNaN(new Date(parsed.occurredAt).getTime())) return null;
+    if (typeof parsed.lineageId !== 'string' || !UUID_RE.test(parsed.lineageId)) return null;
+    if (typeof parsed.filters !== 'string' || !/^[a-f0-9]{16}$/.test(parsed.filters)) return null;
+    if (Object.keys(parsed).sort().join(',') !== 'filters,lineageId,occurredAt,v') return null;
+    return parsed;
+  } catch { return null; }
+}
+
+function qualityRuleView(row) {
+  return { ruleId: row.rule_id, datasetId: row.dataset_id, schemaRevision: row.schema_revision,
+    ruleType: row.rule_type, config: row.config, severity: row.severity, enabled: row.enabled,
+    version: row.version, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() };
+}
+function qualityRunView(row, results) {
+  return { runId: row.run_id, datasetId: row.dataset_id, schemaRevision: row.schema_revision,
+    status: row.status, ruleSetDigest: row.rule_set_digest, recordsExamined: row.records_examined,
+    recordsFailed: row.records_failed, ruleFailureCount: (results || []).reduce((total, result) => total + Number(result.failed || 0), 0), errorCode: row.error_code, attempt: row.attempt,
+    startedAt: row.started_at ? row.started_at.toISOString() : null,
+    completedAt: row.completed_at ? row.completed_at.toISOString() : null,
+    createdAt: row.created_at.toISOString(), results: results || [] };
+}
+function qualityResultView(row) {
+  return { ruleId: row.rule_id, ruleVersion: row.rule_version, status: row.status,
+    examined: row.examined, failed: row.failed, summary: row.summary };
+}
+
+async function markQualityError(runId, owner, token, code) {
+  await pool.query("UPDATE catalog_quality_runs SET status='ERROR', error_code=$2, completed_at=now(), updated_at=now() WHERE run_id=$1 AND status='RUNNING' AND lease_owner=$3 AND fencing_token=$4", [runId, code, owner, token]);
+}
+
+async function executeQualityRun(runId) {
+  const owner = crypto.randomUUID();
+  const claim = await pool.query(
+    `UPDATE catalog_quality_runs SET status='RUNNING', lease_owner=$2,
+       lease_expires_at=now()+interval '5 minutes', fencing_token=fencing_token+1,
+       attempt=attempt+1, started_at=COALESCE(started_at,now()), updated_at=now()
+     WHERE run_id=$1 AND status='PENDING' AND (lease_expires_at IS NULL OR lease_expires_at < now())
+     RETURNING *`, [runId, owner]);
+  const run = claim.rows[0];
+  if (!run) return;
+  const token = Number(run.fencing_token);
+  let client;
+  let leaseTimer;
+  let inTransaction = false;
+  try {
+    const rules = Array.isArray(run.rule_set) ? run.rule_set : [];
+    const maxRecords = 10000;
+    client = await pool.connect();
+    let leaseLost = false;
+    leaseTimer = setInterval(() => {
+      pool.query("UPDATE catalog_quality_runs SET lease_expires_at=now()+interval '5 minutes', updated_at=now() WHERE run_id=$1 AND status='RUNNING' AND lease_owner=$2 AND fencing_token=$3", [runId, owner, token])
+        .then((renewed) => { if (renewed.rowCount === 0) leaseLost = true; })
+        .catch(() => { leaseLost = true; });
+    }, 15000);
+    leaseTimer.unref();
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    inTransaction = true;
+    await client.query("SET LOCAL statement_timeout = '30s'");
+    const rows = await client.query('SELECT payload FROM catalog_records WHERE dataset_id=$1 AND schema_revision=$2 ORDER BY record_id LIMIT $3', [run.dataset_id, run.schema_revision, maxRecords + 1]);
+    await client.query('COMMIT');
+    inTransaction = false;
+    if (leaseLost) {
+      await markQualityError(runId, owner, token, 'LEASE_LOST');
+      return;
+    }
+    if (rows.rows.length > maxRecords) {
+      await markQualityError(runId, owner, token, 'SCAN_LIMIT_EXCEEDED');
+      return;
+    }
+    const records = rows.rows.map((row) => row.payload);
+    const evaluation = evaluateRules(rules, records);
+    const write = await pool.connect();
+    try {
+      await write.query('BEGIN');
+      const current = await write.query("SELECT status,fencing_token FROM catalog_quality_runs WHERE run_id=$1 FOR UPDATE", [runId]);
+      if (!current.rows[0] || current.rows[0].status !== 'RUNNING' || Number(current.rows[0].fencing_token) !== token) {
+        await write.query('ROLLBACK');
+        return;
+      }
+      for (const item of evaluation.results) {
+        const result = item.result;
+        await write.query(
+          `INSERT INTO catalog_quality_results (run_id,rule_id,rule_version,status,examined,failed,summary)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [runId, item.rule.ruleId, item.rule.version, result.status, result.examined, result.failed, JSON.stringify(result.summary)],
+        );
+      }
+      await write.query(
+        `UPDATE catalog_quality_runs SET status=$2, completed_at=now(), updated_at=now(),
+           records_examined=$3, records_failed=$4, lease_expires_at=NULL
+         WHERE run_id=$1 AND status='RUNNING' AND fencing_token=$5`,
+        [runId, evaluation.status, records.length, evaluation.recordsFailed || 0, token],
+      );
+      await write.query('COMMIT');
+    } catch (error) {
+      await write.query('ROLLBACK');
+      throw error;
+    } finally { write.release(); }
+  } catch (error) {
+    if (client && inTransaction) await client.query('ROLLBACK').catch(() => {});
+    const code = error && error.code === '57014' ? 'RUN_TIMEOUT' : 'RUNNER_ERROR';
+    await markQualityError(runId, owner, token, code).catch(() => {});
+  } finally {
+    if (leaseTimer) clearInterval(leaseTimer);
+    if (client) client.release();
+  }
+}
+
+const qualityActive = new Set();
+async function dispatchQualityRuns() {
+  if (qualityActive.size >= 4) return;
+  const pending = await pool.query("SELECT run_id FROM catalog_quality_runs WHERE status='PENDING' ORDER BY created_at LIMIT $1", [4 - qualityActive.size]);
+  for (const row of pending.rows) {
+    if (qualityActive.has(row.run_id)) continue;
+    qualityActive.add(row.run_id);
+    setImmediate(() => {
+      executeQualityRun(row.run_id).catch(() => {}).finally(() => {
+        qualityActive.delete(row.run_id);
+        setImmediate(() => { dispatchQualityRuns().catch(() => {}); });
+      });
+    });
+  }
+}
+
+async function recoverQualityRuns() {
+  await pool.query("UPDATE catalog_quality_runs SET status='ERROR', error_code='INTERRUPTED', completed_at=now(), updated_at=now() WHERE status='RUNNING' AND lease_expires_at < now()");
+  await dispatchQualityRuns();
+  setInterval(() => { dispatchQualityRuns().catch((error) => console.error('quality dispatcher error', error)); }, 5000).unref();
 }
 
 function datasetView(row) {
@@ -290,6 +546,40 @@ async function handle(req, res) {
   if (url.pathname === '/_opsweave/health/startup') return send(res, 200, { status: 'started' }, requestId);
   const who = identity(req);
   if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'caller identity required', requestId);
+  if (url.pathname === '/api/data-catalog/governance-summary' && req.method === 'GET') {
+    if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'authentication required', requestId);
+    const counts = await pool.query(`
+      WITH latest AS (
+        SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.completed_at,r.error_code,r.run_id
+        FROM catalog_quality_runs r ORDER BY r.dataset_id, r.created_at DESC
+      )
+      SELECT (SELECT count(*)::int FROM catalog_datasets) AS dataset_count,
+             (SELECT count(*)::int FROM latest) AS datasets_with_runs,
+             (SELECT count(*)::int FROM latest WHERE status='PASSED') AS passed,
+             (SELECT count(*)::int FROM latest WHERE status='FAILED') AS failed,
+             (SELECT count(*)::int FROM latest WHERE status='ERROR') AS errored,
+             (SELECT count(*)::int FROM latest WHERE status IN ('PENDING','RUNNING')) AS pending,
+             (SELECT count(*)::int FROM catalog_lineage WHERE occurred_at > now() - interval '24 hours') AS lineage_window_count
+    `);
+    const failures = await pool.query(`
+      WITH latest AS (
+        SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.completed_at,r.error_code,r.run_id
+        FROM catalog_quality_runs r ORDER BY r.dataset_id, r.created_at DESC
+      )
+      SELECT l.run_id,l.dataset_id,d.name AS dataset_name,l.status,l.created_at,l.completed_at,l.error_code
+      FROM latest l JOIN catalog_datasets d ON d.dataset_id=l.dataset_id
+      WHERE l.status IN ('FAILED','ERROR') ORDER BY COALESCE(l.completed_at,l.created_at) DESC LIMIT 8
+    `);
+    const row = counts.rows[0];
+    return send(res, 200, {
+      datasetCount: row.dataset_count,
+      datasetsWithQualityRuns: row.datasets_with_runs,
+      latestQuality: { passed: row.passed, failed: row.failed, error: row.errored, pending: row.pending, unknown: row.dataset_count - row.datasets_with_runs },
+      lineageWindowCount: row.lineage_window_count,
+      lineageWindow: '24h',
+      recentFailures: failures.rows.map((failure) => ({ runId: failure.run_id, datasetId: failure.dataset_id, datasetName: failure.dataset_name, status: failure.status, createdAt: failure.created_at.toISOString(), completedAt: failure.completed_at ? failure.completed_at.toISOString() : null, errorCode: failure.error_code })),
+    }, requestId);
+  }
   if (url.pathname === '/api/data-catalog/datasets' && req.method === 'GET') {
     if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
     const result = await pool.query('SELECT * FROM catalog_datasets ORDER BY created_at DESC LIMIT 100');
@@ -448,7 +738,17 @@ async function handle(req, res) {
         for (const record of acceptedRecords) {
           await client.query('INSERT INTO catalog_records (record_id,dataset_id,schema_revision,source_batch_key,payload) VALUES ($1,$2,$3,$4,$5)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, JSON.stringify(record)]);
         }
-        await client.query('INSERT INTO catalog_lineage (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,accepted,rejected,unknown) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, body.jobId || null, JSON.stringify(body.source || {}), acceptedRecords.length, errors.length]);
+        await client.query(
+          `INSERT INTO catalog_lineage
+            (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,
+             accepted,rejected,unknown,pipeline_id,pipeline_revision,job_id,fencing_sequence,
+             effect_id,receipt_id,source_identity,metadata_status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,$10,$11,$12,$13,$14,$15,'AVAILABLE')`,
+          [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, body.ingestionRunId || null,
+           JSON.stringify(body.source || {}), acceptedRecords.length, errors.length,
+           body.pipelineId, body.pipelineRevision, fence.jobId, fence.fencingSequence,
+           body.effectId, receiptId, safeSourceIdentity(body.source, body.sourceBatchKey)],
+        );
         await client.query('COMMIT');
         return send(res, 201, effectReceiptView(receipt.rows[0]), requestId);
       } catch (error) {
@@ -495,7 +795,15 @@ async function handle(req, res) {
         await client.query('BEGIN');
         const receipt = await client.query('INSERT INTO catalog_receipts (receipt_id,dataset_id,schema_revision,source_batch_key,request_digest,status,accepted,rejected,unknown,errors) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9) RETURNING *', [receiptId, datasetId, body.schemaRevision, body.sourceBatchKey, requestDigest, status, acceptedRecords.length, errors.length, JSON.stringify(errors)]);
         for (const record of acceptedRecords) await client.query('INSERT INTO catalog_records (record_id,dataset_id,schema_revision,source_batch_key,payload) VALUES ($1,$2,$3,$4,$5)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, JSON.stringify(record)]);
-        await client.query('INSERT INTO catalog_lineage (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,accepted,rejected,unknown) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)', [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey, body.ingestionRunId || null, JSON.stringify(body.source || {}), acceptedRecords.length, errors.length]);
+        await client.query(
+          `INSERT INTO catalog_lineage
+            (lineage_id,dataset_id,schema_revision,source_batch_key,ingestion_run_id,source,
+             accepted,rejected,unknown,source_identity,metadata_status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,'PARTIAL')`,
+          [crypto.randomUUID(), datasetId, body.schemaRevision, body.sourceBatchKey,
+           body.ingestionRunId || null, JSON.stringify(body.source || {}), acceptedRecords.length,
+           errors.length, safeSourceIdentity(body.source, body.sourceBatchKey)],
+        );
         await client.query('COMMIT');
         return send(res, 201, receiptView(receipt.rows[0]), requestId);
       } catch (error) {
@@ -513,9 +821,183 @@ async function handle(req, res) {
       const rows = await pool.query('SELECT record_id,payload,created_at FROM catalog_records WHERE dataset_id=$1 ORDER BY created_at DESC LIMIT $2', [datasetId, limit]);
       return send(res, 200, { items: rows.rows.map((row) => ({ recordId: row.record_id, ...row.payload })), nextCursor: null }, requestId);
     }
+    if (tail === 'quality-rules' && req.method === 'GET') {
+      const revision = url.searchParams.get('schemaRevision');
+      const params = [datasetId];
+      let sql = 'SELECT * FROM catalog_quality_rules WHERE dataset_id=$1';
+      if (revision) { const parsed = Number(revision); if (!Number.isInteger(parsed) || parsed < 1) return fail(res, 400, 'INVALID_REQUEST', 'schemaRevision invalid', requestId); params.push(parsed); sql += ' AND schema_revision=$2'; }
+      sql += ' ORDER BY created_at DESC LIMIT 200';
+      const rows = await pool.query(sql, params);
+      return send(res, 200, { items: rows.rows.map(qualityRuleView) }, requestId);
+    }
+    if (tail === 'quality-rules' && req.method === 'POST') {
+      if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+      const body = await readJson(req);
+      let input;
+      try { input = normalizeRuleInput(body); } catch (error) { return fail(res, 400, 'INVALID_RULE', error.message, requestId); }
+      if (input.ruleType === 'RECORD_COUNT' && input.config.max > 10000) return fail(res, 400, 'INVALID_RULE', 'RECORD_COUNT max is bounded by the 10000 scan budget', requestId);
+      const revision = body.schemaRevision === undefined ? dataset.rows[0].schema_revision : Number(body.schemaRevision);
+      if (!Number.isInteger(revision) || revision < 1) return fail(res, 400, 'INVALID_REQUEST', 'schemaRevision invalid', requestId);
+      const schema = await pool.query("SELECT 1 FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status='PUBLISHED'", [datasetId, revision]);
+      if (!schema.rows[0]) return fail(res, 409, 'SCHEMA_NOT_PUBLISHED', 'schema revision is not published', requestId);
+      const row = await pool.query(
+        `INSERT INTO catalog_quality_rules (rule_id,dataset_id,schema_revision,rule_type,config,severity,enabled,version,created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8) RETURNING *`,
+        [crypto.randomUUID(), datasetId, revision, input.ruleType, JSON.stringify(input.config), input.severity, input.enabled, who.role || who.pluginId || 'unknown'],
+      );
+      return send(res, 201, qualityRuleView(row.rows[0]), requestId);
+    }
+    const ruleMatch = tail.match(/^quality-rules\/([0-9a-f-]{36})$/);
+    if (ruleMatch) {
+      const ruleId = ruleMatch[1];
+      if (req.method === 'GET') {
+        const row = await pool.query('SELECT * FROM catalog_quality_rules WHERE dataset_id=$1 AND rule_id=$2', [datasetId, ruleId]);
+        if (!row.rows[0]) return fail(res, 404, 'RULE_NOT_FOUND', 'quality rule not found', requestId);
+        return send(res, 200, qualityRuleView(row.rows[0]), requestId);
+      }
+      if (req.method === 'POST') {
+        if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+        const body = await readJson(req);
+        if (!Number.isInteger(body.version) || body.version < 1) return fail(res, 400, 'INVALID_REQUEST', 'version is required', requestId);
+        let input;
+        try { input = normalizeRuleInput(body); } catch (error) { return fail(res, 400, 'INVALID_RULE', error.message, requestId); }
+        const updated = await pool.query(
+          `UPDATE catalog_quality_rules SET rule_type=$3,config=$4,severity=$5,enabled=$6,version=version+1,updated_at=now()
+           WHERE dataset_id=$1 AND rule_id=$2 AND version=$7 RETURNING *`,
+          [datasetId, ruleId, input.ruleType, JSON.stringify(input.config), input.severity, input.enabled, body.version],
+        );
+        if (!updated.rows[0]) {
+          const exists = await pool.query('SELECT version FROM catalog_quality_rules WHERE dataset_id=$1 AND rule_id=$2', [datasetId, ruleId]);
+          if (!exists.rows[0]) return fail(res, 404, 'RULE_NOT_FOUND', 'quality rule not found', requestId);
+          return fail(res, 409, 'VERSION_CONFLICT', 'quality rule version conflict', requestId);
+        }
+        return send(res, 200, qualityRuleView(updated.rows[0]), requestId);
+      }
+      return fail(res, 405, 'METHOD_NOT_ALLOWED', 'method not allowed', requestId);
+    }
+    if (tail === 'quality-runs' && req.method === 'POST') {
+      if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+      const body = await readJson(req);
+      const key = String(req.headers['idempotency-key'] || body.idempotencyKey || '');
+      if (key.length < 8 || key.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(key)) return fail(res, 400, 'INVALID_REQUEST', 'idempotency-key is required', requestId);
+      const revision = body.schemaRevision === undefined ? dataset.rows[0].schema_revision : Number(body.schemaRevision);
+      if (!Number.isInteger(revision) || revision < 1) return fail(res, 400, 'INVALID_REQUEST', 'schemaRevision invalid', requestId);
+      const existing = await pool.query('SELECT * FROM catalog_quality_runs WHERE dataset_id=$1 AND idempotency_key=$2', [datasetId, key]);
+      if (existing.rows[0]) {
+        const current = existing.rows[0];
+        const rulesForDigest = await pool.query('SELECT * FROM catalog_quality_rules WHERE dataset_id=$1 AND schema_revision=$2 AND enabled=true ORDER BY rule_id LIMIT 101', [datasetId, revision]);
+        const currentSnapshot = rulesForDigest.rows.map((rule) => ({ ruleId: rule.rule_id, version: rule.version, ruleType: rule.rule_type, config: rule.config, severity: rule.severity }));
+        const currentDigest = digest({ schemaRevision: revision, ruleSetDigest: ruleSetDigest(currentSnapshot) });
+        if (current.request_digest && current.request_digest !== currentDigest) return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'idempotency key was reused with different rule semantics', requestId);
+        return send(res, 200, qualityRunView(current, []), requestId);
+      }
+      const schema = await pool.query("SELECT 1 FROM catalog_schema_revisions WHERE dataset_id=$1 AND schema_revision=$2 AND status='PUBLISHED'", [datasetId, revision]);
+      if (!schema.rows[0]) return fail(res, 409, 'SCHEMA_NOT_PUBLISHED', 'schema revision is not published', requestId);
+      const rules = await pool.query('SELECT * FROM catalog_quality_rules WHERE dataset_id=$1 AND schema_revision=$2 AND enabled=true ORDER BY rule_id LIMIT 101', [datasetId, revision]);
+      if (rules.rows.length === 0) return fail(res, 409, 'NO_ENABLED_RULES', 'dataset has no enabled quality rules', requestId);
+      if (rules.rows.length > 100) return fail(res, 400, 'RULE_LIMIT_EXCEEDED', 'at most 100 enabled rules', requestId);
+      const snapshot = rules.rows.map((rule) => ({ ruleId: rule.rule_id, version: rule.version, ruleType: rule.rule_type, config: rule.config, severity: rule.severity }));
+      const ruleDigest = ruleSetDigest(snapshot);
+      const requestDigest = digest({ schemaRevision: revision, ruleSetDigest: ruleDigest });
+      const runId = crypto.randomUUID();
+      let inserted;
+      try {
+        inserted = await pool.query(
+          `INSERT INTO catalog_quality_runs (run_id,dataset_id,schema_revision,status,idempotency_key,rule_set,rule_set_digest,request_digest,created_by)
+           VALUES ($1,$2,$3,'PENDING',$4,$5,$6,$7,$8) RETURNING *`,
+          [runId, datasetId, revision, key, JSON.stringify(snapshot), ruleDigest, requestDigest, who.role || who.pluginId || 'unknown'],
+        );
+      } catch (error) {
+        if (error.code === '23505') {
+          const raced = await pool.query('SELECT * FROM catalog_quality_runs WHERE dataset_id=$1 AND idempotency_key=$2', [datasetId, key]);
+          if (raced.rows[0]) {
+            if (raced.rows[0].request_digest && raced.rows[0].request_digest !== requestDigest) return fail(res, 409, 'IDEMPOTENCY_CONFLICT', 'idempotency key was reused with different rule semantics', requestId);
+            return send(res, 200, qualityRunView(raced.rows[0], []), requestId);
+          }
+        }
+        throw error;
+      }
+      setImmediate(() => { dispatchQualityRuns().catch(() => {}); });
+      return send(res, 202, qualityRunView(inserted.rows[0], []), requestId);
+    }
+    if (tail === 'quality-runs' && req.method === 'GET') {
+      const limit = Number(url.searchParams.get('limit') || 50);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) return fail(res, 400, 'INVALID_REQUEST', 'limit must be 1..100', requestId);
+      const rows = await pool.query('SELECT * FROM catalog_quality_runs WHERE dataset_id=$1 ORDER BY created_at DESC LIMIT $2', [datasetId, limit]);
+      return send(res, 200, { items: rows.rows.map((row) => qualityRunView(row, [])) }, requestId);
+    }
+    const runMatch = tail.match(/^quality-runs\/([0-9a-f-]{36})$/);
+    if (runMatch && req.method === 'GET') {
+      const run = await pool.query('SELECT * FROM catalog_quality_runs WHERE dataset_id=$1 AND run_id=$2', [datasetId, runMatch[1]]);
+      if (!run.rows[0]) return fail(res, 404, 'RUN_NOT_FOUND', 'quality run not found', requestId);
+      const results = await pool.query('SELECT * FROM catalog_quality_results WHERE run_id=$1 ORDER BY result_id', [runMatch[1]]);
+      return send(res, 200, qualityRunView(run.rows[0], results.rows.map(qualityResultView)), requestId);
+    }
+    const cancelMatch = tail.match(/^quality-runs\/([0-9a-f-]{36})\/cancel$/);
+    if (cancelMatch && req.method === 'POST') {
+      if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+      const cancelled = await pool.query(
+        `UPDATE catalog_quality_runs SET status='CANCELLED', completed_at=now(), updated_at=now(), fencing_token=fencing_token+1, lease_expires_at=NULL
+         WHERE dataset_id=$1 AND run_id=$2 AND status IN ('PENDING','RUNNING') RETURNING *`,
+        [datasetId, cancelMatch[1]],
+      );
+      if (!cancelled.rows[0]) {
+        const exists = await pool.query('SELECT status FROM catalog_quality_runs WHERE dataset_id=$1 AND run_id=$2', [datasetId, cancelMatch[1]]);
+        if (!exists.rows[0]) return fail(res, 404, 'RUN_NOT_FOUND', 'quality run not found', requestId);
+        return fail(res, 409, 'RUN_TERMINAL', 'run is already terminal', requestId);
+      }
+      return send(res, 200, qualityRunView(cancelled.rows[0], []), requestId);
+    }
     if (tail === 'lineage' && req.method === 'GET') {
-      const rows = await pool.query('SELECT * FROM catalog_lineage WHERE dataset_id=$1 ORDER BY occurred_at DESC LIMIT 100', [datasetId]);
-      return send(res, 200, rows.rows.map((row) => ({ lineageId: row.lineage_id, dataset: { datasetId: row.dataset_id, schemaRevision: row.schema_revision }, source: row.source, sourceBatchKey: row.source_batch_key, ingestionRunId: row.ingestion_run_id, accepted: row.accepted, rejected: row.rejected, unknown: row.unknown, occurredAt: row.occurred_at.toISOString() })), requestId);
+      const limitRaw = Number(url.searchParams.get('limit') || 50);
+      if (!Number.isInteger(limitRaw) || limitRaw < 1 || limitRaw > 200) return fail(res, 400, 'INVALID_REQUEST', 'limit must be 1..200', requestId);
+      const cursorRaw = url.searchParams.get('cursor');
+      const cursor = cursorRaw ? decodeLineageCursor(cursorRaw) : null;
+      if (cursorRaw && !cursor) return fail(res, 400, 'INVALID_CURSOR', 'cursor is invalid', requestId);
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      const fromAt = from ? new Date(from) : null;
+      const toAt = to ? new Date(to) : null;
+      if ((fromAt && Number.isNaN(fromAt.getTime())) || (toAt && Number.isNaN(toAt.getTime()))) return fail(res, 400, 'INVALID_REQUEST', 'from/to must be ISO timestamps', requestId);
+      const filters = { datasetId, from: fromAt ? fromAt.toISOString() : null, to: toAt ? toAt.toISOString() : null,
+        pipelineId: url.searchParams.get('pipelineId') || null, jobId: url.searchParams.get('jobId') || null,
+        schemaRevision: url.searchParams.get('schemaRevision') || null, sourceBatchKey: url.searchParams.get('sourceBatchKey') || null };
+      if (cursor && cursor.filters !== lineageFilterFingerprint(filters)) return fail(res, 400, 'INVALID_CURSOR', 'cursor does not match filters', requestId);
+      const values = [datasetId];
+      const clauses = ['dataset_id=$1'];
+      const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
+      if (fromAt) add('occurred_at >= ?', fromAt.toISOString());
+      if (toAt) add('occurred_at <= ?', toAt.toISOString());
+      const pipelineId = url.searchParams.get('pipelineId');
+      const jobId = url.searchParams.get('jobId');
+      const schemaRevision = url.searchParams.get('schemaRevision');
+      const sourceBatchKey = url.searchParams.get('sourceBatchKey');
+      if (pipelineId) add('pipeline_id = ?', pipelineId);
+      if (jobId) {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(jobId)) return fail(res, 400, 'INVALID_REQUEST', 'jobId must be a UUID', requestId);
+        add('job_id = ?', jobId);
+      }
+      if (schemaRevision) {
+        const revision = Number(schemaRevision);
+        if (!Number.isInteger(revision) || revision < 1) return fail(res, 400, 'INVALID_REQUEST', 'schemaRevision must be a positive integer', requestId);
+        add('schema_revision = ?', revision);
+      }
+      if (sourceBatchKey) add('source_batch_key = ?', sourceBatchKey);
+      if (cursor) {
+        values.push(cursor.occurredAt, cursor.lineageId);
+        clauses.push(`(occurred_at,lineage_id) < ($${values.length - 1}::timestamptz,$${values.length}::uuid)`);
+      }
+      values.push(limitRaw + 1);
+      const rows = await pool.query(`SELECT * FROM catalog_lineage WHERE ${clauses.join(' AND ')} ORDER BY occurred_at DESC,lineage_id DESC LIMIT $${values.length}`, values);
+      const hasMore = rows.rows.length > limitRaw;
+      const page = rows.rows.slice(0, limitRaw);
+      return send(res, 200, { items: page.map(lineageView), nextCursor: hasMore ? encodeLineageCursor(page[page.length - 1], filters) : null }, requestId);
+    }
+    const lineageMatch = tail.match(/^lineage\/([0-9a-f-]{36})$/);
+    if (lineageMatch && req.method === 'GET') {
+      const row = await pool.query('SELECT * FROM catalog_lineage WHERE dataset_id=$1 AND lineage_id=$2', [datasetId, lineageMatch[1]]);
+      if (!row.rows[0]) return fail(res, 404, 'LINEAGE_NOT_FOUND', 'lineage record not found', requestId);
+      return send(res, 200, lineageView(row.rows[0]), requestId);
     }
   }
   return fail(res, 404, 'NOT_FOUND', 'route not found', requestId);
@@ -523,10 +1005,11 @@ async function handle(req, res) {
 
 const server = http.createServer((req, res) => {
   handle(req, res).catch((error) => {
+    console.error('catalog request failed', error);
     const requestId = rid(req);
     const status = error.status || 500;
     fail(res, status, status === 400 ? 'INVALID_REQUEST' : status === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL', status >= 500 ? 'internal catalog error' : error.message, requestId);
   });
 });
 server.on('SIGTERM', () => { stopping = true; server.close(() => pool.end().then(() => process.exit(0))); });
-initDb().then(() => server.listen(PORT, '0.0.0.0', () => console.log(`data-catalog ${VERSION} listening ${PORT}`))).catch((error) => { console.error(error); process.exit(1); });
+initDb().then(async () => { await recoverQualityRuns(); server.listen(PORT, '0.0.0.0', () => console.log(`data-catalog ${VERSION} listening ${PORT}`)); }).catch((error) => { console.error(error); process.exit(1); });

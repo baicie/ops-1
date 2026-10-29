@@ -33,6 +33,12 @@ COMPATIBLE="$(printf '%s' "$DIFF_JSON" | json "d['compatible']")"
 api -X POST "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/$REV2/publish" >/dev/null
 ok "schema revision $REV2 published; old revision 1 remains"
 
+echo "== write a revision-1 record after revision 2 is current"
+api -X POST -H 'content-type: application/json' -H 'Idempotency-Key: data-r1-record-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/records" \
+  -d '{"schemaRevision":1,"sourceBatchKey":"legacy-revision-one-0001","records":[{"id":"legacy-1","name":"legacy","cpu_percent":1,"observed_at":"2026-10-27T00:00:00Z"}]}' >/dev/null
+ok "revision-1 record persisted alongside revision-2 dataset"
+
 echo "== reject incompatible schema change"
 BAD_CODE="$(curl -sS -o /tmp/data-bad-schema.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' \
   "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/schemas/drafts" \
@@ -92,6 +98,67 @@ QUALITY_UNKNOWN="$(printf '%s' "$QUALITY" | json "d['unknown']")"
 [ "$QUALITY_UNKNOWN" = "0" ] || bad "quality unknown is $QUALITY_UNKNOWN, expected 0"
 ok "quality total=$QUALITY_TOTAL unknown=$QUALITY_UNKNOWN"
 
+echo "== quality rules and persistent run"
+QRULE="$(api -X POST -H 'content-type: application/json' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-rules" \
+  -d '{"ruleType":"RECORD_COUNT","config":{"min":100,"max":10000},"severity":"HIGH","schemaRevision":2}')"
+QRULE_ID="$(printf '%s' "$QRULE" | json "d['ruleId']")"
+[ -n "$QRULE_ID" ] || bad "quality rule creation returned no id"
+QRUN="$(api -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
+  -d '{"schemaRevision":2,"idempotencyKey":"quality-run-data-foundation-0001"}')"
+QRUN_ID="$(printf '%s' "$QRUN" | json "d['runId']")"
+QRUN_ID_2="$(api -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
+  -d '{"schemaRevision":2,"idempotencyKey":"quality-run-data-foundation-0001"}' | json "d['runId']")"
+[ "$QRUN_ID" = "$QRUN_ID_2" ] || bad "quality idempotency created a second run"
+for _ in $(seq 1 40); do
+  QSTATUS="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID" | json "d['status']")"
+  case "$QSTATUS" in PASSED|FAILED|ERROR|CANCELLED) break ;; esac
+  sleep 0.25
+done
+[ "$QSTATUS" = "FAILED" ] || bad "quality run expected FAILED, got $QSTATUS"
+QDETAIL="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID")"
+printf '%s' "$QDETAIL" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"]=="FAILED"; assert d["recordsExamined"]==2; assert d["results"] and d["results"][0]["failed"]==1; assert d["ruleSetDigest"].startswith("sha256:")' || bad "quality result shape mismatch"
+CANCEL_CODE="$(curl -sS -o /tmp/quality-cancel.json -w '%{http_code}' "${AUTH[@]}" -X POST "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs/$QRUN_ID/cancel")"
+[ "$CANCEL_CODE" = "409" ] || bad "terminal quality cancel returned $CANCEL_CODE"
+ok "quality rule $QRULE_ID run $QRUN_ID FAILED and history/result persisted"
+
+echo "== quality idempotency semantic conflict"
+api -X POST -H 'content-type: application/json' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-rules/$QRULE_ID" \
+  -d '{"version":1,"ruleType":"RECORD_COUNT","config":{"min":1,"max":2},"severity":"HIGH","enabled":true}' >/dev/null
+QCONFLICT="$(curl -sS -o /tmp/quality-idempotency-conflict.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'Idempotency-Key: quality-run-data-foundation-0001' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-runs" \
+  -d '{"schemaRevision":2,"idempotencyKey":"quality-run-data-foundation-0001"}')"
+[ "$QCONFLICT" = "409" ] || bad "quality semantic idempotency returned $QCONFLICT, expected 409"
+grep -q 'IDEMPOTENCY_CONFLICT' /tmp/quality-idempotency-conflict.json || bad "quality idempotency conflict code missing"
+ok "quality idempotency key rejects different rule semantics"
+
+echo "== governance summary"
+GOV="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/governance-summary")"
+printf '%s' "$GOV" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["datasetCount"]>=1; assert set(("passed","failed","error","pending","unknown")) <= set(d["latestQuality"]); assert isinstance(d["recentFailures"],list); assert d["lineageWindow"]=="24h"' || bad "governance summary shape mismatch"
+ok "governance summary is server-authoritative"
+
+echo "== node resource history"
+NODE_ID="$(api "$URL/api/v1/nodes" | json "d[0]['id']")"
+[ -n "$NODE_ID" ] || bad "node history has no enrolled node"
+NODE_HISTORY="$(api "$URL/api/v1/nodes/$NODE_ID/resource-history?limit=5")"
+printf '%s' "$NODE_HISTORY" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,list) and d; assert d[0]["nodeId"] and d[0]["sampledAt"] and "generation" in d[0]' || bad "node resource history shape mismatch"
+NODE_HOUR="$(api "$URL/api/v1/nodes/$NODE_ID/resource-history?limit=5&resolution=hour")"
+printf '%s' "$NODE_HOUR" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert isinstance(d,list)' || bad "node hourly aggregation shape mismatch"
+BAD_RES="$(curl -sS -o /tmp/node-bad-resolution.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/nodes/$NODE_ID/resource-history?resolution=minute")"
+[ "$BAD_RES" = "400" ] || bad "invalid node resolution returned $BAD_RES"
+ok "node $NODE_ID resource history persisted; hourly aggregate and invalid resolution checked"
+
+echo "== quality negative validation"
+QBAD="$(curl -sS -o /tmp/quality-bad-config.json -w '%{http_code}' "${AUTH[@]}" -X POST -H 'content-type: application/json' \
+  "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/quality-rules" \
+  -d '{"ruleType":"NULL_RATE","config":{"field":"name","threshold":2}}')"
+[ "$QBAD" = "400" ] || bad "invalid quality threshold returned $QBAD"
+grep -q 'INVALID_RULE' /tmp/quality-bad-config.json || bad "invalid quality rule error code missing"
+ok "invalid quality rule config rejected"
+
 echo "== Catalog capability unavailable fails closed"
 GRANT_ID="$(api "$URL/api/v1/capability-grants" | json "next(g['id'] for g in d if g['name']=='data.catalog.v1' and g['state']=='ACTIVE')")"
 api -X DELETE "$URL/api/v1/capability-grants/$GRANT_ID" >/dev/null
@@ -106,7 +173,29 @@ ok "missing capability failed closed and was restored"
 echo "== lineage and dependency protection"
 LINEAGE="$(api "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage")"
 printf '%s' "$LINEAGE" | grep -q "$RUN_ID" || bad "batch lineage missing run id"
-ok "batch lineage"
+python3 - "$LINEAGE" <<'PY2'
+import json, sys
+payload = json.loads(sys.argv[1])
+items = payload.get("items") if isinstance(payload, dict) else payload
+assert items, "lineage response has no items"
+assert "nextCursor" in payload, "lineage response missing nextCursor"
+for item in items:
+    assert item["metadataStatus"] in ("AVAILABLE", "PARTIAL", "NOT_CAPTURED"), item["metadataStatus"]
+    assert "pipeline" in item and "job" in item and "receiptId" in item
+    if item["pipeline"] is not None:
+        assert item["pipeline"]["pipelineId"] and item["pipeline"]["revision"]
+    if item["job"] is not None:
+        assert item["job"]["jobId"]
+PY2
+LIMIT_CODE="$(curl -sS -o /tmp/data-lineage-limit.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage?limit=999")"
+[ "$LIMIT_CODE" = "400" ] || bad "lineage limit was not rejected: $LIMIT_CODE"
+CURSOR_CODE="$(curl -sS -o /tmp/data-lineage-cursor.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage?cursor=%25%25%25")"
+[ "$CURSOR_CODE" = "400" ] || bad "invalid cursor was not rejected: $CURSOR_CODE"
+grep -q 'INVALID_CURSOR' /tmp/data-lineage-cursor.json || bad "invalid cursor error code missing"
+BAD_CURSOR="$(python3 -c 'import base64,json; print(base64.urlsafe_b64encode(json.dumps({"v":1,"occurredAt":"2026-01-01T00:00:00Z","lineageId":"not-a-uuid","filters":"0000000000000000"}).encode()).decode().rstrip("="))')"
+CURSOR_UUID_CODE="$(curl -sS -o /tmp/data-lineage-cursor-uuid.json -w '%{http_code}' "${AUTH[@]}" "$URL/api/v1/gateway/opsweave.data-catalog/api/data-catalog/datasets/$DATASET_ID/lineage?cursor=$BAD_CURSOR")"
+[ "$CURSOR_UUID_CODE" = "400" ] || bad "invalid cursor UUID was not rejected: $CURSOR_UUID_CODE"
+ok "batch lineage with job/pipeline/receipt enrichment"
 DISABLE_CODE="$(curl -sS -o /tmp/data-disable.json -w '%{http_code}' "${AUTH[@]}" -X POST "$URL/api/v1/plugins/opsweave.data-catalog/disable" -H 'content-type: application/json' -H 'Idempotency-Key: data-disable-0001' -d '{"reason":"golden path dependency check"}')"
 [ "$DISABLE_CODE" = "409" ] || bad "catalog disable returned $DISABLE_CODE, expected 409 DEPENDENCY_BLOCKED"
 grep -q 'DEPENDENCY_BLOCKED' /tmp/data-disable.json || bad "catalog disable did not return DEPENDENCY_BLOCKED"

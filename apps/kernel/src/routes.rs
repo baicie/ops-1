@@ -152,6 +152,10 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/nodes/{node_id}/instances",
             get(nodes::node_instances),
         )
+        .route(
+            "/api/v1/nodes/{node_id}/resource-history",
+            get(nodes::resource_history),
+        )
         .route("/api/v1/nodes/{node_id}", delete(nodes::revoke_node))
         .route("/api/v1/audit", get(diagnostics::audit_events))
         .route("/api/v1/diagnostics", get(diagnostics::diagnostics))

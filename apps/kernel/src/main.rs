@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     let state = state::AppState::new(config.clone(), pool, cursor_secret)?;
     db::init(&state).await?;
     deployments::spawn_reconciler(state.clone());
+    nodes::spawn_resource_retention(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&config.bind)
         .await

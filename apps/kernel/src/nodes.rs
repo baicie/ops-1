@@ -2,7 +2,7 @@ use crate::audit;
 use crate::auth::{hash_token, random_token, AuthUser};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use chrono::{DateTime, Duration, Utc};
@@ -13,7 +13,39 @@ use opsweave_contracts::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
+
+static RESOURCE_SAMPLE_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+fn resource_sample_semaphore() -> &'static Arc<Semaphore> {
+    RESOURCE_SAMPLE_SEMAPHORE.get_or_init(|| Arc::new(Semaphore::new(64)))
+}
+
+pub fn spawn_resource_retention(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            match sqlx::query(
+                "DELETE FROM kernel.node_resource_samples WHERE sample_id IN (SELECT sample_id FROM kernel.node_resource_samples WHERE observed_at < now() - interval '7 days' ORDER BY sample_id LIMIT 10000)",
+            )
+            .execute(&state.db)
+            .await
+            {
+                Ok(result) => {
+                    if result.rows_affected() > 0 {
+                        tracing::info!(deleted = result.rows_affected(), "node resource retention batch deleted");
+                    }
+                    if result.rows_affected() >= 10000 {
+                        continue;
+                    }
+                }
+                Err(error) => tracing::warn!(error = %error, "node resource retention cleanup failed"),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        }
+    });
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, FromRow)]
@@ -417,6 +449,48 @@ pub async fn heartbeat(
     .execute(&state.db)
     .await?;
 
+    // Resource telemetry is lower-authority than the heartbeat. It runs in a
+    // bounded background task; a full queue drops telemetry rather than delaying
+    // the authoritative heartbeat.
+    let semaphore = resource_sample_semaphore().clone();
+    match semaphore.try_acquire_owned() {
+        Ok(permit) => {
+            let db = state.db.clone();
+            let sample = payload.resource_snapshot.clone();
+            let generation = payload.generation;
+            tokio::spawn(async move {
+                let _permit = permit;
+                if let Err(error) = sqlx::query(
+                    r#"
+                    INSERT INTO kernel.node_resource_samples
+                      (node_id,generation,observed_at,sampled_at,cpu_utilization,memory_used_bytes,
+                       memory_total_bytes,cpu_cores,filesystem_used_bytes,filesystem_total_bytes)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                    ON CONFLICT (node_id, sampled_at) DO NOTHING
+                    "#,
+                )
+                .bind(node_id)
+                .bind(generation)
+                .bind(observed_at)
+                .bind(sample.sampled_at)
+                .bind(sample.cpu_utilization)
+                .bind(sample.memory_used_bytes)
+                .bind(sample.memory_total_bytes)
+                .bind(sample.cpu_cores)
+                .bind(sample.filesystem_used_bytes)
+                .bind(sample.filesystem_total_bytes)
+                .execute(&db)
+                .await
+                {
+                    tracing::warn!(%node_id, error = %error, "node resource sample was not persisted; heartbeat remains authoritative");
+                }
+            });
+        }
+        Err(_) => {
+            tracing::warn!(%node_id, "node resource telemetry queue is full; sample dropped");
+        }
+    }
+
     for observation in &payload.instances {
         if observation.deployment_id.is_nil() {
             continue;
@@ -580,6 +654,88 @@ pub fn instance_state_str(state: opsweave_contracts::InstanceState) -> &'static 
         opsweave_contracts::InstanceState::Stopped => "STOPPED",
         opsweave_contracts::InstanceState::Unknown => "UNKNOWN",
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceHistoryQuery {
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    pub limit: Option<i64>,
+    pub resolution: Option<String>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeResourceSampleView {
+    pub sample_id: i64,
+    pub node_id: Uuid,
+    pub generation: i64,
+    pub observed_at: DateTime<Utc>,
+    pub sampled_at: DateTime<Utc>,
+    pub cpu_utilization: Option<f64>,
+    pub memory_used_bytes: Option<i64>,
+    pub memory_total_bytes: Option<i64>,
+    pub cpu_cores: Option<i64>,
+    pub filesystem_used_bytes: Option<i64>,
+    pub filesystem_total_bytes: Option<i64>,
+}
+
+pub async fn resource_history(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(node_id): Path<Uuid>,
+    Query(query): Query<ResourceHistoryQuery>,
+) -> AppResult<Json<Vec<NodeResourceSampleView>>> {
+    let _ = fetch_node(&state, node_id).await?;
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let resolution = query.resolution.as_deref().unwrap_or("raw");
+    let rows = if resolution == "hour" {
+        sqlx::query_as::<_, NodeResourceSampleView>(
+            r#"
+            SELECT min(sample_id) AS sample_id,node_id,max(generation) AS generation,
+                   date_trunc('hour', observed_at) AS observed_at,max(sampled_at) AS sampled_at,
+                   avg(cpu_utilization)::float8 AS cpu_utilization,
+                   max(memory_used_bytes) AS memory_used_bytes,
+                   max(memory_total_bytes) AS memory_total_bytes,
+                   max(cpu_cores) AS cpu_cores,
+                   max(filesystem_used_bytes) AS filesystem_used_bytes,
+                   max(filesystem_total_bytes) AS filesystem_total_bytes
+            FROM kernel.node_resource_samples
+            WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
+              AND ($3::timestamptz IS NULL OR observed_at <= $3)
+            GROUP BY node_id, date_trunc('hour', observed_at)
+            ORDER BY observed_at DESC LIMIT $4
+            "#,
+        )
+        .bind(node_id)
+        .bind(query.from)
+        .bind(query.to)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await?
+    } else if resolution == "raw" {
+        sqlx::query_as::<_, NodeResourceSampleView>(
+            r#"
+            SELECT sample_id,node_id,generation,observed_at,sampled_at,cpu_utilization,
+                   memory_used_bytes,memory_total_bytes,cpu_cores,filesystem_used_bytes,
+                   filesystem_total_bytes
+            FROM kernel.node_resource_samples
+            WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
+              AND ($3::timestamptz IS NULL OR observed_at <= $3)
+            ORDER BY observed_at DESC, sample_id DESC LIMIT $4
+            "#,
+        )
+        .bind(node_id)
+        .bind(query.from)
+        .bind(query.to)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await?
+    } else {
+        return Err(AppError::bad_request("resolution must be raw or hour"));
+    };
+    Ok(Json(rows))
 }
 
 pub async fn node_instances(
