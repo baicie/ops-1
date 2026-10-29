@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, setCsrfToken } from './api';
+import { authGeneration } from './auth-generation';
 import { adoptSurfaceOwner, clearSurfaceMemory, DENY_ACCESS, readAccess, type AccessInfo, type AccessSource } from './surface';
 import type { User } from './types';
 
@@ -43,57 +44,84 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     adoptSurfaceOwner(result.user.id);
   }, []);
 
+  const clearSession = useCallback(() => {
+    setUser(null);
+    setAccess(DENY_ACCESS);
+    setAccessSource('missing');
+  }, []);
+
+  /**
+   * The mount-time probe. It can still be in flight when a login commits, so its ticket is
+   * read before the request goes out and both writes below are gated on it: a response that
+   * describes a superseded intent must not touch the session.
+   *
+   * `setLoading(false)` is deliberately *not* gated. It is a one-way latch (nothing sets it
+   * back to true), so a stale response cannot destroy a newer state with it - while gating it
+   * would strand a splash over a session that a login established while the probe was out.
+   */
   const refresh = useCallback(async () => {
+    const ticket = authGeneration.ticket();
     try {
       const result = await api.get<SessionResponse>('/api/v1/auth/me');
+      if (!authGeneration.accepts(ticket)) return;
       setCsrfToken(result.csrfToken);
       applySession(result);
     } catch {
-      setUser(null);
-      setAccess(DENY_ACCESS);
-      setAccessSource('missing');
+      if (!authGeneration.accepts(ticket)) return;
+      clearSession();
     } finally {
       setLoading(false);
     }
-  }, [applySession]);
+  }, [applySession, clearSession]);
 
   useEffect(() => {
     void refresh();
-    const unauthorized = () => {
-      setUser(null);
-      setAccess(DENY_ACCESS);
-      setAccessSource('missing');
+    /**
+     * `api.ts` dispatches this for every 401, including one produced by a request that went
+     * out *before* the current session existed. A 401 stamped with a superseded generation is
+     * not evidence about this session and is dropped; a 401 from the current generation is a
+     * real expiry, so it signs the user out and invalidates everything still in flight.
+     */
+    const unauthorized = (event: Event) => {
+      if (!authGeneration.acceptsEvent(event)) return;
+      authGeneration.advance();
+      clearSession();
     };
     window.addEventListener('opsweave:unauthorized', unauthorized);
     return () => window.removeEventListener('opsweave:unauthorized', unauthorized);
-  }, [refresh]);
+  }, [refresh, clearSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await api.post<SessionResponse>('/api/v1/auth/login', { email, password });
-    setCsrfToken(result.csrfToken);
     // /auth/me is the contract's authority for `access`; the login body only mirrors it.
     // Reading it *before* the identity lands keeps the first authenticated render - the one
     // that picks the surface for "/" - from racing ahead of the grant.
     let authoritative = result;
     try {
       const me = await api.get<SessionResponse>('/api/v1/auth/me');
-      setCsrfToken(me.csrfToken);
       authoritative = me;
     } catch {
       // Keep the session usable when /auth/me is momentarily unreachable: the login body
       // still yields the identity, and a missing grant normalizes to the deny shape.
     }
+    // A committed login *is* the new session intent: advancing here - with no await between
+    // the advance and the writes - makes every response issued before this point stale, so
+    // the pre-login probe can no longer clear the session it never knew about.
+    authGeneration.advance();
+    setCsrfToken(authoritative.csrfToken);
     applySession(authoritative);
+    setLoading(false);
   }, [applySession]);
 
   const logout = useCallback(async () => {
+    // Signing out is a newer intent than anything already in flight, so nothing older may
+    // write session state from here on - including a response that lands during the POST.
+    authGeneration.advance();
     try { await api.post('/api/v1/auth/logout'); } catch { /* session may already be gone */ }
     setCsrfToken('');
     clearSurfaceMemory();
-    setAccess(DENY_ACCESS);
-    setAccessSource('missing');
-    setUser(null);
-  }, []);
+    clearSession();
+  }, [clearSession]);
 
   const value = useMemo(
     () => ({ user, access, accessSource, loading, login, logout, refresh }),
