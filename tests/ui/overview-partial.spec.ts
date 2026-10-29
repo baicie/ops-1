@@ -331,9 +331,12 @@ test('overview: a warning attention item renders the ATTENTION indicator, not a 
   await expect(page.locator('#attention .panel-count')).toHaveText(copy('overview.attention.count', { count: 1 }));
   await expect(page.locator('#attention')).not.toContainText(copy('overview.attention.empty.title'));
 
-  // health=ATTENTION drives the banner tone and its copy (Overview.tsx:70-73), and it links to the list.
-  await expect(page.locator('section.attention-banner.tone-warn h2')).toHaveText(copy('overview.health.attention'));
-  await expect(page.locator('section.attention-banner a[href="#attention"]')).toHaveCount(1);
+  // health=ATTENTION drives Layer 1's verdict band - the same three facts the old .attention-banner
+  // carried (state, headline copy, link to the list), now framed by .health-band (Overview.tsx:118-138).
+  const band = page.locator('section.health-band[data-health="ATTENTION"]');
+  await expect(band).toHaveClass(/tone-warn/);
+  await expect(band.locator('h2')).toHaveText(copy('overview.health.attention'));
+  await expect(band.locator('a[href="#attention"]')).toHaveCount(1);
 
   await page.screenshot({ path: path.join(OUT, 'state-overview-attention.png'), fullPage: true });
 });
