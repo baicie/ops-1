@@ -129,3 +129,75 @@ With a wrong `DOCKER_BRIDGE_IP` plugins start but cannot reach the Kernel or the
   convergence plan (dedicated bridge + fixed gateway + `--network` on plugin containers).
 - `node.env` is checked before every compose call: a `POSTGRES_*`, `DATABASE_URL`,
   `OPSWEAVE_BOOTSTRAP_ADMIN_*`, `OPSWEAVE_GHCR_TOKEN` or `*SECRET*` key there aborts the run.
+
+## 6. Pipeline execution: the three gates a job must pass
+
+A submitted job is claimed by a **node-managed pipeline worker**: a child process of the
+`node` service, not a plugin container. It only exists if all three conditions hold. Miss
+any one and the job sits in `QUEUED` forever with `attempts=0`, `currentLeaseId=null` and a
+single `JOB_SUBMITTED` event — no attempt, no lease, no error.
+
+| # | Gate | Where it is set |
+|---|------|-----------------|
+| 1 | `OPSWEAVE_NODE_WORKER_ENABLED=1` | `compose.yaml` node `environment:` |
+| 2 | `OPSWEAVE_PIPELINE_WORKER_BIN=/usr/local/bin/opsweave-pipeline-worker` | `compose.yaml` node `environment:` (binary is baked in by `Dockerfile:74`) |
+| 3 | marker **file** `/var/lib/opsweave-staging/node/worker-enabled` | created by the operator on the host, see below |
+
+Gates 1 and 2 live in compose, not `node.env`, on purpose: compose `environment:` wins over
+`env_file`, so the same keys in `node.env` would be dead configuration. Gate 3 is not an
+environment variable at all (`apps/node/src/worker_supervisor.rs:45,52`) and **no deploy step
+creates it** — it is the deliberate, explicit switch that tests use to start and stop workers.
+
+```bash
+# gate 3: once per state directory. Re-create it after anything that wipes the directory.
+sudo install -m 644 -o root -g root /dev/null /var/lib/opsweave-staging/node/worker-enabled
+sudo docker logs opsweave-staging-node-1 2>&1 | grep -E 'worker disabled|starting node-managed'
+#   "node-managed pipeline worker disabled"  -> gate 1/3 missing
+#   "starting node-managed pipeline worker"  -> running; instance_id is the Ready instance
+```
+
+Two further conditions are satisfied by an ordinary deployment: at least one plugin instance
+must be `READY` (the supervisor binds the worker to it, `worker_supervisor.rs:59-72`), and the
+worker only fetches a source whose host or IP is in `OPSWEAVE_WORKER_SOURCE_ALLOWLIST` — a
+non-public address is otherwise refused (`apps/pipeline-worker/src/main.rs:1165-1173`). The
+allow-list is a compose interpolation input: override `OPSWEAVE_WORKER_SOURCE_ALLOWLIST` in
+`staging.env`; its default is `172.17.0.1` (the bridge gateway).
+
+**Verifying a release actually executes jobs** (a green `/livez` proves nothing here):
+
+```bash
+# submit, then poll: QUEUED -> CLAIMED -> RUNNING -> SUCCEEDED
+curl -sS -b jar -H 'x-csrf-token: <csrf>' -H "Idempotency-Key: $(uuidgen)" \
+  -H 'content-type: application/json' \
+  -d '{"pipelineId":"host-metrics-pipeline","pipelineRevision":2,"maxAttempts":3,"timeoutSeconds":300}' \
+  http://127.0.0.1:3000/api/v1/jobs
+```
+
+A job that outlives its deadline while still queued is terminalized as
+`JOB_DEADLINE_EXCEEDED` with `attempts=0` — that is the symptom, not a separate fault.
+
+### DEMO source (staging host only, not a production endpoint)
+
+The seeded pipeline `host-metrics-pipeline` revision 2 pins
+`http://172.17.0.1:18090/data-hosts.json` as its source. The fixture is version-controlled
+at `deployments/staging/demo/data-hosts.json` and is copied to
+`/srv/opsweave-staging/demo-source/data-hosts.json` on the host, where a plain
+`python3 -m http.server`
+bound to the docker bridge gateway only (`172.17.0.1:18090`, never a public interface), marked
+`README-DEMO.txt` in that directory. Records match catalog dataset
+`aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa` schema revision 1: `id` (string, required), `name`
+(string, nullable).
+
+```bash
+# restart
+sudo nohup python3 -m http.server 18090 --bind 172.17.0.1 \
+     --directory /srv/opsweave-staging/demo-source \
+     >>/srv/opsweave-staging/demo-source/http-18090.log 2>&1 &
+# clean up (the fixture is not a service; nothing else depends on it)
+sudo kill "$(sudo cat /srv/opsweave-staging/demo-source/http-18090.pid)"
+sudo rm -f /srv/opsweave-staging/demo-source/data-hosts.json \
+           /srv/opsweave-staging/demo-source/http-18090.pid
+```
+
+Replace that URL with a real source (and add its host to `OPSWEAVE_WORKER_SOURCE_ALLOWLIST`)
+before any pipeline acceptance run that claims to prove staging is production-like.

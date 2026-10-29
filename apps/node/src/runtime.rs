@@ -1215,7 +1215,7 @@ fn self_cpu_limit_cores() -> Option<f64> {
         }
         let quota = std::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").ok()?;
         let period = std::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us").ok()?;
-        return parse_cgroup_cpu_max(&format!("{} {}", quota.trim(), period.trim()));
+        parse_cgroup_cpu_max(&format!("{} {}", quota.trim(), period.trim()))
     }
     #[cfg(not(target_os = "linux"))]
     None

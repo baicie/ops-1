@@ -3,8 +3,10 @@ import ReactDOM from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { api } from './api';
 import { useAuth } from './auth';
-import type { Extension } from './types';
+import type { AccessInfo, Surface } from './surface';
+import type { ContributionRejection, Extension } from './types';
 import { EmptyState, ErrorState, Skeleton } from './components/Ui';
+import { SidebarGroup } from './components/app/sidebar';
 import { useT } from './i18n';
 import type { MessageKey, TranslateParams } from './i18n';
 
@@ -17,17 +19,225 @@ type LoadedExtension = {
   error?: string;
 };
 
+/* ---------------------------------------------------------------------------
+ * Contribution contract v2, with v1 kept working (G06).
+ *
+ * The server is the authority: it validates every contribution and only ships the ones
+ * this user may see. The client repeats the validation anyway, because a contribution the
+ * host cannot route must never reach the router - a foreign path would either shadow a
+ * shell route or throw during render, and one dropped item is the lesser failure. A
+ * rejection is recorded and logged, never thrown.
+ * ------------------------------------------------------------------------- */
+
+/** Rule 1: the only surfaces a contribution may declare. */
+const CONTRIBUTION_SURFACES: readonly Surface[] = ['admin', 'workspace'];
+
+/** Rule 5: the capability that makes one surface's contributions visible to a user. */
+const SURFACE_CAPABILITY: Record<Surface, string> = { admin: 'platform:access', workspace: 'workspace:access' };
+
+/** Rule 4: the whole capability vocabulary; an unknown name invalidates the contribution. */
+export const KNOWN_CAPABILITIES: readonly string[] = ['platform:access', 'workspace:access'];
+
+/** Rule 2: a contribution lives under its own plugin id, one prefix per surface. */
+const SURFACE_NAMESPACE: Record<Surface, string> = { admin: '/admin/ext/', workspace: '/app/ext/' };
+
+/** Rule 6: v1 contributions keep the pre-G04 path shape and are always admin. */
+const LEGACY_NAMESPACE = '/ext/';
+
+/** Rule 3: host-owned roots. Their bare form - and anything shallower - is never contributable. */
+const RESERVED_ROOTS: readonly string[] = ['/admin', '/app', '/login', '/api', '/internal', '/assets', '/ext'];
+
+/** One same-origin path: no scheme, query, fragment, whitespace or backslash. */
+const PATH_SHAPE = /^\/[A-Za-z0-9._~\/:-]*$/;
+
+/** Where a surface mounts plugin pages; a claim outside an outlet is not answerable. */
+const PLUGIN_OUTLET = /^\/(?:admin|app)\/ext\/.+/;
+
+/** A contribution the host accepted; `href` is the absolute route the shell mounts. */
+export interface AcceptedContribution {
+  pluginId: string;
+  kind: 'navigation.item' | 'route.page';
+  id: string;
+  /** The declared path, unchanged: v1 keeps `/ext/...`, v2 carries its surface prefix. */
+  path: string;
+  /** Absolute route the shell links to and matches (`/admin/ext/...` for v1). */
+  href: string;
+  surface: Surface;
+  version: 1 | 2;
+  requiredCapabilities: string[];
+}
+
+export type RejectionCode = 'surface' | 'namespace' | 'reserved' | 'capability';
+
+/** A contribution that was dropped; `href` only exists so a direct hit can explain itself. */
+export interface RejectedContribution {
+  pluginId: string;
+  id: string;
+  code: RejectionCode;
+  path: string;
+  href: string;
+  /** The offending value for `surface`/`capability` rejections (a code, never copy). */
+  detail: string;
+}
+
+/** Trailing slashes make the same contribution two different routes; one form wins. */
+function normalizePath(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.length > 1 ? value.replace(/\/+$/, '') : value;
+}
+
+/**
+ * Where a rejected contribution claimed to live, so the route that answers it can name the
+ * reason. Only a well-formed absolute path yields one: a malformed claim is not a URL.
+ */
+function claimedHref(path: string): string {
+  if (!PATH_SHAPE.test(path)) return '';
+  const href = path.startsWith('/admin') || path.startsWith('/app') ? path : '/admin' + path;
+  // A claim on a host route (or a bare surface root) is not something a plugin outlet may answer.
+  return PLUGIN_OUTLET.test(href) ? href : '';
+}
+
+type CapabilityRead = { ok: true; capabilities: string[] } | { ok: false; detail: string };
+
+/** Rule 4: absent means "no extra requirement"; anything outside the vocabulary is fatal. */
+function readCapabilities(raw: unknown): CapabilityRead {
+  if (raw === undefined || raw === null) return { ok: true, capabilities: [] };
+  if (!Array.isArray(raw)) return { ok: false, detail: 'not-a-list' };
+  const capabilities: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== 'string' || !KNOWN_CAPABILITIES.includes(value)) {
+      return { ok: false, detail: typeof value === 'string' ? value : 'not-a-string' };
+    }
+    if (!capabilities.includes(value)) capabilities.push(value);
+  }
+  return { ok: true, capabilities };
+}
+
+/**
+ * One wire contribution in, one acceptance decision out.
+ *
+ * `null` means "not a contribution this module mounts" (a `settings.section.v1`, a shape
+ * without an id) rather than a rejection: only a well-formed contribution that breaks a
+ * rule is recorded as rejected.
+ */
+export function normalizeContribution(
+  pluginId: string,
+  raw: unknown,
+): AcceptedContribution | RejectedContribution | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const source = raw as Record<string, unknown>;
+  const kind = typeof source.kind === 'string' ? source.kind : '';
+  const family = kind === 'navigation.item.v1' || kind === 'navigation.item.v2'
+    ? 'navigation.item'
+    : kind === 'route.page.v1' || kind === 'route.page.v2'
+      ? 'route.page'
+      : null;
+  if (!family) return null;
+  const id = typeof source.id === 'string' ? source.id : '';
+  const path = normalizePath(source.path);
+  if (!id || !PATH_SHAPE.test(path)) return null;
+
+  const version: 1 | 2 = kind.endsWith('.v2') ? 2 : 1;
+  const reject = (code: RejectionCode, detail = ''): RejectedContribution => ({
+    pluginId, id, code, path, href: claimedHref(path), detail,
+  });
+
+  if (RESERVED_ROOTS.includes(path)) return reject('reserved', path);
+
+  let surface: Surface = 'admin';
+  if (version === 2) {
+    const declared = source.surface;
+    if (typeof declared !== 'string' || !CONTRIBUTION_SURFACES.includes(declared as Surface)) {
+      return reject('surface', typeof declared === 'string' ? declared : 'missing');
+    }
+    surface = declared as Surface;
+    if (!path.startsWith(SURFACE_NAMESPACE[surface] + pluginId + '/')) return reject('namespace', path);
+  } else if (!path.startsWith(LEGACY_NAMESPACE) || path.length <= LEGACY_NAMESPACE.length) {
+    return reject('namespace', path);
+  }
+
+  const capabilities = readCapabilities(source.requiredCapabilities);
+  if (!capabilities.ok) return reject('capability', capabilities.detail);
+
+  return {
+    pluginId,
+    kind: family,
+    id,
+    path,
+    href: version === 1 ? '/admin' + path : path,
+    surface,
+    version,
+    requiredCapabilities: capabilities.capabilities,
+  };
+}
+
+/**
+ * What this user may see of `surface`. UX filtering only - the server already withheld
+ * what this user may not see, and the two filters can only ever widen a deny.
+ */
+export function visibleContributions(
+  accepted: AcceptedContribution[],
+  access: AccessInfo,
+  surface: Surface,
+): AcceptedContribution[] {
+  if (!access.allowedSurfaces.includes(surface)) return [];
+  if (!access.capabilities.includes(SURFACE_CAPABILITY[surface])) return [];
+  return accepted.filter((contribution) =>
+    contribution.surface === surface
+    && contribution.requiredCapabilities.every((capability) => access.capabilities.includes(capability)));
+}
+
+/** Absolute path match: the route, or anything a plugin nests below it. */
+function isWithin(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(href + '/');
+}
+
+function deepest<T extends { href: string }>(entries: T[], pathname: string): T | undefined {
+  return entries
+    .filter((entry) => entry.href !== '' && isWithin(pathname, entry.href))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+}
+
+/** Why a contribution was dropped, in the user's language. */
+function rejectionMessage(t: Translator, rejected: RejectedContribution): string {
+  if (rejected.code === 'surface') return t('extensions.rejected.surface', { surface: rejected.detail });
+  if (rejected.code === 'capability') return t('extensions.rejected.capability', { capability: rejected.detail });
+  if (rejected.code === 'reserved') return t('extensions.error.pathConflict');
+  return t('extensions.rejected.namespace', { path: rejected.path });
+}
+
+/**
+ * A server rejection is authoritative: the contribution is not mounted even when a
+ * server also ships it. Unauthorized contributions never appear here - the server withholds
+ * them instead of rejecting them, so a rejection is a contract violation, not a permission gap.
+ */
+function readRejections(extension: Extension): ContributionRejection[] {
+  if (!Array.isArray(extension.rejections)) return [];
+  return extension.rejections.filter((entry): entry is ContributionRejection =>
+    Boolean(entry)
+    && typeof entry.code === 'string'
+    && typeof entry.contributionId === 'string'
+    && typeof entry.pluginId === 'string');
+}
+
 interface ExtensionContextValue {
   extensions: Extension[];
+  accepted: AcceptedContribution[];
+  rejected: RejectedContribution[];
+  serverRejections: ContributionRejection[];
   loaded: Record<string, LoadedExtension>;
   loading: boolean;
   error: Error | null;
   reload(): void;
 }
 
-const ExtensionContext = createContext<ExtensionContextValue | null>(null);
+/** The plugin id an outlet URL points at: `/admin/ext/<pluginId>/...` or `/app/ext/<pluginId>/...`. */
+function pluginIdInOutlet(pathname: string): string {
+  const segments = pathname.split('/').filter(Boolean);
+  return segments[0] === 'admin' || segments[0] === 'app' ? segments[2] ?? '' : '';
+}
 
-const SHELL_RESERVED = ['/plugins', '/nodes', '/activity', '/access', '/settings', '/ops-center', '/instances'];
+const ExtensionContext = createContext<ExtensionContextValue | null>(null);
 
 function loadScript(src: string, t: Translator): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -72,16 +282,24 @@ async function loadRemote(extension: Extension, t: Translator) {
 
 export function ExtensionsProvider({ children }: { children: React.ReactNode }) {
   const t = useT();
-  const { user } = useAuth();
+  const { user, access } = useAuth();
   const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [accepted, setAccepted] = useState<AcceptedContribution[]>([]);
+  const [rejected, setRejected] = useState<RejectedContribution[]>([]);
+  const [serverRejections, setServerRejections] = useState<ContributionRejection[]>([]);
   const [loaded, setLoaded] = useState<Record<string, LoadedExtension>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  // Primitive, so a new `access` object with the same grant does not re-fetch every render.
+  const grantKey = `${access.allowedSurfaces.join('|')}#${access.capabilities.join('|')}`;
 
   useEffect(() => {
     if (!user) {
       setExtensions([]);
+      setAccepted([]);
+      setRejected([]);
+      setServerRejections([]);
       setLoaded({});
       setLoading(false);
       return;
@@ -92,15 +310,45 @@ export function ExtensionsProvider({ children }: { children: React.ReactNode }) 
       try {
         const result = await api.get<Extension[]>('/api/v1/extensions');
         if (cancelled) return;
+        const nextAccepted: AcceptedContribution[] = [];
+        const nextRejected: RejectedContribution[] = [];
+        const nextServerRejections: ContributionRejection[] = [];
+        for (const extension of Array.isArray(result) ? result : []) {
+          const refusals = readRejections(extension);
+          nextServerRejections.push(...refusals);
+          const refused = new Set(refusals.map((entry) => entry.contributionId));
+          const contributions = Array.isArray(extension.contributions) ? extension.contributions : [];
+          for (const contribution of contributions) {
+            // The server already judged this one invalid; shipping it too does not revive it.
+            if (refused.has(String(contribution?.id))) continue;
+            const outcome = normalizeContribution(extension.pluginId, contribution);
+            if (!outcome) continue;
+            if ('code' in outcome) nextRejected.push(outcome);
+            else nextAccepted.push(outcome);
+          }
+        }
+        // Recorded, not thrown: one bad item must not cost the shell its remote extensions.
+        for (const entry of nextServerRejections) {
+          console.warn('[extensions] server rejected contribution', entry);
+        }
+        for (const entry of nextRejected) {
+          console.warn('[extensions] contribution rejected', entry);
+        }
         setExtensions(result);
+        setAccepted(nextAccepted);
+        setRejected(nextRejected);
+        setServerRejections(nextServerRejections);
         setError(null);
+
+        const reachable = new Set(
+          CONTRIBUTION_SURFACES
+            .flatMap((surface) => visibleContributions(nextAccepted, access, surface))
+            .map((contribution) => contribution.pluginId),
+        );
         const next: Record<string, LoadedExtension> = {};
         for (const extension of result) {
-          const rejected = extension.contributions.some((contribution) => SHELL_RESERVED.some((prefix) => contribution.path === prefix || contribution.path.startsWith(prefix + '/')));
-          if (rejected) {
-            next[extension.pluginId] = { extension, registration: null, error: t('extensions.error.pathConflict') };
-            continue;
-          }
+          // Nothing this user may see: no script injected, no component reachable.
+          if (!reachable.has(extension.pluginId)) continue;
           try {
             const registration = await loadRemote(extension, t);
             next[extension.pluginId] = { extension, registration };
@@ -117,9 +365,12 @@ export function ExtensionsProvider({ children }: { children: React.ReactNode }) 
     }
     void load();
     return () => { cancelled = true; };
-  }, [reloadToken, user?.id]);
+  }, [reloadToken, user?.id, grantKey]);
 
-  const value = useMemo(() => ({ extensions, loaded, loading, error, reload: () => setReloadToken((token) => token + 1) }), [extensions, loaded, loading, error]);
+  const value = useMemo(
+    () => ({ extensions, accepted, rejected, serverRejections, loaded, loading, error, reload: () => setReloadToken((token) => token + 1) }),
+    [extensions, accepted, rejected, serverRejections, loaded, loading, error],
+  );
   return <ExtensionContext.Provider value={value}>{children}</ExtensionContext.Provider>;
 }
 
@@ -129,39 +380,81 @@ export function useExtensions() {
   return value;
 }
 
-export function ExtensionNavigation() {
-  const { extensions, loaded } = useExtensions();
-  const items: Array<{ path: string; label: string; pluginId: string }> = [];
-  for (const extension of extensions) {
-    for (const contribution of extension.contributions) {
-      if (contribution.kind !== 'navigation.item.v1') continue;
-      const registration = loaded[extension.pluginId]?.registration;
-      const label = registration?.navigation?.[contribution.id]?.label
-        || extension.pluginId.split('.').slice(-1)[0].replace(/-/g, ' ');
-      items.push({ path: contribution.path, label, pluginId: extension.pluginId });
-    }
-  }
-  return <>{items.map((item) => <Link key={`${item.pluginId}:${item.path}`} to={item.path} className="nav-extension">{item.label}</Link>)}</>;
+/**
+ * The plugin items of one surface's navigation. A contribution reaches this component only
+ * after the server shipped it and this client re-checked the user's capabilities, and a
+ * surface with no visible contribution renders no section at all - a menu that opens
+ * nothing is a lie in the UI.
+ */
+export function ExtensionNavigation({ surface }: { surface: Surface }) {
+  const t = useT();
+  const { accepted, loaded } = useExtensions();
+  const { access } = useAuth();
+  const items = visibleContributions(accepted, access, surface)
+    .filter((contribution) => contribution.kind === 'navigation.item');
+  if (items.length === 0) return null;
+  return (
+    <SidebarGroup label={t('nav.section.extensions')} className="nav-extensions">
+      {items.map((item) => {
+        const label = loaded[item.pluginId]?.registration?.navigation?.[item.id]?.label
+          || item.pluginId.split('.').slice(-1)[0].replace(/-/g, ' ');
+        return (
+          <Link
+            key={`${item.pluginId}:${item.id}`}
+            to={item.href}
+            className="nav-extension"
+            data-testid={`extension-nav-${item.id}`}
+            data-extension-surface={item.surface}
+          >
+            {label}
+          </Link>
+        );
+      })}
+    </SidebarGroup>
+  );
 }
 
-export function ExtensionRoute() {
+/**
+ * One surface's extension outlet. The plugin renders *inside* this route element: it never
+ * receives the router, so it can neither add nor remove a host route.
+ */
+export function ExtensionRoute({ surface }: { surface: Surface }) {
   const t = useT();
-  const location = useLocation();
-  const { extensions, loaded, loading, error } = useExtensions();
+  const { pathname } = useLocation();
+  const { access } = useAuth();
+  const { accepted, rejected, serverRejections, loaded, loading, error } = useExtensions();
   if (loading) return <Skeleton rows={5} />;
   if (error) return <ErrorState error={error} />;
-  const candidates = extensions.flatMap((extension) =>
-    extension.contributions
-      .filter((contribution) => contribution.kind === 'route.page.v1')
-      .map((contribution) => ({ extension, contribution })),
+
+  const match = deepest(
+    visibleContributions(accepted, access, surface).filter((contribution) => contribution.kind === 'route.page'),
+    pathname,
   );
-  const match = candidates
-    .filter(({ contribution }) => location.pathname === contribution.path || location.pathname.startsWith(contribution.path + '/'))
-    .sort((a, b) => b.contribution.path.length - a.contribution.path.length)[0];
   if (!match) {
+    // A path a plugin claimed but the host refused: say why instead of showing a 404. The
+    // server's own rejections carry no path, so they answer for every path of that plugin.
+    const claim = deepest(rejected, pathname);
+    const refused = claim ? [] : serverRejections.filter((entry) => entry.pluginId === pluginIdInOutlet(pathname));
+    if (claim || refused.length > 0) {
+      return (
+        <div
+          className="extension-error"
+          data-testid="extension-rejected"
+          data-rejection-code={claim ? claim.code : refused[0].code}
+        >
+          <EmptyState
+            icon="plugins"
+            title={t('extensions.rejected.title')}
+            description={claim
+              ? rejectionMessage(t, claim)
+              : t('extensions.rejected.serverCount', { count: refused.length })}
+          />
+        </div>
+      );
+    }
     return <EmptyState icon="plugins" title={t('extensions.empty.routeNotFound.title')} description={t('extensions.empty.routeNotFound.description')} />;
   }
-  const loadedExtension = loaded[match.extension.pluginId];
+  const loadedExtension = loaded[match.pluginId];
   if (!loadedExtension) return <Skeleton rows={5} />;
   if (loadedExtension.error) {
     return (
@@ -171,9 +464,9 @@ export function ExtensionRoute() {
       </div>
     );
   }
-  const component = loadedExtension.registration?.components?.[match.contribution.id];
+  const component = loadedExtension.registration?.components?.[match.id];
   if (!component) {
-    return <EmptyState icon="plugins" title={t('extensions.empty.noComponent.title')} description={t('extensions.empty.noComponent.description', { id: match.contribution.id })} />;
+    return <EmptyState icon="plugins" title={t('extensions.empty.noComponent.title')} description={t('extensions.empty.noComponent.description', { id: match.id })} />;
   }
   return <ExtensionBoundary>{React.createElement(component)}</ExtensionBoundary>;
 }

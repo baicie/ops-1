@@ -1,12 +1,15 @@
 use crate::audit::{self, AuditEventView};
-use crate::auth::AuthUser;
+use crate::auth::{access_for, AuthUser};
 use crate::deployments::{self, ActivationRow, DeploymentRow, DeploymentView};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::Json;
 use chrono::{DateTime, Utc};
-use opsweave_contracts::ManifestV11;
+use opsweave_contracts::Role;
+use opsweave_contracts::{
+    deliverable_contributions, ContributionRejection, FrontendSpec, ManifestV11,
+};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::FromRow;
@@ -403,11 +406,53 @@ pub struct ExtensionView {
     pub asset_base: String,
     pub remote_entry: String,
     pub contributions: Value,
+    /// Contract violations only. A contribution this session is not authorised for is
+    /// withheld and appears in neither list, so the response cannot disclose a surface
+    /// the caller may not enter.
+    pub rejections: Vec<ContributionRejection>,
+}
+
+/// The per-session half of `GET /api/v1/extensions`: SQL is the handler's business,
+/// authorisation and dispatch are here.
+///
+/// `extensions()` calls this once per row, so the capability filter has exactly one
+/// implementation and the tests at the bottom of this file drive the shipped path
+/// instead of a parallel one. `None` means the session may see nothing of this
+/// extension; shipping it would only make the browser fetch an empty remote entry.
+pub fn extension_view(
+    plugin_id: &str,
+    publisher: &str,
+    version: &str,
+    activation_revision: i64,
+    frontend: &FrontendSpec,
+    role: Role,
+    admin_surface_roles: &[Role],
+) -> Option<ExtensionView> {
+    let granted: Vec<&str> = access_for(role, admin_surface_roles).capabilities;
+    let delivery = deliverable_contributions(plugin_id, &frontend.contributions, &granted);
+    if delivery.delivered.is_empty() && delivery.rejections.is_empty() {
+        return None;
+    }
+    Some(ExtensionView {
+        asset_base: format!(
+            "/assets/{}/{}/{}",
+            urlencoding::encode(publisher),
+            urlencoding::encode(plugin_id),
+            urlencoding::encode(version)
+        ),
+        remote_entry: frontend.remote_entry.clone(),
+        contributions: serde_json::to_value(&delivery.delivered).unwrap_or(Value::Array(vec![])),
+        rejections: delivery.rejections,
+        plugin_id: plugin_id.to_string(),
+        publisher: publisher.to_string(),
+        version: version.to_string(),
+        activation_revision,
+    })
 }
 
 pub async fn extensions(
     State(state): State<AppState>,
-    _auth: AuthUser,
+    auth: AuthUser,
 ) -> AppResult<Json<Vec<ExtensionView>>> {
     let rows = sqlx::query_as::<_, (String, String, String, i64, Value)>(
         r#"
@@ -433,21 +478,17 @@ pub async fn extensions(
         let Some(frontend) = manifest.frontend else {
             continue;
         };
-        result.push(ExtensionView {
-            asset_base: format!(
-                "/assets/{}/{}/{}",
-                urlencoding::encode(&publisher),
-                urlencoding::encode(&plugin_id),
-                urlencoding::encode(&version)
-            ),
-            remote_entry: frontend.remote_entry,
-            contributions: serde_json::to_value(frontend.contributions)
-                .unwrap_or(Value::Array(vec![])),
-            plugin_id,
-            publisher,
-            version,
-            activation_revision: generation,
-        });
+        if let Some(view) = extension_view(
+            &plugin_id,
+            &publisher,
+            &version,
+            generation,
+            &frontend,
+            auth.role,
+            &state.config.admin_surface_roles,
+        ) {
+            result.push(view);
+        }
     }
     Ok(Json(result))
 }
@@ -645,4 +686,166 @@ fn display_name(id: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // The ids and paths below belong to this file only: they never exist in a database.
+    const PLUGIN: &str = "opsweave.test-surface";
+    const ADMIN_PATH: &str = "/admin/ext/opsweave.test-surface/manage";
+    const WORKSPACE_PATH: &str = "/app/ext/opsweave.test-surface/quality";
+
+    fn frontend(contributions: Vec<Value>) -> FrontendSpec {
+        FrontendSpec {
+            remote_entry: "remoteEntry.js".to_string(),
+            remote_entry_digest: format!("sha256:{}", "a".repeat(64)),
+            asset_index: "asset-index.json".to_string(),
+            asset_index_digest: format!("sha256:{}", "b".repeat(64)),
+            contributions: contributions
+                .into_iter()
+                .map(|raw| serde_json::from_value(raw).expect("contribution deserialises"))
+                .collect(),
+        }
+    }
+
+    // Both v2 kinds carry a surface; a page contribution is validated the same way as a
+    // navigation item, so one helper stands in for either.
+    fn one_admin_and_one_workspace() -> FrontendSpec {
+        frontend(vec![
+            json!({
+                "kind": "navigation.item.v2",
+                "id": "catalog-nav",
+                "surface": "admin",
+                "path": ADMIN_PATH,
+                "titleKey": "plugin.catalog.title",
+            }),
+            json!({
+                "kind": "navigation.item.v2",
+                "id": "quality-nav",
+                "surface": "workspace",
+                "path": WORKSPACE_PATH,
+            }),
+        ])
+    }
+
+    /// Exactly what `GET /api/v1/extensions` ships to one session: the same function the
+    /// handler calls, driven by the role the middleware resolved, serialised with the same
+    /// derives that build the response body.
+    fn shipped(frontend: &FrontendSpec, role: Role, admin_surface_roles: &[Role]) -> Option<Value> {
+        extension_view(
+            PLUGIN,
+            "trusted-team",
+            "0.0.1",
+            7,
+            frontend,
+            role,
+            admin_surface_roles,
+        )
+        .map(|view| serde_json::to_value(view).expect("extension view serialises"))
+    }
+
+    #[test]
+    fn workspace_only_session_receives_no_admin_contribution() {
+        let payload = shipped(&one_admin_and_one_workspace(), Role::Viewer, &[Role::Admin])
+            .expect("the workspace contribution still ships");
+
+        let delivered = payload["contributions"]
+            .as_array()
+            .expect("contributions is an array");
+        assert_eq!(delivered.len(), 1);
+        assert_eq!(delivered[0]["path"], WORKSPACE_PATH);
+        assert_eq!(delivered[0]["surface"], "workspace");
+        assert_eq!(
+            payload["rejections"],
+            json!([]),
+            "losing a contribution to authorisation is not a contract violation and must not be reported"
+        );
+
+        let wire = serde_json::to_string(&payload).expect("payload serialises");
+        assert!(
+            !wire.contains("/admin/ext/"),
+            "a workspace-only session must not receive an admin path: {wire}"
+        );
+        assert!(
+            !wire.contains("plugin.catalog.title"),
+            "a workspace-only session must not receive an admin titleKey: {wire}"
+        );
+    }
+
+    #[test]
+    fn platform_session_receives_every_contribution() {
+        let payload = shipped(&one_admin_and_one_workspace(), Role::Admin, &[Role::Admin])
+            .expect("the platform session receives the extension");
+
+        let delivered = payload["contributions"]
+            .as_array()
+            .expect("contributions is an array");
+        assert_eq!(delivered.len(), 2);
+        assert_eq!(delivered[0]["surface"], "admin");
+        assert_eq!(delivered[0]["titleKey"], "plugin.catalog.title");
+        assert_eq!(delivered[1]["surface"], "workspace");
+        assert_eq!(payload["rejections"], json!([]));
+    }
+
+    #[test]
+    fn admin_surface_roles_decide_the_grant_instead_of_the_role_name() {
+        let frontend = one_admin_and_one_workspace();
+
+        let default = shipped(&frontend, Role::Operator, &[Role::Admin]).expect("workspace only");
+        assert_eq!(default["contributions"].as_array().map(Vec::len), Some(1));
+
+        let widened = shipped(&frontend, Role::Operator, &[Role::Admin, Role::Operator])
+            .expect("the widened deployment ships the extension");
+        assert_eq!(widened["contributions"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn extension_with_nothing_to_deliver_is_omitted() {
+        // A v1 navigation item keeps its historical shape and admin semantics.
+        let legacy = frontend(vec![json!({
+            "kind": "navigation.item.v1",
+            "id": "legacy-nav",
+            "path": "/ext/trusted-team/legacy",
+        })]);
+        // An explicit v2 contribution on the admin surface.
+        let catalog = frontend(vec![json!({
+            "kind": "navigation.item.v2",
+            "id": "catalog-nav",
+            "surface": "admin",
+            "path": ADMIN_PATH,
+        })]);
+
+        for frontend in [&legacy, &catalog] {
+            assert!(
+                shipped(frontend, Role::Viewer, &[Role::Admin]).is_none(),
+                "an extension with nothing to deliver must not be handed to the browser at all"
+            );
+            assert!(
+                shipped(frontend, Role::Admin, &[Role::Admin]).is_some(),
+                "the same extension must still reach a platform session"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_v2_contribution_is_reported_instead_of_dropped() {
+        let frontend = frontend(vec![json!({
+            "kind": "navigation.item.v2",
+            "id": "ghost-nav",
+            "path": ADMIN_PATH,
+        })]);
+
+        let payload = shipped(&frontend, Role::Viewer, &[Role::Admin])
+            .expect("a rejection alone still ships");
+        assert_eq!(payload["contributions"], json!([]));
+        let rejections = payload["rejections"]
+            .as_array()
+            .expect("rejections is an array");
+        assert_eq!(rejections.len(), 1);
+        assert_eq!(rejections[0]["code"], "MISSING_SURFACE");
+        assert_eq!(rejections[0]["pluginId"], PLUGIN);
+    }
 }

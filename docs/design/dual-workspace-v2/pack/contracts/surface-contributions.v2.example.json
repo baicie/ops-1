@@ -1,0 +1,28 @@
+{
+  "$comment": "PROPOSED ONLY: illustrative semantic example, not the current OpsWeave signed manifest schema. Real contract requires ADR + versioned schema + signature migration.",
+  "pluginId": "opsweave.data-catalog",
+  "contributions": [
+    {
+      "kind": "navigation.item.v2",
+      "id": "catalog-manage",
+      "surface": "admin",
+      "path": "/admin/ext/opsweave.data-catalog/manage",
+      "titleKey": "catalog.nav.manage",
+      "requiredCapabilities": ["platform:plugins:manage"]
+    },
+    {
+      "kind": "navigation.item.v2",
+      "id": "quality-report",
+      "surface": "workspace",
+      "path": "/app/ext/opsweave.data-catalog/quality",
+      "titleKey": "catalog.nav.quality",
+      "requiredCapabilities": ["business:quality:read"]
+    }
+  ],
+  "notes": [
+    "Never retrofit or mutate an already signed v1 manifest.",
+    "The server must enforce the user's authorization; UI navigation filters alone are insufficient.",
+    "The route prefix is reserved by the host. Plugins cannot escape their own namespace.",
+    "These example capabilities are proposed. They do not exist in the current Kernel unless separately implemented."
+  ]
+}

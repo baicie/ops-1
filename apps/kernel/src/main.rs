@@ -18,6 +18,7 @@ mod publishers;
 mod receipts;
 mod routes;
 mod state;
+mod static_site;
 mod storage;
 mod users;
 

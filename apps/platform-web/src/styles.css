@@ -420,21 +420,13 @@ input::placeholder { color: var(--ow-text-muted); }
 
 /* Logs */
 .log-page { display: flex; flex-direction: column; gap: 12px; }
-.log-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-.log-header h1 { font-size: var(--ow-type-xl); letter-spacing: -.02em; }
-.log-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 6px; }
+/* The log page renders the shared .page-header; only its meta row and toolbar are log-specific. */
+.log-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
 .log-meta > span { display: inline-flex; align-items: center; gap: 4px; }
-.log-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 .log-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 10px; border: 1px solid var(--ow-border); border-radius: 6px; background: var(--ow-surface); }
 .log-toolbar select { width: auto; min-height: var(--ow-control-sm); }
 .log-count { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-left: auto; }
-.live-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; background: var(--ow-text-muted); }
-.live-dot.connected { background: var(--ow-ok); box-shadow: 0 0 0 3px var(--ow-ok-soft); }
-.live-dot.connecting { background: var(--ow-warn); }
-.live-dot.disconnected { background: var(--ow-danger); }
-.gap-banner { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--ow-warn); background: var(--ow-warn-soft); border-radius: 6px; color: var(--ow-warn); }
-.gap-banner div { flex: 1; }
-.gap-banner p { font-size: var(--ow-type-sm); }
+/* Connection state and stream gaps use the shared StatusIndicator / NoticeBar vocabulary. */
 .terminal { background: var(--ow-code-bg); color: var(--ow-code-text); border: 1px solid #222b38; border-radius: 7px; min-height: 420px; max-height: calc(100vh - 300px); overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.65; padding: 10px 0; }
 .terminal .empty-state { color: #8b98aa; }
 .terminal .empty-icon { background: #171e28; border-color: #263243; color: #7d8da2; }
@@ -552,7 +544,7 @@ input::placeholder { color: var(--ow-text-muted); }
   .summary-grid { grid-template-columns: 1fr; }
   .info-grid { grid-template-columns: 1fr; }
 }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .sidebar { transform: translateX(-100%); width: 260px; box-shadow: 0 0 0 1px var(--ow-border), 0 24px 60px rgba(0,0,0,.28); }
   .sidebar-open { transform: translateX(0); }
   .sidebar-close { display: inline-flex; }
@@ -601,8 +593,6 @@ input::placeholder { color: var(--ow-text-muted); }
   .wizard-actions .btn { width: 100%; }
   .log-line { grid-template-columns: 74px 48px minmax(0, 1fr); }
   .log-channel { display: none; }
-  .log-actions { width: 100%; }
-  .log-actions .btn { flex: 1; }
   .log-count { margin-left: 0; }
   .terminal { min-height: 360px; max-height: none; }
   .toast-stack { left: 12px; right: 12px; bottom: 12px; max-width: none; }
@@ -774,6 +764,9 @@ details.panel.advanced > summary { padding: 14px 18px; }
 .flow-step strong { font-size: 12px; font-weight: 620; white-space: nowrap; }
 .flow-step small { font-family: var(--ow-font-mono); font-size: 10px; color: var(--ow-text-muted); white-space: nowrap; }
 .flow-index { width: 18px; height: 18px; border-radius: 5px; background: var(--ow-accent-soft); color: var(--ow-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+/* An execution order the topology cannot derive is UNKNOWN, and the token needs more room than
+   the 18px index chip. */
+.flow-index-token { width: auto; height: auto; padding: 0; background: transparent; }
 .flow-arrow { align-self: center; color: var(--ow-text-tertiary); flex: none; }
 
 /* Table/UUID containment */
@@ -988,3 +981,296 @@ details.panel.advanced > summary { padding: 14px 18px; }
   .studio-page .studio-canvas { height: auto; min-height: 440px; }
   .studio-page .mobile-node-list { max-height: 430px; }
 }
+
+/* AdminShell V2 (G02) -------------------------------------------------------
+   The shell keeps the pre-G02 class names (.shell/.sidebar/.nav-link/.topbar
+   and friends): twenty un-migrated pages and the studio viewport rules still
+   key off them. Everything below only refines the new navigation, the topbar
+   controls and the command palette, and every value resolves to --ow-* tokens. */
+.admin-sidebar { gap: 8px; padding: 12px 8px 8px; }
+.admin-sidebar .sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 0 4px 2px; }
+.admin-sidebar .nav { gap: 1px; padding: 2px 0; }
+.nav-group { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.admin-sidebar .nav-group + .nav-group { margin-top: 8px; }
+.admin-sidebar .nav-section-label { margin: 6px 10px 3px; }
+.admin-sidebar .nav-link { min-height: 32px; }
+.admin-sidebar .nav-link.active { box-shadow: inset 2px 0 0 var(--ow-accent); }
+.admin-sidebar .nav-link:focus-visible { outline-offset: -2px; }
+.nav-link-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-sidebar .sidebar-footer { flex-direction: column; align-items: stretch; gap: 6px; padding-top: 8px; }
+.sidebar-foot-actions { display: flex; align-items: center; gap: 4px; }
+/* The badge is a page footer elsewhere; here it is compressed into the rail. */
+.admin-sidebar .version-badge { padding: 2px 0 0 !important; border-top: 0 !important; gap: 4px; }
+.admin-sidebar .version-badge .meta-chip { width: 100%; justify-content: space-between; gap: 6px; padding: 2px 6px; font-size: 10px; }
+.admin-sidebar .version-badge .meta-chip strong { font-size: 11px; }
+/* A 64px rail has no room for four chips: hide the badge, keep the toggle. */
+.shell-collapsed .admin-sidebar .version-badge,
+.shell:has(.studio-page) .admin-sidebar .version-badge { display: none; }
+.shell-collapsed .admin-sidebar .sidebar-footer { align-items: center; }
+.shell-collapsed .admin-sidebar .sidebar-foot-actions { justify-content: center; }
+
+/* Topbar: breadcrumb, command trigger, health, language, theme, account. */
+.admin-topbar { gap: 12px; }
+.breadcrumb-list { display: flex; align-items: center; gap: 7px; min-width: 0; margin: 0; padding: 0; list-style: none; overflow: hidden; white-space: nowrap; }
+.breadcrumb-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.breadcrumb-item a, .breadcrumb-item span { overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+.breadcrumb-item span[aria-current='page'] { color: var(--ow-text); font-weight: 550; }
+.topbar-command { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 7px 0 9px; border: 1px solid var(--ow-border); border-radius: 6px; background: var(--ow-surface-2); color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
+.topbar-command:hover { border-color: var(--ow-border-strong); background: var(--ow-surface); color: var(--ow-text); }
+.topbar-command svg { flex: none; }
+.topbar-command-text { white-space: nowrap; }
+.kbd { font-family: inherit; font-size: 10px; line-height: 1; padding: 2px 4px; border: 1px solid var(--ow-border-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--ow-surface); color: var(--ow-text-secondary); }
+/* Surface switcher: a menu row that is a Link, so switching shells never reloads the page. */
+.user-menu-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 8px 9px; border-radius: 5px; color: var(--ow-text); }
+.user-menu-item:hover { background: var(--ow-surface-2); text-decoration: none; }
+.user-menu-item svg { flex: none; margin-top: 2px; color: var(--ow-text-muted); }
+.user-menu-item-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.user-menu-item-copy strong { font-size: var(--ow-type-sm); font-weight: 600; }
+.user-menu-item-copy small { font-size: 10px; color: var(--ow-text-muted); }
+.user-menu-surface { align-self: flex-start; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ow-accent); }
+.user-menu-sep { height: 1px; margin: 5px 4px; background: var(--ow-border); }
+
+/* Command palette (built on the existing dialog/sheet primitives). */
+.ow-command { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.ow-command-input { width: 100%; min-height: var(--ow-control-md); padding: 6px 10px; border: 1px solid var(--ow-border-strong); border-radius: 6px; background: var(--ow-surface); color: var(--ow-text); font-size: var(--ow-type-base); }
+.ow-command-list { display: flex; flex-direction: column; gap: 1px; max-height: 320px; margin: 0; padding: 2px; overflow-y: auto; list-style: none; }
+.ow-command-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 9px; border-radius: 5px; color: var(--ow-text-secondary); cursor: pointer; }
+.ow-command-item.is-active { background: var(--ow-accent-soft); color: var(--ow-accent); }
+.ow-command-label { font-weight: 550; }
+.ow-command-path { font-size: var(--ow-type-sm); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+.ow-command-item.is-active .ow-command-path { color: var(--ow-accent); opacity: .75; }
+.ow-command-empty { padding: 8px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.ow-command-hint { font-size: 11px; color: var(--ow-text-muted); }
+.ow-command-dialog { max-width: 560px; }
+.ow-command-sheet { width: min(92vw, 380px); max-width: 380px; }
+
+@media (max-width: 1200px) {
+  .topbar-command-text { display: none; }
+}
+@media (max-width: 560px) {
+  .admin-topbar { gap: 8px; padding: 0 12px; }
+  .topbar-right { gap: 8px; }
+  .topbar-command { padding: 0 7px; }
+  .topbar-command .kbd { display: none; }
+  /* The switcher keeps the full locale endonym: 104px is the width every other
+     breakpoint uses, and the phone topbar has the room for it. */
+  .lang-select { width: 104px !important; }
+}
+
+
+
+/* ── G03 · sample pages (docs/04 §4.5, docs/09 §9.1) ─────────────────────────────
+   One vocabulary for observational state, shared by Overview, Plugins and Nodes.
+   Colour never carries the meaning alone: every indicator also prints its label. */
+.status-indicator {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+  padding: 1px 8px 1px 6px; border: 1px solid var(--ow-border); border-radius: 999px;
+  background: var(--ow-surface-2); color: var(--ow-text-secondary);
+  font-size: var(--ow-type-sm); font-weight: 600; line-height: 1.5; white-space: nowrap;
+}
+.status-indicator--ready { color: var(--ow-ok); background: var(--ow-ok-soft); border-color: transparent; }
+.status-indicator--degraded { color: var(--ow-warn); background: var(--ow-warn-soft); border-color: transparent; }
+.status-indicator--attention { color: var(--ow-warn); background: var(--ow-warn-soft); border-color: transparent; }
+.status-indicator--stale { color: var(--ow-warn); background: transparent; border-color: var(--ow-warn); border-style: dashed; }
+.status-indicator--unreachable { color: var(--ow-danger); background: var(--ow-danger-soft); border-color: transparent; }
+.status-indicator--revoked { color: var(--ow-text-secondary); background: var(--ow-surface-3); border-color: var(--ow-border-strong); }
+.status-indicator--unknown { color: var(--ow-text-muted); background: transparent; border-color: var(--ow-border-strong); border-style: dashed; }
+.status-indicator--noData { color: var(--ow-text-muted); background: var(--ow-surface-2); border-color: transparent; }
+.status-indicator--partial { color: var(--ow-info); background: var(--ow-info-soft); border-color: transparent; }
+.status-indicator--loading { color: var(--ow-text-muted); background: var(--ow-surface-2); border-color: transparent; }
+.status-indicator--error { color: var(--ow-danger); background: var(--ow-danger-soft); border-color: transparent; }
+.status-indicator--forbidden { color: var(--ow-danger); background: transparent; border-color: currentColor; }
+.status-indicator--conflict { color: var(--ow-info); background: var(--ow-info-soft); border-color: transparent; }
+.status-indicator--notConfigured { color: var(--ow-text-muted); background: var(--ow-surface-2); border-color: transparent; }
+.status-indicator-detail { color: var(--ow-text-muted); font-weight: 500; }
+
+/* The reserved tokens: a source that cannot answer prints NO_DATA / UNKNOWN, never 0. */
+.value-token {
+  display: inline-flex; align-items: center; padding: 0 6px;
+  border: 1px dashed var(--ow-border-strong); border-radius: var(--ow-radius-sm);
+  background: var(--ow-surface-2); color: var(--ow-text-muted);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; line-height: 1.7;
+}
+.value-token--unknown { border-style: dotted; }
+
+/* Metric cards: every card that names a destination is a real link. */
+.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ow-metric {
+  position: relative; display: flex; flex-direction: column; gap: 4px;
+  min-width: 0; padding: 14px 16px; color: var(--ow-text);
+  background: var(--ow-surface); border: 1px solid var(--ow-border);
+  border-radius: var(--ow-radius-md); box-shadow: var(--ow-shadow);
+}
+.ow-metric-link { transition: border-color var(--ow-motion-fast), box-shadow var(--ow-motion-fast); }
+.ow-metric-link:hover { border-color: var(--ow-accent); text-decoration: none; }
+.ow-metric-label { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.ow-metric-value { display: flex; align-items: baseline; gap: 5px; min-height: 32px; font-size: clamp(21px, 2vw, 26px); font-weight: 680; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.ow-metric-unit { font-size: var(--ow-type-sm); font-weight: 600; color: var(--ow-text-muted); }
+.ow-metric-detail { font-size: var(--ow-type-sm); color: var(--ow-text-muted); overflow-wrap: anywhere; }
+.ow-metric-sampled { margin-top: auto; font-size: var(--ow-type-xs); color: var(--ow-text-muted); }
+.ow-metric-go { position: absolute; top: 12px; right: 12px; color: var(--ow-text-muted); opacity: .45; transition: opacity var(--ow-motion-fast); }
+.ow-metric-link:hover .ow-metric-go, .ow-metric-link:focus-visible .ow-metric-go { opacity: 1; color: var(--ow-accent); }
+
+/* First layer of Overview: one card per module, each with its own observation time. */
+.module-strip { list-style: none; margin: 0; padding: 14px 18px 16px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.module-card { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px; background: var(--ow-surface-2); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); }
+.module-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.module-card-name { font-size: var(--ow-type-base); font-weight: 650; }
+.module-card-detail { font-size: var(--ow-type-sm); color: var(--ow-text-secondary); overflow-wrap: anywhere; }
+.module-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; font-size: var(--ow-type-xs); color: var(--ow-text-muted); }
+.module-card-observed { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Summary strips: the count and the rule that produced it, side by side. */
+.ow-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 10px; }
+.ow-summary-card { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 12px 14px; background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); }
+.ow-summary-label { display: flex; align-items: center; gap: 6px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.ow-summary-value { font-size: 24px; font-weight: 680; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.ow-summary-definition { font-size: var(--ow-type-xs); line-height: 1.45; color: var(--ow-text-muted); }
+.ow-summary-card.is-warn .ow-summary-value { color: var(--ow-warn); }
+.ow-summary-card.is-danger .ow-summary-value { color: var(--ow-danger); }
+
+/* Async boundary panels and the not-current notices. */
+.async-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; padding: 18px; background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); }
+.async-panel h2 { font-size: var(--ow-type-lg); }
+.async-panel p { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.async-panel-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+[data-panel-state="forbidden"] { border-color: var(--ow-border-strong); background: var(--ow-surface-2); }
+[data-panel-state="error"] { border-color: var(--ow-danger); }
+.notice-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px; background: var(--ow-surface-2); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); }
+.notice-detail { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.notice-action { margin-left: auto; }
+.notice-stale { border-color: var(--ow-warn); background: var(--ow-warn-soft); }
+.notice-partial { border-color: var(--ow-info); background: var(--ow-info-soft); }
+
+.page-header-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ow-cell-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.ow-cell-note { font-size: var(--ow-type-xs); color: var(--ow-warn); }
+.ow-utilization { font-variant-numeric: tabular-nums; font-weight: 620; }
+.ow-filter-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
+.ow-filter-select { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.ow-filter-select select { min-height: var(--ow-control-sm); padding: 3px 8px; background: var(--ow-surface); color: var(--ow-text); border: 1px solid var(--ow-border-strong); border-radius: 6px; }
+.panel-count { color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
+
+@media (max-width: 1180px) {
+  .metric-grid, .module-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .metric-grid, .module-strip { grid-template-columns: 1fr; }
+  .module-strip, .kpi-grid { padding: 10px 14px 12px; }
+  .notice-bar { align-items: flex-start; flex-direction: column; }
+  .notice-action { margin-left: 0; }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * G07 - Business Workspace
+ *
+ * Two things are styled here: the home task space (four areas that state what they are
+ * waiting for) and the desktop-first investigation layout (three regions that are empty
+ * slots). Both reuse the token set above - no second palette, no second type scale.
+ * ------------------------------------------------------------------------- */
+
+.task-space { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.task-space-head h2 { font-size: var(--ow-type-lg); font-weight: 650; letter-spacing: -.01em; }
+.task-space-head p { margin-top: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-sm); max-width: 820px; }
+.task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; min-width: 0; }
+.task-panel { display: flex; flex-direction: column; min-width: 0; }
+.task-panel .panel-head { padding: 14px 16px; }
+.task-panel .panel-head h3 { font-size: var(--ow-type-base); font-weight: 650; letter-spacing: -.01em; }
+.task-panel .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 3px; }
+.task-panel .business-state { border-top: 0; }
+.task-link { color: var(--ow-accent); font-size: var(--ow-type-sm); font-weight: 600; }
+.task-scope { display: block; margin-top: 6px; }
+
+/* One state, one shape: name + what is being looked at + the only possible action. */
+.business-state { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; padding: 14px 16px; background: var(--ow-surface-2); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); min-width: 0; }
+.task-panel > .business-state { margin: 0; border: 0; border-top: 1px solid var(--ow-border); border-radius: 0 0 var(--ow-radius-md) var(--ow-radius-md); flex: 1; }
+.business-state > .status-indicator { flex: none; }
+.business-state-copy { flex: 1 1 200px; min-width: 0; }
+.business-state-title { font-size: var(--ow-type-base); font-weight: 600; color: var(--ow-text); }
+.business-state-detail { margin-top: 3px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); overflow-wrap: anywhere; }
+.business-state-action { flex: none; }
+.business-state[data-state="forbidden"] { background: var(--ow-danger-soft); border-color: color-mix(in srgb, var(--ow-danger) 32%, var(--ow-border)); }
+.business-state[data-state="unavailable"], .business-state[data-state="notFound"] { border-style: dashed; }
+
+.business-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0; }
+.business-card-slot { display: flex; flex-direction: column; gap: 8px; padding: 15px 16px; min-width: 0; border-right: 1px solid var(--ow-border); }
+.business-card-slot:last-child { border-right: 0; }
+.business-card-slot h3 { font-size: var(--ow-type-base); font-weight: 650; }
+.business-card-hint { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.business-card { min-width: 0; }
+.business-card > .business-state { background: var(--ow-surface); }
+.business-surface-card { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--ow-border); border-radius: 6px; color: var(--ow-text); }
+.business-surface-card:hover { background: var(--ow-surface-2); text-decoration: none; }
+.business-surface-card div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.business-surface-card strong { font-size: var(--ow-type-base); }
+.business-surface-card span { color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
+.business-surface-card svg:last-child { margin-left: auto; color: var(--ow-text-muted); }
+.business-entry-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.business-entry-list li { min-width: 0; }
+.business-entry-list a { display: inline-flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 5px; font-size: var(--ow-type-sm); overflow-wrap: anywhere; }
+.business-entry-list a:hover { background: var(--ow-surface-2); text-decoration: none; }
+.business-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 4px 16px; margin: 0; padding: 2px 0 0; }
+.business-kv div { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px dashed var(--ow-border); min-width: 0; }
+.business-kv dt { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
+.business-kv dd { margin: 0; font-size: var(--ow-type-sm); color: var(--ow-text); overflow-wrap: anywhere; }
+.business-card-slot .callout { margin: 0; }
+
+.capability-status-list { list-style: none; margin: 0; padding: 4px 18px 14px; }
+.capability-status-list li { display: grid; grid-template-columns: 18px minmax(0, 9rem) minmax(0, 7rem) minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--ow-border); font-size: var(--ow-type-sm); }
+.capability-status-list li:last-child { border-bottom: 0; }
+.capability-status-list li > svg { color: var(--ow-text-muted); align-self: center; }
+.capability-status-list a { font-size: var(--ow-type-base); color: var(--ow-text); font-weight: 550; }
+.capability-status-code { justify-self: start; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ow-text-secondary); background: var(--ow-surface-2); border: 1px dashed var(--ow-border-strong); border-radius: 4px; padding: 1px 6px; }
+.capability-status-missing { color: var(--ow-text-muted); overflow-wrap: anywhere; }
+
+/* Investigation workspace: three regions, desktop first, then two, then one. */
+.investigation-layout { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr) minmax(0, 300px); gap: 12px; padding: 14px 16px 18px; min-width: 0; }
+.investigation-notice { grid-column: 1 / -1; }
+.investigation-region { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); background: var(--ow-surface); overflow: hidden; }
+.investigation-region-head { padding: 11px 13px; border-bottom: 1px solid var(--ow-border); background: var(--ow-surface-2); }
+.investigation-region-head h3 { font-size: var(--ow-type-sm); font-weight: 700; letter-spacing: .01em; }
+.investigation-region-head p { margin-top: 3px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); overflow-wrap: anywhere; }
+.investigation-region-body { flex: 1; display: flex; min-width: 0; }
+.investigation-slot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; flex: 1; margin: 10px; padding: 22px 14px; min-height: 148px; text-align: center; border: 1.5px dashed var(--ow-border-strong); border-radius: var(--ow-radius-md); color: var(--ow-text-muted); }
+.investigation-slot-mark { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--ow-surface-2); border: 1px solid var(--ow-border); }
+.investigation-slot-title { font-size: var(--ow-type-sm); font-weight: 650; color: var(--ow-text-secondary); }
+.investigation-slot-line { font-size: var(--ow-type-xs); line-height: 1.45; max-width: 280px; overflow-wrap: anywhere; }
+
+@media (max-width: 1100px) {
+  .investigation-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
+  /* The detail region keeps a full row instead of shrinking: it is the region that grows. */
+  .investigation-region[data-region="detail"] { grid-column: 1 / -1; }
+  .business-card-slot { border-right: 0; border-bottom: 1px solid var(--ow-border); }
+  .business-card-slot:last-child { border-bottom: 0; }
+}
+@media (max-width: 760px) {
+  .task-grid { grid-template-columns: minmax(0, 1fr); }
+  .investigation-layout { grid-template-columns: minmax(0, 1fr); }
+  .investigation-region[data-region="detail"] { grid-column: auto; }
+  .investigation-slot { min-height: 120px; }
+  .capability-status-list { padding: 4px 14px 12px; }
+  .capability-status-list li { grid-template-columns: 18px minmax(0, 1fr); row-gap: 4px; }
+  .capability-status-code, .capability-status-missing { grid-column: 2; }
+}
+
+
+/* The /403 page is deliberately shell-less, so it cannot borrow the panel or header rules the
+   two shells provide. It had no rules of its own and rendered as unstyled text with the action
+   buttons overlapping the description. These four rules are the minimum that makes an
+   unauthenticated-adjacent page legible without giving it a navigation it must not have. */
+.forbidden-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: var(--ow-bg);
+}
+.forbidden-page .page-stack { width: 100%; max-width: 640px; }
+/* Scoped to the forbidden page on purpose: .panel-pad has no other definition, and several
+   studio panels already use the class. A global grid here re-flowed the pipeline editor's
+   drafts, palette and inspector, which broke a draft-conflict test two workflows away. */
+.forbidden-page .panel-pad { padding: 18px 20px; display: grid; gap: 14px; }
+.forbidden-page .page-actions { display: flex; flex-wrap: wrap; gap: 10px; }

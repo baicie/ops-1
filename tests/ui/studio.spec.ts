@@ -50,14 +50,22 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.getByRole('status')).toContainText('Draft created');
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   const timeout = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
-  await timeout.fill('17');
+  // The edit has to differ from the value that is live right now. A fixed number only differed on
+  // the first run: this case publishes what it writes, so the second run found the published
+  // revision already at that value, the form was not dirty, Save correctly stayed disabled, and the
+  // case failed. Read the live value and write a different one, so every run makes a real edit -
+  // without teaching the product to save an unchanged form.
+  await expect(timeout).toBeVisible();
+  const liveTimeout = Number.parseInt(await timeout.inputValue(), 10);
+  const nextTimeout = (Number.isFinite(liveTimeout) && liveTimeout > 0 ? liveTimeout : 15) + 1;
+  await timeout.fill(String(nextTimeout));
   await expect(page.getByRole('button', { name: 'Save draft' })).toBeEnabled();
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByRole('status')).toContainText('Draft saved');
   await page.screenshot({ path: path.join(OUT, 'pipeline-draft-saved.png'), fullPage: true });
   await page.reload();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
-  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('17');
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue(String(nextTimeout));
   await page.getByRole('button', { name: 'Validate', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Server validation passed');
   await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled();
@@ -142,6 +150,21 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await expect(pageB.locator('.conflict-diff')).toContainText('19');
   await expect(pageB.locator('.conflict-diff')).toContainText('18');
   await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png') });
+  // G08 batch C item 1: the two overwriting writes ask through the shared ConfirmAction instead of
+  // window.confirm. This is the real-draft half of that: the dialog opens idle, and the write it
+  // guards is the one that actually saves over the newer draft. The pending/blocked-second-submit
+  // and reload halves are pinned in g08-batch-c.spec.ts, where a delayed response makes the
+  // in-flight window observable without a seeded pipeline.
+  await pageB.getByRole('button', { name: 'Use local & retry' }).click();
+  const overwrite = pageB.getByTestId('confirm-dialog');
+  await expect(overwrite).toBeVisible();
+  await expect(overwrite).toHaveAttribute('data-confirm-state', 'idle');
+  const confirmOverwrite = overwrite.locator('[data-confirm-submit]');
+  await expect(confirmOverwrite).toBeEnabled();
+  await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict-confirm.png') });
+  await confirmOverwrite.click();
+  await expect(pageB.getByTestId('confirm-dialog')).toHaveCount(0);
+  await expect(pageB.getByRole('status')).toContainText('Draft saved');
   await pageB.close();
 });
 

@@ -1,4 +1,5 @@
 use chrono::{DateTime, SecondsFormat, Utc};
+use opsweave_contracts::Role;
 use std::env;
 use std::path::PathBuf;
 
@@ -12,6 +13,10 @@ pub struct Config {
     pub bootstrap_admin_email: Option<String>,
     pub bootstrap_admin_password: Option<String>,
     pub bootstrap_admin_name: String,
+    /// Roles whose sessions are declared eligible for the Admin Console surface
+    /// (platform:access) by GET /api/v1/auth/me. admin is always part of the set;
+    /// OPSWEAVE_ADMIN_SURFACE_ROLES may only widen it.
+    pub admin_surface_roles: Vec<Role>,
     pub dev_publisher_id: String,
     pub dev_publisher_public_key: Option<String>,
     pub session_hours: i64,
@@ -58,6 +63,10 @@ impl Config {
                 .ok()
                 .filter(|value| !value.trim().is_empty()),
             bootstrap_admin_name: env_string("OPSWEAVE_BOOTSTRAP_ADMIN_NAME", "Platform Admin"),
+            admin_surface_roles: parse_admin_surface_roles(&env_string(
+                "OPSWEAVE_ADMIN_SURFACE_ROLES",
+                DEFAULT_ADMIN_SURFACE_ROLES,
+            )),
             dev_publisher_id: env_string("OPSWEAVE_DEV_PUBLISHER_ID", "trusted-team"),
             dev_publisher_public_key: env::var("OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY")
                 .ok()
@@ -159,6 +168,60 @@ fn parse_build_time(raw: &str) -> Option<String> {
     })
 }
 
+/// Default of `OPSWEAVE_ADMIN_SURFACE_ROLES`: only `admin` is declared
+/// eligible for the Admin Console surface.
+pub const DEFAULT_ADMIN_SURFACE_ROLES: &str = "admin";
+
+pub fn default_admin_surface_roles() -> Vec<Role> {
+    vec![Role::Admin]
+}
+
+/// Resolves the Admin Console surface role set from the raw environment value.
+///
+/// Fails closed: an unknown token, a value that yields no role at all, or an
+/// empty value all fall back to the default `admin`-only set and log a warning,
+/// so a typo can never silently widen the surface. The only supported override
+/// is widening to further roles (for example `operator`), and any override is
+/// logged at startup so an audit can see it.
+pub fn parse_admin_surface_roles(raw: &str) -> Vec<Role> {
+    let mut roles: Vec<Role> = Vec::new();
+    let mut unknown: Vec<String> = Vec::new();
+    for token in raw.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        match token.to_ascii_lowercase().parse::<Role>() {
+            Ok(role) => {
+                if !roles.contains(&role) {
+                    roles.push(role);
+                }
+            }
+            Err(_) => unknown.push(token.to_string()),
+        }
+    }
+    if !unknown.is_empty() || roles.is_empty() {
+        tracing::warn!(
+            value = %raw,
+            unknown = ?unknown,
+            "OPSWEAVE_ADMIN_SURFACE_ROLES is invalid; failing closed to the default admin-only admin surface"
+        );
+        return default_admin_surface_roles();
+    }
+    // Misconfiguration must never lock platform admins out of the Admin Console:
+    // the variable may widen the surface, never remove the admin role from it.
+    if !roles.contains(&Role::Admin) {
+        roles.push(Role::Admin);
+    }
+    if roles != default_admin_surface_roles() {
+        tracing::info!(
+            roles = ?roles,
+            "OPSWEAVE_ADMIN_SURFACE_ROLES widens the Admin Console surface"
+        );
+    }
+    roles
+}
+
 fn env_string(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
 }
@@ -194,7 +257,11 @@ fn env_i64(key: &str, default: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_build_sha, parse_build_time, parse_environment, Environment};
+    use super::{
+        parse_admin_surface_roles, parse_build_sha, parse_build_time, parse_environment,
+        Environment,
+    };
+    use opsweave_contracts::Role;
 
     const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -237,5 +304,57 @@ mod tests {
         assert_eq!(parse_build_time(""), None);
         assert_eq!(parse_build_time("not-a-timestamp"), None);
         assert_eq!(parse_build_time("2026-10-28"), None);
+    }
+
+    #[test]
+    fn admin_surface_roles_default_to_admin_only() {
+        assert_eq!(parse_admin_surface_roles("admin"), vec![Role::Admin]);
+        assert_eq!(parse_admin_surface_roles(" ADMIN "), vec![Role::Admin]);
+        assert_eq!(parse_admin_surface_roles("admin,admin"), vec![Role::Admin]);
+    }
+
+    #[test]
+    fn admin_surface_roles_env_can_widen_to_operator() {
+        assert_eq!(
+            parse_admin_surface_roles("operator"),
+            vec![Role::Operator, Role::Admin]
+        );
+        assert_eq!(
+            parse_admin_surface_roles("admin,operator"),
+            vec![Role::Admin, Role::Operator]
+        );
+        assert_eq!(
+            parse_admin_surface_roles("Operator , Admin"),
+            vec![Role::Operator, Role::Admin]
+        );
+    }
+
+    #[test]
+    fn invalid_admin_surface_roles_fail_closed_to_admin_only() {
+        for raw in [
+            "",
+            "   ",
+            ",,",
+            "root",
+            "admin operator",
+            "admin;operator",
+            // A widened set that also contains an unknown token is rejected as a
+            // whole: the valid token is never partially honoured.
+            "operator,root",
+        ] {
+            assert_eq!(
+                parse_admin_surface_roles(raw),
+                vec![Role::Admin],
+                "raw={raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn admin_surface_roles_cannot_lock_admins_out() {
+        assert_eq!(
+            parse_admin_surface_roles("viewer"),
+            vec![Role::Viewer, Role::Admin]
+        );
     }
 }

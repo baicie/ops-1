@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
 import { usePolling } from '../hooks';
 import type { AuditEvent, DeploymentView, PluginDetail } from '../types';
@@ -11,13 +11,17 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { CopyButton, EmptyState, ErrorState, KV, PageHeader, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
+import { CopyButton, EmptyState, ErrorState, KV, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
+import { ConfirmAction } from '../components/app/confirm-action';
+import { PageHeader } from '../components/app/page-header';
+import { NoData, StatusIndicator } from '../components/app/status-indicator';
 import { formatDate, formatBytes, shortDigest } from '../format';
 import { useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
+const TAB_IDS: readonly Tab[] = ['overview', 'versions', 'deployments', 'capabilities', 'permissions', 'events'];
 
 /** Label + control + hint, the shadcn replacement for the shared Field wrapper. */
 function FormField({ label, hint, htmlFor, children }: { label: string; hint?: string; htmlFor?: string; children: React.ReactNode }) {
@@ -30,50 +34,34 @@ function FormField({ label, hint, htmlFor, children }: { label: string; hint?: s
   );
 }
 
-/** The shadcn Dialog replacement for the shared ConfirmDialog; same label, same test id. */
-function ConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel,
-  danger = false,
-  busy = false,
-  onConfirm,
-  onClose,
-}: {
-  open: boolean;
-  title: string;
-  description: React.ReactNode;
-  confirmLabel?: string;
-  danger?: boolean;
-  busy?: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  const t = useT();
-  return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent closeLabel={t('aria.closeDialog')} aria-describedby={undefined} data-testid="confirm-dialog" className="max-w-[480px]">
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-        <div className="leading-relaxed text-foreground-secondary">{description}</div>
-        <DialogFooter>
-          <Button variant="secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</Button>
-          <Button variant={danger ? 'destructive' : 'default'} onClick={onConfirm} disabled={busy}>
-            {busy ? t('action.working') : confirmLabel ?? t('action.confirm')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function PluginDetailPage() {
   const t = useT();
   const { id = '' } = useParams();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`), 4000);
   const [events, setEvents] = useState<AuditEvent[]>([]);
-  const [tab, setTab] = useState<Tab>('overview');
+  // The tab belongs in the URL. Two things already assumed it did: the legacy /plugins/:id
+  // redirect forwards ?tab= by allowlist, and this page links to its own deployments view. Without
+  // reading the parameter that link pointed at a route that does not exist, and the forwarded tab
+  // was silently dropped on arrival.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get('tab');
+  const urlTab: Tab = TAB_IDS.includes(tabFromUrl as Tab) ? (tabFromUrl as Tab) : 'overview';
+  const [tab, setTabState] = useState<Tab>(urlTab);
+  // Reading the parameter once into the initial state was not enough: a `Link` to
+  // `?tab=…` on this same route re-renders the page without remounting it, so the URL moved
+  // and the tab stayed behind. The URL is the source of truth whenever it changes from
+  // outside this component (deep link, in-page link, back/forward).
+  useEffect(() => {
+    setTabState(urlTab);
+  }, [urlTab]);
+  const setTab = (next: Tab) => {
+    setTabState(next);
+    const params = new URLSearchParams(searchParams);
+    if (next === 'overview') params.delete('tab');
+    else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+  };
   const [deployOpen, setDeployOpen] = useState(false);
   const [deployVersion, setDeployVersion] = useState('');
   const [replicas, setReplicas] = useState(2);
@@ -101,57 +89,65 @@ export function PluginDetailPage() {
     if (!deployOpen && versions.length) setDeployVersion((current) => current || versions[0].version);
   }, [deployOpen, versions]);
 
-  if (loading && !data) return <><PageHeader title={t('table.plugin')} /><Skeleton rows={6} /></>;
-  if (error) return <><PageHeader title={t('table.plugin')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
+  // The header keeps its description in the loading and error states too: the page still is what
+  // it says it is while the answer is missing or refused.
+  if (loading && !data) return <><PageHeader title={t('table.plugin')} description={t('pluginDetail.description')} /><Skeleton rows={6} /></>;
+  if (error) return <><PageHeader title={t('table.plugin')} description={t('pluginDetail.description')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
   if (!data) return null;
 
-  async function run(label: string, action: () => Promise<unknown>, success: string) {
+  /**
+   * Performs one write and re-reads the detail. A rejection is deliberately not swallowed here:
+   * ConfirmAction keeps its dialog open, prints the failure and offers the same button again, so
+   * a refused uninstall or rollback is answered where it was asked instead of in a toast.
+   */
+  async function perform(label: string, action: () => Promise<unknown>, success: string) {
     setBusy(label);
     try {
       await action();
       toast.push({ tone: 'ok', title: success });
       await reload();
-    } catch (cause) {
-      const apiError = cause as ApiError;
-      toast.push({ tone: 'danger', title: apiError.code || t('pluginDetail.actionFailed'), detail: apiError.message });
     } finally {
       setBusy(null);
-      setConfirm(null);
     }
   }
 
   async function deploy() {
-    await run('deploy', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/deployments`, {
-      version: deployVersion,
-      desiredReplicas: replicas,
-      nodeSelector: Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2)),
-      maxInstancesPerNode: 1,
-    }), t('pluginDetail.toast.deploymentRequested', { version: deployVersion }));
-    setDeployOpen(false);
-    setTab('deployments');
+    try {
+      await perform('deploy', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/deployments`, {
+        version: deployVersion,
+        desiredReplicas: replicas,
+        nodeSelector: Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2)),
+        maxInstancesPerNode: 1,
+      }), t('pluginDetail.toast.deploymentRequested', { version: deployVersion }));
+      setDeployOpen(false);
+      setTab('deployments');
+    } catch (cause) {
+      const apiError = cause as ApiError;
+      toast.push({ tone: 'danger', title: apiError.code || t('pluginDetail.actionFailed'), detail: apiError.message });
+    }
   }
 
   async function activate(version: string) {
-    await run('activate', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/activations`, {
+    await perform('activate', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/activations`, {
       version,
       expectedRevision: data?.activeRevision?.generation ?? 0,
     }), t('pluginDetail.toast.activated', { version }));
   }
 
   async function disable() {
-    await run('disable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/disable`, { reason: 'Disabled from plugin detail' }), t('pluginDetail.toast.disabled'));
+    await perform('disable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/disable`, { reason: 'Disabled from plugin detail' }), t('pluginDetail.toast.disabled'));
   }
 
   async function enable() {
-    await run('enable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/enable`, {}), t('pluginDetail.toast.redeploymentRequested'));
+    await perform('enable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/enable`, {}), t('pluginDetail.toast.redeploymentRequested'));
   }
 
   async function uninstall() {
-    await run('uninstall', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/uninstall`, {}), t('pluginDetail.toast.uninstalled'));
+    await perform('uninstall', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/uninstall`, {}), t('pluginDetail.toast.uninstalled'));
   }
 
   async function rollback() {
-    await run('rollback', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/rollback`, {
+    await perform('rollback', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/rollback`, {
       targetVersion: rollbackVersion,
       expectedRevision: data?.activeRevision?.generation ?? 0,
       desiredReplicas: 2,
@@ -172,22 +168,33 @@ export function PluginDetailPage() {
       <PageHeader
         eyebrow={(data.publisher || t('pluginDetail.unknownPublisher')) + ' · ' + (data.isSystem ? t('pluginDetail.systemPlugin') : t('pluginDetail.trustedPackage'))}
         title={<span className="title-with-status">{data.name}{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}</span>}
-        description={<><span className="mono">{data.id}</span> · {t('pluginDetail.effectiveVersion')} <strong>{activeVersion || t('pluginDetail.none')}</strong> · {t('pluginDetail.revision', { revision: data.activeRevision?.generation ?? 0 })}</>}
+        description={t('pluginDetail.description')}
+        meta={
+          <div className="detail-meta">
+            <StatusPill status={data.state} />
+            <span className="meta-chip mono">{data.id}</span>
+            {activeVersion
+              ? <span className="meta-chip">{t('pluginDetail.effectiveVersion')} <strong className="mono">{activeVersion}</strong></span>
+              : <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />}
+            {data.activeRevision
+              ? <span className="meta-chip"><Icon name="activity" size={13} /> {t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })}</span>
+              : <NoData detail={t('ui.noData.detail')} />}
+            {data.activeRevision?.activatedAt ? <span className="meta-chip">{t('pluginDetail.meta.activated')} <TimeAgo value={data.activeRevision.activatedAt} /></span> : null}
+            {data.isSystem ? <span className="meta-chip"><Icon name="access" size={13} /> {t('pluginDetail.hostOwnedRecovery')}</span> : null}
+          </div>
+        }
         actions={<>
-          {readyCandidate && <Button onClick={() => setConfirm('activate')} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('pluginDetail.action.activateVersion', { version: readyCandidate.version })}</Button>}
-          {!activeVersion && latestDeployment?.status !== 'READY' && versions[0] && <Button onClick={() => { setDeployVersion(versions[0].version); setDeployOpen(true); }} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('action.deploy')}</Button>}
           {latestDeployment?.status === 'READY' && latestDeployment.version === activeVersion && <StatusPill status="READY" />}
           {activeVersion && <Button variant="secondary" onClick={() => setConfirm('disable')} disabled={Boolean(busy)}><Icon name="stop" size={15} /> {t('action.disable')}</Button>}
           {!activeVersion && data.state === 'DISABLED' && <Button variant="secondary" onClick={() => setConfirm('enable')} disabled={Boolean(busy)}><Icon name="rotate" size={15} /> {t('action.enable')}</Button>}
           <Button variant="secondary" onClick={() => setTab('versions')}><Icon name="plugins" size={15} /> {t('pluginDetail.tab.versions')}</Button>
         </>}
+        primary={readyCandidate
+          ? <Button onClick={() => setConfirm('activate')} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('pluginDetail.action.activateVersion', { version: readyCandidate.version })}</Button>
+          : !activeVersion && latestDeployment?.status !== 'READY' && versions[0]
+            ? <Button onClick={() => { setDeployVersion(versions[0].version); setDeployOpen(true); }} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('action.deploy')}</Button>
+            : undefined}
       />
-      <div className="detail-meta">
-        <StatusPill status={data.state} />
-        {data.activeRevision && <span className="meta-chip"><Icon name="activity" size={13} /> {t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })}</span>}
-        {data.activeRevision?.activatedAt && <span className="meta-chip">{t('pluginDetail.meta.activated')} <TimeAgo value={data.activeRevision.activatedAt} /></span>}
-        {data.isSystem && <span className="meta-chip"><Icon name="access" size={13} /> {t('pluginDetail.hostOwnedRecovery')}</span>}
-      </div>
 
       {/* Tabs is controlled on the existing `tab` state, so the deploy flow can still land on
           "deployments"; Radix owns role=tablist/tab, aria-selected, the roving tabindex and the
@@ -206,13 +213,15 @@ export function PluginDetailPage() {
           <div className="summary-grid">
             <section className="panel">
               <div className="panel-head"><div><h2>{t('pluginDetail.effectiveState.title')}</h2><p>{t('pluginDetail.effectiveState.description')}</p></div></div>
+              {/* A fact the API did not answer prints NO_DATA: a revision of 0 and a replica count
+                  of 0 would be numbers the Kernel never said. */}
               <div className="kv-grid">
                 <KV label={t('pluginDetail.field.installation')}>{data.state}</KV>
-                <KV label={t('pluginDetail.field.activeVersion')}>{activeVersion || t('common.none')}</KV>
-                <KV label={t('pluginDetail.field.activeRevision')}>{data.activeRevision?.generation ?? 0}</KV>
-                <KV label={t('field.desiredReplicas')}>{activeDeployment?.desiredReplicas ?? latestDeployment?.desiredReplicas ?? 0}</KV>
+                <KV label={t('pluginDetail.field.activeVersion')}>{activeVersion || t('pluginDetail.none')}</KV>
+                <KV label={t('pluginDetail.field.activeRevision')}>{data.activeRevision ? data.activeRevision.generation : <NoData detail={t('ui.noData.detail')} />}</KV>
+                <KV label={t('field.desiredReplicas')}>{activeDeployment?.desiredReplicas ?? latestDeployment?.desiredReplicas ?? <NoData detail={t('ui.noData.detail')} />}</KV>
                 <KV label="READY">{activeDeployment ? `${activeDeployment.readyInstances}/${activeDeployment.totalInstances}` : t('pluginDetail.noActiveDeployment')}</KV>
-                <KV label={t('pluginDetail.field.deploymentStatus')}>{activeDeployment ? <StatusPill status={activeDeployment.status} /> : '—'}</KV>
+                <KV label={t('pluginDetail.field.deploymentStatus')}>{activeDeployment ? <StatusPill status={activeDeployment.status} /> : <NoData detail={t('pluginDetail.noActiveDeployment')} />}</KV>
               </div>
               {activeDeployment && <Progress value={activeDeployment.readyInstances} max={Math.max(activeDeployment.desiredReplicas, 1)} label={t('pluginDetail.readyReplicas')} />}
             </section>
@@ -220,18 +229,18 @@ export function PluginDetailPage() {
               <div className="panel-head"><div><h2>{t('pluginDetail.artifactTrust.title')}</h2><p>{t('pluginDetail.artifactTrust.description')}</p></div></div>
               {trustVersion ? (
                 <div className="kv-grid">
-                  <KV label={t('table.publisher')}>{data.publisher}</KV>
+                  <KV label={t('table.publisher')}>{data.publisher || <NoData detail={t('ui.noData.detail')} />}</KV>
                   <KV label={t('table.signature')}><StatusPill status={trustVersion.signatureState} /></KV>
-                  <KV label={t('pluginDetail.field.image')} mono>{shortDigest(trustVersion.imageRef, 22)} <CopyButton value={trustVersion.imageRef} /></KV>
-                  <KV label={t('pluginDetail.field.bundle')} mono>{shortDigest(trustVersion.bundleDigest, 22)} <CopyButton value={trustVersion.bundleDigest} /></KV>
-                  <KV label={t('pluginDetail.field.artifact')} mono>{shortDigest(trustVersion.artifactDigest, 22)} <CopyButton value={trustVersion.artifactDigest} /></KV>
-                  <KV label={t('table.published')}>{formatDate(trustVersion.createdAt)}</KV>
+                  <KV label={t('pluginDetail.field.image')} mono>{trustVersion.imageRef ? shortDigest(trustVersion.imageRef, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.imageRef} /></KV>
+                  <KV label={t('pluginDetail.field.bundle')} mono>{trustVersion.bundleDigest ? shortDigest(trustVersion.bundleDigest, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.bundleDigest} /></KV>
+                  <KV label={t('pluginDetail.field.artifact')} mono>{trustVersion.artifactDigest ? shortDigest(trustVersion.artifactDigest, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.artifactDigest} /></KV>
+                  <KV label={t('table.published')}>{trustVersion.createdAt ? formatDate(trustVersion.createdAt) : <NoData detail={t('ui.noData.detail')} />}</KV>
                 </div>
               ) : <EmptyState icon="file" title={t('pluginDetail.empty.systemPlugin.title')} description={t('pluginDetail.empty.systemPlugin.description')} />}
             </section>
           </div>
           <section className="panel">
-            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" to={`/plugins/${data.id}/deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
+            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" data-testid="plugin-detail-deployments-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
             <InstanceTable instances={activeDeployment?.instances || []} />
           </section>
         </TabsContent>
@@ -259,7 +268,7 @@ export function PluginDetailPage() {
                         <StackCell label={t('table.version')}><strong className="mono">{version.version}</strong>{version.version === activeVersion && <Badge variant="success">{t('common.tag.active')}</Badge>}</StackCell>
                         <StackCell label={t('table.status')}><StatusPill status={version.status} /></StackCell>
                         <StackCell label={t('table.signature')}><StatusPill status={version.signatureState} /></StackCell>
-                        <StackCell label={t('table.imageDigest')}><span className="mono text-sm">{shortDigest(version.imageRef, 18)}</span><CopyButton value={version.imageRef} /></StackCell>
+                        <StackCell label={t('table.imageDigest')}>{version.imageRef ? <span className="mono text-sm">{shortDigest(version.imageRef, 18)}</span> : <NoData detail={t('ui.noData.detail')} />}<CopyButton value={version.imageRef} /></StackCell>
                         <StackCell label={t('table.published')}><TimeAgo value={version.createdAt} /></StackCell>
                         <StackCell label={t('table.actions')} className="max-[760px]:flex-wrap">
                           {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('activate'); }}>{t('action.activate')}</Button>}
@@ -300,7 +309,7 @@ export function PluginDetailPage() {
 
         <TabsContent value="events" className="mt-[18px]">
           <section className="panel table-panel">
-            <div className="panel-head"><div><h2>{t('pluginDetail.events.title')}</h2><p>{t('pluginDetail.events.description')}</p></div><Link className="text-link" to="/activity">{t('pluginDetail.events.global')} <Icon name="arrowRight" size={14} /></Link></div>
+            <div className="panel-head"><div><h2>{t('pluginDetail.events.title')}</h2><p>{t('pluginDetail.events.description')}</p></div><Link className="text-link" to="/admin/activity">{t('pluginDetail.events.global')} <Icon name="arrowRight" size={14} /></Link></div>
             {events.length === 0 ? <EmptyState icon="activity" title={t('overview.events.empty.title')} /> : (
               <Table className={stackTable}>
                 <TableHeader className={stackHead}>
@@ -349,52 +358,49 @@ export function PluginDetailPage() {
         </DialogContent>
       </Dialog>
 
-      <ConfirmDialog
+      {/* Uninstall, rollback, disable and activation are the irreversible or privilege-changing
+          actions of this page: each one goes through the shared ConfirmAction, which disables its
+          submit while the request is in flight and keeps the failure on the dialog. */}
+      <ConfirmAction
         open={confirm === 'activate'}
         title={t('pluginDetail.confirmActivate.title', { version: rollbackVersion || readyCandidate?.version || '' })}
         description={<>{t('pluginDetail.confirmActivate.before')} <strong>{data.name}</strong>{t('pluginDetail.confirmActivate.after')}</>}
         confirmLabel={t('pluginDetail.confirmActivate.confirm')}
-        busy={busy === 'activate'}
-        onConfirm={() => void activate(rollbackVersion || readyCandidate?.version || '')}
+        danger={false}
+        onConfirm={() => activate(rollbackVersion || readyCandidate?.version || '')}
         onClose={() => setConfirm(null)}
       />
-      <ConfirmDialog
+      <ConfirmAction
         open={confirm === 'disable'}
         title={t('pluginDetail.confirmDisable.title', { name: data.name })}
         description={<>{t('pluginDetail.confirmDisable.before')} <code>CAPABILITY_UNAVAILABLE</code>{t('pluginDetail.confirmDisable.after')}</>}
         confirmLabel={t('pluginDetail.confirmDisable.confirm')}
-        danger
-        busy={busy === 'disable'}
-        onConfirm={() => void disable()}
+        onConfirm={() => disable()}
         onClose={() => setConfirm(null)}
       />
-      <ConfirmDialog
+      <ConfirmAction
         open={confirm === 'enable'}
         title={t('pluginDetail.confirmEnable.title', { name: data.name })}
         description={t('pluginDetail.confirmEnable.description')}
         confirmLabel={t('pluginDetail.confirmEnable.confirm')}
-        busy={busy === 'enable'}
-        onConfirm={() => void enable()}
+        danger={false}
+        onConfirm={() => enable()}
         onClose={() => setConfirm(null)}
       />
-      <ConfirmDialog
+      <ConfirmAction
         open={confirm === 'uninstall'}
         title={t('pluginDetail.confirmUninstall.title', { name: data.name })}
         description={<>{t('pluginDetail.confirmUninstall.before')} <strong>{t('pluginDetail.confirmUninstall.retained')}</strong>{t('pluginDetail.confirmUninstall.after')}</>}
         confirmLabel={t('action.uninstall')}
-        danger
-        busy={busy === 'uninstall'}
-        onConfirm={() => void uninstall()}
+        onConfirm={() => uninstall()}
         onClose={() => setConfirm(null)}
       />
-      <ConfirmDialog
+      <ConfirmAction
         open={confirm === 'rollback'}
         title={t('pluginDetail.confirmRollback.title', { version: rollbackVersion })}
         description={t('pluginDetail.confirmRollback.description')}
         confirmLabel={t('pluginDetail.confirmRollback.confirm')}
-        danger
-        busy={busy === 'rollback'}
-        onConfirm={() => void rollback()}
+        onConfirm={() => rollback()}
         onClose={() => setConfirm(null)}
       />
       {!activeVersion && data.state === 'INSTALLED' && <div className="sticky-note"><Icon name="alert" size={15} /> {t('pluginDetail.stickyNote')}</div>}
@@ -423,10 +429,10 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
           <StackCell label={t('table.slot')}><span className="mono">#{instance.slot}</span></StackCell>
           <StackCell label={t('table.node')}><strong>{instance.nodeName || instance.nodeId.slice(0, 8)}</strong><div className="text-sm text-muted-foreground">{instance.nodeStatus}</div></StackCell>
           <StackCell label={t('table.state')}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
-          <StackCell label={t('table.container')}><span className="mono text-sm">{instance.containerId ? instance.containerId.slice(0, 12) : '—'}</span></StackCell>
+          <StackCell label={t('table.container')}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
           <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
           <StackCell label={t('table.observed')}><TimeAgo value={instance.observedAt} /></StackCell>
-          <StackCell label={t('table.logs')}><Link className="text-link" to={`/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
+          <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
         </TableRow>
       ))}</TableBody>
     </Table>
@@ -449,9 +455,11 @@ function DeploymentCard({ deployment, active, onActivate, onRollback }: { deploy
         <KV label={t('pluginDetail.deployment.fieldId')} mono>{deployment.id.slice(0, 13)}…</KV>
         <KV label={t('table.generation')}>{deployment.generation}</KV>
         <KV label={t('status.ready')}>{deployment.readyInstances}/{deployment.desiredReplicas}</KV>
-        <KV label={t('pluginDetail.deployment.cpuMemory')}>{deployment.resources?.cpuMillis ?? '—'} mCPU / {formatBytes((deployment.resources?.memoryMiB || 0) * 1024 * 1024)}</KV>
-        <KV label={t('table.created')}>{formatDate(deployment.createdAt)}</KV>
-        <KV label={t('pluginDetail.deployment.fieldReason')}>{reason?.title ?? '—'}</KV>
+        <KV label={t('pluginDetail.deployment.cpuMemory')}>{deployment.resources
+          ? <span className="mono">{deployment.resources.cpuMillis} mCPU / {deployment.resources.memoryMiB > 0 ? formatBytes(deployment.resources.memoryMiB * 1024 * 1024) : <NoData detail={t('ui.noData.detail')} />}</span>
+          : <NoData detail={t('ui.noData.detail')} />}</KV>
+        <KV label={t('table.created')}>{deployment.createdAt ? formatDate(deployment.createdAt) : <NoData detail={t('ui.noData.detail')} />}</KV>
+        <KV label={t('pluginDetail.deployment.fieldReason')}>{reason?.title ?? <NoData detail={t('ui.noData.detail')} />}</KV>
       </div>
       {reason && <div className="callout"><Icon name="alert" size={15} /><p>{reason.title}</p></div>}
       {reason?.raw && <details className="advanced"><summary>{t('placement.reason.raw')}</summary><p className="mono small">{reason.raw}</p></details>}

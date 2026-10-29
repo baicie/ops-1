@@ -3,13 +3,16 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
 import type { JobList, PipelineDefinition, PipelineDetail, PipelineList, PipelineRevision } from '../types';
 import { Icon } from '../components/Icons';
-import { badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import type { StatusTone } from '../components/status-tone';
 import { Badge } from '../components/ui/badge';
 import { Button, buttonVariants } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { EmptyState, ErrorState, PageHeader, Skeleton, TimeAgo } from '../components/Ui';
+import { EmptyState, TimeAgo } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
+import { PageHeader } from '../components/app/page-header';
+import { NoData } from '../components/app/status-indicator';
 import { useDocumentTitle } from '../hooks';
 import { getPipelineExecutionOrder } from '../studio/ir/topology';
 import { useT } from '../i18n';
@@ -17,15 +20,27 @@ import { cn } from '../lib/utils';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
- * The revision panels show a fixed copy line (and, for revisions, the wire status verbatim),
- * not a status code StatusPill could map on its own — so the pill is painted here through the
- * same shared tone map instead of growing a second label vocabulary.
+ * The revision panels show a fixed copy line, not a status code StatusPill could localize — so
+ * the pill is painted here through the same shared tone map instead of growing a second label
+ * vocabulary. The wire text stays verbatim; only the tone comes from STATUS_MAP, so a revision
+ * the shell cannot classify is painted neutral instead of borrowing the "ok" colour.
  */
 function TonePill({ tone, label, className }: { tone: StatusTone; label: string; className?: string }) {
   return (
     <Badge variant={badgeVariantForTone(tone)} className={className}>
       <Icon name={glyphForTone(tone)} size={12} />
       {label}
+    </Badge>
+  );
+}
+
+function RevisionPill({ status }: { status: string }) {
+  const code = (status || '').toUpperCase();
+  const tone = (code && STATUS_MAP[code]?.tone) || 'unknown';
+  return (
+    <Badge variant={badgeVariantForTone(tone)} data-status={code || undefined}>
+      <Icon name={glyphForTone(tone)} size={12} />
+      {status}
     </Badge>
   );
 }
@@ -70,34 +85,49 @@ export function PipelinesPage() {
         </div>
         <span className="toolbar-count">{t('pipelines.count', { count: items.length })}</span>
       </section>
-      {loading && !data ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => setReloadToken((value) => value + 1)} /> : items.length === 0 ? (
-        <EmptyState icon="file" title={hasServerPage ? t('pipelines.empty.filtered.title') : t('pipelines.empty.none.title')} description={hasServerPage ? t('pipelines.empty.filtered.description') : t('pipelines.empty.none.description')} />
-      ) : (
-        <section className="panel table-panel">
-          <Table className={stackTable}>
-            <TableHeader className={stackHead}>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>{t('table.pipeline')}</TableHead>
-                <TableHead>{t('table.revision')}</TableHead>
-                <TableHead>{t('table.created')}</TableHead>
-                <TableHead>{t('table.updated')}</TableHead>
-                <TableHead aria-label={t('table.open')} />
-              </TableRow>
-            </TableHeader>
-            <TableBody className={stackBody}>
-              {items.map((pipeline) => (
-                <TableRow key={pipeline.pipelineId} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} tabIndex={0}>
-                  <StackCell label={t('table.pipeline')}><Link to={`/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
-                  <StackCell label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
-                  <StackCell label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></StackCell>
-                  <StackCell label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></StackCell>
-                  <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+      <AsyncBoundary
+        loading={loading}
+        error={data ? null : error}
+        hasData={Boolean(data)}
+        skeletonRows={5}
+        onRetry={() => setReloadToken((value) => value + 1)}
+      >
+        {items.length === 0 ? (
+          <div data-empty-state={hasServerPage ? 'filtered' : 'none'}>
+            <EmptyState
+              icon="file"
+              title={hasServerPage ? t('pipelines.empty.filtered.title') : t('pipelines.empty.none.title')}
+              description={hasServerPage ? t('pipelines.empty.filtered.description') : t('pipelines.empty.none.description')}
+              action={hasServerPage ? <Button variant="secondary" onClick={() => setQuery('')}>{t('ui.clearFilters')}</Button> : undefined}
+            />
+          </div>
+        ) : (
+          <section className="panel table-panel">
+            <Table className={stackTable}>
+              <TableHeader className={stackHead}>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>{t('table.pipeline')}</TableHead>
+                  <TableHead>{t('table.revision')}</TableHead>
+                  <TableHead>{t('table.created')}</TableHead>
+                  <TableHead>{t('table.updated')}</TableHead>
+                  <TableHead aria-label={t('table.open')} />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </section>
-      )}
+              </TableHeader>
+              <TableBody className={stackBody}>
+                {items.map((pipeline) => (
+                  <TableRow key={pipeline.pipelineId} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} tabIndex={0}>
+                    <StackCell label={t('table.pipeline')}><Link to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
+                    <StackCell label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
+                    <StackCell label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></StackCell>
+                    <StackCell label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></StackCell>
+                    <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </section>
+        )}
+      </AsyncBoundary>
       <div className="pagination-row">
         <Button variant="secondary" disabled={!cursor} onClick={() => { setCursor(null); setCursorHistory([]); }}>{t('pipelines.pagination.first')}</Button>
         <Button variant="secondary" disabled={!cursorHistory.length} onClick={() => {
@@ -144,6 +174,18 @@ function NodeSummary({ definition }: { definition: PipelineDefinition }) {
   );
 }
 
+function PipelineDetailHeader({ pipelineId, name, description, actions }: { pipelineId: string; name?: string; description?: React.ReactNode; actions?: React.ReactNode }) {
+  const t = useT();
+  return (
+    <PageHeader
+      eyebrow={t('pipelines.eyebrow')}
+      title={name || t('page.pipelineDetail')}
+      description={description ?? <span className="mono">{pipelineId}</span>}
+      actions={actions}
+    />
+  );
+}
+
 export function PipelineDetailPage() {
   const t = useT();
   const { pipelineId = '' } = useParams();
@@ -161,8 +203,19 @@ export function PipelineDetailPage() {
       .catch((cause) => { if (!cancelled) setError(cause as Error); });
     return () => { cancelled = true; };
   }, [pipelineId]);
-  if (error) return <ErrorState error={error} />;
-  if (!detail) return <Skeleton rows={6} />;
+  const allPipelines = <Link className={buttonVariants({ variant: 'secondary' })} to="/admin/pipelines"><Icon name="arrowRight" size={15} /> {t('pipelines.action.all')}</Link>;
+  if (error) return (
+    <div className="page-stack">
+      <PipelineDetailHeader pipelineId={pipelineId} actions={allPipelines} />
+      <AsyncBoundary loading={false} error={error} hasData={false}>{null}</AsyncBoundary>
+    </div>
+  );
+  if (!detail) return (
+    <div className="page-stack">
+      <PipelineDetailHeader pipelineId={pipelineId} actions={allPipelines} />
+      <AsyncBoundary loading hasData={false} error={null}>{null}</AsyncBoundary>
+    </div>
+  );
   const latest = detail.latest;
   return (
     <div className="page-stack">
@@ -170,13 +223,15 @@ export function PipelineDetailPage() {
         eyebrow={t('pipelines.eyebrow')}
         title={detail.name}
         description={<span className="mono">{detail.pipelineId}</span>}
-        actions={<><Link className={buttonVariants({ variant: 'secondary' })} to="/pipelines"><Icon name="arrowRight" size={15} /> {t('pipelines.action.all')}</Link><Link className={buttonVariants()} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link><Link className={buttonVariants({ variant: 'secondary' })} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> {t('pipelines.action.openStudio')}</Link></>}
+        actions={<>{allPipelines}<Link className={buttonVariants({ variant: 'secondary' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> {t('pipelines.action.openStudio')}</Link></>}
+        primary={<Link className={buttonVariants()} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link>}
       />
       <section className="summary-grid pipeline-stats">
         <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRevision')}</span><strong className="metric-value">r{detail.latestRevision}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.nodes')}</span><strong className="metric-value">{latest?.definition.nodes.length ?? 0}</strong></div>
+        {/* A missing published definition is NO_DATA; printing 0 nodes would claim a real count of zero. */}
+        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.nodes')}</span><strong className="metric-value">{latest ? latest.definition.nodes.length : <NoData detail={t('ui.noData.detail')} />}</strong></div>
         <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRun')}</span><strong className="metric-value small">{jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.updated')}</span><strong className="metric-value small"><TimeAgo value={latest?.publishedAt} /></strong></div>
+        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.updated')}</span><strong className="metric-value small">{latest?.publishedAt ? <TimeAgo value={latest.publishedAt} /> : <NoData detail={t('ui.noData.detail')} />}</strong></div>
       </section>
       {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>{t('pipelines.latestRevision.title')}</h2>{/* The 64-char digest is unbreakable text: at 390 it forced a 122px page-level
               horizontal overflow on this panel before (the same markup pre-dated the migration).
@@ -186,14 +241,14 @@ export function PipelineDetailPage() {
         <div className="panel-head"><div><h2>{t('pipelines.history.title')}</h2><p className="muted small">{t('pipelines.history.description')}</p></div></div>
         {detail.revisions.length === 0 ? <EmptyState icon="clock" title={t('pipelines.history.empty')} /> : (
           <ul className="revision-list">{detail.revisions.map((revision) => (
-            <li key={revision.revision}><span className="mono">r{revision.revision}</span><span className="mono muted small">{revision.digest}</span><TonePill tone="ok" label={revision.status} className="max-[700px]:col-start-2" /><TimeAgo value={revision.publishedAt} /></li>
+            <li key={revision.revision}><span className="mono">r{revision.revision}</span><span className="mono muted small">{revision.digest}</span><RevisionPill status={revision.status} /><TimeAgo value={revision.publishedAt} /></li>
           ))}</ul>
         )}
       </section>
       <section className="panel panel-pad">
-        <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
+        <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">{t('pipelines.jobs.empty')}</p> : (
-          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[760px]:!w-auto max-[760px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label="Status"><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
+          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[760px]:!w-auto max-[760px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
         )}
       </section>
       <p className="table-footnote"><Icon name="alert" size={13} /> {t('pipelines.footnote')}</p>
