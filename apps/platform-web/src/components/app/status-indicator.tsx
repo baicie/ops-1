@@ -3,6 +3,7 @@ import { Icon } from '../Icons';
 import { useT } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import { cn } from '../../lib/utils';
+import { statusForCode, type StatusState } from '../status-tone';
 
 /**
  * The observational vocabulary of docs/09 §9.1, rendered as colour **plus** glyph **plus**
@@ -11,26 +12,25 @@ import { cn } from '../../lib/utils';
  *
  * A state is never folded into a neighbour to save a colour: "stopped on purpose" (STOPPED)
  * and "never configured" (DISABLED / UNINSTALLED) are different facts about a node.
+ *
+ * Which state a **wire code** means is not decided here: `status-tone.ts` owns that table so a
+ * code cannot be green on a card and blue in the table above it. This file only adds the states
+ * that never arrive as data (stale / loading / revoked / forbidden / conflict / noData / partial).
  */
 export type IndicatorState =
-  | 'ready'
-  | 'degraded'
-  | 'attention'
+  | StatusState
   | 'stale'
-  | 'unreachable'
   | 'revoked'
-  | 'stopped'
-  | 'unknown'
   | 'noData'
   | 'partial'
   | 'loading'
-  | 'error'
   | 'forbidden'
-  | 'conflict'
-  | 'notConfigured';
+  | 'conflict';
 
 const LABEL_KEYS: Record<IndicatorState, MessageKey> = {
   ready: 'state.ready',
+  // In flight: admitted and being worked on, which is not the same promise as READY.
+  running: 'state.running',
   degraded: 'state.degraded',
   attention: 'state.attention',
   stale: 'state.stale',
@@ -53,6 +53,7 @@ const LABEL_KEYS: Record<IndicatorState, MessageKey> = {
 /** One glyph per state, distinct within the four node states the spec singles out. */
 const GLYPHS: Record<IndicatorState, string> = {
   ready: 'check',
+  running: 'refresh',
   degraded: 'warning',
   attention: 'alert',
   stale: 'clock',
@@ -60,6 +61,8 @@ const GLYPHS: Record<IndicatorState, string> = {
   revoked: 'key',
   // A square pause, not a stop sign and not a gear: parked is neither broken nor unconfigured.
   stopped: 'pause',
+  // Not a clock: a clock says "we are waiting for this to finish", and UNKNOWN means we may
+  // never find out. The arrow keeps it apart from every "in progress" state.
   unknown: 'rotate',
   noData: 'file',
   partial: 'filter',
@@ -84,49 +87,31 @@ const STATE_STYLES: Partial<Record<IndicatorState, React.CSSProperties>> = {
   },
 };
 
-/** Wire codes that mean the same observational state; a code outside this map is UNKNOWN. */
-const CODE_STATES: Record<string, IndicatorState> = {
-  READY: 'ready',
-  ACTIVE: 'ready',
-  INSTALLED: 'ready',
-  CONFIRMED: 'ready',
-  PASSED: 'ready',
-  ONLINE: 'ready',
-  VERIFIED: 'ready',
-  DEGRADED: 'degraded',
-  UNHEALTHY: 'degraded',
-  ATTENTION: 'attention',
-  PENDING: 'attention',
-  PREPARING: 'attention',
-  STARTING: 'attention',
-  DRAINING: 'attention',
-  STAGED: 'attention',
-  UNREACHABLE: 'unreachable',
-  FAILED: 'error',
-  REJECTED: 'error',
-  UNKNOWN: 'unknown',
-  // Never configured: there is nothing to observe yet.
-  DISABLED: 'notConfigured',
-  UNINSTALLED: 'notConfigured',
-  // Configured and then stopped on purpose: a fact about the process, not about
-  // configuration, and not a healthy one - it must not be read as READY.
-  STOPPED: 'stopped',
-};
-
 /**
  * Effective state of an observed row.
  *
  * Priority: revocation, then a terminal failure the source already named (UNREACHABLE), then
  * staleness, then the stored code — a node that stopped reporting must never look READY
  * (docs/09 §9.5), and a node the Kernel already calls UNREACHABLE keeps that name.
+ * The code → state lookup is delegated to the single table in status-tone.ts.
  */
 export function indicatorStateForCode(code?: string | null, flags?: { stale?: boolean; revoked?: boolean }): IndicatorState {
   if (flags?.revoked) return 'revoked';
   if (!code) return flags?.stale ? 'stale' : 'unknown';
-  const state = CODE_STATES[code.toUpperCase()] ?? 'unknown';
+  const state = statusForCode(code)?.state ?? 'unknown';
   if (state === 'unreachable') return state;
   if (flags?.stale) return 'stale';
   return state;
+}
+
+/** The glyph the chip draws for a state; exported so tests can prove the shapes stay distinct. */
+export function glyphForState(state: IndicatorState): string {
+  return GLYPHS[state];
+}
+
+/** The localized label a chip falls back to when the caller does not print the wire code. */
+export function labelKeyForState(state: IndicatorState): MessageKey {
+  return LABEL_KEYS[state];
 }
 
 export function StatusIndicator({
