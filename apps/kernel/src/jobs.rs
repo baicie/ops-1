@@ -3452,6 +3452,7 @@ pub async fn cancel_job(
 #[cfg(test)]
 mod terminalization_tests {
     use super::*;
+    use sqlx::postgres::PgConnectOptions;
     use sqlx::PgPool;
     use tokio::sync::Mutex;
 
@@ -3469,14 +3470,41 @@ mod terminalization_tests {
         assert!(decode_pipeline_cursor("not*base64").is_err());
     }
 
+    /// Skipping is reserved for "no database configured". Once the variable is set, every way
+    /// the fixture can fail to reach the database panics: these tests used to report "ok" while
+    /// asserting nothing whenever the URL was unset, the server was down or the migration failed,
+    /// which made a green run meaningless.
     fn test_url() -> Option<String> {
-        std::env::var("OPSWEAVE_TEST_DATABASE_URL").ok()
+        match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+            Ok(url) => Some(url),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                panic!("OPSWEAVE_TEST_DATABASE_URL is set but is not valid UTF-8")
+            }
+        }
     }
 
     async fn test_pool() -> Option<PgPool> {
         let url = test_url()?;
-        let pool = PgPool::connect(&url).await.ok()?;
-        crate::db::migrate(&pool).await.ok()?;
+        // Parsed separately from the connection so the panics below can name the endpoint they
+        // tried without echoing the password embedded in the URL.
+        let options: PgConnectOptions = url.parse().unwrap_or_else(|error| {
+            panic!("OPSWEAVE_TEST_DATABASE_URL is set but is not a PostgreSQL URL: {error}")
+        });
+        let endpoint = format!(
+            "{}:{}/{}",
+            options.get_host(),
+            options.get_port(),
+            options.get_database().unwrap_or("<no database>")
+        );
+        let pool = PgPool::connect_with(options)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("OPSWEAVE_TEST_DATABASE_URL is set but the database is unusable: cannot connect to {endpoint}: {error}")
+            });
+        crate::db::migrate(&pool).await.unwrap_or_else(|error| {
+            panic!("OPSWEAVE_TEST_DATABASE_URL is set but the database is unusable: {endpoint} rejected the migrations: {error:#}")
+        });
         Some(pool)
     }
 
