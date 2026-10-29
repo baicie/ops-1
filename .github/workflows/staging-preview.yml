@@ -14,6 +14,15 @@ name: staging-preview
 # skipped, and the expected commit falls back to the dispatched ref HEAD (inputs.sha wins if given).
 # It occupies its own concurrency bucket (see the concurrency block below), so a verification run
 # and a deploy run never cancel each other in either direction.
+#
+# Two acceptance tiers, decided once by the plan job and read by every job that cares:
+#   core  a push, or a workflow_dispatch without full_suite=true: the three core specs only
+#         (staging-smoke, dual-surface, admin-shell), the 4.4 min path.
+#   full  workflow_dispatch full_suite=true, or a pull request that becomes ready_for_review: adds the
+#         eleven-file surfaces suite and the three seeded-data suites (one job each).
+# A step the tier leaves out is never silent: the record job writes it into health.json
+# (steps_not_run, with the reason) and into the PR comment. This repository has been bitten by
+# "green because nothing ran" before.
 
 on:
   push:
@@ -33,6 +42,11 @@ on:
         default: false
       verify_only:
         description: Run only the acceptance suites against the already-deployed staging host; the expected commit is the dispatched ref HEAD
+        required: false
+        type: boolean
+        default: false
+      full_suite:
+        description: Run the full acceptance suite (the eleven-file surfaces suite plus the three seeded-data suites) instead of the push-tier core run
         required: false
         type: boolean
         default: false
@@ -63,6 +77,56 @@ env:
   IMAGE_REPO: ghcr.io/baicie/opsweave
 
 jobs:
+  # The acceptance tier is decided once, before anything runs, and every job that cares reads
+  # plan.outputs.tier - so the gate that skips a step and the record that explains the skip cannot
+  # disagree. Two places deciding one skip is how a skip eventually gets reported wrongly.
+  #
+  #   core  a push, or a workflow_dispatch without full_suite=true: the three core specs only
+  #         (staging-smoke, dual-surface, admin-shell) - the 4.4 min path.
+  #   full  workflow_dispatch with full_suite=true, or a pull request that becomes ready_for_review:
+  #         adds the eleven-file surfaces suite and the three seeded-data suites.
+  # A step the tier leaves out is written down by the record job (health.json steps_not_run) instead
+  # of disappearing: this repository has already paid for "green because nothing ran" once.
+  plan:
+    name: plan the run tier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.tier.outputs.tier }}
+      reason: ${{ steps.tier.outputs.reason }}
+    steps:
+      - name: Choose the acceptance tier
+        id: tier
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          REF_NAME: ${{ github.ref_name }}
+          FULL_SUITE: ${{ inputs.full_suite }}
+        run: |
+          set -euo pipefail
+          if [ "$FULL_SUITE" = "true" ]; then
+            full_reason="workflow_dispatch asked for the full suite (full_suite=true)"
+          elif [ "$EVENT_NAME" = "pull_request" ] && [ "$EVENT_ACTION" = "ready_for_review" ]; then
+            full_reason="the pull request became ready for review"
+          else
+            full_reason=""
+          fi
+          if [ -n "$full_reason" ]; then
+            echo "tier=full" >> "$GITHUB_OUTPUT"
+            echo "reason=$full_reason" >> "$GITHUB_OUTPUT"
+            echo "::notice::acceptance tier full - $full_reason"
+            exit 0
+          fi
+          case "$EVENT_NAME" in
+            push) trigger="a push to $REF_NAME" ;;
+            workflow_dispatch) trigger="a workflow_dispatch without full_suite=true" ;;
+            *) trigger="event $EVENT_NAME" ;;
+          esac
+          reason="$trigger, so only the core path runs (staging-smoke.spec.ts, dual-surface.spec.ts, admin-shell.spec.ts)"
+          echo "tier=core" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "::notice::acceptance tier core - $reason. The surfaces suite and the three seeded-data suites are recorded as not-run in health.json; run workflow_dispatch with full_suite=true for the full suite."
+
   build:
     name: build image
     if: ${{ inputs.verify_only != true }}
@@ -365,15 +429,15 @@ jobs:
     # build is a direct need on purpose: the needs context only exposes direct dependencies, so
     # needs.build.outputs.sha resolves to nothing (and the first smoke case fails closed) whenever
     # build is only reached through deploy.
-    needs: [build, deploy]
+    # plan is a direct need for the same reason build is: the needs context only exposes direct
+    # dependencies, so needs.plan.outputs.tier would resolve to nothing - and a core-tier push would
+    # silently run every surfaces step - whenever plan were reached only through another job.
+    needs: [plan, build, deploy]
     runs-on: ubuntu-24.04
-    # Sized so that no step can be preempted by the job cap: 20 (core) + 40 (surfaces) + 20
-    # (seeded data: one step per spec file at 9 + 5 + 6, the same 20 the single step had) = 80
-    # minutes of step caps
-    # plus the dependency install. The previous 50 was already below the sum of its own step caps
-    # (60), so a slow surfaces run was killed by the job timeout instead of by its own, losing the
-    # per-step outcome the record step reports.
-    timeout-minutes: 85
+    # Sized so that no step can be preempted by the job cap: 20 (core) + 40 (surfaces) = 60 minutes
+    # of step caps plus the dependency install. The seeded-data suites are their own jobs now, so
+    # the 20 minutes they used to add no longer belong here.
+    timeout-minutes: 70
     # The suites certify whatever staging serves, so a failed or skipped deploy must not suppress
     # them. verify_only always runs; every other event keeps the deploy-success requirement.
     if: always() && (inputs.verify_only == true || needs.deploy.result == 'success')
@@ -382,6 +446,10 @@ jobs:
       url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
+      # Step outcomes, not job results: the record job has no other way to learn that core passed and
+      # surfaces did not, and a single job result would collapse the two into one.
+      core_outcome: ${{ steps.core.outcome }}
+      surfaces_outcome: ${{ steps.surfaces.outcome }}
     env:
       # Shared by every browser step below: one preview origin, one credential, one expected commit.
       OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
@@ -429,7 +497,7 @@ jobs:
       #                                    plugin-detail-tabs, business-workspace, overview-partial,
       #                                    async-stale, i18n-locale, dialog-a11y,
       #                                    g08-batch-c, g08-batch-c-mobile
-      #   this job, "seeded data"          studio, visual-layout, visual - KNOWN-FLAKY, see the
+      #   seeded-* jobs (one each)        studio, visual-layout, visual - KNOWN-FLAKY, see the
       #                                    step below. studio and visual-layout navigate to the
       #                                    literal id host-metrics-pipeline and assert a published
       #                                    revision, a rendered node graph and a job that reaches
@@ -443,9 +511,9 @@ jobs:
       #                                    host-side demo source server
       #                                    (deployments/staging/README.md, "DEMO source"), and the
       #                                    instance comes from installing the demo plugin. Each of
-      #                                    the three runs as its own known-flaky step, so the
-      #                                    record step can name the file that actually failed, and
-      #                                    none of them gates the job until a seeding step exists.
+      #                                    the three runs as its own known-flaky job, so the record
+      #                                    job can name the file that actually failed, and none of
+      #                                    them gates the run until a seeding step exists.
       #   data-foundation.yml (seeded)     data-foundation, data-foundation-flows
       #                                    (studio and visual-layout also run there against a locally
       #                                    seeded stack, but that gate is path-filtered, so it never
@@ -471,7 +539,9 @@ jobs:
       # eleven specs. Both outcomes are recorded separately in the next step and in the PR comment.
       - name: Playwright admin, plugin, i18n and g08 surfaces
         id: surfaces
-        if: always() && steps.mode.outputs.mode == 'playwright'
+        # Tier gate: this is the 16.8 min step, so it runs in the full tier only. A core-tier run
+        # records it in health.json as not-run with that reason - it never just looks absent.
+        if: always() && steps.mode.outputs.mode == 'playwright' && needs.plan.outputs.tier == 'full'
         timeout-minutes: 40
         run: |
           set -euo pipefail
@@ -489,193 +559,6 @@ jobs:
             dialog-a11y.spec.ts \
             g08-batch-c.spec.ts \
             g08-batch-c-mobile.spec.ts
-
-      # The suites whose data this workflow does not own: studio and visual-layout read the seeded
-      # staging pipeline, visual reads a live demo instance. They run here rather than being
-      # skipped - an absent file list and --grep are both forbidden - and continue-on-error keeps a
-      # missing seed from reddening the deployment while the reason is still recorded in
-      # health.json and in a warning annotation. Removing the three continue-on-error lines is the
-      # whole change once a seeding step lands.
-      #
-      # One step per spec file on purpose. The record step below reads steps.<id>.outcome, so the
-      # failed file is read off its own step instead of being inferred from a group-wide failure:
-      # the previous single step over all three could only report the whole group, and the fixed
-      # reason it printed blamed studio and visual-layout for a missing seed on run 40818576895
-      # where both were green (8/8 and 4/4) and only visual.spec.ts was red. The three caps sum to
-      # the 20 minutes the single step had, so the smoke job's cap arithmetic is unchanged.
-      - name: Playwright seeded-data suite - studio (host-metrics-pipeline) [known-flaky]
-        id: seeded_studio
-        if: always() && steps.mode.outputs.mode == 'playwright'
-        timeout-minutes: 9
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/staging-preview
-          # One --output per spec file so no neighbouring run overwrites its traces.
-          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-studio \
-            studio.spec.ts
-
-      - name: Playwright seeded-data suite - visual layout (host-metrics-pipeline) [known-flaky]
-        id: seeded_visual_layout
-        if: always() && steps.mode.outputs.mode == 'playwright'
-        timeout-minutes: 5
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/staging-preview
-          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-vlayout \
-            visual-layout.spec.ts
-
-      - name: Playwright seeded-data suite - visual (demo plugin, live instance) [known-flaky]
-        id: seeded_visual
-        if: always() && steps.mode.outputs.mode == 'playwright'
-        timeout-minutes: 6
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/staging-preview
-          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-visual \
-            visual.spec.ts
-
-      - name: Record the browser suite results
-        if: always() && steps.mode.outputs.mode == 'playwright'
-        env:
-          CORE_OUTCOME: ${{ steps.core.outcome }}
-          SURFACES_OUTCOME: ${{ steps.surfaces.outcome }}
-          STUDIO_OUTCOME: ${{ steps.seeded_studio.outcome }}
-          VISUAL_LAYOUT_OUTCOME: ${{ steps.seeded_visual_layout.outcome }}
-          VISUAL_OUTCOME: ${{ steps.seeded_visual.outcome }}
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/staging-preview
-          python3 - <<'PY'
-          import json, os
-
-          # What each seeded-data spec file needs that this workflow does not create. The reason is
-          # composed from the files whose own step actually failed, so it can never name a green
-          # spec or send the next reader to the wrong suite - the fault of the fixed string this
-          # replaces, which blamed studio and visual-layout for a missing seed on run 40818576895
-          # where both were green and only visual.spec.ts was red.
-          SEED_NEEDS = {
-              "studio.spec.ts":
-                  "the out-of-band pipeline seed - the literal id host-metrics-pipeline with a "
-                  "published revision, a rendered node graph and a job that reaches Succeeded "
-                  "(admin API seed plus a host-side demo source server, deployments/staging/"
-                  "README.md 'DEMO source')",
-              "visual-layout.spec.ts":
-                  "the same out-of-band pipeline seed as studio.spec.ts - the literal id "
-                  "host-metrics-pipeline with a published revision, a rendered node graph and a "
-                  "job that reaches Succeeded",
-              "visual.spec.ts":
-                  "an installed demo plugin and a live instance - it drives /ext/trusted-team/"
-                  "hello and an instance log stream, which exist only once the demo plugin is "
-                  "installed and a node runs it",
-          }
-
-          NOTHING_CREATES_IT = (
-              "No step in this workflow creates either resource: the pipeline is seeded out of "
-              "band through the admin API plus a host-side demo source server, and the instance "
-              "comes from installing the demo plugin. Known-flaky until a seeding step lands."
-          )
-
-          # (name, known_flaky, [(the spec files one step covers, that step's outcome), ...]).
-          # A group with one step per spec file knows exactly which file failed; a group that runs
-          # several files in one step can only report them together.
-          GROUPS = [
-              ("core", False, [
-                  (("staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts"),
-                   os.environ.get("CORE_OUTCOME", "")),
-              ]),
-              ("admin-plugin-i18n", False, [
-                  (("admin-pages.spec.ts", "admin-polish.spec.ts", "plugin-surfaces.spec.ts",
-                    "plugin-detail-tabs.spec.ts", "business-workspace.spec.ts",
-                    "overview-partial.spec.ts", "async-stale.spec.ts", "i18n-locale.spec.ts",
-                    "dialog-a11y.spec.ts", "g08-batch-c.spec.ts", "g08-batch-c-mobile.spec.ts"),
-                   os.environ.get("SURFACES_OUTCOME", "")),
-              ]),
-              ("seeded-data", True, [
-                  (("studio.spec.ts",), os.environ.get("STUDIO_OUTCOME", "")),
-                  (("visual-layout.spec.ts",), os.environ.get("VISUAL_LAYOUT_OUTCOME", "")),
-                  (("visual.spec.ts",), os.environ.get("VISUAL_OUTCOME", "")),
-              ]),
-          ]
-
-          def seed_reason(parts):
-              """A reason naming only the specs that are not green, and what each one needs."""
-              clauses = []
-              data_bound = False
-              for spec_files, outcome in parts:
-                  if outcome == "success":
-                      continue
-                  for spec in spec_files:
-                      needs = SEED_NEEDS.get(spec)
-                      if outcome in ("", "skipped", "cancelled"):
-                          clauses.append("%s did not run (outcome: %s)"
-                                         % (spec, outcome or "not-run"))
-                      elif needs is None:
-                          clauses.append("%s failed (outcome: %s) with no recorded data dependency"
-                                         % (spec, outcome))
-                      else:
-                          data_bound = True
-                          clauses.append("%s failed (outcome: %s): it needs %s"
-                                         % (spec, outcome, needs))
-              if not clauses:
-                  return ""
-              reason = "seed-or-data-missing - " + "; ".join(clauses) + "."
-              # The shared tail explains a missing resource, so it only belongs on a data-bound run.
-              return reason + " " + NOTHING_CREATES_IT if data_bound else reason
-
-          checks = []
-          for name, known_flaky, parts in GROUPS:
-              # detail keeps the step granularity: a step that runs several files cannot tell them
-              # apart, so it must not read as if every file in it were red.
-              detail = "; ".join("%s: %s" % (outcome or "not-run", ", ".join(spec_files))
-                                 for spec_files, outcome in parts)
-              check = {
-                  "name": name,
-                  "ok": all(outcome == "success" for _files, outcome in parts),
-                  "known_flaky": known_flaky,
-                  "detail": detail,
-                  # Exact only where a step covers one file; a multi-file step is in detail instead.
-                  "failed_files": [spec for spec_files, outcome in parts
-                                   if outcome != "success" and len(spec_files) == 1
-                                   for spec in spec_files],
-              }
-              reason = seed_reason(parts) if known_flaky else ""
-              if reason:
-                  check["reason"] = reason
-              checks.append(check)
-
-          # A known-flaky group still runs and is still reported; it is only excluded from the gate.
-          ok = all(check["ok"] for check in checks if not check["known_flaky"])
-
-          # The reason must be visible in the run summary, not only in a downloaded artifact.
-          for check in checks:
-              if check.get("reason") and not check["ok"]:
-                  print("::warning::known-flaky suite group '%s' - %s (outcome: %s)"
-                        % (check["name"], check["reason"], check["detail"]))
-
-          payload = {
-              "mode": "playwright",
-              "base_url": os.environ.get("OPSWEAVE_URL", ""),
-              "ok": ok,
-              "checks": checks,
-              "known_flaky_reasons": [check["reason"] for check in checks if check.get("reason")],
-              "suite_groups": [
-                  {"name": name,
-                   "known_flaky": known_flaky,
-                   "files": [spec for spec_files, _outcome in parts for spec in spec_files],
-                   "steps": [{"files": list(spec_files), "outcome": outcome or "not-run"}
-                             for spec_files, outcome in parts]}
-                  for name, known_flaky, parts in GROUPS
-              ],
-              "exit_code": 0 if ok else 1,
-          }
-          with open("artifacts/staging-preview/health.json", "w", encoding="utf-8") as handle:
-              json.dump(payload, handle, indent=2)
-              handle.write("\n")
-          print(json.dumps(payload, indent=2))
-          PY
 
       - name: Inline HTTP smoke (fallback)
         if: steps.mode.outputs.mode == 'http'
@@ -750,7 +633,9 @@ jobs:
               "ok": all(check["ok"] for check in checks),
               "checks": checks,
           }
-          with open("artifacts/staging-preview/health.json", "w", encoding="utf-8") as handle:
+          # The record job owns health.json on every path, so this fallback keeps its own evidence
+          # file; the PR comment falls back to it when health.json carries no http result.
+          with open("artifacts/staging-preview/http-smoke.json", "w", encoding="utf-8") as handle:
               json.dump(payload, handle, indent=2)
               handle.write("\n")
           print(json.dumps(payload, indent=2))
@@ -767,9 +652,495 @@ jobs:
             tests/ui/test-results/
           if-no-files-found: warn
 
+  # The three seeded-data suites run one spec file per job. Their data is created out of band (a
+  # host-metrics-pipeline with a published revision, plus an installed demo plugin with a live
+  # instance - deployments/staging/README.md, "DEMO source"); no step in this workflow creates either,
+  # so all three stay known-flaky and none of them gates the run.
+  #
+  # Why parallel: the three used to be three steps of one job, run one after another, and they share
+  # no mutable state. studio.spec.ts writes (draft create/save, one publish on host-metrics-pipeline,
+  # one job submission); visual-layout.spec.ts only reads geometry of the same pages (card count and
+  # box heights, canvas box, .studio-rf-node presence, page overflow) and asserts no data value a
+  # publish would change; visual.spec.ts touches no pipeline at all (overview/plugins/nodes/activity/
+  # access/settings matrices, the /ext/trusted-team/hello extension and an instance log stream). The
+  # editor opens the published revision unless a draft is explicitly created ("Create draft",
+  # studio.spec.ts:49), so a draft studio holds is not picked up by the other two.
+  seeded_studio:
+    name: seeded-data studio [known-flaky]
+    needs: [plan, build, deploy, smoke]
+    if: ${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
+    outputs:
+      # The suite's own outcome, not the job's: the run step is continue-on-error, so a red suite
+      # leaves the job green (it must never gate) while the record job still learns what happened.
+      outcome: ${{ steps.play.outcome }}
+    env:
+      OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
+      OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
+      OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
+      OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace and Chromium
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+
+      - name: Playwright seeded-data suite - studio (host-metrics-pipeline) [known-flaky]
+        id: play
+        timeout-minutes: 9
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-studio \
+            studio.spec.ts
+
+      - name: Name the outcome in the run summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.play.outcome }}
+        run: |
+          set -euo pipefail
+          echo "studio.spec.ts outcome: ${OUTCOME:-not-run}"
+          if [ "${OUTCOME:-not-run}" != "success" ]; then
+            echo "::warning::seeded-data suite studio.spec.ts is ${OUTCOME:-not-run}. It does not gate this run; health.json names the data it needs."
+          fi
+
+      - name: Upload the seeded-data evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-seeded-studio
+          path: |
+            artifacts/staging-preview/
+            artifacts/ui/
+            tests/ui/test-results/
+          if-no-files-found: warn
+
+  seeded_visual_layout:
+    name: seeded-data visual layout [known-flaky]
+    needs: [plan, build, deploy, smoke]
+    if: ${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
+    outputs:
+      # The suite's own outcome, not the job's: the run step is continue-on-error, so a red suite
+      # leaves the job green (it must never gate) while the record job still learns what happened.
+      outcome: ${{ steps.play.outcome }}
+    env:
+      OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
+      OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
+      OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
+      OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace and Chromium
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+
+      - name: Playwright seeded-data suite - visual layout (host-metrics-pipeline) [known-flaky]
+        id: play
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-vlayout \
+            visual-layout.spec.ts
+
+      - name: Name the outcome in the run summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.play.outcome }}
+        run: |
+          set -euo pipefail
+          echo "visual-layout.spec.ts outcome: ${OUTCOME:-not-run}"
+          if [ "${OUTCOME:-not-run}" != "success" ]; then
+            echo "::warning::seeded-data suite visual-layout.spec.ts is ${OUTCOME:-not-run}. It does not gate this run; health.json names the data it needs."
+          fi
+
+      - name: Upload the seeded-data evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-seeded-vlayout
+          path: |
+            artifacts/staging-preview/
+            artifacts/ui/
+            tests/ui/test-results/
+          if-no-files-found: warn
+
+  seeded_visual:
+    name: seeded-data visual [known-flaky]
+    # Runs after smoke: all four jobs drive the same single staging host, and the core/surfaces
+    # suites are timing sensitive (which is why core and surfaces never run in parallel either).
+    # Sequencing this group behind smoke keeps the only new concurrency inside the group.
+    needs: [plan, build, deploy, smoke]
+    if: ${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
+    outputs:
+      # The suite's own outcome, not the job's: the run step is continue-on-error, so a red suite
+      # leaves the job green (it must never gate) while the record job still learns what happened.
+      outcome: ${{ steps.play.outcome }}
+    env:
+      OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
+      OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
+      OPSWEAVE_ADMIN_EMAIL: ${{ secrets.STAGING_ADMIN_EMAIL }}
+      OPSWEAVE_ADMIN_PASSWORD: ${{ secrets.STAGING_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace and Chromium
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+
+      - name: Playwright seeded-data suite - visual (demo plugin, live instance) [known-flaky]
+        id: play
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-visual \
+            visual.spec.ts
+
+      - name: Name the outcome in the run summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.play.outcome }}
+        run: |
+          set -euo pipefail
+          echo "visual.spec.ts outcome: ${OUTCOME:-not-run}"
+          if [ "${OUTCOME:-not-run}" != "success" ]; then
+            echo "::warning::seeded-data suite visual.spec.ts is ${OUTCOME:-not-run}. It does not gate this run; health.json names the data it needs."
+          fi
+
+      - name: Upload the seeded-data evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-seeded-visual
+          path: |
+            artifacts/staging-preview/
+            artifacts/ui/
+            tests/ui/test-results/
+          if-no-files-found: warn
+
+  # health.json has exactly one author: this job. It is the only place that knows every suite's fate -
+  # a step outcome for core/surfaces, a job output plus job result for the three seeded suites - and it
+  # is where a suite that did not run is written down instead of vanishing. A skipped step carries the
+  # reason it was skipped, because "green because nothing ran" is a failure this repository has already
+  # paid for once.
+  record:
+    name: record the acceptance evidence
+    needs: [plan, smoke, seeded_studio, seeded_visual_layout, seeded_visual]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Always: a red core step, a failed seeded job and a cancelled run all still owe the reader a record.
+    if: always()
+    environment:
+      name: staging
+      url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
+    steps:
+      - name: Compose health.json
+        if: always()
+        env:
+          TIER: ${{ needs.plan.outputs.tier }}
+          TIER_REASON: ${{ needs.plan.outputs.reason }}
+          OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
+          SMOKE_MODE: ${{ needs.smoke.outputs.mode }}
+          CORE_OUTCOME: ${{ needs.smoke.outputs.core_outcome }}
+          SURFACES_OUTCOME: ${{ needs.smoke.outputs.surfaces_outcome }}
+          STUDIO_OUTCOME: ${{ needs.seeded_studio.outputs.outcome }}
+          STUDIO_RESULT: ${{ needs.seeded_studio.result }}
+          VISUAL_LAYOUT_OUTCOME: ${{ needs.seeded_visual_layout.outputs.outcome }}
+          VISUAL_LAYOUT_RESULT: ${{ needs.seeded_visual_layout.result }}
+          VISUAL_OUTCOME: ${{ needs.seeded_visual.outputs.outcome }}
+          VISUAL_RESULT: ${{ needs.seeded_visual.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          python3 - <<'PY'
+          import json, os
+
+          TIER = os.environ.get("TIER", "") or "unknown"
+          TIER_REASON = os.environ.get("TIER_REASON", "") or ""
+          MODE = os.environ.get("SMOKE_MODE", "") or "unknown"
+
+          # What each seeded-data spec file needs that this workflow does not create. The reason is composed
+          # from the files whose own suite actually failed, so it can never name a green spec or send the next
+          # reader to the wrong suite - the fault of the fixed string this replaces, which blamed studio and
+          # visual-layout for a missing seed on run 40818576895 where both were green (8/8 and 4/4) and only
+          # visual.spec.ts was red.
+          SEED_NEEDS = {
+              "studio.spec.ts":
+                  "the out-of-band pipeline seed - the literal id host-metrics-pipeline with a published "
+                  "revision, a rendered node graph and a job that reaches Succeeded (admin API seed plus a "
+                  "host-side demo source server, deployments/staging/README.md 'DEMO source')",
+              "visual-layout.spec.ts":
+                  "the same out-of-band pipeline seed as studio.spec.ts - the literal id host-metrics-pipeline "
+                  "with a published revision, a rendered node graph and a job that reaches Succeeded",
+              "visual.spec.ts":
+                  "an installed demo plugin and a live instance - it drives /ext/trusted-team/hello and an "
+                  "instance log stream, which exist only once the demo plugin is installed and a node runs it",
+          }
+
+          NOTHING_CREATES_IT = (
+              "No step in this workflow creates either resource: the pipeline is seeded out of band through "
+              "the admin API plus a host-side demo source server, and the instance comes from installing the "
+              "demo plugin. Known-flaky until a seeding step lands."
+          )
+
+          CORE_FILES = ("staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts")
+          SURFACES_FILES = (
+              "admin-pages.spec.ts", "admin-polish.spec.ts", "plugin-surfaces.spec.ts",
+              "plugin-detail-tabs.spec.ts", "business-workspace.spec.ts", "overview-partial.spec.ts",
+              "async-stale.spec.ts", "i18n-locale.spec.ts", "dialog-a11y.spec.ts",
+              "g08-batch-c.spec.ts", "g08-batch-c-mobile.spec.ts",
+          )
+
+          # (step id, group, the tier the step belongs to, spec files, reported outcome, job result).
+          # A step inside the smoke job reports steps.<id>.outcome; a seeded suite is its own job, so its
+          # outcome is that job's output and its result is the job's result - "skipped" when the tier left it
+          # out, "failure" when the job died before the suite could run.
+          STEPS = [
+              ("core", "core", "core", CORE_FILES,
+               os.environ.get("CORE_OUTCOME", ""), ""),
+              ("surfaces", "admin-plugin-i18n", "full", SURFACES_FILES,
+               os.environ.get("SURFACES_OUTCOME", ""), ""),
+              ("seeded_studio", "seeded-data", "full", ("studio.spec.ts",),
+               os.environ.get("STUDIO_OUTCOME", ""), os.environ.get("STUDIO_RESULT", "")),
+              ("seeded_visual_layout", "seeded-data", "full", ("visual-layout.spec.ts",),
+               os.environ.get("VISUAL_LAYOUT_OUTCOME", ""), os.environ.get("VISUAL_LAYOUT_RESULT", "")),
+              ("seeded_visual", "seeded-data", "full", ("visual.spec.ts",),
+               os.environ.get("VISUAL_OUTCOME", ""), os.environ.get("VISUAL_RESULT", "")),
+          ]
+
+          # (group name, known_flaky). A known-flaky group still runs and is still reported; it is only
+          # excluded from the gate.
+          GROUPS = [("core", False), ("admin-plugin-i18n", False), ("seeded-data", True)]
+
+
+          def resolve_status(step_tier, reported, job_result):
+              # The suite's own outcome, when it reported one.
+              if reported in ("success", "failure"):
+                  return ("passed" if reported == "success" else "failed"), reported
+              # It never reported. Say exactly why, cheapest explanation first: the run mode, the tier, the
+              # job's own fate, and only then "the job ran but never reached the suite".
+              if MODE == "http":
+                  return "skipped", "mode=http"
+              if MODE != "playwright":
+                  # No mode was chosen at all: the smoke job never ran (its deploy dependency did
+                  # not succeed) or the run was cancelled, so this step was never evaluated.
+                  return "skipped", "smoke-job-not-run"
+              if step_tier == "full" and TIER == "core":
+                  return "skipped", "tier=core"
+              if job_result in ("skipped", "cancelled", ""):
+                  return "skipped", (job_result or "not-run")
+              return "failed", "job-%s" % job_result
+
+
+          records = []
+          for step_id, group, step_tier, files, reported, job_result in STEPS:
+              status, short = resolve_status(step_tier, reported, job_result)
+              records.append({
+                  "step": step_id,
+                  "group": group,
+                  "spec_files": list(files),
+                  "status": status,
+                  "outcome": reported or (job_result or "not-run"),
+                  "reported": reported in ("success", "failure"),
+                  "short_reason": short,
+              })
+
+
+          def not_run_reason(record):
+              short = record["short_reason"]
+              if short == "tier=core":
+                  return ("tier=core: %s. This step did not run in the core tier and nothing about it failed; "
+                          "run workflow_dispatch with full_suite=true to execute it."
+                          % (TIER_REASON or "only the core path runs on this trigger"))
+              if short.startswith("mode="):
+                  return ("%s: tests/ui/staging-smoke.spec.ts is absent, so this run took the inline HTTP "
+                          "smoke path and no Playwright suite ran." % short)
+              if short == "smoke-job-not-run":
+                  return ("smoke-job-not-run: the smoke job did not run in this workflow run (its "
+                          "dependency did not succeed, or the run was cancelled), so this step was "
+                          "never evaluated. Nothing about it failed.")
+              if short == "cancelled":
+                  return ("cancelled: the run was cancelled before this step finished; nothing about it "
+                          "failed.")
+              return ("%s: the job that owns this step never reached it; read the job result of its "
+                      "dependency." % short)
+
+
+          def seed_reason(group_records):
+              clauses = []
+              data_bound = False
+              for record in group_records:
+                  # A skipped step was excluded by the tier or by the run mode; that is recorded in
+                  # steps_not_run, and calling it a missing seed would be a wrong reason.
+                  if record["status"] != "failed":
+                      continue
+                  for spec in record["spec_files"]:
+                      if not record["reported"]:
+                          clauses.append("%s did not run: the job never reached the suite (job result: %s) - "
+                                         "read the job log" % (spec, record["outcome"]))
+                          continue
+                      needs = SEED_NEEDS.get(spec)
+                      if needs is None:
+                          clauses.append("%s failed (outcome: %s) with no recorded data dependency"
+                                         % (spec, record["outcome"]))
+                      else:
+                          data_bound = True
+                          clauses.append("%s failed (outcome: %s): it needs %s"
+                                         % (spec, record["outcome"], needs))
+              if not clauses:
+                  return ""
+              if data_bound:
+                  return "seed-or-data-missing - " + "; ".join(clauses) + ". " + NOTHING_CREATES_IT
+              return "suite-did-not-run - " + "; ".join(clauses) + "."
+
+
+          checks = []
+          for group, known_flaky in GROUPS:
+              group_records = [record for record in records if record["group"] == group]
+              failures = [record for record in group_records if record["status"] == "failed"]
+              if failures:
+                  status = "failed"
+              elif any(record["status"] == "passed" for record in group_records):
+                  status = "passed"
+              else:
+                  status = "skipped"
+              check = {
+                  "name": group,
+                  # detail keeps the step granularity: a step that runs several files cannot tell them apart,
+                  # so it must not read as if every file in it were red.
+                  "detail": "; ".join("%s: %s" % (record["outcome"], ", ".join(record["spec_files"]))
+                                      for record in group_records),
+                  "status": status,
+                  "ok": status == "passed",
+                  "known_flaky": known_flaky,
+                  "steps": [record["step"] for record in group_records],
+                  # Exact only where a step covers one file; a multi-file step is in detail instead.
+                  "failed_files": [spec for record in failures if len(record["spec_files"]) == 1
+                                   for spec in record["spec_files"]],
+              }
+              if status == "skipped":
+                  check["skip_reason"] = "; ".join("%s: %s" % (record["step"], record["short_reason"])
+                                                   for record in group_records)
+              if known_flaky and status == "failed":
+                  reason = seed_reason(group_records)
+                  if reason:
+                      check["reason"] = reason
+              checks.append(check)
+
+          # The gate: a known-flaky group never gates, and a step the tier excluded is not a failure - it is
+          # written into steps_not_run instead of being counted as green.
+          ok = all(check["status"] != "failed" for check in checks if not check["known_flaky"])
+
+          steps_not_run = [
+              {"step": record["step"],
+               "group": record["group"],
+               "spec_files": record["spec_files"],
+               "short_reason": record["short_reason"],
+               "reason": not_run_reason(record)}
+              for record in records if record["status"] == "skipped"
+          ]
+
+          # Every skip is announced in the run summary, not only in the downloaded artifact.
+          for entry in steps_not_run:
+              print("::notice::step %s did not run (%s): %s"
+                    % (entry["step"], entry["short_reason"], entry["reason"]))
+          for check in checks:
+              if check.get("reason"):
+                  print("::warning::known-flaky suite group '%s' - %s (outcome: %s)"
+                        % (check["name"], check["reason"], check["detail"]))
+
+          payload = {
+              "mode": MODE,
+              "tier": TIER,
+              "tier_reason": TIER_REASON,
+              "base_url": os.environ.get("OPSWEAVE_URL", ""),
+              "ok": ok,
+              "checks": checks,
+              "steps_not_run": steps_not_run,
+              "known_flaky_reasons": [check["reason"] for check in checks if check.get("reason")],
+              "suite_groups": [
+                  {"name": check["name"],
+                   "known_flaky": check["known_flaky"],
+                   "status": check["status"],
+                   "files": [spec for record in records if record["group"] == check["name"]
+                             for spec in record["spec_files"]],
+                   "steps": [{"files": record["spec_files"], "outcome": record["outcome"]}
+                             for record in records if record["group"] == check["name"]]}
+                  for check in checks
+              ],
+              "exit_code": 0 if ok else 1,
+          }
+          with open("artifacts/staging-preview/health.json", "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, indent=2)
+              handle.write("\n")
+          print(json.dumps(payload, indent=2))
+          PY
+
+      - name: Upload the acceptance record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-health
+          path: artifacts/staging-preview/
+          if-no-files-found: warn
+
   report:
     name: report to pull request
-    needs: [build, deploy, smoke]
+    needs: [build, deploy, smoke, record]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: always()
@@ -818,8 +1189,24 @@ jobs:
               known = {"success": "success", "failure": "failure", "cancelled": "cancelled", "skipped": "skipped"}
               return known.get(value or "", value or "unknown")
 
+          def check_label(item):
+              # A step the tier excluded is "skipped", never "ok" and never "FAIL": scoring it green is
+              # the "green because nothing ran" failure this record exists to prevent.
+              if item.get("status") == "skipped":
+                  return "skipped"
+              return "ok" if item.get("ok") else "FAIL"
+
+          def not_run_summary(payload):
+              steps = payload.get("steps_not_run") or []
+              if not steps:
+                  return "none"
+              return "; ".join("%s (%s)" % (step.get("step"), step.get("short_reason") or "not-run")
+                              for step in steps)
+
           host = load("artifacts/host-status.json") or {}
-          health = load("artifacts/health.json") or {}
+          # health.json is written by the record job on every path; the inline HTTP fallback keeps its
+          # own file so the two can never overwrite each other once the artifacts are merged.
+          health = load("artifacts/health.json") or load("artifacts/http-smoke.json") or {}
           last = host.get("last_deploy") or {}
           served = host.get("served_commit") or {}
 
@@ -832,7 +1219,7 @@ jobs:
               probe = health["health"]
               detail = "livez=%s readyz=%s root=%s" % (probe.get("livez"), probe.get("readyz"), probe.get("root"))
           elif isinstance(health.get("checks"), list):
-              detail = ", ".join("%s=%s" % (item.get("name"), "ok" if item.get("ok") else "FAIL") for item in health["checks"])
+              detail = ", ".join("%s=%s" % (item.get("name"), check_label(item)) for item in health["checks"])
           elif isinstance(health.get("ok"), bool):
               detail = "ok" if health["ok"] else "FAIL"
           elif health.get("exit_code") is not None:
@@ -845,6 +1232,8 @@ jobs:
               ("Deploy", cell(os.environ.get("DEPLOY_RESULT"))),
               ("Health (CI)", cell(os.environ.get("SMOKE_RESULT"))),
               ("Health detail", detail),
+              ("Suite tier", "%s - %s" % (health.get("tier") or "unrecorded", health.get("tier_reason") or "no tier recorded")),
+              ("Not run this run", not_run_summary(health)),
               ("Smoke mode", os.environ.get("SMOKE_MODE") or "unknown"),
               ("Previous successful deploy", os.environ.get("PREVIOUS_SHA") or "none recorded"),
               ("Rollback", rollback),

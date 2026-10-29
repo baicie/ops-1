@@ -19,6 +19,8 @@
 #
 # Overrides used by local rehearsal only: OPSWEAVE_STAGING_ROOT, OPSWEAVE_STAGING_DATA,
 # OPSWEAVE_STAGING_BACKUPS, OPSWEAVE_STAGING_LOGS, OPSWEAVE_BASE_URL, OPSWEAVE_APP_SERVICES.
+# Image transport: OPSWEAVE_PULL_MIRRORS (registry acceleration, empty disables it),
+# OPSWEAVE_MIRROR_PULL_TIMEOUT, OPSWEAVE_PULL_TIMEOUT, OPSWEAVE_REQUIRE_PULL (see prewarm_image).
 
 set -euo pipefail
 
@@ -643,6 +645,76 @@ pull_image() {
   log "pulled $ref (digest: ${IMAGE_DIGEST:-unknown})"
 }
 
+# --- Image pull sources -----------------------------------------------------------------------
+# The staging host reaches the ghcr.io blob CDN at 33-44 KB/s (measured 2026-10-29) while
+# ghcr.nju.edu.cn serves the same layers at ~930 KB/s, so a cold deploy spends most of its wall
+# clock waiting on a network path that does not have to be that slow.
+#
+# A mirror is only usable here because the image is fetched **by digest**: the manifest and every
+# layer are addressed by their SHA-256, so a mirror that served different bytes would fail docker's
+# own digest check instead of being deployed. Accelerating is therefore a bandwidth question, not a
+# trust question - whereas pulling a *tag* from a third party would be a trust question. That is why
+# a tag is never a mirror candidate, and why the digest itself is always read from the official
+# registry: a digest read from the accelerator would let the accelerator choose the content.
+#
+# Nothing here authenticates to a mirror: the ghcr.io credentials from ghcr.token stay with ghcr.io,
+# and an anonymous pull is all an acceleration source should ever need.
+#
+# OPSWEAVE_PULL_MIRRORS          comma-separated registry hosts, tried in order before ghcr.io.
+#                                Unset -> ghcr.nju.edu.cn. Set but empty -> acceleration disabled.
+# OPSWEAVE_MIRROR_PULL_TIMEOUT   one bound per candidate (default 300 s). The compressed layers of
+#                                this image total ~68 MB, i.e. ~75 s at the measured 930 KB/s, so
+#                                300 s is a 4x margin that still leaves ghcr.io its own budget
+#                                (OPSWEAVE_PULL_TIMEOUT, 900 s) when every mirror stalls.
+image_pull_mirrors() {
+  # ${VAR-default}, not ${VAR:-default}: an explicitly empty value means "no mirrors".
+  printf '%s' "${OPSWEAVE_PULL_MIRRORS-ghcr.nju.edu.cn}"
+}
+
+image_repo_path() {
+  # ghcr.io/baicie/opsweave -> baicie/opsweave: a mirror is another registry host, so it serves the
+  # same repository path under its own name.
+  printf '%s' "${IMAGE_REPO#*/}"
+}
+
+is_sha256() {
+  case "${1-}" in
+    sha256:*) ;;
+    *) return 1 ;;
+  esac
+  [ "${#1}" -eq 71 ] || return 1
+  case "${1#sha256:}" in
+    *[!0-9a-f]*) return 1 ;;
+  esac
+  return 0
+}
+
+resolve_image_digest() {
+  local ref="$IMAGE_REPO:$1" candidate
+  # buildx knows the top-level (index) digest exactly, and imagetools only talks to the registry -
+  # no builder instance is needed for this.
+  candidate="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$ref" 2>/dev/null || true)"
+  if is_sha256 "$candidate"; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  # Fallback for a host without the buildx plugin: the linux/amd64 descriptor digest out of
+  # `docker manifest inspect`, parsed with awk because the host has no jq and no python (the same
+  # constraint json_or_null works under). It addresses the same image content as the index above.
+  candidate="$(docker manifest inspect "$ref" 2>/dev/null | awk '
+    /"digest"[[:space:]]*:/ {
+      if (match($0, /sha256:[0-9a-f]{64}/)) pending = substr($0, RSTART, RLENGTH)
+    }
+    /"architecture"[[:space:]]*:[[:space:]]*"amd64"/ { if (pending != "" && found == "") found = pending }
+    END { if (found != "") print found }
+  ' || true)"
+  if is_sha256 "$candidate"; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  return 1
+}
+
 # The registry round trip is the one step whose duration is set by the network, not by this host,
 # and it is the slowest thing a deploy does on a cold host. It runs before acquire_deploy_lock so
 # the critical section only ever covers work this host bounds itself (compose up, health, checks):
@@ -651,14 +723,57 @@ pull_image() {
 # there is nothing to roll back. The tag is the full commit SHA, so the image warmed here is the
 # exact one the locked section needs: pull_image finds it present and skips the registry entirely.
 prewarm_image() {
-  local sha="$1"
+  local sha="$1" ref="$IMAGE_REPO:$1" mirrors="" digest="" candidate="" pulled=""
+
+  # Fast path, unchanged: the tag is the full commit SHA, so an image already on this host is exactly
+  # the image this release needs and no registry round trip - mirror or official - can add anything.
+  if docker image inspect "$ref" >/dev/null 2>&1 && [ "${OPSWEAVE_REQUIRE_PULL:-0}" != "1" ]; then
+    log "image $ref is already present on this host; skipping the registry pull (mirrors included)"
+    return 0
+  fi
   # OPSWEAVE_REQUIRE_PULL=1 means the operator wants a registry round trip whatever is cached, and
   # pull_image honours that inside the lock. Warming here as well would pay for the transfer twice.
   if [ "${OPSWEAVE_REQUIRE_PULL:-0}" = "1" ]; then
     log "OPSWEAVE_REQUIRE_PULL=1; skipping the pre-lock warm-up, the pull happens inside the deploy lock"
     return 0
   fi
+
+  # Credentials first: resolving the digest of a private package needs the same login the pull does.
   ensure_registry_auth || true
+  mirrors="$(image_pull_mirrors)"
+
+  if [ -n "$mirrors" ]; then
+    if digest="$(resolve_image_digest "$sha")" && is_sha256 "$digest"; then
+      local -a mirror_hosts=() candidates=()
+      read -r -a mirror_hosts <<<"$(printf '%s' "$mirrors" | tr ',' ' ')"
+      for candidate in "${mirror_hosts[@]}"; do
+        [ -n "$candidate" ] || continue
+        candidates+=("${candidate%/}/$(image_repo_path)@${digest}")
+      done
+      log "official digest for $ref is $digest; trying $mirrors before ghcr.io"
+      for candidate in ${candidates[@]+"${candidates[@]}"}; do
+        log "pulling $candidate (bounded to ${OPSWEAVE_MIRROR_PULL_TIMEOUT:-300}s)"
+        if timeout "${OPSWEAVE_MIRROR_PULL_TIMEOUT:-300}" docker pull "$candidate"; then
+          # docker already refuses bytes that do not hash to the digest; reading the digest back is
+          # what puts that check in the deploy log instead of leaving it implicit.
+          pulled="$(docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$candidate" 2>/dev/null || true)"
+          if [ "${pulled#*@}" = "$digest" ]; then
+            docker tag "$candidate" "$ref"
+            log "pulled $ref through $candidate (content digest $digest verified); no transfer from ghcr.io"
+            return 0
+          fi
+          warn "the content digest of $candidate is ${pulled#*@}, not $digest; discarding it rather than deploying bytes nobody vetted"
+        else
+          warn "$candidate did not deliver the image within ${OPSWEAVE_MIRROR_PULL_TIMEOUT:-300}s; trying the next source"
+        fi
+      done
+    else
+      warn "cannot read the official digest for $ref (buildx and docker manifest inspect both failed); a mirror would have to be trusted by tag, so only ghcr.io is used"
+    fi
+  fi
+
+  # Official source, with its own 900 s budget: the fallback must never inherit a budget a stalled
+  # mirror already spent.
   if pull_image "$sha"; then
     return 0
   fi
