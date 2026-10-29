@@ -7,6 +7,9 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { EmptyState, ErrorState } from '../components/Ui';
+import { NoticeBar } from '../components/app/async-boundary';
+import { PageHeader } from '../components/app/page-header';
+import { StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
 import { formatDate } from '../format';
 import { useT } from '../i18n';
 import { cn } from '../lib/utils';
@@ -89,29 +92,42 @@ export function InstanceLogsPage() {
     .filter((event) => level === 'ALL' || event.level === level)
     .filter((event) => !contains || event.message.toLowerCase().includes(contains.toLowerCase())), [events, paused, freezeCount, level, contains]);
 
-  if (detailError) return <ErrorState error={detailError} />;
-  if (!detail) return <div className="skeleton" style={{ height: 320 }} />;
+  // The header is the shared one; the log stream keeps its own toolbar, terminal and footer.
+  const header = (
+    <PageHeader
+      title={t('page.instanceLogs')}
+      description={t('instanceLogs.description')}
+      // With no detail there is no instance fact to print: the meta row is omitted rather than
+      // filled with slot 0 and a placeholder node name.
+      meta={detail ? (
+        <div className="log-meta">
+          <Link to={`/admin/plugins/${encodeURIComponent(detail.pluginId)}`} className="text-link meta-chip"><Icon name="plugins" size={13} /> {detail.pluginId}</Link>
+          <span className="meta-chip mono">{detail.version}</span>
+          <span className="mono">{detail.id}</span>
+          <span><Icon name="server" size={13} /> {detail.nodeName || <UnknownValue detail={t('ui.unknown.detail')} />}</span>
+          <span>{t('instanceLogs.slot', { slot: detail.slot })}</span>
+          <StatusPill status={detail.state} />
+          <StatusIndicator state={indicatorStateForCode(detail.nodeStatus)} />
+          <StatusIndicator
+            state={connection === 'connected' ? 'ready' : connection === 'disconnected' ? 'error' : 'loading'}
+            label={connection === 'connected' ? t('instanceLogs.connection.connected') : connection === 'disconnected' ? t('instanceLogs.connection.disconnected') : t('instanceLogs.connection.connecting')}
+          />
+        </div>
+      ) : undefined}
+      actions={<>
+        <Button variant="secondary" className={cn(paused && 'border-warning text-warning')} onClick={() => setPaused(!paused)}><Icon name={paused ? 'play' : 'pause'} size={15} /> {paused ? t('instanceLogs.action.resume', { count: Math.max(0, events.length - freezeCount) }) : t('instanceLogs.action.pause')}</Button>
+        <Button variant="secondary" className={cn(follow && 'border-ring bg-accent text-accent-foreground')} onClick={() => setFollow(!follow)}><Icon name="logs" size={15} /> {t('instanceLogs.action.follow')}</Button>
+        <Button variant="secondary" onClick={() => setReconnectKey((key) => key + 1)}><Icon name="refresh" size={15} /> {t('instanceLogs.action.reconnect')}</Button>
+      </>}
+    />
+  );
+
+  if (detailError) return <div className="log-page">{header}<ErrorState error={detailError} /></div>;
+  if (!detail) return <div className="log-page">{header}<div className="skeleton" style={{ height: 320 }} /></div>;
 
   return (
     <div className="log-page">
-      <header className="log-header">
-        <div>
-          <p className="eyebrow"><Link to={`/admin/plugins/${detail.pluginId}`} className="text-link">{detail.pluginId}</Link> · {detail.version}</p>
-          <h1>{t('page.instanceLogs')}</h1>
-          <div className="log-meta">
-            <span className="mono">{detail.id}</span>
-            <span><Icon name="server" size={13} /> {detail.nodeName}</span>
-            <span>{t('instanceLogs.slot', { slot: detail.slot })}</span>
-            <StatusPill status={detail.state} />
-            <span className={connection === 'connected' ? 'text-ok' : 'text-warn'}><span className={`live-dot ${connection}`} /> {connection === 'connected' ? t('instanceLogs.connection.connected') : connection === 'disconnected' ? t('instanceLogs.connection.disconnected') : t('instanceLogs.connection.connecting')}</span>
-          </div>
-        </div>
-        <div className="log-actions">
-          <Button variant="secondary" className={cn(paused && 'border-warning text-warning')} onClick={() => setPaused(!paused)}><Icon name={paused ? 'play' : 'pause'} size={15} /> {paused ? t('instanceLogs.action.resume', { count: Math.max(0, events.length - freezeCount) }) : t('instanceLogs.action.pause')}</Button>
-          <Button variant="secondary" className={cn(follow && 'border-ring bg-accent text-accent-foreground')} onClick={() => setFollow(!follow)}><Icon name="logs" size={15} /> {t('instanceLogs.action.follow')}</Button>
-          <Button variant="secondary" onClick={() => setReconnectKey((key) => key + 1)}><Icon name="refresh" size={15} /> {t('instanceLogs.action.reconnect')}</Button>
-        </div>
-      </header>
+      {header}
 
       <div className="log-toolbar">
         <div className="search-box"><Icon name="search" size={15} /><Input value={contains} onChange={(event) => setContains(event.target.value)} placeholder={t('instanceLogs.search.placeholder')} aria-label={t('instanceLogs.search.aria')} /></div>
@@ -125,14 +141,18 @@ export function InstanceLogsPage() {
         <Button variant="secondary" size="sm" onClick={() => navigator.clipboard.writeText(visible.map((event) => `${event.observedAt} ${event.level} ${event.message}`).join('\n')).catch(() => undefined)}><Icon name="copy" size={14} /> {t('action.copy')}</Button>
       </div>
 
+      {paused && <div role="status"><NoticeBar state="stale" title={t('instanceLogs.paused.title')} detail={t('instanceLogs.paused.detail', { count: Math.max(0, events.length - freezeCount) })} /></div>}
       {gap && (
-        <div className="gap-banner" role="alert">
-          <Icon name="warning" size={18} />
-          <div><strong>{t('instanceLogs.gap.title', { code: gap.code })}</strong><p>{gap.message}</p></div>
-          <Button variant="secondary" size="sm" onClick={() => { setGap(null); setReconnectKey((key) => key + 1); }}>{t('instanceLogs.gap.reconnect')}</Button>
+        <div role="alert">
+          <NoticeBar
+            state="partial"
+            title={t('instanceLogs.gap.title', { code: gap.code })}
+            detail={gap.message}
+            action={<Button variant="secondary" size="sm" onClick={() => { setGap(null); setReconnectKey((key) => key + 1); }}>{t('instanceLogs.gap.reconnect')}</Button>}
+          />
         </div>
       )}
-      {streamError && !gap && <div className="inline-error"><Icon name="warning" size={16} /> {streamError}</div>}
+      {streamError && !gap && <NoticeBar state="error" title={t('instanceLogs.error.streamTitle')} detail={streamError} />}
 
       <div className="terminal" ref={terminalRef} role="log" aria-live="polite" aria-relevant="additions">
         {visible.length === 0 ? (

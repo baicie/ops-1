@@ -420,21 +420,13 @@ input::placeholder { color: var(--ow-text-muted); }
 
 /* Logs */
 .log-page { display: flex; flex-direction: column; gap: 12px; }
-.log-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-.log-header h1 { font-size: var(--ow-type-xl); letter-spacing: -.02em; }
-.log-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 6px; }
+/* The log page renders the shared .page-header; only its meta row and toolbar are log-specific. */
+.log-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
 .log-meta > span { display: inline-flex; align-items: center; gap: 4px; }
-.log-actions { display: flex; gap: 7px; flex-wrap: wrap; }
 .log-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 10px; border: 1px solid var(--ow-border); border-radius: 6px; background: var(--ow-surface); }
 .log-toolbar select { width: auto; min-height: var(--ow-control-sm); }
 .log-count { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-left: auto; }
-.live-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; background: var(--ow-text-muted); }
-.live-dot.connected { background: var(--ow-ok); box-shadow: 0 0 0 3px var(--ow-ok-soft); }
-.live-dot.connecting { background: var(--ow-warn); }
-.live-dot.disconnected { background: var(--ow-danger); }
-.gap-banner { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--ow-warn); background: var(--ow-warn-soft); border-radius: 6px; color: var(--ow-warn); }
-.gap-banner div { flex: 1; }
-.gap-banner p { font-size: var(--ow-type-sm); }
+/* Connection state and stream gaps use the shared StatusIndicator / NoticeBar vocabulary. */
 .terminal { background: var(--ow-code-bg); color: var(--ow-code-text); border: 1px solid #222b38; border-radius: 7px; min-height: 420px; max-height: calc(100vh - 300px); overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.65; padding: 10px 0; }
 .terminal .empty-state { color: #8b98aa; }
 .terminal .empty-icon { background: #171e28; border-color: #263243; color: #7d8da2; }
@@ -601,8 +593,6 @@ input::placeholder { color: var(--ow-text-muted); }
   .wizard-actions .btn { width: 100%; }
   .log-line { grid-template-columns: 74px 48px minmax(0, 1fr); }
   .log-channel { display: none; }
-  .log-actions { width: 100%; }
-  .log-actions .btn { flex: 1; }
   .log-count { margin-left: 0; }
   .terminal { min-height: 360px; max-height: none; }
   .toast-stack { left: 12px; right: 12px; bottom: 12px; max-width: none; }
@@ -774,6 +764,9 @@ details.panel.advanced > summary { padding: 14px 18px; }
 .flow-step strong { font-size: 12px; font-weight: 620; white-space: nowrap; }
 .flow-step small { font-family: var(--ow-font-mono); font-size: 10px; color: var(--ow-text-muted); white-space: nowrap; }
 .flow-index { width: 18px; height: 18px; border-radius: 5px; background: var(--ow-accent-soft); color: var(--ow-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; }
+/* An execution order the topology cannot derive is UNKNOWN, and the token needs more room than
+   the 18px index chip. */
+.flow-index-token { width: auto; height: auto; padding: 0; background: transparent; }
 .flow-arrow { align-self: center; color: var(--ow-text-tertiary); flex: none; }
 
 /* Table/UUID containment */

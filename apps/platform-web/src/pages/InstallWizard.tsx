@@ -7,7 +7,9 @@ import { Badge } from '../components/ui/badge';
 import { Button, buttonVariants } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
-import { ErrorState, Field, KV, PageHeader, Progress, useToast } from '../components/Ui';
+import { ErrorState, Field, KV, Progress, useToast } from '../components/Ui';
+import { PageHeader } from '../components/app/page-header';
+import { NoData, UnknownValue } from '../components/app/status-indicator';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
@@ -178,8 +180,10 @@ export function InstallWizardPage() {
               <KV label={t('install.field.packageStatus')}><StatusPill status={pkg.status} /></KV>
               <KV label={t('install.field.bundleDigest')} mono>{shortDigest(pkg.bundleDigest, 20)}</KV>
               <KV label={t('install.field.artifactDigest')} mono>{shortDigest(pkg.artifactDigest, 20)}</KV>
-              <KV label={t('install.field.backendImage')} mono>{shortDigest(pkg.imageRef, 24)}</KV>
-              <KV label={t('install.field.frontend')}>{manifest?.frontend ? t('install.field.frontend.count', { count: contributions.length }) : t('common.none')}</KV>
+              <KV label={t('install.field.backendImage')} mono>{pkg.imageRef ? shortDigest(pkg.imageRef, 24) : <NoData detail={t('install.compat.missing')} />}</KV>
+              <KV label={t('install.field.frontend')}>{manifest
+                ? manifest.frontend ? t('install.field.frontend.count', { count: contributions.length }) : t('common.none')
+                : <NoData detail={t('install.compat.missing')} />}</KV>
             </div>
             <div className="callout callout-ok"><Icon name="check" size={16} /><p>{t('install.trust.okNote')}</p></div>
           </section>
@@ -190,13 +194,19 @@ export function InstallWizardPage() {
             </div>
             <div className="panel">
               <div className="panel-head"><div><h2>{t('install.compat.title')}</h2><p>{t('install.compat.description')}</p></div></div>
+              {/* A manifest that omits a value has not told us the value is zero or empty: every
+                  such cell prints NO_DATA (or UNKNOWN inside a compound value) instead. */}
               <div className="kv-grid">
-                <KV label={t('install.field.kernelApiMajor')}>{manifest?.compatibility?.kernelApiMajor ?? '—'}</KV>
-                <KV label={t('install.field.webSdkMajor')}>{manifest?.compatibility?.webSdkMajor ?? '—'}</KV>
-                <KV label={t('install.field.runtime')}>{manifest?.backend ? `${manifest.backend.protocol?.name}/v${manifest.backend.protocol?.version}` : t('install.field.runtime.frontendOnly')}</KV>
-                <KV label={t('install.field.apiPrefix')}><span className="mono">{manifest?.backend?.apiPrefix || '—'}</span></KV>
-                <KV label={t('table.cpu')}>{t('install.field.cpu.value', { value: pkg.manifest?.resources?.cpuMillis ?? 0 })}</KV>
-                <KV label={t('table.memory')}>{t('install.field.memory.value', { value: pkg.manifest?.resources?.memoryMiB ?? 0 })}</KV>
+                <KV label={t('install.field.kernelApiMajor')}>{manifest?.compatibility?.kernelApiMajor ?? <NoData detail={t('install.compat.missing')} />}</KV>
+                <KV label={t('install.field.webSdkMajor')}>{manifest?.compatibility?.webSdkMajor ?? <NoData detail={t('install.compat.missing')} />}</KV>
+                <KV label={t('install.field.runtime')}>{manifest
+                  ? manifest.backend
+                    ? <span className="mono">{manifest.backend.protocol?.name ?? <UnknownValue detail={t('install.compat.missing')} />}/v{manifest.backend.protocol?.version ?? <UnknownValue detail={t('install.compat.missing')} />}</span>
+                    : t('install.field.runtime.frontendOnly')
+                  : <NoData detail={t('install.compat.missing')} />}</KV>
+                <KV label={t('install.field.apiPrefix')}>{manifest?.backend?.apiPrefix ? <span className="mono">{manifest.backend.apiPrefix}</span> : <NoData detail={t('install.compat.missing')} />}</KV>
+                <KV label={t('table.cpu')}>{pkg.manifest?.resources?.cpuMillis != null ? t('install.field.cpu.value', { value: pkg.manifest.resources.cpuMillis }) : <NoData detail={t('install.resources.missing')} />}</KV>
+                <KV label={t('table.memory')}>{pkg.manifest?.resources?.memoryMiB != null ? t('install.field.memory.value', { value: pkg.manifest.resources.memoryMiB }) : <NoData detail={t('install.resources.missing')} />}</KV>
               </div>
             </div>
           </section>
@@ -219,7 +229,7 @@ export function InstallWizardPage() {
 
       {step === 4 && pkg && (
         <section className="panel wizard-panel">
-          <div className="panel-head"><div><h2>{t('install.readiness.title')}</h2><p>{t('install.readiness.description')}</p></div><StatusPill status={deployment?.status || 'PENDING'} /></div>
+          <div className="panel-head"><div><h2>{t('install.readiness.title')}</h2><p>{t('install.readiness.description')}</p></div>{deployment ? <StatusPill status={deployment.status} /> : <NoData detail={t('install.readiness.noDeployment')} />}</div>
           {deploymentError && <div className="inline-error" role="alert"><Icon name="warning" size={16} /> {deploymentError}</div>}
           {deployment ? (
             <>
