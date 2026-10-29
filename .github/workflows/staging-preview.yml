@@ -12,7 +12,8 @@ name: staging-preview
 #
 # workflow_dispatch verify_only=true certifies whatever staging already serves: build and deploy are
 # skipped, and the expected commit falls back to the dispatched ref HEAD (inputs.sha wins if given).
-# Keep it out of a run that is deploying - the "staging-preview" concurrency group cancels in progress.
+# It occupies its own concurrency bucket (see the concurrency block below), so a verification run
+# and a deploy run never cancel each other in either direction.
 
 on:
   push:
@@ -41,8 +42,21 @@ permissions:
   packages: write
   pull-requests: write
 
+# Two buckets, one staging host. The group is keyed by what the run does, not by the workflow name:
+#   deploy  a push, or workflow_dispatch without verify_only. It mutates the single staging host, so
+#           every deploy run shares one group and cancel-in-progress lets the newest supersede the
+#           one in flight - that is the protection that stops repeated pushes from stacking
+#           deployments, and it keeps two deploys from ever running at the same time.
+#   verify  workflow_dispatch verify_only=true. It only certifies the release that is already live
+#           and mutates nothing, so it is keyed by the commit it certifies: a baseline and its
+#           candidate are different SHAs, land in different groups, and neither can cancel the
+#           other. Repeating a verify of the same SHA is the same work, so that may supersede.
+# A deploy and a verify therefore never land in the same group, in either direction.
+# Do not fold the buckets back into one name: a single group is what let a CI deploy and a manual
+# deploy fight over one lock, and what cancelled run 40818496709 (baseline 11fe91c) the moment
+# 40818576895 (candidate e6142ff) was triggered, losing the comparison the two runs existed to make.
 concurrency:
-  group: staging-preview
+  group: "staging-preview-${{ (inputs.verify_only == true) && format('verify-{0}', inputs.sha || github.sha) || 'deploy' }}"
   cancel-in-progress: true
 
 env:
@@ -354,7 +368,8 @@ jobs:
     needs: [build, deploy]
     runs-on: ubuntu-24.04
     # Sized so that no step can be preempted by the job cap: 20 (core) + 40 (surfaces) + 20
-    # (seeded data, which grew by five when visual.spec.ts joined it) = 80 minutes of step caps
+    # (seeded data: one step per spec file at 9 + 5 + 6, the same 20 the single step had) = 80
+    # minutes of step caps
     # plus the dependency install. The previous 50 was already below the sum of its own step caps
     # (60), so a slow surfaces run was killed by the job timeout instead of by its own, losing the
     # per-step outcome the record step reports.
@@ -427,9 +442,10 @@ jobs:
       #                                    seeded out of band through the admin API plus a
       #                                    host-side demo source server
       #                                    (deployments/staging/README.md, "DEMO source"), and the
-      #                                    instance comes from installing the demo plugin. The step
-      #                                    runs all three and records the outcome plus this reason,
-      #                                    and does not gate the job until a seeding step exists.
+      #                                    instance comes from installing the demo plugin. Each of
+      #                                    the three runs as its own known-flaky step, so the
+      #                                    record step can name the file that actually failed, and
+      #                                    none of them gates the job until a seeding step exists.
       #   data-foundation.yml (seeded)     data-foundation, data-foundation-flows
       #                                    (studio and visual-layout also run there against a locally
       #                                    seeded stack, but that gate is path-filtered, so it never
@@ -478,20 +494,47 @@ jobs:
       # staging pipeline, visual reads a live demo instance. They run here rather than being
       # skipped - an absent file list and --grep are both forbidden - and continue-on-error keeps a
       # missing seed from reddening the deployment while the reason is still recorded in
-      # health.json and in a warning annotation. Removing the continue-on-error is the whole change
-      # once a seeding step lands.
-      - name: Playwright seeded-data suites (studio, visual layout, visual) [known-flaky]
-        id: seeded
+      # health.json and in a warning annotation. Removing the three continue-on-error lines is the
+      # whole change once a seeding step lands.
+      #
+      # One step per spec file on purpose. The record step below reads steps.<id>.outcome, so the
+      # failed file is read off its own step instead of being inferred from a group-wide failure:
+      # the previous single step over all three could only report the whole group, and the fixed
+      # reason it printed blamed studio and visual-layout for a missing seed on run 40818576895
+      # where both were green (8/8 and 4/4) and only visual.spec.ts was red. The three caps sum to
+      # the 20 minutes the single step had, so the smoke job's cap arithmetic is unchanged.
+      - name: Playwright seeded-data suite - studio (host-metrics-pipeline) [known-flaky]
+        id: seeded_studio
         if: always() && steps.mode.outputs.mode == 'playwright'
-        timeout-minutes: 20
+        timeout-minutes: 9
         continue-on-error: true
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
-          # Its own --output so neither neighbouring group's traces are overwritten.
-          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded \
-            studio.spec.ts \
-            visual-layout.spec.ts \
+          # One --output per spec file so no neighbouring run overwrites its traces.
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-studio \
+            studio.spec.ts
+
+      - name: Playwright seeded-data suite - visual layout (host-metrics-pipeline) [known-flaky]
+        id: seeded_visual_layout
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        timeout-minutes: 5
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-vlayout \
+            visual-layout.spec.ts
+
+      - name: Playwright seeded-data suite - visual (demo plugin, live instance) [known-flaky]
+        id: seeded_visual
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded-visual \
             visual.spec.ts
 
       - name: Record the browser suite results
@@ -499,52 +542,106 @@ jobs:
         env:
           CORE_OUTCOME: ${{ steps.core.outcome }}
           SURFACES_OUTCOME: ${{ steps.surfaces.outcome }}
-          SEEDED_OUTCOME: ${{ steps.seeded.outcome }}
+          STUDIO_OUTCOME: ${{ steps.seeded_studio.outcome }}
+          VISUAL_LAYOUT_OUTCOME: ${{ steps.seeded_visual_layout.outcome }}
+          VISUAL_OUTCOME: ${{ steps.seeded_visual.outcome }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
           python3 - <<'PY'
           import json, os
 
-          # Why the seeded-data group is allowed to fail. It names the data it needs so that a red
-          # run is self-explaining instead of needing a workflow read to interpret.
-          SEED_REASON = (
-              "seed-missing: studio and visual-layout read the literal id host-metrics-pipeline and "
-              "assert a published revision, a rendered node graph and a job that reaches Succeeded. "
-              "visual reads no pipeline data but needs a live instance: it asserts the "
-              "/ext/trusted-team/hello extension and an instance log stream, which only exist once "
-              "the demo plugin is installed and a node runs it. No step in this workflow creates "
-              "either - the pipeline is seeded out of band through the admin API plus a host-side "
-              "demo source server. Known-flaky until a seeding step lands."
+          # What each seeded-data spec file needs that this workflow does not create. The reason is
+          # composed from the files whose own step actually failed, so it can never name a green
+          # spec or send the next reader to the wrong suite - the fault of the fixed string this
+          # replaces, which blamed studio and visual-layout for a missing seed on run 40818576895
+          # where both were green and only visual.spec.ts was red.
+          SEED_NEEDS = {
+              "studio.spec.ts":
+                  "the out-of-band pipeline seed - the literal id host-metrics-pipeline with a "
+                  "published revision, a rendered node graph and a job that reaches Succeeded "
+                  "(admin API seed plus a host-side demo source server, deployments/staging/"
+                  "README.md 'DEMO source')",
+              "visual-layout.spec.ts":
+                  "the same out-of-band pipeline seed as studio.spec.ts - the literal id "
+                  "host-metrics-pipeline with a published revision, a rendered node graph and a "
+                  "job that reaches Succeeded",
+              "visual.spec.ts":
+                  "an installed demo plugin and a live instance - it drives /ext/trusted-team/"
+                  "hello and an instance log stream, which exist only once the demo plugin is "
+                  "installed and a node runs it",
+          }
+
+          NOTHING_CREATES_IT = (
+              "No step in this workflow creates either resource: the pipeline is seeded out of "
+              "band through the admin API plus a host-side demo source server, and the instance "
+              "comes from installing the demo plugin. Known-flaky until a seeding step lands."
           )
 
-          # (group, outcome env, spec files, known_flaky, reason)
+          # (name, known_flaky, [(the spec files one step covers, that step's outcome), ...]).
+          # A group with one step per spec file knows exactly which file failed; a group that runs
+          # several files in one step can only report them together.
           GROUPS = [
-              ("core",
-               os.environ.get("CORE_OUTCOME", ""),
-               ["staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts"],
-               False, ""),
-              ("admin-plugin-i18n",
-               os.environ.get("SURFACES_OUTCOME", ""),
-               ["admin-pages.spec.ts", "admin-polish.spec.ts", "plugin-surfaces.spec.ts",
-                "plugin-detail-tabs.spec.ts", "business-workspace.spec.ts", "overview-partial.spec.ts",
-                "async-stale.spec.ts", "i18n-locale.spec.ts", "dialog-a11y.spec.ts",
-                "g08-batch-c.spec.ts", "g08-batch-c-mobile.spec.ts"],
-               False, ""),
-              ("seeded-data",
-               os.environ.get("SEEDED_OUTCOME", ""),
-               ["studio.spec.ts", "visual-layout.spec.ts", "visual.spec.ts"],
-               True, SEED_REASON),
+              ("core", False, [
+                  (("staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts"),
+                   os.environ.get("CORE_OUTCOME", "")),
+              ]),
+              ("admin-plugin-i18n", False, [
+                  (("admin-pages.spec.ts", "admin-polish.spec.ts", "plugin-surfaces.spec.ts",
+                    "plugin-detail-tabs.spec.ts", "business-workspace.spec.ts",
+                    "overview-partial.spec.ts", "async-stale.spec.ts", "i18n-locale.spec.ts",
+                    "dialog-a11y.spec.ts", "g08-batch-c.spec.ts", "g08-batch-c-mobile.spec.ts"),
+                   os.environ.get("SURFACES_OUTCOME", "")),
+              ]),
+              ("seeded-data", True, [
+                  (("studio.spec.ts",), os.environ.get("STUDIO_OUTCOME", "")),
+                  (("visual-layout.spec.ts",), os.environ.get("VISUAL_LAYOUT_OUTCOME", "")),
+                  (("visual.spec.ts",), os.environ.get("VISUAL_OUTCOME", "")),
+              ]),
           ]
 
+          def seed_reason(parts):
+              """A reason naming only the specs that are not green, and what each one needs."""
+              clauses = []
+              data_bound = False
+              for spec_files, outcome in parts:
+                  if outcome == "success":
+                      continue
+                  for spec in spec_files:
+                      needs = SEED_NEEDS.get(spec)
+                      if outcome in ("", "skipped", "cancelled"):
+                          clauses.append("%s did not run (outcome: %s)"
+                                         % (spec, outcome or "not-run"))
+                      elif needs is None:
+                          clauses.append("%s failed (outcome: %s) with no recorded data dependency"
+                                         % (spec, outcome))
+                      else:
+                          data_bound = True
+                          clauses.append("%s failed (outcome: %s): it needs %s"
+                                         % (spec, outcome, needs))
+              if not clauses:
+                  return ""
+              reason = "seed-or-data-missing - " + "; ".join(clauses) + "."
+              # The shared tail explains a missing resource, so it only belongs on a data-bound run.
+              return reason + " " + NOTHING_CREATES_IT if data_bound else reason
+
           checks = []
-          for name, outcome, files, known_flaky, reason in GROUPS:
+          for name, known_flaky, parts in GROUPS:
+              # detail keeps the step granularity: a step that runs several files cannot tell them
+              # apart, so it must not read as if every file in it were red.
+              detail = "; ".join("%s: %s" % (outcome or "not-run", ", ".join(spec_files))
+                                 for spec_files, outcome in parts)
               check = {
                   "name": name,
-                  "ok": outcome == "success",
+                  "ok": all(outcome == "success" for _files, outcome in parts),
                   "known_flaky": known_flaky,
-                  "detail": "%s: %s" % (outcome or "not-run", ", ".join(files)),
+                  "detail": detail,
+                  # Exact only where a step covers one file; a multi-file step is in detail instead.
+                  "failed_files": [spec for spec_files, outcome in parts
+                                   if outcome != "success" and len(spec_files) == 1
+                                   for spec in spec_files],
               }
+              reason = seed_reason(parts) if known_flaky else ""
               if reason:
                   check["reason"] = reason
               checks.append(check)
@@ -563,10 +660,15 @@ jobs:
               "base_url": os.environ.get("OPSWEAVE_URL", ""),
               "ok": ok,
               "checks": checks,
-              "known_flaky_reasons": [reason for _n, _o, _f, _k, reason in GROUPS if reason],
-              "suite_groups": [{"name": name, "outcome": outcome, "files": files,
-                                "known_flaky": known_flaky}
-                               for name, outcome, files, known_flaky, reason in GROUPS],
+              "known_flaky_reasons": [check["reason"] for check in checks if check.get("reason")],
+              "suite_groups": [
+                  {"name": name,
+                   "known_flaky": known_flaky,
+                   "files": [spec for spec_files, _outcome in parts for spec in spec_files],
+                   "steps": [{"files": list(spec_files), "outcome": outcome or "not-run"}
+                             for spec_files, outcome in parts]}
+                  for name, known_flaky, parts in GROUPS
+              ],
               "exit_code": 0 if ok else 1,
           }
           with open("artifacts/staging-preview/health.json", "w", encoding="utf-8") as handle:
