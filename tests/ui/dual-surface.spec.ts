@@ -139,6 +139,16 @@ test('a declared workspace-only grant is denied without the version-mismatch hin
 });
 
 test('the legacy URLs land on their canonical /admin path and drop unlisted query keys', async ({ page }) => {
+  // Budget matched to this test's work, scoped to this test alone: the case is 21 cold full-page
+  // loads wide (sign-in, the 18 table entries, the open-redirect probe, the unknown-route probe),
+  // while the file-wide 60 s is a single-render budget. It measured 24.8 / 24.9 / 37.3 / 33.2 /
+  // 27.6 s on the reporting workstation (5/5 green), and CI run 40814575863 hit 60 s on a slower
+  // runner and timed out on the last entry. 180 s = 21 loads at a pessimistic 8 s each plus slack,
+  // ~4.8x the worst local run; a genuinely slow case elsewhere in this file still fails at 60 s.
+  // Not test.slow(): its 3x is derived from the global timeout, so a later global change would
+  // move this budget silently instead of breaking here loudly.
+  test.setTimeout(180_000);
+
   await stubGrant(page, 'admin');
   await signIn(page);
   await expect(page).toHaveURL(/\/admin\/overview$/);
