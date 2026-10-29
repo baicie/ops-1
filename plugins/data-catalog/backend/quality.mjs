@@ -76,14 +76,18 @@ export function evaluateRule(rule, records) {
   } else if (rule.ruleType === 'UNIQUE_KEY') {
     const seen = new Set();
     records.forEach((record, index) => {
-      const values = config.fields.map((field) => record[field]);
-      if (config.nullPolicy === 'IGNORE' && values.some((value) => value === null || value === undefined)) return;
+      const values = config.fields.map((field) => hasValue(record, field) ? record[field] : null);
+      const hasNull = values.some((value) => value === null);
+      if (hasNull) {
+        if (config.nullPolicy === 'IGNORE') return;
+        failed += 1; failedIndexes.push(index); return;
+      }
       const key = canonical(values);
       if (seen.has(key)) { failed += 1; failedIndexes.push(index); } else seen.add(key);
     });
   } else if (rule.ruleType === 'RECORD_COUNT') {
     failed = records.length < config.min || records.length > config.max ? 1 : 0;
-    return { status: failed ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes: failed ? [0] : [], summary: { min: config.min, max: config.max, observed: records.length } };
+    return { status: failed ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes: [], aggregateFailed: Boolean(failed), summary: { min: config.min, max: config.max, observed: records.length, aggregateFailed: Boolean(failed) } };
   }
   return { status: failed > 0 ? 'FAILED' : 'PASSED', examined: records.length, failed, failedIndexes, summary: { failed } };
 }

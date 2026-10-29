@@ -51,3 +51,19 @@ test('recordsFailed is distinct records, ruleFailureCount is per-rule failures',
   assert.equal(result.recordsFailed, 1);
   assert.equal(result.results.reduce((total, item) => total + item.result.failed, 0), 2);
 });
+
+
+test('record count aggregate failure does not invent a failed record', () => {
+  const result = evaluateRules([rule('RECORD_COUNT', { min: 1, max: 10 })], []);
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.recordsFailed, 0);
+  assert.equal(result.results[0].result.aggregateFailed, true);
+});
+
+test('unique key FAIL rejects null and missing keys; IGNORE skips them', () => {
+  const records = [{ id: null }, { id: '1' }, { id: '1' }, {}];
+  const fail = evaluateRules([rule('UNIQUE_KEY', { fields: ['id'], nullPolicy: 'FAIL' })], records);
+  assert.equal(fail.results[0].result.failed, 3); // null, duplicate 1, missing
+  const ignore = evaluateRules([rule('UNIQUE_KEY', { fields: ['id'], nullPolicy: 'IGNORE' })], records);
+  assert.equal(ignore.results[0].result.failed, 1); // duplicate 1 only
+});
