@@ -11,7 +11,8 @@ name: staging-preview
 # A missing secret fails the deploy job with an explicit error; the deployment is never skipped.
 #
 # workflow_dispatch verify_only=true certifies whatever staging already serves: build and deploy are
-# skipped, and the expected commit falls back to the dispatched ref HEAD (inputs.sha wins if given).
+# skipped, and sha is required. It is the commit the host is serving - the one thing the certification
+# asserts - and its absence fails the plan job before a runner is spent, instead of falling back.
 # It occupies its own concurrency bucket (see the concurrency block below), so a verification run
 # and a deploy run never cancel each other in either direction.
 # A certification always runs the full tier - certifying the deployed build with a subset certifies
@@ -44,7 +45,7 @@ on:
         type: boolean
         default: false
       verify_only:
-        description: Run only the acceptance suites against the already-deployed staging host; the expected commit is the dispatched ref HEAD
+        description: Run only the acceptance suites against the already-deployed staging host; requires sha - the commit the host is serving, which the identity assertion checks
         required: false
         type: boolean
         default: false
@@ -99,6 +100,42 @@ jobs:
       tier: ${{ steps.tier.outputs.tier }}
       reason: ${{ steps.tier.outputs.reason }}
     steps:
+      # verify_only certifies the build that is already deployed, and the single thing it asserts is
+      # that the host serves a named commit. That assertion has no useful default, so a dispatch that
+      # omits the commit stops here, before any job spends a runner:
+      #   - falling back to github.sha is right only on the day the dispatched ref HEAD happens to be
+      #     the live build; every other day it is a red run that blames the host for a mismatch the
+      #     dispatch created (run on 187fc60 expected 187fc60 and served 192256c - nothing was wrong
+      #     with the deployment).
+      #   - taking the commit the host reports instead would compare the served sha with itself. That
+      #     is a tautology: it cannot fail, so it certifies nothing.
+      # Neither is a default worth having; ask for the commit instead.
+      - name: Require the commit that verify_only certifies
+        id: dispatch
+        env:
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${VERIFY_ONLY:-}" != "true" ]; then
+            echo "not a verify_only dispatch: the build job resolves the commit to build and deploy"
+            exit 0
+          fi
+          sha="$(printf '%s' "${INPUT_SHA:-}" | tr -d '[:space:]')"
+          if [ -z "$sha" ]; then
+            echo "::error::verify_only=true needs the commit the staging host is serving: re-dispatch with -f sha=<40-character commitSha>."
+            echo "verify_only never builds and never deploys; it certifies what is already live, so the"
+            echo "served-commit assertion (tests/ui/staging-smoke.spec.ts:53, servedSHA == OPSWEAVE_EXPECTED_SHA)"
+            echo "has nothing to compare against unless the commit is named. Falling back to github.sha only"
+            echo "holds when this ref HEAD is the deployed build, and comparing the host's sha with itself"
+            echo "asserts nothing at all."
+            echo "Read the served commit from the last run's PR comment ('Served commit'), or on the host from"
+            echo "deploy-staging.sh --status --json (served_commit.sha), then re-dispatch:"
+            echo "  gh workflow run staging-preview.yml -f verify_only=true -f sha=<that commit>"
+            exit 1
+          fi
+          echo "verify_only will certify $sha as the commit the host serves"
+
       - name: Choose the acceptance tier
         id: tier
         env:
@@ -464,7 +501,10 @@ jobs:
     timeout-minutes: 70
     # The suites certify whatever staging serves, so a failed or skipped deploy must not suppress
     # them. verify_only always runs; every other event keeps the deploy-success requirement.
-    if: always() && (inputs.verify_only == true || needs.deploy.result == 'success')
+    # A failed plan does suppress them: the plan job is where a dispatch that cannot certify anything
+    # is rejected (verify_only without the commit it certifies), and running the suites anyway would
+    # report that rejection as a served-commit mismatch - the confusing red this gate removes.
+    if: always() && needs.plan.result == 'success' && (inputs.verify_only == true || needs.deploy.result == 'success')
     environment:
       name: staging
       url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
@@ -524,20 +564,22 @@ jobs:
       #   seeded-* jobs (one each)        studio, visual-layout, visual - KNOWN-FLAKY, see the
       #                                    step below. studio and visual-layout navigate to the
       #                                    literal id host-metrics-pipeline and assert a published
-      #                                    revision, a rendered node graph and a job that reaches
-      #                                    Succeeded. visual is the 1440/1024/390 light+dark
-      #                                    screenshot matrix: it reads no pipeline data at all, but
-      #                                    it drives a live instance (/ext/trusted-team/hello and an
-      #                                    instance log stream), so an idle staging host fails it
-      #                                    for a missing deployment rather than a missing seed. No
-      #                                    step in this workflow creates either one: the pipeline is
-      #                                    seeded out of band through the admin API plus a
-      #                                    host-side demo source server
-      #                                    (deployments/staging/README.md, "DEMO source"), and the
-      #                                    instance comes from installing the demo plugin. Each of
-      #                                    the three runs as its own known-flaky job, so the record
+      #                                    revision and a rendered node graph; studio's run-page case
+      #                                    submits a job and asserts it reaches Succeeded, so that
+      #                                    stack has to be able to execute one. Neither is created by
+      #                                    this workflow: the pipeline is seeded out of band through
+      #                                    the admin API plus a host-side demo source server
+      #                                    (deployments/staging/README.md, "DEMO source"). visual is
+      #                                    the 1440/1024/390 light+dark screenshot matrix: it reads no
+      #                                    pipeline data at all, but it drives a live instance
+      #                                    (/ext/trusted-team/hello and an instance log stream), so an
+      #                                    idle host fails it for a missing deployment rather than a
+      #                                    missing seed - and that half is seeded now: seeded_visual
+      #                                    installs the demo plugin before its suite, idempotently, in
+      #                                    a step whose failure is reported instead of hidden. Each
+      #                                    of the three runs as its own known-flaky job, so the record
       #                                    job can name the file that actually failed, and none of
-      #                                    them gates the run until a seeding step exists.
+      #                                    them gates the run.
       #   data-foundation.yml (seeded)     data-foundation, data-foundation-flows
       #                                    (studio and visual-layout also run there against a locally
       #                                    seeded stack, but that gate is path-filtered, so it never
@@ -833,7 +875,11 @@ jobs:
     needs: [plan, build, deploy, smoke]
     if: ${{ always() && needs.plan.outputs.tier == 'full' && needs.smoke.outputs.mode == 'playwright' && (inputs.verify_only == true || needs.deploy.result == 'success') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 30, not 20: this job now seeds the demo plugin first, and that seed builds opsctl from source
+    # (a cold cargo build) before it can talk to the platform. The cap is set so the build, the
+    # workspace install and the 6-minute suite can all finish - a step must never be preempted by
+    # the job cap, because a preempted step reports a timeout instead of its real outcome.
+    timeout-minutes: 30
     environment:
       name: staging
       url: ${{ vars.OPSWEAVE_PREVIEW_URL || 'http://82.156.234.84:3000' }}
@@ -841,6 +887,9 @@ jobs:
       # The suite's own outcome, not the job's: the run step is continue-on-error, so a red suite
       # leaves the job green (it must never gate) while the record job still learns what happened.
       outcome: ${{ steps.play.outcome }}
+      # The seed step's outcome, so the record job can name the step that failed rather than only the
+      # resource it left missing.
+      hello_install: ${{ steps.hello.outcome }}
     env:
       OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
       OPSWEAVE_EXPECTED_SHA: ${{ needs.build.outputs.sha || inputs.sha || github.sha }}
@@ -863,6 +912,55 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+
+      # The demo plugin is the half of this suite's data that a step can actually create: visual.spec.ts
+      # drives /ext/trusted-team/hello and an instance log stream, which exist only while
+      # dev.opsweave.hello is installed, deployed and serving a READY instance. Until now that was true
+      # only because someone had installed it by hand on the host - the hand-installed folklore 6d04a83
+      # set out to remove - so it is wired in here, in the job that needs it.
+      #
+      # It may fail without turning this job red. The group is known-flaky and never gates, and the
+      # suite must still run: skipping it would leave the record job reading a step outcome of nothing
+      # for a job that reported success, which it would have to record as a failure with no cause
+      # (resolve_status falls through to "failed / job-success"). Running it produces a real outcome,
+      # and the step below writes the seed's own outcome - and where to read the reason - into the log
+      # and into health.json. What must never happen is the failure being invisible.
+      - name: Install the Rust toolchain for opsctl (the installer's only API client)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Seed the demo hello plugin (idempotent)
+        id: hello
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          # role=node is the label the staging node runtime enrols with; the deployment is pinned to
+          # it. Override here if the node is ever relabelled.
+          OPSWEAVE_HELLO_SELECTOR: role=node
+        run: |
+          set -euo pipefail
+          # opsctl and a session are runner-side needs of the installer, not install-time needs of the
+          # plugin. What the step deliberately does not take is the publish path's registry and SSH
+          # secrets: the bundle is already staged on the platform (scripts/publish-demo-hello-plugin.sh
+          # is a release step, run once, not per CI run), so this only deploys and activates it. That is
+          # also why the bundle is needed only on the ABSENT branch of the installer.
+          cargo build -q -p opsweave-opsctl
+          ./target/debug/opsctl --url "$OPSWEAVE_URL" login \
+            --email "$OPSWEAVE_ADMIN_EMAIL" --password "$OPSWEAVE_ADMIN_PASSWORD"
+          bash scripts/demo_hello_up.sh
+
+      - name: Name the demo plugin seed outcome in the run summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.hello.outcome }}
+        run: |
+          set -euo pipefail
+          echo "demo hello plugin seed: ${OUTCOME:-not-run}"
+          if [ "${OUTCOME:-not-run}" != "success" ]; then
+            # An error annotation, not a failed step: continue-on-error above keeps the suite runnable,
+            # and this is what makes the failure impossible to miss in the run summary.
+            echo "::error::could not install dev.opsweave.hello@0.0.1 (seed outcome: ${OUTCOME:-not-run}); the seed step's log above names the cause - a missing bundle means the package was never staged on the platform (scripts/publish-demo-hello-plugin.sh), and a deploy or activate error means the platform holds the package but could not serve it"
+            echo "visual.spec.ts still runs and is then expected to fail on the missing /ext/trusted-team/hello extension and instance log stream; health.json records it as seed-or-data-missing."
+          fi
 
       - name: Playwright seeded-data suite - visual (demo plugin, live instance) [known-flaky]
         id: play
@@ -927,6 +1025,9 @@ jobs:
           VISUAL_LAYOUT_RESULT: ${{ needs.seeded_visual_layout.result }}
           VISUAL_OUTCOME: ${{ needs.seeded_visual.outputs.outcome }}
           VISUAL_RESULT: ${{ needs.seeded_visual.result }}
+          # The demo-plugin seed's own outcome, so a red visual suite can name the step that was
+          # supposed to install the plugin instead of only the plugin it is missing.
+          VISUAL_SEED_OUTCOME: ${{ needs.seeded_visual.outputs.hello_install }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
@@ -936,29 +1037,36 @@ jobs:
           TIER = os.environ.get("TIER", "") or "unknown"
           TIER_REASON = os.environ.get("TIER_REASON", "") or ""
           MODE = os.environ.get("SMOKE_MODE", "") or "unknown"
+          # The seed step's reported outcome: "success", "failure", or empty when the job never reached it.
+          VISUAL_SEED_OUTCOME = os.environ.get("VISUAL_SEED_OUTCOME", "") or ""
 
-          # What each seeded-data spec file needs that this workflow does not create. The reason is composed
-          # from the files whose own suite actually failed, so it can never name a green spec or send the next
-          # reader to the wrong suite - the fault of the fixed string this replaces, which blamed studio and
-          # visual-layout for a missing seed on run 40818576895 where both were green (8/8 and 4/4) and only
-          # visual.spec.ts was red.
+          # What each seeded-data spec file needs, and where this workflow does or does not create it. The
+          # reason is composed from the files whose own suite actually failed, so it can never name a green
+          # spec or send the next reader to the wrong suite - the fault of the fixed string this replaces,
+          # which blamed studio and visual-layout for a missing seed on run 40818576895 where both were green
+          # (8/8 and 4/4) and only visual.spec.ts was red.
           SEED_NEEDS = {
               "studio.spec.ts":
                   "the out-of-band pipeline seed - the literal id host-metrics-pipeline with a published "
-                  "revision, a rendered node graph and a job that reaches Succeeded (admin API seed plus a "
-                  "host-side demo source server, deployments/staging/README.md 'DEMO source')",
+                  "revision and a rendered node graph, plus a stack that can execute the job its own run "
+                  "page submits (admin API seed plus a host-side demo source server, deployments/staging/"
+                  "README.md 'DEMO source')",
               "visual-layout.spec.ts":
                   "the same out-of-band pipeline seed as studio.spec.ts - the literal id host-metrics-pipeline "
-                  "with a published revision, a rendered node graph and a job that reaches Succeeded",
+                  "with a published revision and a rendered node graph (it asserts canvas geometry, not a job)",
               "visual.spec.ts":
                   "an installed demo plugin and a live instance - it drives /ext/trusted-team/hello and an "
-                  "instance log stream, which exist only once the demo plugin is installed and a node runs it",
+                  "instance log stream, which exist only once the demo plugin is installed and a node runs "
+                  "it (the 'Seed the demo hello plugin' step in seeded_visual installs it)",
           }
 
-          NOTHING_CREATES_IT = (
-              "No step in this workflow creates either resource: the pipeline is seeded out of band through "
-              "the admin API plus a host-side demo source server, and the instance comes from installing the "
-              "demo plugin. Known-flaky until a seeding step lands."
+          # Named for the gap it describes rather than for the two resources it once covered: the demo-plugin
+          # half has a step now, so a reason claiming no step creates it would be false in the record.
+          SEED_GAP = (
+              "The demo-plugin half does have a step: seeded_visual installs it before its suite and its "
+              "outcome is reported above. The pipeline half is still seeded out of band through the admin API "
+              "plus a host-side demo source server (deployments/staging/README.md 'DEMO source'), and no step "
+              "in this workflow creates it. Known-flaky until that seeding step lands."
           )
 
           CORE_FILES = ("staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts")
@@ -1063,12 +1171,16 @@ jobs:
                                          % (spec, record["outcome"]))
                       else:
                           data_bound = True
-                          clauses.append("%s failed (outcome: %s): it needs %s"
-                                         % (spec, record["outcome"], needs))
+                          clause = ("%s failed (outcome: %s): it needs %s"
+                                    % (spec, record["outcome"], needs))
+                          if spec == "visual.spec.ts" and VISUAL_SEED_OUTCOME != "success":
+                              clause += (". The step that installs it reported '%s' in this run"
+                                         % (VISUAL_SEED_OUTCOME or "not-run"))
+                          clauses.append(clause)
               if not clauses:
                   return ""
               if data_bound:
-                  return "seed-or-data-missing - " + "; ".join(clauses) + ". " + NOTHING_CREATES_IT
+                  return "seed-or-data-missing - " + "; ".join(clauses) + ". " + SEED_GAP
               return "suite-did-not-run - " + "; ".join(clauses) + "."
 
 
