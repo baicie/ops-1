@@ -5,7 +5,9 @@ name: staging-preview
 #
 # Required repository/environment configuration (GitHub Environment: staging):
 #   secrets STAGING_HOST, STAGING_USER, STAGING_SSH_KEY, STAGING_HOST_KEY, STAGING_BASE_URL
-#   optional STAGING_ADMIN_EMAIL, STAGING_ADMIN_PASSWORD (the browser smoke logs in with them)
+#   optional STAGING_ADMIN_EMAIL, STAGING_ADMIN_PASSWORD (the browser suites and the demo-plugin
+#     seed log in with them; when unset both fall back to the demo account committed in
+#     tests/ui/*.spec.ts, admin@opsweave.local, because that is the credential the specs drive)
 #   optional vars OPSWEAVE_PREVIEW_URL (browser-facing preview origin; defaults to port 3000, the
 #     port the kernel listens on, and must name the same origin as STAGING_BASE_URL)
 # A missing secret fails the deploy job with an explicit error; the deployment is never skipped.
@@ -723,10 +725,11 @@ jobs:
             tests/ui/test-results/
           if-no-files-found: warn
 
-  # The three seeded-data suites run one spec file per job. Their data is created out of band (a
-  # host-metrics-pipeline with a published revision, plus an installed demo plugin with a live
-  # instance - deployments/staging/README.md, "DEMO source"); no step in this workflow creates either,
-  # so all three stay known-flaky and none of them gates the run.
+  # The three seeded-data suites run one spec file per job. Their data used to be created out of band
+  # only (a host-metrics-pipeline with a published revision, plus an installed demo plugin with a live
+  # instance - deployments/staging/README.md, "DEMO source"). Half of that is in the workflow now:
+  # seeded_visual runs "Seed the demo hello plugin" before its suite. The pipeline still has no step,
+  # and nothing in this workflow observes it, so all three stay known-flaky and none gates the run.
   #
   # Why parallel: the three used to be three steps of one job, run one after another, and they share
   # no mutable state. studio.spec.ts writes (draft create/save, one publish on host-metrics-pipeline,
@@ -948,9 +951,24 @@ jobs:
           # secrets: the bundle is already staged on the platform (scripts/publish-demo-hello-plugin.sh
           # is a release step, run once, not per CI run), so this only deploys and activates it. That is
           # also why the bundle is needed only on the ABSENT branch of the installer.
+          # Credentials: the staging environment has no STAGING_ADMIN_* secret. An unset secret used to
+          # reach login as an empty email/password and fail there with INVALID_REQUEST ("email and
+          # password are required"), so the seed could not work at all. These are the same documented
+          # demo-account defaults every tests/ui/*.spec.ts already logs in with, so the seed resolves
+          # them exactly the way the suites do - and, like the suites, a real secret still wins. The
+          # source is announced and the value is not: it is a demo account, not a secret, but there is
+          # no reason to echo a password into a public log.
+          admin_email="${OPSWEAVE_ADMIN_EMAIL:-admin@opsweave.local}"
+          admin_password="${OPSWEAVE_ADMIN_PASSWORD:-OpsWeave!2026}"
+          if [ -n "${OPSWEAVE_ADMIN_EMAIL:-}" ] && [ -n "${OPSWEAVE_ADMIN_PASSWORD:-}" ]; then
+            echo "admin credentials: STAGING_ADMIN_EMAIL/STAGING_ADMIN_PASSWORD"
+          else
+            echo "::warning::STAGING_ADMIN_EMAIL/STAGING_ADMIN_PASSWORD are not set in the staging environment; the seed logs in with the demo account committed in tests/ui/*.spec.ts. If that account has been rotated, set both secrets."
+            echo "admin credentials: tests/ui demo-account default (staging secrets unset)"
+          fi
           cargo build -q -p opsweave-opsctl
           ./target/debug/opsctl --url "$OPSWEAVE_URL" login \
-            --email "$OPSWEAVE_ADMIN_EMAIL" --password "$OPSWEAVE_ADMIN_PASSWORD"
+            --email "$admin_email" --password "$admin_password"
           bash scripts/demo_hello_up.sh
 
       - name: Name the demo plugin seed outcome in the run summary
@@ -964,7 +982,7 @@ jobs:
             # An error annotation, not a failed step: continue-on-error above keeps the suite runnable,
             # and this is what makes the failure impossible to miss in the run summary.
             echo "::error::could not install dev.opsweave.hello@0.0.1 (seed outcome: ${OUTCOME:-not-run}); the seed step's log above names the cause - a missing bundle means the package was never staged on the platform (scripts/publish-demo-hello-plugin.sh), and a deploy or activate error means the platform holds the package but could not serve it"
-            echo "visual.spec.ts still runs and is then expected to fail on the missing /ext/trusted-team/hello extension and instance log stream; health.json records it as seed-or-data-missing."
+            echo "visual.spec.ts still runs. Whatever it reports, the record job writes this seed's outcome into health.json (the seeded-data check's seeds) and into the PR comment, so a green suite is never read as 'this pipeline installed the plugin' when it did not."
           fi
 
       - name: Playwright seeded-data suite - visual (demo plugin, live instance) [known-flaky]
@@ -1044,6 +1062,43 @@ jobs:
           MODE = os.environ.get("SMOKE_MODE", "") or "unknown"
           # The seed step's reported outcome: "success", "failure", or empty when the job never reached it.
           VISUAL_SEED_OUTCOME = os.environ.get("VISUAL_SEED_OUTCOME", "") or ""
+          VISUAL_JOB_RESULT = os.environ.get("VISUAL_RESULT", "") or ""
+
+          # The demo-plugin seed is a prerequisite of visual.spec.ts, not a suite, so it is recorded on
+          # its own and on every path. A green suite only says the plugin was there; it says nothing
+          # about who put it there, and run 40854403102 is the case in point - the seed failed, the
+          # suite was 5/5 green against the hand-installed plugin, and the record said nothing.
+          #
+          # An empty outcome means the step was never evaluated. Two ways: the job never ran (tier, run
+          # mode, cancellation - recorded as not-run, with steps_not_run carrying the reason) or the job
+          # ran and died before the step (a real gap in the seed, so it counts as failed).
+          VISUAL_JOB_RAN = VISUAL_JOB_RESULT not in ("", "skipped", "cancelled")
+          if VISUAL_SEED_OUTCOME == "success":
+              SEED_STATUS, SEED_SHORT = "passed", "success"
+          elif VISUAL_SEED_OUTCOME == "failure":
+              SEED_STATUS, SEED_SHORT = "failed", "failure"
+          elif VISUAL_JOB_RAN:
+              SEED_STATUS, SEED_SHORT = "failed", "step-not-reached"
+          else:
+              SEED_STATUS, SEED_SHORT = "not-run", "job-not-run"
+
+          SEEDS = [{
+              "name": "demo-plugin",
+              "job": "seeded_visual",
+              "step": "hello",
+              "installs": "dev.opsweave.hello@0.0.1 (the /ext/trusted-team/hello extension and the "
+                          "instance log stream visual.spec.ts drives)",
+              "outcome": VISUAL_SEED_OUTCOME or SEED_SHORT,
+              "status": SEED_STATUS,
+              "short_reason": SEED_SHORT,
+              # The one question this record exists to answer: did this run produce the data, or did it
+              # inherit it? Green on inherited data is not evidence the pipeline can produce a green.
+              "produced_by_pipeline": SEED_STATUS == "passed",
+          }]
+          # Which specs this run can actually speak for: only the demo-plugin seed has a step here. The
+          # pipeline seed has no step and no probe, so a red studio/visual-layout suite cannot be
+          # attributed to it by this job - see suite_attribution in seed_reason.
+          OBSERVED_SEEDS = {"visual.spec.ts": SEEDS[0]}
 
           # What each seeded-data spec file needs, and where this workflow does or does not create it. The
           # reason is composed from the files whose own suite actually failed, so it can never name a green
@@ -1065,14 +1120,25 @@ jobs:
                   "it (the 'Seed the demo hello plugin' step in seeded_visual installs it)",
           }
 
-          # Named for the gap it describes rather than for the two resources it once covered: the demo-plugin
-          # half has a step now, so a reason claiming no step creates it would be false in the record.
+          # Named for the gap it describes rather than for the two resources it once covered. The demo-plugin
+          # half has a step now, so a reason claiming no step creates it would be false in the record - and so
+          # would the sentence this replaces ("its outcome is reported above"), which was true only on the
+          # runs where the suite was red, i.e. exactly the runs where the seed outcome was already visible.
           SEED_GAP = (
-              "The demo-plugin half does have a step: seeded_visual installs it before its suite and its "
-              "outcome is reported above. The pipeline half is still seeded out of band through the admin API "
-              "plus a host-side demo source server (deployments/staging/README.md 'DEMO source'), and no step "
-              "in this workflow creates it. Known-flaky until that seeding step lands."
+              "The demo-plugin half does have a step: seeded_visual runs it before its suite, and this record "
+              "carries that step's own outcome in every run (the seeded-data check's 'seeds'). The pipeline "
+              "half is still seeded out of band through the admin API plus a host-side demo source server "
+              "(deployments/staging/README.md 'DEMO source'), and no step in this workflow creates or observes "
+              "it, so this record cannot say whether it was missing. Known-flaky until that seeding step lands."
           )
+
+          # Where each seeded job writes its Playwright trace (playwright test --output test-results/<dir>),
+          # so a reason that declines to guess a cause can still send the reader to the step and locator.
+          TRACE_DIR = {
+              "studio.spec.ts": "tests/ui/test-results/seeded-studio/",
+              "visual-layout.spec.ts": "tests/ui/test-results/seeded-vlayout/",
+              "visual.spec.ts": "tests/ui/test-results/seeded-visual/",
+          }
 
           CORE_FILES = ("staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts")
           SURFACES_FILES = (
@@ -1096,7 +1162,7 @@ jobs:
               ("seeded_visual_layout", "seeded-data", "full", ("visual-layout.spec.ts",),
                os.environ.get("VISUAL_LAYOUT_OUTCOME", ""), os.environ.get("VISUAL_LAYOUT_RESULT", "")),
               ("seeded_visual", "seeded-data", "full", ("visual.spec.ts",),
-               os.environ.get("VISUAL_OUTCOME", ""), os.environ.get("VISUAL_RESULT", "")),
+               os.environ.get("VISUAL_OUTCOME", ""), VISUAL_JOB_RESULT),
           ]
 
           # (group name, known_flaky). A known-flaky group still runs and is still reported; it is only
@@ -1158,8 +1224,15 @@ jobs:
 
 
           def seed_reason(group_records):
+              # The prefix states what this run actually observed, and nothing more. 'seed-or-data-missing'
+              # is claimed only where a step in this run was supposed to create the data and reported that
+              # it did not - that is evidence. Where nothing here observes the data, the record says so and
+              # names the trace instead of asserting a cause: on run 40854403102 this string blamed a
+              # missing pipeline seed for a locator.click timeout in studio.spec.ts:45, while the same
+              # file's draft-conflict case (:130) drove the same editor and the same node and the pipeline
+              # list case (:109) passed - the pipeline seed was demonstrably there.
               clauses = []
-              data_bound = False
+              labels = []
               for record in group_records:
                   # A skipped step was excluded by the tier or by the run mode; that is recorded in
                   # steps_not_run, and calling it a missing seed would be a wrong reason.
@@ -1167,26 +1240,45 @@ jobs:
                       continue
                   for spec in record["spec_files"]:
                       if not record["reported"]:
+                          labels.append("suite-did-not-run")
                           clauses.append("%s did not run: the job never reached the suite (job result: %s) - "
                                          "read the job log" % (spec, record["outcome"]))
                           continue
                       needs = SEED_NEEDS.get(spec)
                       if needs is None:
+                          labels.append("suite-failed-with-unclear-cause")
                           clauses.append("%s failed (outcome: %s) with no recorded data dependency"
                                          % (spec, record["outcome"]))
+                          continue
+                      seed = OBSERVED_SEEDS.get(spec)
+                      if seed is not None and seed["status"] == "failed":
+                          # The step that installs this spec's data ran in this job and failed before the
+                          # suite: this is the one case the seed attribution is entitled to assert.
+                          labels.append("seed-or-data-missing")
+                          clauses.append("%s failed (outcome: %s) and the step that installs its data "
+                                         "reported '%s' in this run: it needs %s"
+                                         % (spec, record["outcome"], seed["outcome"], needs))
+                      elif seed is not None:
+                          labels.append("suite-failed-with-unclear-cause")
+                          clauses.append("%s failed (outcome: %s) although the step that installs its data "
+                                         "reported success in this run, so the install/deploy/activate path "
+                                         "completed here - the plugin's presence is not the open question (%s), "
+                                         "so the cause is more likely the page, the instance or the suite than "
+                                         "a missing seed: the trace under %s names the step and the locator"
+                                         % (spec, record["outcome"], needs, TRACE_DIR.get(spec, "tests/ui/test-results/")))
                       else:
-                          data_bound = True
-                          clause = ("%s failed (outcome: %s): it needs %s"
-                                    % (spec, record["outcome"], needs))
-                          if spec == "visual.spec.ts" and VISUAL_SEED_OUTCOME != "success":
-                              clause += (". The step that installs it reported '%s' in this run"
-                                         % (VISUAL_SEED_OUTCOME or "not-run"))
-                          clauses.append(clause)
+                          labels.append("suite-failed-with-unclear-cause")
+                          clauses.append("%s failed (outcome: %s). No step in this workflow creates or "
+                                         "observes %s, so this record cannot tell a missing seed from a page "
+                                         "that never became ready: the trace under %s names the step and the "
+                                         "locator that timed out"
+                                         % (spec, record["outcome"], needs, TRACE_DIR.get(spec, "tests/ui/test-results/")))
               if not clauses:
                   return ""
-              if data_bound:
-                  return "seed-or-data-missing - " + "; ".join(clauses) + ". " + SEED_GAP
-              return "suite-did-not-run - " + "; ".join(clauses) + "."
+              head = ", ".join(dict.fromkeys(labels))
+              if "seed-or-data-missing" in labels:
+                  return head + " - " + "; ".join(clauses) + ". " + SEED_GAP
+              return head + " - " + "; ".join(clauses) + "."
 
 
           checks = []
@@ -1213,6 +1305,15 @@ jobs:
                   "failed_files": [spec for record in failures if len(record["spec_files"]) == 1
                                    for spec in record["spec_files"]],
               }
+              if group == "seeded-data":
+                  # Carried on every path, not only when a suite is red: the run this record failed to
+                  # describe was 5/5 green with a failed seed, and a field that appears only on failure
+                  # is exactly how that stays invisible.
+                  check["seeds"] = SEEDS
+                  check["detail"] = "; ".join(part for part in (
+                      check["detail"],
+                      "; ".join("seed %s: %s" % (seed["name"], seed["status"]) for seed in SEEDS),
+                  ) if part)
               if status == "skipped":
                   check["skip_reason"] = "; ".join("%s: %s" % (record["step"], record["short_reason"])
                                                    for record in group_records)
@@ -1244,6 +1345,25 @@ jobs:
                   print("::warning::known-flaky suite group '%s' - %s (outcome: %s)"
                         % (check["name"], check["reason"], check["detail"]))
 
+          # The seed is announced on its own, independently of the suite it feeds. This is the line run
+          # 40854403102 did not have: the seed failed, the suite was green, and nothing in the run said
+          # that the green had been inherited from a plugin someone installed on the host by hand.
+          for seed in SEEDS:
+              if seed["status"] == "passed":
+                  print("::notice::seed %s succeeded in this run: %s" % (seed["name"], seed["installs"]))
+              elif seed["status"] == "failed":
+                  print("::warning::the seed for %s did NOT succeed in this run (outcome: %s, step %s/%s). "
+                        "%s was not installed by this workflow, so a green suite here is not evidence the "
+                        "pipeline can produce it - the host already had it, and a rebuilt host would fail "
+                        "that suite. Read the %s job log for the cause."
+                        % ("visual.spec.ts", seed["outcome"], seed["job"], seed["step"],
+                           seed["installs"], seed["job"]))
+              else:
+                  print("::notice::the seed for %s did not run (%s, step %s/%s): %s was not installed by "
+                        "this run, and nothing here certifies it."
+                        % ("visual.spec.ts", seed["short_reason"], seed["job"], seed["step"],
+                           seed["installs"]))
+
           payload = {
               "mode": MODE,
               "tier": TIER,
@@ -1251,6 +1371,7 @@ jobs:
               "base_url": os.environ.get("OPSWEAVE_URL", ""),
               "ok": ok,
               "checks": checks,
+              "seeds": SEEDS,
               "steps_not_run": steps_not_run,
               "known_flaky_reasons": [check["reason"] for check in checks if check.get("reason")],
               "suite_groups": [
@@ -1366,6 +1487,70 @@ jobs:
           elif health.get("exit_code") is not None:
               detail = "playwright exit %s" % health["exit_code"]
 
+          # The seeded-data prerequisites, read back from the record instead of from a job output: this
+          # job does not need seeded_visual, and a seed that failed while its suite was green must still
+          # appear here. That combination - the one run 40854403102 was - is what this row exists for.
+          def seeds(health):
+              found = [item for item in (health.get("seeds") or []) if isinstance(item, dict)]
+              if found:
+                  return found
+              return [seed for item in (health.get("checks") or []) if isinstance(item, dict)
+                      for seed in (item.get("seeds") or []) if isinstance(seed, dict)]
+
+          def suite_outcome(health, spec):
+              for group in health.get("suite_groups") or []:
+                  for step in group.get("steps") or []:
+                      if spec in (step.get("files") or []):
+                          return step.get("outcome") or "not-run"
+              return "not-run"
+
+          def seed_cell(found):
+              if not found:
+                  return "not recorded (no seeded-data suites in this run)"
+              cells = []
+              for seed in found:
+                  status = seed.get("status") or "unknown"
+                  outcome = seed.get("outcome") or "not-run"
+                  if status == "passed":
+                      cells.append("%s: ok (installed by this run)" % seed.get("name"))
+                  elif status == "failed":
+                      cells.append("%s: FAILED (outcome %s) - NOT installed by this run"
+                                   % (seed.get("name"), outcome))
+                  else:
+                      cells.append("%s: not run (%s)" % (seed.get("name"), outcome))
+              return "; ".join(cells)
+
+          def seed_notes(health, found):
+              # One line per seed that did not succeed. Saying it in the table is not enough: the table
+              # is scanned, and the point of the sentence is that a green suite may be inherited.
+              notes = []
+              for seed in found:
+                  status = seed.get("status") or "unknown"
+                  outcome = seed.get("outcome") or "not-run"
+                  installs = seed.get("installs") or "the data its suite needs"
+                  if status == "passed":
+                      continue
+                  if status != "failed":
+                      notes.append("The %s seed did not run in this run (%s), so nothing here certifies that "
+                                   "%s exists." % (seed.get("name"), outcome, installs))
+                      continue
+                  visual = suite_outcome(health, "visual.spec.ts")
+                  if visual == "success":
+                      tail = ("visual.spec.ts passed anyway, which means it drove a plugin that was already "
+                              "on the host: this green was not produced by the pipeline, and a rebuilt host "
+                              "would not have it.")
+                  elif visual == "failure":
+                      tail = ("visual.spec.ts is red in this run, and the plugin it needs was never "
+                              "installed by it.")
+                  else:
+                      tail = ("visual.spec.ts did not run in this tier, so nothing about it was certified "
+                              "either way.")
+                  notes.append("**The %s seed did not succeed** (outcome: %s), so %s was not installed by "
+                               "this run. %s" % (seed.get("name"), outcome, installs, tail))
+              return notes
+
+          found_seeds = seeds(health)
+
           rows = [
               ("Preview", os.environ.get("PREVIEW_URL") or "<unset>"),
               ("Commit", "`%s`" % (os.environ.get("TARGET_SHA") or "<unknown>")),
@@ -1375,6 +1560,7 @@ jobs:
               ("Health detail", detail),
               ("Suite tier", "%s - %s" % (health.get("tier") or "unrecorded", health.get("tier_reason") or "no tier recorded")),
               ("Not run this run", not_run_summary(health)),
+              ("Seeded data (this run)", seed_cell(found_seeds)),
               ("Smoke mode", os.environ.get("SMOKE_MODE") or "unknown"),
               ("Previous successful deploy", os.environ.get("PREVIOUS_SHA") or "none recorded"),
               ("Rollback", rollback),
@@ -1385,6 +1571,9 @@ jobs:
           for name, value in rows:
               lines.append("| %s | %s |" % (name, str(value).replace("|", "\\|")))
           lines.append("")
+          for note in seed_notes(health, found_seeds):
+              lines.append(note)
+              lines.append("")
           lines.append("Kernel health endpoints: /livez and /readyz. This comment is updated in place on every run and is never duplicated.")
           body = "\n".join(lines) + "\n"
 
