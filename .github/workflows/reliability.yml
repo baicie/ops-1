@@ -1,0 +1,42 @@
+name: reliability
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  quality-faults:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install catalog backend dependencies
+        working-directory: plugins/data-catalog/backend
+        run: npm ci --omit=dev --no-audit --no-fund
+      - name: Run isolated quality fault harness
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          FT_DATABASE_PREFIX: postgres://postgres:postgres@localhost
+        run: ./tests/reliability/run.sh --all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reliability-evidence
+          path: artifacts/reliability/

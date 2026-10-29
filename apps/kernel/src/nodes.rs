@@ -27,7 +27,7 @@ pub fn spawn_resource_retention(state: AppState) {
     tokio::spawn(async move {
         loop {
             match sqlx::query(
-                "DELETE FROM kernel.node_resource_samples WHERE sample_id IN (SELECT sample_id FROM kernel.node_resource_samples WHERE observed_at < now() - interval '7 days' ORDER BY sample_id LIMIT 10000)",
+                "DELETE FROM kernel.node_resource_samples WHERE sample_id IN (SELECT sample_id FROM kernel.node_resource_samples WHERE observed_at < now() - interval '7 days' ORDER BY observed_at, sample_id LIMIT 10000)",
             )
             .execute(&state.db)
             .await
@@ -679,6 +679,19 @@ pub struct NodeResourceSampleView {
     pub cpu_cores: Option<i64>,
     pub filesystem_used_bytes: Option<i64>,
     pub filesystem_total_bytes: Option<i64>,
+    pub resolution: Option<String>,
+    pub window_start: Option<DateTime<Utc>>,
+    pub window_end: Option<DateTime<Utc>>,
+    pub sample_count: Option<i32>,
+    pub cpu_min: Option<f64>,
+    pub cpu_max: Option<f64>,
+    pub cpu_avg: Option<f64>,
+    pub memory_peak_bytes: Option<i64>,
+    pub filesystem_peak_bytes: Option<i64>,
+    pub generation_start: Option<i64>,
+    pub generation_end: Option<i64>,
+    pub generation_changes: Option<i32>,
+    pub generation_distinct_count: Option<i32>,
 }
 
 pub async fn resource_history(
@@ -693,18 +706,41 @@ pub async fn resource_history(
     let rows = if resolution == "hour" {
         sqlx::query_as::<_, NodeResourceSampleView>(
             r#"
-            SELECT min(sample_id) AS sample_id,node_id,max(generation) AS generation,
-                   date_trunc('hour', observed_at) AS observed_at,max(sampled_at) AS sampled_at,
-                   avg(cpu_utilization)::float8 AS cpu_utilization,
-                   max(memory_used_bytes) AS memory_used_bytes,
-                   max(memory_total_bytes) AS memory_total_bytes,
-                   max(cpu_cores) AS cpu_cores,
-                   max(filesystem_used_bytes) AS filesystem_used_bytes,
-                   max(filesystem_total_bytes) AS filesystem_total_bytes
-            FROM kernel.node_resource_samples
-            WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
-              AND ($3::timestamptz IS NULL OR observed_at <= $3)
-            GROUP BY node_id, date_trunc('hour', observed_at)
+            WITH filtered AS (
+              SELECT *, (date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') AS bucket
+              FROM kernel.node_resource_samples
+              WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
+                AND ($3::timestamptz IS NULL OR observed_at <= $3)
+            ), ordered AS (
+              SELECT *, lag(generation) OVER (PARTITION BY node_id ORDER BY observed_at, sample_id) AS previous_generation
+              FROM filtered
+            ), aggregated AS (
+              SELECT bucket,node_id,count(*)::int AS sample_count,min(sample_id) AS sample_id,
+                     (array_agg(generation ORDER BY observed_at, sample_id))[1] AS generation_start,
+                     (array_agg(generation ORDER BY observed_at DESC, sample_id DESC))[1] AS generation_end,
+                     count(DISTINCT generation)::int AS generation_distinct_count,
+                     sum(CASE WHEN previous_generation IS NOT NULL AND previous_generation IS DISTINCT FROM generation THEN 1 ELSE 0 END)::int AS generation_changes,
+                     max(sampled_at) AS sampled_at,
+                     avg(cpu_utilization)::float8 AS cpu_utilization,
+                     max(memory_used_bytes) AS memory_used_bytes,
+                     max(memory_total_bytes) AS memory_total_bytes,
+                     max(cpu_cores) AS cpu_cores,
+                     max(filesystem_used_bytes) AS filesystem_used_bytes,
+                     max(filesystem_total_bytes) AS filesystem_total_bytes,
+                     min(cpu_utilization)::float8 AS cpu_min,
+                     max(cpu_utilization)::float8 AS cpu_max,
+                     avg(cpu_utilization)::float8 AS cpu_avg,
+                     max(memory_used_bytes) AS memory_peak_bytes,
+                     max(filesystem_used_bytes) AS filesystem_peak_bytes
+              FROM ordered GROUP BY bucket,node_id
+            )
+            SELECT sample_id,node_id,generation_end AS generation,bucket AS observed_at,sampled_at,
+                   cpu_utilization,memory_used_bytes,memory_total_bytes,cpu_cores,
+                   filesystem_used_bytes,filesystem_total_bytes,'hour'::text AS resolution,
+                   bucket AS window_start,bucket + interval '1 hour' AS window_end,
+                   sample_count,cpu_min,cpu_max,cpu_avg,memory_peak_bytes,filesystem_peak_bytes,
+                   generation_start,generation_end,generation_changes,generation_distinct_count
+            FROM aggregated
             ORDER BY observed_at DESC LIMIT $4
             "#,
         )
@@ -719,7 +755,12 @@ pub async fn resource_history(
             r#"
             SELECT sample_id,node_id,generation,observed_at,sampled_at,cpu_utilization,
                    memory_used_bytes,memory_total_bytes,cpu_cores,filesystem_used_bytes,
-                   filesystem_total_bytes
+                   filesystem_total_bytes,'raw'::text AS resolution,
+                   NULL::timestamptz AS window_start,NULL::timestamptz AS window_end,
+                   NULL::int AS sample_count,NULL::float8 AS cpu_min,NULL::float8 AS cpu_max,
+                   NULL::float8 AS cpu_avg,NULL::bigint AS memory_peak_bytes,
+                   NULL::bigint AS filesystem_peak_bytes,NULL::bigint AS generation_start,
+                   NULL::bigint AS generation_end,NULL::int AS generation_changes,NULL::int AS generation_distinct_count
             FROM kernel.node_resource_samples
             WHERE node_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2)
               AND ($3::timestamptz IS NULL OR observed_at <= $3)
