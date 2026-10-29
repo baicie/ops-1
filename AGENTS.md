@@ -10,6 +10,12 @@
 5. 若 UI 有变化，必须提交交互状态矩阵和真实浏览器截图，手工审查 1440/1024/390 宽度与明暗主题。
 6. 完成后更新实现状态、风险清单、迁移说明和变更摘要；不得伪造通过率、生产就绪声明。
 
+## 前端与国际化（MUST）
+- 前端统一 **Vite + React + TypeScript + Tailwind CSS + shadcn/ui**；组件以开源 `shadcn-admin` 模板的既有实现为参考，按 shadcn 的 copy-in 模式进仓库（`apps/platform-web/src/components/ui/`），不引运行时组件包；禁止并列引入 MUI/AntD/Chakra 等第二套 UI 框架。
+- 所有用户可见文案 **必须**走 i18n 消息目录（默认 `en` + `zh-CN`），禁止硬编码；缺键与未使用键必须可被校验发现；时间/数字/货币用 `Intl` 格式化。
+- E2E 选择器 **禁止**依赖本地化后的可见文案（用 role、稳定的 accessible name 或 `data-testid`），否则切换语言即碎。
+- 后端返回给用户看的错误必须带稳定错误码，前端按码取本地化文案；不得直接把服务端英文句子渲染给用户。
+
 ## 绝对禁止（MUST NOT）
 - 将业务插件功能写入 Kernel；未经 ADR 添加新的不可卸载能力。
 - 从 Web 直接连接 Node Runtime、插件容器端口或数据库；绕过 Gateway 的 RBAC 和资源范围。

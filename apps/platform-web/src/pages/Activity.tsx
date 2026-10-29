@@ -3,10 +3,22 @@ import { api } from '../api';
 import { usePolling } from '../hooks';
 import type { AuditEvent } from '../types';
 import { Icon } from '../components/Icons';
-import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { EmptyState, ErrorState, PageHeader, Skeleton, TimeAgo } from '../components/Ui';
 import { formatDate } from '../format';
+import { useT } from '../i18n';
+import { cn } from '../lib/utils';
+import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+
+/** The subject filter has an "all subjects" state, which Radix Select cannot express
+ *  (an item value is never "no value"): the empty string the API expects is mapped here. */
+const ALL_SUBJECTS = 'ALL';
 
 export function ActivityPage() {
+  const t = useT();
   const [subjectType, setSubjectType] = useState('');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -15,35 +27,59 @@ export function ActivityPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader title="Activity" description="Audited lifecycle, deployment and trust actions. Event time is not receive time." actions={<button className="btn btn-secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> Refresh</button>} />
+      <PageHeader title={t('page.activity')} description={t('activity.description')} actions={<Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
       <section className="toolbar">
-        <div className="search-box"><Icon name="search" size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search event, subject or actor" aria-label="Search audit events" /></div>
-        <select value={subjectType} onChange={(event) => setSubjectType(event.target.value)} aria-label="Filter subject type">
-          <option value="">All subjects</option><option value="plugin">Plugin</option><option value="deployment">Deployment</option><option value="node">Node</option><option value="publisher">Publisher</option><option value="enrollment_token">Enrollment token</option>
-        </select>
-        <span className="toolbar-count">{events.length} events</span>
+        <div className="relative flex min-w-[260px] max-w-[460px] flex-1 items-center">
+          <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('activity.search.placeholder')} aria-label={t('activity.search.aria')} className="pl-[33px]" />
+        </div>
+        <Select value={subjectType || ALL_SUBJECTS} onValueChange={(value) => setSubjectType(value === ALL_SUBJECTS ? '' : value)}>
+          <SelectTrigger aria-label={t('activity.filter.aria')} className="w-auto">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_SUBJECTS}>{t('activity.filter.allSubjects')}</SelectItem>
+            <SelectItem value="plugin">{t('activity.filter.plugin')}</SelectItem>
+            <SelectItem value="deployment">{t('activity.filter.deployment')}</SelectItem>
+            <SelectItem value="node">{t('activity.filter.node')}</SelectItem>
+            <SelectItem value="publisher">{t('activity.filter.publisher')}</SelectItem>
+            <SelectItem value="enrollment_token">{t('activity.filter.enrollmentToken')}</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="toolbar-count">{t('activity.count.events', { count: events.length })}</span>
       </section>
-      {loading && !data ? <Skeleton rows={7} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : events.length === 0 ? <EmptyState icon="activity" title="No audit events" description="Actions performed through the Kernel will appear here." /> : (
+      {loading && !data ? <Skeleton rows={7} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : events.length === 0 ? <EmptyState icon="activity" title={t('activity.empty.title')} description={t('activity.empty.description')} /> : (
         <section className="panel table-panel">
-          <table className="data-table activity-table">
-            <thead><tr><th>Event</th><th>Result</th><th>Subject</th><th>Actor</th><th>Occurred</th><th aria-label="Details" /></tr></thead>
-            <tbody>{events.map((event) => (
-              <React.Fragment key={event.id}>
-                <tr className="clickable" onClick={() => setExpanded(expanded === event.id ? null : event.id)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') setExpanded(expanded === event.id ? null : event.id); }}>
-                  <td data-label="Event"><strong>{event.eventType}</strong><div className="muted small">{event.action}</div></td>
-                  <td data-label="Result"><StatusBadge status={event.result} /></td>
-                  <td data-label="Subject"><span className="muted small">{event.subjectType}</span><div className="mono small">{event.subjectId}</div></td>
-                  <td data-label="Actor"><span className="muted small">{event.actorType}</span><div className="mono small">{event.actorId.slice(0, 12)}</div></td>
-                  <td data-label="Occurred"><TimeAgo value={event.occurredAt} /><div className="muted small">{formatDate(event.occurredAt)}</div></td>
-                  <td className="row-action"><Icon name={expanded === event.id ? 'down' : 'chevron'} size={15} /></td>
-                </tr>
-                {expanded === event.id && <tr className="expanded-row"><td colSpan={6}><div className="event-detail"><div className="event-detail-meta"><span>Event ID <code>{event.id}</code></span>{event.requestId && <span>Request <code>{event.requestId}</code></span>}</div><pre>{JSON.stringify(event.details, null, 2)}</pre></div></td></tr>}
-              </React.Fragment>
-            ))}</tbody>
-          </table>
+          <Table className={stackTable}>
+            <TableHeader className={stackHead}>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t('table.event')}</TableHead>
+                <TableHead>{t('table.result')}</TableHead>
+                <TableHead>{t('table.subject')}</TableHead>
+                <TableHead>{t('table.actor')}</TableHead>
+                <TableHead>{t('table.occurred')}</TableHead>
+                <TableHead aria-label={t('table.details')} />
+              </TableRow>
+            </TableHeader>
+            <TableBody className={stackBody}>
+              {events.map((event) => (
+                <React.Fragment key={event.id}>
+                  <TableRow className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} onClick={() => setExpanded(expanded === event.id ? null : event.id)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') setExpanded(expanded === event.id ? null : event.id); }}>
+                    <StackCell label={t('table.event')}><strong>{event.eventType}</strong><div className="text-sm text-muted-foreground">{event.action}</div></StackCell>
+                    <StackCell label={t('table.result')}><StatusPill status={event.result} /></StackCell>
+                    <StackCell label={t('table.subject')}><span className="text-sm text-muted-foreground">{event.subjectType}</span><div className="mono text-sm">{event.subjectId}</div></StackCell>
+                    <StackCell label={t('table.actor')}><span className="text-sm text-muted-foreground">{event.actorType}</span><div className="mono text-sm">{event.actorId.slice(0, 12)}</div></StackCell>
+                    <StackCell label={t('table.occurred')}><TimeAgo value={event.occurredAt} /><div className="text-sm text-muted-foreground">{formatDate(event.occurredAt)}</div></StackCell>
+                    <TableCell className="row-action max-[760px]:hidden"><Icon name={expanded === event.id ? 'down' : 'chevron'} size={15} /></TableCell>
+                  </TableRow>
+                  {expanded === event.id && <TableRow className="expanded-row"><TableCell colSpan={6}><div className="event-detail"><div className="event-detail-meta"><span>{t('activity.detail.eventId')} <code>{event.id}</code></span>{event.requestId && <span>{t('activity.detail.request')} <code>{event.requestId}</code></span>}</div><pre>{JSON.stringify(event.details, null, 2)}</pre></div></TableCell></TableRow>}
+                </React.Fragment>
+              ))}
+            </TableBody>
+          </Table>
         </section>
       )}
-      <p className="table-footnote"><Icon name="access" size={13} /> Audit details are redacted at write time. Raw session tokens, enrollment tokens and plugin secrets are never recorded.</p>
+      <p className="table-footnote"><Icon name="access" size={13} /> {t('activity.footnote')}</p>
     </div>
   );
 }

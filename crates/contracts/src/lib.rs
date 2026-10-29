@@ -436,9 +436,21 @@ pub enum LogLevel {
 pub struct ResourceSnapshot {
     pub sampled_at: DateTime<Utc>,
     pub cpu_utilization: Option<f64>,
+    /// Host memory in use, in bytes: the budget plugin containers draw from.
     pub memory_used_bytes: Option<i64>,
+    /// Host memory total, in bytes. Never the Node Runtime container's own
+    /// cgroup limit - plugin containers are host siblings of that container.
     pub memory_total_bytes: Option<i64>,
+    /// Host-schedulable CPU cores: the budget plugin containers draw from.
+    /// Never the Node Runtime container's own cgroup quota.
     pub cpu_cores: Option<i64>,
+    /// Diagnostic only: the CPU cap of the Node Runtime's own cgroup, in
+    /// cores. It bounds the agent, not the plugins placed from this snapshot,
+    /// so placement MUST NOT read it.
+    pub self_cpu_limit_cores: Option<f64>,
+    /// Diagnostic only: the memory cap of the Node Runtime's own cgroup, in
+    /// bytes. Placement MUST NOT read it either.
+    pub self_memory_limit_bytes: Option<i64>,
     pub filesystem_used_bytes: Option<i64>,
     pub filesystem_total_bytes: Option<i64>,
 }

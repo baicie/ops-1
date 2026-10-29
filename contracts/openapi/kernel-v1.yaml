@@ -14,6 +14,35 @@ paths:
       responses:
         '200': {description: Health summary}
         '401': {description: Not authenticated}
+  /version:
+    get:
+      summary: Public build identity of the running kernel
+      description: >
+        Unauthenticated by design so a staging preview can prove which build it
+        serves before anyone signs in. The payload is a closed set of five
+        fields; it must never carry configuration, credentials or an env dump.
+      security: []
+      responses:
+        '200':
+          description: Build identity; commitSha and buildTime are null when the build did not record them
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [version, commitSha, buildTime, environment, startedAt]
+                properties:
+                  version: {type: string, description: CARGO_PKG_VERSION of the kernel}
+                  commitSha:
+                    type: [string, 'null']
+                    pattern: '^[0-9a-f]{40}$'
+                    description: Full lower-case digest, or null; malformed values are reported as null
+                  buildTime:
+                    type: [string, 'null']
+                    format: date-time
+                    description: RFC 3339 UTC timestamp of the build, or null
+                  environment: {type: string, enum: [STAGING, DEVELOPMENT, PRODUCTION, UNKNOWN]}
+                  startedAt: {type: string, format: date-time, description: Kernel start instant}
   /plugins:
     get:
       summary: Installed trusted plugins

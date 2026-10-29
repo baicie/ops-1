@@ -1,3 +1,6 @@
+/* Tailwind utilities load first so this hand-written design system keeps cascade priority. */
+@import './tailwind.css';
+
 :root {
   color-scheme: light;
   --ow-bg: #f4f5f7;
@@ -78,6 +81,9 @@ html[data-theme="dark"] {
 
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; }
+/* Radix dialogs lock body scroll while open; the reserved gutter keeps the page from shifting
+   horizontally at that moment. */
+html { scrollbar-gutter: stable; }
 body {
   margin: 0;
   background: var(--ow-bg);
@@ -131,7 +137,10 @@ pre { margin: 0; }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ow-text-secondary); }
 .icon-btn:hover { background: var(--ow-surface-2); color: var(--ow-text); }
 .icon-btn:disabled { opacity: .35; cursor: default; }
-.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* Field renders the Radix Label primitive, whose shadcn typography (text-sm / font-semibold /
+   text-muted-foreground / items-center) would otherwise be inherited by the caller's nested
+   controls. These declarations keep the pre-migration inherited body typography authoritative. */
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; align-items: stretch; font-size: inherit; font-weight: inherit; color: inherit; }
 .field-label { font-size: var(--ow-type-sm); font-weight: 600; color: var(--ow-text-secondary); }
 .field-hint { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
 input, select, textarea {
@@ -491,7 +500,9 @@ input::placeholder { color: var(--ow-text-muted); }
 
 /* Modal and toast */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(10, 14, 20, .48); backdrop-filter: blur(2px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.modal { background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-lg); box-shadow: 0 24px 70px rgba(0,0,0,.35); width: 100%; max-height: 92vh; display: flex; flex-direction: column; }
+/* The dialog primitive positions .modal itself (fixed, centred); it therefore owns the 20px
+   viewport gutters the old .modal-backdrop padding used to provide. */
+.modal { background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-lg); box-shadow: 0 24px 70px rgba(0,0,0,.35); width: calc(100% - 40px); max-height: 92vh; display: flex; flex-direction: column; }
 .modal-small { max-width: 480px; }
 .modal-medium { max-width: 640px; }
 .modal-large { max-width: 860px; }
@@ -501,7 +512,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 13px 18px; border-top: 1px solid var(--ow-border); }
 .confirm-copy { color: var(--ow-text-secondary); line-height: 1.6; }
 .confirm-copy code { background: var(--ow-surface-2); }
-.toast-stack { position: fixed; right: 20px; bottom: 20px; z-index: 120; display: flex; flex-direction: column; gap: 8px; max-width: 390px; }
+.toast-stack { position: fixed; right: 20px; bottom: 20px; z-index: 120; display: flex; flex-direction: column; gap: 8px; max-width: 390px; pointer-events: auto; }
 .toast { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; background: var(--ow-surface); border: 1px solid var(--ow-border); border-left: 3px solid var(--ow-accent); border-radius: 6px; box-shadow: var(--ow-shadow); font-size: var(--ow-type-sm); animation: toast-in .18s ease-out; }
 .toast strong { display: block; font-weight: 600; }
 .toast p { color: var(--ow-text-muted); margin-top: 2px; }
@@ -614,7 +625,8 @@ input::placeholder { color: var(--ow-text-muted); }
   .readiness-block { padding: 16px 14px 6px; }
   .readiness-number { font-size: 36px; }
   .modal-backdrop { padding: 8px; align-items: flex-end; }
-  .modal { max-height: 94vh; border-radius: 12px 12px 0 0; }
+  /* Below this width .modal is a bottom sheet, as it was while .modal-backdrop owned the layout. */
+  .modal { width: calc(100% - 16px); max-height: 94vh; border-radius: 12px 12px 0 0; top: auto; bottom: 8px; transform: translateX(-50%); }
   .log-toolbar .search-box { min-width: 100%; max-width: none; }
   .log-toolbar select { flex: 1; }
   .log-line { padding: 2px 9px; grid-template-columns: 70px 42px minmax(0, 1fr); gap: 7px; font-size: 11px; }

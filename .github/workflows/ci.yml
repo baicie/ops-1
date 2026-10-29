@@ -24,6 +24,8 @@ jobs:
       - run: pnpm --filter @opsweave/hello-web typecheck
       - run: pnpm --filter @opsweave/data-catalog-web typecheck
       - run: pnpm --filter @opsweave/data-integration-web typecheck
+      # Fails on a missing message key or a key built from a template literal.
+      - run: node scripts/check-i18n.mjs
       - run: pnpm --filter @opsweave/platform-web build
       - run: pnpm --filter @opsweave/hello-web build
       - run: pnpm --filter @opsweave/data-catalog-web build

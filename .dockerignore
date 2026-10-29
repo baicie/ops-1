@@ -1,0 +1,21 @@
+# Build context hygiene: the image is built from sources only.
+.git
+.github
+target
+node_modules
+dist
+data
+data-restored
+data-test
+artifacts
+keys
+.opsweave
+.env
+*.log
+test-results
+playwright-report
+blueprint-extracted
+.blueprint
+plugins/hello-java/jre
+plugins/hello-go/hello-go-linux
+deployments/local
