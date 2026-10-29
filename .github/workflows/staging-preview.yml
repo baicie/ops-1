@@ -14,12 +14,15 @@ name: staging-preview
 # skipped, and the expected commit falls back to the dispatched ref HEAD (inputs.sha wins if given).
 # It occupies its own concurrency bucket (see the concurrency block below), so a verification run
 # and a deploy run never cancel each other in either direction.
+# A certification always runs the full tier - certifying the deployed build with a subset certifies
+# nothing - and there is no downgrade switch out of it; the plan job writes down why.
 #
 # Two acceptance tiers, decided once by the plan job and read by every job that cares:
-#   core  a push, or a workflow_dispatch without full_suite=true: the three core specs only
-#         (staging-smoke, dual-surface, admin-shell), the 4.4 min path.
-#   full  workflow_dispatch full_suite=true, or a pull request that becomes ready_for_review: adds the
-#         eleven-file surfaces suite and the three seeded-data suites (one job each).
+#   core  a push, or a workflow_dispatch without full_suite=true and without verify_only: the three
+#         core specs only (staging-smoke, dual-surface, admin-shell), the 4.4 min path.
+#   full  workflow_dispatch full_suite=true, workflow_dispatch verify_only=true, or a pull request
+#         that becomes ready_for_review: adds the eleven-file surfaces suite and the three
+#         seeded-data suites (one job each).
 # A step the tier leaves out is never silent: the record job writes it into health.json
 # (steps_not_run, with the reason) and into the PR comment. This repository has been bitten by
 # "green because nothing ran" before.
@@ -46,7 +49,7 @@ on:
         type: boolean
         default: false
       full_suite:
-        description: Run the full acceptance suite (the eleven-file surfaces suite plus the three seeded-data suites) instead of the push-tier core run
+        description: Run the full acceptance suite (the eleven-file surfaces suite plus the three seeded-data suites) instead of the push-tier core run (always on when verify_only=true)
         required: false
         type: boolean
         default: false
@@ -81,10 +84,11 @@ jobs:
   # plan.outputs.tier - so the gate that skips a step and the record that explains the skip cannot
   # disagree. Two places deciding one skip is how a skip eventually gets reported wrongly.
   #
-  #   core  a push, or a workflow_dispatch without full_suite=true: the three core specs only
-  #         (staging-smoke, dual-surface, admin-shell) - the 4.4 min path.
-  #   full  workflow_dispatch with full_suite=true, or a pull request that becomes ready_for_review:
-  #         adds the eleven-file surfaces suite and the three seeded-data suites.
+  #   core  a push, or a workflow_dispatch without full_suite=true and without verify_only: the three
+  #         core specs only (staging-smoke, dual-surface, admin-shell) - the 4.4 min path.
+  #   full  workflow_dispatch with full_suite=true, workflow_dispatch with verify_only=true, or a
+  #         pull request that becomes ready_for_review: adds the eleven-file surfaces suite and the
+  #         three seeded-data suites.
   # A step the tier leaves out is written down by the record job (health.json steps_not_run) instead
   # of disappearing: this repository has already paid for "green because nothing ran" once.
   plan:
@@ -102,8 +106,28 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           REF_NAME: ${{ github.ref_name }}
           FULL_SUITE: ${{ inputs.full_suite }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
         run: |
           set -euo pipefail
+          # verify_only certifies the build that is already deployed. A certification that runs a
+          # subset certifies nothing: it would hand back a green record with the surfaces and
+          # seeded-data groups reading "skipped, tier=core" on the one run whose entire purpose is to
+          # vouch for what is live. So verify_only is full, unconditionally.
+          #
+          # There is deliberately no full_suite=false escape hatch out of that. This input is
+          # declared default:false, so "the operator passed false" and "the operator passed
+          # nothing" both arrive here as the string false; a rule that downgraded on an explicit
+          # false would downgrade on every verify_only dispatch, which is precisely the behaviour
+          # being removed here. Recovering that distinction means turning full_suite into a string
+          # input with no default - a change to the dispatch contract - to buy a fast path whose only
+          # purpose is skipping the suites a certification exists to run. Dispatch without
+          # verify_only when the core path is what you want; ask for verify_only to certify.
+          if [ "$VERIFY_ONLY" = "true" ]; then
+            echo "tier=full" >> "$GITHUB_OUTPUT"
+            echo "reason=verify_only=true certifies the build that is already deployed, so the whole suite runs" >> "$GITHUB_OUTPUT"
+            echo "::notice::acceptance tier full - verify_only=true certifies the deployed build, so the full suite runs (surfaces and seeded-data included)"
+            exit 0
+          fi
           if [ "$FULL_SUITE" = "true" ]; then
             full_reason="workflow_dispatch asked for the full suite (full_suite=true)"
           elif [ "$EVENT_NAME" = "pull_request" ] && [ "$EVENT_ACTION" = "ready_for_review" ]; then
@@ -119,7 +143,7 @@ jobs:
           fi
           case "$EVENT_NAME" in
             push) trigger="a push to $REF_NAME" ;;
-            workflow_dispatch) trigger="a workflow_dispatch without full_suite=true" ;;
+            workflow_dispatch) trigger="a workflow_dispatch without full_suite=true and without verify_only" ;;
             *) trigger="event $EVENT_NAME" ;;
           esac
           reason="$trigger, so only the core path runs (staging-smoke.spec.ts, dual-surface.spec.ts, admin-shell.spec.ts)"
