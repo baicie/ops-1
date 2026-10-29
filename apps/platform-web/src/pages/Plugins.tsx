@@ -106,10 +106,14 @@ export function PluginsPage() {
         primary={<Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('plugins.action.installPackage')}</Link>}
       />
       <AsyncBoundary loading={loading} error={error} hasData={Boolean(data)} onRetry={() => void reload()} skeletonRows={6}>
-        <section className="ow-summary" aria-label={t('plugins.summary.aria')} data-testid="plugins-summary">
-          <SummaryCard label={t('plugins.summary.installed')} value={summary.installed} definition={t('plugins.summary.installed.definition')} />
-          <SummaryCard label={t('plugins.summary.upgradeable')} value={summary.upgradeable} definition={t('plugins.summary.upgradeable.definition')} tone={summary.upgradeable > 0 ? 'warn' : undefined} />
-          <SummaryCard label={t('plugins.summary.abnormal')} value={summary.abnormal} definition={t('plugins.summary.abnormal.definition')} tone={summary.abnormal > 0 ? 'danger' : undefined} />
+        {/* One strip, three counts, the counting rule printed under each: the definitions are
+            what stops "Installed 3" from being read as "3 healthy". */}
+        <section className="stat-block" aria-label={t('plugins.summary.aria')} data-testid="plugins-summary">
+          <div className="ow-summary stat-strip">
+            <SummaryCard label={t('plugins.summary.installed')} value={summary.installed} definition={t('plugins.summary.installed.definition')} />
+            <SummaryCard label={t('plugins.summary.upgradeable')} value={summary.upgradeable} definition={t('plugins.summary.upgradeable.definition')} tone={summary.upgradeable > 0 ? 'warn' : undefined} />
+            <SummaryCard label={t('plugins.summary.abnormal')} value={summary.abnormal} definition={t('plugins.summary.abnormal.definition')} tone={summary.abnormal > 0 ? 'danger' : undefined} />
+          </div>
         </section>
         {isStale(observedAt, 8000) ? <NoticeBar state="stale" title={t('ui.stale.title')} detail={t('ui.stale.detail', { at: observedAt ?? '' })} /> : null}
         <section className="toolbar">
@@ -134,14 +138,18 @@ export function PluginsPage() {
           <section className="panel table-panel">
             <Table className={cn('plugins-table', stackTable)}>
               <TableHeader className={stackHead}>
+                {/* Name and version are one block to read, so they lead. Deployment and runtime
+                    readiness are two different states and are named as two columns instead of
+                    being mixed into one "health" heading. Digest, activation and publisher are
+                    protocol detail: they keep their columns and lose their weight. */}
                 <TableRow className="hover:bg-transparent">
                   <TableHead>{t('table.plugin')}</TableHead>
-                  <TableHead>{t('table.publisher')}</TableHead>
                   <TableHead>{t('table.version')}</TableHead>
-                  <TableHead>{t('table.digest')}</TableHead>
-                  <TableHead>{t('table.activation')}</TableHead>
+                  <TableHead className="max-[1200px]:hidden">{t('table.publisher')}</TableHead>
+                  <TableHead>{t('table.deployment')}</TableHead>
                   <TableHead>{t('table.readyReplicas')}</TableHead>
-                  <TableHead>{t('table.recentHealth')}</TableHead>
+                  <TableHead>{t('table.digest')}</TableHead>
+                  <TableHead className="max-[1200px]:hidden">{t('table.activation')}</TableHead>
                   <TableHead aria-label={t('table.actions')} />
                 </TableRow>
               </TableHeader>
@@ -159,32 +167,14 @@ export function PluginsPage() {
                           {plugin.isSystem && <span className="tag">{t('common.tag.system')}</span>}
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.publisher')}>{plugin.publisher ? <span className="text-muted-foreground">{plugin.publisher}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
                       <StackCell label={t('table.version')}>
                         <div className="ow-cell-stack">
                           <span className="mono">{plugin.activeVersion || plugin.latestVersion || null}{!(plugin.activeVersion || plugin.latestVersion) && <NoData detail={t('ui.noData.detail')} />}</span>
                           {upgrade ? <span className="ow-cell-note">{t('plugins.upgrade.available', { version: plugin.latestVersion ?? '' })}</span> : null}
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.digest')}>
-                        <div className="ow-cell-stack">
-                          {fact?.digest ? <span className="mono text-sm" title={fact.digest}>{shortDigest(fact.digest)}</span> : <NoData detail={t('plugins.table.digestHint')} />}
-                          {fact?.trust ? <StatusIndicator state={indicatorStateForCode(fact.trust)} label={t('status.verified')} /> : null}
-                        </div>
-                      </StackCell>
-                      <StackCell label={t('table.activation')}>
-                        {fact?.generation !== null && fact?.generation !== undefined ? (
-                          <span className="mono">{t('plugins.table.generation', { generation: fact.generation })}</span>
-                        ) : (
-                          <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />
-                        )}
-                      </StackCell>
-                      <StackCell label={t('table.readyReplicas')}>
-                        {!fact ? <NoData detail={t('plugins.replicas.none')} /> : fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
-                          <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : ''}>{plugin.readyInstances}/{plugin.totalInstances}</span>
-                        )}
-                      </StackCell>
-                      <StackCell label={t('table.recentHealth')}>
+                      <StackCell label={t('table.publisher')} className="max-[1200px]:hidden">{plugin.publisher ? <span className="text-muted-foreground">{plugin.publisher}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                      <StackCell label={t('table.deployment')}>
                         {fact?.deploymentStatus ? (
                           <div className="ow-cell-stack">
                             <StatusIndicator state={indicatorStateForCode(fact.deploymentStatus)} label={indicatorStateForCode(fact.deploymentStatus) === 'unknown' ? fact.deploymentStatus : undefined} />
@@ -192,7 +182,25 @@ export function PluginsPage() {
                           </div>
                         ) : <NoData detail={t('plugins.health.none')} />}
                       </StackCell>
-                      <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden">
+                      <StackCell label={t('table.readyReplicas')}>
+                        {!fact || fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
+                          <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : undefined}>{plugin.readyInstances}/{plugin.totalInstances}</span>
+                        )}
+                      </StackCell>
+                      <StackCell label={t('table.digest')}>
+                        <div className="ow-cell-stack">
+                          {fact?.digest ? <span className="mono ow-cell-meta" title={fact.digest}>{shortDigest(fact.digest)}</span> : <NoData detail={t('plugins.table.digestHint')} />}
+                          {fact?.trust ? <StatusIndicator state={indicatorStateForCode(fact.trust)} label={t('status.verified')} /> : null}
+                        </div>
+                      </StackCell>
+                      <StackCell label={t('table.activation')} className="max-[1200px]:hidden">
+                        {fact?.generation !== null && fact?.generation !== undefined ? (
+                          <span className="mono ow-cell-meta">{t('plugins.table.generation', { generation: fact.generation })}</span>
+                        ) : (
+                          <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />
+                        )}
+                      </StackCell>
+                      <TableCell className="w-8 text-right text-muted-foreground max-[760px]:w-full max-[760px]:border-0 max-[760px]:px-3.5 max-[760px]:pt-0">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button type="button" className="icon-btn" aria-label={t('plugins.action.menu', { name: plugin.name })} onClick={(event) => event.stopPropagation()}>

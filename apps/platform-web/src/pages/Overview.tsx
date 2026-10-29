@@ -51,8 +51,16 @@ function sourceState(data: unknown, error: Error | null, loading: boolean): Sour
 
 /**
  * §4.5 A. Three layers, in this order: can the platform serve, what must an operator do,
- * what changed lately. Every number comes from the Kernel; a module the Kernel does not
- * report is UNKNOWN — never 0, never green.
+ * what changed lately.
+ *
+ * V3 changed the *containers*, not the facts. The v3 audit found the page opening with twelve
+ * boxed regions - a health banner, four KPI cards, four module cards nested inside a panel,
+ * and two list panels - so the reading order the copy promised (health, then work, then
+ * history) was invisible: every block shouted at the same volume. Now the verdict is a flat
+ * band on the page, the counts are one hairline strip with one provenance line (they used to
+ * print the same observation time four times), and only the three things an operator acts on
+ * keep a panel. Every number still comes from the Kernel; a module the Kernel does not report
+ * is UNKNOWN — never 0, never green.
  */
 export function OverviewPage() {
   const t = useT();
@@ -79,6 +87,17 @@ export function OverviewPage() {
   // PARTIAL means a source settled without answering. A source still pending is not a verdict.
   const partialSource = sourceStates.includes('missing');
 
+  const criticalCount = data ? data.attention.filter((item) => item.severity === 'critical').length : 0;
+  // The band says one thing. Its three children (state, headline, when) are the same three
+  // facts the old banner carried, minus the card frame and the icon bubble.
+  const healthHeadline = !data
+    ? ''
+    : data.health === 'READY'
+      ? t('overview.health.ready')
+      : data.health === 'DEGRADED'
+        ? t(criticalCount === 1 ? 'overview.health.criticalIssue' : 'overview.health.criticalIssues', { count: criticalCount })
+        : t('overview.health.attention');
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -96,73 +115,70 @@ export function OverviewPage() {
       >
         {data ? (
           <>
-            <section className={`attention-banner tone-${data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn'}`} aria-label={t('overview.health.aria')}>
-              <div className="attention-icon"><Icon name={data.health === 'READY' ? 'check' : 'warning'} size={20} /></div>
-              <div className="attention-copy">
-                <h2>{data.health === 'READY' ? t('overview.health.ready') : data.health === 'DEGRADED' ? t(data.attention.filter((item) => item.severity === 'critical').length === 1 ? 'overview.health.criticalIssue' : 'overview.health.criticalIssues', { count: data.attention.filter((item) => item.severity === 'critical').length }) : t('overview.health.attention')}</h2>
+            {/* Layer 1 — the verdict. No card, no icon bubble: the state glyph carries the
+                colour, and the copy carries the reason. */}
+            <section
+              className={`health-band tone-${data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn'}`}
+              aria-label={t('overview.health.aria')}
+              data-health={data.health}
+            >
+              <div className="health-band-state">
+                <StatusIndicator state={indicatorStateForCode(data.health)} label={data.health} />
+              </div>
+              <div className="health-band-copy">
+                <h2>{healthHeadline}</h2>
                 <p>{data.attention.length ? data.attention[0].detail : t('overview.health.allClearDetail')}</p>
               </div>
-              <StatusIndicator state={indicatorStateForCode(data.health)} label={data.health} className="ml-auto shrink-0" />
-              {data.attention.length > 0 && <a className={buttonVariants({ variant: 'secondary' })} href="#attention">{t('overview.action.reviewIssues')}</a>}
-            </section>
-
-            <section className="panel" aria-labelledby="overview-modules-title" data-testid="overview-modules">
-              <div className="panel-head">
-                <div><h2 id="overview-modules-title">{t('overview.modules.title')}</h2><p>{t('overview.modules.description')}</p></div>
+              <div className="health-band-side">
+                <span>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>
+                {data.attention.length > 0 && (
+                  <a className="text-link" href="#attention">{t('overview.action.reviewIssues')} <Icon name="arrowRight" size={13} /></a>
+                )}
               </div>
-              <ul className="module-strip" aria-label={t('overview.modules.aria')}>
-                {modules.map((module) => (
-                  <li key={module.id} className="module-card" data-module={module.id} data-indicator={module.state}>
-                    <div className="module-card-head">
-                      <span className="module-card-name">{t(module.labelKey)}</span>
-                      <StatusIndicator state={module.state} />
-                    </div>
-                    <p className="module-card-detail">{module.detail}</p>
-                    <div className="module-card-foot">
-                      <span className="module-card-observed">{module.observedAt ? t('ui.observedAt', { at: formatDate(module.observedAt) }) : t('ui.notObserved')}</span>
-                      {module.href ? <Link className="text-link" to={module.href}>{t('overview.module.open')} <Icon name="arrowRight" size={13} /></Link> : null}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              {partialSource ? <NoticeBar state="partial" title={t('state.partial')} detail={t('ui.partial.sources', { ok: sourcesAnswered, total: sourceStates.length })} /> : null}
             </section>
 
-            <section className="metric-grid" aria-label={t('overview.kpi.aria')}>
-              <MetricCard
-                label={t('overview.kpi.healthyNodes')}
-                value={`${data.nodesReady} / ${data.nodesTotal}`}
-                detail={data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')}
-                sampledAt={observedAt}
-                href="/admin/nodes"
-              />
-              <MetricCard
-                label={t('overview.kpi.installedPlugins')}
-                value={data.pluginsInstalled}
-                detail={t(data.pluginsAvailable === 1 ? 'overview.kpi.installedPlugins.one' : 'overview.kpi.installedPlugins.many', { count: data.pluginsAvailable })}
-                sampledAt={observedAt}
-                href="/admin/plugins"
-              />
-              <MetricCard
-                label={t('common.readyInstances')}
-                value={`${data.instancesReady} / ${data.instancesTotal}`}
-                detail={t('overview.kpi.readyInstances.detail')}
-                sampledAt={observedAt}
-                href="/admin/plugins"
-              />
-              <MetricCard
-                label={t('overview.kpi.activeDeployments')}
-                value={data.activeDeployments}
-                detail={t('overview.kpi.activeDeployments.detail')}
-                sampledAt={observedAt}
-                href="/admin/plugins"
-              />
+            {/* Layer 2 — the counts. One strip, one observation time for all four, because
+                they share one source; four cards each repeating it was four copies of a fact. */}
+            <section className="stat-block" aria-label={t('overview.kpi.aria')}>
+              <div className="stat-strip">
+                <MetricCard
+                  label={t('overview.kpi.healthyNodes')}
+                  value={`${data.nodesReady} / ${data.nodesTotal}`}
+                  detail={data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')}
+                  showSampled={false}
+                  href="/admin/nodes"
+                />
+                <MetricCard
+                  label={t('overview.kpi.installedPlugins')}
+                  value={data.pluginsInstalled}
+                  detail={t(data.pluginsAvailable === 1 ? 'overview.kpi.installedPlugins.one' : 'overview.kpi.installedPlugins.many', { count: data.pluginsAvailable })}
+                  showSampled={false}
+                  href="/admin/plugins"
+                />
+                <MetricCard
+                  label={t('common.readyInstances')}
+                  value={`${data.instancesReady} / ${data.instancesTotal}`}
+                  detail={t('overview.kpi.readyInstances.detail')}
+                  showSampled={false}
+                  href="/admin/plugins"
+                />
+                <MetricCard
+                  label={t('overview.kpi.activeDeployments')}
+                  value={data.activeDeployments}
+                  detail={t('overview.kpi.activeDeployments.detail')}
+                  showSampled={false}
+                  href="/admin/plugins"
+                />
+              </div>
+              <p className="stat-provenance">{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</p>
             </section>
 
-            <div className="overview-grid">
-              <section className="panel" id="attention">
+            {/* Layer 3 — what an operator does next (widest), beside what the platform can
+                currently observe. Both keep a panel because both are work surfaces. */}
+            <div className="console-grid">
+              <section className="panel" id="attention" aria-labelledby="overview-attention-title">
                 <div className="panel-head">
-                  <div><h2>{t('overview.attention.title')}</h2><p>{t('overview.attention.description')}</p></div>
+                  <div><h2 id="overview-attention-title">{t('overview.attention.title')}</h2><p>{t('overview.attention.description')}</p></div>
                   <span className="panel-count">{t('overview.attention.count', { count: data.attention.length })}</span>
                 </div>
                 {data.attention.length === 0 ? (
@@ -179,29 +195,52 @@ export function OverviewPage() {
                   </ul>
                 )}
               </section>
-              <section className="panel" data-testid="overview-audit">
-                <div className="panel-head"><div><h2>{t('overview.events.title')}</h2><p>{t('overview.events.description')}</p></div><Link className="text-link" to="/admin/activity">{t('overview.events.viewAll')} <Icon name="arrowRight" size={14} /></Link></div>
-                {data.recentEvents.length === 0 ? (
-                  <EmptyState icon="activity" title={t('overview.events.empty.title')} description={t('overview.events.empty.description')} />
-                ) : (
-                  <ul className="event-list">
-                    {data.recentEvents.map((event) => {
-                      const state = indicatorStateForCode(event.result);
-                      return (
-                        <li key={event.id}>
-                          <StatusIndicator state={state} label={state === 'unknown' ? event.result : undefined} />
-                          <div className="event-copy">
-                            <div className="event-title"><strong>{event.eventType}</strong></div>
-                            <p>{event.subjectType} <span className="mono">{event.subjectId}</span></p>
-                          </div>
-                          <TimeAgo value={event.occurredAt} />
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+
+              <section className="panel" aria-labelledby="overview-modules-title" data-testid="overview-modules">
+                <div className="panel-head">
+                  <div><h2 id="overview-modules-title">{t('overview.modules.title')}</h2><p>{t('overview.modules.description')}</p></div>
+                </div>
+                <ul className="module-strip" aria-label={t('overview.modules.aria')}>
+                  {modules.map((module) => (
+                    <li key={module.id} className="module-card" data-module={module.id} data-indicator={module.state}>
+                      <div className="module-card-head">
+                        <span className="module-card-name">{t(module.labelKey)}</span>
+                        <StatusIndicator state={module.state} />
+                      </div>
+                      <p className="module-card-detail">{module.detail}</p>
+                      <div className="module-card-foot">
+                        <span className="module-card-observed">{module.observedAt ? t('ui.observedAt', { at: formatDate(module.observedAt) }) : t('ui.notObserved')}</span>
+                        {module.href ? <Link className="text-link" to={module.href}>{t('overview.module.open')} <Icon name="arrowRight" size={13} /></Link> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {partialSource ? <NoticeBar state="partial" title={t('state.partial')} detail={t('ui.partial.sources', { ok: sourcesAnswered, total: sourceStates.length })} /> : null}
               </section>
             </div>
+
+            <section className="panel" data-testid="overview-audit">
+              <div className="panel-head"><div><h2>{t('overview.events.title')}</h2><p>{t('overview.events.description')}</p></div><Link className="text-link" to="/admin/activity">{t('overview.events.viewAll')} <Icon name="arrowRight" size={14} /></Link></div>
+              {data.recentEvents.length === 0 ? (
+                <EmptyState icon="activity" title={t('overview.events.empty.title')} description={t('overview.events.empty.description')} />
+              ) : (
+                <ul className="event-list">
+                  {data.recentEvents.map((event) => {
+                    const state = indicatorStateForCode(event.result);
+                    return (
+                      <li key={event.id}>
+                        <StatusIndicator state={state} label={state === 'unknown' ? event.result : undefined} />
+                        <div className="event-copy">
+                          <div className="event-title"><strong>{event.eventType}</strong></div>
+                          <p>{event.subjectType} <span className="mono">{event.subjectId}</span></p>
+                        </div>
+                        <TimeAgo value={event.occurredAt} />
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
           </>
         ) : null}
       </AsyncBoundary>
@@ -277,3 +316,4 @@ function buildModules(
   const catalog: ModuleRow = { id: 'catalog', labelKey: 'overview.module.catalog', state: 'unknown', detail: t('overview.module.catalog.unavailable'), observedAt: null };
   return [kernel, nodes, runtime, catalog];
 }
+

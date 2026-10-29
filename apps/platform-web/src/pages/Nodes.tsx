@@ -146,18 +146,22 @@ export function NodesPage() {
         skeletonRows={5}
         emptyState={<EmptyState icon="nodes" title={t('nodes.empty.title')} description={t('nodes.empty.description')} action={<Button onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'}>{t('nodes.empty.action')}</Button>} />}
       >
-        <section className="ow-summary" aria-label={t('nodes.summary.aria')} data-testid="nodes-summary">
-          <div className="ow-summary-card">
-            <span className="ow-summary-label">{t('nodes.summary.total')}</span>
-            <span className="ow-summary-value">{nodes.length}</span>
-            <span className="ow-summary-definition">{t('nodes.summary.definition')}</span>
+        {/* A count you cannot click is a number you then have to hunt for again: each cell
+            selects the state it counts, and aria-pressed keeps the current filter readable. */}
+        <section className="stat-block" aria-label={t('nodes.summary.aria')} data-testid="nodes-summary">
+          <div className="ow-summary stat-strip">
+            <button type="button" className="ow-summary-card" aria-pressed={stateFilter === 'ALL'} onClick={() => setStateFilter('ALL')}>
+              <span className="ow-summary-label">{t('nodes.summary.total')}</span>
+              <span className="ow-summary-value">{nodes.length}</span>
+              <span className="ow-summary-definition">{t('nodes.summary.definition')}</span>
+            </button>
+            {(['ready', 'stale', 'unreachable', 'revoked'] as IndicatorState[]).map((state) => (
+              <button type="button" className="ow-summary-card" key={state} aria-pressed={stateFilter === state.toUpperCase()} onClick={() => setStateFilter(state.toUpperCase())}>
+                <span className="ow-summary-label"><StatusIndicator state={state} /></span>
+                <span className="ow-summary-value">{nodes.filter((node) => nodeState(node) === state).length}</span>
+              </button>
+            ))}
           </div>
-          {(['ready', 'stale', 'unreachable', 'revoked'] as IndicatorState[]).map((state) => (
-            <div className="ow-summary-card" key={state}>
-              <span className="ow-summary-label"><StatusIndicator state={state} /></span>
-              <span className="ow-summary-value">{nodes.filter((node) => nodeState(node) === state).length}</span>
-            </div>
-          ))}
         </section>
         <section className="toolbar">
           <div className="ow-filter-scroll">
@@ -191,9 +195,8 @@ export function NodesPage() {
                 <TableHead>{t('table.instances')}</TableHead>
                 <TableHead>{t('table.cpu')}</TableHead>
                 <TableHead>{t('table.memory')}</TableHead>
-                <TableHead>{t('table.capacity')}</TableHead>
+                <TableHead className="max-[1200px]:hidden">{t('table.capacity')}</TableHead>
                 <TableHead>{t('table.sampledAt')}</TableHead>
-                <TableHead>{t('table.lastHeartbeat')}</TableHead>
                 <TableHead aria-label={t('table.open')} />
               </TableRow>
             </TableHeader>
@@ -216,13 +219,12 @@ export function NodesPage() {
                     <StackCell label={t('table.instances')}><strong>{node.instancesReady}/{node.instancesTotal}</strong><span className="text-sm text-muted-foreground"> READY</span></StackCell>
                     <StackCell label={t('table.cpu')} data-resource="cpu">{cpu === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(cpu * 100)}%</span>}</StackCell>
                     <StackCell label={t('table.memory')} data-resource="memory">{memory === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(memory * 100)}%</span>}</StackCell>
-                    <StackCell label={t('table.capacity')} data-resource="capacity">
+                    <StackCell label={t('table.capacity')} data-resource="capacity" className="max-[1200px]:hidden">
                       {snapshot?.memoryTotalBytes ? (
                         <span className="text-sm">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
                       ) : <NoData detail={t('nodes.resource.missingSnapshot')} />}
                     </StackCell>
                     <StackCell label={t('table.sampledAt')} data-resource="sampled-at">{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
-                    <StackCell label={t('table.lastHeartbeat')}><TimeAgo value={node.lastSeenAt} /></StackCell>
                     <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
                   </TableRow>
                 );
@@ -341,7 +343,7 @@ export function NodeDetailPage() {
           <div className="panel-head"><div><h2>{t('nodeDetail.resources.title')}</h2><p>{t('nodeDetail.resources.description')}</p></div></div>
           {!snapshot ? <p className="text-muted-foreground p-4">{t('nodeDetail.resources.empty')}</p> : (
             <div className="resource-stack">
-              <div><div className="resource-row"><span>{t('nodeDetail.resource.cpuUtilization')}</span><strong>{snapshot.cpuUtilization === null || snapshot.cpuUtilization === undefined ? t('common.noData') : `${(snapshot.cpuUtilization * 100).toFixed(0)}%`}</strong></div><ProgressBar percent={snapshot.cpuUtilization ?? null} /></div>
+              <div><div className="resource-row"><span>{t('nodeDetail.resource.cpuUtilization')}</span><strong>{typeof snapshot.cpuUtilization === 'number' ? `${(snapshot.cpuUtilization * 100).toFixed(0)}%` : <NoData detail={t('nodes.resource.missingSnapshot')} />}</strong></div><ProgressBar percent={snapshot.cpuUtilization ?? null} /></div>
               <div><div className="resource-row"><span>{t('table.memory')}</span><strong>{formatBytes(snapshot.memoryUsedBytes)} / {formatBytes(snapshot.memoryTotalBytes)}</strong></div><ProgressBar percent={memoryPercent} /></div>
               <div><div className="resource-row"><span>{t('table.filesystem')}</span><strong>{formatBytes(snapshot.filesystemUsedBytes)} / {formatBytes(snapshot.filesystemTotalBytes)}</strong></div><ProgressBar percent={diskPercent} /></div>
               <p className="text-sm text-muted-foreground">{t('nodeDetail.resources.sampledAt', { at: formatDate(snapshot.sampledAt) })}</p>
@@ -377,7 +379,7 @@ export function NodeDetailPage() {
                 {history.slice(0, 20).map((sample) => (
                   <TableRow key={sample.sampleId}>
                     <StackCell label={t('table.observed')}>{formatDate(sample.observedAt)}</StackCell>
-                    <StackCell label={t('table.cpu')}>{sample.cpuUtilization === null ? t('common.noData') : `${(sample.cpuUtilization * 100).toFixed(0)}%`}</StackCell>
+                    <StackCell label={t('table.cpu')}>{typeof sample.cpuUtilization === 'number' ? `${(sample.cpuUtilization * 100).toFixed(0)}%` : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
                     <StackCell label={t('table.memory')}>{formatBytes(sample.memoryUsedBytes)} / {formatBytes(sample.memoryTotalBytes)}</StackCell>
                     <StackCell label={t('table.filesystem')}>{formatBytes(sample.filesystemUsedBytes)} / {formatBytes(sample.filesystemTotalBytes)}</StackCell>
                     <StackCell label={t('table.generation')}>{sample.generation}</StackCell>

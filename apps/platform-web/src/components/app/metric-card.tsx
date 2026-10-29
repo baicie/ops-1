@@ -22,6 +22,7 @@ export function MetricCard({
   sampledAt,
   href,
   state = 'ready',
+  showSampled = true,
   className,
 }: {
   label: string;
@@ -32,6 +33,12 @@ export function MetricCard({
   sampledAt?: string | null;
   href?: string;
   state?: 'ready' | 'noData' | 'unknown';
+  /**
+   * Whether this card prints its own observation time. A strip whose members share one source
+   * prints that time once for the strip, and four copies of it was the repetition the v3 audit
+   * called out - so the card stops repeating it instead of the CSS hiding four nodes.
+   */
+  showSampled?: boolean;
   className?: string;
 }) {
   const t = useT();
@@ -51,9 +58,11 @@ export function MetricCard({
         )}
       </span>
       {detail ? <span className="ow-metric-detail">{detail}</span> : null}
-      <span className="ow-metric-sampled">
-        {sampledAt ? t('ui.observedAt', { at: formatDate(sampledAt) }) : t('ui.notObserved')}
-      </span>
+      {showSampled ? (
+        <span className="ow-metric-sampled">
+          {sampledAt ? t('ui.observedAt', { at: formatDate(sampledAt) }) : t('ui.notObserved')}
+        </span>
+      ) : null}
       {href ? <span className="ow-metric-go" aria-hidden="true"><Icon name="arrowRight" size={14} /></span> : null}
     </>
   );

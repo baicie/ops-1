@@ -1240,3 +1240,114 @@ details.panel.advanced > summary { padding: 14px 18px; }
    drafts, palette and inspector, which broke a draft-conflict test two workflows away. */
 .forbidden-page .panel-pad { padding: 18px 20px; display: grid; gap: 14px; }
 .forbidden-page .page-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* ── V3 flagship console: Overview, Plugins, Nodes ───────────────────────────────
+   The failure the v3 audit named is "every block wrapped in a card". A page that opens with
+   twelve boxed regions teaches the operator to scan boxes rather than read state, and the
+   nested card (a .module-card inside a .panel) is the same idea twice. These rules keep the
+   information and drop the frames: one flat health band, one hairline stat strip, and
+   ledgers whose rows are separated by a single rule. No new colour, no new size - every value
+   below is an existing token. */
+
+/* 1. Health band - the verdict sits on the page, not in a box. The tone-* rules already in
+   this file paint the 4px left rule; this only adds the geometry. */
+.health-band {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 18px;
+  padding: 2px 0 15px 18px;
+  margin-top: -2px;
+  border-bottom: 1px solid var(--ow-border);
+}
+.health-band-copy { min-width: 0; }
+.health-band-copy h2 { font-size: var(--ow-type-lg); font-weight: 650; letter-spacing: -.01em; }
+.health-band-copy p { margin-top: 3px; color: var(--ow-text-secondary); font-size: var(--ow-type-base); max-width: 74ch; overflow-wrap: anywhere; }
+.health-band-state { display: flex; align-items: center; }
+.health-band-side { display: flex; align-items: center; gap: 16px; color: var(--ow-text-muted); font-size: var(--ow-type-sm); white-space: nowrap; }
+
+/* 2. Stat strip - the counts, one rule per row of facts, one provenance line for all of them.
+   Four cards each printing the same observation time was four copies of one fact. */
+.stat-block { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  border-top: 1px solid var(--ow-border);
+  border-bottom: 1px solid var(--ow-border);
+  min-width: 0;
+}
+.stat-strip > * {
+  min-width: 0;
+  padding: 12px 18px;
+  border: 0;
+  border-left: 1px solid var(--ow-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+.stat-strip > *:first-child { border-left: 0; padding-left: 0; }
+.stat-strip > *:last-child { padding-right: 0; }
+.stat-strip .ow-metric-value { min-height: 30px; letter-spacing: -.02em; font-weight: 660; }
+.stat-strip .ow-metric-label { color: var(--ow-text-secondary); }
+.stat-strip .ow-metric-go { display: none; }
+.stat-strip .ow-metric-link { border-radius: 0; }
+.stat-strip .ow-metric-link:hover { background: var(--ow-surface-2); text-decoration: none; }
+.stat-strip .ow-metric-link:hover .ow-metric-label { color: var(--ow-accent); }
+.stat-strip .ow-metric-link:focus-visible { outline-offset: -2px; }
+.stat-provenance { margin-top: 7px; font-size: var(--ow-type-xs); color: var(--ow-text-muted); }
+
+/* 3. Availability as a ledger: four rows, one column, one rule between them instead of a
+   card inside a card. The DOM contract stays (data-module / .module-card-detail /
+   .module-card-observed) because the partial-source tests read it. */
+.module-strip { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 0; }
+.module-card {
+  padding: 11px 18px;
+  gap: 3px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--ow-border);
+  border-radius: 0;
+}
+.module-card:last-child { border-bottom: 0; }
+.module-card-head { flex-wrap: nowrap; gap: 10px; }
+.module-card-name { font-size: var(--ow-type-base); }
+.module-card-foot { margin-top: 1px; }
+
+/* 4. Two-column console: the work queue is the widest thing on the page, the source ledger is
+   beside it, activity runs underneath. Priority is width and position, not card count. */
+.console-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+/* One attention row next to four source rows leaves a hole under the queue. A stretched panel
+   closes that region instead of leaving an unbordered gap where a fourth card used to be. */
+.console-grid > .panel { display: flex; flex-direction: column; }
+
+/* 5. Table density. The panels already scroll, but a column cut off at 1024 is a defect even
+   when it scrolls - the operator cannot compare two rows without scrolling a table. */
+.plugins-table th, .plugins-table td, .nodes-table th, .nodes-table td { padding-left: 12px; padding-right: 12px; }
+.plugins-table .entity-cell strong, .nodes-table .entity-cell strong { font-size: var(--ow-type-base); font-weight: 620; }
+.plugins-table .entity-cell span.mono, .nodes-table .entity-cell span.mono { font-size: var(--ow-type-xs); }
+.ow-cell-meta { font-size: var(--ow-type-xs); color: var(--ow-text-muted); }
+.ow-cell-name { display: flex; align-items: baseline; gap: 7px; min-width: 0; flex-wrap: wrap; }
+/* The summary strip doubles as the state filter on Nodes; a pressed cell is not a new colour,
+   it is the same accent rule the active tab uses. */
+button.ow-summary-card { font: inherit; color: inherit; cursor: pointer; }
+button.ow-summary-card:hover { background: var(--ow-surface-2); }
+button.ow-summary-card[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--ow-accent); }
+button.ow-summary-card:focus-visible { outline-offset: -2px; }
+
+@media (max-width: 1180px) {
+  .console-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .health-band { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-left: 14px; }
+  .health-band-side { flex-wrap: wrap; white-space: normal; }
+  .stat-strip { grid-template-columns: minmax(0, 1fr); }
+  .stat-strip > * { border-left: 0; border-top: 1px solid var(--ow-border); padding-left: 0; padding-right: 0; }
+  .stat-strip > *:first-child { border-top: 0; }
+}
+@media (max-width: 560px) {
+  /* A phone cannot hide four filters behind a horizontal scroll it never advertises. */
+  .ow-filter-scroll { overflow: visible; }
+  .ow-filter-scroll [role="tablist"] { flex-wrap: wrap; height: auto; width: 100%; }
+}
+
