@@ -1,0 +1,3455 @@
+{
+ "config": {
+  "label": "r390-light-en",
+  "w": 390,
+  "h": 844,
+  "theme": "light",
+  "locale": "en",
+  "full": true,
+  "shotFilter": [
+   "overview",
+   "plugins",
+   "pipelines",
+   "jobs",
+   "nodes",
+   "governance",
+   "activity",
+   "access",
+   "settings/",
+   "ops-center",
+   "instances/"
+  ]
+ },
+ "discovered": {
+  "plugin": "/admin/plugins/dev.opsweave.hello",
+  "node": "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246",
+  "instance": "/admin/instances/531d794b-e26a-4772-aef5-ec15d88a75d6/logs"
+ },
+ "pages": {
+  "/login": {
+   "error": "SKIP"
+  },
+  "/admin/overview": {
+   "finalUrl": "http://82.156.234.84:3000/admin/overview",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2620,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 125,
+   "fontHist": {
+    "10": 5,
+    "11": 13,
+    "12": 66,
+    "13": 10,
+    "15": 1,
+    "16": 5,
+    "21": 4,
+    "22": 1,
+    "13.5": 20
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 54,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 11,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 13,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "21px": {
+     "n": 4,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 11,
+    "maxDepth": 2,
+    "depths": {
+     "1": 7,
+     "2": 4
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "OpsWeave · OpsWeave",
+   "h1": "Overview",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_overview.png"
+  },
+  "/admin/plugins": {
+   "finalUrl": "http://82.156.234.84:3000/admin/plugins",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1981,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "div",
+     "cls": "inline-flex h-9 items-center justify-center gap-1 rounded-md border bo",
+     "left": 14,
+     "right": 392,
+     "n": 1
+    },
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    }
+   ],
+   "offenderTotal": 100,
+   "textEls": 131,
+   "fontHist": {
+    "10": 6,
+    "11": 14,
+    "12": 34,
+    "13": 61,
+    "15": 1,
+    "22": 1,
+    "24": 3,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 25,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 14,
+     "ratio": 1.57
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 53,
+     "ratio": 1.5
+    },
+    "24px": {
+     "n": 3,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 4,
+    "maxDepth": 1,
+    "depths": {
+     "1": 4
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Plugins · OpsWeave",
+   "h1": "Plugins",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    0,
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_plugins.png"
+  },
+  "/admin/pipelines": {
+   "finalUrl": "http://82.156.234.84:3000/admin/pipelines",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 844,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 54,
+   "fontHist": {
+    "10": 5,
+    "11": 5,
+    "12": 14,
+    "13": 17,
+    "15": 1,
+    "22": 1,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 9,
+     "ratio": 1.47
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 10,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 1,
+    "maxDepth": 1,
+    "depths": {
+     "1": 1
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Pipelines · OpsWeave",
+   "h1": "Pipelines",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_pipelines.png"
+  },
+  "/admin/jobs": {
+   "finalUrl": "http://82.156.234.84:3000/admin/jobs",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3341,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 222,
+   "fontHist": {
+    "10": 5,
+    "11": 5,
+    "12": 29,
+    "13": 170,
+    "15": 1,
+    "22": 1,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 9,
+     "ratio": 1.47
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 118,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 1,
+    "maxDepth": 1,
+    "depths": {
+     "1": 1
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Jobs · OpsWeave",
+   "h1": "Jobs",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_jobs.png"
+  },
+  "/admin/nodes": {
+   "finalUrl": "http://82.156.234.84:3000/admin/nodes",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1322,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 90,
+   "fontHist": {
+    "10": 5,
+    "11": 6,
+    "12": 35,
+    "13": 26,
+    "15": 1,
+    "22": 1,
+    "24": 5,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 21,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 6,
+     "ratio": 1.49
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 19,
+     "ratio": 1.5
+    },
+    "24px": {
+     "n": 5,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 8,
+    "maxDepth": 1,
+    "depths": {
+     "1": 8
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Nodes · OpsWeave",
+   "h1": "Nodes",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_nodes.png"
+  },
+  "/admin/governance": {
+   "finalUrl": "http://82.156.234.84:3000/admin/governance",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1966,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 119,
+   "fontHist": {
+    "10": 5,
+    "11": 21,
+    "12": 36,
+    "13": 36,
+    "15": 1,
+    "16": 4,
+    "22": 1,
+    "13.5": 15
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 17,
+     "ratio": 1.48
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 14,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 21,
+     "ratio": 1.61
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 28,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 4,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 8,
+    "maxDepth": 1,
+    "depths": {
+     "1": 8
+    }
+   },
+   "clippedCount": 1,
+   "clipped": [
+    {
+     "text": "Governance",
+     "cls": "",
+     "sw": 65,
+     "cw": 54
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "12px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Governance · OpsWeave",
+   "h1": "Governance",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_governance.png"
+  },
+  "/admin/activity": {
+   "finalUrl": "http://82.156.234.84:3000/admin/activity",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 25158,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "div",
+     "cls": "text-sm text-muted-foreground",
+     "left": 309,
+     "right": 414,
+     "n": 5
+    },
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    }
+   ],
+   "offenderTotal": 104,
+   "textEls": 1935,
+   "fontHist": {
+    "10": 5,
+    "11": 5,
+    "12": 961,
+    "13": 951,
+    "15": 1,
+    "22": 1,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 279,
+     "ratio": 1.5
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 812,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 1,
+    "maxDepth": 1,
+    "depths": {
+     "1": 1
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Activity · OpsWeave",
+   "h1": "Activity",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_activity.png"
+  },
+  "/admin/access": {
+   "finalUrl": "http://82.156.234.84:3000/admin/access",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1961,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 105,
+   "fontHist": {
+    "10": 5,
+    "11": 5,
+    "12": 46,
+    "13": 28,
+    "15": 1,
+    "16": 4,
+    "22": 1,
+    "13.5": 15
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 29,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 14,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 20,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 4,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 5,
+    "maxDepth": 2,
+    "depths": {
+     "1": 4,
+     "2": 1
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Access · OpsWeave",
+   "h1": "Access & trust",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    28,
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_access.png"
+  },
+  "/admin/settings": {
+   "finalUrl": "http://82.156.234.84:3000/admin/settings",
+   "overflow": -7,
+   "docScrollW": 383,
+   "docClientW": 390,
+   "docHeight": 1771,
+   "bodyScrollW": 383,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 79,
+   "fontHist": {
+    "10": 7,
+    "11": 5,
+    "12": 30,
+    "13": 19,
+    "15": 1,
+    "16": 4,
+    "22": 1,
+    "13.5": 11,
+    "12.2": 1
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 28,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 6,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 15,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 4,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 4,
+    "maxDepth": 1,
+    "depths": {
+     "1": 4
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Settings · OpsWeave",
+   "h1": "Settings",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0
+  },
+  "/admin/settings/diagnostics": {
+   "finalUrl": "http://82.156.234.84:3000/admin/settings/diagnostics",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4156,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 10
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group nav-extensions",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 198,
+   "fontHist": {
+    "10": 12,
+    "11": 7,
+    "12": 117,
+    "13": 19,
+    "15": 1,
+    "16": 10,
+    "22": 1,
+    "13.5": 31
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 69,
+     "ratio": 1.5
+    },
+    "10px": {
+     "n": 11,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 6,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 14,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 10,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 12,
+    "maxDepth": 2,
+    "depths": {
+     "1": 11,
+     "2": 1
+    }
+   },
+   "clippedCount": 2,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 1
+    },
+    {
+     "text": "Bootstrap Diagnostics",
+     "cls": "",
+     "sw": 120,
+     "cw": 27
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Settings · OpsWeave",
+   "h1": "Bootstrap Diagnostics",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_settings_diagnostics.png"
+  },
+  "/admin/ops-center": {
+   "finalUrl": "http://82.156.234.84:3000/admin/ops-center",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1480,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 74,
+   "fontHist": {
+    "10": 6,
+    "11": 5,
+    "12": 32,
+    "13": 9,
+    "15": 1,
+    "16": 4,
+    "22": 1,
+    "13.5": 15,
+    "11.3": 1
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 23,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 14,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 4,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 4,
+    "maxDepth": 1,
+    "depths": {
+     "1": 4
+    }
+   },
+   "clippedCount": 1,
+   "clipped": [
+    {
+     "text": "Ops Center",
+     "cls": "",
+     "sw": 61,
+     "cw": 54
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Ops Center · OpsWeave",
+   "h1": "Ops Center",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_ops-center.png"
+  },
+  "/admin/plugins/install": {
+   "finalUrl": "http://82.156.234.84:3000/admin/plugins/install",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 844,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 52,
+   "fontHist": {
+    "10": 5,
+    "11": 7,
+    "12": 20,
+    "13": 5,
+    "15": 1,
+    "16": 2,
+    "22": 1,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 19,
+     "ratio": 1.48
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 6,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 2,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 2,
+    "maxDepth": 2,
+    "depths": {
+     "1": 1,
+     "2": 1
+    }
+   },
+   "clippedCount": 2,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 2
+    },
+    {
+     "text": "install",
+     "cls": "",
+     "sw": 33,
+     "cw": 16
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px 0px 4px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Plugins · OpsWeave",
+   "h1": "Install signed plugin",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_plugins_install.png"
+  },
+  "/app/home": {
+   "finalUrl": "http://82.156.234.84:3000/app/home",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3124,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group nav-group-business",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 5
+    }
+   ],
+   "offenderTotal": 72,
+   "textEls": 104,
+   "fontHist": {
+    "10": 11,
+    "11": 5,
+    "12": 52,
+    "13": 23,
+    "15": 1,
+    "16": 4,
+    "22": 1,
+    "13.5": 7
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 41,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 6,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 16,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 4,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 9,
+    "maxDepth": 2,
+    "depths": {
+     "1": 7,
+     "2": 2
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "My workspace · OpsWeave",
+   "h1": "My workspace",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 6,
+   "mainOffsetLeft": 0
+  },
+  "/app/incidents": {
+   "finalUrl": "http://82.156.234.84:3000/app/incidents",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1508,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group nav-group-business",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 5
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 72,
+   "textEls": 49,
+   "fontHist": {
+    "10": 5,
+    "11": 11,
+    "12": 21,
+    "13": 1,
+    "15": 1,
+    "16": 2,
+    "22": 1,
+    "13.5": 7
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 19,
+     "ratio": 1.48
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 6,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 11,
+     "ratio": 1.47
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 2,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 6,
+    "maxDepth": 2,
+    "depths": {
+     "1": 2,
+     "2": 4
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Incidents · OpsWeave",
+   "h1": "Incidents",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 6,
+   "mainOffsetLeft": 0
+  },
+  "/app/investigations": {
+   "finalUrl": "http://82.156.234.84:3000/app/investigations",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 844,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group nav-group-business",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 5
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 72,
+   "textEls": 35,
+   "fontHist": {
+    "10": 5,
+    "11": 5,
+    "12": 11,
+    "13": 2,
+    "15": 1,
+    "16": 2,
+    "22": 1,
+    "13.5": 8
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 9,
+     "ratio": 1.47
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 7,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 2,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 2,
+    "maxDepth": 2,
+    "depths": {
+     "1": 1,
+     "2": 1
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Investigations · OpsWeave",
+   "h1": "Investigations",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 6,
+   "mainOffsetLeft": 0
+  },
+  "/app/reports": {
+   "finalUrl": "http://82.156.234.84:3000/app/reports",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 844,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group nav-group-business",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 5
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 72,
+   "textEls": 35,
+   "fontHist": {
+    "10": 5,
+    "11": 5,
+    "12": 11,
+    "13": 2,
+    "15": 1,
+    "16": 2,
+    "22": 1,
+    "13.5": 8
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 9,
+     "ratio": 1.47
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 7,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 2,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 2,
+    "maxDepth": 2,
+    "depths": {
+     "1": 1,
+     "2": 1
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Reports · OpsWeave",
+   "h1": "Reports",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 6,
+   "mainOffsetLeft": 0
+  },
+  "/admin/nope": {
+   "finalUrl": "http://82.156.234.84:3000/admin/nope",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 844,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 10
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group nav-extensions",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 38,
+   "fontHist": {
+    "10": 5,
+    "11": 5,
+    "12": 9,
+    "13": 4,
+    "15": 1,
+    "16": 1,
+    "22": 1,
+    "13.5": 12
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 8,
+     "ratio": 1.46
+    },
+    "10px": {
+     "n": 4,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 11,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "16px": {
+     "n": 1,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 0,
+    "maxDepth": 0,
+    "depths": {}
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "OpsWeave · OpsWeave",
+   "h1": "Not found",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0
+  },
+  "/admin/plugins/dev.opsweave.hello": {
+   "finalUrl": "http://82.156.234.84:3000/admin/plugins/dev.opsweave.hello",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1760,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap rounded-sm b",
+     "left": 349,
+     "right": 472,
+     "n": 3
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-muted px-1.",
+     "left": 440,
+     "right": 459,
+     "n": 3
+    },
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    }
+   ],
+   "offenderTotal": 105,
+   "textEls": 113,
+   "fontHist": {
+    "10": 11,
+    "11": 7,
+    "12": 49,
+    "13": 30,
+    "15": 1,
+    "16": 3,
+    "22": 1,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 27,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 6,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 18,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 3,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 3,
+    "maxDepth": 1,
+    "depths": {
+     "1": 3
+    }
+   },
+   "clippedCount": 2,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 1
+    },
+    {
+     "text": "dev.opsweave.hello",
+     "cls": "",
+     "sw": 106,
+     "cw": 27
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Plugins · OpsWeave",
+   "h1": "Hello Ops",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_plugins_dev.opsweave.hello.png"
+  },
+  "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246": {
+   "finalUrl": "http://82.156.234.84:3000/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5220,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 337,
+   "fontHist": {
+    "10": 6,
+    "11": 7,
+    "12": 58,
+    "13": 247,
+    "15": 1,
+    "16": 5,
+    "22": 1,
+    "13.5": 12
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 40,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 6,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 131,
+     "ratio": 1.5
+    },
+    "16px": {
+     "n": 5,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 5,
+    "maxDepth": 1,
+    "depths": {
+     "1": 5
+    }
+   },
+   "clippedCount": 2,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 1
+    },
+    {
+     "text": "9b426dab-2…b4f246",
+     "cls": "",
+     "sw": 118,
+     "cw": 29
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Nodes · OpsWeave",
+   "h1": "staging-node",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_nodes_9b426dab-27c4-45ce-9773-b51a3db4f246.png"
+  },
+  "/admin/instances/531d794b-e26a-4772-aef5-ec15d88a75d6/logs": {
+   "finalUrl": "http://82.156.234.84:3000/admin/instances/531d794b-e26a-4772-aef5-ec15d88a75d6/logs",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1108,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 10
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group nav-extensions",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 63,
+   "fontHist": {
+    "10": 6,
+    "11": 11,
+    "12": 25,
+    "13": 8,
+    "15": 1,
+    "22": 1,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 20,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 6,
+     "ratio": 1.55
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 9,
+     "ratio": 1.53
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 2,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 0,
+    "maxDepth": 0,
+    "depths": {}
+   },
+   "clippedCount": 3,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 0
+    },
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 0
+    },
+    {
+     "text": "Instance logs",
+     "cls": "",
+     "sw": 72,
+     "cw": 6
+    }
+   ],
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Instance logs · OpsWeave",
+   "h1": "Instance logs",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    28,
+    30,
+    32,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_instances_531d794b-e26a-4772-aef5-ec15d88a75d6_logs.png"
+  },
+  "/admin/pipelines/host-metrics-pipeline": {
+   "finalUrl": "http://82.156.234.84:3000/admin/pipelines/host-metrics-pipeline",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2368,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "span",
+     "cls": "flow-index",
+     "left": 448,
+     "right": 466,
+     "n": 3
+    },
+    {
+     "tag": "span",
+     "cls": "flow-arrow",
+     "left": 417,
+     "right": 429,
+     "n": 3
+    },
+    {
+     "tag": "div",
+     "cls": "flow-step",
+     "left": 295,
+     "right": 411,
+     "n": 4
+    },
+    {
+     "tag": "strong",
+     "cls": "",
+     "left": 308,
+     "right": 398,
+     "n": 4
+    },
+    {
+     "tag": "small",
+     "cls": "",
+     "left": 308,
+     "right": 398,
+     "n": 4
+    },
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 117,
+   "textEls": 155,
+   "fontHist": {
+    "10": 18,
+    "11": 11,
+    "12": 46,
+    "13": 42,
+    "14": 1,
+    "15": 1,
+    "16": 3,
+    "21": 2,
+    "22": 1,
+    "13.5": 30
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 24,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 11,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 22,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 26,
+     "ratio": 1.5
+    },
+    "21px": {
+     "n": 2,
+     "ratio": 1.1
+    },
+    "16px": {
+     "n": 3,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 7,
+    "maxDepth": 1,
+    "depths": {
+     "1": 7
+    }
+   },
+   "clippedCount": 9,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 1
+    },
+    {
+     "text": "Pipeline detail",
+     "cls": "",
+     "sw": 76,
+     "cw": 22
+    },
+    {
+     "text": "sha256:e42442085b8cd2d8c4aff9776d578",
+     "cls": "mono muted small",
+     "sw": 513,
+     "cw": 283
+    },
+    {
+     "text": "sha256:810a328167adaab8eca7c6ac00361",
+     "cls": "mono muted small",
+     "sw": 513,
+     "cw": 283
+    },
+    {
+     "text": "sha256:90d4a084d6cc885db75bfa8562998",
+     "cls": "mono muted small",
+     "sw": 513,
+     "cw": 283
+    },
+    {
+     "text": "sha256:050e3f81bc4cdd8c658a7b82ae6b7",
+     "cls": "mono muted small",
+     "sw": 513,
+     "cw": 283
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "12px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Pipelines · OpsWeave",
+   "h1": "Host Metrics Pipeline",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_pipelines_host-metrics-pipeline.png"
+  },
+  "/admin/pipelines/host-metrics-pipeline/editor": {
+   "finalUrl": "http://82.156.234.84:3000/admin/pipelines/host-metrics-pipeline/editor",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1636,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 86,
+   "textEls": 139,
+   "fontHist": {
+    "9": 5,
+    "10": 13,
+    "11": 12,
+    "12": 49,
+    "13": 13,
+    "15": 1,
+    "21": 1,
+    "13.5": 13,
+    "9.5": 16,
+    "10.5": 6,
+    "8.5": 10
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 48,
+     "ratio": 1.38
+    },
+    "10px": {
+     "n": 15,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 12,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 14,
+     "ratio": 1.44
+    },
+    "21px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 4,
+     "ratio": 1.28
+    },
+    "9px": {
+     "n": 10,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 4,
+    "maxDepth": 1,
+    "depths": {
+     "1": 4
+    }
+   },
+   "clippedCount": 3,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 0
+    },
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 0
+    },
+    {
+     "text": "Pipeline Studio",
+     "cls": "",
+     "sw": 81,
+     "cw": 9
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "0px",
+    "gap": "normal",
+    "maxWidth": "none"
+   },
+   "title": "Pipeline Studio · OpsWeave",
+   "h1": "Host Metrics Pipeline",
+   "h1Style": {
+    "size": "21px",
+    "weight": "700",
+    "lh": "25.2px",
+    "ls": "-0.63px"
+   },
+   "buttonHeights": [
+    26,
+    28,
+    30,
+    36,
+    38
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_pipelines_host-metrics-pipeline_editor.png"
+  },
+  "/admin/pipelines/host-metrics-pipeline/run": {
+   "finalUrl": "http://82.156.234.84:3000/admin/pipelines/host-metrics-pipeline/run",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 844,
+   "bodyScrollW": 375,
+   "offenders": [
+    {
+     "tag": "aside",
+     "cls": "sidebar admin-sidebar sidebar-drawer",
+     "left": -260,
+     "right": 0,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "sidebar-head brand-row",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "nav",
+     "cls": "nav",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    },
+    {
+     "tag": "div",
+     "cls": "nav-group",
+     "left": -252,
+     "right": -9,
+     "n": 3
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link",
+     "left": -252,
+     "right": -9,
+     "n": 9
+    },
+    {
+     "tag": "a",
+     "cls": "nav-link active active",
+     "left": -252,
+     "right": -9,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 99,
+   "textEls": 47,
+   "fontHist": {
+    "10": 6,
+    "11": 9,
+    "12": 13,
+    "13": 6,
+    "15": 1,
+    "22": 1,
+    "13.5": 11
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 11,
+     "ratio": 1.47
+    },
+    "10px": {
+     "n": 5,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "11px": {
+     "n": 7,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 3,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 1,
+    "maxDepth": 1,
+    "depths": {
+     "1": 1
+    }
+   },
+   "clippedCount": 3,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 0
+    },
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 0
+    },
+    {
+     "text": "Run pipeline",
+     "cls": "",
+     "sw": 67,
+     "cw": 7
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "0px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Pipelines · OpsWeave",
+   "h1": "Host Metrics Pipeline",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_pipelines_host-metrics-pipeline_run.png"
+  },
+  "/admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae": {
+   "finalUrl": "http://82.156.234.84:3000/admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae",
+   "overflow": 223,
+   "docScrollW": 613,
+   "docClientW": 390,
+   "docHeight": 1755,
+   "bodyScrollW": 613,
+   "offenders": [
+    {
+     "tag": "code",
+     "cls": "mono small",
+     "left": 88,
+     "right": 613,
+     "n": 1
+    },
+    {
+     "tag": "table",
+     "cls": "w-full border-collapse caption-bottom text-base",
+     "left": 15,
+     "right": 490,
+     "n": 1
+    },
+    {
+     "tag": "thead",
+     "cls": "border-b border-solid border-border",
+     "left": 17,
+     "right": 489,
+     "n": 1
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors data-[state=sele",
+     "left": 17,
+     "right": 489,
+     "n": 2
+    },
+    {
+     "tag": "tbody",
+     "cls": "[&_tr:last-child]:border-0",
+     "left": 17,
+     "right": 489,
+     "n": 1
+    },
+    {
+     "tag": "time",
+     "cls": "",
+     "left": 427,
+     "right": 469,
+     "n": 1
+    }
+   ],
+   "offenderTotal": 110,
+   "textEls": 116,
+   "fontHist": {
+    "10": 10,
+    "11": 11,
+    "12": 57,
+    "13": 9,
+    "14": 2,
+    "15": 1,
+    "21": 1,
+    "22": 1,
+    "13.5": 18,
+    "20.3": 5,
+    "12.7": 1
+   },
+   "lineHeights": {
+    "15px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "12px": {
+     "n": 36,
+     "ratio": 1.49
+    },
+    "10px": {
+     "n": 9,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 17,
+     "ratio": 1.45
+    },
+    "11px": {
+     "n": 10,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 3,
+     "ratio": 1.5
+    },
+    "21px": {
+     "n": 1,
+     "ratio": 1.1
+    },
+    "20px": {
+     "n": 5,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 10,
+    "maxDepth": 1,
+    "depths": {
+     "1": 10
+    }
+   },
+   "clippedCount": 2,
+   "clipped": [
+    {
+     "text": "/",
+     "cls": "crumb-sep",
+     "sw": 12,
+     "cw": 2
+    },
+    {
+     "text": "Job detail",
+     "cls": "",
+     "sw": 53,
+     "cw": 25
+    }
+   ],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "12px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "18px 14px 42px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "Jobs · OpsWeave",
+   "h1": "host-metrics-pipeline",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    20,
+    30,
+    36
+   ],
+   "navItems": 13,
+   "mainOffsetLeft": 0,
+   "shot": "r390-light-en__admin_jobs_1285fbe8-9bb8-459f-b073-af245d32b3ae.png"
+  },
+  "/403": {
+   "finalUrl": "http://82.156.234.84:3000/403",
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 844,
+   "bodyScrollW": 375,
+   "offenders": [],
+   "offenderTotal": 0,
+   "textEls": 6,
+   "fontHist": {
+    "10": 1,
+    "13": 3,
+    "22": 1,
+    "13.5": 1
+   },
+   "lineHeights": {
+    "10px": {
+     "n": 1,
+     "ratio": 1.5
+    },
+    "22px": {
+     "n": 1,
+     "ratio": 1.2
+    },
+    "13px": {
+     "n": 2,
+     "ratio": 1.5
+    },
+    "14px": {
+     "n": 1,
+     "ratio": 1.5
+    }
+   },
+   "cards": {
+    "total": 1,
+    "maxDepth": 1,
+    "depths": {
+     "1": 1
+    }
+   },
+   "clippedCount": 0,
+   "clipped": [],
+   "panelStyle": {
+    "radius": "10px",
+    "padding": "18px 20px",
+    "border": "1px solid",
+    "bg": "rgb(255, 255, 255)"
+   },
+   "contentStyle": {
+    "padding": "32px 20px",
+    "gap": "normal",
+    "maxWidth": "1480px"
+   },
+   "title": "OpsWeave · Platform",
+   "h1": "No access to the platform console",
+   "h1Style": {
+    "size": "22px",
+    "weight": "700",
+    "lh": "26.4px",
+    "ls": "-0.66px"
+   },
+   "buttonHeights": [
+    36
+   ],
+   "navItems": 0,
+   "mainOffsetLeft": 0
+  }
+ },
+ "capturedAt": "2026-10-29T14:18:35.777Z"
+}
