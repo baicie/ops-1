@@ -1,17 +1,22 @@
+import { resolveInitialLocale, translate, type MessageKey, type TranslateParams } from '../../i18n';
 import type { PipelineDefinition, PipelineNode } from '../../types';
 
 export interface ConfigChange { path: string; local: string; server: string }
 export interface NodeDiff { nodeId: string; label: string; kind: 'added' | 'removed' | 'changed'; changes: ConfigChange[] }
 export interface DefinitionDiff { nodes: NodeDiff[]; edgesAdded: string[]; edgesRemoved: string[] }
 
-function label(node?: PipelineNode): string {
-  if (!node) return 'Unknown node';
-  const known: Record<string, string> = {
-    'builtin.source.http_json': 'HTTP Source', 'builtin.parse.json': 'Parse JSON',
-    'builtin.map.fields': 'Map Fields', 'builtin.filter.predicate': 'Filter Records',
-    'builtin.validate.schema': 'Validate Schema', 'builtin.sink.dataset': 'Dataset Sink',
-  };
-  return known[node.type] || node.nodeId;
+type Translate = (key: MessageKey, params?: TranslateParams) => string;
+
+const NODE_LABEL_KEYS: Record<string, MessageKey> = {
+  'builtin.source.http_json': 'studio.nodeType.httpSource', 'builtin.parse.json': 'studio.nodeType.parseJson',
+  'builtin.map.fields': 'studio.nodeType.mapFields', 'builtin.filter.predicate': 'studio.nodeType.filter',
+  'builtin.validate.schema': 'studio.nodeType.validate', 'builtin.sink.dataset': 'studio.nodeType.datasetSink',
+};
+
+function label(node: PipelineNode | undefined, t: Translate): string {
+  if (!node) return t('studio.nodeType.unknown');
+  const key = NODE_LABEL_KEYS[node.type];
+  return key ? t(key) : node.nodeId;
 }
 
 function flatten(value: unknown, prefix = '', out: Record<string, string> = {}): Record<string, string> {
@@ -28,21 +33,21 @@ function flatten(value: unknown, prefix = '', out: Record<string, string> = {}):
 // credential-bearing fields are compared but their values stay hidden.
 const PUBLIC_NUMERIC_FIELDS = new Set(['typeVersion', 'timeoutSeconds', 'maxRecords', 'schemaRevision']);
 
-function visibleFieldValue(path: string, serialized: string | undefined): string {
-  if (serialized === undefined) return '(absent)';
+function visibleFieldValue(path: string, serialized: string | undefined, t: Translate): string {
+  if (serialized === undefined) return t('studio.diff.absent');
   if (!PUBLIC_NUMERIC_FIELDS.has(path) || !/^-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?$/.test(serialized)) {
     return '[REDACTED]';
   }
   return serialized;
 }
 
-function fieldChanges(localNode: PipelineNode, serverNode: PipelineNode): ConfigChange[] {
+function fieldChanges(localNode: PipelineNode, serverNode: PipelineNode, t: Translate): ConfigChange[] {
   const local = flatten({ ...localNode.config, typeVersion: localNode.typeVersion, inputs: localNode.inputs, outputs: localNode.outputs });
   const server = flatten({ ...serverNode.config, typeVersion: serverNode.typeVersion, inputs: serverNode.inputs, outputs: serverNode.outputs });
   return Array.from(new Set([...Object.keys(local), ...Object.keys(server)]))
     .filter((path) => local[path] !== server[path])
     .sort()
-    .map((path) => ({ path, local: visibleFieldValue(path, local[path]), server: visibleFieldValue(path, server[path]) }));
+    .map((path) => ({ path, local: visibleFieldValue(path, local[path], t), server: visibleFieldValue(path, server[path], t) }));
 }
 
 function edgeId(edge: { fromNode: string; toNode: string; fromPort: string; toPort: string }) {
@@ -51,18 +56,20 @@ function edgeId(edge: { fromNode: string; toNode: string; fromPort: string; toPo
 
 /** Field-level Definition diff used only in the conflict UI. */
 export function definitionDiff(local: PipelineDefinition, server: PipelineDefinition): DefinitionDiff {
+  const locale = resolveInitialLocale();
+  const t: Translate = (key, params) => translate(locale, key, params);
   const localNodes = new Map(local.nodes.map((node) => [node.nodeId, node]));
   const serverNodes = new Map(server.nodes.map((node) => [node.nodeId, node]));
   const nodes: NodeDiff[] = [];
   for (const id of Array.from(serverNodes.keys()).sort()) {
-    if (!localNodes.has(id)) nodes.push({ nodeId: id, label: label(serverNodes.get(id)), kind: 'removed', changes: [] });
+    if (!localNodes.has(id)) nodes.push({ nodeId: id, label: label(serverNodes.get(id), t), kind: 'removed', changes: [] });
   }
   for (const id of Array.from(localNodes.keys()).sort()) {
     const mine = localNodes.get(id)!;
     const theirs = serverNodes.get(id);
-    if (!theirs) { nodes.push({ nodeId: id, label: label(mine), kind: 'added', changes: [] }); continue; }
-    const changes = fieldChanges(mine, theirs);
-    if (changes.length) nodes.push({ nodeId: id, label: label(mine), kind: 'changed', changes });
+    if (!theirs) { nodes.push({ nodeId: id, label: label(mine, t), kind: 'added', changes: [] }); continue; }
+    const changes = fieldChanges(mine, theirs, t);
+    if (changes.length) nodes.push({ nodeId: id, label: label(mine, t), kind: 'changed', changes });
   }
   const localEdges = new Set(local.edges.map(edgeId));
   const serverEdges = new Set(server.edges.map(edgeId));

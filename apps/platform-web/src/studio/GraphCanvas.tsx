@@ -4,6 +4,7 @@ import {
   type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { useT, type MessageKey, type TranslateParams } from '../i18n';
 import type { PipelineNode } from '../types';
 import type { GraphEdge, GraphNode } from './ir/types';
 import { Icon } from '../components/Icons';
@@ -13,28 +14,36 @@ interface PipelineNodeData extends Record<string, unknown> {
   direction: 'horizontal' | 'vertical';
 }
 
-const NODE_META: Record<string, { label: string; category: string; icon: string; summary: (config: Record<string, unknown>) => string }> = {
-  'builtin.source.http_json': { label: 'HTTP Source', category: 'source', icon: 'activity', summary: (config) => config.endpoint ? String(config.endpoint) : 'Endpoint not set' },
-  'builtin.parse.json': { label: 'Parse JSON', category: 'transform', icon: 'ops', summary: () => 'Bounded JSON parse' },
-  'builtin.map.fields': { label: 'Map Fields', category: 'transform', icon: 'ops', summary: (config) => config.mappings ? `${Object.keys(config.mappings as object).length} mapped fields` : 'Default id / name mapping' },
-  'builtin.filter.predicate': { label: 'Filter Records', category: 'transform', icon: 'filter', summary: (config) => config.field ? `${String(config.field)} ${String(config.op || 'eq')}` : 'No filter predicate' },
-  'builtin.validate.schema': { label: 'Validate Schema', category: 'validate', icon: 'check', summary: () => 'Dataset schema pin' },
-  'builtin.sink.dataset': { label: 'Dataset Sink', category: 'sink', icon: 'inbox', summary: (config) => config.datasetId ? 'Dataset configured' : 'Dataset not set' },
+type Translate = (key: MessageKey, params?: TranslateParams) => string;
+
+const NODE_META: Record<string, { labelKey: MessageKey; category: string; icon: string; summary: (t: Translate, config: Record<string, unknown>) => string }> = {
+  'builtin.source.http_json': { labelKey: 'studio.nodeType.httpSource', category: 'source', icon: 'activity', summary: (t, config) => config.endpoint ? String(config.endpoint) : t('studio.nodeSummary.endpointMissing') },
+  'builtin.parse.json': { labelKey: 'studio.nodeType.parseJson', category: 'transform', icon: 'ops', summary: (t) => t('studio.nodeSummary.jsonParse') },
+  'builtin.map.fields': { labelKey: 'studio.nodeType.mapFields', category: 'transform', icon: 'ops', summary: (t, config) => config.mappings ? t('studio.nodeSummary.mappedFields', { count: Object.keys(config.mappings as object).length }) : t('studio.nodeSummary.defaultMapping') },
+  'builtin.filter.predicate': { labelKey: 'studio.nodeType.filter', category: 'transform', icon: 'filter', summary: (t, config) => config.field ? `${String(config.field)} ${String(config.op || 'eq')}` : t('studio.nodeSummary.noPredicate') },
+  'builtin.validate.schema': { labelKey: 'studio.nodeType.validate', category: 'validate', icon: 'check', summary: (t) => t('studio.nodeSummary.schemaPin') },
+  'builtin.sink.dataset': { labelKey: 'studio.nodeType.datasetSink', category: 'sink', icon: 'inbox', summary: (t, config) => config.datasetId ? t('studio.nodeSummary.datasetConfigured') : t('studio.nodeSummary.datasetMissing') },
 };
 
 function PipelineNodeView({ data, selected }: NodeProps<Node<PipelineNodeData>>) {
+  const t = useT();
   const node = data.ir;
   const vertical = data.direction === 'vertical';
   const targetPos = vertical ? Position.Top : Position.Left;
   const sourcePos = vertical ? Position.Bottom : Position.Right;
-  const meta = NODE_META[node.type] || { label: node.type.split('.').slice(-1)[0], category: 'transform', icon: 'box', summary: () => 'Custom node' };
+  const meta = NODE_META[node.type];
+  // An unknown type is protocol data: its last segment is the label, and the summary says so.
+  const label = meta ? t(meta.labelKey) : node.type.split('.').slice(-1)[0];
+  const category = meta?.category ?? 'transform';
+  const icon = meta?.icon ?? 'box';
+  const summary = meta ? meta.summary(t, node.config) : t('studio.nodeType.custom');
   return (
-    <div className={`studio-rf-node node-${meta.category} ${selected ? 'selected' : ''}`}>
+    <div className={`studio-rf-node node-${category} ${selected ? 'selected' : ''}`}>
       <div className="studio-rf-node-head">
-        <span className="node-type-icon"><Icon name={meta.icon} size={14} /></span>
-        <div className="node-title"><strong>{meta.label}</strong><small>{node.nodeId}</small></div>
+        <span className="node-type-icon"><Icon name={icon} size={14} /></span>
+        <div className="node-title"><strong>{label}</strong><small>{node.nodeId}</small></div>
       </div>
-      <p className="node-summary">{meta.summary(node.config)}</p>
+      <p className="node-summary">{summary}</p>
       <div className="studio-rf-ports">
         {node.inputs.map((port) => <span key={port.name} className="studio-rf-port input"><Handle type="target" position={targetPos} id={port.name} /><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span></span>)}
         {node.outputs.map((port) => <span key={port.name} className="studio-rf-port output"><span className="port-label">{port.name}</span><span className="port-type">{port.dataType}</span><Handle type="source" position={sourcePos} id={port.name} /></span>)}
@@ -59,6 +68,7 @@ export interface GraphCanvasProps {
 }
 
 export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesChange, onConnectAttempt, onSelect, layoutNonce = 0, direction = 'horizontal', viewMode = 'readable' }: GraphCanvasProps) {
+  const t = useT();
   const [flow, setFlow] = useState<ReactFlowInstance<Node<PipelineNodeData>, Edge> | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const fittedRef = useRef(false);
@@ -164,7 +174,10 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
         onNodesChange={handleNodesChange}
         onConnect={connect}
         onNodesDelete={(deleted) => {
-          if (!window.confirm(`Delete ${deleted.length} selected node${deleted.length === 1 ? '' : 's'} and their connections?`)) return;
+          const question = deleted.length === 1
+            ? t('studio.canvas.deleteConfirm.one', { count: deleted.length })
+            : t('studio.canvas.deleteConfirm.many', { count: deleted.length });
+          if (!window.confirm(question)) return;
           const removed = new Set(deleted.map((item) => item.id));
           onNodesChange(nodes.filter((node) => !removed.has(node.id)));
           onEdgesChange(edges.filter((edge) => !removed.has(edge.source) && !removed.has(edge.target)));

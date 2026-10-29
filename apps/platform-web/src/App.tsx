@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { AuthProvider, useAuth } from './auth';
 import { ExtensionsProvider, ExtensionRoute } from './extensions';
 import { ToastProvider } from './components/Ui';
+import { TooltipProvider } from './components/ui/tooltip';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
@@ -20,13 +21,15 @@ import { NotFoundPage } from './pages/NotFound';
 import { PipelinesPage, PipelineDetailPage, PipelineEditorPage } from './pages/Pipelines';
 import { JobsPage, JobDetailPage, JobSubmitPage } from './pages/Jobs';
 import { GovernancePage } from './pages/Governance';
+import { useT } from './i18n';
 
 function Splash() {
+  const t = useT();
   return (
     <div className="splash">
-      <div className="brand brand-large"><span className="brand-mark"><span /><span /><span /></span><span className="brand-word">OpsWeave</span></div>
+      <div className="brand brand-large"><span className="brand-mark"><span /><span /><span /></span><span className="brand-word">{t('app.brand')}</span></div>
       <span className="spinner" />
-      <p>Establishing authorized session…</p>
+      <p>{t('app.splash.establishing')}</p>
     </div>
   );
 }
@@ -41,39 +44,41 @@ function RequireAuth() {
 
 export function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <ToastProvider>
-          <ExtensionsProvider>
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              <Route element={<RequireAuth />}>
-                <Route index element={<OverviewPage />} />
-                <Route path="/plugins" element={<PluginsPage />} />
-                <Route path="/plugins/install" element={<InstallWizardPage />} />
-                <Route path="/plugins/:id" element={<PluginDetailPage />} />
-                <Route path="/pipelines" element={<PipelinesPage />} />
-                <Route path="/pipelines/:pipelineId" element={<PipelineDetailPage />} />
-                <Route path="/pipelines/:pipelineId/editor" element={<PipelineEditorPage />} />
-                <Route path="/pipelines/:pipelineId/run" element={<JobSubmitPage />} />
-                <Route path="/jobs" element={<JobsPage />} />
-                <Route path="/jobs/:jobId" element={<JobDetailPage />} />
-                <Route path="/nodes" element={<NodesPage />} />
-                <Route path="/nodes/:id" element={<NodeDetailPage />} />
-                <Route path="/governance" element={<GovernancePage />} />
-                <Route path="/instances/:id/logs" element={<InstanceLogsPage />} />
-                <Route path="/activity" element={<ActivityPage />} />
-                <Route path="/access" element={<AccessPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/settings/diagnostics" element={<DiagnosticsPage />} />
-                <Route path="/ops-center" element={<OpsCenterPage />} />
-                <Route path="/ext/*" element={<ExtensionRoute />} />
-                <Route path="*" element={<NotFoundPage />} />
-              </Route>
-            </Routes>
-          </ExtensionsProvider>
-        </ToastProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <TooltipProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <ToastProvider>
+            <ExtensionsProvider>
+              <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route element={<RequireAuth />}>
+                  <Route index element={<OverviewPage />} />
+                  <Route path="/plugins" element={<PluginsPage />} />
+                  <Route path="/plugins/install" element={<InstallWizardPage />} />
+                  <Route path="/plugins/:id" element={<PluginDetailPage />} />
+                  <Route path="/pipelines" element={<PipelinesPage />} />
+                  <Route path="/pipelines/:pipelineId" element={<PipelineDetailPage />} />
+                  <Route path="/pipelines/:pipelineId/editor" element={<PipelineEditorPage />} />
+                  <Route path="/pipelines/:pipelineId/run" element={<JobSubmitPage />} />
+                  <Route path="/jobs" element={<JobsPage />} />
+                  <Route path="/jobs/:jobId" element={<JobDetailPage />} />
+                  <Route path="/nodes" element={<NodesPage />} />
+                  <Route path="/nodes/:id" element={<NodeDetailPage />} />
+                  <Route path="/governance" element={<GovernancePage />} />
+                  <Route path="/instances/:id/logs" element={<InstanceLogsPage />} />
+                  <Route path="/activity" element={<ActivityPage />} />
+                  <Route path="/access" element={<AccessPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/settings/diagnostics" element={<DiagnosticsPage />} />
+                  <Route path="/ops-center" element={<OpsCenterPage />} />
+                  <Route path="/ext/*" element={<ExtensionRoute />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Route>
+              </Routes>
+            </ExtensionsProvider>
+          </ToastProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </TooltipProvider>
   );
 }

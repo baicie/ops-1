@@ -1175,11 +1175,187 @@ fn resource_snapshot(metrics: &Arc<StdMutex<MetricsState>>) -> ResourceSnapshot 
         cpu_utilization,
         memory_used_bytes,
         memory_total_bytes,
-        cpu_cores: std::thread::available_parallelism()
-            .ok()
-            .map(|count| count.get() as i64),
+        cpu_cores: schedulable_cpu_cores(),
+        self_cpu_limit_cores: self_cpu_limit_cores(),
+        self_memory_limit_bytes: self_memory_limit_bytes(),
         filesystem_used_bytes,
         filesystem_total_bytes,
+    }
+}
+
+/// Host-schedulable CPU cores.
+///
+/// `available_parallelism()` answers a different question: it reports this
+/// process's own cgroup quota (staging runs the node container with
+/// `cpus: "1.0"`), so a 4 vCPU host reported 1 core while `/proc/meminfo`
+/// reported the host's 3.7 GiB in the same snapshot. Plugin containers are
+/// created by the host daemon and are siblings of this process, so the
+/// placement budget is the host's cores, never this container's share.
+fn schedulable_cpu_cores() -> Option<i64> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
+            if let Some(cores) = parse_cpuinfo_cores(&cpuinfo) {
+                return Some(cores);
+            }
+        }
+    }
+    std::thread::available_parallelism()
+        .ok()
+        .map(|count| count.get() as i64)
+}
+
+/// CPU cap of the Node Runtime's own cgroup, in cores. Diagnosis only: it never
+/// bounds the plugin containers scheduled from this snapshot.
+fn self_cpu_limit_cores() -> Option<f64> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(text) = std::fs::read_to_string("/sys/fs/cgroup/cpu.max") {
+            return parse_cgroup_cpu_max(&text);
+        }
+        let quota = std::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").ok()?;
+        let period = std::fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us").ok()?;
+        return parse_cgroup_cpu_max(&format!("{} {}", quota.trim(), period.trim()));
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
+/// Memory cap of the Node Runtime's own cgroup, in bytes. Diagnosis only, for
+/// the same reason as `self_cpu_limit_cores`.
+fn self_memory_limit_bytes() -> Option<i64> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(text) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
+            return parse_cgroup_memory_max(&text);
+        }
+        if let Ok(text) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.limit_in_bytes") {
+            return parse_cgroup_memory_max(&text);
+        }
+    }
+    None
+}
+
+#[allow(dead_code)]
+fn parse_cpuinfo_cores(cpuinfo: &str) -> Option<i64> {
+    let cores = cpuinfo
+        .lines()
+        .filter(|line| line.starts_with("processor"))
+        .count();
+    (cores > 0).then_some(cores as i64)
+}
+
+/// cgroup v2 `cpu.max` is "<quota> <period>" in microseconds, or
+/// "max <period>" when the cgroup is unlimited. Returns whole/fractional cores.
+#[allow(dead_code)]
+fn parse_cgroup_cpu_max(text: &str) -> Option<f64> {
+    let mut fields = text.split_whitespace();
+    let quota: f64 = fields.next()?.parse().ok()?;
+    let period: f64 = fields.next()?.parse().ok()?;
+    (quota > 0.0 && period > 0.0).then(|| quota / period)
+}
+
+/// cgroup v2 reports "max" for an unlimited cgroup and cgroup v1 reports a
+/// sentinel near i64::MAX; both mean "no limit".
+#[allow(dead_code)]
+fn parse_cgroup_memory_max(text: &str) -> Option<i64> {
+    let value: i64 = text.trim().parse().ok()?;
+    (value > 0 && value < i64::MAX / 2).then_some(value)
+}
+
+#[cfg(test)]
+mod resource_snapshot_tests {
+    use super::{
+        parse_cgroup_cpu_max, parse_cgroup_memory_max, parse_cpuinfo_cores, schedulable_cpu_cores,
+    };
+    use chrono::Utc;
+    use opsweave_contracts::ResourceSnapshot;
+    use serde_json::json;
+
+    const FOUR_CORE_CPUINFO: &str = "processor	: 0
+model name	: x
+
+processor	: 1
+
+processor	: 2
+
+processor	: 3
+
+";
+
+    #[test]
+    fn host_core_count_comes_from_cpuinfo_not_the_process_quota() {
+        assert_eq!(parse_cpuinfo_cores(FOUR_CORE_CPUINFO), Some(4));
+        assert_eq!(
+            parse_cpuinfo_cores(
+                "model name : no processors
+"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn cgroup_cpu_quota_is_reported_in_cores() {
+        assert_eq!(parse_cgroup_cpu_max("100000 100000"), Some(1.0));
+        assert_eq!(parse_cgroup_cpu_max("150000 100000"), Some(1.5));
+        assert_eq!(parse_cgroup_cpu_max("max 100000"), None);
+        assert_eq!(parse_cgroup_cpu_max(""), None);
+    }
+
+    #[test]
+    fn cgroup_memory_limit_is_reported_in_bytes() {
+        assert_eq!(
+            parse_cgroup_memory_max(
+                "536870912
+"
+            ),
+            Some(536_870_912)
+        );
+        assert_eq!(
+            parse_cgroup_memory_max(
+                "max
+"
+            ),
+            None
+        );
+        assert_eq!(
+            parse_cgroup_memory_max(
+                "9223372036854771712
+"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn snapshot_separates_the_host_budget_from_the_agent_cgroup_limit() {
+        // Constructed inputs, never the real cgroup: the contract under test is
+        // that cpuCores carries the host budget while the self* fields only
+        // describe the Node Runtime's own container.
+        let snapshot = ResourceSnapshot {
+            sampled_at: Utc::now(),
+            cpu_utilization: Some(0.05),
+            memory_used_bytes: Some(1_108_037_632),
+            memory_total_bytes: Some(3_904_065_536),
+            cpu_cores: parse_cpuinfo_cores(FOUR_CORE_CPUINFO),
+            self_cpu_limit_cores: parse_cgroup_cpu_max("100000 100000"),
+            self_memory_limit_bytes: parse_cgroup_memory_max("536870912"),
+            filesystem_used_bytes: None,
+            filesystem_total_bytes: None,
+        };
+        assert_eq!(snapshot.cpu_cores, Some(4));
+        assert_eq!(snapshot.self_cpu_limit_cores, Some(1.0));
+        let wire = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(wire["cpuCores"], json!(4));
+        assert_eq!(wire["selfCpuLimitCores"], json!(1.0));
+        assert_eq!(wire["selfMemoryLimitBytes"], json!(536_870_912));
+        assert_eq!(wire["memoryTotalBytes"], json!(3_904_065_536_i64));
+    }
+
+    #[test]
+    fn live_collection_stays_fail_closed_without_cpuinfo() {
+        assert!(schedulable_cpu_cores().is_none_or(|cores| cores >= 1));
     }
 }
 

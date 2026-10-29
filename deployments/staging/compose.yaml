@@ -1,0 +1,176 @@
+# OpsWeave staging — single image, two roles, one Linux host.
+# Frozen contract: project name, 4 service names, bind paths, port bindings.
+# See deployments/staging/README.md for the operating procedure.
+#
+# Least privilege (ADR-014 §8): every service mounts its OWN env file. There
+# is no shared runtime env file any more — the node must not be able to read
+# POSTGRES_PASSWORD or OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD even though all four
+# containers come from one image and one host.
+#   postgres -> postgres.env   (POSTGRES_* only)
+#   kernel   -> kernel.env     (DATABASE_URL, bootstrap admin, runtime limits)
+#   node     -> node.env       (node identity + one-time enrolment token)
+# /srv/opsweave-staging/staging.env is interpolation input only (it feeds the
+# ${...} substitutions below); it is never mounted into a container.
+
+name: opsweave-staging
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL. Bound to loopback AND the docker bridge gateway so that plugin
+  # containers (default bridge network) can reach it: the Kernel builds the
+  # plugin DSN from OPSWEAVE_PLUGIN_DB_HOST + the port in DATABASE_URL
+  # (apps/kernel/src/storage.rs:208-221), hence 55432 everywhere.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    env_file:
+      - ${OPSWEAVE_POSTGRES_ENV_FILE:-/srv/opsweave-staging/postgres.env}
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:55432:5432"
+      - "${DOCKER_BRIDGE_IP:-172.17.0.1}:55432:5432"
+    volumes:
+      - /var/lib/opsweave-staging/pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # OCI registry for plugin images. Same dual binding: the host-side docker CLI
+  # (driven by the node role) must reach it, and it must not be public.
+  # NOTE: registry:2 has no shell health tooling beyond busybox wget.
+  # ---------------------------------------------------------------------------
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    ports:
+      - "127.0.0.1:15001:5000"
+      - "${DOCKER_BRIDGE_IP:-172.17.0.1}:15001:5000"
+    volumes:
+      - /var/lib/opsweave-staging/registry:/var/lib/registry
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5000/v2/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Kernel + Web Shell. Host networking is mandatory: the Kernel validates each
+  # Node data_endpoint and only accepts plaintext http on loopback
+  # (apps/kernel/src/nodes.rs:212-231), so a bridged container's 127.0.0.1
+  # would be the container itself. With host networking the Kernel listens on
+  # the preview port directly and the node role is a real loopback peer.
+  # DATABASE_URL must therefore point at the bridge gateway, port 55432.
+  # ---------------------------------------------------------------------------
+  kernel:
+    image: ${OPSWEAVE_IMAGE:?set OPSWEAVE_IMAGE}
+    restart: unless-stopped
+    network_mode: host
+    command: ["/usr/local/bin/opsweave-kernel"]
+    env_file:
+      - ${OPSWEAVE_KERNEL_ENV_FILE:-/srv/opsweave-staging/kernel.env}
+    environment:
+      OPSWEAVE_BIND: 0.0.0.0:${OPSWEAVE_PREVIEW_PORT:-18080}
+      OPSWEAVE_DATA_DIR: /app/data
+      OPSWEAVE_WEB_DIST: /app/web
+      # Plugin containers run on the default bridge; their report-back address
+      # is the bridge gateway, never 127.0.0.1 (that would be themselves).
+      OPSWEAVE_PLUGIN_DB_HOST: ${DOCKER_BRIDGE_IP:-172.17.0.1}
+      OPSWEAVE_PLUGIN_KERNEL_URL: http://${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_PREVIEW_PORT:-18080}
+      OPSWEAVE_BUILD_SHA: ${OPSWEAVE_BUILD_SHA:-unknown}
+      OPSWEAVE_BUILD_TIME: ${OPSWEAVE_BUILD_TIME:-unknown}
+      OPSWEAVE_ENVIRONMENT: STAGING
+    volumes:
+      - /var/lib/opsweave-staging/kernel:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:${OPSWEAVE_PREVIEW_PORT:-18080}/livez || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
+
+  # ---------------------------------------------------------------------------
+  # Node Runtime. Host networking + the host docker socket: it drives plugin
+  # containers through the docker CLI. Identities live in
+  # /var/lib/opsweave-staging/node (node-identity.json) and MUST persist, or
+  # every deploy re-enrols the node and breaks its generation history.
+  # The data endpoint stays loopback so the Kernel's whitelist accepts it.
+  # ---------------------------------------------------------------------------
+  node:
+    image: ${OPSWEAVE_IMAGE:?set OPSWEAVE_IMAGE}
+    restart: unless-stopped
+    network_mode: host
+    command: ["/usr/local/bin/opsweave-node"]
+    # node.env only: no POSTGRES_*, no DATABASE_URL, no bootstrap admin password.
+    env_file:
+      - ${OPSWEAVE_NODE_ENV_FILE:-/srv/opsweave-staging/node.env}
+    environment:
+      OPSWEAVE_KERNEL_URL: http://127.0.0.1:${OPSWEAVE_PREVIEW_PORT:-18080}
+      OPSWEAVE_DOCKER_HOST: unix:///var/run/docker.sock
+      # Path-identical mount: the Node Runtime passes token-mount sources to the
+      # *host* docker daemon, so its state directory must have the same absolute
+      # path inside this container as it does on the host. Any other mapping makes
+      # every plugin instance fail with "bind source path does not exist".
+      OPSWEAVE_NODE_STATE_DIR: /var/lib/opsweave-staging/node
+      OPSWEAVE_NODE_DATA_BIND: 127.0.0.1:9101
+      OPSWEAVE_NODE_DATA_ENDPOINT: http://127.0.0.1:9101
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/opsweave-staging/node:/var/lib/opsweave-staging/node
+    group_add:
+      - "${DOCKER_GID:-999}"
+    depends_on:
+      kernel:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:9101/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 45s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M

@@ -4,12 +4,23 @@ import { api } from '../api';
 import { newIdempotencyKey } from '../api';
 import type { JobDiagnostics, JobList, JobResultView, JobView, PipelineDetail } from '../types';
 import { Icon } from '../components/Icons';
-import { EmptyState, ErrorState, PageHeader, Skeleton, StatusBadge, TimeAgo } from '../components/Ui';
+import { Button, buttonVariants } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { EmptyState, ErrorState, PageHeader, Skeleton, TimeAgo } from '../components/Ui';
 import { useDocumentTitle } from '../hooks';
 import { executionLabel as durationLabel, spanLabel } from './jobDuration';
+import { useT } from '../i18n';
+import { cn } from '../lib/utils';
+import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+
+const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
 
 export function JobsPage() {
-  useDocumentTitle('Jobs');
+  const t = useT();
+  useDocumentTitle(t('page.jobs'));
   const [data, setData] = useState<JobList | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [status, setStatus] = useState('ALL');
@@ -34,26 +45,67 @@ export function JobsPage() {
   const pipelines = Array.from(new Set((data?.items || []).map((job) => job.pipelineId))).sort();
   return (
     <div className="page-stack">
-      <PageHeader title="Jobs" description="Durable typed-pipeline executions and their current lifecycle state." actions={<button className="btn btn-secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button>} />
+      <PageHeader title={t('page.jobs')} description={t('jobs.description')} actions={<Button variant="secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
       <section className="toolbar">
-        <div className="search-box"><Icon name="search" size={16} /><input aria-label="Search jobs" placeholder="Search job ID or pipeline" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
-        <select aria-label="Filter by pipeline" value={pipelineFilter} onChange={(event) => setPipelineFilter(event.target.value)} style={{ maxWidth: 240 }}><option value="ALL">All pipelines</option>{pipelines.map((pipeline) => <option key={pipeline} value={pipeline}>{pipeline}</option>)}</select>
-        <div className="segmented">{['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].map((value) => <button key={value} className={status === value ? 'active' : ''} onClick={() => { setStatus(value); setCursor(null); }}>{value === 'ALL' ? 'All' : value}</button>)}</div>
-        <span className="toolbar-count">{visibleJobs.length} of {data?.items.length ?? 0} shown</span>
+        <div className="relative flex min-w-[260px] max-w-[460px] flex-1 items-center">
+          <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
+          <Input aria-label={t('jobs.search.aria')} placeholder={t('jobs.search.placeholder')} value={query} onChange={(event) => setQuery(event.target.value)} className="pl-[33px]" />
+        </div>
+        <Select value={pipelineFilter} onValueChange={setPipelineFilter}>
+          <SelectTrigger aria-label={t('jobs.filter.aria')} className="w-[240px] max-w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">{t('jobs.filter.allPipelines')}</SelectItem>
+            {pipelines.map((pipeline) => <SelectItem key={pipeline} value={pipeline}>{pipeline}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Tabs value={status} onValueChange={(value) => { setStatus(value); setCursor(null); }}>
+          <TabsList className="h-auto max-w-full flex-wrap justify-start">
+            {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : value}</TabsTrigger>)}
+          </TabsList>
+        </Tabs>
+        <span className="toolbar-count">{t('jobs.count', { shown: visibleJobs.length, total: data?.items.length ?? 0 })}</span>
       </section>
-      {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : visibleJobs.length === 0 ? <EmptyState icon="clock" title={data?.items.length ? 'No jobs match this filter' : 'No jobs'} description={data?.items.length ? 'Clear search or choose another pipeline/status.' : 'Publish a revision and submit a run from its Pipeline detail page.'} /> : (
-        <section className="panel table-panel"><table className="data-table responsive-table jobs-table"><thead><tr><th>Job</th><th>Pipeline</th><th>Revision</th><th>Status</th><th>Attempts</th><th>Duration</th><th>Created</th><th /></tr></thead><tbody>
-          {visibleJobs.map((job) => <tr key={job.jobId} className="clickable"><td data-label="Job" className="job-id-cell"><Link className="mono truncate" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></td><td data-label="Pipeline">{job.pipelineId}</td><td data-label="Revision"><span className="mono">r{job.pipelineRevision}</span></td><td data-label="Status"><StatusBadge status={job.status} /></td><td data-label="Attempts">{job.attempts}/{job.maxAttempts}</td><td data-label="Duration"><span className="mono">{durationLabel(job)}</span></td><td data-label="Created"><TimeAgo value={job.createdAt} /></td><td className="row-action"><Icon name="chevron" size={16} /></td></tr>)}
-        </tbody></table></section>
+      {loading && !data ? <Skeleton rows={6} /> : error ? <ErrorState error={error} onRetry={() => setReload((value) => value + 1)} /> : visibleJobs.length === 0 ? <EmptyState icon="clock" title={data?.items.length ? t('jobs.empty.filtered.title') : t('jobs.empty.none.title')} description={data?.items.length ? t('jobs.empty.filtered.description') : t('jobs.empty.none.description')} /> : (
+        <section className="panel table-panel">
+          <Table className={stackTable}>
+            <TableHeader className={stackHead}>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>{t('table.job')}</TableHead>
+                <TableHead>{t('table.pipeline')}</TableHead>
+                <TableHead>{t('table.revision')}</TableHead>
+                <TableHead>{t('table.status')}</TableHead>
+                <TableHead>{t('table.attempts')}</TableHead>
+                <TableHead>{t('table.duration')}</TableHead>
+                <TableHead>{t('table.created')}</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody className={stackBody}>
+              {visibleJobs.map((job) => (
+                <TableRow key={job.jobId} className={cn('cursor-pointer', stackRow)}>
+                  <StackCell label={t('table.job')} className="job-id-cell max-[760px]:w-auto max-[760px]:max-w-none"><Link className="mono min-w-0 truncate max-[760px]:max-w-[220px]" title={job.jobId} to={`/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
+                  <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[760px]:whitespace-normal">{job.pipelineId}</StackCell>
+                  <StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell>
+                  <StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell>
+                  <StackCell label={t('table.attempts')}>{job.attempts}/{job.maxAttempts}</StackCell>
+                  <StackCell label={t('table.duration')} className="whitespace-nowrap max-[760px]:whitespace-normal"><span className="mono">{durationLabel(job)}</span></StackCell>
+                  <StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell>
+                  <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
       )}
-      <div className="pagination-row"><button className="btn btn-secondary" disabled={!cursor} onClick={() => setCursor(null)}>First page</button><button className="btn btn-secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor || null)}>Next page</button></div>
+      <div className="pagination-row"><Button variant="secondary" disabled={!cursor} onClick={() => setCursor(null)}>{t('pipelines.pagination.first')}</Button><Button variant="secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor || null)}>{t('pipelines.pagination.next')}</Button></div>
     </div>
   );
 }
 
 export function JobDetailPage() {
+  const t = useT();
   const { jobId = '' } = useParams();
-  useDocumentTitle('Job detail');
+  useDocumentTitle(t('page.jobDetail'));
   const [job, setJob] = useState<JobView | null>(null);
   const [result, setResult] = useState<JobResultView | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
@@ -92,27 +144,28 @@ export function JobDetailPage() {
   if (!job) return <Skeleton rows={6} />;
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Run" title={job.pipelineId} description={<span className="job-subtitle"><StatusBadge status={job.status} /><span>Revision r{job.pipelineRevision}</span><span className="job-short-id" title={job.jobId}>Run {job.jobId.slice(0, 8)}</span></span>} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <button className="btn btn-danger" onClick={() => void cancel()}><Icon name="pause" size={15} /> Cancel</button>}<button className="btn btn-secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> Refresh</button><Link className="btn btn-secondary" to="/jobs">All jobs</Link></>} />
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId}>{t('jobs.runShortId', { id: job.jobId.slice(0, 8) })}</span></span>} actions={<>{['QUEUED','CLAIMED','RUNNING'].includes(job.status) && <Button variant="destructive" onClick={() => void cancel()}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/jobs">{t('jobs.action.allJobs')}</Link></>} />
       <section className="summary-grid job-stats">
-        <div className="panel metric-card"><span className="metric-label">Status</span><strong className="metric-value"><StatusBadge status={job.status} /></strong></div>
-        <div className="panel metric-card"><span className="metric-label">Execution</span><strong className="metric-value mono">{durationLabel(job)}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">Pipeline</span><strong className="metric-value mono">{job.pipelineId}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">Revision</span><strong className="metric-value">r{job.pipelineRevision}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><StatusPill status={job.status} /></strong></div>
+        <div className="panel metric-card"><span className="metric-label">{t('jobs.metric.execution')}</span><strong className="metric-value mono">{durationLabel(job)}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">{t('table.pipeline')}</span><strong className="metric-value mono">{job.pipelineId}</strong></div>
+        <div className="panel metric-card"><span className="metric-label">{t('table.revision')}</span><strong className="metric-value">r{job.pipelineRevision}</strong></div>
       </section>
-      <details className="advanced panel"><summary>Advanced · full Job ID, fence and lease</summary><div className="kv-grid"><div className="kv"><span className="kv-label">Job ID</span><button type="button" className="link-button mono" title="Copy job ID" onClick={() => void navigator.clipboard?.writeText(job.jobId)}>{job.jobId}</button></div><div className="kv"><span className="kv-label">Attempts</span><span className="kv-value mono">{job.attempts} / {job.maxAttempts}</span></div><div className="kv"><span className="kv-label">Fence</span><span className="kv-value mono">{job.currentFence}</span></div><div className="kv"><span className="kv-label">Lease</span><span className="kv-value mono">{job.currentLeaseId || '—'}</span></div><div className="kv"><span className="kv-label">Queue wait</span><span className="kv-value mono">{spanLabel(job.createdAt, job.startedAt)}</span></div><div className="kv"><span className="kv-label">Total elapsed</span><span className="kv-value mono">{spanLabel(job.createdAt, job.finishedAt)}</span></div><div className="kv"><span className="kv-label">Updated</span><span className="kv-value mono">{new Date(job.updatedAt).toISOString()}</span></div></div></details>
-      <section className="panel panel-pad"><h2>Lifecycle</h2><ul className="detail-list"><li><span>Created</span><TimeAgo value={job.createdAt} /></li><li><span>Updated</span><TimeAgo value={job.updatedAt} /></li><li><span>Error code</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">Attempts, timeline and checkpoints are read from Kernel records; full identifiers remain in Advanced.</p></section>
-      <section className="panel panel-pad"><h2>Timeline</h2>{!diagnostics ? <p className="muted small">Diagnostics unavailable.</p> : diagnostics.events.length === 0 ? <p className="muted small">No events recorded.</p> : <ol className="timeline">{diagnostics.events.map((event) => <li key={event.eventId}><span className="timeline-dot" /><div><strong>{event.eventType}</strong>{event.toStatus && <span className="tag">{event.toStatus}</span>}{event.fencingSequence != null && <span className="muted small">fence {event.fencingSequence}</span>}<TimeAgo value={event.occurredAt} /></div></li>)}</ol>}{diagnostics?.truncated && <p className="muted small">Timeline truncated at 500 events.</p>}</section>
-      {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>Attempts</h2><div className="table-panel"><table className="data-table"><thead><tr><th>Attempt</th><th>Status</th><th>Fence</th><th>Node</th><th>Started</th></tr></thead><tbody>{diagnostics.attempts.map((attempt) => <tr key={attempt.attemptNumber}><td>#{attempt.attemptNumber}</td><td><StatusBadge status={attempt.status} /></td><td className="mono">{attempt.fencingSequence}</td><td className="mono small">{attempt.nodeId}</td><td><TimeAgo value={attempt.startedAt} /></td></tr>)}</tbody></table></div></section>}
-      {diagnostics && diagnostics.checkpoints.length > 0 && <section className="panel panel-pad"><h2>Checkpoints</h2><ul className="detail-list">{diagnostics.checkpoints.map((checkpoint) => <li key={checkpoint.checkpointId}><span>Attempt {checkpoint.attemptNumber} · sequence {checkpoint.sequence}</span><code className="mono small">{checkpoint.stateDigest}</code></li>)}</ul></section>}
-      {result ? <section className="panel panel-pad"><h2>Result</h2><p className="small">Status <StatusBadge status={result.status} /></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre><details className="advanced"><summary>Result metadata</summary><p className="mono small">{result.resultDigest || 'No result digest'}</p></details></section> : resultError ? <p className="muted small">Result: {resultError}</p> : null}
+      <details className="advanced panel"><summary>{t('jobs.advanced.summary')}</summary><div className="kv-grid"><div className="kv"><span className="kv-label">{t('jobs.field.jobId')}</span><button type="button" className="link-button mono" title={t('jobs.copyJobId')} onClick={() => void navigator.clipboard?.writeText(job.jobId)}>{job.jobId}</button></div><div className="kv"><span className="kv-label">{t('table.attempts')}</span><span className="kv-value mono">{job.attempts} / {job.maxAttempts}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.fence')}</span><span className="kv-value mono">{job.currentFence}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.lease')}</span><span className="kv-value mono">{job.currentLeaseId || '—'}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.queueWait')}</span><span className="kv-value mono">{spanLabel(job.createdAt, job.startedAt)}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.totalElapsed')}</span><span className="kv-value mono">{spanLabel(job.createdAt, job.finishedAt)}</span></div><div className="kv"><span className="kv-label">{t('table.updated')}</span><span className="kv-value mono">{new Date(job.updatedAt).toISOString()}</span></div></div></details>
+      <section className="panel panel-pad"><h2>{t('jobs.lifecycle.title')}</h2><ul className="detail-list"><li><span>{t('table.created')}</span><TimeAgo value={job.createdAt} /></li><li><span>{t('table.updated')}</span><TimeAgo value={job.updatedAt} /></li><li><span>{t('jobs.field.errorCode')}</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">{t('jobs.lifecycle.note')}</p></section>
+      <section className="panel panel-pad"><h2>{t('jobs.timeline.title')}</h2>{!diagnostics ? <p className="muted small">{t('jobs.timeline.unavailable')}</p> : diagnostics.events.length === 0 ? <p className="muted small">{t('jobs.timeline.empty')}</p> : <ol className="timeline">{diagnostics.events.map((event) => <li key={event.eventId}><span className="timeline-dot" /><div><strong>{event.eventType}</strong>{event.toStatus && <span className="tag">{event.toStatus}</span>}{event.fencingSequence != null && <span className="muted small">{t('jobs.timeline.fence', { fence: event.fencingSequence })}</span>}<TimeAgo value={event.occurredAt} /></div></li>)}</ol>}{diagnostics?.truncated && <p className="muted small">{t('jobs.timeline.truncated')}</p>}</section>
+      {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>{t('table.attempts')}</h2><div className="table-panel"><Table><TableHeader><TableRow className="hover:bg-transparent"><TableHead>{t('jobs.field.attempt')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('jobs.field.fence')}</TableHead><TableHead>{t('table.node')}</TableHead><TableHead>{t('table.started')}</TableHead></TableRow></TableHeader><TableBody>{diagnostics.attempts.map((attempt) => <TableRow key={attempt.attemptNumber}><TableCell>#{attempt.attemptNumber}</TableCell><TableCell><StatusPill status={attempt.status} /></TableCell><TableCell className="mono">{attempt.fencingSequence}</TableCell><TableCell className="mono text-sm">{attempt.nodeId}</TableCell><TableCell><TimeAgo value={attempt.startedAt} /></TableCell></TableRow>)}</TableBody></Table></div></section>}
+      {diagnostics && diagnostics.checkpoints.length > 0 && <section className="panel panel-pad"><h2>{t('jobs.checkpoints.title')}</h2><ul className="detail-list">{diagnostics.checkpoints.map((checkpoint) => <li key={checkpoint.checkpointId}><span>{t('jobs.checkpoints.entry', { attempt: checkpoint.attemptNumber, sequence: checkpoint.sequence })}</span><code className="mono small">{checkpoint.stateDigest}</code></li>)}</ul></section>}
+      {result ? <section className="panel panel-pad"><h2>{t('table.result')}</h2><p className="small">{t('table.status')} <StatusPill status={result.status} /></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre><details className="advanced"><summary>{t('jobs.result.metadata')}</summary><p className="mono small">{result.resultDigest || t('jobs.result.noDigest')}</p></details></section> : resultError ? <p className="muted small">{t('jobs.result.error', { message: resultError })}</p> : null}
     </div>
   );
 }
 
 export function JobSubmitPage() {
+  const t = useT();
   const { pipelineId = '' } = useParams();
   const navigate = useNavigate();
-  useDocumentTitle('Run pipeline');
+  useDocumentTitle(t('page.runPipeline'));
   const [detail, setDetail] = useState<PipelineDetail | null>(null);
   const [input, setInput] = useState('{}');
   const [revision, setRevision] = useState<number | null>(null);
@@ -124,23 +177,28 @@ export function JobSubmitPage() {
     setSubmitting(true); setError(null);
     try {
       let parsed: unknown;
-      try { parsed = JSON.parse(input); } catch { throw new Error('Input must be valid JSON'); }
+      try { parsed = JSON.parse(input); } catch { throw new Error(t('jobs.submit.invalidJson')); }
       const job = await api.post<JobView>('/api/v1/jobs', { pipelineId, pipelineRevision: revision, input: parsed }, newIdempotencyKey());
       navigate(`/jobs/${job.jobId}`);
     } catch (cause) { setError((cause as Error).message); } finally { setSubmitting(false); }
   };
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Run" title={detail.name} description={`${pipelineId} · choose a published revision`} />
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={detail.name} description={t('jobs.submit.description', { pipelineId })} />
       {error && <div className="studio-banner studio-banner-error" role="alert">{error}</div>}
       <section className="panel panel-pad run-panel">
-        <label><span>Published revision</span><select value={revision ?? ''} onChange={(event) => setRevision(Number(event.target.value))}>{detail.revisions.map((item) => <option key={item.revision} value={item.revision}>r{item.revision} · {item.status}</option>)}</select></label>
-        <label><span>Input JSON</span><textarea rows={10} value={input} onChange={(event) => setInput(event.target.value)} /></label>
-        <button className="btn btn-primary" onClick={() => void submit()} disabled={submitting || revision === null}>{submitting ? 'Submitting…' : 'Submit job'}</button>
-        <p className="muted small">Drafts cannot be executed. Only immutable published revisions can be submitted.</p>
+        <label><span>{t('jobs.submit.publishedRevision')}</span>
+          <Select value={revision === null ? '' : String(revision)} onValueChange={(value) => setRevision(Number(value))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {detail.revisions.map((item) => <SelectItem key={item.revision} value={String(item.revision)}>r{item.revision} · {item.status}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </label>
+        <label><span>{t('jobs.submit.inputJson')}</span><textarea rows={10} value={input} onChange={(event) => setInput(event.target.value)} /></label>
+        <Button onClick={() => void submit()} disabled={submitting || revision === null}>{submitting ? t('jobs.submit.submitting') : t('pipelines.jobs.submit')}</Button>
+        <p className="muted small">{t('jobs.submit.note')}</p>
       </section>
     </div>
   );
 }
-
-

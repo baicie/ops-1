@@ -3,12 +3,21 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
 import type { InstanceDetail, LogEvent } from '../types';
 import { Icon } from '../components/Icons';
-import { EmptyState, ErrorState, StatusBadge, TimeAgo } from '../components/Ui';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { EmptyState, ErrorState } from '../components/Ui';
 import { formatDate } from '../format';
+import { useT } from '../i18n';
+import { cn } from '../lib/utils';
+import { StatusPill } from './table-kit';
 
 type Gap = { code: string; message: string; firstSequence?: number | null; lastSequence?: number | null };
 
+const LEVELS = ['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG', 'TRACE', 'UNKNOWN'];
+
 export function InstanceLogsPage() {
+  const t = useT();
   const { id = '' } = useParams();
   const [detail, setDetail] = useState<InstanceDetail | null>(null);
   const [detailError, setDetailError] = useState<Error | null>(null);
@@ -54,13 +63,13 @@ export function InstanceLogsPage() {
       } catch { /* ignore malformed log event */ }
     });
     source.addEventListener('gap', (event) => {
-      try { setGap(JSON.parse((event as MessageEvent).data)); } catch { setGap({ code: 'GAP', message: 'The stream has a gap.' }); }
+      try { setGap(JSON.parse((event as MessageEvent).data)); } catch { setGap({ code: 'GAP', message: t('instanceLogs.gap.defaultMessage') }); }
       if ((event as MessageEvent).lastEventId) setLastCursor((event as MessageEvent).lastEventId);
     });
     source.addEventListener('heartbeat', () => setConnection('connected'));
     source.onerror = () => {
       setConnection('disconnected');
-      setStreamError('The log stream disconnected. The cursor is retained; reconnect to resume or accept an explicit gap.');
+      setStreamError(t('instanceLogs.error.disconnected'));
     };
     return () => source.close();
   }, [id, reconnectKey]);
@@ -88,56 +97,59 @@ export function InstanceLogsPage() {
       <header className="log-header">
         <div>
           <p className="eyebrow"><Link to={`/plugins/${detail.pluginId}`} className="text-link">{detail.pluginId}</Link> · {detail.version}</p>
-          <h1>Instance logs</h1>
+          <h1>{t('page.instanceLogs')}</h1>
           <div className="log-meta">
             <span className="mono">{detail.id}</span>
             <span><Icon name="server" size={13} /> {detail.nodeName}</span>
-            <span>slot #{detail.slot}</span>
-            <StatusBadge status={detail.state} />
-            <span className={connection === 'connected' ? 'text-ok' : 'text-warn'}><span className={`live-dot ${connection}`} /> {connection}</span>
+            <span>{t('instanceLogs.slot', { slot: detail.slot })}</span>
+            <StatusPill status={detail.state} />
+            <span className={connection === 'connected' ? 'text-ok' : 'text-warn'}><span className={`live-dot ${connection}`} /> {connection === 'connected' ? t('instanceLogs.connection.connected') : connection === 'disconnected' ? t('instanceLogs.connection.disconnected') : t('instanceLogs.connection.connecting')}</span>
           </div>
         </div>
         <div className="log-actions">
-          <button className={`btn btn-secondary ${paused ? 'btn-warn' : ''}`} onClick={() => setPaused(!paused)}><Icon name={paused ? 'play' : 'pause'} size={15} /> {paused ? `Resume (${Math.max(0, events.length - freezeCount)} buffered)` : 'Pause view'}</button>
-          <button className={`btn btn-secondary ${follow ? 'btn-active' : ''}`} onClick={() => setFollow(!follow)}><Icon name="logs" size={15} /> Follow</button>
-          <button className="btn btn-secondary" onClick={() => setReconnectKey((key) => key + 1)}><Icon name="refresh" size={15} /> Reconnect</button>
+          <Button variant="secondary" className={cn(paused && 'border-warning text-warning')} onClick={() => setPaused(!paused)}><Icon name={paused ? 'play' : 'pause'} size={15} /> {paused ? t('instanceLogs.action.resume', { count: Math.max(0, events.length - freezeCount) }) : t('instanceLogs.action.pause')}</Button>
+          <Button variant="secondary" className={cn(follow && 'border-ring bg-accent text-accent-foreground')} onClick={() => setFollow(!follow)}><Icon name="logs" size={15} /> {t('instanceLogs.action.follow')}</Button>
+          <Button variant="secondary" onClick={() => setReconnectKey((key) => key + 1)}><Icon name="refresh" size={15} /> {t('instanceLogs.action.reconnect')}</Button>
         </div>
       </header>
 
       <div className="log-toolbar">
-        <div className="search-box"><Icon name="search" size={15} /><input value={contains} onChange={(event) => setContains(event.target.value)} placeholder="Filter messages (case-insensitive)" aria-label="Filter log messages" /></div>
-        <select value={level} onChange={(event) => setLevel(event.target.value)} aria-label="Filter by level">
-          {['ALL', 'INFO', 'WARN', 'ERROR', 'DEBUG', 'TRACE', 'UNKNOWN'].map((value) => <option key={value}>{value}</option>)}
-        </select>
-        <span className="log-count">{visible.length} shown · {events.length} buffered</span>
-        <button className="btn btn-small" onClick={() => navigator.clipboard.writeText(visible.map((event) => `${event.observedAt} ${event.level} ${event.message}`).join('\n')).catch(() => undefined)}><Icon name="copy" size={14} /> Copy</button>
+        <div className="search-box"><Icon name="search" size={15} /><Input value={contains} onChange={(event) => setContains(event.target.value)} placeholder={t('instanceLogs.search.placeholder')} aria-label={t('instanceLogs.search.aria')} /></div>
+        <Select value={level} onValueChange={setLevel}>
+          <SelectTrigger aria-label={t('instanceLogs.filter.aria')} className="h-8 w-[132px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {LEVELS.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <span className="log-count">{t('instanceLogs.count', { shown: visible.length, buffered: events.length })}</span>
+        <Button variant="secondary" size="sm" onClick={() => navigator.clipboard.writeText(visible.map((event) => `${event.observedAt} ${event.level} ${event.message}`).join('\n')).catch(() => undefined)}><Icon name="copy" size={14} /> {t('action.copy')}</Button>
       </div>
 
       {gap && (
         <div className="gap-banner" role="alert">
           <Icon name="warning" size={18} />
-          <div><strong>Gap: {gap.code}</strong><p>{gap.message}</p></div>
-          <button className="btn btn-small" onClick={() => { setGap(null); setReconnectKey((key) => key + 1); }}>Reconnect from earliest available</button>
+          <div><strong>{t('instanceLogs.gap.title', { code: gap.code })}</strong><p>{gap.message}</p></div>
+          <Button variant="secondary" size="sm" onClick={() => { setGap(null); setReconnectKey((key) => key + 1); }}>{t('instanceLogs.gap.reconnect')}</Button>
         </div>
       )}
       {streamError && !gap && <div className="inline-error"><Icon name="warning" size={16} /> {streamError}</div>}
 
       <div className="terminal" ref={terminalRef} role="log" aria-live="polite" aria-relevant="additions">
         {visible.length === 0 ? (
-          <EmptyState icon="logs" title={events.length ? 'No events match this filter' : 'Waiting for log events'} description={events.length ? 'Clear the filters to see the buffered stream.' : 'Only authorized operators can subscribe. The Node keeps a bounded ring buffer; lost history is reported as a gap, never fabricated.'} />
+          <EmptyState icon="logs" title={events.length ? t('instanceLogs.empty.filtered.title') : t('instanceLogs.empty.waiting.title')} description={events.length ? t('instanceLogs.empty.filtered.description') : t('instanceLogs.empty.waiting.description')} />
         ) : visible.map((event) => (
           <div className={`log-line level-${event.level.toLowerCase()}`} key={event.eventId}>
             <span className="log-time" title={formatDate(event.observedAt)}>{new Date(event.observedAt).toLocaleTimeString(undefined, { hour12: false })}</span>
             <span className="log-level">{event.level}</span>
             <span className="log-channel">{event.channel}</span>
-            <span className="log-message">{event.message}{event.truncated && <span className="log-truncated"> [truncated]</span>}</span>
+            <span className="log-message">{event.message}{event.truncated && <span className="log-truncated"> {t('instanceLogs.truncated')}</span>}</span>
           </div>
         ))}
       </div>
       <footer className="log-footer">
-        <span>Stream {detail.streamId.slice(0, 8)}… · cursor is opaque and permission-bound</span>
-        {lastCursor && <span className="mono">last cursor {lastCursor.slice(0, 18)}…</span>}
-        <span>Buffer is bounded on the Node; expired cursors produce an explicit gap.</span>
+        <span>{t('instanceLogs.footer.stream', { id: detail.streamId.slice(0, 8) })}</span>
+        {lastCursor && <span className="mono">{t('instanceLogs.footer.cursor', { cursor: lastCursor.slice(0, 18) })}</span>}
+        <span>{t('instanceLogs.footer.buffer')}</span>
       </footer>
     </div>
   );
