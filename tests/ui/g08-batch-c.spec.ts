@@ -12,6 +12,9 @@ import path from 'node:path';
  *   - a value the source did not answer is a NO_DATA / UNKNOWN token, never a 0 or a dash;
  *   - the irreversible operations of plugin detail are ConfirmAction dialogs that block a second
  *     submit and keep the failure on the dialog;
+ *   - the two overwriting writes of the studio editor leave window.confirm for the same component,
+ *     and where a second submit is stopped (the studio case does not render an error state - it
+ *     hands the failure to the page surface, which PipelineEditor.tsx says it intends);
  *   - the log stream keeps its own toolbar/terminal layout and states a paused view as STALE.
  *
  * States the running stack cannot produce on demand are produced by rewriting the response the
@@ -362,6 +365,259 @@ test('disabling a plugin confirms, blocks a second submit and keeps the failure 
   await expect(confirm).toBeEnabled();
   expect(writes, 'exactly one write left the page').toBe(1);
   await page.screenshot({ path: path.join(OUT, 'g08-c-plugin-detail-confirm-error-1440-light.png'), fullPage: true });
+});
+
+// --- 3b. the studio conflict dialogs: idle, pending, and who owns the failure -------------
+
+/**
+ * G08 batch C item 1: the two writes that overwrite work in the studio editor - "reload latest"
+ * and "use local & retry" - ask through the shared ConfirmAction instead of window.confirm.
+ *
+ * A real draft conflict needs the seeded host-metrics-pipeline, so the four responses the editor
+ * already consumes are supplied here in the kernel's own shape (DraftView, apps/kernel/src/jobs.rs,
+ * including a UUID draft id because the route parses one). Everything between them is the
+ * product's code: the conflict comes from a real 409 on the save, the retry carries the version it
+ * has just read, and the failure surfaces where PipelineEditor.tsx sends it.
+ */
+const STUDIO_DRAFT_ID = '5f1b0c3e-9d2a-4c7b-8e11-3a6d5c4b2f10';
+
+function studioDefinition(timeoutSeconds: number) {
+  return {
+    ...PIPELINE_DEFINITION,
+    nodes: PIPELINE_DEFINITION.nodes.map((node) =>
+      node.nodeId === 'source' ? { ...node, config: { ...node.config, timeoutSeconds } } : node),
+  };
+}
+
+function studioDraft(version: number, timeoutSeconds: number) {
+  return {
+    draftId: STUDIO_DRAFT_ID,
+    pipelineId: PIPELINE_ID,
+    baseRevision: 1,
+    definition: studioDefinition(timeoutSeconds),
+    definitionDigest: 'sha256:' + 'd'.repeat(64),
+    version,
+    status: 'DRAFT',
+    createdBy: '00000000-0000-4000-8000-000000000001',
+    updatedBy: '00000000-0000-4000-8000-000000000001',
+    createdAt: '2026-10-01T00:00:00Z',
+    updatedAt: '2026-10-01T00:00:00Z',
+  };
+}
+
+/**
+ * The draft starts at v1/17. The first save is refused with the kernel's own 409 (a second
+ * editor moved the draft to v2/18, which the page then reads back), and every later save is
+ * answered by "refuse": either a slow 500 or a success. Writes are logged with the version they
+ * carried, so "the retry sent the version it had just read" is an assertion, not a comment.
+ */
+async function stubStudioConflict(page: Page, refuse: 'slow-500' | 'accept') {
+  const escaped = PIPELINE_ID.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const detail = new RegExp('/api/v1/pipelines/' + escaped + '$');
+  const drafts = new RegExp('/api/v1/pipelines/' + escaped + '/drafts(/[^/?]+)?$');
+  const state = { loads: 0, writeLog: [] as { ifMatch: string | null }[] };
+
+  await page.route(detail, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      pipelineId: PIPELINE_ID,
+      name: PIPELINE_DEFINITION.name,
+      latestRevision: 1,
+      createdAt: '2026-10-01T00:00:00Z',
+      updatedAt: '2026-10-01T00:00:00Z',
+      latest: {
+        pipelineId: PIPELINE_ID,
+        revision: 1,
+        digest: PIPELINE_DEFINITION.digest,
+        status: 'PUBLISHED',
+        publishedAt: '2026-10-01T00:00:00Z',
+        definition: PIPELINE_DEFINITION,
+        plan: {},
+      },
+      revisions: [{ revision: 1, digest: PIPELINE_DEFINITION.digest, status: 'PUBLISHED', publishedAt: '2026-10-01T00:00:00Z' }],
+    }),
+  }));
+
+  await page.route(drafts, async (route) => {
+    const request = route.request();
+    const method = request.method();
+    const onOneDraft = new URL(request.url()).pathname.endsWith('/drafts/' + STUDIO_DRAFT_ID);
+    if (method === 'GET' && !onOneDraft) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([studioDraft(1, 17)]) });
+    }
+    if (method === 'GET') {
+      state.loads += 1;
+      // v1 is what the page opened; every read after it is the newer draft, edited to 18. Those
+      // reads are slow on purpose: the reload swaps the editor for a skeleton, and that window is
+      // what the discard case asserts.
+      if (state.loads === 1) {
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(studioDraft(1, 17)) });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(studioDraft(2, 18)) });
+    }
+    state.writeLog.push({ ifMatch: request.headers()['if-match'] ?? null });
+    if (state.writeLog.length === 1) {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'DRAFT_VERSION_CONFLICT', message: 'draft was updated by another editor' }),
+      });
+    }
+    if (refuse === 'slow-500') {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'STUDIO_WRITE_REFUSED', message: 'the fixture refused this draft write' }),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(studioDraft(3, 19)) });
+  });
+
+  return {
+    writeLog: () => state.writeLog,
+    writeCount: () => state.writeLog.length,
+  };
+}
+
+/**
+ * Samples "data-confirm-state" every frame, so "the dialog never rendered an error" is a recorded
+ * fact rather than an inference from the final DOM. States are de-duplicated and 'absent' marks a
+ * frame in which no dialog was mounted.
+ */
+async function startConfirmStateTrace(page: Page) {
+  await page.evaluate(() => {
+    const store = window as unknown as { __confirmStates: string[]; __confirmSampling: boolean };
+    store.__confirmStates = [];
+    store.__confirmSampling = true;
+    const sample = () => {
+      const dialog = document.querySelector('[data-testid="confirm-dialog"]');
+      const state = dialog ? dialog.getAttribute('data-confirm-state') || 'unknown' : 'absent';
+      if (store.__confirmStates[store.__confirmStates.length - 1] !== state) store.__confirmStates.push(state);
+      if (store.__confirmSampling) window.requestAnimationFrame(sample);
+    };
+    window.requestAnimationFrame(sample);
+  });
+}
+
+async function stopConfirmStateTrace(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const store = window as unknown as { __confirmStates: string[]; __confirmSampling: boolean };
+    store.__confirmSampling = false;
+    return store.__confirmStates;
+  });
+}
+
+/** The editor as an operator reaches it: a draft loaded through ?draft, one node selected. */
+async function openStudioDraft(page: Page) {
+  await page.goto('/admin/pipelines/' + PIPELINE_ID + '/editor?draft=' + STUDIO_DRAFT_ID);
+  await expect(page.locator('.studio-inspector')).toBeVisible();
+  await page.locator('.studio-palette .palette-item small.mono').filter({ hasText: /^source$/ }).click();
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('17');
+}
+
+/** A save the server refuses because the draft moved on, leaving the conflict banner behind. */
+async function saveIntoConflict(page: Page) {
+  await page.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('19');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
+  await expect(page.locator('.conflict-diff')).toContainText('timeoutSeconds');
+  await expect(page.locator('.conflict-diff')).toContainText('19');
+  await expect(page.locator('.conflict-diff')).toContainText('18');
+}
+
+test('the studio overwrite dialog asks, blocks a second submit and leaves the refusal to the page', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const stub = await stubStudioConflict(page, 'slow-500');
+  await login(page);
+  await openStudioDraft(page);
+  await saveIntoConflict(page);
+
+  await page.getByRole('button', { name: 'Use local & retry' }).click();
+  const dialog = page.getByTestId('confirm-dialog');
+  await expect(dialog, 'overwriting the newer draft asks first').toBeVisible();
+  await expect(dialog).toHaveAttribute('data-confirm-state', 'idle');
+  const confirm = dialog.locator('[data-confirm-submit]');
+  await expect(confirm).toBeEnabled();
+  await startConfirmStateTrace(page);
+  await page.screenshot({ path: path.join(OUT, 'g08-c-studio-overwrite-confirm-idle-1440-light.png'), fullPage: true });
+
+  // Two activations in one task: React has not re-rendered yet, so the second one lands on a
+  // button the disabled attribute has not touched. The component's in-flight ref is all that can
+  // drop it, which is what this case is for.
+  const armed = await page.evaluate(() => {
+    const button = document.querySelector('[data-testid="confirm-dialog"] [data-confirm-submit]') as HTMLButtonElement | null;
+    if (!button) return 'missing';
+    button.click();
+    const secondReachedAnEnabledButton = !button.disabled;
+    button.click();
+    return secondReachedAnEnabledButton ? 'enabled' : 'disabled';
+  });
+  expect(armed, 'the second activation really did reach a live button').toBe('enabled');
+
+  await expect(dialog).toHaveAttribute('data-confirm-state', 'pending');
+  await expect(confirm).toBeDisabled();
+  await expect(confirm).toHaveAttribute('aria-busy', 'true');
+  await page.screenshot({ path: path.join(OUT, 'g08-c-studio-overwrite-confirm-pending-1440-light.png'), fullPage: true });
+  expect(stub.writeCount(), 'the dropped activation never became a second write').toBe(2);
+
+  // The refusal is not the dialog's to render: PipelineEditor.tsx resolves on failure so the page
+  // surface reports it, and the dialog closes.
+  await expect(page.locator('.error-state')).toContainText('the fixture refused this draft write');
+  await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
+  const trace = await stopConfirmStateTrace(page);
+  expect(trace, 'no error state is rendered on this dialog').not.toContain('error');
+  expect(trace, 'the operator saw the button working').toContain('pending');
+  expect(trace[trace.length - 1], 'the dialog is gone once the page owns the failure').toBe('absent');
+  expect(stub.writeLog(), 'the first save carried v1 and the retry carried the v2 it had just read').toEqual([
+    { ifMatch: '1' },
+    { ifMatch: '2' },
+  ]);
+  expect(errors, 'page errors: ' + errors.join('; ')).toEqual([]);
+});
+
+test('the studio reload dialog discards only on confirm, writes nothing and returns the server draft', async ({ page }) => {
+  const stub = await stubStudioConflict(page, 'accept');
+  await login(page);
+  await openStudioDraft(page);
+  await saveIntoConflict(page);
+  const writesBeforeReload = stub.writeCount();
+
+  await page.getByRole('button', { name: 'Reload latest' }).click();
+  const dialog = page.getByTestId('confirm-dialog');
+  await expect(dialog, 'discarding local edits asks first').toBeVisible();
+  await expect(dialog).toHaveAttribute('data-confirm-state', 'idle');
+
+  // Cancel has to be a real exit: the local edit and the banner are both still there.
+  await expect(dialog.locator('[data-confirm-cancel]')).toBeEnabled();
+  await dialog.locator('[data-confirm-cancel]').click();
+  await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
+  await expect(page.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('19');
+  expect(stub.writeCount(), 'cancelling wrote nothing').toBe(writesBeforeReload);
+
+  // Confirmed: the reload replaces the whole editor, so the dialog is gone before a pending state
+  // could render - the skeleton is the pending surface for this write.
+  await page.getByRole('button', { name: 'Reload latest' }).click();
+  await expect(page.getByTestId('confirm-dialog')).toHaveAttribute('data-confirm-state', 'idle');
+  await startConfirmStateTrace(page);
+  await page.getByTestId('confirm-dialog').locator('[data-confirm-submit]').click();
+  await expect(page.locator('.skeleton-stack')).toBeVisible();
+  await expect(page.getByTestId('confirm-dialog')).toHaveCount(0);
+  await expect(page.locator('.studio-inspector')).toBeVisible();
+  await expect(page.locator('.studio-conflict')).toHaveCount(0);
+  await page.locator('.studio-palette .palette-item small.mono').filter({ hasText: /^source$/ }).click();
+  await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds'), 'the server draft, not the local one').toHaveValue('18');
+  const trace = await stopConfirmStateTrace(page);
+  expect(trace, 'the sampler was live before the confirmation').toContain('idle');
+  expect(trace, 'this dialog has no error state: the reload surfaces its own failure').not.toContain('error');
+  expect(trace, 'the reload swaps the editor in the same task, so pending never renders').not.toContain('pending');
+  expect(trace[trace.length - 1], 'the dialog is gone once the reload owns the page').toBe('absent');
+  expect(stub.writeCount(), 'discarding a draft writes nothing').toBe(writesBeforeReload);
+  await page.screenshot({ path: path.join(OUT, 'g08-c-studio-reload-dialog-result-1440-light.png'), fullPage: true });
 });
 
 // --- 4. the log stream keeps its own layout, header shared --------------------------------

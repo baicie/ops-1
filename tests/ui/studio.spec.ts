@@ -142,6 +142,21 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await expect(pageB.locator('.conflict-diff')).toContainText('19');
   await expect(pageB.locator('.conflict-diff')).toContainText('18');
   await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png') });
+  // G08 batch C item 1: the two overwriting writes ask through the shared ConfirmAction instead of
+  // window.confirm. This is the real-draft half of that: the dialog opens idle, and the write it
+  // guards is the one that actually saves over the newer draft. The pending/blocked-second-submit
+  // and reload halves are pinned in g08-batch-c.spec.ts, where a delayed response makes the
+  // in-flight window observable without a seeded pipeline.
+  await pageB.getByRole('button', { name: 'Use local & retry' }).click();
+  const overwrite = pageB.getByTestId('confirm-dialog');
+  await expect(overwrite).toBeVisible();
+  await expect(overwrite).toHaveAttribute('data-confirm-state', 'idle');
+  const confirmOverwrite = overwrite.locator('[data-confirm-submit]');
+  await expect(confirmOverwrite).toBeEnabled();
+  await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict-confirm.png') });
+  await confirmOverwrite.click();
+  await expect(pageB.getByTestId('confirm-dialog')).toHaveCount(0);
+  await expect(pageB.getByRole('status')).toContainText('Draft saved');
   await pageB.close();
 });
 

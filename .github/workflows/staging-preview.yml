@@ -302,11 +302,12 @@ jobs:
     # build is only reached through deploy.
     needs: [build, deploy]
     runs-on: ubuntu-24.04
-    # Sized so that no step can be preempted by the job cap: 20 (core) + 40 (surfaces) + 15
-    # (seeded data) = 75 minutes of step caps plus the dependency install. The previous 50 was
-    # already below the sum of its own step caps (60), so a slow surfaces run was killed by the
-    # job timeout instead of by its own, losing the per-step outcome the record step reports.
-    timeout-minutes: 80
+    # Sized so that no step can be preempted by the job cap: 20 (core) + 40 (surfaces) + 20
+    # (seeded data, which grew by five when visual.spec.ts joined it) = 80 minutes of step caps
+    # plus the dependency install. The previous 50 was already below the sum of its own step caps
+    # (60), so a slow surfaces run was killed by the job timeout instead of by its own, losing the
+    # per-step outcome the record step reports.
+    timeout-minutes: 85
     # The suites certify whatever staging serves, so a failed or skipped deploy must not suppress
     # them. verify_only always runs; every other event keeps the deploy-success requirement.
     if: always() && (inputs.verify_only == true || needs.deploy.result == 'success')
@@ -362,24 +363,31 @@ jobs:
       #                                    plugin-detail-tabs, business-workspace, overview-partial,
       #                                    async-stale, i18n-locale, dialog-a11y,
       #                                    g08-batch-c, g08-batch-c-mobile
-      #   this job, "seeded data"          studio, visual-layout - KNOWN-FLAKY, see the step below.
-      #                                    Both navigate to the literal id host-metrics-pipeline and
-      #                                    assert a published revision, a rendered node graph and a
-      #                                    job that reaches Succeeded. No step in this workflow
-      #                                    creates that data: it is seeded out of band through the
-      #                                    admin API plus a host-side demo source server
-      #                                    (deployments/staging/README.md, "DEMO source"). The step
-      #                                    runs them and records the outcome plus this reason, and
-      #                                    does not gate the job until a seeding step exists.
+      #   this job, "seeded data"          studio, visual-layout, visual - KNOWN-FLAKY, see the
+      #                                    step below. studio and visual-layout navigate to the
+      #                                    literal id host-metrics-pipeline and assert a published
+      #                                    revision, a rendered node graph and a job that reaches
+      #                                    Succeeded. visual is the 1440/1024/390 light+dark
+      #                                    screenshot matrix: it reads no pipeline data at all, but
+      #                                    it drives a live instance (/ext/trusted-team/hello and an
+      #                                    instance log stream), so an idle staging host fails it
+      #                                    for a missing deployment rather than a missing seed. No
+      #                                    step in this workflow creates either one: the pipeline is
+      #                                    seeded out of band through the admin API plus a
+      #                                    host-side demo source server
+      #                                    (deployments/staging/README.md, "DEMO source"), and the
+      #                                    instance comes from installing the demo plugin. The step
+      #                                    runs all three and records the outcome plus this reason,
+      #                                    and does not gate the job until a seeding step exists.
       #   data-foundation.yml (seeded)     data-foundation, data-foundation-flows
       #                                    (studio and visual-layout also run there against a locally
       #                                    seeded stack, but that gate is path-filtered, so it never
       #                                    fires on a frontend-only change)
-      #   uncovered, deliberately          visual.spec.ts - the 1440/1024/390 light+dark screenshot
-      #                                    matrix. It was left uncovered by 49f079f as "needs a
-      #                                    seeded staging deployment" and is still not wired
-      #                                    anywhere; it is listed here so that stays explicit
-      #                                    rather than silent.
+      #   uncovered, deliberately          none. visual.spec.ts (the 1440/1024/390 light+dark
+      #                                    screenshot matrix) was left uncovered by 49f079f as
+      #                                    "needs a seeded staging deployment" and was the last spec
+      #                                    wired to nothing; it joins the known-flaky group below,
+      #                                    where its outcome is recorded instead of being silent.
       - name: Playwright core paths (staging smoke, dual surface, admin shell)
         id: core
         if: steps.mode.outputs.mode == 'playwright'
@@ -415,15 +423,16 @@ jobs:
             g08-batch-c.spec.ts \
             g08-batch-c-mobile.spec.ts
 
-      # The two suites that read the seeded staging pipeline, and the only ones whose data this
-      # workflow does not own. They run here rather than being skipped - an absent file list and
-      # --grep are both forbidden - and continue-on-error keeps a missing seed from reddening the
-      # deployment while the reason is still recorded in health.json and in a warning annotation.
-      # Removing the continue-on-error is the whole change once a seeding step lands.
-      - name: Playwright seeded-data suites (studio, visual layout) [known-flaky]
+      # The suites whose data this workflow does not own: studio and visual-layout read the seeded
+      # staging pipeline, visual reads a live demo instance. They run here rather than being
+      # skipped - an absent file list and --grep are both forbidden - and continue-on-error keeps a
+      # missing seed from reddening the deployment while the reason is still recorded in
+      # health.json and in a warning annotation. Removing the continue-on-error is the whole change
+      # once a seeding step lands.
+      - name: Playwright seeded-data suites (studio, visual layout, visual) [known-flaky]
         id: seeded
         if: always() && steps.mode.outputs.mode == 'playwright'
-        timeout-minutes: 15
+        timeout-minutes: 20
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -431,7 +440,8 @@ jobs:
           # Its own --output so neither neighbouring group's traces are overwritten.
           pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/seeded \
             studio.spec.ts \
-            visual-layout.spec.ts
+            visual-layout.spec.ts \
+            visual.spec.ts
 
       - name: Record the browser suite results
         if: always() && steps.mode.outputs.mode == 'playwright'
@@ -450,8 +460,11 @@ jobs:
           SEED_REASON = (
               "seed-missing: studio and visual-layout read the literal id host-metrics-pipeline and "
               "assert a published revision, a rendered node graph and a job that reaches Succeeded. "
-              "No step in this workflow creates that data - it is seeded out of band through the "
-              "admin API plus a host-side demo source server. Known-flaky until a seeding step lands."
+              "visual reads no pipeline data but needs a live instance: it asserts the "
+              "/ext/trusted-team/hello extension and an instance log stream, which only exist once "
+              "the demo plugin is installed and a node runs it. No step in this workflow creates "
+              "either - the pipeline is seeded out of band through the admin API plus a host-side "
+              "demo source server. Known-flaky until a seeding step lands."
           )
 
           # (group, outcome env, spec files, known_flaky, reason)
@@ -469,7 +482,7 @@ jobs:
                False, ""),
               ("seeded-data",
                os.environ.get("SEEDED_OUTCOME", ""),
-               ["studio.spec.ts", "visual-layout.spec.ts"],
+               ["studio.spec.ts", "visual-layout.spec.ts", "visual.spec.ts"],
                True, SEED_REASON),
           ]
 
