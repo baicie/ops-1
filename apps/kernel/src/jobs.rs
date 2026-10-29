@@ -18,7 +18,7 @@ use chrono::{DateTime, Duration, Utc};
 use opsweave_pipeline_transform::{apply_filter, apply_mapping, validate_records};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sqlx::{FromRow, Row};
+use sqlx::{FromRow, PgPool, Row};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -2361,8 +2361,18 @@ async fn terminalize_job(
     })
 }
 
+/// Kernel-initiated terminalization: a Job reaches a terminal state without an
+/// external principal asking for it (deadline reaper, attempts-exhausted claim).
+/// `actor_id` still names the concrete kernel path.
+///
+/// This value must stay inside the `audit_events_actor_type_check` allowed set
+/// defined in migrations/0001_init.sql (USER, NODE, KERNEL, WORKLOAD). The
+/// former value `SYSTEM` was outside that set, so the insert was rejected and
+/// the record silently dropped on every kernel-initiated terminalization.
+const KERNEL_ACTOR: &str = "KERNEL";
+
 async fn audit_terminalization(
-    state: &AppState,
+    db: &PgPool,
     job_id: Uuid,
     status: &str,
     error_code: Option<&str>,
@@ -2371,28 +2381,41 @@ async fn audit_terminalization(
 ) {
     // Audit is intentionally after the Job transaction commits: no external
     // HTTP/audit operation runs while holding the Job row lock.
-    let _ = crate::audit::record(
-        &state.db,
+    let result = if status == "SUCCEEDED" {
+        "ACCEPTED"
+    } else {
+        "REJECTED"
+    };
+    if let Err(error) = crate::audit::record(
+        db,
         "pipeline.job_terminalized",
         actor_type,
         actor_id,
         "job",
         &job_id.to_string(),
         "terminalize",
-        if status == "SUCCEEDED" {
-            "ACCEPTED"
-        } else {
-            "REJECTED"
-        },
+        result,
         json!({"status": status, "errorCode": error_code}),
         None,
     )
-    .await;
+    .await
+    {
+        // A missing audit record is a missing security trail. It cannot roll
+        // back a committed terminalization, so surface it instead of smothering
+        // it the way the previous `let _ =` did.
+        tracing::error!(
+            job_id = %job_id,
+            actor_id,
+            status,
+            %error,
+            "audit write failed for pipeline.job_terminalized"
+        );
+    }
 }
 
-async fn audit_reaped(state: &AppState, reaped: &[(Uuid, &'static str)]) {
+async fn audit_reaped(db: &PgPool, reaped: &[(Uuid, &'static str)]) {
     for (job_id, code) in reaped {
-        audit_terminalization(state, *job_id, "FAILED", Some(*code), "SYSTEM", "reaper").await;
+        audit_terminalization(db, *job_id, "FAILED", Some(*code), KERNEL_ACTOR, "reaper").await;
     }
 }
 
@@ -2497,20 +2520,27 @@ pub async fn claim_next(
         .await?;
         let Some(job_id) = job_id else {
             tx.commit().await?;
-            audit_reaped(&state, &reaped).await;
+            audit_reaped(&state.db, &reaped).await;
             return Ok(StatusCode::NO_CONTENT.into_response());
         };
         match claim_core(&mut tx, job_id, &trusted, &worker.version).await {
             Ok(ClaimOutcome::Claimed(response)) => {
                 tx.commit().await?;
-                audit_reaped(&state, &reaped).await;
+                audit_reaped(&state.db, &reaped).await;
                 return Ok(Json(response).into_response());
             }
             Ok(ClaimOutcome::Terminalized(code)) => {
                 tx.commit().await?;
-                audit_reaped(&state, &reaped).await;
-                audit_terminalization(&state, job_id, "FAILED", Some(code), "SYSTEM", "claim")
-                    .await;
+                audit_reaped(&state.db, &reaped).await;
+                audit_terminalization(
+                    &state.db,
+                    job_id,
+                    "FAILED",
+                    Some(code),
+                    KERNEL_ACTOR,
+                    "claim",
+                )
+                .await;
                 return Err(AppError::conflict(code, "job reached a terminal state"));
             }
             Err(error)
@@ -2731,7 +2761,15 @@ pub async fn claim_job(
         }
         Ok(ClaimOutcome::Terminalized(code)) => {
             tx.commit().await?;
-            audit_terminalization(&state, job_id, "FAILED", Some(code), "SYSTEM", "claim").await;
+            audit_terminalization(
+                &state.db,
+                job_id,
+                "FAILED",
+                Some(code),
+                KERNEL_ACTOR,
+                "claim",
+            )
+            .await;
             return Err(AppError::conflict(code, "job reached a terminal state"));
         }
         Err(error) => {
@@ -3399,7 +3437,7 @@ pub async fn cancel_job(
     tx.commit().await?;
     if let TerminalizeOutcome::Applied { .. } = outcome {
         audit_terminalization(
-            &state,
+            &state.db,
             job_id,
             "CANCELLED",
             None,
@@ -3414,6 +3452,7 @@ pub async fn cancel_job(
 #[cfg(test)]
 mod terminalization_tests {
     use super::*;
+    use sqlx::postgres::PgConnectOptions;
     use sqlx::PgPool;
     use tokio::sync::Mutex;
 
@@ -3431,14 +3470,80 @@ mod terminalization_tests {
         assert!(decode_pipeline_cursor("not*base64").is_err());
     }
 
+    /// CI sets this to "1" so that a missing OPSWEAVE_TEST_DATABASE_URL fails the run instead of
+    /// skipping it. Local development leaves it unset and keeps the skip.
+    const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+    /// Whether a missing OPSWEAVE_TEST_DATABASE_URL has to fail instead of skipping. Only a clear
+    /// no leaves the skip in place: a value that is neither a clear yes nor a clear no panics,
+    /// because a typo in CI must not quietly restore the skip this flag exists to remove.
+    fn database_required() -> bool {
+        match std::env::var(REQUIRE_DATABASE_ENV) {
+            Err(std::env::VarError::NotPresent) => false,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                panic!("{REQUIRE_DATABASE_ENV} is set but is not valid UTF-8")
+            }
+            Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+                "" | "0" | "false" | "no" => false,
+                "1" | "true" | "yes" => true,
+                other => panic!(
+                    "{REQUIRE_DATABASE_ENV} is set to {other:?}: use 1 to require the DB-backed \
+                     tests to run against a real database, or 0 to let them skip"
+                ),
+            },
+        }
+    }
+
+    /// Skipping is reserved for "no database configured and nobody asked for one". With
+    /// OPSWEAVE_REQUIRE_TEST_DATABASE=1 an unset URL panics, and once the URL is set every way
+    /// the fixture can fail to reach the database panics: these tests used to report "ok" while
+    /// asserting nothing whenever the URL was unset, the server was down or the migration failed,
+    /// which made a green run meaningless.
     fn test_url() -> Option<String> {
-        std::env::var("OPSWEAVE_TEST_DATABASE_URL").ok()
+        match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+            Ok(url) => Some(url),
+            Err(std::env::VarError::NotPresent) => {
+                if database_required() {
+                    panic!(
+                        "{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset: \
+                         this run requires the DB-backed kernel tests to really run, so skipping \
+                         them counts as a failure. Point OPSWEAVE_TEST_DATABASE_URL at a \
+                         reachable PostgreSQL instance, or unset {REQUIRE_DATABASE_ENV} for a \
+                         local run without a database."
+                    );
+                }
+                eprintln!(
+                    "skip: OPSWEAVE_TEST_DATABASE_URL is unset and {REQUIRE_DATABASE_ENV} is not 1"
+                );
+                None
+            }
+            Err(std::env::VarError::NotUnicode(_)) => {
+                panic!("OPSWEAVE_TEST_DATABASE_URL is set but is not valid UTF-8")
+            }
+        }
     }
 
     async fn test_pool() -> Option<PgPool> {
         let url = test_url()?;
-        let pool = PgPool::connect(&url).await.ok()?;
-        crate::db::migrate(&pool).await.ok()?;
+        // Parsed separately from the connection so the panics below can name the endpoint they
+        // tried without echoing the password embedded in the URL.
+        let options: PgConnectOptions = url.parse().unwrap_or_else(|error| {
+            panic!("OPSWEAVE_TEST_DATABASE_URL is set but is not a PostgreSQL URL: {error}")
+        });
+        let endpoint = format!(
+            "{}:{}/{}",
+            options.get_host(),
+            options.get_port(),
+            options.get_database().unwrap_or("<no database>")
+        );
+        let pool = PgPool::connect_with(options)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("OPSWEAVE_TEST_DATABASE_URL is set but the database is unusable: cannot connect to {endpoint}: {error}")
+            });
+        crate::db::migrate(&pool).await.unwrap_or_else(|error| {
+            panic!("OPSWEAVE_TEST_DATABASE_URL is set but the database is unusable: {endpoint} rejected the migrations: {error:#}")
+        });
         Some(pool)
     }
 
@@ -3457,6 +3562,11 @@ mod terminalization_tests {
             let sql = format!("DELETE FROM {table} WHERE job_id IN ({jobs})");
             sqlx::query(&sql).execute(pool).await.unwrap();
         }
+        let sql = format!(
+            "DELETE FROM kernel.audit_events WHERE subject_type='job' AND subject_id IN \
+             (SELECT job_id::text FROM kernel.pipeline_jobs WHERE pipeline_id IN ({pipelines}))"
+        );
+        sqlx::query(&sql).execute(pool).await.unwrap();
         let sql = format!("DELETE FROM kernel.pipeline_jobs WHERE pipeline_id IN ({pipelines})");
         sqlx::query(&sql).execute(pool).await.unwrap();
         let sql =
@@ -3602,6 +3712,20 @@ mod terminalization_tests {
                 .await
                 .unwrap();
         (status, leases, attempts, results, events)
+    }
+
+    /// Audit rows recorded against one Job, oldest first.
+    async fn audit_rows(pool: &PgPool, job: Uuid) -> Vec<(String, String, String, String, Value)> {
+        sqlx::query_as(
+            "SELECT event_type, actor_type, actor_id, result, details
+             FROM kernel.audit_events
+             WHERE subject_type='job' AND subject_id=$1
+             ORDER BY occurred_at, id",
+        )
+        .bind(job.to_string())
+        .fetch_all(pool)
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -4004,6 +4128,104 @@ mod terminalization_tests {
         .await
         .unwrap();
         sqlx::query(&format!("DROP FUNCTION {function}()"))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    /// Regression for the silent audit loss: the reaper terminalizes an expired
+    /// Job and the caller then audits after the commit (see claim_next). The row
+    /// must really reach kernel.audit_events with an actor_type the live
+    /// check constraint accepts -- the insert succeeding in this test is itself
+    /// the proof that actor_type is legal.
+    #[tokio::test]
+    async fn reaper_terminalization_records_audit_event_with_allowed_actor_type() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let pipeline = new_pipeline(&pool).await;
+        let job = add_job(
+            &pool,
+            &pipeline,
+            0,
+            3,
+            Some(Utc::now() - Duration::seconds(1)),
+        )
+        .await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let reaped = reap_terminal_jobs(&mut tx, 100).await.unwrap();
+        tx.commit().await.unwrap();
+        assert!(reaped.iter().any(|(id, _)| *id == job));
+        audit_reaped(&pool, &reaped).await;
+
+        let rows = audit_rows(&pool, job).await;
+        assert_eq!(
+            rows.len(),
+            1,
+            "a reaped terminalization must leave exactly one audit record"
+        );
+        let (event_type, actor_type, actor_id, result, details) = &rows[0];
+        assert_eq!(event_type, "pipeline.job_terminalized");
+        assert_eq!(actor_type, "KERNEL");
+        assert_eq!(actor_id, "reaper");
+        assert_eq!(result, "REJECTED");
+        assert_eq!(details["status"], "FAILED");
+        assert_eq!(details["errorCode"], "JOB_DEADLINE_EXCEEDED");
+    }
+
+    /// Pins the decision behind the fix: the actor_type constraint was left
+    /// alone and the code now writes an allowed value, instead of the
+    /// constraint being widened to admit 'SYSTEM'. Anyone revisiting that
+    /// option has to change this test deliberately.
+    #[tokio::test]
+    async fn actor_type_outside_constraint_is_still_rejected() {
+        let _guard = TEST_LOCK.lock().await;
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        cleanup_test_data(&pool).await;
+        let job = Uuid::new_v4();
+
+        let rejected = crate::audit::record(
+            &pool,
+            "pipeline.job_terminalized",
+            "SYSTEM",
+            "reaper",
+            "job",
+            &job.to_string(),
+            "terminalize",
+            "REJECTED",
+            json!({}),
+            None,
+        )
+        .await;
+        assert!(
+            rejected.is_err(),
+            "'SYSTEM' must stay outside audit_events_actor_type_check"
+        );
+        assert!(audit_rows(&pool, job).await.is_empty());
+
+        let accepted = crate::audit::record(
+            &pool,
+            "pipeline.job_terminalized",
+            "KERNEL",
+            "reaper",
+            "job",
+            &job.to_string(),
+            "terminalize",
+            "REJECTED",
+            json!({}),
+            None,
+        )
+        .await;
+        assert!(accepted.is_ok(), "KERNEL must be an accepted actor_type");
+        assert_eq!(audit_rows(&pool, job).await.len(), 1);
+
+        sqlx::query("DELETE FROM kernel.audit_events WHERE subject_type='job' AND subject_id=$1")
+            .bind(job.to_string())
             .execute(&pool)
             .await
             .unwrap();

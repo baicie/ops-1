@@ -98,12 +98,32 @@
               "id",
               "path"
             ],
+            "allOf": [
+              {
+                "if": { "properties": { "kind": { "enum": ["navigation.item.v2", "route.page.v2"] } }, "required": ["kind"] },
+                "then": { "required": ["surface"] }
+              },
+              {
+                "if": { "properties": { "kind": { "enum": ["route.page.v1", "navigation.item.v1", "settings.section.v1"] } }, "required": ["kind"] },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      { "required": ["surface"] },
+                      { "required": ["titleKey"] },
+                      { "required": ["requiredCapabilities"] }
+                    ]
+                  }
+                }
+              }
+            ],
             "properties": {
               "kind": {
                 "enum": [
                   "route.page.v1",
                   "navigation.item.v1",
-                  "settings.section.v1"
+                  "settings.section.v1",
+                  "navigation.item.v2",
+                  "route.page.v2"
                 ]
               },
               "id": {
@@ -111,8 +131,25 @@
                 "minLength": 1
               },
               "path": {
+                "description": "The route the contribution is reachable at. A . or .. segment is path traversal in every kind, so both contract generations refuse it.",
                 "type": "string",
-                "pattern": "^/(?:[A-Za-z0-9_./:-]+)?$"
+                "pattern": "^/(?:[A-Za-z0-9_./:-]+)?$",
+                "not": { "pattern": "(^|/)\\.\\.?(/|$)" }
+              },
+              "surface": {
+                "description": "v2 kinds only (navigation.item.v2, route.page.v2). Which shell may render this contribution. The path must live under /admin/ext/<pluginId>/ or /app/ext/<pluginId>/ accordingly; the kernel rejects a mismatch rather than guessing.",
+                "enum": ["admin", "workspace"]
+              },
+              "titleKey": {
+                "description": "v2 kinds only (navigation.item.v2, route.page.v2). i18n key resolved by the host.",
+                "type": "string",
+                "minLength": 1
+              },
+              "requiredCapabilities": {
+                "description": "v2 kinds only (navigation.item.v2, route.page.v2). Minimum capabilities the *session* must already hold. A capability the platform does not know is a manifest error, never an implicit grant.",
+                "type": "array",
+                "maxItems": 8,
+                "items": { "enum": ["platform:access", "workspace:access"] }
               }
             }
           }

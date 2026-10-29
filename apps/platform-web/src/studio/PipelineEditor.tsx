@@ -3,7 +3,10 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError, newIdempotencyKey } from '../api';
 import type { PipelineDetail, PipelineDraft, PipelinePreview, PipelineRevision, PipelineValidation } from '../types';
 import { Icon } from '../components/Icons';
-import { ErrorState, PageHeader, Skeleton } from '../components/Ui';
+import { ErrorState, Skeleton } from '../components/Ui';
+import { ConfirmAction } from '../components/app/confirm-action';
+import { PageHeader } from '../components/app/page-header';
+import { StatusIndicator, UnknownValue } from '../components/app/status-indicator';
 import { useDocumentTitle } from '../hooks';
 import { useT, type MessageKey, type TranslateParams } from '../i18n';
 import { GraphCanvas } from './GraphCanvas';
@@ -72,6 +75,8 @@ export function PipelineEditorPage() {
   const [viewMode, setViewMode] = useState<'readable' | 'all'>('readable');
   const [mobileView, setMobileView] = useState<'nodes' | 'canvas'>('canvas');
   const [configInvalid, setConfigInvalid] = useState(false);
+  /** Which of the two conflicting-draft writes a confirmation is open for. */
+  const [confirmConflict, setConfirmConflict] = useState<null | 'discard' | 'overwrite'>(null);
   const loadSeq = useRef(0);
   useEffect(() => {
     if (!graph) return;
@@ -120,9 +125,12 @@ export function PipelineEditorPage() {
 
   useEffect(() => { void load(draftParam); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [pipelineId, draftParam]);
 
-  if (loading) return <Skeleton rows={8} />;
-  if (error) return <ErrorState error={error} onRetry={() => void load(draftParam)} />;
-  if (!detail || !graph) return <ErrorState error={new Error(t('studio.error.noData'))} onRetry={() => void load(draftParam)} />;
+  // The shared header renders in every state: the page is still the editor for this pipeline
+  // while the definition is loading, refused, or missing.
+  const headerFallback = <PageHeader eyebrow={t('studio.eyebrow')} title={pipelineId} description={t('studio.description')} />;
+  if (loading) return <div className="page-stack studio-page">{headerFallback}<Skeleton rows={8} /></div>;
+  if (error) return <div className="page-stack studio-page">{headerFallback}<ErrorState error={error} onRetry={() => void load(draftParam)} /></div>;
+  if (!detail || !graph) return <div className="page-stack studio-page">{headerFallback}<ErrorState error={new Error(t('studio.error.noData'))} onRetry={() => void load(draftParam)} /></div>;
   const published = detail.latest as PipelineRevision | null | undefined;
   const definition = fromGraph(draft?.definition || published?.definition || ({} as never), graph);
   const dirty = irKey(definition) !== baseline;
@@ -162,7 +170,7 @@ export function PipelineEditorPage() {
       setGraph(toGraph(created.definition, layoutDirection)); setBaseline(irKey(created.definition));
       setHistory([]); setFuture([]); setSelectedId(null); setServerValidation(null);
       setNotice(t('studio.notice.draftCreated', { version: created.version }));
-      navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
+      navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${created.draftId}`, { replace: true });
     } catch (cause) { setError(cause as Error); } finally { setBusy(null); }
   };
   const saveDraft = async (overrideVersion?: number) => {
@@ -207,7 +215,7 @@ export function PipelineEditorPage() {
         { 'idempotency-key': newIdempotencyKey(), 'if-match': String(draft.version) },
       );
       setNotice(t('studio.notice.published', { revision: result.revision }));
-      navigate(`/pipelines/${encodeURIComponent(pipelineId)}`);
+      navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}`);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) setConflict(cause.message);
       else setError(cause as Error);
@@ -262,10 +270,19 @@ export function PipelineEditorPage() {
   };
   return (
     <div className="page-stack studio-page">
+      {/* Header only: the palette, canvas, inspector and preview keep their dedicated layouts
+          (a workflow canvas is not a card), and the meta row states the pipeline facts instead of
+          folding them into the description sentence. */}
       <PageHeader
         eyebrow={t('studio.eyebrow')}
         title={definition.name}
-        description={<span className="mono">{pipelineId} · r{definition.revision} · {draft ? t('studio.header.draftVersion', { version: draft.version }) : t('studio.header.publishedReadOnly')} · {dirty ? t('studio.header.unsavedChanges') : t('studio.header.saved')}</span>}
+        description={t('studio.description')}
+        meta={<>
+          <span className="meta-chip mono">{pipelineId}</span>
+          <span className="meta-chip">{t('studio.meta.revision', { revision: definition.revision })}</span>
+          <span className="meta-chip">{draft ? t('studio.header.draftVersion', { version: draft.version }) : t('studio.header.publishedReadOnly')}</span>
+          <StatusIndicator state={dirty ? 'attention' : 'ready'} label={dirty ? t('studio.header.unsavedChanges') : t('studio.header.saved')} />
+        </>}
         actions={<>
           <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
           <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
@@ -274,13 +291,15 @@ export function PipelineEditorPage() {
           <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
           <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
           <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
-          <Link className="btn btn-secondary" to={`/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
-          {!hasDraft ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button> : <>
+          <Link className="btn btn-secondary" to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
+          {hasDraft && <>
             <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
             <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
-            <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</button>
           </>}
         </>}
+        primary={!hasDraft
+          ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button>
+          : <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</button>}
       />
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
@@ -301,11 +320,11 @@ export function PipelineEditorPage() {
         </div>
         <div className="conflict-actions">
           <button className="btn btn-secondary btn-small" onClick={() => setConflict(null)}>{t('studio.action.keepEditing')}</button>
-          <button className="btn btn-secondary btn-small" onClick={() => { if (window.confirm(t('studio.conflict.discardConfirm'))) { setConflict(null); void load(draft?.draftId); } }}>{t('studio.action.reloadLatest')}</button>
-          <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => { if (window.confirm(t('studio.conflict.overwriteConfirm'))) { setConflict(null); void saveDraft(conflictLatest?.version); } }}>{t('studio.action.useLocalRetry')}</button>
+          <button className="btn btn-secondary btn-small" onClick={() => setConfirmConflict('discard')}>{t('studio.action.reloadLatest')}</button>
+          <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => setConfirmConflict('overwrite')}>{t('studio.action.useLocalRetry')}</button>
         </div>
       </div>}
-      {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>{t('studio.drafts.title')}</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
+      {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>{t('studio.drafts.title')}</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
       <div className="studio-shell">
         <aside className="panel panel-pad studio-palette">
           <h2>{t('studio.palette.title')}</h2><p className="muted small">{t('studio.palette.description')}</p>
@@ -316,7 +335,7 @@ export function PipelineEditorPage() {
             <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>{t('studio.canvas.viewNodes')}</button>
             <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>{t('studio.canvas.viewCanvas')}</button>
           </div>
-          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className="flow-index">{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : '?'}</span><span><strong>{nodeLabel(t, node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{t('studio.canvas.nodeOutCount', { count: node.outputs.length })}</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className={getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? 'flow-index' : 'flow-index flow-index-token'}>{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : <UnknownValue detail={t('ui.unknown.detail')} />}</span><span><strong>{nodeLabel(t, node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{t('studio.canvas.nodeOutCount', { count: node.outputs.length })}</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
           <p className="studio-note"><Icon name="alert" size={13} /> {t('studio.canvas.note')}</p>
         </section>
@@ -346,6 +365,25 @@ export function PipelineEditorPage() {
         </>}
         {!preview && !previewError && <p className="muted small">{t('studio.preview.notAJob')}</p>}
       </section>}
+      {/* Both writes below overwrite work, so they ask through ConfirmAction instead of
+          window.confirm. The request sequence is unchanged: the same load/save call runs on
+          confirm, and the page-level error surface still reports a failure. */}
+      <ConfirmAction
+        open={confirmConflict === 'discard'}
+        title={t('studio.confirmDiscard.title')}
+        description={t('studio.conflict.discardConfirm')}
+        confirmLabel={t('studio.action.reloadLatest')}
+        onConfirm={async () => { setConflict(null); await load(draft?.draftId); }}
+        onClose={() => setConfirmConflict(null)}
+      />
+      <ConfirmAction
+        open={confirmConflict === 'overwrite'}
+        title={t('studio.confirmOverwrite.title')}
+        description={t('studio.conflict.overwriteConfirm')}
+        confirmLabel={t('studio.action.useLocalRetry')}
+        onConfirm={async () => { setConflict(null); await saveDraft(conflictLatest?.version); }}
+        onClose={() => setConfirmConflict(null)}
+      />
     </div>
   );
 }

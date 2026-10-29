@@ -1,37 +1,49 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { usePolling } from '../hooks';
 import type { AuditEvent, NodeView } from '../types';
 import { Icon } from '../components/Icons';
-import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { CopyButton, EmptyState, ErrorState, KV, PageHeader, Skeleton, TimeAgo, useToast } from '../components/Ui';
+import { CopyButton, EmptyState, ErrorState, KV, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { formatBytes, formatDate } from '../format';
 import { useT } from '../i18n';
 import { cn } from '../lib/utils';
-import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
+import { PageHeader } from '../components/app/page-header';
+import { NoData, StatusIndicator, indicatorStateForCode, type IndicatorState } from '../components/app/status-indicator';
 
-/** Replaces the legacy .status pill: a Badge, the same glyph, the same localized label. */
+/**
+ * Status rendering for every node surface: colour + glyph + text, and the effective state is
+ * the observed one — revoked beats stale beats the stored code, so a silent node can never
+ * render as READY (docs/09 §9.5).
+ */
 function StatusPill({ status }: { status: string }) {
-  const t = useT();
-  const code = status?.toUpperCase();
-  const known = code ? STATUS_MAP[code] : undefined;
-  const tone = known?.tone ?? 'unknown';
-  // A code the shared mapping does not know is protocol data, not copy: render it verbatim.
-  const text = known ? t(known.labelKey) : status || t('status.unknown');
-  return (
-    <Badge variant={badgeVariantForTone(tone)} data-status={code || undefined} className={cn(!known && 'border-dashed')}>
-      <Icon name={glyphForTone(tone)} size={12} />
-      {text}
-    </Badge>
-  );
+  const state = indicatorStateForCode(status);
+  return <StatusIndicator state={state} label={state === 'unknown' ? status : undefined} />;
+}
+
+/** Effective node state: revocation, then UNREACHABLE, then staleness, then the stored code. */
+function nodeState(node: NodeView): IndicatorState {
+  return indicatorStateForCode(node.status, { stale: node.stale, revoked: Boolean(node.revokedAt) });
+}
+
+/** A utilisation ratio, or null when the sample is missing or not a usable number. */
+function ratio(used?: number | null, total?: number | null): number | null {
+  if (typeof used !== 'number' || typeof total !== 'number') return null;
+  if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0 || used < 0) return null;
+  return Math.min(1, used / total);
+}
+
+function percentOf(value?: number | null): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) return null;
+  return value;
 }
 
 // The legacy .data-table card layout at <=760px (thead hidden, one row per node) keyed off
@@ -76,8 +88,10 @@ opsweave-node`;
 
 export function NodesPage() {
   const t = useT();
-  const { data, error, loading, reload } = usePolling(() => api.get<NodeView[]>('/api/v1/nodes'), 5000);
+  const { data, error, loading, reload, observedAt } = useObservedPolling(() => api.get<NodeView[]>('/api/v1/nodes'), 5000);
   const { user } = useAuth();
+  const [stateFilter, setStateFilter] = useState('ALL');
+  const [osFilter, setOsFilter] = useState('ALL');
   const [joinOpen, setJoinOpen] = useState(false);
   const [label, setLabel] = useState('role=node');
   const [ttl, setTtl] = useState(30);
@@ -90,6 +104,16 @@ export function NodesPage() {
   const tokenFieldId = useId();
   const navigate = useNavigate();
   const nodes = data || [];
+  const operatingSystems = useMemo(
+    () => Array.from(new Set(nodes.map((node) => node.os).filter(Boolean))).sort(),
+    [nodes],
+  );
+  // The state filter runs on the *effective* state, not the stored code: filtering by READY
+  // must never surface a node whose heartbeat went stale (docs/09 §9.5).
+  const visible = useMemo(
+    () => nodes.filter((node) => (stateFilter === 'ALL' || nodeState(node) === stateFilter) && (osFilter === 'ALL' || node.os === osFilter)),
+    [nodes, stateFilter, osFilter],
+  );
 
   async function createToken() {
     setBusy(true);
@@ -110,11 +134,53 @@ export function NodesPage() {
       <PageHeader
         title={t('page.nodes')}
         description={t('nodes.description')}
-        actions={<><Button variant="secondary" className="max-[760px]:flex-1" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Button className="max-[760px]:flex-1" onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'} title={user?.role !== 'admin' ? t('nodes.join.adminRequired') : ''}><Icon name="plus" size={15} /> {t('nodes.join.action')}</Button></>}
+        actions={<Button variant="secondary" className="max-[760px]:flex-1" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
+        primary={<Button className="max-[760px]:flex-1" onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'} title={user?.role !== 'admin' ? t('nodes.join.adminRequired') : ''}><Icon name="plus" size={15} /> {t('nodes.join.action')}</Button>}
       />
-      {loading && !data ? <Skeleton rows={5} /> : error ? <ErrorState error={error} onRetry={() => void reload()} /> : nodes.length === 0 ? (
-        <EmptyState icon="nodes" title={t('nodes.empty.title')} description={t('nodes.empty.description')} action={<Button onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'}>{t('nodes.empty.action')}</Button>} />
-      ) : (
+      <AsyncBoundary
+        loading={loading}
+        error={error}
+        hasData={Boolean(data)}
+        isEmpty={nodes.length === 0}
+        onRetry={() => void reload()}
+        skeletonRows={5}
+        emptyState={<EmptyState icon="nodes" title={t('nodes.empty.title')} description={t('nodes.empty.description')} action={<Button onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'}>{t('nodes.empty.action')}</Button>} />}
+      >
+        <section className="ow-summary" aria-label={t('nodes.summary.aria')} data-testid="nodes-summary">
+          <div className="ow-summary-card">
+            <span className="ow-summary-label">{t('nodes.summary.total')}</span>
+            <span className="ow-summary-value">{nodes.length}</span>
+            <span className="ow-summary-definition">{t('nodes.summary.definition')}</span>
+          </div>
+          {(['ready', 'stale', 'unreachable', 'revoked'] as IndicatorState[]).map((state) => (
+            <div className="ow-summary-card" key={state}>
+              <span className="ow-summary-label"><StatusIndicator state={state} /></span>
+              <span className="ow-summary-value">{nodes.filter((node) => nodeState(node) === state).length}</span>
+            </div>
+          ))}
+        </section>
+        <section className="toolbar">
+          <div className="ow-filter-scroll">
+            <Tabs value={stateFilter} onValueChange={setStateFilter}>
+              <TabsList aria-label={t('nodes.filter.status.aria')}>
+                {['ALL', 'READY', 'STALE', 'UNREACHABLE', 'REVOKED'].map((value) => (
+                  <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : value === 'READY' ? t('state.ready') : value === 'STALE' ? t('state.stale') : value === 'UNREACHABLE' ? t('state.unreachable') : t('state.revoked')}</TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
+          {operatingSystems.length > 1 ? (
+            <label className="ow-filter-select">
+              <span>{t('nodes.filter.os')}</span>
+              <select value={osFilter} onChange={(event) => setOsFilter(event.target.value)} aria-label={t('nodes.filter.os')}>
+                <option value="ALL">{t('nodes.filter.os.all')}</option>
+                {operatingSystems.map((os) => <option key={os} value={os}>{os}</option>)}
+              </select>
+            </label>
+          ) : null}
+          <span className="toolbar-count">{t('nodes.count.summary', { filtered: visible.length, total: nodes.length })}</span>
+        </section>
+        {isStale(observedAt, 5000) ? <NoticeBar state="stale" title={t('ui.stale.title')} detail={t('ui.stale.detail', { at: observedAt ?? '' })} /> : null}
         <section className="panel table-panel">
           <Table className={cn('nodes-table', stackTable)}>
             <TableHeader className={stackHead}>
@@ -123,27 +189,48 @@ export function NodesPage() {
                 <TableHead>{t('table.status')}</TableHead>
                 <TableHead>{t('table.identity')}</TableHead>
                 <TableHead>{t('table.instances')}</TableHead>
+                <TableHead>{t('table.cpu')}</TableHead>
                 <TableHead>{t('table.memory')}</TableHead>
+                <TableHead>{t('table.capacity')}</TableHead>
+                <TableHead>{t('table.sampledAt')}</TableHead>
                 <TableHead>{t('table.lastHeartbeat')}</TableHead>
                 <TableHead aria-label={t('table.open')} />
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
-              {nodes.map((node) => (
-                <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} onClick={() => navigate(`/nodes/${node.id}`)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') navigate(`/nodes/${node.id}`); }}>
-                  <StackCell label={t('table.node')}><div className="entity-cell"><span className="entity-icon"><Icon name="server" size={17} /></span><div><strong>{node.name}</strong><span className="mono">{node.id.slice(0, 13)}…</span></div></div></StackCell>
-                  <StackCell label={t('table.status')}><StatusPill status={node.status} />{node.stale && <div className="mt-[3px] text-sm text-warning">{t('table.lastObserved')} <TimeAgo value={node.lastSeenAt} /></div>}</StackCell>
-                  <StackCell label={t('table.identity')}><span className="mono text-sm">{node.os}/{node.arch}</span><div className="text-sm text-muted-foreground">{t('nodes.table.generation', { generation: node.generation })}</div></StackCell>
-                  <StackCell label={t('table.instances')}><strong>{node.instancesReady}/{node.instancesTotal}</strong><span className="text-sm text-muted-foreground"> READY</span></StackCell>
-                  <StackCell label={t('table.memory')}>{node.resourceSnapshot?.memoryTotalBytes ? <><strong>{formatBytes(node.resourceSnapshot.memoryUsedBytes)}</strong><span className="text-sm text-muted-foreground"> / {formatBytes(node.resourceSnapshot.memoryTotalBytes)}</span></> : <span className="text-muted-foreground">{t('common.noData')}</span>}</StackCell>
-                  <StackCell label={t('table.lastHeartbeat')}><TimeAgo value={node.lastSeenAt} /></StackCell>
-                  <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
-                </TableRow>
-              ))}
+              {visible.map((node) => {
+                const snapshot = node.resourceSnapshot;
+                const cpu = percentOf(snapshot?.cpuUtilization);
+                const memory = ratio(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes);
+                const open = () => navigate(`/admin/nodes/${node.id}`);
+                return (
+                  <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-node-state={nodeState(node)} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
+                    <StackCell label={t('table.node')}><div className="entity-cell"><span className="entity-icon"><Icon name="server" size={17} /></span><div><strong>{node.name}</strong><span className="mono">{node.id.slice(0, 13)}…</span></div></div></StackCell>
+                    <StackCell label={t('table.status')}>
+                      <div className="ow-cell-stack">
+                        <StatusIndicator state={nodeState(node)} />
+                        <span className="text-sm text-muted-foreground">{t('table.lastObserved')} <TimeAgo value={node.lastSeenAt} /></span>
+                      </div>
+                    </StackCell>
+                    <StackCell label={t('table.identity')}><span className="mono text-sm">{node.os}/{node.arch}</span><div className="text-sm text-muted-foreground">{t('nodes.table.generation', { generation: node.generation })}</div></StackCell>
+                    <StackCell label={t('table.instances')}><strong>{node.instancesReady}/{node.instancesTotal}</strong><span className="text-sm text-muted-foreground"> READY</span></StackCell>
+                    <StackCell label={t('table.cpu')} data-resource="cpu">{cpu === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(cpu * 100)}%</span>}</StackCell>
+                    <StackCell label={t('table.memory')} data-resource="memory">{memory === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(memory * 100)}%</span>}</StackCell>
+                    <StackCell label={t('table.capacity')} data-resource="capacity">
+                      {snapshot?.memoryTotalBytes ? (
+                        <span className="text-sm">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
+                      ) : <NoData detail={t('nodes.resource.missingSnapshot')} />}
+                    </StackCell>
+                    <StackCell label={t('table.sampledAt')} data-resource="sampled-at">{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
+                    <StackCell label={t('table.lastHeartbeat')}><TimeAgo value={node.lastSeenAt} /></StackCell>
+                    <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </section>
-      )}
+      </AsyncBoundary>
       <div className="info-grid">
         <div className="callout"><Icon name="access" size={16} /><p>{t('nodes.credentialsNote')}</p></div>
         <div className="callout"><Icon name="alert" size={16} /><p>{t('nodes.staleNote.before')} <strong>UNREACHABLE</strong>{t('nodes.staleNote.after')}</p></div>
@@ -325,7 +412,7 @@ export function NodeDetailPage() {
                   <StackCell label={t('table.state')}><StatusPill status={instance.state} /></StackCell>
                   <StackCell label={t('table.container')}><span className="mono text-sm">{instance.containerId ? instance.containerId.slice(0, 12) : '—'}</span></StackCell>
                   <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
-                  <StackCell label={t('table.logs')}><Link className="text-link" to={`/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
+                  <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
                 </TableRow>
               ))}
             </TableBody>

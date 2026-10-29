@@ -1,0 +1,5 @@
+[
+  {"id": "host-1", "name": "host-1.staging.example"},
+  {"id": "host-2", "name": "host-2.staging.example"},
+  {"id": "host-3", "name": "host-3.staging.example"}
+]

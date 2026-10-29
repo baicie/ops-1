@@ -1,3 +1,4 @@
+import { authGeneration, unauthorizedDetail } from './auth-generation';
 import { resolveInitialLocale, translate } from './i18n';
 
 export class ApiError extends Error {
@@ -31,6 +32,10 @@ export function newIdempotencyKey(): string {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // The generation this request belongs to, read before the first `await`: a login or a
+  // logout during the flight makes the result stale, and a stale 401 must not sign out the
+  // session established after it went out (see auth-generation.ts).
+  const ticket = authGeneration.ticket();
   const headers = new Headers(init.headers);
   if (!headers.has('content-type') && init.body && !(init.body instanceof Blob)) {
     headers.set('content-type', 'application/json');
@@ -45,7 +50,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try { body = text ? JSON.parse(text) : null; } catch { body = { message: text }; }
   if (!response.ok) {
     if (response.status === 401) {
-      window.dispatchEvent(new CustomEvent('opsweave:unauthorized'));
+      window.dispatchEvent(new CustomEvent('opsweave:unauthorized', { detail: unauthorizedDetail(ticket) }));
     }
     throw new ApiError(
       response.status,

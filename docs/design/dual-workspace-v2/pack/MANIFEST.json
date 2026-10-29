@@ -1,0 +1,181 @@
+{
+  "package": "OpsWeave-Dual-Workspace-Design-v2",
+  "version": "v2.0-draft",
+  "date": "2026-10-28",
+  "baseline_pr11_head": "8b6a32ae47206f47e55c090d19c0fedd2e9ed33c",
+  "documents": 12,
+  "executable_stage_prompts": 12,
+  "master_prompts": 1,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 5199,
+      "sha256": "36a25b8f444c648a0e1e97a78e0e547286fdebaf3b5e1822a31217ead653983e"
+    },
+    {
+      "path": "VERSION.md",
+      "bytes": 713,
+      "sha256": "ad2b506038c537c2a90c968be2e8b42d53ec9951d8852f840aa7f8ad43b8e478"
+    },
+    {
+      "path": "checklists/gate-checklist.md",
+      "bytes": 2100,
+      "sha256": "f998c7581cf03a2a359518229de15eba8b867e85c0d1183a032c265df1f1905d"
+    },
+    {
+      "path": "checklists/role-route-api-matrix.csv",
+      "bytes": 1117,
+      "sha256": "476031f97e09e8db51db9d305c97908c2e77ad6ff6241ff3154b15710b1f1809"
+    },
+    {
+      "path": "checklists/visual-review-rubric.md",
+      "bytes": 1287,
+      "sha256": "18c525d60f86bc5d7d9b4401d7c48e6efdbef8a03a8d21a83b45f1051102770f"
+    },
+    {
+      "path": "contracts/navigation-and-auth-types.example.ts",
+      "bytes": 1191,
+      "sha256": "95315070f892503913731319777f4bdbb73d6223ab06f4f55f8f634b308be151"
+    },
+    {
+      "path": "contracts/surface-contributions.v2.example.json",
+      "bytes": 1164,
+      "sha256": "5900f8f63720fbd5cf48da4629903b52473e55dbc0569085d84193516d63a5ef"
+    },
+    {
+      "path": "docs/01-baseline-and-original-design.md",
+      "bytes": 4651,
+      "sha256": "b66632c4b42c511212dd3ae0b6c2b739d803443e694f9cc414eeb630b276f487"
+    },
+    {
+      "path": "docs/02-product-model-and-boundaries.md",
+      "bytes": 4125,
+      "sha256": "5a1166a48f6959417e5a6703223ae26b715ff2ea7ea162d2f314730ba5685941"
+    },
+    {
+      "path": "docs/03-information-architecture.md",
+      "bytes": 4493,
+      "sha256": "6f334328492c7108d827d4f38228ae9e63701f30d537d76d88cbc470dade8128"
+    },
+    {
+      "path": "docs/04-design-system-and-shadcn-admin.md",
+      "bytes": 8569,
+      "sha256": "ba18773512720575b536004519f43ec51263d40213c9e3444f590c91e602149f"
+    },
+    {
+      "path": "docs/05-frontend-architecture.md",
+      "bytes": 4830,
+      "sha256": "f2bae948e4d92f269b6c22ba60091caa93e8c653f6b2d9cf56ca67361a1b4351"
+    },
+    {
+      "path": "docs/06-auth-and-permissions.md",
+      "bytes": 4370,
+      "sha256": "e64a0c9cf596c5a8362fd0388aeda1fcc6db58a22fb021ab16531d956c482624"
+    },
+    {
+      "path": "docs/07-plugin-contribution-contract.md",
+      "bytes": 3921,
+      "sha256": "a4cb9302c0512ab07182441d78a4cc223150076f606d67dd255b49b3d878db6b"
+    },
+    {
+      "path": "docs/08-incremental-migration.md",
+      "bytes": 4345,
+      "sha256": "d6f592f3fab04afc35f340638f418aa059c4e8f3a3fe4720a10d6c5514ec7e11"
+    },
+    {
+      "path": "docs/09-interaction-state-matrix.md",
+      "bytes": 3855,
+      "sha256": "e170d4e33e3f883a8174ceb287b7e0e67d89d583dfebc984ab1e836fd3231891"
+    },
+    {
+      "path": "docs/10-release-and-preview-gates.md",
+      "bytes": 3741,
+      "sha256": "570d92227ac675f4ca88b0db81f37d05b9a4b2dca582186f3f153ac9dad06eaf"
+    },
+    {
+      "path": "docs/11-architecture-decisions-and-risks.md",
+      "bytes": 3868,
+      "sha256": "fe20babb46e10d4f58ca2541b8e8bfe3a1c174c948d729e10ea5d523a9be4a6f"
+    },
+    {
+      "path": "docs/12-business-first-vertical-slice.md",
+      "bytes": 2583,
+      "sha256": "5ea5e0c3905ce39d8250b18e0d08214fd453cd5fc840e45efeb80d4d8d35016f"
+    },
+    {
+      "path": "prompts/00-MASTER-MISSION.md",
+      "bytes": 6524,
+      "sha256": "88af4fb90ab1957e85e77a26532f5fe1749469a38dc1b7b319a2a24c03e52ba2"
+    },
+    {
+      "path": "prompts/01-BASELINE-AUDIT.md",
+      "bytes": 2292,
+      "sha256": "9e1be299648b7e368dab7e15a2ecca138b30a9d5fed598d42b6d14bc4c6088b7"
+    },
+    {
+      "path": "prompts/02-DESIGN-SYSTEM.md",
+      "bytes": 2005,
+      "sha256": "fe6fca68e358254a37084464e21229e97f8273611af7c3a04cef7d5bb36fbca6"
+    },
+    {
+      "path": "prompts/03-ADMIN-SHELL.md",
+      "bytes": 1809,
+      "sha256": "3b33bb517afa219379235d3ff51a0c2786fd92f145d5d57f072b438fb8bab1b3"
+    },
+    {
+      "path": "prompts/04-ADMIN-EXEMPLARS.md",
+      "bytes": 1885,
+      "sha256": "6de27c01f8245c88ed4ec96d99d5fc39881591ec6cf9e1af618b6fce16ea1fc1"
+    },
+    {
+      "path": "prompts/05-DUAL-ROUTER.md",
+      "bytes": 2734,
+      "sha256": "cc3e8f1e53ae6db49a4036190f866c5295c362ab1f5030a34e5875ee3657ceaa"
+    },
+    {
+      "path": "prompts/06-SURFACE-AUTH.md",
+      "bytes": 2428,
+      "sha256": "a243c96e687c33feb2e48b6752372ec68fdf542f79b82648e4c87988735266a5"
+    },
+    {
+      "path": "prompts/07-PLUGIN-SURFACES.md",
+      "bytes": 2419,
+      "sha256": "e7d32cf35dcd18d46c273f145fe0d5049c134e66cb806ca2d668f498521da878"
+    },
+    {
+      "path": "prompts/08-BUSINESS-SHELL.md",
+      "bytes": 1962,
+      "sha256": "af25b61e0cacd4eef8ca15195139441b04b564f76b191192d9c271e51e7f9acc"
+    },
+    {
+      "path": "prompts/09-ADMIN-POLISH.md",
+      "bytes": 1752,
+      "sha256": "78a249d32ab59a286a3ae71ed5616eaff1e86a96c98948d93c2f6d658623fc71"
+    },
+    {
+      "path": "prompts/10-UI-CI-STAGING.md",
+      "bytes": 2150,
+      "sha256": "ef510ac4f7be44749f3f3a3e3c2eee847be8524b91ba1fee0c0c857701a8c48c"
+    },
+    {
+      "path": "prompts/11-INDEPENDENT-REVIEW.md",
+      "bytes": 1998,
+      "sha256": "64959fe81baf6726a28cbc2523202534d494bdc2857254ac0d88c989804991f9"
+    },
+    {
+      "path": "prompts/12-PRODUCT-HANDOFF.md",
+      "bytes": 2633,
+      "sha256": "c1ab33b0855a7032326d40696e34f1a3bfa4db4a417b6c5bf80b7fe85506a3f1"
+    },
+    {
+      "path": "reference/OpsWeave-0.1.0-Collection-Design-Full.md",
+      "bytes": 49541,
+      "sha256": "8c846e8c0004f612b51fe011a7ab072f3aabfc2bf0c8d87907722fda502594d1"
+    },
+    {
+      "path": "reference/OpsWeave-0.1.0-Design-Full.md",
+      "bytes": 76643,
+      "sha256": "e63c29b1225be7e004ba51927da3c90ed07c42cde462254a49b8af98eb0e93ef"
+    }
+  ]
+}

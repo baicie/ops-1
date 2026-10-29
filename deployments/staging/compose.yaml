@@ -153,6 +153,22 @@ services:
       OPSWEAVE_NODE_STATE_DIR: /var/lib/opsweave-staging/node
       OPSWEAVE_NODE_DATA_BIND: 127.0.0.1:9101
       OPSWEAVE_NODE_DATA_ENDPOINT: http://127.0.0.1:9101
+      # Node-managed pipeline worker. Without these two keys the node logs
+      # "node-managed pipeline worker disabled" and every submitted job stays
+      # QUEUED with attempts=0, currentLeaseId=null, forever
+      # (apps/node/src/worker_supervisor.rs:38-45).
+      # The binary path is a fact of the image, not an operator choice:
+      # deployments/staging/Dockerfile:74 installs it there.
+      OPSWEAVE_NODE_WORKER_ENABLED: "1"
+      OPSWEAVE_PIPELINE_WORKER_BIN: /usr/local/bin/opsweave-pipeline-worker
+      # The worker refuses non-public source addresses unless they are listed
+      # here (apps/pipeline-worker/src/main.rs:1165-1173). Only the bridge
+      # gateway is allowed by default because that is where a staging source
+      # lives; override in staging.env to add another source host.
+      OPSWEAVE_WORKER_SOURCE_ALLOWLIST: ${OPSWEAVE_WORKER_SOURCE_ALLOWLIST:-172.17.0.1}
+      # The worker also requires this marker file in the state directory, which
+      # is NOT an env var and is never created by a deploy. See README §6.
+      #   /var/lib/opsweave-staging/node/worker-enabled
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/opsweave-staging/node:/var/lib/opsweave-staging/node

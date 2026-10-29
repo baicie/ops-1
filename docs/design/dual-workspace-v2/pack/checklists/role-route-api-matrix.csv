@@ -1,0 +1,10 @@
+role,surface,route,expected_route,api_example,expected_api,notes
+anonymous,admin,/admin/nodes,login,/api/v1/nodes,401,Untrusted user never receives sensitive data
+viewer,admin,/admin/nodes,forbidden,/api/v1/plugins/packages,403,Admin route guard plus existing operator/admin API authorization
+operator,admin,/admin/nodes,requires_explicit_policy,/api/v1/nodes,existing_behavior,Audit what operator must retain before changing access
+admin,admin,/admin/nodes,allowed,/api/v1/nodes,existing_auth,Exact required permission still applies
+viewer,workspace,/app/home,allowed_if_authorized,/api/v1/auth/me,200,Do not assume all business data available
+admin,workspace,/app/incidents,authorized_scope_only,/api/v1/incident,conditional,Platform admin not necessarily all business scopes
+viewer,admin,/admin/ext/example,forbidden,/api/v1/capabilities/example/1/manage,403,No plugin route/API bypass
+viewer,workspace,/app/ext/example,conditional,/api/v1/capabilities/example/1/list,scope_filtered,Requires active plugin and real capability
+expired,admin,/admin/overview,login,/api/v1/auth/me,401,Revoke session and clear caches

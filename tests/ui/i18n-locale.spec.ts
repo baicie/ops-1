@@ -29,7 +29,8 @@ async function shoot(page: Page, name: string, theme: 'light' | 'dark') {
 }
 
 function navItem(page: Page) {
-  return page.locator('a[href="/nodes"]:visible').first();
+  // G04 moved the platform console under /admin; the href is the stable, language-free handle.
+  return page.locator('a[href="/admin/nodes"]:visible').first();
 }
 
 test.describe.configure({ mode: 'serial' });
