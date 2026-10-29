@@ -66,11 +66,11 @@ async function switchSurface(page: Page, target: 'admin' | 'workspace') {
   await expect(page.locator('.user-menu')).toHaveCount(0);
 }
 
-test.describe.configure({ mode: 'serial' });
-
-// Handlers here outlive the test: one can still be awaiting route.fetch when the context tears
-// down, and in a serial file Playwright blames the next test for it - which turned a passing run
-// on staging into 1 failed plus 2 did not run, with no product assertion involved.
+// Deliberately not a serial file: every test below stubs its own grant and signs in on a fresh
+// context, so under serial one real failure turns its siblings into "did not run" and the run
+// stops saying anything about them. Ordering is already the config's (workers: 1,
+// fullyParallel: false); handlers here outlive the test - one can still be awaiting route.fetch
+// when the context tears down - so leftovers are ignored instead of blamed on the next test.
 test.afterEach(async ({ page }) => {
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
