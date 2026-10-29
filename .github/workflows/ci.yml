@@ -6,11 +6,54 @@ on:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    # apps/kernel's DB-backed tests (src/jobs.rs, mod terminalization_tests) return early when
+    # OPSWEAVE_TEST_DATABASE_URL is unset, so they used to report "ok" in this job having
+    # asserted nothing. The service plus the two guard steps below are what make green mean it.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      OPSWEAVE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo fmt --all -- --check
+      # The fixture treats "no URL", "cannot connect" and "migration failed" identically: it
+      # returns None and the test returns early. So prove the URL is live before the run, and
+      # prove the fixture really reached it after the run.
+      - name: DB-backed kernel tests are armed
+        run: |
+          set -eu
+          : "${OPSWEAVE_TEST_DATABASE_URL:?the kernel DB tests would silently skip without it}"
+          psql "$OPSWEAVE_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc 'select 1' > /dev/null
+          echo "armed against $OPSWEAVE_TEST_DATABASE_URL"
+          echo "DB-gated tests: jobs::terminalization_tests (10 of its 11; the cursor test is pure)."
+          echo "No workspace test needs node/worker/docker, so nothing else is expected to skip."
       - run: cargo test --locked --workspace
+      - name: DB-backed kernel tests really connected
+        run: |
+          set -eu
+          # Only the fixture migrates, so a ledger row proves test_pool() reached the database and
+          # ran sqlx::migrate! -- i.e. the 10 DB tests did not return early. Do not add a migrate
+          # step ahead of the tests in this job or this check goes vacuous.
+          applied=$(psql "$OPSWEAVE_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc 'select count(*) from _sqlx_migrations')
+          echo "migrations applied by the test fixture: $applied"
+          test "$applied" -gt 0
+          present=$(psql "$OPSWEAVE_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "select to_regclass('kernel.pipeline_jobs') is not null")
+          echo "kernel.pipeline_jobs exists: $present"
+          test "$present" = "t"
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
   web:
     runs-on: ubuntu-latest
