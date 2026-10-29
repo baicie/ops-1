@@ -134,6 +134,11 @@ jobs:
             echo "  gh workflow run staging-preview.yml -f verify_only=true -f sha=<that commit>"
             exit 1
           fi
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::sha='$sha' is not a 40-character lowercase hex commit SHA, and the served-commit assertion compares it byte-for-byte (tests/ui/staging-smoke.spec.ts:53)."
+            echo "Pass the full commitSha from the last run's PR comment ('Served commit'), or from deploy-staging.sh --status --json (served_commit.sha): gh workflow run staging-preview.yml -f verify_only=true -f sha=<40-hex>"
+            exit 1
+          fi
           echo "verify_only will certify $sha as the commit the host serves"
 
       - name: Choose the acceptance tier
