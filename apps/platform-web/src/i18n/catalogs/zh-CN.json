@@ -1,5 +1,6 @@
 {
   "access.action.addPublisher": "添加发布者",
+  "access.action.menu": "{name} 的操作",
   "access.confirmDisable.confirm": "禁用用户",
   "access.confirmDisable.description": "禁用会立即吊销该账号的会话并阻止其重新登录；既有审计历史保留。",
   "access.confirmDisable.title": "禁用 {name}？",

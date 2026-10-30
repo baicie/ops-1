@@ -2080,7 +2080,8 @@ html[lang='zh-CN'] .ow-cell-meta { line-height: 1.6; }
     align-items: stretch;
     height: auto;
     min-height: 0;
-    padding: 8px 2px;
+    /* 6px a side: §2.5's card counts 12px of padding in total (see stackRow in table-kit). */
+    padding: 6px 2px;
     border-bottom: 1px solid var(--ow-border);
   }
   .plugins-table tbody tr:last-child,
@@ -2179,13 +2180,18 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 
 /* A row checkbox is a control, not a decoration: 16px of target inside a 28px cell so a
    finger on a phone still hits it, and the stacked card keeps it on its own line. */
+/* A 15px box, not a 40px field. The global `input { min-height: var(--ow-control-md) }` made this
+   checkbox the tallest thing in its row: /admin/plugins measured 54.8px against §4.2's 42. The
+   row is the hit area here, and block-level removes the line box the inline-block sat in. */
 .row-check {
   width: 15px;
   height: 15px;
+  min-height: 15px;
   margin: 0;
   accent-color: var(--ow-accent);
   cursor: pointer;
 }
+.ow-table tbody td > .row-check { display: block; }
 .row-check:disabled { cursor: not-allowed; opacity: .45; }
 
 /* A status that opens the entity it describes must not look like prose. It keeps the pill's
@@ -2291,7 +2297,27 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 @media (max-width: 768px) {
   .ow-table tbody tr { height: auto; }
   .ow-table tbody td { line-height: 1.4; }
+
+  /* §2.5 facts 4..n are not rendered at 390. A cell class, not the `hidden` utility: the legacy
+     .nodes-table/.plugins-table rules above set display on tbody td at this same breakpoint with
+     a higher specificity, so a utility on the cell never hid it (6 facts on a card asking 3). */
+  .ow-table tbody tr > td.ow-card-extra { display: none; }
+
+  /* One card line is one label (11/1.2) and one value (13/1.2) - §2.5's "label 11 / value 13".
+     The cell inherited the 14px body tier from the table, so every fact line was 19.6px and a
+     measurement of "≤ 140px per card" was out of reach while the numbers were right. */
+  .ow-table tbody td[data-label] { font-size: var(--ow-type-meta); line-height: 1.2; }
+  .ow-table tbody td[data-label] > span:first-child { font-size: var(--ow-type-label); line-height: 1.2; }
+
+  /* A cell that carries one fact does not reserve the second row the desktop table aligns on:
+     the two fixed rows are a row-alignment device (§2.3), and a card aligns nothing. */
+  .ow-table tbody .ow-cell { grid-template-rows: none; }
 }
+
+/* The qualifier line is 15.4px, so a 16px icon box inside it set the identity cell's second line
+   to 16.9 and the row to 40.5. The icon keeps its role at the meta tier. */
+.ow-table tbody td .ow-ident-meta .entity-icon { width: 13px; height: 13px; }
+.ow-table tbody td .ow-ident-meta .entity-icon svg { width: 13px; height: 13px; }
 .ow-table thead th { height: 32px; padding-top: 0; padding-bottom: 0; font-size: var(--ow-type-label); line-height: 1.4; }
 .ow-table tbody td .status,
 .ow-table tbody td .status-indicator { font-size: var(--ow-type-label); line-height: 1.4; }
@@ -2340,3 +2366,26 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 .ow-ident-meta .entity-icon { width: 16px; height: 16px; border-radius: var(--ow-radius-control); }
 .ow-ident-meta .entity-icon svg { width: 11px; height: 11px; }
 .ow-table tbody td .tag { padding: 0 4px; line-height: 1.2; }
+
+/* ── §2.3's qualifier line, pinned ───────────────────────────────────────────────────────
+ * The two-line cell is 15.6 (value) + 15.4 (label), and 15.4 is the whole point: the second
+ * line is a smaller tier doing a smaller job. It was being sized by its contents instead - a
+ * 14px mono value, a 13px icon box, a status tag - which raised the line box to 19.4 and the
+ * row to 43 (nodes) and 44.1 (plugins) against §4.2's 42. The line is now exactly the label
+ * tier and its contents centre inside it.
+ *
+ * This block comes last on purpose: .ow-table tbody .ow-cell's two fixed rows are declared
+ * further up with the same specificity. */
+.ow-table tbody td .ow-ident-meta {
+  display: flex;
+  align-items: center;
+  height: 15.4px;
+}
+.ow-table tbody td .ow-ident-meta .entity-cell { display: inline-flex; align-items: center; }
+@media (max-width: 768px) {
+  /* NOT the flattening it looks like: `none` swaps two explicit tracks for two implicit ones and
+     each child still sizes its own row - /admin/plugins measures 39px per fact cell either way,
+     which is the 9.6px by which its card (149.6) misses §2.5's 140. Writing `display: flex` here
+     is the flattening, and it is a layout change that needs its own measurement run. */
+  .ow-table tbody .ow-cell { grid-template-rows: none; }
+}

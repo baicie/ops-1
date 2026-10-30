@@ -9,7 +9,7 @@ import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { CopyButton, EmptyState, ErrorState, KV, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { ConfirmAction } from '../components/app/confirm-action';
@@ -19,7 +19,7 @@ import { formatDate, formatBytes, shortDigest } from '../format';
 import { useI18n, useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
-import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardActionCell, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { InstallationStatus, useStatusText } from '../components/app/status';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
@@ -487,6 +487,16 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
   const t = useT();
   const { locale } = useI18n();
   if (!instances.length) return <EmptyState icon="nodes" title={t('pluginDetail.instances.empty.title')} description={t('pluginDetail.instances.empty.description')} />;
+  /**
+   * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio. The log
+   * link is the card's verb, not a fourth fact - it rides the identity line at 390, so the card
+   * stays a way into the logs instead of a dead end.
+   */
+  const cardFacts = rankCardFacts({
+    slot: instances.map((instance) => '#' + instance.slot),
+    state: instances.map((instance) => instance.state),
+    container: instances.map((instance) => (instance.containerId ? instance.containerId.slice(0, 12) : '')),
+  });
   return (
     <Table className={stackTable}>
       <TableHeader className={stackHead}>
@@ -504,10 +514,10 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
             <span>{instance.nodeStatus}</span>
             <span>{t('table.restarts')} {instance.restartCount}</span>
           </IdentityCell>
-          <StackCell label={t('table.slot')}><span className="mono">#{instance.slot}</span></StackCell>
-          <StackCell label={t('table.state')}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
-          <StackCell label={t('table.container')}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-          <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
+          <StackCell label={t('table.slot')} className={cardCellClass(cardFacts.includes('slot'))}><span className="mono">#{instance.slot}</span></StackCell>
+          <StackCell label={t('table.state')} className={cardCellClass(cardFacts.includes('state'))}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
+          <StackCell label={t('table.container')} className={cardCellClass(cardFacts.includes('container'))}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+          <TableCell className={cardActionCell}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></TableCell>
         </TableRow>
       ))}</TableBody>
     </Table>

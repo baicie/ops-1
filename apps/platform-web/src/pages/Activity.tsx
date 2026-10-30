@@ -185,7 +185,11 @@ export function ActivityPage() {
                         </IdentityCell>
                         <StackCell label={t('table.result')} className={cardCellClass(cardFacts.includes('result'))}><StatusPill status={event.result} /></StackCell>
                         <StackCell label={t('table.actor')} className={cardCellClass(cardFacts.includes('actor'))}><span title={event.actorId}>{event.actorType} · {event.actorId.slice(0, 4)}</span></StackCell>
-                        <StackCell label={t('table.occurred')} className={cardCellClass(cardFacts.includes('occurred'))}><TimeAgo value={event.occurredAt} /><span className="ow-ident-meta">{formatDate(event.occurredAt)}</span></StackCell>
+                        {/* §2.3: one timestamp, not two. The relative age and the absolute date are
+                            the same fact; the second line made this cell 43.2px against §4.2's 42 and
+                            the card 141.6 against §2.5's 140. The absolute moment stays reachable on
+                            the cell (title) and in the row's own detail panel below. */}
+                        <StackCell label={t('table.occurred')} className={cardCellClass(cardFacts.includes('occurred'))} title={formatDate(event.occurredAt)}><TimeAgo value={event.occurredAt} /></StackCell>
                         {/* §2.5: the disclosure rides the identity line at 390. */}
                         <TableCell className="row-action max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-0 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0"><Icon name={open ? 'down' : 'chevron'} size={15} /></TableCell>
                       </TableRow>
@@ -195,6 +199,7 @@ export function ActivityPage() {
                             <div className="event-detail">
                               <div className="event-detail-meta">
                                 <span>{t('activity.detail.subject')} <code>{event.subjectId}</code></span>
+                                <span>{t('table.occurred')} <code>{formatDate(event.occurredAt)}</code></span>
                                 <span>{t('table.actor')} <code>{event.actorId}</code></span>
                                 <span>{t('activity.detail.eventId')} <code>{event.id}</code></span>
                                 {event.requestId && <span>{t('activity.detail.request')} <code>{event.requestId}</code></span>}

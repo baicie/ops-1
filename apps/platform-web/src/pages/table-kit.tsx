@@ -35,10 +35,13 @@ export const RECORD_BREAKPOINT = 768;
 export const stackTable = 'max-[768px]:block';
 export const stackHead = 'max-[768px]:hidden';
 export const stackBody = 'max-[768px]:block';
-export const stackRow = 'max-[768px]:flex max-[768px]:flex-col max-[768px]:px-1 max-[768px]:py-2.5';
+// py-1.5, not py-2.5: §2.5's card is 12 padding + 20 identity + 8 gap + 3 x 22 facts + 12
+// padding + 12 slack - 12 of padding in total, so 6 a side. 10px a side spent the slack the
+// three facts needed (measured 142.6 on /admin/jobs). relative: the menu rides the identity line.
+export const stackRow = 'max-[768px]:relative max-[768px]:flex max-[768px]:flex-col max-[768px]:px-1 max-[768px]:py-1.5';
 const stackCell =
   'max-[768px]:flex max-[768px]:items-start max-[768px]:justify-between max-[768px]:gap-3.5 ' +
-  'max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:py-[5px] max-[768px]:text-right';
+  'max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:py-1 max-[768px]:text-right';
 // The legacy .data-table/.responsive-table label was a ::before with flex: none, so it never
 // shrank. Without shrink-0 a wide value on the right squeezes the label and wraps it ("任 / 务").
 const stackLabel = 'hidden shrink-0 whitespace-nowrap text-muted-foreground max-[768px]:inline';
@@ -212,14 +215,26 @@ export function IdentityCell({
   );
 }
 
-/** §2.1: the full id is one click away - a 36-character UUID cannot be transcribed by eye. */
-export function copyIdAction(id: string, label: string): RowAction {
+/**
+ * §2.1: the full id is one click away - a 36-character UUID cannot be transcribed by eye - and
+ * it is the FIRST item of the row menu. One id ('copy-id') for every table, so "does this row
+ * offer the copy" is one selector instead of one per page. The hooks let a page keep its own
+ * confirmation without re-implementing the write; a refused write is reported, never left as an
+ * unhandled rejection.
+ */
+export function copyIdAction(
+  id: string,
+  label: string,
+  hooks: { onCopied?: () => void; onFailed?: () => void } = {},
+): RowAction {
   return {
     id: 'copy-id',
     label,
     icon: 'copy',
     onSelect: () => {
-      void navigator.clipboard?.writeText(id);
+      const write = navigator.clipboard?.writeText(id);
+      if (!write) { hooks.onFailed?.(); return; }
+      write.then(() => hooks.onCopied?.(), () => hooks.onFailed?.());
     },
   };
 }
@@ -288,7 +303,20 @@ export function rankCardFacts(
     .map((entry) => entry.key);
 }
 
-/** The desktop-only cell of a demoted column: present in the table, dropped on the card. */
+/**
+ * The desktop-only cell of a demoted column: present in the table, dropped on the card.
+ *
+ * A class of its own, not the `hidden` utility: .nodes-table/.plugins-table set
+ * `display: flex` on tbody td at the same breakpoint (specificity 0,1,2), which outranks every
+ * Tailwind utility (0,1,0) - that is why those two tables rendered 6 facts on a card that asks
+ * for 3 while /admin/jobs, whose table carries no legacy class, rendered 3.
+ */
 export function cardCellClass(isCardFact: boolean): string {
-  return isCardFact ? 'max-[768px]:block' : 'max-[768px]:hidden';
+  return isCardFact ? 'max-[768px]:block' : 'ow-card-extra';
 }
+
+/**
+ * §2.5: the row menu rides the identity line at 390 instead of taking a line of its own - that
+ * alone was 32 of today's 239px. The cell must not carry a label: a labelled cell is a fact.
+ */
+export const cardActionCell = 'max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-2 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0';

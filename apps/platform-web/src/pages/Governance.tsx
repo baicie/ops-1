@@ -12,7 +12,7 @@ import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
 import { useI18n, useT } from '../i18n';
 import { formatDate } from '../format';
-import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Dataset = { datasetId: string; name: string; schemaRevision: number; updatedAt: string };
 type QualityRun = { runId: string; datasetId: string; status: string; recordsExamined: number; recordsFailed: number; completedAt: string | null; createdAt: string };
@@ -61,6 +61,16 @@ export function GovernancePage() {
   const unreachable = nodeList.filter((node) => node.status === 'UNREACHABLE' || node.stale).length;
   const recentFailures = summary?.recentFailures || [];
   const quality = summary?.latestQuality;
+  /**
+   * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio over the
+   * rows on screen. The other two tables on this page already sit at 2 and 3 facts.
+   */
+  const cardFacts = rankCardFacts({
+    schema: datasets.map((dataset) => `r${dataset.schemaRevision}`),
+    quality: datasets.map((dataset) => (dataset.latest ? dataset.latest.status : 'UNKNOWN')),
+    examined: datasets.map((dataset) => (dataset.latest ? String(dataset.latest.recordsExamined) : '')),
+    failed: datasets.map((dataset) => (dataset.latest ? String(dataset.latest.recordsFailed) : '')),
+  });
 
   return <div className="page-stack">
     <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="secondary" onClick={() => { void load(); void reloadNodes(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
@@ -101,11 +111,11 @@ export function GovernancePage() {
                     <span>r{dataset.schemaRevision}</span>
                     <span>{dataset.latest ? dataset.latest.runId.slice(0, 8) : t('common.noRuns')}</span>
                   </IdentityCell>
-                  <StackCell label={t('table.schema')}>r{dataset.schemaRevision}</StackCell>
-                  <StackCell label={t('table.quality')}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <StatusPill status="UNKNOWN" />}</StackCell>
+                  <StackCell label={t('table.schema')} className={cardCellClass(cardFacts.includes('schema'))}>r{dataset.schemaRevision}</StackCell>
+                  <StackCell label={t('table.quality')} className={cardCellClass(cardFacts.includes('quality'))}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <StatusPill status="UNKNOWN" />}</StackCell>
                   {/* A run that examined no records reported nothing: NO_DATA, not a 0 count. */}
-                  <StackCell label={t('table.examined')}>{dataset.latest ? dataset.latest.recordsExamined : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-                  <StackCell label={t('table.failed')}>{dataset.latest ? dataset.latest.recordsFailed : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                  <StackCell label={t('table.examined')} className={cardCellClass(cardFacts.includes('examined'))}>{dataset.latest ? dataset.latest.recordsExamined : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                  <StackCell label={t('table.failed')} className={cardCellClass(cardFacts.includes('failed'))}>{dataset.latest ? dataset.latest.recordsFailed : <NoData detail={t('ui.noData.detail')} />}</StackCell>
                 </TableRow>
               ))}
             </TableBody>

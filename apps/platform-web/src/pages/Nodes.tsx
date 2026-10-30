@@ -21,7 +21,7 @@ import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../compon
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 import { ConfirmAction } from '../components/app/confirm-action';
-import { IdentityCell, RowActions, StackCell, formatIdentity, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 /**
  * A revoked node is proven by the node route, not by the DELETE's 200. `DELETE /nodes/{id}`
@@ -122,6 +122,18 @@ export function NodesPage() {
     () => nodes.filter((node) => (stateFilter === 'ALL' || nodeState(node) === stateFilter) && (osFilter === 'ALL' || node.os === osFilter)),
     [nodes, stateFilter, osFilter],
   );
+  /**
+   * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio over the
+   * rows on screen. Capacity is a restatement of the memory column and `sampledAt` restates the
+   * observation age the identity line already carries, so neither is a candidate here: a card
+   * would spend a line saying what the line above it said. Both stay desktop columns.
+   */
+  const cardFacts = rankCardFacts({
+    status: visible.map((node) => nodeState(node)),
+    instances: visible.map((node) => `${node.instancesReady}/${node.instancesTotal}`),
+    cpu: visible.map((node) => { const value = percentOf(node.resourceSnapshot?.cpuUtilization); return value === null ? '' : `${Math.round(value * 100)}%`; }),
+    memory: visible.map((node) => { const value = ratio(node.resourceSnapshot?.memoryUsedBytes, node.resourceSnapshot?.memoryTotalBytes); return value === null ? '' : `${Math.round(value * 100)}%`; }),
+  });
 
   async function createToken() {
     setBusy(true);
@@ -150,9 +162,12 @@ export function NodesPage() {
   /** Every verb one node row may run, with the reason printed when one is refused. */
   function nodeActions(node: NodeView): RowAction[] {
     const actions: RowAction[] = [
+      // table-spec §2.1: the full id is always one click away and it is the FIRST item of the row
+      // menu. Hover text on the identity cell is not a copy affordance - a 36-character UUID
+      // cannot be transcribed by eye.
+      copyIdAction(node.id, t('nodes.action.copyId'), { onCopied: () => toast.push({ tone: 'ok', title: t('nodes.action.copyId'), detail: node.id }) }),
       { id: 'details', label: t('nodes.action.open'), icon: 'external', onSelect: () => navigate(`/admin/nodes/${node.id}`) },
       { id: 'instances', label: t('nodes.action.instances'), icon: 'box', onSelect: () => navigate(`/admin/nodes/${node.id}`) },
-      { id: 'copy', label: t('nodes.action.copyId'), icon: 'copy', onSelect: () => { void navigator.clipboard.writeText(node.id); toast.push({ tone: 'ok', title: t('nodes.action.copyId'), detail: node.id }); } },
     ];
     actions.push({
       id: 'revoke',
@@ -248,25 +263,28 @@ export function NodesPage() {
                       <span className="mono">{node.os}/{node.arch}</span>
                       <span>{t('nodes.table.generation', { generation: node.generation })}</span>
                     </IdentityCell>
-                    <StackCell label={t('table.status')}>
+                    {/* §2.3: a two-line cell must fit 40px, and this one did not - it printed
+                        lastSeenAt a second time (the identity cell's age IS that field) on a 24px
+                        hit area, and the row measured 50.4px against §4.2's 42. The pill is the
+                        fact; the age is already on the line above it. */}
+                    <StackCell label={t('table.status')} className={cardCellClass(cardFacts.includes('status'))}>
                       <div className="ow-cell-stack">
                         {/* The state is an entity: it opens the node it describes. */}
                         <Link className="status-entity" to={`/admin/nodes/${node.id}`} data-status-entity={node.id} title={t('nodes.status.openEntity', { name: node.name })} onClick={(event) => event.stopPropagation()}>
                           <StatusIndicator state={nodeState(node)} />
                         </Link>
-                        <span className="text-sm text-muted-foreground">{t('table.lastObserved')} <TimeAgo value={node.lastSeenAt} /></span>
                       </div>
                     </StackCell>
-                    <StackCell label={t('table.instances')}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
-                    <StackCell label={t('table.cpu')} data-resource="cpu">{cpu === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(cpu * 100)}%</span>}</StackCell>
-                    <StackCell label={t('table.memory')} data-resource="memory">{memory === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(memory * 100)}%</span>}</StackCell>
-                    <StackCell label={t('table.capacity')} data-resource="capacity" className="max-[1200px]:hidden">
+                    <StackCell label={t('table.instances')} className={cardCellClass(cardFacts.includes('instances'))}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
+                    <StackCell label={t('table.cpu')} data-resource="cpu" className={cardCellClass(cardFacts.includes('cpu'))}>{cpu === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(cpu * 100)}%</span>}</StackCell>
+                    <StackCell label={t('table.memory')} data-resource="memory" className={cardCellClass(cardFacts.includes('memory'))}>{memory === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(memory * 100)}%</span>}</StackCell>
+                    <StackCell label={t('table.capacity')} data-resource="capacity" className={cn('max-[1200px]:hidden', cardCellClass(false))}>
                       {snapshot?.memoryTotalBytes ? (
                         <span className="ow-cell-meta ow-tnum">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
                       ) : <NoData detail={t('nodes.resource.missingSnapshot')} />}
                     </StackCell>
-                    <StackCell label={t('table.sampledAt')} data-resource="sampled-at">{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:w-full max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:pt-0">
+                    <StackCell label={t('table.sampledAt')} data-resource="sampled-at" className={cardCellClass(false)}>{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
+                    <TableCell className={cn('w-8 text-right text-muted-foreground', cardActionCell)}>
                       <RowActions label={t('nodes.action.menu', { name: node.name })} actions={nodeActions(node)} />
                     </TableCell>
                   </TableRow>

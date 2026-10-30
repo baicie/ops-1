@@ -1,5 +1,6 @@
 {
   "access.action.addPublisher": "Add publisher",
+  "access.action.menu": "Actions for {name}",
   "access.confirmDisable.confirm": "Disable user",
   "access.confirmDisable.description": "Disabling revokes this account’s sessions immediately and blocks new sign-ins. Existing audit history is preserved.",
   "access.confirmDisable.title": "Disable {name}?",

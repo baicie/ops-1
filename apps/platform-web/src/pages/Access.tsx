@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { CopyButton, EmptyState, TimeAgo, useToast } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { ConfirmAction } from '../components/app/confirm-action';
@@ -19,6 +19,7 @@ import { NoData } from '../components/app/status-indicator';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import { shortDigest } from '../format';
 import { useI18n, useT } from '../i18n';
+import { cn } from '../lib/utils';
 import { ABSENT_STATE, verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import {
   describePublisherTrust,
@@ -28,7 +29,7 @@ import {
   userCreatedLanded,
   userStateLanded,
 } from '../lib/verified-writes';
-import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 type ManagedUser = { id: string; email: string; displayName: string; role: string; disabled: boolean; createdAt: string };
 
@@ -90,6 +91,26 @@ export function AccessPage() {
 
   /** The account list is the only route that answers "who exists": there is no GET /users/{id}. */
   const readUsers = () => api.get<ManagedUser[]>('/api/v1/users');
+
+  /**
+   * table-spec §2.1: the fingerprint is this row's identifier, and copying it is the first thing
+   * the row menu offers - a 67-character key cannot be transcribed by eye. Revoking stays one
+   * confirmation away and is only offered while the trust can still be withdrawn.
+   */
+  function publisherActions(publisher: Publisher): RowAction[] {
+    const actions: RowAction[] = [copyIdAction(publisher.fingerprint, t('table.copyIdentifier'))];
+    if (user?.role === 'admin' && publisher.trustState === 'TRUSTED') {
+      actions.push({ id: 'revoke', label: t('action.revoke'), icon: 'trash', danger: true, divider: true, onSelect: () => setRevoke(publisher.publisherId) });
+    }
+    return actions;
+  }
+
+  /** table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio. */
+  const publisherCardFacts = rankCardFacts({
+    fingerprint: (data || []).map((publisher) => shortDigest(publisher.fingerprint, 20)),
+    trust: (data || []).map((publisher) => publisher.trustState),
+    note: (data || []).map((publisher) => publisher.note || ''),
+  });
 
   async function createUser() {
     setUserBusy(true);
@@ -236,7 +257,12 @@ export function AccessPage() {
               <TableBody className={stackBody}>
                 {(users || []).map((item) => (
                   <TableRow key={item.id} className={stackRow} data-user={item.id}>
-                    <StackCell label={t('table.user')}><strong>{item.displayName}</strong><div className="text-sm text-muted-foreground">{item.email}</div></StackCell>
+                    {/* §2.1: the row opens with one identity in human language; the email is its
+                        qualifier line. It used to be a labelled cell, which also made the user card
+                        carry four facts where §2.5 allows three. */}
+                    <IdentityCell label={t('table.user')} identity={formatIdentity({ name: item.displayName, id: item.id, at: item.createdAt, locale, rowsOnPage: (users || []).length })} cardFact>
+                      <span>{item.email}</span>
+                    </IdentityCell>
                     <StackCell label={t('table.role')}><span className="role-pill">{item.role}</span></StackCell>
                     <StackCell label={t('table.status')}><UserStatusPill disabled={item.disabled} /></StackCell>
                     <StackCell label={t('table.actions')}>{item.id !== user?.id && <Button size="sm" variant={item.disabled ? 'default' : 'destructive'} onClick={() => setUserTarget({ account: item, disabled: !item.disabled })}>{item.disabled ? t('action.enable') : t('action.disable')}</Button>}</StackCell>
@@ -265,18 +291,22 @@ export function AccessPage() {
                 <TableHead>{t('table.fingerprint')}</TableHead>
                 <TableHead>{t('table.trust')}</TableHead>
                 <TableHead>{t('table.note')}</TableHead>
-                {user?.role === 'admin' && <TableHead>{t('table.actions')}</TableHead>}
+                <TableHead aria-label={t('table.actions')} />
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
               {(data || []).map((publisher) => (
                 <TableRow key={publisher.publisherId} className={stackRow}>
                   <IdentityCell label={t('table.publisher')} identity={formatIdentity({ name: publisher.publisherId, id: publisher.fingerprint, at: publisher.createdAt, locale, rowsOnPage: (data || []).length })} cardFact />
-                  <StackCell label={t('table.fingerprint')}><span className="mono text-sm">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
-                  <StackCell label={t('table.trust')}><StatusPill status={publisher.trustState} /></StackCell>
+                  <StackCell label={t('table.fingerprint')} className={cardCellClass(publisherCardFacts.includes('fingerprint'))}><span className="mono text-sm">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
+                  <StackCell label={t('table.trust')} className={cardCellClass(publisherCardFacts.includes('trust'))}><StatusPill status={publisher.trustState} /></StackCell>
                   {/* An absent note is a missing record, not an empty one: the reserved token, never a dash. */}
-                  <StackCell label={t('table.note')}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-                  {user?.role === 'admin' && <StackCell label={t('table.actions')}>{publisher.trustState === 'TRUSTED' && <Button size="sm" variant="destructive" onClick={() => setRevoke(publisher.publisherId)}>{t('action.revoke')}</Button>}</StackCell>}
+                  <StackCell label={t('table.note')} className={cardCellClass(publisherCardFacts.includes('note'))}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                  {/* §2.5: a labelled cell IS a fact, so the verb menu is a plain cell - and at 390 it
+                      rides the identity line instead of spending a line of the card. */}
+                  <TableCell className={cn('w-8 text-right text-muted-foreground', cardActionCell)}>
+                    <RowActions label={t('access.action.menu', { name: publisher.publisherId })} actions={publisherActions(publisher)} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

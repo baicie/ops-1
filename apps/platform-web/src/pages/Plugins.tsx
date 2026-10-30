@@ -20,7 +20,7 @@ import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-writ
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
-import { IdentityCell, RowActions, StackCell, formatIdentity, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 import { InstallationStatus } from '../components/app/status';
 import { deriveInstallationState } from '../lib/installation-state';
 
@@ -188,6 +188,17 @@ export function PluginsPage() {
   }), [plugins, query, state, quickFilter]);
 
   const summary = useMemo(() => summarize(plugins), [plugins]);
+  /**
+   * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio over the
+   * rows on screen. Publisher and activation are the two columns the table already demotes below
+   * 1200px, so they are not card candidates either - they keep their desktop column.
+   */
+  const cardFacts = rankCardFacts({
+    version: filtered.map((plugin) => plugin.activeVersion || plugin.latestVersion || ''),
+    state: filtered.map((plugin) => plugin.state || ''),
+    readyReplicas: filtered.map((plugin) => `${plugin.readyInstances}/${plugin.totalInstances}`),
+    digest: filtered.map((plugin) => (facts[plugin.id]?.digest ? shortDigest(facts[plugin.id].digest as string) : '')),
+  });
   const selectable = canOperate ? filtered.filter((plugin) => !plugin.isSystem).map((plugin) => plugin.id) : [];
   const selectedPlugins = useMemo(() => plugins.filter((plugin) => selected.includes(plugin.id)), [plugins, selected]);
   /**
@@ -197,15 +208,6 @@ export function PluginsPage() {
   const selectionStoppable = selectedPlugins.length > 0 && selectedPlugins.every((plugin) => !plugin.isSystem && plugin.state !== 'DISABLED' && Boolean(plugin.activeVersion));
   const selectionStartable = selectedPlugins.length > 0 && selectedPlugins.every((plugin) => !plugin.isSystem && plugin.state === 'DISABLED');
   const allSelected = selectable.length > 0 && selectable.every((id) => selected.includes(id));
-
-  async function copyId(id: string) {
-    try {
-      await navigator.clipboard.writeText(id);
-      toast.push({ tone: 'ok', title: t('plugins.action.copyId'), detail: id });
-    } catch {
-      toast.push({ tone: 'danger', title: t('error.copyFailed'), detail: id });
-    }
-  }
 
   /** One request per plugin id: the Kernel has no bulk route, and none is invented here. */
   async function call(verb: Verb, id: string, targetVersion?: string): Promise<void> {
@@ -289,8 +291,12 @@ export function PluginsPage() {
     const open = () => navigate(plugin.isSystem ? '/admin/ops-center' : `/admin/plugins/${plugin.id}`);
     const fact = facts[plugin.id];
     const actions: RowAction[] = [
+      // table-spec §2.1: the copy of the row's own identifier is the FIRST item of the menu.
+      copyIdAction(plugin.id, t('plugins.action.copyId'), {
+        onCopied: () => toast.push({ tone: 'ok', title: t('plugins.action.copyId'), detail: plugin.id }),
+        onFailed: () => toast.push({ tone: 'danger', title: t('error.copyFailed'), detail: plugin.id }),
+      }),
       { id: 'details', label: t('plugins.action.details'), icon: 'external', onSelect: open },
-      { id: 'copy', label: t('plugins.action.copyId'), icon: 'copy', onSelect: () => void copyId(plugin.id) },
     ];
     if (!canOperate) return actions;
     const system = plugin.isSystem;
@@ -453,8 +459,10 @@ export function PluginsPage() {
                   const checked = selected.includes(plugin.id);
                   return (
                     <TableRow key={plugin.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-plugin={plugin.id} data-abnormal={isAbnormal(plugin) ? 'true' : undefined} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
+                      {/* §2.5: the row checkbox rides the identity line at 390 instead of taking a
+                          line of its own - the 40px control box was 48px of the card. */}
                       {canOperate ? (
-                        <TableCell className="w-8 max-[768px]:w-full max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:pt-0 max-[768px]:text-left">
+                        <TableCell className="w-8 max-[768px]:absolute max-[768px]:left-1 max-[768px]:top-2 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0">
                           <input
                             type="checkbox"
                             className="row-check"
@@ -470,25 +478,25 @@ export function PluginsPage() {
                           />
                         </TableCell>
                       ) : null}
-                      <IdentityCell label={t('table.plugin')} identity={formatIdentity({ name: plugin.name, id: plugin.id, locale, rowsOnPage: filtered.length })} cardFact>
+                      <IdentityCell label={t('table.plugin')} identity={formatIdentity({ name: plugin.name, id: plugin.id, locale, rowsOnPage: filtered.length })} cardFact className="max-[768px]:pl-5">
                         <div className="entity-cell">
                           <span className={cn('entity-icon', plugin.isSystem && 'system')}><Icon name={plugin.isSystem ? 'ops' : 'box'} size={17} /></span>
 
                           {plugin.isSystem && <span className="tag">{t('common.tag.system')}</span>}
                         </div>
                       </IdentityCell>
-                      <StackCell label={t('table.version')}>
+                      <StackCell label={t('table.version')} className={cardCellClass(cardFacts.includes('version'))}>
                         <div className="ow-cell">
                           <span className="mono ow-cell-value">{plugin.activeVersion || plugin.latestVersion || null}{!(plugin.activeVersion || plugin.latestVersion) && <NoData detail={t('ui.noData.detail')} />}</span>
                           {upgrade ? <span className="ow-cell-meta">{t('plugins.upgrade.available', { version: plugin.latestVersion ?? '' })}</span> : null}
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.publisher')} className="max-[1200px]:hidden">
+                      <StackCell label={t('table.publisher')} className={cn('max-[1200px]:hidden', cardCellClass(false))}>
                         <div className="ow-cell">
                           <span className="ow-cell-value">{plugin.publisher ? <span className="text-muted-foreground">{plugin.publisher}</span> : <NoData detail={t('ui.noData.detail')} />}</span>
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.state')}>
+                      <StackCell label={t('table.state')} className={cardCellClass(cardFacts.includes('state'))}>
                         <div className="ow-cell">
                           {/* The installation state, from the derivation both surfaces share.
                               This cell used to read `fact.deploymentStatus` - a different
@@ -508,14 +516,14 @@ export function PluginsPage() {
                           {installation.missing.length && !plugin.state ? <NoData detail={t('status.missingField', { field: installation.missing.join(', ') })} /> : null}
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.readyReplicas')}>
+                      <StackCell label={t('table.readyReplicas')} className={cardCellClass(cardFacts.includes('readyReplicas'))}>
                         <div className="ow-cell">
                           <span className="ow-cell-value">{!fact || fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
                             <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : undefined}>{plugin.readyInstances}/{plugin.totalInstances}</span>
                           )}</span>
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.digest')}>
+                      <StackCell label={t('table.digest')} className={cardCellClass(cardFacts.includes('digest'))}>
                         <div className="ow-cell">
                           {fact?.digest ? <span className="mono ow-cell-value" title={fact.digest}>{shortDigest(fact.digest)}</span> : <NoData detail={t('plugins.table.digestHint')} />}
                           {fact?.trust ? (
@@ -525,7 +533,7 @@ export function PluginsPage() {
                           ) : null}
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.activation')} className="max-[1200px]:hidden">
+                      <StackCell label={t('table.activation')} className={cn('max-[1200px]:hidden', cardCellClass(false))}>
                         <div className="ow-cell">
                           {fact?.generation !== null && fact?.generation !== undefined ? (
                             <span className="mono ow-cell-value">{t('plugins.table.generation', { generation: fact.generation })}</span>
@@ -536,7 +544,7 @@ export function PluginsPage() {
                           )}
                         </div>
                       </StackCell>
-                      <TableCell className="w-8 text-right text-muted-foreground max-[768px]:w-full max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:pt-0">
+                      <TableCell className={cn('w-8 text-right text-muted-foreground', cardActionCell)}>
                         <RowActions label={t('plugins.action.menu', { name: plugin.name })} actions={actionsFor(plugin)} />
                       </TableCell>
                     </TableRow>
