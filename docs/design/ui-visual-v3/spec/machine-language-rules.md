@@ -177,11 +177,11 @@ They are promoted to a **gate input**:
 
 ```yaml
       # ci.yml job web-metrics (new), after the audit harness has captured this commit
-      - run: node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit --max-age-hours 24
+      - run: node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit   # no --max-age-hours flag exists; see below
 ```
 
 1. `overflow > 0` on any route at any viewport **fails the build** (`table-spec.md` §4.3 proves the red).
-2. `--max-age-hours 24` **fails on a stale artifact**: `capturedAt` must be newer than the commit under
+2. **Staleness is not detected at all.** An earlier revision of this document described a `--max-age-hours` option that would reject artifacts older than the commit. The script never implemented it: running it returns `no such file or directory` with exit 2. `capturedAt` is recorded but nothing compares it to anything.
    test. Today’s files are 28 hours older than HEAD `7fd0c99`, which is the mechanical definition of
    “recorded, shipped, ignored”. In CI the default is off so the proof above stays reproducible; in the job
    it is on, because that job captures its own artifacts.
@@ -199,7 +199,7 @@ They are promoted to a **gate input**:
 | M2 | `:lang(en)` scope for 22 rules, one rule | `styles.css` | 1 rule replacing 22 declarations | 1h | zero visible change in either locale (uppercase is a no-op on CJK); verify with a zh-CN screenshot that no spacing shifted (letter-spacing was scoped with it) |
 | M3 | `formatDuration(locale, s)` + `formatBytes` via `Intl`, delete `'No data'` | `format.ts`, `Diagnostics.tsx`, `jobDuration.ts`, `Jobs.tsx` | 4 files, 6 call sites | 1.5h | `jobDuration.ts` has its own label logic (`executionLabel`, `spanLabel`) and must not double-format; its unit tests are the contract |
 | M4 | Keep the 3 danger verbs, add the rule to the gate | none (already compliant) | 0 | 0.5h | the rule can only fail on *new* code; that is the point |
-| M5 | Wire `check-ui-metrics.mjs` into CI with `--max-age-hours` | `.github/workflows/ci.yml`, new job `web-metrics` | 1 job, ~15 lines | 2h | the job needs a browser and a seeded session — `staging-preview.yml` already does exactly this, so the first version can live there |
+| M5 | Wire `check-ui-metrics.mjs` into CI (no staleness guard exists; build the guard and the flag together) | `.github/workflows/ci.yml`, new job `web-metrics` | 1 job, ~15 lines | 2h | the job needs a browser and a seeded session — `staging-preview.yml` already does exactly this, so the first version can live there |
 
 **Total ≈ 9 hours**, and M5 is the only one that needs infrastructure.
 
@@ -279,9 +279,7 @@ and the clean 1440 run passes the same script (`table-spec.md` §4.4, `exit 0`).
 stops the *next* release from shipping on this file:
 
 ```
-$ node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit --max-age-hours 24
-FAIL  stale-artifact  r390-light-en  capturedAt 2026-10-29T14:22:59.063Z is older than HEAD 2026-10-30T18:05:26+08:00
-```
+(removed: this block quoted a flag the script never implemented)
 
 ---
 
