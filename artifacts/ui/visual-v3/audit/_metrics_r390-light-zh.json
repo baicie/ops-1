@@ -1,3417 +1,5700 @@
 {
  "config": {
   "label": "r390-light-zh",
-  "w": 390,
-  "h": 844,
   "theme": "light",
-  "locale": "zh-CN",
-  "full": true,
-  "shotFilter": [
-   "overview",
-   "jobs"
-  ]
- },
- "discovered": {
-  "plugin": "/admin/plugins/dev.opsweave.hello",
-  "node": "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246",
-  "instance": "/admin/instances/531d794b-e26a-4772-aef5-ec15d88a75d6/logs"
+  "mode": "after",
+  "baseURL": "http://127.0.0.1:5173",
+  "data": "fixtures"
  },
  "pages": {
-  "/login": {
-   "error": "SKIP"
-  },
-  "/admin/overview": {
-   "finalUrl": "http://82.156.234.84:3000/admin/overview",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 2546,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 125,
-   "fontHist": {
-    "10": 5,
-    "11": 13,
-    "12": 66,
-    "13": 10,
-    "15": 1,
-    "16": 5,
-    "21": 4,
-    "22": 1,
-    "13.5": 20
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 54,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 11,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 13,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "21px": {
-     "n": 4,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 11,
-    "maxDepth": 2,
-    "depths": {
-     "1": 7,
-     "2": 4
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "OpsWeave · OpsWeave",
-   "h1": "总览",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0,
-   "shot": "r390-light-zh__admin_overview.png"
-  },
-  "/admin/plugins": {
-   "finalUrl": "http://82.156.234.84:3000/admin/plugins",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1894,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 131,
-   "fontHist": {
-    "10": 6,
-    "11": 14,
-    "12": 34,
-    "13": 61,
-    "15": 1,
-    "22": 1,
-    "24": 3,
-    "13.5": 11
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 25,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 14,
-     "ratio": 1.57
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 53,
-     "ratio": 1.5
-    },
-    "24px": {
-     "n": 3,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 4,
-    "maxDepth": 1,
-    "depths": {
-     "1": 4
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "插件 · OpsWeave",
-   "h1": "插件",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    0,
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/pipelines": {
-   "finalUrl": "http://82.156.234.84:3000/admin/pipelines",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 844,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 54,
-   "fontHist": {
-    "10": 5,
-    "11": 5,
-    "12": 14,
-    "13": 17,
-    "15": 1,
-    "22": 1,
-    "13.5": 11
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 9,
-     "ratio": 1.47
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 10,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 1,
-    "maxDepth": 1,
-    "depths": {
-     "1": 1
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "流水线 · OpsWeave",
-   "h1": "流水线",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
   "/admin/jobs": {
-   "finalUrl": "http://82.156.234.84:3000/admin/jobs",
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 3322,
-   "bodyScrollW": 375,
-   "offenders": [
+   "docHeight": 1503,
+   "offenders": [],
+   "identityKey": [
+    "host-metrics · 1285",
+    "host-metrics · e273",
+    "host-metrics · 9c4a",
+    "host-metrics · 3f8b",
+    "host-metrics · a71d",
+    "host-metrics · 5b6e",
+    "host-metrics · c04f",
+    "host-metrics · 7d2e",
+    "host-metrics · f19a",
+    "host-metrics · 6e35",
+    "host-metrics · 2a8f",
+    "host-metrics · b53c",
+    "host-metrics · 8f47",
+    "host-metrics · 41e6"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 70.8,
+    "p95": 70.8,
+    "max": 70.8,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.36,
+    0.36,
+    1
+   ],
+   "columnLabels": [
+    "任务",
+    "状态",
+    "耗时",
+    "创建时间"
+   ],
+   "tableRowCounts": [
+    14
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 0,
+   "cards": [
     {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
+     "key": "host-metrics · 1285",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 1285",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "18小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       422,
+       427,
+       430,
+       460
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 412.6,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 429.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 459.6,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 427.4,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 421.6,
+       "h": 32
+      },
+      "duration": {
+       "top": 459.6,
+       "h": 16.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "host-metrics · e273",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · e273",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "16小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       492,
+       498,
+       501,
+       530
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 483.4,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 500.6,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 530.4,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 498.2,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 492.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 530.4,
+       "h": 16.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "host-metrics · 9c4a",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 9c4a",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "运行中",
+       "54865.9 s running",
+       "15小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       563,
+       569,
+       571,
+       601
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 554.2,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 571.4,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 601.2,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 569,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 563.2,
+       "h": 32
+      },
+      "duration": {
+       "top": 601.2,
+       "h": 16.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
+     "key": "host-metrics · 3f8b",
+     "clipped": false,
+     "width": 221,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 3f8b",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "失败",
+       "1800.0 s",
+       "14小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       634,
+       640,
+       642,
+       672
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 625,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 642.2,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 672,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 639.8,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 634,
+       "h": 32
+      },
+      "duration": {
+       "top": 672,
+       "h": 16.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
+     "key": "host-metrics · a71d",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · a71d",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "13小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       705,
+       711,
+       713,
+       743
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 695.8,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 713,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 742.8,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 710.6,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 704.8,
+       "h": 32
+      },
+      "duration": {
+       "top": 742.8,
+       "h": 16.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "host-metrics · 5b6e",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 5b6e",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "排队中",
+       "Queued",
+       "12小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       776,
+       781,
+       784,
+       814
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 766.6,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 783.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 813.6,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 781.4,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 775.6,
+       "h": 32
+      },
+      "duration": {
+       "top": 813.6,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · c04f",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · c04f",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "11小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       846,
+       852,
+       855,
+       884
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 837.4,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 854.6,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 884.4,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 852.2,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 846.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 884.4,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 7d2e",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 7d2e",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已取消",
+       "1800.0 s",
+       "9小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       917,
+       923,
+       925,
+       955
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 908.2,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 925.4,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 955.2,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 923,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 917.2,
+       "h": 32
+      },
+      "duration": {
+       "top": 955.2,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · f19a",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · f19a",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "运行中",
+       "30025.9 s running",
+       "8小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       988,
+       994,
+       996,
+       1026
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 979,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 996.2,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1026,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 993.8,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 988,
+       "h": 32
+      },
+      "duration": {
+       "top": 1026,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 6e35",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 6e35",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "7小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1059,
+       1065,
+       1067,
+       1097
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1049.8,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1067,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1096.8,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1064.5,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1058.8,
+       "h": 32
+      },
+      "duration": {
+       "top": 1096.8,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 2a8f",
+     "clipped": false,
+     "width": 221,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 2a8f",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "失败",
+       "1800.0 s",
+       "6小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1130,
+       1135,
+       1138,
+       1168
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1120.5,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1137.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1167.5,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1135.3,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1129.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 1167.5,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · b53c",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · b53c",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "5小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1200,
+       1206,
+       1209,
+       1238
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1191.3,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1208.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1238.3,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1206.1,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1200.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 1238.3,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 8f47",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 8f47",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "运行中",
+       "13465.9 s running",
+       "4小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1271,
+       1277,
+       1279,
+       1309
+      ],
+      "height": 70.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1262.1,
+       "h": 70.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1279.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1309.1,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1276.9,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1271.1,
+       "h": 32
+      },
+      "duration": {
+       "top": 1309.1,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 41e6",
+     "clipped": false,
+     "width": 215,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 41e6",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "3小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1339,
+       1345,
+       1347,
+       1377
+      ],
+      "height": 66.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1332.9,
+       "h": 66.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1347.1,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1376.9,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1344.7,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1338.9,
+       "h": 32
+      },
+      "duration": {
+       "top": 1376.9,
+       "h": 16.8
+      }
+     },
+     "values": 5
     }
    ],
-   "offenderTotal": 99,
-   "textEls": 222,
-   "fontHist": {
-    "10": 5,
-    "11": 5,
-    "12": 29,
-    "13": 170,
-    "15": 1,
-    "22": 1,
-    "13.5": 11
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 14
    },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 9,
-     "ratio": 1.47
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 118,
-     "ratio": 1.5
-    }
+   "firstScreen": {
+    "full": 6,
+    "partial": 7,
+    "total": 14
    },
-   "cards": {
-    "total": 1,
-    "maxDepth": 1,
-    "depths": {
-     "1": 1
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "任务 · OpsWeave",
-   "h1": "任务",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0,
-   "shot": "r390-light-zh__admin_jobs.png"
-  },
-  "/admin/nodes": {
-   "finalUrl": "http://82.156.234.84:3000/admin/nodes",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1251,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 90,
-   "fontHist": {
-    "10": 5,
-    "11": 6,
-    "12": 35,
-    "13": 26,
-    "15": 1,
-    "22": 1,
-    "24": 5,
-    "13.5": 11
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 21,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 6,
-     "ratio": 1.49
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 19,
-     "ratio": 1.5
-    },
-    "24px": {
-     "n": 5,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 8,
-    "maxDepth": 1,
-    "depths": {
-     "1": 8
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "节点 · OpsWeave",
-   "h1": "节点",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/governance": {
-   "finalUrl": "http://82.156.234.84:3000/admin/governance",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1928,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 119,
-   "fontHist": {
-    "10": 5,
-    "11": 21,
-    "12": 36,
-    "13": 36,
-    "15": 1,
-    "16": 4,
-    "22": 1,
-    "13.5": 15
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 17,
-     "ratio": 1.48
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 14,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 21,
-     "ratio": 1.61
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 28,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 4,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 8,
-    "maxDepth": 1,
-    "depths": {
-     "1": 8
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "12px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "治理 · OpsWeave",
-   "h1": "治理",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
+   "tableWidth": 349,
+   "tablePanelWidth": 349
   },
   "/admin/activity": {
-   "finalUrl": "http://82.156.234.84:3000/admin/activity",
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 25140,
-   "bodyScrollW": 375,
-   "offenders": [
+   "docHeight": 3140,
+   "offenders": [],
+   "identityKey": [
+    "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
+    "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
+    "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
+    "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
+    "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
+    "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
+    "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
+    "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
+    "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
+    "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
+    "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
+    "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
+    "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
+    "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
+    "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
+    "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
+    "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 155.2,
+    "p95": 155.2,
+    "max": 155.2,
+    "n": 17
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.94,
+    1
+   ],
+   "columnLabels": [
+    "事件",
+    "结果",
+    "发生时间"
+   ],
+   "tableRowCounts": [
+    17
+   ],
+   "duplicateRunMax": 1,
+   "rows": 17,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
     {
-     "tag": "div",
-     "cls": "text-sm text-muted-foreground",
-     "left": 301,
-     "right": 407,
-     "n": 5
+     "key": "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.created · f0fe",
+      "qualifier": "USER 82475274sequence 0",
+      "facts": [
+       "已接受deployment.create",
+       "2分钟前05:02:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       404,
+       410,
+       414,
+       444,
+       463,
+       524
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
     },
     {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
+     "key": "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.enabled · 6b1c",
+      "qualifier": "USER 82475274sequence 1",
+      "facts": [
+       "已成功plugin.enable",
+       "26分钟前04:38:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       559,
+       565,
+       569,
+       599,
+       618,
+       679
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
     },
     {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.enrolled · 22dd",
+      "qualifier": "USER 82475274sequence 2",
+      "facts": [
+       "未知node.enroll",
+       "50分钟前04:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       714,
+       720,
+       724,
+       754,
+       773,
+       834
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
     },
     {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.disabled · d47a",
+      "qualifier": "USER 82475274sequence 3",
+      "facts": [
+       "已接受plugin.disable",
+       "1小时前03:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       869,
+       875,
+       879,
+       909,
+       928,
+       989
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
     },
     {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
+     "key": "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "policy.updated · 19e4",
+      "qualifier": "USER 82475274sequence 4",
+      "facts": [
+       "已成功policy.update",
+       "1小时前03:26:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1025,
+       1031,
+       1035,
+       1064,
+       1084,
+       1144
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
     },
     {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
+     "key": "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "enrollment_token.issued · f0fe",
+      "qualifier": "USER 82475274sequence 5",
+      "facts": [
+       "未知token.issue",
+       "2小时前03:02:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1180,
+       1186,
+       1190,
+       1219,
+       1239,
+       1299
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.failed · 6b1c",
+      "qualifier": "USER 82475274sequence 6",
+      "facts": [
+       "已接受deployment.deploy",
+       "2小时前02:38:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1335,
+       1341,
+       1345,
+       1375,
+       1394,
+       1454
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.unreachable · 22dd",
+      "qualifier": "USER 82475274sequence 7",
+      "facts": [
+       "已成功node.observe",
+       "2小时前02:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1490,
+       1496,
+       1500,
+       1530,
+       1549,
+       1610
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 7,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.probed · 6b1c",
+      "qualifier": "USER 82475274sequence 8× 9 3小时前 → 6小时前",
+      "facts": [
+       "已接受plugin.probe",
+       "3小时前01:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1645,
+       1651,
+       1655,
+       1685,
+       1704,
+       1765
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.enabled · 22dd",
+      "qualifier": "USER 82475274sequence 17",
+      "facts": [
+       "未知plugin.enable",
+       "6小时前22:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1800,
+       1806,
+       1810,
+       1840,
+       1859,
+       1920
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.enrolled · d47a",
+      "qualifier": "USER 82475274sequence 18",
+      "facts": [
+       "已接受node.enroll",
+       "7小时前21:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1956,
+       1962,
+       1966,
+       1995,
+       2015,
+       2075
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.disabled · 19e4",
+      "qualifier": "USER 82475274sequence 19",
+      "facts": [
+       "已成功plugin.disable",
+       "7小时前21:26:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2111,
+       2117,
+       2121,
+       2150,
+       2170,
+       2230
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "policy.updated · f0fe",
+      "qualifier": "USER 82475274sequence 20",
+      "facts": [
+       "未知policy.update",
+       "8小时前21:02:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2266,
+       2272,
+       2276,
+       2305,
+       2325,
+       2385
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "enrollment_token.issued · 6b1c",
+      "qualifier": "USER 82475274sequence 21",
+      "facts": [
+       "已接受token.issue",
+       "8小时前20:38:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2421,
+       2427,
+       2431,
+       2461,
+       2480,
+       2541
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.failed · 22dd",
+      "qualifier": "USER 82475274sequence 22",
+      "facts": [
+       "已成功deployment.deploy",
+       "8小时前20:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2576,
+       2582,
+       2586,
+       2616,
+       2635,
+       2696
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.unreachable · d47a",
+      "qualifier": "USER 82475274sequence 23",
+      "facts": [
+       "未知node.observe",
+       "9小时前19:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2731,
+       2737,
+       2741,
+       2771,
+       2790,
+       2851
+      ],
+      "height": 155.2
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45",
+     "clipped": false,
+     "width": 291,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.created · 19e4",
+      "qualifier": "USER 82475274sequence 24",
+      "facts": [
+       "已接受deployment.create",
+       "9小时前19:26:45"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2883,
+       2889,
+       2893,
+       2923,
+       2942,
+       3003
+      ],
+      "height": 151.2
+     },
+     "geometry": null,
+     "values": 4
     }
    ],
-   "offenderTotal": 104,
-   "textEls": 1935,
-   "fontHist": {
-    "10": 5,
-    "11": 5,
-    "12": 961,
-    "13": 951,
-    "15": 1,
-    "22": 1,
-    "13.5": 11
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 17
    },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 279,
-     "ratio": 1.5
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 812,
-     "ratio": 1.5
-    }
+   "firstScreen": {
+    "full": 2,
+    "partial": 3,
+    "total": 17
    },
-   "cards": {
-    "total": 1,
-    "maxDepth": 1,
-    "depths": {
-     "1": 1
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "活动 · OpsWeave",
-   "h1": "活动",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
+   "tableWidth": 349,
+   "tablePanelWidth": 349
   },
-  "/admin/access": {
-   "finalUrl": "http://82.156.234.84:3000/admin/access",
+  "/admin/nodes": {
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 1811,
-   "bodyScrollW": 375,
-   "offenders": [
+   "docHeight": 1837,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 105.8,
+    "p95": 105.8,
+    "max": 105.8,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "实例",
+    "资源"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 0,
+   "cards": [
     {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "macos/aarch64代次 1",
+      "facts": [
+       "就绪",
+       "1/4 就绪",
+       "12% · 31%2.3 GiB / 7.5 GiB · 2分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       551,
+       555,
+       559,
+       589,
+       610
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 541.8,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 559,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 589.3,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 550.8,
+       "h": 32
+      },
+      "duration": {
+       "top": 588.8,
+       "h": 17.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "linux/x86_64代次 2",
+      "facts": [
+       "就绪",
+       "2/4 就绪",
+       "18% · 32%2.4 GiB / 7.5 GiB · 5分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       657,
+       661,
+       665,
+       695,
+       715
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 647.6,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 664.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 695.1,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 656.6,
+       "h": 32
+      },
+      "duration": {
+       "top": 694.6,
+       "h": 17.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "macos/aarch64代次 3",
+      "facts": [
+       "就绪",
+       "3/4 就绪",
+       "24% · 34%2.5 GiB / 7.5 GiB · 8分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       762,
+       766,
+       771,
+       800,
+       801,
+       821
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 753.3,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 770.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 800.8,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 762.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 800.3,
+       "h": 17.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 216,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "linux/x86_64代次 1",
+      "facts": [
+       "不可达",
+       "1/4 就绪",
+       "该节点在此时间窗没有上报资源快照。"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       868,
+       872,
+       876,
+       906,
+       907,
+       927
+      ],
+      "height": 92.6
+     },
+     "geometry": {
+      "row": {
+       "top": 859.1,
+       "h": 92.6
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 876.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 906.6,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 868.1,
+       "h": 32
+      },
+      "duration": {
+       "top": 906.1,
+       "h": 17.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "macos/aarch64代次 2",
+      "facts": [
+       "就绪",
+       "2/4 就绪",
+       "36% · 36%2.7 GiB / 7.5 GiB · 14分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       961,
+       965,
+       969,
+       999,
+       1020
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 951.7,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 968.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 999.2,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 960.7,
+       "h": 32
+      },
+      "duration": {
+       "top": 998.7,
+       "h": 17.8
+      }
+     },
+     "values": 5
     },
     {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 205,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "linux/x86_64代次 3",
+      "facts": [
+       "观测陈旧",
+       "3/4 就绪",
+       "42% · 37%2.7 GiB / 7.5 GiB · 17分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1067,
+       1071,
+       1075,
+       1105,
+       1125
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1057.5,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1074.7,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1105,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1066.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 1104.5,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "macos/aarch64代次 1",
+      "facts": [
+       "就绪",
+       "1/4 就绪",
+       "48% · 38%2.8 GiB / 7.5 GiB · 20分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1172,
+       1176,
+       1180,
+       1210,
+       1211,
+       1231
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1163.3,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1180.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1210.8,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1172.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 1210.3,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "linux/x86_64代次 2",
+      "facts": [
+       "就绪",
+       "2/4 就绪",
+       "54% · 39%2.9 GiB / 7.5 GiB · 23分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1278,
+       1282,
+       1286,
+       1316,
+       1317,
+       1337
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1269.1,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1286.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1316.6,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1278.1,
+       "h": 32
+      },
+      "duration": {
+       "top": 1316.1,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "macos/aarch64代次 3",
+      "facts": [
+       "就绪",
+       "3/4 就绪",
+       "60% · 40%3.0 GiB / 7.5 GiB · 26分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1384,
+       1388,
+       1392,
+       1422,
+       1443
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1374.8,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1392,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1422.3,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1383.8,
+       "h": 32
+      },
+      "duration": {
+       "top": 1421.8,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 205,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "linux/x86_64代次 1",
+      "facts": [
+       "需要关注",
+       "1/4 就绪",
+       "66% · 41%3.1 GiB / 7.5 GiB · 29分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1490,
+       1494,
+       1498,
+       1528,
+       1548
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1480.6,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1497.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1528.1,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1489.6,
+       "h": 32
+      },
+      "duration": {
+       "top": 1527.6,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 227,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "macos/aarch64代次 2",
+      "facts": [
+       "就绪",
+       "2/4 就绪",
+       "72% · 43%3.2 GiB / 7.5 GiB · 32分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1595,
+       1599,
+       1604,
+       1633,
+       1634,
+       1654
+      ],
+      "height": 105.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1586.4,
+       "h": 105.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1603.6,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1633.9,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1595.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 1633.4,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 233,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "linux/x86_64代次 3",
+      "facts": [
+       "就绪",
+       "3/4 就绪",
+       "78% · 44%3.3 GiB / 7.5 GiB · 35分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1698,
+       1702,
+       1706,
+       1736,
+       1737,
+       1757
+      ],
+      "height": 101.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1692.2,
+       "h": 101.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1706.4,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1736.7,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1698.2,
+       "h": 32
+      },
+      "duration": {
+       "top": 1736.2,
+       "h": 17.8
+      }
+     },
+     "values": 5
     }
    ],
-   "offenderTotal": 99,
-   "textEls": 105,
-   "fontHist": {
-    "10": 5,
-    "11": 5,
-    "12": 46,
-    "13": 28,
-    "15": 1,
-    "16": 4,
-    "22": 1,
-    "13.5": 15
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 29,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 14,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 20,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 4,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 5,
-    "maxDepth": 2,
-    "depths": {
-     "1": 4,
-     "2": 1
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "访问 · OpsWeave",
-   "h1": "访问与信任",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    28,
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/settings": {
-   "finalUrl": "http://82.156.234.84:3000/admin/settings",
-   "overflow": -14,
-   "docScrollW": 376,
-   "docClientW": 390,
-   "docHeight": 1716,
-   "bodyScrollW": 376,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 79,
-   "fontHist": {
-    "10": 7,
-    "11": 5,
-    "12": 30,
-    "13": 19,
-    "15": 1,
-    "16": 4,
-    "22": 1,
-    "13.5": 11,
-    "12.2": 1
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 28,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 6,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 15,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 4,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 4,
-    "maxDepth": 1,
-    "depths": {
-     "1": 4
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "设置 · OpsWeave",
-   "h1": "设置",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/settings/diagnostics": {
-   "finalUrl": "http://82.156.234.84:3000/admin/settings/diagnostics",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 4156,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 10
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group nav-extensions",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 198,
-   "fontHist": {
-    "10": 12,
-    "11": 7,
-    "12": 117,
-    "13": 19,
-    "15": 1,
-    "16": 10,
-    "22": 1,
-    "13.5": 31
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 69,
-     "ratio": 1.5
-    },
-    "10px": {
-     "n": 11,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 6,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 14,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 10,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 12,
-    "maxDepth": 2,
-    "depths": {
-     "1": 11,
-     "2": 1
-    }
-   },
-   "clippedCount": 2,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 2
-    },
-    {
-     "text": "引导诊断",
-     "cls": "",
-     "sw": 44,
-     "cw": 25
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "设置 · OpsWeave",
-   "h1": "引导诊断",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/ops-center": {
-   "finalUrl": "http://82.156.234.84:3000/admin/ops-center",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1332,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 74,
-   "fontHist": {
-    "10": 6,
-    "11": 5,
-    "12": 32,
-    "13": 9,
-    "15": 1,
-    "16": 4,
-    "22": 1,
-    "13.5": 15,
-    "11.3": 1
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 23,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 14,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 4,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 4,
-    "maxDepth": 1,
-    "depths": {
-     "1": 4
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "运维中心 · OpsWeave",
-   "h1": "运维中心",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/plugins/install": {
-   "finalUrl": "http://82.156.234.84:3000/admin/plugins/install",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 844,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 52,
-   "fontHist": {
-    "10": 5,
-    "11": 7,
-    "12": 20,
-    "13": 5,
-    "15": 1,
-    "16": 2,
-    "22": 1,
-    "13.5": 11
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 19,
-     "ratio": 1.48
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 6,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 2,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 2,
-    "maxDepth": 2,
-    "depths": {
-     "1": 1,
-     "2": 1
-    }
-   },
-   "clippedCount": 2,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 2
-    },
-    {
-     "text": "install",
-     "cls": "",
-     "sw": 33,
-     "cw": 22
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px 0px 4px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "插件 · OpsWeave",
-   "h1": "安装签名插件",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/app/home": {
-   "finalUrl": "http://82.156.234.84:3000/app/home",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 2765,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group nav-group-business",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 5
-    }
-   ],
-   "offenderTotal": 72,
-   "textEls": 104,
-   "fontHist": {
-    "10": 11,
-    "11": 5,
-    "12": 52,
-    "13": 23,
-    "15": 1,
-    "16": 4,
-    "22": 1,
-    "13.5": 7
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 41,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 6,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 16,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 4,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 9,
-    "maxDepth": 2,
-    "depths": {
-     "1": 7,
-     "2": 2
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "我的工作台 · OpsWeave",
-   "h1": "我的工作台",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 6,
-   "mainOffsetLeft": 0
-  },
-  "/app/incidents": {
-   "finalUrl": "http://82.156.234.84:3000/app/incidents",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1345,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group nav-group-business",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 5
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 72,
-   "textEls": 49,
-   "fontHist": {
-    "10": 5,
-    "11": 11,
-    "12": 21,
-    "13": 1,
-    "15": 1,
-    "16": 2,
-    "22": 1,
-    "13.5": 7
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 19,
-     "ratio": 1.48
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 6,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 11,
-     "ratio": 1.47
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 2,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 6,
-    "maxDepth": 2,
-    "depths": {
-     "1": 2,
-     "2": 4
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "故障 · OpsWeave",
-   "h1": "故障",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 6,
-   "mainOffsetLeft": 0
-  },
-  "/app/investigations": {
-   "finalUrl": "http://82.156.234.84:3000/app/investigations",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 844,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group nav-group-business",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 5
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 72,
-   "textEls": 35,
-   "fontHist": {
-    "10": 5,
-    "11": 5,
-    "12": 11,
-    "13": 2,
-    "15": 1,
-    "16": 2,
-    "22": 1,
-    "13.5": 8
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 9,
-     "ratio": 1.47
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 7,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 2,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 2,
-    "maxDepth": 2,
-    "depths": {
-     "1": 1,
-     "2": 1
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "调查 · OpsWeave",
-   "h1": "调查",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 6,
-   "mainOffsetLeft": 0
-  },
-  "/app/reports": {
-   "finalUrl": "http://82.156.234.84:3000/app/reports",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 844,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer workspace-sidebar",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group nav-group-business",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 5
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 72,
-   "textEls": 35,
-   "fontHist": {
-    "10": 5,
-    "11": 5,
-    "12": 11,
-    "13": 2,
-    "15": 1,
-    "16": 2,
-    "22": 1,
-    "13.5": 8
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 9,
-     "ratio": 1.47
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 7,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 2,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 2,
-    "maxDepth": 2,
-    "depths": {
-     "1": 1,
-     "2": 1
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "报告 · OpsWeave",
-   "h1": "报告",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 6,
-   "mainOffsetLeft": 0
-  },
-  "/admin/nope": {
-   "finalUrl": "http://82.156.234.84:3000/admin/nope",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 844,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 10
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group nav-extensions",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 38,
-   "fontHist": {
-    "10": 5,
-    "11": 5,
-    "12": 9,
-    "13": 4,
-    "15": 1,
-    "16": 1,
-    "22": 1,
-    "13.5": 12
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 8,
-     "ratio": 1.46
-    },
-    "10px": {
-     "n": 4,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 11,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "16px": {
-     "n": 1,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 0,
-    "maxDepth": 0,
-    "depths": {}
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "OpsWeave · OpsWeave",
-   "h1": "未找到",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/plugins/dev.opsweave.hello": {
-   "finalUrl": "http://82.156.234.84:3000/admin/plugins/dev.opsweave.hello",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1709,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "span",
-     "cls": "ml-[5px] rounded-full border border-solid border-border bg-muted px-1.",
-     "left": 440,
-     "right": 460,
-     "n": 1
-    },
-    {
-     "tag": "button",
-     "cls": "inline-flex items-center justify-center whitespace-nowrap rounded-sm b",
-     "left": 315,
-     "right": 392,
-     "n": 2
-    },
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    }
-   ],
-   "offenderTotal": 102,
-   "textEls": 113,
-   "fontHist": {
-    "10": 11,
-    "11": 7,
-    "12": 49,
-    "13": 30,
-    "15": 1,
-    "16": 3,
-    "22": 1,
-    "13.5": 11
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 27,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 6,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 18,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 3,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 3,
-    "maxDepth": 1,
-    "depths": {
-     "1": 3
-    }
-   },
-   "clippedCount": 2,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 1
-    },
-    {
-     "text": "dev.opsweave.hello",
-     "cls": "",
-     "sw": 106,
-     "cw": 32
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "插件 · OpsWeave",
-   "h1": "Hello Ops",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 2,
+    "partial": 3,
+    "total": 12
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
   },
   "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246": {
-   "finalUrl": "http://82.156.234.84:3000/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246",
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 5184,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 337,
-   "fontHist": {
-    "10": 6,
-    "11": 7,
-    "12": 58,
-    "13": 247,
-    "15": 1,
-    "16": 5,
-    "22": 1,
-    "13.5": 12
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 40,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 6,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 131,
-     "ratio": 1.5
-    },
-    "16px": {
-     "n": 5,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 5,
-    "maxDepth": 1,
-    "depths": {
-     "1": 5
-    }
-   },
-   "clippedCount": 2,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 1
-    },
-    {
-     "text": "9b426dab-2…b4f246",
-     "cls": "",
-     "sw": 118,
-     "cw": 32
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "节点 · OpsWeave",
-   "h1": "staging-node",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/instances/531d794b-e26a-4772-aef5-ec15d88a75d6/logs": {
-   "finalUrl": "http://82.156.234.84:3000/admin/instances/531d794b-e26a-4772-aef5-ec15d88a75d6/logs",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1090,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 10
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group nav-extensions",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 63,
-   "fontHist": {
-    "10": 6,
-    "11": 11,
-    "12": 25,
-    "13": 8,
-    "15": 1,
-    "22": 1,
-    "13.5": 11
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 20,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 6,
-     "ratio": 1.55
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 9,
-     "ratio": 1.53
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 2,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 0,
-    "maxDepth": 0,
-    "depths": {}
-   },
-   "clippedCount": 3,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 0
-    },
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 0
-    },
-    {
-     "text": "实例日志",
-     "cls": "",
-     "sw": 44,
-     "cw": 2
-    }
-   ],
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "实例日志 · OpsWeave",
-   "h1": "实例日志",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    28,
-    30,
-    32,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/pipelines/host-metrics-pipeline": {
-   "finalUrl": "http://82.156.234.84:3000/admin/pipelines/host-metrics-pipeline",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 2350,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "span",
-     "cls": "flow-index",
-     "left": 448,
-     "right": 466,
-     "n": 3
-    },
-    {
-     "tag": "span",
-     "cls": "flow-arrow",
-     "left": 417,
-     "right": 429,
-     "n": 3
-    },
-    {
-     "tag": "div",
-     "cls": "flow-step",
-     "left": 295,
-     "right": 411,
-     "n": 4
-    },
-    {
-     "tag": "strong",
-     "cls": "",
-     "left": 308,
-     "right": 398,
-     "n": 4
-    },
-    {
-     "tag": "small",
-     "cls": "",
-     "left": 308,
-     "right": 398,
-     "n": 4
-    },
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 117,
-   "textEls": 155,
-   "fontHist": {
-    "10": 18,
-    "11": 11,
-    "12": 46,
-    "13": 42,
-    "14": 1,
-    "15": 1,
-    "16": 3,
-    "21": 2,
-    "22": 1,
-    "13.5": 30
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 24,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 11,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 22,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 26,
-     "ratio": 1.5
-    },
-    "21px": {
-     "n": 2,
-     "ratio": 1.1
-    },
-    "16px": {
-     "n": 3,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 7,
-    "maxDepth": 1,
-    "depths": {
-     "1": 7
-    }
-   },
-   "clippedCount": 9,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 1
-    },
-    {
-     "text": "流水线详情",
-     "cls": "",
-     "sw": 55,
-     "cw": 23
-    },
-    {
-     "text": "sha256:e42442085b8cd2d8c4aff9776d578",
-     "cls": "mono muted small",
-     "sw": 513,
-     "cw": 283
-    },
-    {
-     "text": "sha256:810a328167adaab8eca7c6ac00361",
-     "cls": "mono muted small",
-     "sw": 513,
-     "cw": 283
-    },
-    {
-     "text": "sha256:90d4a084d6cc885db75bfa8562998",
-     "cls": "mono muted small",
-     "sw": 513,
-     "cw": 283
-    },
-    {
-     "text": "sha256:050e3f81bc4cdd8c658a7b82ae6b7",
-     "cls": "mono muted small",
-     "sw": 513,
-     "cw": 283
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "12px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "流水线 · OpsWeave",
-   "h1": "Host Metrics Pipeline",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/pipelines/host-metrics-pipeline/editor": {
-   "finalUrl": "http://82.156.234.84:3000/admin/pipelines/host-metrics-pipeline/editor",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 1612,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 86,
-   "textEls": 139,
-   "fontHist": {
-    "9": 5,
-    "10": 13,
-    "11": 12,
-    "12": 49,
-    "13": 13,
-    "15": 1,
-    "21": 1,
-    "13.5": 13,
-    "9.5": 16,
-    "10.5": 6,
-    "8.5": 10
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 48,
-     "ratio": 1.38
-    },
-    "10px": {
-     "n": 15,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 12,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 14,
-     "ratio": 1.44
-    },
-    "21px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 4,
-     "ratio": 1.28
-    },
-    "9px": {
-     "n": 10,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 4,
-    "maxDepth": 1,
-    "depths": {
-     "1": 4
-    }
-   },
-   "clippedCount": 3,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 0
-    },
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 1
-    },
-    {
-     "text": "流水线编辑器",
-     "cls": "",
-     "sw": 66,
-     "cw": 10
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "0px",
-    "gap": "normal",
-    "maxWidth": "none"
-   },
-   "title": "流水线编辑器 · OpsWeave",
-   "h1": "Host Metrics Pipeline",
-   "h1Style": {
-    "size": "21px",
-    "weight": "700",
-    "lh": "25.2px",
-    "ls": "-0.63px"
-   },
-   "buttonHeights": [
-    26,
-    28,
-    30,
-    36,
-    38
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/pipelines/host-metrics-pipeline/run": {
-   "finalUrl": "http://82.156.234.84:3000/admin/pipelines/host-metrics-pipeline/run",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 844,
-   "bodyScrollW": 375,
-   "offenders": [
-    {
-     "tag": "aside",
-     "cls": "sidebar admin-sidebar sidebar-drawer",
-     "left": -260,
-     "right": 0,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "sidebar-head brand-row",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "nav",
-     "cls": "nav",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    },
-    {
-     "tag": "div",
-     "cls": "nav-group",
-     "left": -252,
-     "right": -9,
-     "n": 3
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link",
-     "left": -252,
-     "right": -9,
-     "n": 9
-    },
-    {
-     "tag": "a",
-     "cls": "nav-link active active",
-     "left": -252,
-     "right": -9,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 99,
-   "textEls": 47,
-   "fontHist": {
-    "10": 6,
-    "11": 9,
-    "12": 13,
-    "13": 6,
-    "15": 1,
-    "22": 1,
-    "13.5": 11
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 11,
-     "ratio": 1.47
-    },
-    "10px": {
-     "n": 5,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "11px": {
-     "n": 7,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 3,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 1,
-    "maxDepth": 1,
-    "depths": {
-     "1": 1
-    }
-   },
-   "clippedCount": 3,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 1
-    },
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 1
-    },
-    {
-     "text": "运行流水线",
-     "cls": "",
-     "sw": 55,
-     "cw": 8
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "0px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "流水线 · OpsWeave",
-   "h1": "Host Metrics Pipeline",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0
-  },
-  "/admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae": {
-   "finalUrl": "http://82.156.234.84:3000/admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae",
-   "overflow": 175,
-   "docScrollW": 565,
-   "docClientW": 390,
-   "docHeight": 1856,
-   "bodyScrollW": 565,
-   "offenders": [
-    {
-     "tag": "code",
-     "cls": "mono small",
-     "left": 41,
-     "right": 565,
-     "n": 1
-    },
-    {
-     "tag": "table",
-     "cls": "w-full border-collapse caption-bottom text-base",
-     "left": 15,
-     "right": 458,
-     "n": 1
-    },
-    {
-     "tag": "thead",
-     "cls": "border-b border-solid border-border",
-     "left": 17,
-     "right": 457,
-     "n": 1
-    },
-    {
-     "tag": "tr",
-     "cls": "border-b border-solid border-border transition-colors data-[state=sele",
-     "left": 17,
-     "right": 457,
-     "n": 2
-    },
-    {
-     "tag": "th",
-     "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg-muted px-",
-     "left": 378,
-     "right": 457,
-     "n": 1
-    },
-    {
-     "tag": "tbody",
-     "cls": "[&_tr:last-child]:border-0",
-     "left": 17,
-     "right": 457,
-     "n": 1
-    }
-   ],
-   "offenderTotal": 108,
-   "textEls": 116,
-   "fontHist": {
-    "10": 10,
-    "11": 11,
-    "12": 57,
-    "13": 9,
-    "14": 2,
-    "15": 1,
-    "21": 1,
-    "22": 1,
-    "13.5": 18,
-    "20.3": 5,
-    "12.7": 1
-   },
-   "lineHeights": {
-    "15px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "12px": {
-     "n": 36,
-     "ratio": 1.49
-    },
-    "10px": {
-     "n": 9,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 17,
-     "ratio": 1.45
-    },
-    "11px": {
-     "n": 10,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 3,
-     "ratio": 1.5
-    },
-    "21px": {
-     "n": 1,
-     "ratio": 1.1
-    },
-    "20px": {
-     "n": 5,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 10,
-    "maxDepth": 1,
-    "depths": {
-     "1": 10
-    }
-   },
-   "clippedCount": 2,
-   "clipped": [
-    {
-     "text": "/",
-     "cls": "crumb-sep",
-     "sw": 12,
-     "cw": 2
-    },
-    {
-     "text": "任务详情",
-     "cls": "",
-     "sw": 44,
-     "cw": 25
-    }
-   ],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "12px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "18px 14px 42px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "任务 · OpsWeave",
-   "h1": "host-metrics-pipeline",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    20,
-    30,
-    36
-   ],
-   "navItems": 13,
-   "mainOffsetLeft": 0,
-   "shot": "r390-light-zh__admin_jobs_1285fbe8-9bb8-459f-b073-af245d32b3ae.png"
-  },
-  "/403": {
-   "finalUrl": "http://82.156.234.84:3000/403",
-   "overflow": -15,
-   "docScrollW": 375,
-   "docClientW": 390,
-   "docHeight": 844,
-   "bodyScrollW": 375,
+   "docHeight": 5267,
    "offenders": [],
-   "offenderTotal": 0,
-   "textEls": 6,
-   "fontHist": {
-    "10": 1,
-    "13": 3,
-    "22": 1,
-    "13.5": 1
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 97.4,
+    "p95": 135.5,
+    "max": 135.5,
+    "n": 15
    },
-   "lineHeights": {
-    "10px": {
-     "n": 1,
-     "ratio": 1.5
-    },
-    "22px": {
-     "n": 1,
-     "ratio": 1.2
-    },
-    "13px": {
-     "n": 2,
-     "ratio": 1.5
-    },
-    "14px": {
-     "n": 1,
-     "ratio": 1.5
-    }
-   },
-   "cards": {
-    "total": 1,
-    "maxDepth": 1,
-    "depths": {
-     "1": 1
-    }
-   },
-   "clippedCount": 0,
-   "clipped": [],
-   "panelStyle": {
-    "radius": "10px",
-    "padding": "18px 20px",
-    "border": "1px solid",
-    "bg": "rgb(255, 255, 255)"
-   },
-   "contentStyle": {
-    "padding": "32px 20px",
-    "gap": "normal",
-    "maxWidth": "1480px"
-   },
-   "title": "OpsWeave · Platform",
-   "h1": "无权访问平台控制台",
-   "h1Style": {
-    "size": "22px",
-    "weight": "700",
-    "lh": "26.4px",
-    "ls": "-0.66px"
-   },
-   "buttonHeights": [
-    36
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    0.42,
+    1,
+    null,
+    null,
+    null,
+    null,
+    null
    ],
-   "navItems": 0,
-   "mainOffsetLeft": 0
+   "columnLabels": [
+    "观测时间",
+    "CPU",
+    "内存",
+    "文件系统",
+    "插件",
+    "版本",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    12,
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 15,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 15
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 15
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1649,
+   "offenders": [],
+   "identityKey": [
+    "Hello Ops",
+    "Host Metrics",
+    "Log Tail",
+    "Data Catalog",
+    "Policy Engine",
+    "Registry Mirror",
+    "Edge Probe",
+    "Edge Tunnel",
+    "Fault Lab",
+    "Replay Lab",
+    "Audit Sink",
+    "Console Bridge"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 92.4,
+    "p95": 92.4,
+    "max": 92.4,
+    "n": 12
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    1,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "插件",
+    "版本",
+    "部署状态",
+    "就绪 副本",
+    "摘要 / 信任"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 0,
+   "cards": [
+    {
+     "key": "Hello Ops",
+     "clipped": false,
+     "width": 175,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Hello Ops",
+      "qualifier": "系统trusted-team",
+      "facts": [
+       "0.2.0",
+       "已安装2分钟前 · 代次 2",
+       "0/3",
+       "sha256:a100a10…a100a100已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       556,
+       559,
+       568,
+       601,
+       602
+      ],
+      "height": 81.1
+     },
+     "geometry": {
+      "row": {
+       "top": 546.7,
+       "h": 81.1
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 567.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 601,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 559.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 602.5,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 168,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Host Metrics",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1",
+       "已安装32分钟前 · 代次 3",
+       "1/3",
+       "sha256:a101a10…a101a101已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       637,
+       640,
+       649,
+       682,
+       684
+      ],
+      "height": 81.1
+     },
+     "geometry": {
+      "row": {
+       "top": 627.7,
+       "h": 81.1
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 648.6,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 682.1,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 640.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 683.6,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Log Tail",
+     "clipped": false,
+     "width": 176,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Log Tail",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2",
+       "已禁用1小时前 · 代次 4",
+       "2/3",
+       "sha256:a102a10…a102a102已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       718,
+       722,
+       730,
+       763,
+       765
+      ],
+      "height": 81.1
+     },
+     "geometry": {
+      "row": {
+       "top": 708.8,
+       "h": 81.1
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 729.7,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 763.2,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 721.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 764.6,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Data Catalog",
+     "clipped": false,
+     "width": 176,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Data Catalog",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0有更新版本 0.2.3",
+       "已安装1小时前 · 代次 5",
+       "0/3",
+       "sha256:a103a10…a103a103已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       799,
+       803,
+       811,
+       844,
+       850,
+       851
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 789.9,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 810.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 849.9,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 802.6,
+       "h": 32
+      },
+      "duration": {
+       "top": 844.3,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Policy Engine",
+     "clipped": false,
+     "width": 174,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Policy Engine",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1有更新版本 0.2.0",
+       "已暂存2小时前 · 代次 6",
+       "1/3",
+       "sha256:a104a10…a104a104已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       891,
+       895,
+       903,
+       937,
+       942,
+       944
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 882.3,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 903.2,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 942.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 895,
+       "h": 32
+      },
+      "duration": {
+       "top": 936.7,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Registry Mirror",
+     "clipped": false,
+     "width": 175,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Registry Mirror",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2有更新版本 0.2.1",
+       "失败2小时前 · 代次 7",
+       "2/3",
+       "sha256:a105a10…a105a105已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       984,
+       987,
+       996,
+       1029,
+       1035,
+       1036
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 974.6,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 995.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1034.7,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 987.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 1029,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Edge Probe",
+     "clipped": false,
+     "width": 174,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Edge Probe",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0有更新版本 0.2.2",
+       "已安装3小时前 · 代次 8",
+       "0/3",
+       "sha256:a106a10…a106a106已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1076,
+       1080,
+       1088,
+       1121,
+       1127,
+       1129
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 1067,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1087.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1127,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1079.7,
+       "h": 32
+      },
+      "duration": {
+       "top": 1121.4,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Edge Tunnel",
+     "clipped": false,
+     "width": 174,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Edge Tunnel",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1有更新版本 0.2.3",
+       "已安装3小时前 · 代次 9",
+       "1/3",
+       "sha256:a107a10…a107a107已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 8,
+      "tops": [
+       0,
+       1168,
+       1172,
+       1180,
+       1181,
+       1214,
+       1219,
+       1221
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 1159.4,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1180.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1219.4,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1172.1,
+       "h": 32
+      },
+      "duration": {
+       "top": 1213.8,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Fault Lab",
+     "clipped": false,
+     "width": 169,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Fault Lab",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2有更新版本 0.2.0",
+       "已暂存4小时前 · 代次 10",
+       "2/3",
+       "sha256:a108a10…a108a108已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1261,
+       1264,
+       1273,
+       1306,
+       1312,
+       1313
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 1251.8,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1272.7,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1311.8,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1264.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 1306.2,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Replay Lab",
+     "clipped": false,
+     "width": 171,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Replay Lab",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0有更新版本 0.2.1",
+       "已安装4小时前 · 代次 11",
+       "0/3",
+       "sha256:a109a10…a109a109已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1353,
+       1357,
+       1365,
+       1399,
+       1404,
+       1406
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 1344.1,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1365,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1404.2,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1356.8,
+       "h": 32
+      },
+      "duration": {
+       "top": 1398.5,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Audit Sink",
+     "clipped": false,
+     "width": 169,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Audit Sink",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1有更新版本 0.2.2",
+       "已安装5小时前 · 代次 12",
+       "1/3",
+       "sha256:a110a11…a110a110已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 8,
+      "tops": [
+       0,
+       1446,
+       1449,
+       1457,
+       1458,
+       1491,
+       1497,
+       1498
+      ],
+      "height": 92.4
+     },
+     "geometry": {
+      "row": {
+       "top": 1436.5,
+       "h": 92.4
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1457.4,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1496.5,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1449.2,
+       "h": 32
+      },
+      "duration": {
+       "top": 1490.9,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Console Bridge",
+     "clipped": false,
+     "width": 192,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Console Bridge",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.3",
+       "已禁用5小时前",
+       "2/3",
+       "sha256:a111a11…a111a111已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1535,
+       1539,
+       1547,
+       1580,
+       1582
+      ],
+      "height": 77.1
+     },
+     "geometry": {
+      "row": {
+       "top": 1528.9,
+       "h": 77.1
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1546.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1580.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1538.6,
+       "h": 32
+      },
+      "duration": {
+       "top": 1581.7,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 3,
+    "partial": 4,
+    "total": 12
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3917,
+   "offenders": [],
+   "identityKey": [
+    "orders-raw",
+    "orders-curated",
+    "shipments",
+    "events-click",
+    "events-impression",
+    "inventory",
+    "invoice-lines",
+    "node-metrics",
+    "plugin-invocations",
+    "audit-ledger",
+    "risk-scores",
+    "stale-feed",
+    "orders-curated · 4f1c",
+    "inventory · b93d",
+    "orders-curated · 71ae",
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 97.4,
+    "p95": 117.8,
+    "max": 117.8,
+    "n": 27
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    null,
+    null,
+    1,
+    0.33,
+    0.25
+   ],
+   "columnLabels": [
+    "数据集",
+    "Schema",
+    "数据集",
+    "状态",
+    "节点",
+    "状态",
+    "代次"
+   ],
+   "tableRowCounts": [
+    12,
+    3,
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "orders-raw",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-raw",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       823,
+       827,
+       856,
+       876
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       915,
+       919,
+       949,
+       968
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "shipments",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "shipments",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1008,
+       1012,
+       1042,
+       1061
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "events-click",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "events-click",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1101,
+       1105,
+       1134,
+       1154
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "events-impression",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "events-impression",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1193,
+       1197,
+       1227,
+       1246
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "inventory",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "inventory",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1286,
+       1290,
+       1319,
+       1339
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "invoice-lines",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "invoice-lines",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1378,
+       1382,
+       1412,
+       1431
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "node-metrics",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "node-metrics",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1471,
+       1475,
+       1504,
+       1524
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "plugin-invocations",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "plugin-invocations",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1563,
+       1567,
+       1597,
+       1616
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "audit-ledger",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "audit-ledger",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1656,
+       1660,
+       1690,
+       1709
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "risk-scores",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "risk-scores",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1749,
+       1753,
+       1782,
+       1802
+      ],
+      "height": 92.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "stale-feed",
+     "clipped": false,
+     "width": 291,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "stale-feed",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1838,
+       1842,
+       1872,
+       1891
+      ],
+      "height": 88.6
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated · 4f1c",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated · 4f1c",
+      "qualifier": "",
+      "facts": [
+       "失败"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       2022,
+       2026,
+       2055,
+       2075
+      ],
+      "height": 97.4
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "inventory · b93d",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "inventory · b93d",
+      "qualifier": "",
+      "facts": [
+       "未知"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       2119,
+       2123,
+       2153,
+       2172
+      ],
+      "height": 97.4
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated · 71ae",
+     "clipped": false,
+     "width": 291,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated · 71ae",
+      "qualifier": "",
+      "facts": [
+       "失败"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       2213,
+       2217,
+       2247,
+       2266
+      ],
+      "height": 93.4
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2393,
+       2397,
+       2427,
+       2446,
+       2472
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2511,
+       2515,
+       2545,
+       2564,
+       2589
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2629,
+       2633,
+       2663,
+       2682,
+       2707
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "",
+      "facts": [
+       "不可达",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2747,
+       2751,
+       2780,
+       2800,
+       2825
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2865,
+       2869,
+       2898,
+       2917,
+       2943
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "",
+      "facts": [
+       "观测陈旧",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2982,
+       2986,
+       3016,
+       3035,
+       3060
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3100,
+       3104,
+       3134,
+       3153,
+       3178
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3218,
+       3222,
+       3251,
+       3271,
+       3296
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3336,
+       3340,
+       3369,
+       3389,
+       3414
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "",
+      "facts": [
+       "需要关注",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3453,
+       3457,
+       3487,
+       3506,
+       3532
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3571,
+       3575,
+       3605,
+       3624,
+       3649
+      ],
+      "height": 117.8
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 291,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3686,
+       3690,
+       3719,
+       3739,
+       3764
+      ],
+      "height": 113.8
+     },
+     "geometry": null,
+     "values": 3
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 27
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 1,
+    "total": 27
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3373,
+   "offenders": [],
+   "identityKey": [
+    "Platform Admin",
+    "Dana Ops",
+    "Lee Chen",
+    "Sam Ito",
+    "Nia Park",
+    "Rui Costa",
+    "Aki Tan",
+    "Noa Berg",
+    "trusted-team",
+    "lab",
+    "partner-a",
+    "partner-b",
+    "community",
+    "vendor-x"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 159.4,
+    "p95": 163,
+    "max": 163,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "用户",
+    "角色",
+    "状态",
+    "操作",
+    "发布者",
+    "指纹",
+    "信任状态",
+    "备注"
+   ],
+   "tableRowCounts": [
+    8,
+    6
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 3,
+   "cards": [
+    {
+     "key": "Platform Admin",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Platform Admin",
+      "qualifier": "admin@opsweave.local",
+      "facts": [
+       "admin",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1009,
+       1013,
+       1042,
+       1062,
+       1088,
+       1116
+      ],
+      "height": 159.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Dana Ops",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Dana Ops",
+      "qualifier": "dana@opsweave.local",
+      "facts": [
+       "operator",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1168,
+       1172,
+       1202,
+       1221,
+       1247,
+       1276
+      ],
+      "height": 159.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Lee Chen",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Lee Chen",
+      "qualifier": "lee@opsweave.local",
+      "facts": [
+       "viewer",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1328,
+       1332,
+       1361,
+       1381,
+       1407,
+       1435
+      ],
+      "height": 159.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Sam Ito",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Sam Ito",
+      "qualifier": "sam@opsweave.local",
+      "facts": [
+       "operator",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1487,
+       1491,
+       1521,
+       1540,
+       1566,
+       1594
+      ],
+      "height": 159.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Nia Park",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Nia Park",
+      "qualifier": "nia@opsweave.local",
+      "facts": [
+       "viewer",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1646,
+       1650,
+       1680,
+       1699,
+       1725,
+       1754
+      ],
+      "height": 159.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Rui Costa",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Rui Costa",
+      "qualifier": "rui@opsweave.local",
+      "facts": [
+       "operator",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1806,
+       1810,
+       1839,
+       1859,
+       1885,
+       1913
+      ],
+      "height": 159.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Aki Tan",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Aki Tan",
+      "qualifier": "aki@opsweave.local",
+      "facts": [
+       "auditor",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1965,
+       1969,
+       1999,
+       2018,
+       2044,
+       2072
+      ],
+      "height": 159.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Noa Berg",
+     "clipped": false,
+     "width": 291,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Noa Berg",
+      "qualifier": "noa@opsweave.local",
+      "facts": [
+       "viewer",
+       "已禁用",
+       "启动副本"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2121,
+       2125,
+       2155,
+       2174,
+       2200,
+       2229
+      ],
+      "height": 155.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "trusted-team",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "trusted-team",
+      "qualifier": "",
+      "facts": [
+       "sha256:1111111111111…11111111",
+       "未知",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2366,
+       2372,
+       2376,
+       2405,
+       2425,
+       2465,
+       2493
+      ],
+      "height": 161
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "lab",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab",
+      "qualifier": "",
+      "facts": [
+       "sha256:2222222222222…22222222",
+       "未知",
+       "无"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2527,
+       2533,
+       2537,
+       2566,
+       2586,
+       2626,
+       2654
+      ],
+      "height": 163
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "partner-a",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "partner-a",
+      "qualifier": "",
+      "facts": [
+       "sha256:3333333333333…33333333",
+       "待处理",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2690,
+       2696,
+       2700,
+       2729,
+       2749,
+       2789,
+       2817
+      ],
+      "height": 161
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "partner-b",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "partner-b",
+      "qualifier": "",
+      "facts": [
+       "sha256:4444444444444…44444444",
+       "未知",
+       "无"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2851,
+       2857,
+       2861,
+       2890,
+       2909,
+       2949,
+       2978
+      ],
+      "height": 163
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "community",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "community",
+      "qualifier": "",
+      "facts": [
+       "sha256:5555555555555…55555555",
+       "未知",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       3013,
+       3019,
+       3023,
+       3053,
+       3072,
+       3112,
+       3141
+      ],
+      "height": 161
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "vendor-x",
+     "clipped": false,
+     "width": 291,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "vendor-x",
+      "qualifier": "",
+      "facts": [
+       "sha256:6666666666666…66666666",
+       "待处理",
+       "无"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       3171,
+       3177,
+       3181,
+       3211,
+       3230,
+       3270,
+       3299
+      ],
+      "height": 159
+     },
+     "geometry": null,
+     "values": 4
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 14
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 14
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3607,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 121,
+    "p95": 121,
+    "max": 121,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "最近观测"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1314,
+       1318,
+       1347,
+       1367,
+       1395
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "44分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1435,
+       1439,
+       1468,
+       1488,
+       1516
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "1小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1556,
+       1560,
+       1589,
+       1609,
+       1637
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "",
+      "facts": [
+       "不可达",
+       "2小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1677,
+       1681,
+       1710,
+       1730,
+       1758
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1798,
+       1802,
+       1831,
+       1851,
+       1879
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "",
+      "facts": [
+       "未知",
+       "3小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1919,
+       1923,
+       1952,
+       1972,
+       2000
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "4小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2040,
+       2044,
+       2073,
+       2093,
+       2121
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "4小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2161,
+       2165,
+       2194,
+       2214,
+       2242
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "5小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2282,
+       2286,
+       2315,
+       2335,
+       2363
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "",
+      "facts": [
+       "排空中",
+       "6小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2403,
+       2407,
+       2436,
+       2456,
+       2484
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "7小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2524,
+       2528,
+       2557,
+       2577,
+       2605
+      ],
+      "height": 121
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 291,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "7小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2642,
+       2646,
+       2675,
+       2695,
+       2723
+      ],
+      "height": 117
+     },
+     "geometry": null,
+     "values": 3
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 12
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1941,
+   "offenders": [
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 373,
+     "right": 452
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 413,
+     "right": 439
+    }
+   ],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 175.3,
+    "p95": 175.3,
+    "max": 175.3,
+    "n": 3
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "节点",
+    "槽位",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 3,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 3,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "READY重启次数 0",
+      "facts": [
+       "#0",
+       "运行中",
+       "c0ffee0deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       1387,
+       1414,
+       1441,
+       1459,
+       1478,
+       1503,
+       1521
+      ],
+      "height": 175.3
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "READY重启次数 1",
+      "facts": [
+       "#1",
+       "运行中",
+       "c0ffee1deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       1562,
+       1589,
+       1617,
+       1634,
+       1654,
+       1678,
+       1697
+      ],
+      "height": 175.3
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 313,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "READY重启次数 2",
+      "facts": [
+       "#2",
+       "未知exit code 137",
+       "c0ffee2deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       1734,
+       1762,
+       1789,
+       1807,
+       1826,
+       1851,
+       1869
+      ],
+      "height": 171.3
+     },
+     "geometry": null,
+     "values": 5
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 3
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 3
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1398,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 61.2,
+    "p95": 61.2,
+    "max": 61.2,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "尝试",
+    "状态",
+    "栅栏",
+    "节点",
+    "开始时间"
+   ],
+   "tableRowCounts": [
+    2
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 2
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 2
+   },
+   "tableWidth": 375,
+   "tablePanelWidth": 349
   }
- },
- "capturedAt": "2026-10-29T14:19:51.719Z"
+ }
 }

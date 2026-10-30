@@ -78,6 +78,10 @@ The same file records `overflow: 175` in zh-CN. **Nothing in the repository read
 runs `typecheck`, three `check-*.mjs` scripts, four builds and `vitest` — no browser, no metrics. The
 record was written and the release went out. That is the finding this spec’s gate exists to close.
 
+The artifact above has since been re-collected (§4.7). The same route, measured on this tree at 390 on
+2026-10-31, reports `overflow: -15`. The 223px is a history of what shipped, not a reading of the tree,
+and §4.3 is where that is said in the same breath as the command that used to print it.
+
 ### 1.6 Identical consecutive rows are rendered one at a time
 
 `Activity.tsx:29` `PAGE_SIZE = 25`; the review counted **9 of 25 rows carrying the same event**. A page of
@@ -168,26 +172,65 @@ the first occurrence’s timestamp, `× N`, and the run’s first→last span. T
 On the measured `/admin/activity` page (9 of 25 rows identical) the page renders **17 rows instead of 25**,
 and the run is 1/17 of the page instead of 9/25. Expanding is one click and is not persisted.
 
-### 2.5 The 390 card: the first line is the key (R5)
+### 2.5 The 390 card: two lines, and the first line is the key (R5)
 
 ```
-┌ card ≤ 132px ─────────────────────────────────┐
-│ host-metrics · r9 · 18h ago               [⋯] │   identity 13px, one line, not ellipsised
-│ status      Running                           │   3 facts, label 11 / value 13
-│ attempts    2 / 3                             │
-│ duration    15m 58s                           │
-└───────────────────────────────────────────────┘
+┌ card 70.8px ─────────────────────────────────────┐
+│ host-metrics · 1285            Succeeded   [⋯]   │  line 1: identity 15.6 · badge 20.4 · trigger 32
+│ r7 · Attempts 1/3 · 1800.0 s · 18h ago           │  line 2: qualifier + facts, 16.8
+└──────────────────────────────────────────────────┘
 ```
 
+Two lines, not five. Measured on this tree at 390 (`_metrics_r390-light-en.json`, `/admin/jobs`, 14 cards):
+
+```
+70.8 = 6     padding-top
+     + 38    line 1   the ⋯ trigger is the tallest item on it (identity 15.6, badge 20.4)
+     +  3    row-gap  the line-break pseudo-element, `.ow-card-2l::before` in styles.css
+     + 16.8  line 2   12 × 1.4, one line at the meta tier
+     +  6    padding-bottom
+     +  1    border-bottom
+```
+
+38 is not a chosen number, it is the recorded one: `meta.top 478 − row.top 431 − padding 6 − rowGap 3`
+(`geometry` in the artifact). A flex line is as tall as its tallest item, and on a card that item is the
+32px row control, not the text.
+
+- **Line 1 is §2.1's identity key** — ⟨name⟩ · ⟨disambiguator⟩ — plus what the row is *for* at its end:
+  the status badge and the `⋯` trigger. The trigger stops being an absolutely positioned box and becomes
+  a flex item; the reservation that box needed was 36px of a card whose content is 20.
+- **Line 2 is the qualifier and the demoted facts**, with the same interpunct the qualifier already puts
+  between its own parts: `r7 · Attempts 1/3 · 1800.0 s · 18h ago`.
 - The first line **is** the §2.1 identity key, and it is not truncated by a fixed width. If it does not
   fit, the `name` part ellipsises and `disambiguator · age` never does — those are what make the card
   distinguishable.
-- At most **3 facts** per card, ranked by the §2.2 rule (highest distinct ratio wins). Facts 4…n are not
-  rendered at 390; they live on the detail page.
-- The `⋯` action sits on the identity line, not on a row of its own — that alone is 32 of today’s 239px.
-- 132 = 12 padding + 20 identity + 8 gap + 3 × 22 facts + 12 padding + 12 slack. A target, not a constant:
-  the gate asserts ≤ 140.
+- At most **3 facts** per card (`cardFactCount`), ranked by the §2.2 rule (highest distinct ratio wins).
+  Facts 4…n are not rendered at 390; they live on the detail page.
 - `identityKey` uniqueness must be 1.000 at 390. That is the rule the 14 identical cards violated.
+- Nothing is deleted on the way from five lines to two: a fact cell keeps its element, its `data-label`
+  and its value, and only changes which line it rides (`cardTwoLineRow` / `cardLineAfter` in
+  `pages/table-kit.tsx`). Every selector is inside the 768px query and under `.ow-card-2l`, so §2.3's
+  40px row above 768 is untouched.
+
+**The cost, stated.** Line 1 is the phone's heading, so the column name is **not painted** on a card at 390:
+`.ow-card-2l > td > span:first-child { display: none }`. A reader at 390 gets values without headings.
+What keeps the name reachable: the cell keeps `data-label` (the one machine handle that survives, and what
+the harness counts), the value keeps the heading in a `title` tooltip, and the desktop `thead` keeps it at
+every width above 768. The trade is **144.6px per card** — the five-line measurement this rule replaced —
+against 70.8px.
+
+**Per page, measured** (`_metrics_r390-light-en.json`, 2026-10-31). Three pages opt into the two-line row:
+
+| route | lines | card height | note |
+|---|---|---|---|
+| `/admin/jobs` | 2 | 66.8 – 70.8 | the arithmetic above, closed |
+| `/admin/plugins` | 2 | 77.1 – 92.4 | line 1 carries an extra fact cell |
+| `/admin/nodes` | 3 | 90.6 – 104.8 | a fact wraps: `cardLines.tops` 597 / 617, 31.2 = 2 × 15.6 |
+
+The five table pages that have **not** opted in still stack their facts and measure 88.6–175.3
+(`/admin/governance` 88.6–117.8, `/admin/settings/diagnostics` 117–121, `/admin/activity` 150.6–154.6,
+`/admin/access` 155.4–161.4, `/admin/plugins/dev.opsweave.metrics` 171.3–175.3). That is the remaining gap:
+the rule is written for every card at 390 and three pages apply it.
 
 ### 2.6 Overflow: the container never scrolls on a phone (R6)
 
@@ -282,29 +325,59 @@ thresholds read the cap from it and fail closed when it is absent.
 
 ### 4.3 Proof it goes red on the data that shipped
 
-```
-$ node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json
-FAIL  overflow>0  r390-light-en  /admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae  +223px  worst: <code> mono small right=613
-FAIL  r390-light-en  pages=26  violations=1
+The record that shipped (§1.5) failed this gate:
 
+```
+FAIL  overflow>0  r390-light-en  /admin/jobs/1285fbe8-…  +223px  worst: <code> mono small right=613
 check-ui-metrics: FAIL (1 violation(s) across 25 page measurements)
 $ echo $?
 1
 ```
 
+**That command no longer prints that, and the reason belongs to the record.** The 13 `_metrics_*.json`
+files were committed as data by `a4c246a` with no script that writes them; the harness that produced them
+(`config.w/h/theme/locale/shotFilter`, page fields `fontHist` / `lineHeights`) is not in the repository.
+So the only tool that can regenerate the directory is `tests/ui/ui-table-audit.spec.ts`, and it writes the
+§4.1 contract and nothing else. On 2026-10-31 the directory was re-collected with that harness: the 3 files
+it writes were rewritten, and the 10 it cannot write — the 1024 viewport, both dark themes, the 1440 zh-CN
+file, and the login file — were deleted instead of being left to fail closed for ever on fields no tool can
+fill in. §4.7 is the inventory, and it also states what the deletion cost.
+
+A red proof that still runs, from the tree. `--template` fails closed on an artifact that carries no
+`template` object:
+
+```
+$ node scripts/check-ui-metrics.mjs --template artifacts/ui/visual-v3/audit/_metrics_r1440-light-en.json
+ok    r1440-light-en  pages=10  violations=0
+FAIL  template-unmeasured  r1440-light-en  missing: headerHeight, firstBlockY, controlRow
+
+check-ui-metrics: FAIL (1 violation(s) across 10 page measurements)
+$ echo $?
+1
+```
+
+**One red proof that does not hold, written down instead of implied.** §2.5's `cards[].clipped` detector is
+exercised by the `clipped-probe` test, which measures `/admin/jobs` at 390 twice: as shipped, and with
+§1.4's fixed max-width forced onto the identity line. Every copy of that probe that can still be
+read — the tracked `table/after/_clipped_probe.json` and the 2026-10-31 re-collection — reports
+`withFixedMaxWidth: { cards: 14, clipped: 0 }`. The detector has never been observed to fire. The gate's
+fail-closed half still holds (a card with no boolean `clipped` is `card-clipped-unmeasured`), but
+“this assertion would have caught §1.4” is a claim the artifacts do not support.
+
 ### 4.4 Proof it goes green on a measured-clean run
 
 ```
-$ node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit/_metrics_r1440-light-en.json
-ok    r1440-light-en  pages=26  violations=0
+$ node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit
+ok    r1440-light-en  pages=10  violations=0
+ok    r390-light-en  pages=10  violations=0
+ok    r390-light-zh  pages=10  violations=0
 
-check-ui-metrics: PASS (25 page measurements, no horizontal overflow)
+check-ui-metrics: PASS (30 page measurements, 9 §4.2 assertions each + §2.5 card clipping)
 $ echo $?
 0
 ```
 
-Same script, same tree, two datasets: the red is caused by the 223px, not by a harness that is always red.
-(The zh-CN sibling `_metrics_r390-light-zh.json` fails the same way at 175px.)
+Same script, same tree as §4.3: the red there is caused by a measurement, not by a gate that is always red.
 
 ### 4.5 The script
 
@@ -364,6 +437,32 @@ opt-in env flag), which is a change to what the harness proves — it would no l
 a real session — so it is written down here and not done.
 
 ---
+
+### 4.7 What the artifact directory contains, and what it stopped containing
+
+`artifacts/ui/visual-v3/audit/`, re-collected 2026-10-31 by the only committed harness:
+
+| file | routes | produced by |
+|---|---|---|
+| `_metrics_r1440-light-en.json` | 10 | `tests/ui/ui-table-audit.spec.ts` |
+| `_metrics_r390-light-en.json` | 10 | ditto |
+| `_metrics_r390-light-zh.json` | 10 | ditto |
+
+Deleted in the same run, with the reason each had no producer: `_metrics_r1024-{dark,light}-{en,zh}.json`
+(4), `_metrics_r1440-dark-{en,zh}.json` (2), `_metrics_r390-dark-{en,zh}.json` (2) and
+`_metrics_r1440-light-zh.json` (1) — the harness's matrix is 1440 and 390, light only, and it skips zh-CN at
+1440; and `_metrics_login.json` (1) — that file measured `/login` alone, while every other artifact in the
+set recorded `/login` as `SKIP`, so no committed harness can produce a passing login measurement.
+
+**What that cost, stated rather than implied.** The deleted files carried **26 routes** over 12 label
+combinations; the re-collected set carries **10 routes** over 3. The 16 routes this gate no longer measures
+anywhere: `/403`, `/admin/nope`, `/admin/overview`, `/admin/pipelines`,
+`/admin/pipelines/host-metrics-pipeline` (and its `…/editor` and `…/run`),
+`/admin/plugins/dev.opsweave.hello`, `/admin/plugins/install`, `/admin/settings`, `/admin/ops-center`,
+`/admin/instances/{id}/logs`, `/app/home`, `/app/incidents`, `/app/investigations`,
+`/app/reports`, `/login`. §4.5 says a page with no measurement is a failure and not a pass; a route
+that drops out of the harness is that same failure one level up, so it is recorded here rather than being
+inherited silently.
 
 ## 5. 不做什么
 
