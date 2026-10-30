@@ -29,32 +29,86 @@ export function useCompactViewport(query = '(max-width: 1024px)'): boolean {
   return compact;
 }
 
-const THEME_STORAGE_KEY = 'opsweave-theme';
+/**
+ * Which theme is the browser in?
+ *
+ * V5 read `opsweave-theme` from localStorage and defaulted to light, so a visitor whose OS
+ * asked for dark got a light console and a `prefers-color-scheme: dark` media query that could
+ * never match. The order is now: an explicit choice the visitor made (persisted), then the
+ * system preference, live. It lives beside the toggle that writes it, and `main.tsx` imports
+ * `resolveInitialTheme` so the first paint uses the same rule.
+ */
+export const THEME_STORAGE_KEY = 'opsweave-theme';
 
-type Theme = 'light' | 'dark';
+/** The OS preference as a media query, so a mid-session change is followed too. */
+export const DARK_SCHEME_QUERY = '(prefers-color-scheme: dark)';
 
-function readStoredTheme(): Theme {
+export type Theme = 'light' | 'dark';
+
+function storedTheme(): Theme | null {
   try {
-    return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'dark' || stored === 'light' ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The system preference; light when the browser cannot answer. */
+export function systemTheme(): Theme {
+  try {
+    return window.matchMedia(DARK_SCHEME_QUERY).matches ? 'dark' : 'light';
   } catch {
     return 'light';
   }
 }
 
+/** First paint: the persisted choice, else what the OS asks for. */
+export function resolveInitialTheme(): Theme {
+  return storedTheme() ?? systemTheme();
+}
+
+/** Sets `html[data-theme]`, the attribute every token block keys off. */
+export function applyDocumentTheme(theme: Theme): void {
+  if (typeof document !== 'undefined') document.documentElement.dataset.theme = theme;
+}
+
 /** One preference for the whole product: switching shell must not flip the theme. */
 export function useTheme() {
-  const [theme, setTheme] = React.useState<Theme>(readStoredTheme);
+  const [theme, setTheme] = React.useState<Theme>(resolveInitialTheme);
+  const [chosen, setChosen] = React.useState<boolean>(() => storedTheme() !== null);
+
   React.useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch {
-      // A blocked storage keeps the theme for this session only.
-    }
+    applyDocumentTheme(theme);
   }, [theme]);
+
+  React.useEffect(() => {
+    if (chosen) return;
+    let list: MediaQueryList;
+    try {
+      list = window.matchMedia(DARK_SCHEME_QUERY);
+    } catch {
+      return;
+    }
+    const sync = () => setTheme(list.matches ? 'dark' : 'light');
+    sync();
+    list.addEventListener('change', sync);
+    return () => list.removeEventListener('change', sync);
+  }, [chosen]);
+
   return {
     theme,
-    toggle: () => setTheme((previous) => (previous === 'light' ? 'dark' : 'light')),
+    chosen,
+    toggle: () => setTheme((previous) => {
+      const next = previous === 'light' ? 'dark' : 'light';
+      setChosen(true);
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, next);
+      } catch {
+        // A blocked storage keeps the choice for this session only.
+      }
+      return next;
+    }),
   };
 }
 

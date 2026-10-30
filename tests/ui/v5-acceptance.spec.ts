@@ -82,7 +82,14 @@ test('state: empty - an unconfigured platform is neutral, with three steps and o
   const band = page.locator('section.health-band[data-health="NOT_CONFIGURED"]');
   await expect(band, 'READY with 0 nodes and 0 plugins must not claim health').toBeVisible();
   await expect(band).toHaveClass(/tone-neutral/);
-  await expect(band.locator('h2')).toHaveText('Not configured yet');
+  // V5 printed "Not configured yet" twice on this band (the state chip and the headline), so
+  // the phrase said nothing new the second time. The chip carries the verdict word once; the
+  // headline now says what the verdict means, and the assertion forbids them being the same.
+  const verdictWord = (await band.locator('.status-indicator').innerText()).trim();
+  expect(verdictWord, 'the chip carries the verdict word').toBe('Not configured');
+  const headline = (await band.locator('h2').innerText()).trim();
+  expect(headline, 'the headline explains the verdict instead of repeating it').toBe('Nothing is observed yet: no node, no plugin');
+  expect(headline, 'the verdict word must not be printed twice').not.toBe(verdictWord);
   await expect(band.locator('h2')).not.toHaveText('Platform is ready');
   await expect(band.locator('.status-indicator')).toHaveAttribute('data-indicator', 'notConfigured');
 
@@ -90,6 +97,13 @@ test('state: empty - an unconfigured platform is neutral, with three steps and o
   await expect(setup).toBeVisible();
   await expect(setup.locator('.setup-step')).toHaveCount(3);
   await expect(setup.locator('.setup-actions a'), 'one primary action, not two').toHaveCount(1);
+
+  // P0-2: the topbar pill and the rail read the body's verdict, so an unconfigured platform
+  // cannot be announced as "Platform ready" in the chrome above it.
+  await expect(page.getByTestId('health-pill'), 'the pill follows the body verdict').toHaveAttribute('data-verdict', 'not-configured');
+  await expect(page.getByTestId('health-pill')).toHaveText(/Not configured/);
+  await expect(page.getByTestId('health-pill')).not.toHaveText(/ready/i);
+  await expect(page.locator('[data-version-field="status"] strong'), 'the rail cannot say READY here').toHaveText('Not configured');
 
   const values = page.locator('.stat-strip .ow-metric-value');
   await expect(values.nth(0), '0/0 is not a ratio').toHaveText('—');
@@ -127,7 +141,9 @@ test('state: forbidden - a 403 is a wall, not an error and not a retry', async (
 test('state: dialog - a real modal with a real scrim', async ({ page }) => {
   await login(page);
   await page.goto('/admin/nodes');
-  await page.locator('[data-async-state] .empty-state button').first().click();
+  // The dialog is the same whether or not a node is enrolled, so open it from the page's one
+  // primary action instead of assuming this fixture has an empty node list.
+  await page.locator('.page-header .page-actions > *').last().click();
   const dialog = page.locator('[role="dialog"][aria-modal="true"]');
   await expect(dialog, 'the state is a dialog, so a dialog element must exist').toBeVisible();
   const overlay = page.locator('.ow-dialog-overlay');
@@ -426,6 +442,16 @@ test('contrast: the status word, the tertiary label and canvas captions clear 4.
 
 test('attention: the count has a referent - a 3px tone rule and a pill on every row', async ({ page }) => {
   await login(page);
+  // One attention row, injected: a seeded platform may legitimately have none, and this test
+  // is about the row the count refers to, not about which warning the fixture happens to hold.
+  const live = await page.evaluate(async () => (await fetch('/api/v1/overview')).json());
+  await page.route(OVERVIEW, (route) => route.fulfill({
+    json: {
+      ...live,
+      health: 'ATTENTION',
+      attention: [{ severity: 'warning', title: 'Node lab-node-1 heartbeat is stale', detail: 'Node lab-node-1 has not sent a heartbeat for longer than the stale threshold.', link: '/nodes' }],
+    },
+  }));
   await page.goto('/admin/overview');
   // Wait for the panel to paint before counting: reading rows straight after goto measured
   // whatever had rendered so far, not what the page shows.

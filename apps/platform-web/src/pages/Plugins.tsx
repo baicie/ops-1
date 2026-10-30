@@ -111,10 +111,16 @@ export function PluginsPage() {
             digits. */}
         <section className="stat-block" aria-label={t('plugins.summary.aria')} data-testid="plugins-summary">
           <div className="ow-summary">
-            <SummaryCard label={t('plugins.summary.installed')} value={summary.installed} definition={t('plugins.summary.installed.definition')} />
-            <SummaryCard label={t('plugins.summary.upgradeable')} value={summary.upgradeable} definition={t('plugins.summary.upgradeable.definition')} tone={summary.upgradeable > 0 ? 'warn' : undefined} />
-            <SummaryCard label={t('plugins.summary.abnormal')} value={summary.abnormal} definition={t('plugins.summary.abnormal.definition')} tone={summary.abnormal > 0 ? 'danger' : undefined} />
+            <SummaryCard summaryKey="installed" label={t('plugins.summary.installed')} value={summary.installed} definition={t('plugins.summary.installed.definition')} />
+            <SummaryCard summaryKey="upgradeable" label={t('plugins.summary.upgradeable')} value={summary.upgradeable} definition={t('plugins.summary.upgradeable.definition')} tone={summary.upgradeable > 0 ? 'warn' : undefined} />
+            <SummaryCard summaryKey="abnormal" label={t('plugins.summary.abnormal')} value={summary.abnormal} definition={t('plugins.summary.abnormal.definition')} tone={summary.abnormal > 0 ? 'danger' : undefined} />
           </div>
+          {/* The Overview KPI counts installation rows; the built-in Ops Center plugin has no
+              installation row, so counting the row here was 4 against the Overview's 3. Both
+              numbers now use one selector, and the excluded row says so instead of vanishing. */}
+          {summary.system > 0 ? (
+            <p className="stat-note" data-testid="plugins-system-note">{t('plugins.summary.systemNote', { count: summary.system })}</p>
+          ) : null}
         </section>
         {isStale(observedAt, 8000) ? <NoticeBar state="stale" title={t('ui.stale.title')} detail={t('ui.stale.detail', { at: observedAt ?? '' })} /> : null}
         <section className="toolbar">
@@ -211,7 +217,7 @@ export function PluginsPage() {
                           )}
                         </div>
                       </StackCell>
-                      <TableCell className="w-8 text-right text-muted-foreground max-[760px]:w-full max-[760px]:border-0 max-[760px]:px-3.5 max-[760px]:pt-0">
+                      <TableCell className="w-8 text-right text-muted-foreground max-[768px]:w-full max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:pt-0">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <button type="button" className="icon-btn" aria-label={t('plugins.action.menu', { name: plugin.name })} onClick={(event) => event.stopPropagation()}>
@@ -238,16 +244,17 @@ export function PluginsPage() {
   );
 }
 
-function SummaryCard({ label, value, definition, tone }: { label: string; value: number; definition: string; tone?: 'warn' | 'danger' }) {
+function SummaryCard({ summaryKey, label, value, definition, tone }: { summaryKey: string; label: string; value: number; definition: string; tone?: 'warn' | 'danger' }) {
   return (
     <div
       className={cn('ow-summary-card', tone === 'warn' && 'is-warn', tone === 'danger' && 'is-danger')}
       data-summary={label}
+      data-summary-key={summaryKey}
       title={definition}
       aria-label={label + ': ' + value + '. ' + definition}
     >
       <span className="ow-summary-label">{label}</span>
-      <span className="ow-summary-value">{value}</span>
+      <span className="ow-summary-value" data-summary-value={summaryKey}>{value}</span>
       <span className="ow-summary-definition" aria-hidden="true">{definition}</span>
     </div>
   );
@@ -264,12 +271,16 @@ function summarize(plugins: PluginSummary[]) {
   let installed = 0;
   let upgradeable = 0;
   let abnormal = 0;
+  let system = 0;
   for (const plugin of plugins) {
+    // One selector for both pages: the Overview counts kernel.plugin_installations rows, and a
+    // built-in (system) plugin has none. Counting it here is what printed 4 beside a 3.
+    if (plugin.isSystem) { system += 1; continue; }
     if (plugin.state === 'INSTALLED') installed += 1;
     if (plugin.latestVersion && plugin.activeVersion && plugin.latestVersion !== plugin.activeVersion) upgradeable += 1;
     const signatureBad = Boolean(plugin.signatureState && plugin.signatureState !== 'VERIFIED');
     const replicasBehind = plugin.totalInstances > 0 && plugin.readyInstances < plugin.totalInstances;
     if (signatureBad || replicasBehind || plugin.state === 'DEGRADED' || plugin.state === 'FAILED') abnormal += 1;
   }
-  return { installed, upgradeable, abnormal };
+  return { installed, upgradeable, abnormal, system };
 }

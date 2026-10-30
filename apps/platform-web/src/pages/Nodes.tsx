@@ -49,14 +49,14 @@ function percentOf(value?: number | null): number | null {
 // The legacy .data-table card layout at <=760px (thead hidden, one row per node) keyed off
 // the .data-table selector; these constants carry the same breakpoint as Tailwind variants so
 // the tables no longer need that selector at all.
-const stackTable = 'max-[760px]:block';
-const stackHead = 'max-[760px]:hidden';
-const stackBody = 'max-[760px]:block';
-const stackRow = 'max-[760px]:flex max-[760px]:flex-col max-[760px]:px-1 max-[760px]:py-2.5';
+const stackTable = 'max-[768px]:block';
+const stackHead = 'max-[768px]:hidden';
+const stackBody = 'max-[768px]:block';
+const stackRow = 'max-[768px]:flex max-[768px]:flex-col max-[768px]:px-1 max-[768px]:py-2.5';
 const stackCell =
-  'max-[760px]:flex max-[760px]:items-start max-[760px]:justify-between max-[760px]:gap-3.5 ' +
-  'max-[760px]:border-0 max-[760px]:px-3.5 max-[760px]:py-[5px] max-[760px]:text-right';
-const stackLabel = 'hidden text-muted-foreground max-[760px]:inline';
+  'max-[768px]:flex max-[768px]:items-start max-[768px]:justify-between max-[768px]:gap-3.5 ' +
+  'max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:py-[5px] max-[768px]:text-right';
+const stackLabel = 'hidden text-muted-foreground max-[768px]:inline';
 
 /** Table cell that keeps its data-label and prints that label inline only in the stacked layout. */
 function StackCell({ label, className, children, ...props }: React.TdHTMLAttributes<HTMLTableCellElement> & { label: string }) {
@@ -133,8 +133,8 @@ export function NodesPage() {
     <div className="page-stack">
       <PageHeader
         title={t('page.nodes')}
-        actions={<Button variant="secondary" className="max-[760px]:flex-1" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
-        primary={<Button className="max-[760px]:flex-1" onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'} title={user?.role !== 'admin' ? t('nodes.join.adminRequired') : ''}><Icon name="plus" size={15} /> {t('nodes.join.action')}</Button>}
+        actions={<Button variant="secondary" className="max-[768px]:flex-1" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
+        primary={<Button className="max-[768px]:flex-1" onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'} title={user?.role !== 'admin' ? t('nodes.join.adminRequired') : ''}><Icon name="plus" size={15} /> {t('nodes.join.action')}</Button>}
       />
       <AsyncBoundary
         loading={loading}
@@ -220,7 +220,7 @@ export function NodesPage() {
                       ) : <NoData detail={t('nodes.resource.missingSnapshot')} />}
                     </StackCell>
                     <StackCell label={t('table.sampledAt')} data-resource="sampled-at">{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Icon name="chevron" size={16} /></TableCell>
                   </TableRow>
                 );
               })}
@@ -315,7 +315,7 @@ export function NodeDetailPage() {
         eyebrow={t('nodeDetail.eyebrow')}
         title={data.name}
         description={<><span className="mono">{data.id}</span> · {t('nodeDetail.generation', { generation: data.generation })} · {data.os}/{data.arch}</>}
-        actions={<><Button variant="secondary" className="max-[760px]:flex-1" onClick={() => { void reload(); void reloadInstances(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{user?.role === 'admin' && <Button variant="destructive" className="max-[760px]:flex-1" onClick={() => setConfirm(true)}><Icon name="trash" size={15} /> {t('action.revoke')}</Button>}</>}
+        actions={<><Button variant="secondary" className="max-[768px]:flex-1" onClick={() => { void reload(); void reloadInstances(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{user?.role === 'admin' && <Button variant="destructive" className="max-[768px]:flex-1" onClick={() => setConfirm(true)}><Icon name="trash" size={15} /> {t('action.revoke')}</Button>}</>}
       />
       <div className="detail-meta"><StatusPill status={data.status} />{data.stale && <span className="meta-chip text-warning"><Icon name="warning" size={13} /> {t('nodeDetail.staleSince')} <TimeAgo value={data.lastSeenAt} /></span>}<span className="meta-chip"><Icon name="clock" size={13} /> {t('nodeDetail.enrolled', { at: formatDate(data.enrolledAt) })}</span><span className="meta-chip"><Icon name="server" size={13} /> {data.runtimeAdapterVersion || t('nodeDetail.adapterUnknown')}</span></div>
       <div className="summary-grid">

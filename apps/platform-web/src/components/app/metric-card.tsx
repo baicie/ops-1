@@ -26,6 +26,8 @@ export function MetricCard({
   state = 'ready',
   showSampled = true,
   className,
+  /** A stable identity for evidence: the visible label is localized, this one is not. */
+  metricId,
 }: {
   label: string;
   value?: React.ReactNode;
@@ -44,6 +46,7 @@ export function MetricCard({
    */
   showSampled?: boolean;
   className?: string;
+  metricId?: string;
 }) {
   const t = useT();
   const body = (
@@ -72,9 +75,9 @@ export function MetricCard({
     </>
   );
 
-  if (!href) return <div className={cn('ow-metric', className)}>{body}</div>;
+  if (!href) return <div className={cn('ow-metric', className)} data-metric={metricId}>{body}</div>;
   return (
-    <Link to={href} className={cn('ow-metric', 'ow-metric-link', className)} data-metric-card="" data-metric-href={href}>
+    <Link to={href} className={cn('ow-metric', 'ow-metric-link', className)} data-metric-card="" data-metric={metricId} data-metric-href={href}>
       {body}
     </Link>
   );

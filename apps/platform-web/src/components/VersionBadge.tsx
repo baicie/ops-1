@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
-import type { MessageKey } from '../i18n';
+import { VERDICT_COPY, usePlatformVerdict, verdictDotState } from '../lib/platform-status';
 
 /**
  * Build identity reported by the Kernel at `GET /api/v1/version`.
@@ -13,16 +13,6 @@ type BuildIdentity = {
   buildTime?: string | null;
   environment?: string | null;
   startedAt?: string | null;
-};
-
-/** Wire-level readiness codes from `/readyz`. These are protocol values, not display copy. */
-type ReadinessCode = 'READY' | 'NOT_READY' | 'UNKNOWN';
-
-/** Only the rendered label is localized; the code above stays stable on the wire. */
-const READINESS_LABEL_KEYS: Record<ReadinessCode, MessageKey> = {
-  READY: 'badge.value.ready',
-  NOT_READY: 'badge.value.notReady',
-  UNKNOWN: 'badge.value.unknown',
 };
 
 /**
@@ -42,7 +32,12 @@ const READINESS_LABEL_KEYS: Record<ReadinessCode, MessageKey> = {
 export function VersionBadge() {
   const { t, formatDateTime } = useI18n();
   const [identity, setIdentity] = useState<BuildIdentity | null>(null);
-  const [status, setStatus] = useState<ReadinessCode>('UNKNOWN');
+  // V5 printed the /readyz HTTP status as "Status READY", so the rail advertised READY on the
+  // 403, error and not-configured pages whose body said otherwise. The field now carries the
+  // shell's one verdict (lib/platform-status), the same value the topbar pill prints.
+  const verdict = usePlatformVerdict();
+  const statusWord = t(VERDICT_COPY[verdict].short);
+  const dotState = verdictDotState(verdict);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,15 +51,6 @@ export function VersionBadge() {
         if (!cancelled && response.ok) setIdentity((await response.json()) as BuildIdentity);
       } catch {
         // Best-effort: an unreachable kernel keeps every field at UNKNOWN.
-      }
-      try {
-        const ready = await fetch('/readyz', {
-          credentials: 'same-origin',
-          headers: { accept: 'application/json' },
-        });
-        if (!cancelled) setStatus(ready.ok ? 'READY' : 'NOT_READY');
-      } catch {
-        if (!cancelled) setStatus('UNKNOWN');
       }
     }
 
@@ -86,9 +72,9 @@ export function VersionBadge() {
   return (
     <footer className="sidebar-meta-block" aria-label="Deployment version">
       <div className="sidebar-meta-rows">
-        {/* Row 1 and row 3 own the full 240px rail; only the two short pairs share row 2.
-            At two pairs per row on every line, "Environment STAGING" overflowed by 1px and
-            rendered "STAGI..." - a truncated value is not a self-proof. */}
+        {/* One labelled fact per row. Two facts shared a row until the status field stopped
+            being a short wire code: "Not configured" squeezed "Commit bfe8d70" from 46px of
+            text into 42px of box, and a truncated SHA is not a self-proof. */}
         <div className="sidebar-meta-row">
           <span className="sidebar-meta-field" data-version-field="environment">
             <span className="sidebar-meta-key">{t('badge.environment')}</span>
@@ -100,11 +86,13 @@ export function VersionBadge() {
             <span className="sidebar-meta-key">{t('badge.commit')}</span>
             <strong className="sidebar-meta-sha" title={identity?.commitSha ?? undefined}>{commit}</strong>
           </span>
+        </div>
+        <div className="sidebar-meta-row">
           <span className="sidebar-meta-field" data-version-field="status">
             <span className="sidebar-meta-key">{t('badge.status')}</span>
-            <strong className="sidebar-meta-readiness">
-              <span className="sidebar-meta-dot" data-state={status} aria-hidden="true" />
-              {t(READINESS_LABEL_KEYS[status])}
+            <strong className="sidebar-meta-readiness" data-verdict={verdict}>
+              <span className="sidebar-meta-dot" data-state={dotState} aria-hidden="true" />
+              {statusWord}
             </strong>
           </span>
         </div>

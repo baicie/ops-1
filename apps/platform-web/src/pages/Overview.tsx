@@ -13,6 +13,8 @@ import { AsyncBoundary, NoticeBar, useObservedPolling } from '../components/app/
 import { MetricCard } from '../components/app/metric-card';
 import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, indicatorStateForCode, type IndicatorState } from '../components/app/status-indicator';
+import { localizeAttentionDetail, localizeAttentionTitle } from '../lib/kernel-messages';
+import { isUnconfigured } from '../lib/platform-status';
 
 /** Only the fields this view reads; /api/v1/diagnostics is a plain object payload. */
 interface DiagnosticsView {
@@ -118,10 +120,10 @@ export function OverviewPage() {
   const partialSource = sourceStates.includes('missing');
 
   // A green verdict on an empty platform is the exact failure rules/05 and AGENTS.md forbid:
-  // READY with zero nodes and zero plugins has proven nothing, because nothing exists yet. It
-  // is NOT_CONFIGURED - neutral, not green - and the page says what to do next instead of
-  // printing an all-clear over an empty install.
-  const unconfigured = Boolean(data && data.health === 'READY' && data.nodesTotal === 0 && data.pluginsInstalled === 0);
+  // READY with zero nodes and zero plugins has proven nothing, because nothing exists yet. The
+  // rule lives in lib/platform-status so the topbar pill and the rail's status field read the
+  // same derivation instead of inventing their own (§ P0-2).
+  const unconfigured = isUnconfigured(data);
 
   const criticalCount = data ? data.attention.filter((item) => item.severity === 'critical').length : 0;
   // The band says one thing. Its three children (state, headline, when) are the same three
@@ -129,7 +131,7 @@ export function OverviewPage() {
   const healthHeadline = !data
     ? ''
     : unconfigured
-      ? t('overview.health.notConfigured')
+      ? t('overview.setup.headline')
       : data.health === 'READY'
       ? t('overview.health.ready')
       : data.health === 'DEGRADED'
@@ -168,12 +170,16 @@ export function OverviewPage() {
                 <div className="health-band-state">
                   <StatusIndicator
                     state={unconfigured ? 'notConfigured' : indicatorStateForCode(data.health)}
-                    label={unconfigured ? t('overview.health.notConfigured') : data.health}
+                    label={unconfigured ? t('state.notConfigured') : data.health}
                   />
                 </div>
                 <div className="health-band-copy">
                   <h2>{healthHeadline}</h2>
-                  <p>{unconfigured ? t('overview.health.notConfiguredDetail') : data.attention.length ? data.attention[0].detail : t('overview.health.allClearDetail')}</p>
+                  <p>{unconfigured
+                    ? t('overview.health.notConfiguredDetail')
+                    : data.attention.length
+                      ? localizeAttentionDetail(data.attention[0].detail, t).text
+                      : t('overview.health.allClearDetail')}</p>
                 </div>
                 <div className="health-band-side" data-testid="overview-observed">
                   <span title={observedAt ?? undefined}>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>
@@ -195,6 +201,7 @@ export function OverviewPage() {
                     href="/admin/nodes"
                   />
                   <MetricCard
+                    metricId="installedPlugins"
                     label={t('overview.kpi.installedPlugins')}
                     value={data.pluginsInstalled}
                     detail={t(data.pluginsAvailable === 1 ? 'overview.kpi.installedPlugins.one' : 'overview.kpi.installedPlugins.many', { count: data.pluginsAvailable })}
@@ -262,13 +269,24 @@ export function OverviewPage() {
                     </div>
                   ) : (
                     <ul className="attention-list">
-                      {data.attention.map((item, index) => (
-                        <li key={`${item.title}-${index}`} className={`attention-item severity-${item.severity}`} data-severity={item.severity}>
-                          <StatusIndicator state={SEVERITY_STATE[item.severity] ?? 'attention'} label={t(SEVERITY_LABEL[item.severity] ?? 'overview.severity.warning')} />
-                          <div className="attention-item-copy"><strong>{item.title}</strong><p>{item.detail}</p></div>
-                          <Link className="text-link" to={item.link}>{t('overview.attention.inspect')} <Icon name="arrowRight" size={13} /></Link>
-                        </li>
-                      ))}
+                      {data.attention.map((item, index) => {
+                        // The Kernel writes these sentences in English and the payload carries no
+                        // message code, so a recognized sentence is localized and an unknown one
+                        // is printed verbatim with its source named (lib/kernel-messages).
+                        const title = localizeAttentionTitle(item.title, t);
+                        const detail = localizeAttentionDetail(item.detail, t);
+                        return (
+                          <li key={`${item.title}-${index}`} className={`attention-item severity-${item.severity}`} data-severity={item.severity} data-title-source={title.source} data-detail-source={detail.source}>
+                            <StatusIndicator state={SEVERITY_STATE[item.severity] ?? 'attention'} label={t(SEVERITY_LABEL[item.severity] ?? 'overview.severity.warning')} />
+                            <div className="attention-item-copy">
+                              <strong>{title.text}</strong>
+                              {title.source === 'kernel' ? <span className="server-source">{t('ui.textSource.kernel')}</span> : null}
+                              <p>{detail.text}{detail.source === 'kernel' ? <span className="server-source">{t('ui.textSource.kernel')}</span> : null}</p>
+                            </div>
+                            <Link className="text-link" to={item.link}>{t('overview.attention.inspect')} <Icon name="arrowRight" size={13} /></Link>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </section>

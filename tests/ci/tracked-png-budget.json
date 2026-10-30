@@ -11,7 +11,7 @@
   ],
   "$howToRegenerate": "node tests/ci/check-tracked-png-budget.mjs --print-manifest",
   "totals": {
-    "maxFiles": 382,
+    "maxFiles": 422,
     "maxBytes": 73451744
   },
   "directories": {
@@ -80,6 +80,9 @@
     },
     "artifacts/ui/v5": {
       "maxFiles": 16
+    },
+    "artifacts/ui/v6-remediation": {
+      "maxFiles": 40
     }
   },
   "knownMissingDocReferences": [

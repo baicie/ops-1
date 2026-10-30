@@ -1,8 +1,7 @@
 import * as React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { api } from '../../api';
-import type { Overview } from '../../types';
 import { Icon } from '../../components/Icons';
+import { VERDICT_COPY, pillText, usePlatformSnapshot, usePlatformVerdict } from '../../lib/platform-status';
 import { useI18n } from '../../i18n';
 import { Breadcrumb, type BreadcrumbEntry } from '../../components/app/breadcrumb';
 import { CommandPalette, useCommandShortcut, type CommandEntry } from '../../components/app/command';
@@ -31,28 +30,14 @@ export function AdminHeader({
   const location = useLocation();
   const { mobileOpen, setMobileOpen } = useSidebar();
 
-  const [health, setHealth] = React.useState<Overview | null>(null);
   const [commandOpen, setCommandOpen] = React.useState(false);
+  // The pill reads the shell's one verdict (lib/platform-status) instead of keeping its own
+  // copy of /api/v1/overview: a second reading of the same endpoint is how the topbar came to
+  // promise "Platform ready" over a body that said "Not configured".
+  const snapshot = usePlatformSnapshot();
+  const verdict = usePlatformVerdict();
 
   useCommandShortcut(() => setCommandOpen(true));
-
-  React.useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const result = await api.get<Overview>('/api/v1/overview');
-        if (!cancelled) setHealth(result);
-      } catch {
-        // The health pill is best-effort; an unreachable kernel leaves it empty.
-      }
-    }
-    void load();
-    const timer = window.setInterval(load, 15000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
 
   const trail = React.useMemo<BreadcrumbEntry[]>(
     () => breadcrumbTrail(location.pathname).map((node) => ({ label: node.labelKey ? t(node.labelKey) : node.text ?? '', to: node.to })),
@@ -70,7 +55,10 @@ export function AdminHeader({
     navigate(entry.path);
   }
 
-  const healthTone = health?.health === 'READY' ? 'ok' : health?.health === 'DEGRADED' ? 'danger' : 'warn';
+  const copy = VERDICT_COPY[verdict];
+  const criticalCount = snapshot.overview
+    ? snapshot.overview.attention.filter((item) => item.severity === 'critical').length
+    : 0;
 
   return (
     <header className="topbar admin-topbar">
@@ -103,16 +91,10 @@ export function AdminHeader({
           <kbd className="kbd" aria-hidden="true">&#8984;K</kbd>
         </button>
 
-        {health ? (
-          <span className={'health-pill health-' + healthTone} data-testid="health-pill">
-            <span className="health-dot" aria-hidden="true" />
-            {health.health === 'READY'
-              ? t('topbar.health.ready')
-              : health.health === 'DEGRADED'
-                ? t('topbar.health.critical', { count: health.attention.filter((item) => item.severity === 'critical').length })
-                : t('topbar.health.attention')}
-          </span>
-        ) : null}
+        <span className={'health-pill health-' + copy.tone} data-testid="health-pill" data-verdict={verdict}>
+          <span className="health-dot" aria-hidden="true" />
+          {pillText(verdict, t, criticalCount)}
+        </span>
 
         <LanguageSwitcher />
         <ThemeToggle />

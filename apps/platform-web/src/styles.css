@@ -94,6 +94,12 @@
   --ow-motion-normal: 180ms;
   /* Inter is not shipped yet, so this resolves to the system stack it already fell back to;
      the token exists so one edit switches it when the font is bundled. */
+  /* Filter chips: a 12% accent fill marks the selected one, and the text pair is measured
+     rather than inherited (see section 13 b). */
+  --ow-chip-text: #4b5563;
+  --ow-chip-bg: #eef1f5;
+  --ow-chip-active-text: #2a48b8;
+  --ow-chip-active-bg: color-mix(in srgb, #3457d5 12%, transparent);
   --ow-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --ow-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -128,6 +134,10 @@ html[data-theme="dark"] {
   --ow-danger-soft: #35191c;
   --ow-info: #7bb6f4;
   --ow-info-soft: #142538;
+  --ow-chip-text: #a8b3c1;
+  --ow-chip-bg: #1b2129;
+  --ow-chip-active-text: #cdd8ff;
+  --ow-chip-active-bg: color-mix(in srgb, #7891ff 18%, transparent);
   --ow-code-bg: #090c11;
   --ow-code-text: #d5dfec;
   --ow-shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
@@ -1111,14 +1121,6 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .module-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; font-size: var(--ow-type-xs); color: var(--ow-text-muted); }
 .module-card-observed { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Summary strips: the count and the rule that produced it, side by side. */
-.ow-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 8px; }
-.ow-summary-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 12px 12px; background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); }
-.ow-summary-label { display: flex; align-items: center; gap: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
-.ow-summary-value { font-size: var(--ow-type-xl); font-weight: 600; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-.ow-summary-definition { font-size: var(--ow-type-xs); line-height: 1.45; color: var(--ow-text-muted); }
-.ow-summary-card.is-warn .ow-summary-value { color: var(--ow-warn); }
-.ow-summary-card.is-danger .ow-summary-value { color: var(--ow-danger); }
 
 /* Async boundary panels and the not-current notices. */
 .async-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); }
@@ -1307,63 +1309,65 @@ details.panel.advanced > summary { padding: 12px 16px; }
 /* The verdict chip is the one place a state word is allowed to be loud. */
 .health-band-state .status-indicator { font-size: var(--ow-type-sm); padding: 2px 8px 2px 8px; }
 
-/* ── 2. Glance strip: four numbers, one rhythm ───────────────────────────────────────
- * Same three tiers in every cell - 11px uppercase label, 21px value, 11px note - so the
- * four cells share a baseline and their bottoms line up. The denominator is a real part of
- * the value ("3 / 3"), never a different format in the next cell over ("3"). */
-.stat-block { display: block; min-width: 0; }
-.stat-strip {
+/* ── 2. One metric strip, three pages ────────────────────────────────────────────────
+ * Overview, Plugins and Nodes each render "a few numbers, each a way in". V5 shipped two
+ * recipes for that one element: .stat-strip glued its cells together with shared hairlines
+ * and no gap, .ow-summary drew bordered cards with an 8px gap - and the hairline strip sat
+ * flush against the panel below it while every other gap on the page was 24px. One recipe
+ * now, read by both class names: equal cards, one 8px gap, the card radius. */
+.stat-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.stat-strip,
+.ow-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-top: 1px solid var(--ow-border);
-  border-bottom: 1px solid var(--ow-border);
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  gap: var(--ow-space-2);
+  border: 0;
   min-width: 0;
 }
-.stat-strip > * {
+.stat-strip > *,
+.ow-summary-card {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 10px 20px 11px;
-  border: 0;
-  border-left: 1px solid var(--ow-border);
-  border-radius: 0;
-  background: transparent;
+  gap: 2px;
+  padding: 12px 16px 13px;
+  border: 1px solid var(--ow-border);
+  border-radius: var(--ow-radius-card);
+  background: var(--ow-surface);
   box-shadow: none;
   text-align: left;
 }
-.stat-strip > *:first-child { border-left: 0; padding-left: 0; }
-.stat-strip > *:last-child { padding-right: 0; }
-.stat-strip .ow-metric-label {
-  font-size: var(--ow-type-xs);
-  font-weight: 600;
-  letter-spacing: .055em;
-  text-transform: uppercase;
-  color: var(--ow-text-muted);
-}
-.stat-strip .ow-metric-value {
-  min-height: 0;
-  font-size: var(--ow-type-metric);
-  font-weight: 600;
-  letter-spacing: -.015em;
-  line-height: 1.25;
-  font-variant-numeric: tabular-nums;
-}
-.stat-strip .ow-metric-detail {
-  font-size: var(--ow-type-xs);
-  color: var(--ow-text-muted);
-  min-height: 15px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.stat-strip .ow-metric-go { display: none; }
-.stat-strip .ow-metric-link { border-radius: 0; transition: background var(--ow-motion-fast); }
-.stat-strip .ow-metric-link:hover { background: var(--ow-surface-2); text-decoration: none; }
+.stat-strip .ow-metric-label,
+.ow-summary-label { font-size: var(--ow-type-xs); font-weight: 600; letter-spacing: .055em; text-transform: uppercase; color: var(--ow-text-muted); }
+.stat-strip .ow-metric-value,
+.ow-summary-value { display: flex; align-items: baseline; gap: 4px; min-height: 0; font-size: var(--ow-type-metric); font-weight: 600; letter-spacing: -.015em; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.ow-summary-card.is-warn .ow-summary-value { color: var(--ow-warn); }
+.ow-summary-card.is-danger .ow-summary-value { color: var(--ow-danger); }
+.stat-strip .ow-metric-detail { font-size: var(--ow-type-xs); color: var(--ow-text-muted); min-height: 15px; overflow-wrap: anywhere; }
+/* The counting rule travels as the cell title and accessible name; printing it under every
+   digit made the strip three lines tall for three numbers. */
+.ow-summary-definition { display: none; }
+.stat-strip .ow-metric-go { position: static; margin-left: auto; align-self: flex-end; order: 3; }
+.stat-strip .ow-metric-link,
+.ow-summary-card { transition: border-color var(--ow-motion-fast), background var(--ow-motion-fast); }
+.stat-strip .ow-metric-link:hover,
+button.ow-summary-card:hover { background: var(--ow-surface-2); border-color: var(--ow-border-strong); text-decoration: none; }
 .stat-strip .ow-metric-link:hover .ow-metric-value { color: var(--ow-accent); }
-.stat-strip .ow-metric-link:active { background: var(--ow-surface-3); }
-.stat-strip .ow-metric-link:focus-visible { outline-offset: -2px; }
+.stat-strip .ow-metric-link:focus-visible,
+button.ow-summary-card:focus-visible { outline-offset: -2px; }
+/* A cell that doubles as a filter marks itself with an accent fill and an accent label - not
+   a 2px underline, which read as a stray blue line under the first cell of the Nodes strip. */
+button.ow-summary-card[aria-pressed='true'] { background: var(--ow-accent-soft); border-color: var(--ow-accent); }
+button.ow-summary-card[aria-pressed='true'] .ow-summary-value,
+button.ow-summary-card[aria-pressed='true'] .ow-summary-label { color: var(--ow-accent); }
+/* The excluded system plugin is a fact about the count, not a fourth number. */
+.stat-note { margin: 0; font-size: var(--ow-type-xs); color: var(--ow-text-muted); }
+/* The Kernel's own sentence, when the client has no mapping for it. Attributed, never the
+   primary copy. */
+.server-quote { margin: 0; font-size: var(--ow-type-sm); color: var(--ow-text-secondary); overflow-wrap: anywhere; }
+.server-source { display: inline-flex; align-items: center; margin-right: 6px; padding: 0 4px; border: 1px dashed var(--ow-border-strong); border-radius: 4px; font-size: var(--ow-type-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ow-text-muted); }
 .ow-metric-den { font-size: var(--ow-type-base); font-weight: 500; color: var(--ow-text-muted); margin-left: -4px; }
+.stat-provenance { display: none; }
 .stat-provenance { display: none; }
 
 /* ── 3. Two-column console ───────────────────────────────────────────────────────────
@@ -1647,25 +1651,9 @@ html[data-theme="dark"] .lang-select {
 .ow-cell-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .ow-tnum { font-variant-numeric: tabular-nums; }
 
-/* Summary cells that double as a filter: the pressed state is the accent underline, and the
-   state word is a dot plus a label instead of a pill used as a column heading. */
+/* Summary cells that double as a filter keep one affordance only: the pressed state is the
+   accent fill declared with the strip recipe above. */
 button.ow-summary-card { font: inherit; color: inherit; cursor: pointer; }
-button.ow-summary-card:hover { background: var(--ow-surface-2); }
-button.ow-summary-card[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--ow-accent); }
-button.ow-summary-card:focus-visible { outline-offset: -2px; }
-.ow-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border-top: 1px solid var(--ow-border); border-bottom: 1px solid var(--ow-border); }
-.ow-summary-card {
-  display: flex; flex-direction: column; gap: 1px; min-width: 0;
-  padding: 10px 20px 11px; border: 0; border-left: 1px solid var(--ow-border);
-  border-radius: 0; background: transparent; text-align: left;
-}
-.ow-summary-card:first-child { border-left: 0; padding-left: 0; }
-.ow-summary-label { font-size: var(--ow-type-xs); font-weight: 600; letter-spacing: .055em; text-transform: uppercase; color: var(--ow-text-muted); }
-.ow-summary-value { font-size: var(--ow-type-metric); font-weight: 600; letter-spacing: -.015em; line-height: 1.25; font-variant-numeric: tabular-nums; }
-.ow-summary-card.is-warn .ow-summary-value { color: var(--ow-warn); }
-.ow-summary-card.is-danger .ow-summary-value { color: var(--ow-danger); }
-/* The counting rule travels as the cell title and accessible name; printing it under every digit made the strip three lines tall for three numbers. */
-.ow-summary-definition { display: none; }
 
 /* Counts in a filter cell: a dot carries the state, the number carries the fact. */
 .state-count { display: inline-flex; align-items: baseline; gap: 8px; }
@@ -1686,10 +1674,8 @@ button.ow-summary-card:focus-visible { outline-offset: -2px; }
   .console-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "aside" "main"; }
 }
 @media (max-width: 900px) {
-  .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .stat-strip > *:nth-child(odd) { border-left: 0; padding-left: 0; }
-  .stat-strip > *:nth-child(-n+2) { border-bottom: 1px solid var(--ow-border); }
-  .stat-strip > *:nth-child(n+3) { padding-top: 8px; }
+  .stat-strip,
+  .ow-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
   .health-band { grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; padding-left: 12px; }
@@ -1862,9 +1848,11 @@ button.ow-summary-card:focus-visible,
   .panel-head > .panel-count,
   .panel-head > .text-link,
   .panel-head > .btn { flex: none; white-space: nowrap; }
-  .stat-strip > *:last-child:nth-child(odd) { grid-column: span 2; border-left: 0; padding-left: 0; }
+  .stat-strip,
   .ow-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ow-summary-card:last-child:nth-child(odd) { grid-column: span 2; border-left: 0; padding-left: 0; }
+  /* An odd last cell spans the row instead of leaving a bare cell of empty grid. */
+  .stat-strip > *:last-child:nth-child(odd),
+  .ow-summary-card:last-child:nth-child(odd) { grid-column: span 2; }
 }
 .ow-filter-scroll { scrollbar-width: none; }
 .ow-filter-scroll::-webkit-scrollbar { display: none; }
@@ -2006,3 +1994,122 @@ html[lang='zh-CN'] .ow-cell-meta { line-height: 1.6; }
 .sidebar-meta-dot[data-state='NOT_READY'] { background: var(--ow-danger); }
 /* A 64px rail has no room for labelled facts: the toggle row stays, the block goes. */
 .shell-collapsed .sidebar-meta-block { display: none; }
+
+/* ── 13. The V5 review, in CSS ────────────────────────────────────────────────────────
+ * Four of the six P0 findings are layout facts, so they are fixed here, once, at the end of
+ * the cascade: the ≤768px record layout for the two list tables, the chip tokens both themes
+ * read, the command list that could only show 9 of 10 destinations, and the login column that
+ * was mostly empty. */
+
+/* a) ≤768px: a table is a list of records, not a grid of columns.
+ * V5 stacked the cells (display:block) but left the row at its desktop height
+ * (`--ow-row`, 56px), so four rows of seven cells overlapped inside a 224px tbody: the
+ * version column printed on top of the plugin name, and the Nodes table clipped status,
+ * instances, CPU, memory, capacity and sample time out of a 56px box. Releasing the row
+ * height is the fix; the row can then grow to whatever its cells need. */
+@media (max-width: 768px) {
+  .plugins-table,
+  .nodes-table,
+  .plugins-table tbody,
+  .nodes-table tbody { display: block; width: 100%; }
+  .plugins-table thead,
+  .nodes-table thead { display: none; }
+  .plugins-table tbody tr,
+  .nodes-table tbody tr {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    height: auto;
+    min-height: 0;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--ow-border);
+  }
+  .plugins-table tbody tr:last-child,
+  .nodes-table tbody tr:last-child { border-bottom: 0; }
+  .plugins-table tbody td,
+  .nodes-table tbody td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    height: auto;
+    padding: 4px 12px;
+    border: 0;
+    text-align: right;
+    vertical-align: top;
+  }
+  .plugins-table tbody td > *,
+  .nodes-table tbody td > * { min-width: 0; }
+  /* The record is the click target, so it keeps a whole-row hit area once it is a card. */
+  .plugins-table tbody tr:focus-visible,
+  .nodes-table tbody tr:focus-visible { outline-offset: 0; border-radius: var(--ow-radius-md); }
+  .table-panel { overflow-x: clip; }
+}
+
+/* b) Chips. In V5 the filter chips inherited `text-muted-foreground` on `bg-muted` and the
+ * selected chip was a plain white block: in dark mode the pair measured 1.62:1 and the
+ * selected state looked like a hole in the page. One token pair per theme, selected state is
+ * a 12% accent fill, and every chip is a 28px control so a phone row stays tappable. */
+[role='tablist'] { background: var(--ow-chip-bg); border-color: transparent; }
+[role='tab'] { color: var(--ow-chip-text); background: transparent; min-height: var(--ow-control-sm); }
+[role='tab']:hover { color: var(--ow-text); }
+/* Two classes plus an attribute on purpose: the shadcn trigger ships
+   data-[state=active]:bg-card, which ties on specificity and won the paint in V5 (the selected
+   filter chip was a white block in both themes). */
+[role='tablist'] [role='tab'][data-state='active'] {
+  background-color: var(--ow-chip-active-bg);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ow-chip-active-text);
+}
+
+/* c) The command palette listed 10 destinations in a 340px box and cut the tenth. Ten rows
+ * are 38.4px each plus 8px of padding: the box now sizes to them, and a short viewport gets
+ * a visible scrollbar instead of a hidden overflow. */
+.ow-command-list {
+  max-height: min(480px, calc(100dvh - 190px));
+  scrollbar-width: thin;
+  scrollbar-color: var(--ow-border-strong) transparent;
+}
+.ow-command-list::-webkit-scrollbar { width: 10px; }
+.ow-command-list::-webkit-scrollbar-thumb { background: var(--ow-border-strong); border-radius: 999px; }
+
+/* d) The language control was clipped to "中文（简" by a fixed 84px width that existed to buy
+ * the phone breadcrumb 20px. The breadcrumb gives the 20px back instead: its own rule keeps
+ * the current title on one line, and a truncated language name is not a language name. */
+@media (max-width: 620px) {
+  .lang-select { width: auto !important; max-width: 148px; }
+}
+html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
+
+/* e) The login page: the copy column had 555px of dead space because the footnote was pushed
+ * to the bottom of a 100vh column. The column is capped and centred, so the page reads as one
+ * composition at 1440 instead of a paragraph and a void. */
+.login-page { grid-template-columns: minmax(0, 1fr) minmax(360px, 44%); }
+.login-brand { justify-content: center; padding: 48px 56px; }
+.login-copy { max-width: 560px; }
+.login-footnote { margin-top: 8px; }
+@media (max-width: 1024px) {
+  .login-brand { justify-content: flex-start; }
+}
+
+/* f) Chrome status words that are not "ready" or "not ready" still need a colour: the pill and
+ * the rail dot read the one verdict (lib/platform-status), so both must have a neutral and a
+ * danger-muted face. */
+.health-neutral .health-dot { background: var(--ow-text-muted); box-shadow: 0 0 0 3px var(--ow-surface-3); }
+.sidebar-meta-dot[data-state='NOT_CONFIGURED'] { background: var(--ow-text-muted); }
+.sidebar-meta-dot[data-state='ATTENTION'] { background: var(--ow-warn); }
+
+
+/* g) /403 and the error panels: a permission wall is one card at the top of the page, not a
+ * card centred in a whole empty screen. The page keeps its header and starts where a reader
+ * starts reading. */
+.forbidden-page { align-items: flex-start; justify-content: center; padding: 56px 20px 48px; }
+.forbidden-page .page-stack { max-width: 720px; }
+
+/* h) The page rhythm inside a boundary. AsyncBoundary wraps a page's sections in one element,
+ * so the 24px column gap .page-stack declares never reached them: every section inside was
+ * flush against the next, and the metric strip sat directly on the panel under it (measured
+ * gap 0px against a 24px column gap everywhere else). The wrapper carries the same rhythm. */
+[data-async-state='ready'],
+[data-async-state='empty'] { display: flex; flex-direction: column; gap: var(--ow-space-6); min-width: 0; }
