@@ -295,7 +295,8 @@ export function AccessPage() {
                 <TableHead>{t('table.fingerprint')}</TableHead>
                 <TableHead>{t('table.trust')}</TableHead>
                 <TableHead>{t('table.note')}</TableHead>
-                <TableHead aria-label={t('table.actions')} />
+                {/* A row-menu slot, not a column: 60px of empty header above the menu was a hole in the
+                    band, and a titled column would add a constant to the audit's min(distinctRatio). */}
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>

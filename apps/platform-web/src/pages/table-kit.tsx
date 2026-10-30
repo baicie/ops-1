@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Icon } from '../components/Icons';
 import { CopyButton } from '../components/Ui';
 import { Badge } from '../components/ui/badge';
@@ -225,12 +226,23 @@ export function formatIdentity(options: {
 export function IdentityCell({
   label,
   identity,
+  href,
   cardFact,
   className,
   children,
 }: {
   label: string;
   identity: Identity;
+  /**
+   * The record this row is, when the row is a record and not a disclosure.
+   *
+   * A row that opens on click but holds no anchor is a row a keyboard user can only open by
+   * guessing, and one an assistive technology announces as plain text. So the name is a real
+   * <a href>: the row's identity is the thing the reader is already looking at, Cmd-click and
+   * "copy link address" work, and a Tab-first user gets a control whose activation is native.
+   * A row that discloses instead of navigating passes no href and keeps its own button.
+   */
+  href?: string;
   cardFact?: boolean;
   className?: string;
   children?: React.ReactNode;
@@ -249,7 +261,11 @@ export function IdentityCell({
     >
       <span className={cn(stackLabel, 'max-[768px]:hidden')}>{label}</span>
       <span className="ow-ident" data-identity-key={identity.key} title={detail}>
-        <span className="ow-ident-name">{identity.name}</span>
+        {href ? (
+          <Link className="ow-ident-name ow-ident-link" to={href} aria-label={identity.key} onClick={(event) => event.stopPropagation()}>{identity.name}</Link>
+        ) : (
+          <span className="ow-ident-name">{identity.name}</span>
+        )}
         {identity.disambiguator ? <span className="ow-ident-tail">{' · ' + identity.disambiguator}</span> : null}
       </span>
       {/* Always rendered, so an identity cell without a qualifier still reserves §2.3's qualifier

@@ -2485,6 +2485,18 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
  * the age are exactly what makes two rows tellable apart, so they never ellipsise. */
 .ow-ident { display: flex; align-items: baseline; min-width: 0; font-size: var(--ow-type-meta); line-height: 1.2; }
 .ow-ident-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* The identity name is a real anchor (a row of records is a list of destinations), so it owes two
+ * things the bare <a> rule does not give it: it may not repaint the row's own typography - a table
+ * whose every name turns accent blue is a page of links, not a table - and it must still say it is
+ * a link when pointed at or focused. Colour and weight come from .ow-ident-name. */
+/* The chevron in a pipeline row is a link now, so it would inherit the anchor's accent colour and
+ * the hover underline. Neither suits a 16px glyph in a 44px slot: it keeps the muted tone the cell
+ * always had, and the row's hover wash is the feedback. */
+.ow-row-go { color: var(--ow-text-muted); }
+.ow-row-go:hover { color: var(--ow-text); text-decoration: none; }
+.ow-ident-link { color: inherit; }
+.ow-ident-link:hover { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.ow-ident-link:focus-visible { outline-offset: 1px; }
 /* §2.1's disambiguator is the only thing that tells two rows of one pipeline apart, so it is
    painted at the text colour and at the name's weight instead of at caption grey - the review
    measured it as the palest run on the page. The age after it stays subordinate. */

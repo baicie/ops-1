@@ -368,6 +368,15 @@ const nodeHistory = Array.from({ length: 12 }, (_, index) => ({
   filesystemTotalBytes: 120_000_000_000,
 }));
 
+/** Three pipelines, for the list /admin/pipelines renders rows from (the row-keyboard test). */
+const pipelineRows = ['host-metrics', 'host-build', 'data-ingest'].map((pipelineId, index) => ({
+  pipelineId,
+  name: pipelineId,
+  latestRevision: 3 + index,
+  createdAt: ago(30 + index),
+  updatedAt: ago(2 + index),
+}));
+
 /** Deterministic answers for every data endpoint the eight audited routes read. */
 const FIXTURES: [RegExp, unknown | ((url: string) => unknown)][] = [
   [/\/api\/v1\/jobs\?/, { items: jobs, nextCursor: null }],
@@ -375,6 +384,7 @@ const FIXTURES: [RegExp, unknown | ((url: string) => unknown)][] = [
   [/\/api\/v1\/jobs\/[0-9a-f-]+\/diagnostics$/, jobDiagnostics],
   [/\/api\/v1\/jobs\/[0-9a-f-]+$/, jobDetail],
   [/\/api\/v1\/audit/, auditEvents()],
+  [/\/api\/v1\/pipelines\?/, { items: pipelineRows, nextCursor: null }],
   [/\/api\/v1\/nodes$/, nodes],
   [/\/api\/v1\/nodes\/[0-9a-f-]+\/instances$/, nodeInstances],
   [/\/api\/v1\/nodes\/[0-9a-f-]+\/resource-history/, nodeHistory],
@@ -924,6 +934,169 @@ test('usable', async ({ browser }) => {
   await context.close();
 });
 
+
+/**
+ * P0 · a keyboard user opens a record, and the run reports how many Tabs it took.
+ *
+ * The probe this replaces walked /admin/jobs, pressed Tab 60 times and looked for an a[href]
+ * inside tbody. It found none, and it was right about the anchor: the row was a focusable tr with
+ * an Enter handler, so there was no link to find, nothing to middle-click, nothing whose address
+ * could be copied and nothing a screen reader would announce as a destination. The same probe also
+ * reported 26 Tab stops with a focus ring on every one, which is the part that made the pair worth
+ * writing down: the ring assertion was green about an element a reader cannot identify.
+ *
+ * So both halves are asserted here, on every run, and neither one alone is enough:
+ *
+ *   1. the control a row offers is a real anchor (or, for a disclosure row, a real button), so the
+ *      stop has a name, a destination and native activation;
+ *   2. pressing Enter on the stop it lands on opens the record, within a bounded number of Tabs.
+ *
+ * The Tab count is bounded because a tab order nobody will walk does not exist: MAX_TABS sits above
+ * today's measurement, so the assertion fails on a regression and not on its own threshold.
+ *
+ * Two more readings travel here because they are the same rows in the same run: the row wash
+ * (--ow-hover, not the --ow-surface-2 it replaced - the CSS override reached only two tables) and
+ * the trailing header cell (a row-menu slot must not print as an empty column head).
+ */
+const MAX_TABS = 40;
+
+/** One entry per list that offers a record to open. */
+const RECORDS = ['/admin/jobs', '/admin/nodes', '/admin/plugins', '/admin/pipelines'];
+
+test('row keyboard', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const record: Row = {};
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, baseURL: BASE });
+  await context.addInitScript(() => {
+    localStorage.setItem('opsweave-theme', 'light');
+    localStorage.setItem('opsweave-locale', 'en');
+  });
+  const page = await context.newPage();
+  await stub(page);
+  await page.goto(BASE + '/login');
+  await page.fill('input[type=email]', ADMIN_EMAIL);
+  await page.fill('input[type=password]', ADMIN_PASSWORD);
+  await page.click('[data-testid=login-submit]');
+  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+
+  const open = async (route: string) => {
+    await page.goto(BASE + route);
+    await page.waitForSelector('[data-async-state="ready"], [data-async-state="empty"]', { timeout: 20000 }).catch(() => undefined);
+    await page.waitForTimeout(350);
+  };
+
+  /** What the body offers: rows, the controls in them, and any stop that is not one. */
+  const shapeOf = () => page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('table tbody tr'));
+    // A tabindex on something that is not a link, a button or a form control is a Tab stop with no
+    // activation: the tr tabindex=0 this change removed, and the /admin/pipelines row before it.
+    const deadStops = rows.flatMap((tr) => [
+      ...(tr.hasAttribute('tabindex') && tr.getAttribute('tabindex') !== '-1' ? [{ tag: 'tr', why: 'focusable row' }] : []),
+      ...Array.from(tr.querySelectorAll('[tabindex]:not([tabindex="-1"])'))
+        .filter((el) => !el.matches('a[href], button, input, select, textarea, summary'))
+        .map((el) => ({ tag: el.tagName.toLowerCase(), why: 'focusable without an activation' })),
+    ]);
+    const heads = Array.from(document.querySelectorAll('table thead th'));
+    const last = heads[heads.length - 1] as HTMLElement | undefined;
+    return {
+      rows: rows.length,
+      rowLinks: rows.reduce((sum, tr) => sum + tr.querySelectorAll('a[href]').length, 0),
+      rowButtons: rows.reduce((sum, tr) => sum + tr.querySelectorAll('button').length, 0),
+      deadStops,
+      labelledHeads: heads.filter((th) => (th.textContent || '').trim().length > 0).length,
+      trailingHead: last ? (last.textContent || '').trim() : null,
+      trailingHeadWidth: last ? Math.round(last.getBoundingClientRect().width) : null,
+    };
+  });
+
+  /** Walk the tab order until the stop is inside the body AND matches the selector. */
+  const tabTo = async (selector: string) => {
+    for (let i = 1; i <= MAX_TABS; i += 1) {
+      await page.keyboard.press('Tab');
+      const hit = await page.evaluate((sel) => {
+        const el = document.activeElement as HTMLElement | null;
+        if (!el || el === document.body || !el.closest || !el.closest('tbody')) return null;
+        if (!el.matches(sel)) return null;
+        const name = (el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+        return { href: el.getAttribute('href'), name };
+      }, selector);
+      if (hit) return { tabs: i, ...hit };
+    }
+    return null;
+  };
+
+  for (const at of RECORDS) {
+    await open(at);
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+    const shape = await shapeOf();
+    expect(shape.rows, at + ': the list has rows to open').toBeGreaterThan(0);
+    expect(shape.deadStops, at + ': no Tab stop without an activation ' + JSON.stringify(shape.deadStops)).toEqual([]);
+    expect(shape.rowLinks, at + ': every row carries a real link (rows=' + shape.rows + ', links=' + shape.rowLinks + ')').toBeGreaterThanOrEqual(shape.rows);
+    expect(shape.trailingHead, at + ': the last header cell is not an empty slot').not.toBe('');
+
+    const landed = await tabTo('tbody a[href]');
+    expect(landed, at + ': a keyboard user reaches a row link within ' + MAX_TABS + ' Tabs').not.toBeNull();
+    expect(landed!.name, at + ': the link the tab order lands on has an accessible name').not.toBe('');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(1200);
+    const pathNow = new URL(page.url()).pathname;
+    // The rule is that Enter goes where the link said it would - not that this page's first row
+    // points at a particular route. A system plugin opens Ops Center, and a regex per page would
+    // encode a fixture detail instead of the behaviour under test.
+    expect(pathNow, at + ': Enter follows the row link it landed on (tab ' + landed!.tabs + ', href ' + landed!.href + ', url ' + pathNow + ')').toBe(
+      new URL(landed!.href || '', BASE).pathname,
+    );
+    expect(pathNow, at + ': the row opened something other than the list it was on').not.toBe(at);
+    record[at] = { ...shape, tabs: landed!.tabs, href: landed!.href, opened: pathNow };
+  }
+
+  // /admin/activity has no record to open: its row discloses. The stop is the disclosure button -
+  // a button with aria-expanded and aria-controls - and not a focusable row.
+  await open('/admin/activity');
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
+  const activity = await shapeOf();
+  expect(activity.rows, '/admin/activity: the list has rows').toBeGreaterThan(0);
+  expect(activity.deadStops, '/admin/activity: no Tab stop without an activation ' + JSON.stringify(activity.deadStops)).toEqual([]);
+  expect(activity.rowButtons, '/admin/activity: every row carries its disclosure button').toBeGreaterThanOrEqual(activity.rows);
+  expect(activity.trailingHead, '/admin/activity: the last header cell is not an empty slot').not.toBe('');
+  const disclosure = await tabTo('tbody button[data-testid="activity-disclosure"]');
+  expect(disclosure, '/admin/activity: the disclosure button is reachable within ' + MAX_TABS + ' Tabs').not.toBeNull();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(250);
+  const panels = await page.locator('tr.expanded-row').count();
+  expect(panels, '/admin/activity: Enter on the disclosure opens the detail row (tab ' + disclosure!.tabs + ')').toBe(1);
+  record['/admin/activity'] = { ...activity, tabs: disclosure!.tabs, panels };
+
+  // The wash a row takes on hover, and the token it is supposed to be.
+  await open('/admin/jobs');
+  const firstRow = page.locator('table tbody tr').first();
+  const before = await firstRow.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await firstRow.hover();
+  await page.waitForTimeout(250);
+  const after = await firstRow.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const wash = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--ow-hover)';
+    document.body.appendChild(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    const luminance = (value: string) => {
+      const parts = (value.match(/[\d.]+/g) || ['255', '255', '255']).slice(0, 3).map((n) => {
+        const v = Number(n) / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2];
+    };
+    const ratio = (luminance('rgb(255, 255, 255)') + 0.05) / (luminance(resolved) + 0.05);
+    return { resolved, contrastOnWhite: Math.round(ratio * 100) / 100 };
+  });
+  record.hover = { before, after, changed: before !== after, ...wash };
+  expect(after, '/admin/jobs: the row wash moves on hover (' + before + ' -> ' + after + ')').not.toBe(before);
+  expect(after, '/admin/jobs: the row wash is --ow-hover (' + wash.resolved + '), not --ow-surface-2').toBe(wash.resolved);
+
+  fs.writeFileSync(path.join(OUT, '_keyboard.json'), JSON.stringify(record, null, 1));
+  await context.close();
+});
 /**
  * §2.5's instrument, measured against the defect it exists for.
  *

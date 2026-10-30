@@ -53,23 +53,23 @@
  "/admin/activity": {
   "rows": 17,
   "identityKeys": [
-   "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T16:27:04",
-   "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T16:03:04",
-   "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T15:39:04",
-   "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T15:15:04",
-   "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T14:51:04",
-   "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T14:27:04",
-   "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T14:03:04",
-   "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T13:39:04",
-   "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T13:15:04 · +8@2026-10-30T09:39:04",
-   "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T09:39:04",
-   "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T09:15:04",
-   "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T08:51:04",
-   "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T08:27:04",
-   "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T08:03:04",
-   "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T07:39:04",
-   "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T07:15:04",
-   "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T06:51:04"
+   "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T22:21:24",
+   "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T21:57:24",
+   "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T21:33:24",
+   "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T21:09:24",
+   "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T20:45:24",
+   "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T20:21:24",
+   "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T19:57:24",
+   "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T19:33:24",
+   "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T19:09:24 · +8@2026-10-30T15:33:24",
+   "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T15:33:24",
+   "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T15:09:24",
+   "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T14:45:24",
+   "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T14:21:24",
+   "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T13:57:24",
+   "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T13:33:24",
+   "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T13:09:24",
+   "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T12:45:24"
   ],
   "identityWithClock": [],
   "ageCellsPerRow": [
@@ -103,7 +103,7 @@
    "panels": 1,
    "panelId": "activity-detail-0",
    "panelMentionsActor": true,
-   "panelText": "Subjectdeployment f0fe3808-4531-4fd0-ad1c-d85c9e60b11aActorUSER 82475274-80eb-432e-85db-c2be567ee543ResultAccepted deployment.createRecorded at2026-10-30 16:27 "
+   "panelText": "Subjectdeployment f0fe3808-4531-4fd0-ad1c-d85c9e60b11aActorUSER 82475274-80eb-432e-85db-c2be567ee543ResultAccepted deployment.createRecorded at2026-10-30 22:21 "
   },
   "disclosureAfterEnter": {
    "panels": 0

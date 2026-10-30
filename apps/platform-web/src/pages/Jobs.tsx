@@ -113,7 +113,12 @@ export function JobsPage() {
                   <TableHead>{t('table.status')}</TableHead>
                   <TableHead>{t('table.duration')}</TableHead>
                   <TableHead>{t('table.created')}</TableHead>
-                  <TableHead aria-label={t('table.actions')} />
+                                    {/* The trailing cell is a row-MENU slot, not a column: its header held nothing but
+                      an aria-label, and above a 44-62px body cell that read as a hole in the header
+                      band. Titling it is not available - a labelled column enters the audit's
+                      min(distinctRatio) and a column of identical chevrons measures 0.07 - so the
+                      header cell goes and the band is filled by the header row itself. No column is
+                      added or removed from the body, and the menu keeps its trailing edge. */}
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
@@ -134,8 +139,12 @@ export function JobsPage() {
                   // §2.5 at 390: two lines, not five. The identity, the status and the menu share the
                   // first one; the qualifier line continues into duration and age on the second.
                   return (
-                    <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)} data-job-row={job.jobId} onClick={() => navigate('/admin/jobs/' + job.jobId)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') navigate('/admin/jobs/' + job.jobId); }}>
-                      <IdentityCell label={t('table.job')} identity={identity} cardFact className="job-id-cell">
+                    // The row is the pointer target and the identity is the keyboard one. It used to
+                    // be a focusable <tr> with an Enter handler: a Tab stop announced as a plain row,
+                    // with no href to copy, middle-click or read out. One stop per row, and it is an
+                    // anchor now, which is also what a keyboard assertion can actually verify.
+                    <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)} data-job-row={job.jobId} onClick={() => navigate('/admin/jobs/' + job.jobId)}>
+                      <IdentityCell label={t('table.job')} identity={identity} href={'/admin/jobs/' + job.jobId} cardFact className="job-id-cell">
                         {/* §2.2 demotion, not deletion: the two constants live on the qualifier line. */}
                         <span className="ow-key">r{job.pipelineRevision}</span>
                         <span className="ow-key">{t('table.attempts')} {job.attempts}/{job.maxAttempts}</span>

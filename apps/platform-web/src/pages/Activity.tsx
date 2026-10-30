@@ -241,7 +241,10 @@ export function ActivityPage() {
                   <TableHead>{t('table.event')}</TableHead>
                   <TableHead>{t('table.outcome')}</TableHead>
                   <TableHead>{t('table.occurred')}</TableHead>
-                  <TableHead aria-label={t('table.details')} />
+                  {/* The trailing cell is the disclosure button's slot, not a column: an empty header
+                      above it was a hole in the band. A titled column would enter the audit's
+                      min(distinctRatio) and the ratio of a column of identical buttons is 0.07, so
+                      the header cell goes and the header row keeps the band filled. */}
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
@@ -250,18 +253,15 @@ export function ActivityPage() {
                   const open = openRow === row.identityKey;
                   return (
                     <React.Fragment key={row.identityKey}>
+                      {/* A disclosure row is not a destination, so the keyboard control is the
+                          disclosure button in the last cell - aria-expanded, aria-controls, native
+                          Enter and Space. The row used to be a second Tab stop with an Enter handler
+                          as well, which announced nothing and duplicated the button one stop later. */}
                       <TableRow
-                        className={cn('cursor-pointer focus-visible:outline-offset-[-2px] max-[768px]:relative', stackRow)}
+                        className={cn('cursor-pointer max-[768px]:relative', stackRow)}
                         data-row-key={row.foldKey}
                         data-expanded={open ? 'true' : 'false'}
                         onClick={() => setOpenRow(open ? null : row.identityKey)}
-                        tabIndex={0}
-                        onKeyDown={(keyEvent) => {
-                          // Only when the row itself has focus: Enter on the disclosure button inside
-                          // it fires the button's own click as well, and the two toggles cancelled out.
-                          if (keyEvent.target !== keyEvent.currentTarget) return;
-                          if (keyEvent.key === 'Enter') setOpenRow(open ? null : row.identityKey);
-                        }}
                       >
                         {/*
                           The identity the reader is actually comparing: the name, the subject, who
@@ -312,6 +312,7 @@ export function ActivityPage() {
                             aria-expanded={open}
                             aria-controls={'activity-detail-' + index}
                             aria-label={t(open ? 'activity.detail.collapse' : 'activity.detail.expand')}
+                            title={t('table.details')}
                             onClick={(event2) => { event2.stopPropagation(); setOpenRow(open ? null : row.identityKey); }}
                           >
                             <Icon name={open ? 'down' : 'chevron'} size={15} />

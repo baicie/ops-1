@@ -432,7 +432,8 @@ export function PluginsPage() {
                   <TableHead>{t('table.deployment')}</TableHead>
                   {factsKnown ? <TableHead>{t('table.readyReplicas')}</TableHead> : null}
                   {factsKnown ? <TableHead>{t('table.digest')}</TableHead> : null}
-                  <TableHead aria-label={t('table.actions')} />
+                  {/* A row-menu slot, not a column: 58px of empty header above the menu was a hole in
+                      the band, and a titled column would add a constant to min(distinctRatio). */}
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
@@ -451,7 +452,9 @@ export function PluginsPage() {
                      release string, ready-replicas is ready-over-declared, and each keeps its own
                      cell so the desktop header and the data-label still name it. */
                   return (
-                    <TableRow key={plugin.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', cardTwoLineRow, stackRow)} data-plugin={plugin.id} data-abnormal={isAbnormal(plugin) ? 'true' : undefined} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
+                    // One keyboard stop per row and it is an anchor: the plugin's name is the link, so
+                  // Cmd-click opens a second tab and the stop is announced as the destination it is.
+                  <TableRow key={plugin.id} className={cn('cursor-pointer', cardTwoLineRow, stackRow)} data-plugin={plugin.id} data-abnormal={isAbnormal(plugin) ? 'true' : undefined} onClick={open}>
                       {/* §2.5: the row checkbox rides the identity line at 390 instead of taking a
                           line of its own - the 40px control box was 48px of the card. */}
                       {canOperate ? (
@@ -471,7 +474,7 @@ export function PluginsPage() {
                           />
                         </TableCell>
                       ) : null}
-                      <IdentityCell label={t('table.plugin')} identity={formatIdentity({ name: plugin.name, id: plugin.id, locale, rowsOnPage: filtered.length })} cardFact className="max-[768px]:pl-5">
+                      <IdentityCell label={t('table.plugin')} identity={formatIdentity({ name: plugin.name, id: plugin.id, locale, rowsOnPage: filtered.length })} href={entity} cardFact className="max-[768px]:pl-5">
                         {/* §2.2: the publisher was its own column at ratio 0.17 - a reader finds a
                             difference in every sixth row - so it rides the name it qualifies. */}
                         <div className="entity-cell">

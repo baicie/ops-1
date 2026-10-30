@@ -272,7 +272,9 @@ export function NodesPage() {
                 <TableHead>{t('table.status')}</TableHead>
                 <TableHead>{t('table.instances')}</TableHead>
                 {resourcesMeasurable ? <TableHead>{t('table.resources')}</TableHead> : null}
-                <TableHead aria-label={t('table.open')} />
+                {/* The trailing cell holds the row menu, so it is a slot and not a column: an empty
+                    header above 56px of body read as a hole in the band, and titling it would add a
+                    constant column to the audit's min(distinctRatio). The body is unchanged. */}
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
@@ -289,8 +291,11 @@ export function NodesPage() {
                    data-label and its own arithmetic (1/4 is ready-over-total, 12% is a ratio of
                    one snapshot) - so the mapping is declared here rather than borrowed. */
                 return (
-                  <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', cardTwoLineRow, stackRow)} data-node-state={nodeState(node)} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
-                    <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: visible.length })} cardFact>
+                  // The row opens on a pointer; the node's own name is the anchor that opens it on a
+                  // keyboard. It was a roleless <tr tabindex=0> with an Enter handler, which a screen
+                  // reader reads as a row of text and a keyboard assertion cannot tell from a dead stop.
+                  <TableRow key={node.id} className={cn('cursor-pointer', cardTwoLineRow, stackRow)} data-node-state={nodeState(node)} onClick={open}>
+                    <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: visible.length })} href={'/admin/nodes/' + node.id} cardFact>
                       <span className="mono">{node.os}/{node.arch}</span>
                       <span className="ow-key">{t('nodes.table.generation', { generation: node.generation })}</span>
                     </IdentityCell>

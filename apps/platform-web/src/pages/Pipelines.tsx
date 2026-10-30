@@ -110,17 +110,23 @@ export function PipelinesPage() {
                   <TableHead>{t('table.revision')}</TableHead>
                   <TableHead>{t('table.created')}</TableHead>
                   <TableHead>{t('table.updated')}</TableHead>
-                  <TableHead aria-label={t('table.open')} />
+                  {/* A row-menu slot, not a column: 44px of empty header above the chevron was a hole,
+                      and titling it would put a constant column under the audit's min(distinctRatio). */}
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
                 {items.map((pipeline) => (
-                  <TableRow key={pipeline.pipelineId} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} tabIndex={0}>
+                  // This row carried tabIndex=0 with no onClick and no key handler: a Tab stop that
+                  // did nothing at all, on a row that painted cursor:pointer anyway. The name is the
+                  // link and the chevron below is one too, so the row itself is not a control.
+                  <TableRow key={pipeline.pipelineId} className={stackRow}>
                     <StackCell label={t('table.pipeline')}><Link to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
                     <StackCell label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
                     <StackCell label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></StackCell>
                     <StackCell label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                    {/* The chevron promised a click and did nothing. Same destination as the name, but
+                        the two are one stop apart, so it is labelled rather than duplicated speech. */}
+                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Link className="ow-row-go" aria-label={t('table.open')} to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><Icon name="chevron" size={16} /></Link></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
