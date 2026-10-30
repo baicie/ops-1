@@ -789,6 +789,12 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .metric-value.small { font-size: var(--ow-type-base); font-weight: 500; letter-spacing: 0; }
 .metric-value.mono { font-family: var(--ow-font-mono); font-size: var(--ow-type-base); }
 .pipeline-stats .metric-value .mono, .job-stats .metric-value.mono { overflow: hidden; text-overflow: ellipsis; }
+/* The tile is one line of one value. A pipelineId is a machine token, not a sentence: it inherited
+ * white-space:normal from the phone rule above and broke across three lines of a metric tile. The
+ * inner .metric-token is what ellipsises - text-overflow does nothing on a flex container whose
+ * anonymous item has no min-width to shrink to. */
+.job-stats .metric-value.mono { white-space: nowrap; }
+.job-stats .metric-value.mono > .metric-token { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* Execution path summary on Pipeline Detail */
 .pipeline-flow { display: flex; align-items: stretch; gap: 4px; overflow-x: auto; padding: 4px 0 4px; }
@@ -979,9 +985,6 @@ details.panel.advanced > summary { padding: 12px 16px; }
   .mobile-node-list strong { font-size: var(--ow-type-base); }
   .mobile-node-list small { font-family: var(--ow-font-mono); font-size: var(--ow-type-label); color: var(--ow-text-muted); overflow: hidden; text-overflow: ellipsis; }
 }
-
-.link-button { border: 0; background: transparent; padding: 0; color: var(--ow-accent); cursor: pointer; text-align: left; border-radius: 4px; }
-.link-button:hover { text-decoration: underline; }
 
 /* Mobile toolbar wraps instead of clipping labels; node-list note stays in flow. */
 @media (max-width: 768px) {
@@ -2340,6 +2343,33 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
     white-space: normal;
   }
   .main-content pre { white-space: pre-wrap; }
+}
+
+/* The exception the block above needs, and its reason.
+ *
+ * "The container never scrolls on a phone" was written to stop the PAGE scrolling sideways, and
+ * it stops it by letting every .mono run break between any two characters. A mono token has a
+ * min-content width of ONE character, so in a narrow column the browser spends exactly that: the
+ * 390 review measured a 36-character node id in the attempts table laid out as 10 line boxes of
+ * 3.6 characters in a 59.9px column, and a 71-character sha256 digest as 3 lines - while
+ * documentElement.scrollWidth stayed inside clientWidth, which is why no assertion ever saw it.
+ *
+ * An identifier is one line. It is truncated with the whole value in the tooltip and on the copy
+ * button (LongId in pages/table-kit.tsx), or - for the fields an operator has to read or
+ * transcribe in full - it sits in a bounded horizontal scroller of its own, which is a scroll
+ * region inside the card, not the page. Neither element can carry the .mono utility: the blanket
+ * rule above matches it, and four characters per line is what that costs.
+ */
+.ow-longid { display: flex; align-items: baseline; gap: 4px; flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.ow-longid > .icon-btn { flex: none; }
+.ow-longid-value { flex: 1 1 auto; min-width: 0; font-family: var(--ow-font-mono); font-size: var(--ow-type-sm); white-space: nowrap; overflow-wrap: normal; word-break: normal; overflow: hidden; text-overflow: ellipsis; }
+.ow-longid-value[data-scroll] { overflow-x: auto; overflow-y: hidden; }
+
+/* §2.6: a bound on the payload, not a wrap of it. Pretty-printed JSON at 390 is a column of long
+   lines, and breaking each one mid-token is what makes it unreadable; the payload keeps its own
+   pre-formatted lines and scrolls inside .result-json, which already carries overflow:auto. */
+@media (max-width: 768px) {
+  .main-content pre.ow-scroll-x { white-space: pre; overflow-wrap: normal; word-break: normal; }
 }
 
 /* The two-row cell inside a 40px row is 31px: 15.6 (13/1.2) + 15.4 (11/1.4), table-spec §2.3.

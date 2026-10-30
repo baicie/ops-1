@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '../components/Icons';
+import { CopyButton } from '../components/Ui';
 import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { TableCell } from '../components/ui/table';
@@ -255,6 +256,40 @@ export function copyIdAction(
       write.then(() => hooks.onCopied?.(), () => hooks.onFailed?.());
     },
   };
+}
+
+/**
+ * §2.6: one identifier, one line.
+ *
+ * A mono run with no spaces has a min-content width of one character, and the <=768 rule that
+ * stops the phone scrolling sideways ("the container never scrolls") spends exactly that. The 390
+ * review measured a 36-character node id in the attempts table laid out as 10 line boxes of 3.6
+ * characters in a 59.9px column - unreadable, and invisible to an assertion that only compares
+ * documentElement.scrollWidth with clientWidth.
+ *
+ * `display` is what a reader needs to tell this row from the next one: a four-hex disambiguator
+ * from lib/identity (the one rule every table uses for "what is this row called") or a head…tail
+ * digest. `scroll` instead puts the whole value in its own bounded horizontal scroller, for the
+ * fields an operator has to read or transcribe in full - that box scrolls, the page does not.
+ * Either way the full value is in the tooltip and on the copy button, so shortening a value never
+ * removes it from the screen.
+ */
+export function LongId({ value, display, label, scroll = false, testId, className }: {
+  value?: string | null;
+  /** What is printed; the full `value` stays in the title and on the clipboard. */
+  display?: string;
+  label: string;
+  scroll?: boolean;
+  testId?: string;
+  className?: string;
+}) {
+  if (!value) return <span className="muted">{'\u2014'}</span>;
+  return (
+    <span className={cn('ow-longid', className)}>
+      <span className="ow-longid-value" title={value} data-scroll={scroll ? '' : undefined} data-testid={testId}>{display ?? value}</span>
+      <CopyButton value={value} label={label} testId={testId ? testId + '-copy' : undefined} />
+    </span>
+  );
 }
 
 /* ── table-spec §2.2 / §2.5: which columns earn the card ────────────────────────────── */

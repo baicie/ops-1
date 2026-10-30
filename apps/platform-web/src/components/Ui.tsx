@@ -108,12 +108,13 @@ export function TimeAgo({ value }: { value?: string | null }) {
   return <time dateTime={value} title={date.toISOString()}>{ageMessage(locale, value)}</time>;
 }
 
-export function CopyButton({ value, label }: { value?: string | null; label?: string }) {
+export function CopyButton({ value, label, testId }: { value?: string | null; label?: string; testId?: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const text = label || t('action.copy');
   return (
     <button
+      data-testid={testId}
       className="icon-btn"
       title={text}
       aria-label={text}
