@@ -12,6 +12,7 @@ import { PageHeader } from '../components/app/page-header';
 import { NoData, UnknownValue } from '../components/app/status-indicator';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
+import { deployReadbackFailure, verifyDeployAfterWrite } from '../lib/deploy-readback';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describePlacementReason } from '../placement-reason';
 import { StatusPill } from './table-kit';
@@ -85,20 +86,46 @@ export function InstallWizardPage() {
     }
   }
 
+  /**
+   * The create is a request; the deployment on screen is the one a GET returned. The wizard used
+   * to render the POST body - which is why lib/deploy-readback.ts exists. On an unconfirmed
+   * readback the wizard says so and does not advance: a 200 with no deployment behind it is not
+   * a deployment.
+   */
   async function deploy() {
     if (!pkg) return;
     setBusy(true);
     setDeploymentError(null);
     try {
       const nodeSelector = Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2));
-      const result = await api.post<DeploymentView>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/deployments`, {
-        version: pkg.version,
-        desiredReplicas: replicas,
-        nodeSelector,
-        maxInstancesPerNode: 1,
+      const result = await verifyDeployAfterWrite<DeploymentView>({
+        write: () => api.post<DeploymentView>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/deployments`, {
+          version: pkg.version,
+          desiredReplicas: replicas,
+          nodeSelector,
+          maxInstancesPerNode: 1,
+        }),
+        read: () => api.get<DeploymentView[]>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/deployments`),
+        idOf: (item) => item.id,
+        statusOf: (item) => item.status,
       });
-      setDeployment(result);
-      setStep(4);
+      const failure = deployReadbackFailure(result, t);
+      if (result.deployment) {
+        // Step 4 renders this object as-is, so a FAILED or PENDING deployment reads as FAILED or
+        // PENDING - never as the success the write would have liked to report.
+        setDeployment(result.deployment);
+        setStep(4);
+      }
+      if (failure) {
+        setDeploymentError(failure.message);
+        toast.push({ tone: 'danger', title: t('install.toast.deployFailed'), detail: failure.message });
+        return;
+      }
+      toast.push({
+        tone: 'ok',
+        title: t('install.toast.deployed', { pluginId: pkg.pluginId }),
+        detail: t('verify.state', { state: result.state }),
+      });
     } catch (cause) {
       const apiError = cause as ApiError;
       toast.push({ tone: 'danger', title: apiError.code || t('install.toast.deployFailed'), detail: apiError.message });

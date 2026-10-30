@@ -361,9 +361,14 @@ export function PipelineEditorPage() {
         <label className="preview-input"><span>{t('studio.preview.sampleLabel')}</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
         {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
         {preview && <>
-          <div className="preview-summary"><strong>{statusText(preview.status)}</strong><span>{t('studio.preview.recordCount', { count: preview.processedRecords })}</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">{t('studio.preview.truncated')}</span>}</div>
+          {/* The summary paints catalog copy, so it cannot be asserted by its text: the same run
+              reads "Completed" in en and "已完成" in zh-CN. The wire code and the counts ride along
+              in data-* exactly as Status does with data-status - protocol data, never translated,
+              never the label. records is the number the server actually processed, so a test can
+              pin it instead of looking for the word "records". */}
+          <div className="preview-summary" data-status={preview.status} data-records={preview.processedRecords} data-node-count={preview.nodeOutputs.length}><strong>{statusText(preview.status)}</strong><span>{t('studio.preview.recordCount', { count: preview.processedRecords })}</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">{t('studio.preview.truncated')}</span>}</div>
           {preview.errors.length > 0 && <ul className="validation-list">{preview.errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
-          <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">{t('studio.preview.nodeFlow', { input: node.inputCount, output: node.outputCount, ms: node.durationMs })}</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
+          <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId} data-node-id={node.nodeId} data-output-count={node.outputCount} data-input-count={node.inputCount} data-error-count={node.errors.length}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">{t('studio.preview.nodeFlow', { input: node.inputCount, output: node.outputCount, ms: node.durationMs })}</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
         </>}
         {!preview && !previewError && <p className="muted small">{t('studio.preview.notAJob')}</p>}
       </section>}

@@ -98,6 +98,41 @@ describe('code rules: a promise is either awaited or handled', () => {
   });
 });
 
+describe('code rules: a write is verified by a re-read, not by its own response', () => {
+  /**
+   * A5 (§2 of docs/design/ui-visual-v3/code-rules.md). `InstallWizard.deploy()` used to take the
+   * body of `POST /plugins/{id}/deployments` and render it as the result, so the wizard printed
+   * the platform's echo of the request. The rule: a value bound to a write call never reaches a
+   * `set*` render setter. It must go through lib/verify-after-write.ts or lib/deploy-readback.ts,
+   * which return what a fresh GET said.
+   */
+  it('never renders the response body of a write verb', () => {
+    const offenders: string[] = [];
+    // §5 carve-out: an enrollment token is a one-time secret that exists only in the create
+    // response - no GET returns it - so the body is the resource, not an echo of the request.
+    const oneTimeSecret = new Set(['pages/Nodes.tsx:153']);
+    for (const [name, text] of sourceText()) {
+      if (/\.test\./.test(name)) continue;
+      // A5 states its scope as apps/platform-web/src/pages. The studio surface has its own two
+      // hits (PipelineEditor.tsx:182 saves a draft from the PUT body; :269 is a computing POST,
+      // /pipelines/preview, which writes nothing) - reported, not smuggled in as exempt here.
+      if (name.split(/[\\/]/)[0] !== 'pages') continue;
+      const bound = new Map<string, number>();
+      text.split('\n').forEach((line, index) => {
+        const inline = line.match(/\bset[A-Z]\w*\(\s*await\s+api\.(post|put|patch|delete)\b/);
+        if (inline) offenders.push(name + ':' + (index + 1) + ' renders a write response inline');
+        const m = line.match(/\b(?:const|let)\s+(\w+)\s*=\s*await\s+api\.(post|put|patch|delete)\b/);
+        if (m && !oneTimeSecret.has(name + ':' + (index + 1))) bound.set(m[1], index + 1);
+      });
+      for (const [variable, line] of bound) {
+        const rendered = new RegExp('\\bset[A-Z]\\w*\\(\\s*' + variable + '\\s*[,)]');
+        if (rendered.test(text)) offenders.push(name + ':' + line + ' renders ' + variable + ' from a write response');
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('code rules: the status table is read fail-closed', () => {
   /**
    * `STATUS_MAP[code].tone` is how two pages crashed on a code the table did not carry. A read

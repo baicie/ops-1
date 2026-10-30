@@ -1169,21 +1169,28 @@ ADR-UI-002 写着"所有令牌必须属于 OpsWeave（禁止并行第二套）"�
 | 38 | `r390-light-zh__admin_jobs_1285fbe8-9bb8-459f-b073-af245d32b3ae.png` | §2.6 溢出（zh 175px） |
 | 39 | `login-390.png` | §3-20 |
 
-### 4.2 未入库（本地保留，约 66 张 + 12 份度量 JSON）
+### 4.2 未入库（同一批矩阵的其余组合）
 
-未入库的是**同一批矩阵的其余组合**，全部在 `artifacts/ui/visual-v3/audit/` 但**不提交**：
+未入库的是**同一批矩阵的其余组合**。它们与 §4.1 的 39 张由同一个采集器对同一批路由产生，只是组合或路由不在正文引用范围内，因此**不提交 Git**：
 
-- `r1440-light-en__403.png`、`r1440-light-en__app_investigations.png`、`..._app_reports.png`、`..._app_observability.png`、`..._app_resources.png`、`..._app_sources.png`
-- `r1440-light-zh__403.png`、`..._admin_access.png`、`..._admin_activity.png`、`..._admin_instances_*.png`、`..._admin_jobs_*.png`、`..._admin_nodes.png`、`..._admin_nodes_*.png`、`..._admin_nope.png`、`..._admin_ops-center.png`、`..._admin_pipelines.png`、`..._admin_pipelines_*.png`、`..._admin_plugins.png`、`..._admin_plugins_dev.*.png`、`..._admin_plugins_install.png`、`..._admin_settings.png`、`..._app_incidents.png`、`..._app_investigations.png`、`..._app_reports.png`
-- `r1440-dark-en__admin_nodes.png`、`..._admin_pipelines.png`、`..._admin_plugins.png`、`..._admin_pipelines_*_editor.png`
-- `r1440-dark-zh__admin_jobs.png`、`..._admin_jobs_*.png`、`..._admin_nodes.png`、`..._admin_nodes_*.png`、`..._admin_plugins.png`、`..._admin_plugins_dev.*.png`、`..._admin_plugins_install.png`、`..._admin_settings_diagnostics.png`
-- `r1024-light-en__admin_jobs.png`、`..._admin_jobs_*.png`、`..._admin_nodes_*.png`、`r1024-light-zh__admin_overview.png`
-- `r390-light-en__admin_access.png`、`..._admin_activity.png`、`..._admin_governance.png`、`..._admin_instances_*.png`、`..._admin_jobs.png`、`..._admin_nodes_*.png`、`..._admin_ops-center.png`、`..._admin_pipelines.png`、`..._admin_pipelines_*.png`、`..._admin_plugins.png`、`..._admin_plugins_*.png`、`..._admin_settings_diagnostics.png`
-- `r390-dark-en__admin_overview.png`、`r390-dark-zh__admin_jobs.png`、`..._admin_jobs_*.png`
-- `r390-light-zh__admin_overview.png`、`..._admin_jobs.png`
+- 1440 断点：`light-zh` 的其余 admin 路由；`dark-en` / `dark-zh` 的 nodes、pipelines、plugins、jobs；`403`；`app_investigations` / `app_reports` 等业务页
+- 1024 断点：`light-en` 的 admin_jobs；`light-zh` 的 admin_overview
+- 390 断点：`light-en` 的 access / activity / governance / instances / jobs / nodes / ops-center / pipelines / plugins / settings_diagnostics；`dark-en`、`dark-zh` 的 overview 与 jobs；`light-zh` 的 overview 与 jobs
+
+这里只用"断点 + 主题 + 语言 + 路由"描述组合，不写具体文件名：本节断言的是**这些文件不存在于 Git**，逐个列出文件名会让链接检查器把它们读成 §4.1 那样的证据链接，而证据链接必须可点开——一份"我没提交这个文件"的目录页不应该长得像一份引用清单。
+
+归档位置：`.github/workflows/staging-preview.yml` 的 *Upload smoke evidence* 步骤上传整个 `artifacts/ui/`，整批矩阵因此作为 CI Artifact 保存。**"未入库"不等于"丢失"**：需要时重跑采集器即可复现，不必从 Git 历史里找回。
+
 - 度量 JSON：`_metrics_{login,r1024-*,r1440-*,r390-*}.json` 共 12 份（**建议入库**：它们是本报告所有数字的可复算来源，体积 < 2MB）
 
-> 仓库当前已有 **934 张**被跟踪 PNG；本轮新增 **39 张**（+4.2%），未越过 40 张上限。
+> 历史口径（2026-10-29 本轮）：仓库当时已有 **934 张**被跟踪 PNG，本轮新增 **39 张**（+4.2%），未越过本轮的 40 张上限。
+>
+> 当前口径（2026-10-31 收敛）：复核时该桶实际在库 **69 张**——§4.1 的 39 张之外，另有 30 张属于本节声明"不提交"的组合。逐张核对正文后分成两类：
+>
+> - **21 张**被报告正文当作证据引用（各节的 `**证据**` 行）。删掉它们等于删掉证据链接，因此**保留**。
+> - **9 张**在全文任何位置都没有被引用，已移除：`r1024-light-en__admin_jobs`、`r1024-light-zh__admin_overview`、`r1440-dark-zh__admin_jobs`、`r1440-light-en__403`、`r1440-light-zh__403`、`r390-dark-en__admin_overview`、`r390-dark-zh__admin_jobs`、`r390-light-en__admin_access`、`r390-light-zh__admin_overview`。
+>
+> 因此该桶现在是 **60 张**（39 + 21），`tests/ci/tracked-png-budget.json` 的上限也按 60 记录。§4.1 的"39 张"是本轮**入库配额**，不是该桶的**在库张数**；两个数字分开写，清单才描述真实目录树，而报告仍保留它当初的配额口径。
 
 ---
 

@@ -19,17 +19,17 @@
 | A2 | 读这张表必须 fail-closed：显式兜底，不许裸下标 | 【闸门】`code-rules.test.ts` | 修复前 2 违规，已修 |
 | A3 | 安装状态只由 `lib/installation-state.ts` 推导 | 【闸门】`installation-state.test.ts` | 检查过，0 违规（4 处命中经复核为断言，非第二套词汇表） |
 | A4 | 时间/年龄/身份/字节只有一套格式化器 | 【闸门】`check-ui-tokens.mjs` R6 | 4 处（棘轮已记账），另有 2 处未纳入闸门 |
-| A5 | 写操作必须回读后才算成功 | 【人工】+ `verify-after-write.test.ts` | 1 违规 |
+| A5 | 写操作必须回读后才算成功 | 【闸门】`code-rules.test.ts` + `verify-after-write.test.ts` + `deploy-readback.test.ts` | 修复前 1 违规（InstallWizard.deploy() 渲染 POST 响应体），已修 |
 | A6 | 去重账本只有 resolve 才算 settled | 【闸门】`facts-ledger.test.ts` | 检查过，0 违规 |
 | A7 | 列表页只用 `pages/table-kit.tsx` 的表格原语 | 【人工】 | 检查过，0 违规 |
-| A8 | 闸门本身不许放松；棘轮只许越拧越紧 | 【闸门】`ui-debt.json` | 0 违规，且拧紧 1 格（20 → 19） |
+| A8 | 闸门本身不许放松；棘轮只许越拧越紧 | 【闸门】`ui-debt.json` | 0 违规；本轮 5 个旧桶同时拧紧 + 新增 2 个桶，见 §7 |
 | B1 | 死代码：不可达 CSS、无引用导出、注释块、TODO | 【闸门】`code-rules.test.ts` + `/tmp` 脚本见 §4 | 修复前 24 处，已修 23 |
-| B2 | 同一 selector 在同一层叠上下文里不许重复声明 | 【人工】 | 修复前 245 处（140 同值 / 95 覆盖 / 10 整块），已修 1 |
+| B2 | 同一 selector 在同一层叠上下文里不许重复声明 | 【人工】+ 6 批像素验收 | 修复前 234 组（139 同值 / 95 覆盖）+ 9 整块重复 → **0 / 0** |
 | B3 | 类型逃逸（`as any` / `: any` / `@ts-ignore`） | 【人工】 | 修复前 24 处，已修 4 |
 | B4 | 每个 Promise 要么 await，要么处理 rejection | 【闸门】`code-rules.test.ts` | 修复前 1 违规，已修 |
 | B5 | 命名与行为一致 | 【人工】 | 1 违规，已修 |
-| B6 | 魔法数字：绕过 token 的字面值 | 【闸门】`check-ui-tokens.mjs` R1–R3 | 0 违规（344/55 处属设计内字面值，见 §4 说明） |
-| C1 | 隐式契约：插值必须真插值（选择器、testid、搜索串） | 【人工】 | 1 违规 |
+| B6 | 魔法数字：绕过 token 的字面值 | 【闸门】`check-ui-tokens.mjs` R1–R3 + R7 | R1–R3 无新增；R7 新增两个间距桶并各拧紧一格（435 → 52 / 115 → 108） |
+| C1 | 隐式契约：插值必须真插值（选择器、testid、搜索串） | 【人工】+ 词法扫描 | 修复前 1 违规（`Plugins.tsx` 搜索串漏 $），已修；全仓 156 个源码文件复扫 0 命中 |
 | C2 | 空真测试：断言必须在格式错误时也会失败 | 【人工】 | 2 违规，已修 |
 | C3 | 用户可见文案与后端可见原因走消息目录 | 【闸门】`check-i18n.mjs` | 3 违规 |
 | C4 | 颜色不得是唯一信号 | 【闸门】`status-tone.test.ts` | 检查过，0 违规 |

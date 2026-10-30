@@ -7,12 +7,14 @@
     "maxFiles per directory is the exact count after the 2026-11 cleanup (1087 -> 331 tracked PNGs), so any single",
     "new file in any bucket turns the guard red until someone raises that bucket's number on purpose.",
     "Ceilings were taken from `git ls-files '*.png'` immediately after the cleanup; regenerate the byte ceilings with",
-    "the command in the $howToRegenerate line if a deliberate re-capture changes file sizes."
+    "the command in the $howToRegenerate line if a deliberate re-capture changes file sizes.",
+    "Ceilings were lowered to the post-2026-10-31 curated count (569 -> 429 files, 70.05 -> 68.13 MB) when the duplicate table runs, the 30 undeclared audit captures and the superseded v6 matrix left the index. Only lower.",
+    "Ceilings lowered to the 2026-10-31 curated count (569 -> 428 files, 70.05 -> 68.24 MB) after the duplicate table runs, the 9 uncited audit captures, and the superseded pre-v8 console buckets (visual-v4, v5, ui-v7, ui-verbs-v6) left the index. Only lower: those four buckets are cited by no document and cover pages that visual-v3/audit now carries with the current console."
   ],
   "$howToRegenerate": "node tests/ci/check-tracked-png-budget.mjs --print-manifest",
   "totals": {
-    "maxFiles": 569,
-    "maxBytes": 73451744
+    "maxFiles": 379,
+    "maxBytes": 71554236
   },
   "directories": {
     "artifacts/ui": {
@@ -47,13 +49,29 @@
       "maxFiles": 18
     },
     "artifacts/ui/visual-v3/audit": {
-      "maxFiles": 69
+      "maxFiles": 60,
+      "note": "The 60 images visual-audit.md actually links as evidence: the 39 of its section 4.1 quota plus 21 that its section 4.2 says stay local but which the report body cites on a 证据 line. 9 further captures were tracked and cited nowhere; those left the index."
+    },
+    "artifacts/ui/visual-v3/debt": {
+      "maxFiles": 6
+    },
+    "artifacts/ui/visual-v3/deployed": {
+      "maxFiles": 6,
+      "note": "representative deployed-vs-local comparison; the full 36 were measured and discarded"
     },
     "artifacts/ui/visual-v3/flagship/after": {
       "maxFiles": 36
     },
     "artifacts/ui/visual-v3/flagship/before": {
       "maxFiles": 36
+    },
+    "artifacts/ui/visual-v3/table/after": {
+      "maxFiles": 25,
+      "note": "Post-fix half of the table-geometry baseline; same instrument as table/before. The four other run labels (before-fix, after-fix, review7, final) were repeated captures of the same matrix and are archived as a CI artifact."
+    },
+    "artifacts/ui/visual-v3/table/before": {
+      "maxFiles": 20,
+      "note": "The one table-geometry baseline kept: same instrument (tests/ui/ui-table-audit.spec.ts) on pre-fix page code. Pair with table/after."
     },
     "artifacts/ui/visual-v3/token-layer/after": {
       "maxFiles": 6
@@ -69,35 +87,6 @@
     },
     "docs/assets/0.0.4/ui-redesign": {
       "maxFiles": 10
-    },
-    "artifacts/ui/visual-v3/deployed": {
-      "maxFiles": 6,
-      "note": "representative deployed-vs-local comparison; the full 36 were measured and discarded"
-    },
-    "artifacts/ui/visual-v4": {
-      "maxFiles": 30,
-      "note": "V4 console redesign: 3 pages x viewports/themes + the interaction-state matrix; the full uncurated matrix stays out of git (see docs report)."
-    },
-    "artifacts/ui/v5": {
-      "maxFiles": 16
-    },
-    "artifacts/ui/v6-remediation": {
-      "maxFiles": 40
-    },
-    "artifacts/ui-verbs-v6": {
-      "maxFiles": 15
-    },
-    "artifacts/ui-v7": {
-      "maxFiles": 11
-    },
-    "artifacts/ui/visual-v3/table": {
-      "maxFiles": 106
-    },
-    "artifacts/ui-v8-activity": {
-      "maxFiles": 9
-    },
-    "artifacts/ui/visual-v3/debt": {
-      "maxFiles": 6
     }
   },
   "knownMissingDocReferences": [

@@ -23,6 +23,7 @@ import { NoData, StatusIndicator, indicatorStateForCode } from '../components/ap
 import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 import { InstallationStatus } from '../components/app/status';
 import { deriveInstallationState } from '../lib/installation-state';
+import { filterPlugins, isAbnormal, matchesQuickFilter, type QuickFilter } from './plugins-filter';
 
 /** Per-plugin facts only the detail route exposes: digest, trust, activation and deployment health. */
 interface PluginFacts {
@@ -108,29 +109,10 @@ const VERB_DONE: Record<Verb, MessageKey> = {
 };
 
 /**
- * The three counts the summary strip prints, written as predicates over the same rows the
- * table renders.
- *
- * This is the fix for a count with no rows behind it: "Needs attention 1" used to be a number
- * the operator then had to hunt for by reading every status cell. Clicking the count filters
- * the table to exactly the rows it counted - one selector for both the number and the filter,
- * so they cannot disagree.
+ * The three counts the summary strip prints live in ./plugins-filter with the search haystack and
+ * the row filter, because they are one rule: the count, the chip and the rows must be the same
+ * selector or the number and the table disagree.
  */
-type QuickFilter = 'installed' | 'upgradeable' | 'abnormal';
-
-function isAbnormal(plugin: PluginSummary): boolean {
-  const signatureBad = Boolean(plugin.signatureState && plugin.signatureState !== 'VERIFIED');
-  const replicasBehind = plugin.totalInstances > 0 && plugin.readyInstances < plugin.totalInstances;
-  return signatureBad || replicasBehind || plugin.state === 'DEGRADED' || plugin.state === 'FAILED';
-}
-
-function matchesQuickFilter(plugin: PluginSummary, key: QuickFilter): boolean {
-  if (plugin.isSystem) return false;
-  if (key === 'installed') return plugin.state === 'INSTALLED';
-  if (key === 'upgradeable') return Boolean(plugin.latestVersion && plugin.activeVersion && plugin.latestVersion !== plugin.activeVersion);
-  return isAbnormal(plugin);
-}
-
 /**
  * §4.5 B. Summary first (with the counting rule printed next to it), then search + state filter,
  * then the table. A column the API does not answer renders NO_DATA - a replica count of 0 for a
@@ -180,12 +162,7 @@ export function PluginsPage() {
     }
   }, [plugins, factsEpoch]);
 
-  const filtered = useMemo(() => plugins.filter((plugin) => {
-    const matchesQuery = `{plugin.id} ${plugin.name} ${plugin.publisher || ''}`.toLowerCase().includes(query.toLowerCase());
-    const matchesState = state === 'ALL' || plugin.state === state;
-    const matchesQuick = quickFilter === null || matchesQuickFilter(plugin, quickFilter);
-    return matchesQuery && matchesState && matchesQuick;
-  }), [plugins, query, state, quickFilter]);
+  const filtered = useMemo(() => filterPlugins(plugins, { query, state, quickFilter }), [plugins, query, state, quickFilter]);
 
   const summary = useMemo(() => summarize(plugins), [plugins]);
   /**

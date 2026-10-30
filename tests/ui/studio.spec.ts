@@ -99,9 +99,44 @@ test('server preview runs pure transforms and reports node outputs', async ({ pa
   await page.goto(`/pipelines/${PIPELINE}/editor`);
   await page.getByRole('button', { name: 'Preview', exact: true }).click();
   await page.getByRole('button', { name: 'Run preview' }).click();
-  await expect(page.getByLabel('Preview panel')).toContainText('COMPLETED');
-  await expect(page.getByLabel('Preview panel')).toContainText('records');
-  await expect(page.locator('.preview-node').first()).toBeVisible();
+
+  const panel = page.getByLabel('Preview panel');
+  const summary = panel.locator('.preview-summary');
+
+  // The summary paints catalog copy, so its text is "Completed" in en and "已完成" in zh-CN, and
+  // it was never the protocol answer anyway. data-status carries the wire code (the same contract
+  // Status keeps), so this asserts the real result without pinning the case to one language.
+  await expect(summary).toHaveAttribute('data-status', 'COMPLETED');
+
+  // Exact processed count, not "the word records appears": the sample this case actually submits
+  // is read back, and the server's processedRecords must equal the number of rows that went in -
+  // which is what "pure transforms" means. One row in, one row out.
+  const sampleRows = JSON.parse(await panel.locator('textarea').inputValue()) as unknown[];
+  const expected = sampleRows.length;
+  expect(expected, 'the seeded sample is a non-empty array').toBeGreaterThan(0);
+  await expect(summary).toHaveAttribute('data-records', String(expected));
+
+  // Node Outputs open: the summary's node count and the number of node cards must agree, every
+  // card must name its node, and every card must render a parseable payload.
+  const nodes = panel.locator('.preview-node');
+  await expect(nodes.first()).toBeVisible();
+  const nodeCount = Number(await summary.getAttribute('data-node-count'));
+  expect(nodeCount, 'the preview reports at least one node output').toBeGreaterThan(0);
+  await expect(nodes).toHaveCount(nodeCount);
+
+  for (let index = 0; index < nodeCount; index += 1) {
+    const node = nodes.nth(index);
+    const nodeId = await node.getAttribute('data-node-id');
+    expect(nodeId, `preview node #${index} names its nodeId`).toBeTruthy();
+    // The payload is rendered and parseable, which is what "the node output can be opened" means.
+    const opened = JSON.parse((await node.locator('pre').first().textContent()) ?? 'null') as unknown;
+    expect(Array.isArray(opened), `node ${nodeId} renders its rows as a JSON array`).toBe(true);
+    // outputCount is the node's real row count, so the rows it renders can never outnumber it.
+    const outputCount = Number(await node.getAttribute('data-output-count'));
+    expect(Number.isInteger(outputCount), `node ${nodeId} reports an integer output-count`).toBe(true);
+    expect((opened as unknown[]).length, `node ${nodeId} does not render more rows than it produced`).toBeLessThanOrEqual(outputCount);
+  }
+
   await page.addStyleTag({ content: '.topbar{visibility:hidden}' });
   await page.locator('.studio-preview').screenshot({ path: path.join(OUT, 'pipeline-preview.png') });
 });
