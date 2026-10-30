@@ -17,6 +17,8 @@ import { NoData, UnknownValue } from './status-indicator';
 export function MetricCard({
   label,
   value,
+  /** The other half of a ratio, rendered muted right after the value ("3 / 3"). */
+  denominator,
   unit,
   detail,
   sampledAt,
@@ -27,6 +29,8 @@ export function MetricCard({
 }: {
   label: string;
   value?: React.ReactNode;
+  /** Rendered as "/ n" so a count with a total and one without share one shape. */
+  denominator?: React.ReactNode;
   unit?: string;
   detail?: React.ReactNode;
   /** When the value was observed. Rendered as an absolute time, never invented. */
@@ -49,6 +53,7 @@ export function MetricCard({
         {state === 'ready' ? (
           <>
             {value}
+            {denominator !== undefined ? <span className="ow-metric-den">/{denominator}</span> : null}
             {unit ? <span className="ow-metric-unit">{unit}</span> : null}
           </>
         ) : state === 'noData' ? (

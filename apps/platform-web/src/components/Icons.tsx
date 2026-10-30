@@ -1,47 +1,65 @@
 import React from 'react';
 
+/**
+ * One icon grid for the whole shell: a 24px box with a 2px safe margin, 1.7 unit stroke,
+ * round caps and joins. Every entry below is drawn to the same optical weight, so a rail of
+ * ten icons reads as one set instead of ten illustrations.
+ *
+ * The previous set mixed 1.8px strokes with 1.5px ones, filled corners with open arcs and
+ * borrowed a "no entry" circle for Governance - which only ever rendered because the
+ * navigation asked for a `shield` glyph this file did not define, and the fallback painted
+ * an alert triangle instead (AdminNavigation.ts:65). An unknown key still falls back, but the
+ * fallback is now a neutral diamond rather than a warning.
+ */
 const paths: Record<string, React.ReactNode> = {
-  overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
-  plugins: <><path d="M8 3v4M16 3v4M5 7h14v4a7 7 0 0 1-14 0V7Z" /><path d="M12 18v3" /></>,
-  nodes: <><rect x="3" y="4" width="18" height="7" rx="2" /><rect x="3" y="13" width="18" height="7" rx="2" /><path d="M7 7.5h.01M7 16.5h.01" /></>,
-  activity: <path d="M3 12h4l2.5-7 5 14 2.5-7h4" />,
-  pipeline: <><circle cx="5" cy="6" r="2" /><circle cx="19" cy="6" r="2" /><circle cx="12" cy="18" r="2" /><path d="M7 6h10M6 8v3a3 3 0 0 0 3 3h2M18 8v3a3 3 0 0 1-3 3h-2" /></>,
-  access: <><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v2" /></>,
-  settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.14.5.54.9 1.05 1.05H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15Z" /></>,
-  ops: <><path d="M4 6h16M4 12h16M4 18h10" /><circle cx="18" cy="18" r="2" /></>,
-  menu: <path d="M4 6h16M4 12h16M4 18h16" />,
-  close: <path d="m6 6 12 12M18 6 6 18" />,
-  chevron: <path d="m9 18 6-6-6-6" />,
-  down: <path d="m6 9 6 6 6-6" />,
+  // ── navigation ────────────────────────────────────────────────────────────────
+  overview: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.6" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.6" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.6" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.6" /></>,
+  plugins: <path d="M9 3.5h3.2v2.1a1.8 1.8 0 0 0 3.6 0V3.5H20v4.6h-2.1a1.8 1.8 0 0 0 0 3.6H20V20h-4.2v-2.2a1.8 1.8 0 0 0-3.6 0V20H5.5v-4.2h2.2a1.8 1.8 0 0 0 0-3.6H5.5V3.5H9Z" />,
+  nodes: <><rect x="3" y="4" width="18" height="7" rx="1.8" /><rect x="3" y="13" width="18" height="7" rx="1.8" /><path d="M6.8 7.5h.01M6.8 16.5h.01M11 7.5h4M11 16.5h4" /></>,
+  pipeline: <><circle cx="6" cy="6" r="2.4" /><circle cx="18" cy="12" r="2.4" /><circle cx="6" cy="18" r="2.4" /><path d="M8.4 6h3.1a2 2 0 0 1 2 2v1.6M15.6 12h-2.1a2 2 0 0 0-2 2v1.6" /></>,
+  clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.2V12l3.2 2" /></>,
+  shield: <><path d="M12 3.5 19 6v5.4c0 4.2-2.9 7.5-7 9.1-4.1-1.6-7-4.9-7-9.1V6l7-2.5Z" /><path d="m9.2 12 2 2 3.6-3.8" /></>,
+  access: <><rect x="4" y="10.5" width="16" height="9.5" rx="2.2" /><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" /><path d="M12 14.4v2.2" /></>,
+  activity: <path d="M3 12.2h3.4l2.3-6.6 4.4 12.8 2.3-6.2H21" />,
+  settings: <><path d="M4 7.5h9M17.5 7.5H20M4 16.5h3.5M12 16.5h8" /><circle cx="15" cy="7.5" r="2.4" /><circle cx="9.5" cy="16.5" r="2.4" /></>,
+  ops: <><circle cx="12" cy="12" r="8.5" /><path d="M12 12h.01" /><path d="m15.6 8.4-2 4.6-4.6 2 2-4.6 4.6-2Z" /></>,
+  // ── chrome and controls ───────────────────────────────────────────────────────
+  menu: <path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h11" />,
+  close: <path d="m6.5 6.5 11 11M17.5 6.5l-11 11" />,
+  chevron: <path d="m9.5 18 6-6-6-6" />,
+  down: <path d="m6 9.5 6 6 6-6" />,
   plus: <path d="M12 5v14M5 12h14" />,
-  refresh: <><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></>,
-  external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M20 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4" /></>,
-  play: <path d="m8 5 11 7-11 7V5Z" />,
-  layout: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
-  stop: <rect x="6" y="6" width="12" height="12" rx="1.5" />,
-  warning: <><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v5M12 17h.01" /></>,
-  check: <path d="m5 12 4 4L19 6" />,
-  save: <><path d="M4 4h13l3 3v13H4z" /><path d="M8 4v6h8V4M8 20v-7h8v7" /></>,
-  upload: <><path d="M12 17V4M6 10l6-6 6 6" /><path d="M5 20h14" /></>,
-  copy: <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
-  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
-  moon: <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8Z" />,
-  logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5M21 12H9" /></>,
-  search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-  file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8M8 17h6" /></>,
-  server: <><rect x="3" y="3" width="18" height="8" rx="2" /><rect x="3" y="13" width="18" height="8" rx="2" /><path d="M7 7h.01M7 17h.01" /></>,
-  box: <><path d="m12 2 9 5-9 5-9-5 9-5Z" /><path d="m3 7 9 5 9-5M3 12l9 5 9-5M3 17l9 5 9-5" /></>,
-  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-  logs: <><path d="M4 4h16v16H4z" /><path d="M8 8h8M8 12h8M8 16h5" /></>,
-  alert: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></>,
-  trash: <><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14" /></>,
-  rotate: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></>,
-  key: <><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3M15 8l2 2" /></>,
-  terminal: <><path d="m4 6 6 6-6 6M12 18h8" /></>,
-  arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
-  filter: <path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z" />,
-  pause: <path d="M8 5v14M16 5v14" />,
-  inbox: <><path d="M4 4h16v16H4z" /><path d="M4 13h4l2 3h4l2-3h4" /></>,
+  refresh: <><path d="M20 11a8 8 0 1 0-2.4 5.7" /><path d="M20 4.5V11h-6.5" /></>,
+  external: <><path d="M14 4h6v6M20 4l-8.5 8.5" /><path d="M19 14.5V19a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 19V6.5A1.5 1.5 0 0 1 5.5 5H10" /></>,
+  play: <path d="M8 5.2 18.5 12 8 18.8V5.2Z" />,
+  stop: <rect x="6.5" y="6.5" width="11" height="11" rx="1.6" />,
+  pause: <path d="M9 5.5v13M15 5.5v13" />,
+  warning: <><path d="M12 3.6 3 20.2h18L12 3.6Z" /><path d="M12 9.4v4.8M12 17.2h.01" /></>,
+  alert: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.8v4.6M12 16.1h.01" /></>,
+  info: <><circle cx="12" cy="12" r="8.5" /><path d="M12 11.2v5M12 7.9h.01" /></>,
+  check: <path d="m5 12.4 4.4 4.4L19 6.6" />,
+  save: <><path d="M4.5 4.5h12l3 3v12h-15v-15Z" /><path d="M8 4.5v5.5h7V4.5M8 19.5v-6h8v6" /></>,
+  upload: <><path d="M12 16.5V4.5M6.5 10 12 4.5 17.5 10" /><path d="M5 19.5h14" /></>,
+  copy: <><rect x="8.5" y="8.5" width="11" height="11" rx="1.8" /><path d="M15.5 8.5V6.3A1.8 1.8 0 0 0 13.7 4.5H6.3A1.8 1.8 0 0 0 4.5 6.3v7.4a1.8 1.8 0 0 0 1.8 1.8h2.2" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4" /></>,
+  moon: <path d="M20.5 13.2A8.5 8.5 0 1 1 10.8 3.5a6.6 6.6 0 0 0 9.7 9.7Z" />,
+  logout: <><path d="M9.5 20.5H5.5A1.5 1.5 0 0 1 4 19V5a1.5 1.5 0 0 1 1.5-1.5h4" /><path d="m16 16.5 4.5-4.5L16 7.5M20.5 12H9" /></>,
+  search: <><circle cx="11" cy="11" r="6.5" /><path d="m19.5 19.5-4-4" /></>,
+  file: <><path d="M13.5 3.5H6.5A1.5 1.5 0 0 0 5 5v14a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V9l-5.5-5.5Z" /><path d="M13.5 3.5V9H19M8.5 13h7M8.5 16.5h4.5" /></>,
+  server: <><rect x="3" y="4" width="18" height="7" rx="1.8" /><rect x="3" y="13" width="18" height="7" rx="1.8" /><path d="M6.8 7.5h.01M6.8 16.5h.01" /></>,
+  box: <><path d="m12 3 8 4.4-8 4.4-8-4.4L12 3Z" /><path d="m4 7.4 8 4.4v9.2l-8-4.4V7.4ZM20 7.4l-8 4.4v9.2l8-4.4V7.4Z" /></>,
+  logs: <><rect x="3.5" y="4" width="17" height="16" rx="1.8" /><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h5" /></>,
+  trash: <><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13" /></>,
+  rotate: <><path d="M3.5 12a8.5 8.5 0 1 0 2.9-6.4L3.5 8" /><path d="M3.5 3v5h5" /></>,
+  key: <><circle cx="8.5" cy="15" r="3.8" /><path d="m11.3 12.2 8.2-8.2M16.5 5.4l2.7 2.7M14.2 7.7l2.3 2.3" /></>,
+  terminal: <><path d="m4.5 7 5.5 5-5.5 5M12.5 17.5h7" /></>,
+  arrowRight: <path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5" />,
+  arrowLeft: <path d="M19.5 12h-14M11 6.5 5.5 12l5.5 5.5" />,
+  filter: <path d="M3.5 5.5h17l-6.6 7.6v6l-3.8 1.9v-7.9L3.5 5.5Z" />,
+  inbox: <><path d="M3.5 4.5h17v15h-17v-15Z" /><path d="M3.5 13.5H8l2 2.6h4l2-2.6h4.5" /></>,
+  layout: <><rect x="3.5" y="3.5" width="17" height="17" rx="2" /><path d="M3.5 9h17M9.5 9v11.5" /></>,
+  // Neutral fallback: a diamond is a placeholder, not an alarm.
+  unknown: <path d="m12 3.5 8.5 8.5-8.5 8.5L3.5 12 12 3.5Z" />,
 };
 
 export function Icon({ name, size = 18, className = '' }: { name: string; size?: number; className?: string }) {
@@ -53,12 +71,13 @@ export function Icon({ name, size = 18, className = '' }: { name: string; size?:
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.7"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      focusable="false"
     >
-      {paths[name] || paths.alert}
+      {paths[name] || paths.unknown}
     </svg>
   );
 }

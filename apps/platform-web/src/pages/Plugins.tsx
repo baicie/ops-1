@@ -101,15 +101,16 @@ export function PluginsPage() {
     <div className="page-stack">
       <PageHeader
         title={t('page.plugins')}
-        description={t('plugins.description')}
         actions={<Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
         primary={<Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('plugins.action.installPackage')}</Link>}
       />
       <AsyncBoundary loading={loading} error={error} hasData={Boolean(data)} onRetry={() => void reload()} skeletonRows={6}>
-        {/* One strip, three counts, the counting rule printed under each: the definitions are
-            what stops "Installed 3" from being read as "3 healthy". */}
+        {/* One strip, three counts. The counting rule still travels with each number - as the
+            cell's accessible description and its hover title - instead of a three-line
+            paragraph under every card, which is what made the strip 130px tall for three
+            digits. */}
         <section className="stat-block" aria-label={t('plugins.summary.aria')} data-testid="plugins-summary">
-          <div className="ow-summary stat-strip">
+          <div className="ow-summary">
             <SummaryCard label={t('plugins.summary.installed')} value={summary.installed} definition={t('plugins.summary.installed.definition')} />
             <SummaryCard label={t('plugins.summary.upgradeable')} value={summary.upgradeable} definition={t('plugins.summary.upgradeable.definition')} tone={summary.upgradeable > 0 ? 'warn' : undefined} />
             <SummaryCard label={t('plugins.summary.abnormal')} value={summary.abnormal} definition={t('plugins.summary.abnormal.definition')} tone={summary.abnormal > 0 ? 'danger' : undefined} />
@@ -223,17 +224,24 @@ export function PluginsPage() {
           </section>
         )}
       </AsyncBoundary>
-      <p className="table-footnote"><Icon name="alert" size={13} /> {t('plugins.footnote')}</p>
+      <div className="page-footnotes">
+        <p><Icon name="info" size={13} /> {t('plugins.footnote')}</p>
+      </div>
     </div>
   );
 }
 
 function SummaryCard({ label, value, definition, tone }: { label: string; value: number; definition: string; tone?: 'warn' | 'danger' }) {
   return (
-    <div className={cn('ow-summary-card', tone === 'warn' && 'is-warn', tone === 'danger' && 'is-danger')} data-summary={label}>
+    <div
+      className={cn('ow-summary-card', tone === 'warn' && 'is-warn', tone === 'danger' && 'is-danger')}
+      data-summary={label}
+      title={definition}
+      aria-label={label + ': ' + value + '. ' + definition}
+    >
       <span className="ow-summary-label">{label}</span>
       <span className="ow-summary-value">{value}</span>
-      <span className="ow-summary-definition">{definition}</span>
+      <span className="ow-summary-definition" aria-hidden="true">{definition}</span>
     </div>
   );
 }

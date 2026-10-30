@@ -118,7 +118,10 @@ export function breadcrumbTrail(pathname: string): AdminBreadcrumbNode[] {
   const absolute = (parts: string[]) => ADMIN_SURFACE_PREFIX + '/' + parts.join('/');
   if (segments.length === 0) return [{ labelKey: 'page.overview', to: '/admin/overview' }];
   const top = ADMIN_NAV_ITEMS.find((item) => item.to === absolute([segments[0]]));
+  // The surface name is the first crumb: without it the trail is a single word that repeats
+  // the page title, which is why the topbar read as a second H1 instead of as a location.
   const nodes: AdminBreadcrumbNode[] = [
+    { labelKey: 'nav.section.platform', to: '/admin/overview' },
     { labelKey: top?.labelKey, text: top ? undefined : shorten(decodeURIComponent(segments[0])), to: absolute([segments[0]]) },
   ];
   for (let index = 1; index < segments.length; index += 1) {

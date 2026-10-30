@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Icon } from './Icons';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n';
 
@@ -25,26 +26,24 @@ const READINESS_LABEL_KEYS: Record<ReadinessCode, MessageKey> = {
   UNKNOWN: 'badge.value.unknown',
 };
 
-function Chip({ field, label, value, title }: { field: string; label: string; value: string; title?: string }) {
-  return (
-    <span className="meta-chip" data-version-field={field}>
-      <span className="muted small">{label}</span>
-      <strong className="mono" title={title}>{value}</strong>
-    </span>
-  );
-}
-
 /**
  * Non-production deployment badge: which build is the browser actually looking at?
  *
  * The probe is deliberately a bare fetch instead of the shared api client, so a
  * failing version endpoint can never trigger the global 401/unauthorized path
  * or throw into the shell.
+ *
+ * V4: this used to be a permanent four-row table in the rail - environment, commit,
+ * deployed-at and status, each 11px, with five hairlines inside a 240px column. An
+ * administrator checks it occasionally; nobody reads it while working. It is now one line
+ * (readiness dot, environment, commit) and the exact deploy time opens on request, so the
+ * rail gives that space back to navigation without losing the fact.
  */
 export function VersionBadge() {
   const { t, formatDateTime } = useI18n();
   const [identity, setIdentity] = useState<BuildIdentity | null>(null);
   const [status, setStatus] = useState<ReadinessCode>('UNKNOWN');
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,16 +85,32 @@ export function VersionBadge() {
   const deployedAt = deployedSource ? formatDateTime(deployedSource) : unknown;
 
   return (
-    <footer
-      className="toolbar version-badge"
-      /* Frozen: tests/ui/staging-smoke.spec.ts locates the badge by this accessible name. */
-      aria-label="Deployment version"
-      style={{ padding: '10px 28px 18px', borderTop: '1px solid var(--ow-border)' }}
-    >
-      <Chip field="environment" label={t('badge.environment')} value={environment} />
-      <Chip field="commit" label={t('badge.commit')} value={commit} title={identity?.commitSha ?? undefined} />
-      <Chip field="deployedAt" label={t('badge.deployedAt')} value={deployedAt} />
-      <Chip field="status" label={t('badge.status')} value={t(READINESS_LABEL_KEYS[status])} />
+    <footer className="sidebar-meta-block" aria-label="Deployment version">
+      <button
+        type="button"
+        className="sidebar-meta"
+        aria-expanded={open}
+        onClick={() => setOpen((previous) => !previous)}
+        data-testid="version-badge-toggle"
+      >
+        <span className="sidebar-meta-dot" data-state={status} aria-hidden="true" />
+        <span data-version-field="environment"><strong className="sidebar-meta-env">{environment}</strong></span>
+        <span aria-hidden="true">·</span>
+        <span data-version-field="commit" title={identity?.commitSha ?? undefined}><strong className="sidebar-meta-sha">{commit}</strong></span>
+        <Icon name="down" size={12} className="sidebar-meta-chevron" />
+      </button>
+      {open ? (
+        <dl className="sidebar-meta-details">
+          <div className="sidebar-meta-row">
+            <dt>{t('badge.status')}</dt>
+            <dd data-version-field="status"><strong>{t(READINESS_LABEL_KEYS[status])}</strong></dd>
+          </div>
+          <div className="sidebar-meta-row">
+            <dt>{t('badge.deployedAt')}</dt>
+            <dd data-version-field="deployedAt"><strong>{deployedAt}</strong></dd>
+          </div>
+        </dl>
+      ) : null}
     </footer>
   );
 }

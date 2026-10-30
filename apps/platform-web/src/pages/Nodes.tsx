@@ -17,7 +17,7 @@ import { useT } from '../i18n';
 import { cn } from '../lib/utils';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
-import { NoData, StatusIndicator, indicatorStateForCode, type IndicatorState } from '../components/app/status-indicator';
+import { NoData, StatusIndicator, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 
 /**
  * Status rendering for every node surface: colour + glyph + text, and the effective state is
@@ -133,7 +133,6 @@ export function NodesPage() {
     <div className="page-stack">
       <PageHeader
         title={t('page.nodes')}
-        description={t('nodes.description')}
         actions={<Button variant="secondary" className="max-[760px]:flex-1" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
         primary={<Button className="max-[760px]:flex-1" onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'} title={user?.role !== 'admin' ? t('nodes.join.adminRequired') : ''}><Icon name="plus" size={15} /> {t('nodes.join.action')}</Button>}
       />
@@ -147,9 +146,11 @@ export function NodesPage() {
         emptyState={<EmptyState icon="nodes" title={t('nodes.empty.title')} description={t('nodes.empty.description')} action={<Button onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'}>{t('nodes.empty.action')}</Button>} />}
       >
         {/* A count you cannot click is a number you then have to hunt for again: each cell
-            selects the state it counts, and aria-pressed keeps the current filter readable. */}
+            selects the state it counts, and aria-pressed keeps the current filter readable.
+            V4 removed the second, identical filter underneath: a state strip plus a tab row
+            offered the same five choices twice, 40px apart. */}
         <section className="stat-block" aria-label={t('nodes.summary.aria')} data-testid="nodes-summary">
-          <div className="ow-summary stat-strip">
+          <div className="ow-summary">
             <button type="button" className="ow-summary-card" aria-pressed={stateFilter === 'ALL'} onClick={() => setStateFilter('ALL')}>
               <span className="ow-summary-label">{t('nodes.summary.total')}</span>
               <span className="ow-summary-value">{nodes.length}</span>
@@ -157,22 +158,16 @@ export function NodesPage() {
             </button>
             {(['ready', 'stale', 'unreachable', 'revoked'] as IndicatorState[]).map((state) => (
               <button type="button" className="ow-summary-card" key={state} aria-pressed={stateFilter === state.toUpperCase()} onClick={() => setStateFilter(state.toUpperCase())}>
-                <span className="ow-summary-label"><StatusIndicator state={state} /></span>
+                <span className="ow-summary-label state-count">
+                  <span className="state-count-dot" data-indicator={state} aria-hidden="true" />
+                  {t(labelKeyForState(state))}
+                </span>
                 <span className="ow-summary-value">{nodes.filter((node) => nodeState(node) === state).length}</span>
               </button>
             ))}
           </div>
         </section>
         <section className="toolbar">
-          <div className="ow-filter-scroll">
-            <Tabs value={stateFilter} onValueChange={setStateFilter}>
-              <TabsList aria-label={t('nodes.filter.status.aria')}>
-                {['ALL', 'READY', 'STALE', 'UNREACHABLE', 'REVOKED'].map((value) => (
-                  <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : value === 'READY' ? t('state.ready') : value === 'STALE' ? t('state.stale') : value === 'UNREACHABLE' ? t('state.unreachable') : t('state.revoked')}</TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </div>
           {operatingSystems.length > 1 ? (
             <label className="ow-filter-select">
               <span>{t('nodes.filter.os')}</span>
@@ -216,12 +211,12 @@ export function NodesPage() {
                       </div>
                     </StackCell>
                     <StackCell label={t('table.identity')}><span className="mono text-sm">{node.os}/{node.arch}</span><div className="text-sm text-muted-foreground">{t('nodes.table.generation', { generation: node.generation })}</div></StackCell>
-                    <StackCell label={t('table.instances')}><strong>{node.instancesReady}/{node.instancesTotal}</strong><span className="text-sm text-muted-foreground"> READY</span></StackCell>
+                    <StackCell label={t('table.instances')}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
                     <StackCell label={t('table.cpu')} data-resource="cpu">{cpu === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(cpu * 100)}%</span>}</StackCell>
                     <StackCell label={t('table.memory')} data-resource="memory">{memory === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(memory * 100)}%</span>}</StackCell>
                     <StackCell label={t('table.capacity')} data-resource="capacity" className="max-[1200px]:hidden">
                       {snapshot?.memoryTotalBytes ? (
-                        <span className="text-sm">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
+                        <span className="ow-cell-meta ow-tnum">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
                       ) : <NoData detail={t('nodes.resource.missingSnapshot')} />}
                     </StackCell>
                     <StackCell label={t('table.sampledAt')} data-resource="sampled-at">{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
@@ -233,9 +228,11 @@ export function NodesPage() {
           </Table>
         </section>
       </AsyncBoundary>
-      <div className="info-grid">
-        <div className="callout"><Icon name="access" size={16} /><p>{t('nodes.credentialsNote')}</p></div>
-        <div className="callout"><Icon name="alert" size={16} /><p>{t('nodes.staleNote.before')} <strong>UNREACHABLE</strong>{t('nodes.staleNote.after')}</p></div>
+      {/* Two sentences that used to be two bordered callouts side by side: they explain a
+          column, they are not content, so they read as one muted footnote block. */}
+      <div className="page-footnotes">
+        <p><Icon name="access" size={13} /> {t('nodes.credentialsNote')}</p>
+        <p><Icon name="info" size={13} /> {t('nodes.staleNote.before')} <strong>UNREACHABLE</strong>{t('nodes.staleNote.after')}</p>
       </div>
 
       <Dialog open={joinOpen} onOpenChange={(open) => { setJoinOpen(open); if (!open) { setToken(null); setShowToken(false); } }}>

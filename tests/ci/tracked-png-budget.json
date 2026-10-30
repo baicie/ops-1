@@ -11,8 +11,8 @@
   ],
   "$howToRegenerate": "node tests/ci/check-tracked-png-budget.mjs --print-manifest",
   "totals": {
-    "maxFiles": 337,
-    "maxBytes": 68208864
+    "maxFiles": 367,
+    "maxBytes": 73451744
   },
   "directories": {
     "artifacts/ui": {
@@ -73,6 +73,10 @@
     "artifacts/ui/visual-v3/deployed": {
       "maxFiles": 6,
       "note": "representative deployed-vs-local comparison; the full 36 were measured and discarded"
+    },
+    "artifacts/ui/visual-v4": {
+      "maxFiles": 30,
+      "note": "V4 console redesign: 3 pages x viewports/themes + the interaction-state matrix; the full uncurated matrix stays out of git (see docs report)."
     }
   },
   "knownMissingDocReferences": [

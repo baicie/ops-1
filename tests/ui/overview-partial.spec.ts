@@ -283,8 +283,10 @@ test('overview: DEGRADED renders when a module reports it - and it is not PARTIA
   await expect(runtime.locator('.module-card-detail')).toHaveText(copy('overview.module.runtime.detail', forcedReplicas));
 
   // The strip and the KPI agree because both read the payload that really rendered.
+  // V4 prints a ratio the same way in every cell: 0/1, with the total muted rather than a
+  // differently formatted number in the next cell over.
   await expect(page.locator('a[data-metric-card][data-metric-href="/admin/nodes"] .ow-metric-value'))
-    .toHaveText(forcedNodes.ready + ' / ' + forcedNodes.total);
+    .toHaveText(forcedNodes.ready + '/' + forcedNodes.total);
 
   // DEGRADED is an answer, not a missing source: no PARTIAL notice rides along with it.
   await expect(page.locator(PARTIAL_NOTICE)).toHaveCount(0);

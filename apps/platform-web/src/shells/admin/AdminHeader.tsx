@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../api';
 import type { Overview } from '../../types';
 import { Icon } from '../../components/Icons';
-import { TimeAgo } from '../../components/Ui';
 import { useI18n } from '../../i18n';
 import { Breadcrumb, type BreadcrumbEntry } from '../../components/app/breadcrumb';
 import { CommandPalette, useCommandShortcut, type CommandEntry } from '../../components/app/command';
@@ -113,9 +112,6 @@ export function AdminHeader({
                 ? t('topbar.health.critical', { count: health.attention.filter((item) => item.severity === 'critical').length })
                 : t('topbar.health.attention')}
           </span>
-        ) : null}
-        {health?.attention?.length ? (
-          <span className="topbar-meta">{t('topbar.lastCheck')} <TimeAgo value={new Date().toISOString()} /></span>
         ) : null}
 
         <LanguageSwitcher />

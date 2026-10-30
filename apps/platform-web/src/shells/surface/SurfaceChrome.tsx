@@ -73,7 +73,6 @@ export function LanguageSwitcher() {
       aria-label={t('nav.language')}
       value={locale}
       onChange={(event) => setLocale(event.target.value as Locale)}
-      style={{ flex: '0 0 auto', width: 104, background: 'var(--ow-surface-2)', border: '1px solid var(--ow-border)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
     >
       {SUPPORTED_LOCALES.map((option) => (
         <option key={option} value={option}>{t(LOCALE_LABEL_KEYS[option])}</option>

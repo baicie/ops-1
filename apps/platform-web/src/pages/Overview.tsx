@@ -29,6 +29,23 @@ const SEVERITY_LABEL: Record<string, MessageKey> = {
 };
 
 /**
+ * An audit code is not a health claim. ACCEPTED means the kernel admitted the request; the
+ * one thing a reader needs from this column is the exception, so only a non-positive result
+ * is rendered as a coloured chip and everything else stays silent.
+ */
+const QUIET_RESULTS = new Set(['ACCEPTED', 'SUCCEEDED', 'COMPLETED', 'VERIFIED', 'READY', 'OK', 'SUCCESS']);
+
+/** Audit rows read as sentences, so the known event vocabulary gets a label. */
+const EVENT_LABELS: Record<string, MessageKey> = {
+  'pipeline.draft_created': 'event.pipeline.draftCreated',
+  'pipeline.draft_updated': 'event.pipeline.draftUpdated',
+  'pipeline.draft_published': 'event.pipeline.draftPublished',
+  'pipeline.job_completed': 'event.pipeline.jobCompleted',
+  'pipeline.job_failed': 'event.pipeline.jobFailed',
+  'capability.service_invoke': 'event.capability.serviceInvoke',
+};
+
+/**
  * A data source has three outcomes, and only one of them is a verdict about the source.
  *
  * ANSWERED — the newest attempt returned a payload and did not throw.
@@ -53,14 +70,16 @@ function sourceState(data: unknown, error: Error | null, loading: boolean): Sour
  * §4.5 A. Three layers, in this order: can the platform serve, what must an operator do,
  * what changed lately.
  *
- * V3 changed the *containers*, not the facts. The v3 audit found the page opening with twelve
- * boxed regions - a health banner, four KPI cards, four module cards nested inside a panel,
- * and two list panels - so the reading order the copy promised (health, then work, then
- * history) was invisible: every block shouted at the same volume. Now the verdict is a flat
- * band on the page, the counts are one hairline strip with one provenance line (they used to
- * print the same observation time four times), and only the three things an operator acts on
- * keep a panel. Every number still comes from the Kernel; a module the Kernel does not report
- * is UNKNOWN — never 0, never green.
+ * V4 changed the *composition*, because V3 had already flattened the boxes without fixing
+ * the weight: the attention list still held the wide column whether it held one row or
+ * twelve, so an all-clear page spent its largest region on the words "nothing to do" while
+ * eight audit rows were squeezed into a short strip underneath. The page now sizes every
+ * region to its content - the audit ledger takes the wide column, the work queue and the
+ * module ledger share the narrow one - and the counts sit in one strip whose four cells
+ * share a label / value / note rhythm so their baselines line up.
+ *
+ * Every number still comes from the Kernel; a module the Kernel does not report is UNKNOWN
+ * with the reason attached, never 0 and never green.
  */
 export function OverviewPage() {
   const t = useT();
@@ -78,7 +97,7 @@ export function OverviewPage() {
 
   const overviewSource = sourceState(data, overview.error, overview.loading);
   const kernelSource = sourceState(diagnostics.data, diagnostics.error, diagnostics.loading);
-  const modules = buildModules(t, data, diagnostics.data, diagnostics.error, kernelSource, isAdmin, observedAt);
+  const modules = buildModules(t, data, diagnostics.data, diagnostics.error, kernelSource, isAdmin);
   // Counted, not declared: these are the sources this view actually asked. A non-admin session
   // never requests diagnostics (the loader above), so counting that route as unanswered would report a
   // permission this page never sought as a broken source - it simply is not one of the sources.
@@ -97,12 +116,12 @@ export function OverviewPage() {
       : data.health === 'DEGRADED'
         ? t(criticalCount === 1 ? 'overview.health.criticalIssue' : 'overview.health.criticalIssues', { count: criticalCount })
         : t('overview.health.attention');
+  const days = data ? groupEventsByDay(data.recentEvents) : [];
 
   return (
     <div className="page-stack">
       <PageHeader
         title={t('page.overview')}
-        description={t('overview.description')}
         actions={<Button variant="secondary" onClick={() => { void overview.reload(); void diagnostics.reload(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
         primary={<Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link>}
       />
@@ -115,132 +134,175 @@ export function OverviewPage() {
       >
         {data ? (
           <>
-            {/* Layer 1 — the verdict. No card, no icon bubble: the state glyph carries the
-                colour, and the copy carries the reason. */}
-            <section
-              className={`health-band tone-${data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn'}`}
-              aria-label={t('overview.health.aria')}
-              data-health={data.health}
-            >
-              <div className="health-band-state">
-                <StatusIndicator state={indicatorStateForCode(data.health)} label={data.health} />
-              </div>
-              <div className="health-band-copy">
-                <h2>{healthHeadline}</h2>
-                <p>{data.attention.length ? data.attention[0].detail : t('overview.health.allClearDetail')}</p>
-              </div>
-              <div className="health-band-side">
-                <span>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>
-                {data.attention.length > 0 && (
-                  <a className="text-link" href="#attention">{t('overview.action.reviewIssues')} <Icon name="arrowRight" size={13} /></a>
-                )}
-              </div>
-            </section>
-
-            {/* Layer 2 — the counts. One strip, one observation time for all four, because
-                they share one source; four cards each repeating it was four copies of a fact. */}
-            <section className="stat-block" aria-label={t('overview.kpi.aria')}>
-              <div className="stat-strip">
-                <MetricCard
-                  label={t('overview.kpi.healthyNodes')}
-                  value={`${data.nodesReady} / ${data.nodesTotal}`}
-                  detail={data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')}
-                  showSampled={false}
-                  href="/admin/nodes"
-                />
-                <MetricCard
-                  label={t('overview.kpi.installedPlugins')}
-                  value={data.pluginsInstalled}
-                  detail={t(data.pluginsAvailable === 1 ? 'overview.kpi.installedPlugins.one' : 'overview.kpi.installedPlugins.many', { count: data.pluginsAvailable })}
-                  showSampled={false}
-                  href="/admin/plugins"
-                />
-                <MetricCard
-                  label={t('common.readyInstances')}
-                  value={`${data.instancesReady} / ${data.instancesTotal}`}
-                  detail={t('overview.kpi.readyInstances.detail')}
-                  showSampled={false}
-                  href="/admin/plugins"
-                />
-                <MetricCard
-                  label={t('overview.kpi.activeDeployments')}
-                  value={data.activeDeployments}
-                  detail={t('overview.kpi.activeDeployments.detail')}
-                  showSampled={false}
-                  href="/admin/plugins"
-                />
-              </div>
-              <p className="stat-provenance">{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</p>
-            </section>
-
-            {/* Layer 3 — what an operator does next (widest), beside what the platform can
-                currently observe. Both keep a panel because both are work surfaces. */}
-            <div className="console-grid">
-              <section className="panel" id="attention" aria-labelledby="overview-attention-title">
-                <div className="panel-head">
-                  <div><h2 id="overview-attention-title">{t('overview.attention.title')}</h2><p>{t('overview.attention.description')}</p></div>
-                  <span className="panel-count">{t('overview.attention.count', { count: data.attention.length })}</span>
+            {/* Layer 1 - the verdict, then the counts. One observation stamp covers both:
+                four modules each printing their own copy of it was four copies of one fact. */}
+            <div className="status-summary">
+              <section
+                className={`health-band tone-${data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn'}`}
+                aria-label={t('overview.health.aria')}
+                data-health={data.health}
+              >
+                <div className="health-band-state">
+                  <StatusIndicator state={indicatorStateForCode(data.health)} label={data.health} />
                 </div>
-                {data.attention.length === 0 ? (
-                  <EmptyState icon="check" title={t('overview.attention.empty.title')} description={t('overview.attention.empty.description')} />
-                ) : (
-                  <ul className="attention-list">
-                    {data.attention.map((item, index) => (
-                      <li key={`${item.title}-${index}`} className={`attention-item severity-${item.severity}`} data-severity={item.severity}>
-                        <StatusIndicator state={SEVERITY_STATE[item.severity] ?? 'attention'} label={t(SEVERITY_LABEL[item.severity] ?? 'overview.severity.warning')} />
-                        <div className="attention-item-copy"><strong>{item.title}</strong><p>{item.detail}</p></div>
-                        <Link className="text-link" to={item.link}>{t('overview.attention.inspect')} <Icon name="arrowRight" size={14} /></Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div className="health-band-copy">
+                  <h2>{healthHeadline}</h2>
+                  <p>{data.attention.length ? data.attention[0].detail : t('overview.health.allClearDetail')}</p>
+                </div>
+                <div className="health-band-side" data-testid="overview-observed">
+                  <span title={observedAt ?? undefined}>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>
+                  {data.attention.length > 0 ? <a className="text-link" href="#attention">{t('overview.action.reviewIssues')} <Icon name="arrowRight" size={12} /></a> : null}
+                </div>
               </section>
 
-              <section className="panel" aria-labelledby="overview-modules-title" data-testid="overview-modules">
-                <div className="panel-head">
-                  <div><h2 id="overview-modules-title">{t('overview.modules.title')}</h2><p>{t('overview.modules.description')}</p></div>
+              <section className="stat-block" aria-label={t('overview.kpi.aria')}>
+                <div className="stat-strip">
+                  <MetricCard
+                    label={t('overview.kpi.healthyNodes')}
+                    value={data.nodesReady}
+                    denominator={data.nodesTotal}
+                    detail={data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')}
+                    showSampled={false}
+                    href="/admin/nodes"
+                  />
+                  <MetricCard
+                    label={t('overview.kpi.installedPlugins')}
+                    value={data.pluginsInstalled}
+                    detail={t(data.pluginsAvailable === 1 ? 'overview.kpi.installedPlugins.one' : 'overview.kpi.installedPlugins.many', { count: data.pluginsAvailable })}
+                    showSampled={false}
+                    href="/admin/plugins"
+                  />
+                  <MetricCard
+                    label={t('common.readyInstances')}
+                    value={data.instancesReady}
+                    denominator={data.instancesTotal}
+                    detail={t('overview.kpi.readyInstances.detail')}
+                    showSampled={false}
+                    href="/admin/plugins"
+                  />
+                  <MetricCard
+                    label={t('overview.kpi.activeDeployments')}
+                    value={data.activeDeployments}
+                    detail={t('overview.kpi.activeDeployments.detail')}
+                    showSampled={false}
+                    href="/admin/plugins"
+                  />
                 </div>
-                <ul className="module-strip" aria-label={t('overview.modules.aria')}>
-                  {modules.map((module) => (
-                    <li key={module.id} className="module-card" data-module={module.id} data-indicator={module.state}>
-                      <div className="module-card-head">
-                        <span className="module-card-name">{t(module.labelKey)}</span>
-                        <StatusIndicator state={module.state} />
-                      </div>
-                      <p className="module-card-detail">{module.detail}</p>
-                      <div className="module-card-foot">
-                        <span className="module-card-observed">{module.observedAt ? t('ui.observedAt', { at: formatDate(module.observedAt) }) : t('ui.notObserved')}</span>
-                        {module.href ? <Link className="text-link" to={module.href}>{t('overview.module.open')} <Icon name="arrowRight" size={13} /></Link> : null}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                {partialSource ? <NoticeBar state="partial" title={t('state.partial')} detail={t('ui.partial.sources', { ok: sourcesAnswered, total: sourceStates.length })} /> : null}
               </section>
             </div>
 
-            <section className="panel" data-testid="overview-audit">
-              <div className="panel-head"><div><h2>{t('overview.events.title')}</h2><p>{t('overview.events.description')}</p></div><Link className="text-link" to="/admin/activity">{t('overview.events.viewAll')} <Icon name="arrowRight" size={14} /></Link></div>
-              {data.recentEvents.length === 0 ? (
-                <EmptyState icon="activity" title={t('overview.events.empty.title')} description={t('overview.events.empty.description')} />
-              ) : (
-                <ul className="event-list">
-                  {data.recentEvents.map((event) => {
-                    const state = indicatorStateForCode(event.result);
-                    return (
-                      <li key={event.id}>
-                        <StatusIndicator state={state} label={state === 'unknown' ? event.result : undefined} />
-                        <div className="event-copy">
-                          <div className="event-title"><strong>{event.eventType}</strong></div>
-                          <p>{event.subjectType} <span className="mono">{event.subjectId}</span></p>
-                        </div>
-                        <TimeAgo value={event.occurredAt} />
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </section>
+            {/* Layer 2 - work (narrow column: the queue first, then what the platform can
+                observe) beside history (wide column: the audit ledger with something in it).
+                Grid areas, not source order, so a phone reads queue -> history as well. */}
+            <div className="console-grid">
+              <div className="console-aside">
+                <section className="panel" id="attention" aria-labelledby="overview-attention-title">
+                  <div className="panel-head">
+                    <h2 id="overview-attention-title">{t('overview.attention.title')}</h2>
+                    <span className="panel-count">{t('overview.attention.count', { count: data.attention.length })}</span>
+                  </div>
+                  {data.attention.length === 0 ? (
+                    <div className="attention-clear" data-testid="overview-attention-clear">
+                      <span className="attention-clear-icon"><Icon name="check" size={13} /></span>
+                      <div>
+                        <strong>{t('overview.attention.empty.title')}</strong>
+                        <span className="attention-clear-sep" aria-hidden="true">·</span>
+                        <span>{t('overview.attention.empty.description')}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <ul className="attention-list">
+                      {data.attention.map((item, index) => (
+                        <li key={`${item.title}-${index}`} className={`attention-item severity-${item.severity}`} data-severity={item.severity}>
+                          <StatusIndicator state={SEVERITY_STATE[item.severity] ?? 'attention'} label={t(SEVERITY_LABEL[item.severity] ?? 'overview.severity.warning')} />
+                          <div className="attention-item-copy"><strong>{item.title}</strong><p>{item.detail}</p></div>
+                          <Link className="text-link" to={item.link}>{t('overview.attention.inspect')} <Icon name="arrowRight" size={13} /></Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="panel" aria-labelledby="overview-modules-title" data-testid="overview-modules">
+                  <div className="panel-head">
+                    <h2 id="overview-modules-title">{t('overview.modules.title')}</h2>
+                  </div>
+                  <ul className="module-strip" aria-label={t('overview.modules.aria')}>
+                    {modules.map((module) => {
+                      const body = (
+                        <>
+                          <div className="module-card-head">
+                            <span className="module-card-name">{t(module.labelKey)}</span>
+                            <StatusIndicator state={module.state} />
+                          </div>
+                          <p className="module-card-detail">{module.detail}</p>
+                          {module.href ? <span className="module-card-go" aria-hidden="true"><Icon name="arrowRight" size={14} /></span> : null}
+                        </>
+                      );
+                      return (
+                        <li key={module.id} className="module-row">
+                          {module.href ? (
+                            <Link className="module-card" to={module.href} data-module={module.id} data-indicator={module.state}>
+                              {body}
+                            </Link>
+                          ) : (
+                            <div className="module-card" data-module={module.id} data-indicator={module.state}>{body}</div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {partialSource ? <NoticeBar state="partial" title={t('state.partial')} detail={t('ui.partial.sources', { ok: sourcesAnswered, total: sourceStates.length })} /> : null}
+                </section>
+              </div>
+
+              <section className="panel console-main" data-testid="overview-audit" aria-labelledby="overview-events-title">
+                <div className="panel-head">
+                  <h2 id="overview-events-title">{t('overview.events.title')}</h2>
+                  <Link className="text-link" to="/admin/activity">{t('overview.events.viewAll')} <Icon name="arrowRight" size={13} /></Link>
+                </div>
+                {data.recentEvents.length === 0 ? (
+                  <EmptyState icon="activity" title={t('overview.events.empty.title')} description={t('overview.events.empty.description')} />
+                ) : (
+                  <ol className="event-list">
+                    {days.map((day) => (
+                      <React.Fragment key={day.key}>
+                        <li className="event-day" aria-hidden="true">{dayLabel(t, day.key)}</li>
+                        {day.rows.map((row) => {
+                          const quiet = QUIET_RESULTS.has(row.result.toUpperCase());
+                          const inner = (
+                            <>
+                              <span className="event-time"><TimeAgo value={row.at} /></span>
+                              <span className="event-body">
+                                <span className="event-title">
+                                  <strong className={EVENT_LABELS[row.eventType] ? undefined : 'mono'}>{EVENT_LABELS[row.eventType] ? t(EVENT_LABELS[row.eventType]) : row.eventType}</strong>
+                                  {row.count > 1 ? <span className="event-count" title={t('overview.events.repeated', { count: row.count })}>×{row.count}</span> : null}
+                                  {!quiet ? (
+                                    <span className="event-result">
+                                      <StatusIndicator state={indicatorStateForCode(row.result)} label={row.result} />
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span className="event-subject">
+                                  <span className="event-subject-kind">{row.subjectType}</span>
+                                  <span aria-hidden="true"> </span>
+                                  <span className="mono" title={row.subjectId}>{shortId(row.subjectId)}</span>
+                                </span>
+                              </span>
+                            </>
+                          );
+                          return (
+                            <li key={row.key} data-event={row.eventType}>
+                              {row.href ? <Link className="event-row" to={row.href}>{inner}</Link> : <div className="event-row">{inner}</div>}
+                            </li>
+                          );
+                        })}
+                      </React.Fragment>
+                    ))}
+                  </ol>
+                )}
+              </section>
+            </div>
           </>
         ) : null}
       </AsyncBoundary>
@@ -253,13 +315,13 @@ type ModuleRow = {
   labelKey: MessageKey;
   state: IndicatorState;
   detail: string;
-  observedAt: string | null;
   href?: string;
 };
 
 /**
- * The first layer: four modules, each with the time this client observed it. Nothing is
- * inferred across modules — a READY node count says nothing about the Catalog.
+ * The first layer: four modules, each stating what it is doing. The counts they used to
+ * repeat are in the glance strip, so a row carries only the state and the reason - two
+ * lines in every row, which is what keeps the ledger even.
  */
 function buildModules(
   t: (key: MessageKey, params?: Record<string, string | number>) => string,
@@ -268,15 +330,14 @@ function buildModules(
   diagnosticsError: Error | null,
   kernelSource: SourceState,
   isAdmin: boolean,
-  observedAt: string | null,
 ): ModuleRow[] {
   const kernel: ModuleRow = (() => {
-    if (!isAdmin) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.denied'), observedAt: null };
-    if (diagnosticsError) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.error'), observedAt: null };
+    if (!isAdmin) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.denied') };
+    if (diagnosticsError) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.error') };
     // Still asking is LOADING; asked and settled with nothing (a 200 with an empty body) is UNKNOWN
     // with the reason attached - the same rule the nodes and runtime cards already follow below.
     if (!diagnostics) {
-      return { id: 'kernel', labelKey: 'overview.module.kernel', state: kernelSource === 'pending' ? 'loading' : 'unknown', detail: t('ui.notObserved'), observedAt: null };
+      return { id: 'kernel', labelKey: 'overview.module.kernel', state: kernelSource === 'pending' ? 'loading' : 'unknown', detail: t('ui.notObserved') };
     }
     const database = diagnostics.kernel.database === 'connected' ? t('overview.module.kernel.dbConnected') : t('overview.module.kernel.dbUnavailable');
     return {
@@ -284,36 +345,113 @@ function buildModules(
       labelKey: 'overview.module.kernel',
       state: diagnostics.kernel.database === 'connected' ? 'ready' : 'degraded',
       detail: t('overview.module.kernel.detail', { version: diagnostics.kernel.version, database }),
-      observedAt,
     };
   })();
   const nodes: ModuleRow = !data
-    ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'unknown', detail: t('ui.notObserved'), observedAt: null, href: '/admin/nodes' }
+    ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'unknown', detail: t('ui.notObserved'), href: '/admin/nodes' }
     : data.nodesTotal === 0
-      ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'notConfigured', detail: t('overview.module.nodes.none'), observedAt, href: '/admin/nodes' }
+      ? { id: 'nodes', labelKey: 'overview.module.nodes', state: 'notConfigured', detail: t('overview.module.nodes.none'), href: '/admin/nodes' }
       : {
           id: 'nodes',
           labelKey: 'overview.module.nodes',
           state: data.nodesReady === data.nodesTotal ? 'ready' : 'degraded',
-          detail: t('overview.module.nodes.detail', { ready: data.nodesReady, total: data.nodesTotal }),
-          observedAt,
+          detail: data.nodesReady === data.nodesTotal ? t('overview.module.nodes.reachable', { total: data.nodesTotal }) : t('overview.module.nodes.detail', { ready: data.nodesReady, total: data.nodesTotal }),
           href: '/admin/nodes',
         };
   const runtime: ModuleRow = !data
-    ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'unknown', detail: t('ui.notObserved'), observedAt: null, href: '/admin/plugins' }
+    ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'unknown', detail: t('ui.notObserved'), href: '/admin/plugins' }
     : data.instancesTotal === 0
-      ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'notConfigured', detail: t('overview.module.runtime.none'), observedAt, href: '/admin/plugins' }
+      ? { id: 'runtime', labelKey: 'overview.module.runtime', state: 'notConfigured', detail: t('overview.module.runtime.none'), href: '/admin/plugins' }
       : {
           id: 'runtime',
           labelKey: 'overview.module.runtime',
           state: data.instancesReady === data.instancesTotal ? 'ready' : 'degraded',
-          detail: t('overview.module.runtime.detail', { ready: data.instancesReady, total: data.instancesTotal, deployments: data.activeDeployments }),
-          observedAt,
+          detail: data.instancesReady === data.instancesTotal ? t('overview.module.runtime.allReady') : t('overview.module.runtime.detail', { ready: data.instancesReady, total: data.instancesTotal, deployments: data.activeDeployments }),
           href: '/admin/plugins',
         };
   // The Kernel exposes no Catalog health source. Marking it READY because plugins exist would
   // be exactly the inference §4.5 A forbids, so it stays UNKNOWN with the reason attached.
-  const catalog: ModuleRow = { id: 'catalog', labelKey: 'overview.module.catalog', state: 'unknown', detail: t('overview.module.catalog.unavailable'), observedAt: null };
+  const catalog: ModuleRow = { id: 'catalog', labelKey: 'overview.module.catalog', state: 'unknown', detail: t('overview.module.catalog.unavailable') };
   return [kernel, nodes, runtime, catalog];
 }
 
+type AuditRow = {
+  key: string;
+  eventType: string;
+  subjectType: string;
+  subjectId: string;
+  result: string;
+  at: string;
+  count: number;
+  href?: string;
+};
+
+type AuditDay = { key: string; rows: AuditRow[] };
+
+/**
+ * The band over a group of audit rows answers one question: is this one burst or a week of
+ * them? Today and yesterday get a word, everything older gets its date.
+ */
+function dayLabel(t: (key: MessageKey, params?: Record<string, string | number>) => string, dayKey: string): string {
+  const today = new Date();
+  const iso = (date: Date) => date.toISOString().slice(0, 10);
+  if (dayKey === iso(today)) return t('overview.events.day.today');
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (dayKey === iso(yesterday)) return t('overview.events.day.yesterday');
+  return formatDate(dayKey + 'T00:00:00Z');
+}
+
+/** Long ids are shortened in the middle: a 36-character uuid in a list is not read. */
+function shortId(value: string): string {
+  if (!value) return '';
+  return value.length > 20 ? value.slice(0, 8) + '\u2026' + value.slice(-4) : value;
+}
+
+/** Where an audited subject lives, when this shell has a page for it. */
+function eventHref(event: Overview['recentEvents'][number]): string | undefined {
+  const details = (event.details ?? {}) as Record<string, unknown>;
+  if (event.subjectType === 'pipeline' || event.subjectType === 'pipeline_draft') {
+    const pipelineId = typeof details.pipelineId === 'string' ? details.pipelineId : event.subjectId;
+    return '/admin/pipelines/' + encodeURIComponent(pipelineId);
+  }
+  if (event.subjectType === 'job') return '/admin/jobs/' + encodeURIComponent(event.subjectId);
+  return undefined;
+}
+
+/**
+ * Group consecutive repeats of the same event on the same subject.
+ *
+ * The deployed view printed eight rows, four of which were the same two events twice, all
+ * with the same timestamp and the same green chip. A burst is one fact ("draft updated
+ * twice"), not four - so it renders as one row carrying xN, and the day band explains why
+ * everything shares one time.
+ */
+function groupEventsByDay(events: Overview['recentEvents']): AuditDay[] {
+  const days: AuditDay[] = [];
+  let current: AuditRow | null = null;
+  for (const event of events) {
+    const dayKey = event.occurredAt.slice(0, 10);
+    let day = days[days.length - 1];
+    if (!day || day.key !== dayKey) {
+      day = { key: dayKey, rows: [] };
+      days.push(day);
+      current = null;
+    }
+    if (current && current.eventType === event.eventType && current.subjectId === event.subjectId) {
+      current.count += 1;
+      continue;
+    }
+    current = {
+      key: event.id,
+      eventType: event.eventType,
+      subjectType: event.subjectType,
+      subjectId: event.subjectId,
+      result: event.result,
+      at: event.occurredAt,
+      count: 1,
+      href: eventHref(event),
+    };
+    day.rows.push(current);
+  }
+  return days;
+}

@@ -210,11 +210,17 @@ test('plugins print the counting rule next to the summary', async ({ page }) => 
   const summary = page.getByTestId('plugins-summary');
   await expect(summary).toBeVisible();
   await expect(summary).toContainText('Installed');
-  await expect(summary).toContainText('Installation state is INSTALLED');
   await expect(summary).toContainText('Upgrade available');
-  await expect(summary).toContainText('The newest uploaded package version differs from the active version');
   await expect(summary).toContainText('Needs attention');
-  await expect(summary).toContainText('READY replicas below desired');
+  // V4 moved the counting rule from a three-line paragraph under each card to the cell's
+  // title and accessible name: the number still carries its definition, the strip is 56px
+  // tall instead of 130px. The rule itself is still asserted, just where it now lives.
+  const rules = await summary.locator('.ow-summary-card').evaluateAll((cards) => cards.map((card) => card.getAttribute('title') || ''));
+  expect(rules).toHaveLength(3);
+  expect(rules[0]).toContain('INSTALLED');
+  expect(rules[1]).toContain('Newest version differs from active');
+  expect(rules[2]).toContain('Replicas below desired');
+  for (const rule of rules) expect(rule.length, 'every count states what it counts').toBeGreaterThan(0);
   const values = summary.locator('.ow-summary-value');
   await expect(values).toHaveCount(3);
   for (const value of await values.all()) {
@@ -238,12 +244,15 @@ test('overview offers at least three metrics that navigate somewhere', async ({ 
     expect((await metric.locator('.ow-metric-label').innerText()).trim().length).toBeGreaterThan(0);
   }
   await expect(page.getByTestId('overview-modules')).toBeVisible();
-  // Every first-layer module states when it was observed or why it could not be.
+  // Every first-layer module states what it is doing; the observation time of the whole view
+  // is stated once (V4), because four copies of one polling timestamp was not four facts.
   const moduleCards = page.locator('[data-module]');
   expect(await moduleCards.count()).toBe(4);
+  await expect(page.getByTestId('overview-observed')).not.toBeEmpty();
   for (const card of await moduleCards.all()) {
-    const observed = await card.locator('.module-card-observed').innerText();
-    expect(observed.trim().length, 'module card must state its observation time').toBeGreaterThan(0);
+    const detail = await card.locator('.module-card-detail').innerText();
+    expect(detail.trim().length, 'module card must state its state or its reason').toBeGreaterThan(0);
+    await expect(card.locator('.status-indicator')).toHaveCount(1);
   }
   await metrics.first().click();
   await expect(page).toHaveURL(/\/nodes$/);
