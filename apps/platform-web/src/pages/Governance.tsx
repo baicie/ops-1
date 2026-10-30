@@ -100,8 +100,10 @@ export function GovernancePage() {
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>{t('governance.quality.title')}</h2><p>{t('governance.quality.description')}</p></div><Link className="text-link" to="/admin/ext/trusted-team/data-catalog">{t('governance.quality.openCatalog')}</Link></div>
         {datasets.length === 0 ? <EmptyState icon="catalog" title={t('governance.quality.empty.title')} description={t('governance.quality.empty.description')} /> : (<>
-          {/* table-spec §2.2/§2.7: the one sentence a dropped column is owed. */}
-          {!qualityMeasurable ? <p className="stat-note" data-table-note="demoted">{t('governance.quality.note')}</p> : null}
+          {/* M1: an Empty panel says "none" ONCE, above the table - it does not print the same
+              "no runs" in twelve rows. §2.2/§2.7 owe the dropped column one sentence, and that
+              sentence is where the count and the way out belong. */}
+          {!qualityMeasurable ? <p className="stat-note" data-table-note="demoted:empty">{t('governance.quality.note', { total: datasets.length })}</p> : null}
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
@@ -123,7 +125,13 @@ export function GovernancePage() {
                         {dataset.latest.runId.slice(0, 8)}{' · '}
                         {t('governance.quality.counts', { examined: number.format(dataset.latest.recordsExamined), failed: number.format(dataset.latest.recordsFailed) })}
                       </span>
-                    ) : <span>{t('common.noRuns')}</span>}
+                    ) : qualityMeasurable ? (
+                      // A single dataset with no run, inside a page that has runs: that row is the
+                      // answer to its own question, so it says "no runs" where the count would go.
+                      <span>{t('common.noRuns')}</span>
+                    ) : null}
+                    {/* Nothing here when NO dataset has a run: the sentence above the table is the
+                        one place that fact is stated (M1: once, not per row). */}
                   </IdentityCell>
                   <StackCell label={t('table.schema')} className={cardCellClass(cardFacts.includes('schema'))}>r{dataset.schemaRevision}</StackCell>
                   {qualityMeasurable ? (
@@ -147,7 +155,20 @@ export function GovernancePage() {
             <TableBody className={stackBody}>
               {recentFailures.map((run) => (
                 <TableRow key={run.runId} className={stackRow}>
-                  <IdentityCell label={t('table.dataset')} identity={formatIdentity({ name: run.datasetName, id: run.runId, at: run.completedAt || run.createdAt, locale, rowsOnPage: recentFailures.length })} cardFact />
+                  {/* §2.1's disambiguator, earned: the same dataset can fail twice on this page, and
+                      without it the two rows carry one identity (measured 24/27 distinct). */}
+                  <IdentityCell
+                    label={t('table.dataset')}
+                    identity={formatIdentity({
+                      name: run.datasetName,
+                      id: run.runId,
+                      at: run.completedAt || run.createdAt,
+                      locale,
+                      nameIsUnique: new Set(recentFailures.map((item) => item.datasetName)).size === recentFailures.length,
+                      rowsOnPage: recentFailures.length,
+                    })}
+                    cardFact
+                  />
                   <StackCell label={t('table.status')}><StatusPill status={run.status} /></StackCell>
                 </TableRow>
               ))}

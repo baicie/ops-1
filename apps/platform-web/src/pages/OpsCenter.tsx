@@ -6,6 +6,7 @@ import type { NodeView, Overview, PluginSummary } from '../types';
 import { Icon } from '../components/Icons';
 import { buttonVariants } from '../components/ui/button';
 import { EmptyState, ErrorState, PageHeader, Skeleton, TimeAgo } from '../components/Ui';
+import { NoData } from '../components/app/status-indicator';
 import { formatBytes } from '../format';
 import { useT } from '../i18n';
 import { StatusPill } from './table-kit';
@@ -20,6 +21,19 @@ export function OpsCenterPage() {
   const data = overview.data!;
   const nodeList = nodes.data || [];
   const pluginList = (plugins.data || []).filter((plugin) => !plugin.isSystem);
+  /**
+   * M1: a sample that did not arrive is **Missing** - a dashed token that promises a value and
+   * says, in the reader's language, that the source exists and this window has no reading. It is
+   * not the prose "Memory: no data", which reads like an answer and tells the reader nothing, and
+   * it is not for a zero either: a node that reported 0 bytes reported a number.
+   */
+  const memoryReading = (node: NodeView) => {
+    const snapshot = node.resourceSnapshot;
+    const used = snapshot?.memoryUsedBytes;
+    const total = snapshot?.memoryTotalBytes;
+    if (typeof used !== 'number' || typeof total !== 'number') return <NoData detail={t('ui.noData.detail')} />;
+    return `${formatBytes(used)} / ${formatBytes(total)}`;
+  };
   return (
     <div className="page-stack">
       <PageHeader
@@ -36,7 +50,7 @@ export function OpsCenterPage() {
       <div className="summary-grid">
         <section className="panel">
           <div className="panel-head"><div><h2>{t('opsCenter.nodes.title')}</h2><p>{t('opsCenter.nodes.description')}</p></div><Link className="text-link" to="/admin/nodes">{t('opsCenter.nodes.all')} <Icon name="arrowRight" size={14} /></Link></div>
-          {nodeList.length === 0 ? <EmptyState icon="nodes" title={t('common.noNodes')} description={t('opsCenter.nodes.empty.description')} /> : <div className="ops-node-list">{nodeList.map((node) => <Link to={`/admin/nodes/${node.id}`} className="ops-node" key={node.id}><span className="ops-node-name"><strong>{node.name}</strong><span className="muted small">{node.os}/{node.arch} · gen {node.generation}</span></span><StatusPill status={node.status} /><span className="ops-node-metric">{node.resourceSnapshot?.memoryUsedBytes ? `${formatBytes(node.resourceSnapshot.memoryUsedBytes)} / ${formatBytes(node.resourceSnapshot.memoryTotalBytes)}` : t('opsCenter.nodes.memoryNoData')}</span><span className="muted small"><TimeAgo value={node.lastSeenAt} /></span></Link>)}</div>}
+          {nodeList.length === 0 ? <EmptyState icon="nodes" title={t('common.noNodes')} description={t('opsCenter.nodes.empty.description')} /> : <div className="ops-node-list">{nodeList.map((node) => <Link to={`/admin/nodes/${node.id}`} className="ops-node" key={node.id}><span className="ops-node-name"><strong>{node.name}</strong><span className="muted small">{node.os}/{node.arch} · gen {node.generation}</span></span><StatusPill status={node.status} /><span className="ops-node-metric">{memoryReading(node)}</span><span className="muted small"><TimeAgo value={node.lastSeenAt} /></span></Link>)}</div>}
         </section>
         <section className="panel">
           <div className="panel-head"><div><h2>{t('opsCenter.plugins.title')}</h2><p>{t('opsCenter.plugins.description')}</p></div><Link className="text-link" to="/admin/plugins">{t('opsCenter.plugins.all')} <Icon name="arrowRight" size={14} /></Link></div>

@@ -46,12 +46,20 @@ const stackCell =
 // shrank. Without shrink-0 a wide value on the right squeezes the label and wraps it ("任 / 务").
 const stackLabel = 'hidden shrink-0 whitespace-nowrap text-muted-foreground max-[768px]:inline';
 
-/** Table cell that keeps its data-label and prints that label inline only in the stacked layout. */
+/**
+ * Table cell that keeps its data-label and prints that label inline only in the stacked layout.
+ *
+ * The value rides a .ow-cell-body block. At ≥768 that block reserves the two-tier height of §2.3
+ * (15.6 value + 15.4 qualifier = 31), so a cell that prints one line and the identity cell beside
+ * it that prints two start on the same band instead of 8px apart - the "centre vs top" step the
+ * review measured between neighbouring cells of one row. At <768 the wrapper is `display:
+ * contents`, so the card keeps laying its facts out as direct children of the cell.
+ */
 export function StackCell({ label, className, children, ...props }: React.TdHTMLAttributes<HTMLTableCellElement> & { label: string }) {
   return (
     <TableCell data-label={label} className={cn(stackCell, className)} {...props}>
       <span className={stackLabel}>{label}</span>
-      {children}
+      <span className="ow-cell-body">{children}</span>
     </TableCell>
   );
 }
@@ -122,8 +130,18 @@ export function RowActions({ label, actions, onOpenChange }: { label: string; ac
 /** Above this row count 4 hex characters stop being enough; §2.1 derives 8 for its reason. */
 export const IDENTITY_MANY_ROWS = 100;
 
+/**
+ * What the row is called: ⟨name⟩ · ⟨disambiguator⟩.
+ *
+ * The age is deliberately NOT part of the key. It was, and the audit measured it: two rows that
+ * the reader cannot tell apart ("host-metrics · 1285 · 18 hours ago" / "host-metrics · 1285 ·
+ * 17 hours ago") counted as two distinct identities, so §2.1's uniqueness assertion went green
+ * on the one field that is already printed in its own column one cell to the right. An identity
+ * key that contains a clock stops being an identity the moment the clock ticks.
+ *
+ * The age still travels on the Identity (the cell puts it in `title`), just not in the key.
+ */
 export interface Identity {
-  /** What the row is called: ⟨name⟩ · ⟨disambiguator⟩ · ⟨age⟩. */
   key: string;
   name: string;
   disambiguator: string;
@@ -164,7 +182,7 @@ export function formatIdentity(options: {
   const disambiguator = nameIsUnique || hex.length < width ? '' : hex.slice(0, width);
   const age = relativeAge(locale, at);
   return {
-    key: [name, disambiguator, age].filter(Boolean).join(' · '),
+    key: [name, disambiguator].filter(Boolean).join(' · '),
     name,
     disambiguator,
     age,
@@ -173,8 +191,12 @@ export function formatIdentity(options: {
 }
 
 /**
- * The one identity cell. title carries the full id; data-identity-key is the machine
+ * The one identity cell. title carries the full id and the age; data-identity-key is the machine
  * reading of the cell the audit harness compares for uniqueness (table-spec §4.1).
+ *
+ * The visible line is ⟨name⟩ · ⟨disambiguator⟩ only: the age has a column of its own in every
+ * table that renders this cell, and printing it twice in one row is what let a duplicated
+ * timestamp pass for a distinguishing one.
  *
  * cardFact marks the <=3 columns §2.5 keeps at 390; every other cell is a desktop column the
  * card drops, not information that was deleted.
@@ -196,21 +218,19 @@ export function IdentityCell({
     <TableCell
       data-label={label}
       data-column={label}
-      title={identity.fullId || undefined}
+      title={[identity.fullId, identity.age].filter(Boolean).join(' · ') || undefined}
       data-card-fact={cardFact ? '' : undefined}
       className={cn(stackCell, 'ow-ident-cell max-[768px]:text-left', className)}
     >
       <span className={cn(stackLabel, 'max-[768px]:hidden')}>{label}</span>
       <span className="ow-ident" data-identity-key={identity.key}>
         <span className="ow-ident-name">{identity.name}</span>
-        {identity.disambiguator || identity.age ? (
-          <span className="ow-ident-tail">
-            {identity.disambiguator ? ' · ' + identity.disambiguator : ''}
-            {identity.age ? ' · ' + identity.age : ''}
-          </span>
-        ) : null}
+        {identity.disambiguator ? <span className="ow-ident-tail">{' · ' + identity.disambiguator}</span> : null}
       </span>
-      {children ? <span className="ow-ident-meta">{children}</span> : null}
+      {/* Always rendered, so an identity cell without a qualifier still reserves §2.3's qualifier
+          track and its first line lines up with every other cell in the row. It is emptied by CSS
+          at 390 (display:none when :empty), where a card must not spend 15px on nothing. */}
+      <span className="ow-ident-meta">{children}</span>
     </TableCell>
   );
 }

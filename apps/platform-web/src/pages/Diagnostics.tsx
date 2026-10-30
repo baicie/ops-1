@@ -12,7 +12,19 @@ import { NoData, UnknownValue } from '../components/app/status-indicator';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import { formatDuration } from '../format';
 import { useI18n, useT } from '../i18n';
+import type { MessageKey } from '../i18n';
 import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+
+/**
+ * The runtime policies arrive as config keys ("bundle.signature", "placement.fence") and used to
+ * be printed as their own labels, so the panel read as two English dot-paths with a number after
+ * each. These are the two keys the kernel ships; a key this table does not know still shows its
+ * own name, because an invented label would be worse than a dot-path.
+ */
+const POLICY_LABELS: Record<string, { label: MessageKey; hint: MessageKey }> = {
+  'bundle.signature': { label: 'diagnostics.policy.signature.label', hint: 'diagnostics.policy.signature.hint' },
+  'placement.fence': { label: 'diagnostics.policy.fence.label', hint: 'diagnostics.policy.fence.hint' },
+};
 
 const commands = `opsctl status
 opsctl doctor
@@ -131,7 +143,12 @@ export function DiagnosticsPage() {
                     </Table>
                   )}
                 </section>
-                <section className="panel"><div className="panel-head"><div><h2>{t('common.runtimePolicies')}</h2><p>{t('diagnostics.policies.description')}</p></div></div>{policies.length === 0 ? <EmptyState icon="settings" title={t('diagnostics.policies.empty')} /> : <div className="kv-grid">{policies.map(([key, value]) => <KV key={key} label={key}>{value}</KV>)}</div>}</section>
+                <section className="panel"><div className="panel-head"><div><h2>{t('common.runtimePolicies')}</h2><p>{t('diagnostics.policies.description')}</p></div></div>{policies.length === 0 ? <EmptyState icon="settings" title={t('diagnostics.policies.empty')} /> : <div className="kv-grid">{policies.map(([key, value]) => (
+                  <KV key={key} label={POLICY_LABELS[key] ? t(POLICY_LABELS[key].label) : key}>
+                    <span className="mono">{String(value)}</span>
+                    {POLICY_LABELS[key] ? <span className="text-sm text-muted-foreground"> {t(POLICY_LABELS[key].hint)}</span> : null}
+                  </KV>
+                ))}</div>}</section>
                 <section className="panel"><div className="panel-head"><div><h2>{t('diagnostics.audit.title')}</h2><p>{t('diagnostics.audit.description')}</p></div></div>{events.length === 0 ? <EmptyState icon="activity" title={t('diagnostics.audit.empty')} /> : (
                   <ul className="event-list">{events.map((event) => <li key={event.id}><div className="event-marker"><Icon name={event.result === 'REJECTED' ? 'warning' : 'check'} size={13} /></div><div className="event-copy"><div className="event-title"><strong>{event.eventType}</strong><StatusPill status={event.result} /></div><p>{event.subjectType} <span className="mono">{event.subjectId}</span></p></div><TimeAgo value={event.occurredAt} /></li>)}</ul>
                 )}</section>

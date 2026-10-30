@@ -486,7 +486,9 @@ export function NodeDetailPage() {
                   <TableHead>{t('table.cpu')}</TableHead>
                   <TableHead>{t('table.memory')}</TableHead>
                   <TableHead>{t('table.filesystem')}</TableHead>
-                  <TableHead>{t('table.generation')}</TableHead>
+                  {/* §2.2: a node's generation does not change inside a sample window, so the column
+                      answered the same value twelve times (measured ratio 0.08). It is stated once,
+                      in the caption above the chart, where it belongs. */}
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
@@ -496,7 +498,6 @@ export function NodeDetailPage() {
                     <StackCell label={t('table.cpu')}>{typeof sample.cpuUtilization === 'number' ? `${(sample.cpuUtilization * 100).toFixed(0)}%` : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
                     <StackCell label={t('table.memory')}>{formatBytes(sample.memoryUsedBytes)} / {formatBytes(sample.memoryTotalBytes)}</StackCell>
                     <StackCell label={t('table.filesystem')}>{formatBytes(sample.filesystemUsedBytes)} / {formatBytes(sample.filesystemTotalBytes)}</StackCell>
-                    <StackCell label={t('table.generation')}>{sample.generation}</StackCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -510,24 +511,28 @@ export function NodeDetailPage() {
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
+                {/* §2.2 caps a table at five columns at 1024+. Slot and restarts are one value
+                    each (a slot number, a small count) and they qualify the instance, so they ride
+                    the plugin name's second line instead of spending two of the seven. */}
                 <TableHead>{t('table.plugin')}</TableHead>
                 <TableHead>{t('table.version')}</TableHead>
-                <TableHead>{t('table.slot')}</TableHead>
                 <TableHead>{t('table.state')}</TableHead>
                 <TableHead>{t('table.container')}</TableHead>
-                <TableHead>{t('table.restarts')}</TableHead>
                 <TableHead>{t('table.logs')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
               {instances.map((instance) => (
                 <TableRow key={instance.id}>
-                  <StackCell label={t('table.plugin')}><span className="mono">{instance.pluginId}</span></StackCell>
+                  <StackCell label={t('table.plugin')}>
+                    <div className="ow-cell">
+                      <span className="mono ow-cell-value">{instance.pluginId}</span>
+                      <span className="ow-cell-meta">{t('table.slot')} #{instance.slot} · {t('table.restarts')} {instance.restartCount}</span>
+                    </div>
+                  </StackCell>
                   <StackCell label={t('table.version')}>{instance.version}</StackCell>
-                  <StackCell label={t('table.slot')}>#{instance.slot}</StackCell>
                   <StackCell label={t('table.state')}><StatusPill status={instance.state} /></StackCell>
                   <StackCell label={t('table.container')}><span className="mono text-sm">{instance.containerId ? instance.containerId.slice(0, 12) : '—'}</span></StackCell>
-                  <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
                   <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
                 </TableRow>
               ))}

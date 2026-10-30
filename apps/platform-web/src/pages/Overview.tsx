@@ -13,6 +13,8 @@ import { AsyncBoundary, NoticeBar, useObservedPolling } from '../components/app/
 import { MetricCard } from '../components/app/metric-card';
 import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, indicatorStateForCode, type IndicatorState } from '../components/app/status-indicator';
+import { useStatusText } from '../components/app/status';
+import { statusForCode } from '../components/status-tone';
 import { localizeAttentionDetail, localizeAttentionTitle } from '../lib/kernel-messages';
 import { isUnconfigured } from '../lib/platform-status';
 
@@ -48,13 +50,38 @@ const SETUP_STEPS: Array<{ step: MessageKey; detail: MessageKey }> = [
   { step: 'overview.setup.step3', detail: 'overview.setup.step3.detail' },
 ];
 
-/** Audit rows read as sentences, so the known event vocabulary gets a label. */
+/**
+ * Audit rows read as sentences, so the known event vocabulary gets a label.
+ *
+ * "Known" means the codes the kernel actually writes into kernel.audit_events (grep of
+ * apps/kernel/src), not the six this table happened to start with: `plugin.activated` is what a
+ * plugin activation writes, and it reached the console as a raw dot-path in a mono font while
+ * `pipeline.draft_created` beside it read "Draft created".
+ */
 const EVENT_LABELS: Record<string, MessageKey> = {
+  'pipeline.created': 'event.pipeline.created',
   'pipeline.draft_created': 'event.pipeline.draftCreated',
   'pipeline.draft_updated': 'event.pipeline.draftUpdated',
   'pipeline.draft_published': 'event.pipeline.draftPublished',
+  'pipeline.revision_published': 'event.pipeline.revisionPublished',
   'pipeline.job_completed': 'event.pipeline.jobCompleted',
   'pipeline.job_failed': 'event.pipeline.jobFailed',
+  'pipeline.job_terminalized': 'event.pipeline.jobTerminalized',
+  'plugin.activated': 'event.plugin.activated',
+  'plugin.staged': 'event.plugin.staged',
+  'plugin.disabled': 'event.plugin.disabled',
+  'plugin.uninstalled': 'event.plugin.uninstalled',
+  'plugin.rejected': 'event.plugin.rejected',
+  'deployment.created': 'event.deployment.created',
+  'node.enrolled': 'event.node.enrolled',
+  'node.revoked': 'event.node.revoked',
+  'node.enrollment_token.created': 'event.node.enrollmentTokenCreated',
+  'publisher.added': 'event.publisher.added',
+  'publisher.revoked': 'event.publisher.revoked',
+  'user.created': 'event.user.created',
+  'user.updated': 'event.user.updated',
+  'capability.granted': 'event.capability.granted',
+  'capability.revoked': 'event.capability.revoked',
   'capability.service_invoke': 'event.capability.serviceInvoke',
 };
 
@@ -96,6 +123,13 @@ function sourceState(data: unknown, error: Error | null, loading: boolean): Sour
  */
 export function OverviewPage() {
   const t = useT();
+  const statusText = useStatusText();
+  /**
+   * A result code with a row in status-tone is rendered as that row's word ("Confirmed"), the
+   * same word the pill of that code uses on every other page. A code the table does not know has
+   * no word to print, so it stays verbatim - protocol data is still better than an invention.
+   */
+  const resultLabel = (code: string) => (statusForCode(code) ? statusText(code) : code);
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const overview = useObservedPolling(() => api.get<Overview>('/api/v1/overview'), 10000);
@@ -356,7 +390,7 @@ export function OverviewPage() {
                                   {row.count > 1 ? <span className="event-count" title={t('overview.events.repeated', { count: row.count })}>×{row.count}</span> : null}
                                   {!quiet ? (
                                     <span className="event-result">
-                                      <StatusIndicator state={indicatorStateForCode(row.result)} label={row.result} />
+                                      <StatusIndicator state={indicatorStateForCode(row.result)} label={resultLabel(row.result)} />
                                     </span>
                                   ) : null}
                                 </span>

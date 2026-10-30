@@ -161,7 +161,11 @@ const plugins = PLUGIN_IDS.map((id, index) => ({
   publisher: ['trusted-team', 'trusted-team', 'lab'][index % 3],
   latestVersion: '0.2.' + (index % 4),
   activeVersion: index === 11 ? null : '0.2.' + (index % 3),
-  state: ['ENABLED', 'ENABLED', 'DISABLED', 'ENABLED', 'STAGED', 'ERROR', 'ENABLED', 'ENABLED', 'STAGED', 'ENABLED', 'ENABLED', 'DISABLED'][index],
+  // The install-state codes the kernel's state machine actually writes (apps/kernel/src/deployments.rs:
+  // STAGED / INSTALLED / DISABLED / UNINSTALLED, and REJECTED on a failed verification). This fixture
+  // used to say ENABLED and ERROR - codes no endpoint can emit - so the Deployment column rendered
+  // "No data" on nine of twelve rows and a review read that as the page's own leftover NO_DATA.
+  state: ['INSTALLED', 'INSTALLED', 'DISABLED', 'INSTALLED', 'STAGED', 'FAILED', 'INSTALLED', 'INSTALLED', 'STAGED', 'INSTALLED', 'INSTALLED', 'DISABLED'][index],
   signatureState: index === 8 ? 'UNSIGNED' : 'VERIFIED',
   readyInstances: index % 3,
   totalInstances: 3,
@@ -238,10 +242,12 @@ const governanceSummary = {
   lineageWindowCount: 184,
   lineageWindow: '24h',
   latestQuality: { passed: 6, failed: 2, error: 1, unknown: 0, pending: 0 },
+  // UUIDs, because §2.1's disambiguator is four hex characters of the canonical id: two rows of the
+  // same dataset must still be two rows, and 'run00002-2' / 'run00002-2b' both cut to '0000'.
   recentFailures: [
-    { runId: 'run00002-2', datasetName: 'orders-curated', status: 'FAILED', createdAt: ago(4), completedAt: ago(3.9) },
-    { runId: 'run00005-5', datasetName: 'inventory', status: 'ERROR', createdAt: ago(10), completedAt: ago(9.8) },
-    { runId: 'run00002-2b', datasetName: 'orders-curated', status: 'FAILED', createdAt: ago(28), completedAt: ago(27.9) },
+    { runId: '4f1c8b20-2a4c-4d18-9e05-3c71b6d28f4c', datasetName: 'orders-curated', status: 'FAILED', createdAt: ago(4), completedAt: ago(3.9) },
+    { runId: 'b93d7e14-0f27-4a63-8c19-d5e2a9b7c038', datasetName: 'inventory', status: 'ERROR', createdAt: ago(10), completedAt: ago(9.8) },
+    { runId: '71ae40c9-8b52-4f06-b3d9-5e7081c4a2f6', datasetName: 'orders-curated', status: 'FAILED', createdAt: ago(28), completedAt: ago(27.9) },
   ],
 };
 
@@ -327,6 +333,41 @@ function pluginDetailFor(url: string): unknown {
   return pluginDetails[id] ?? pluginDetails[PLUGIN_IDS[0]];
 }
 
+/**
+ * /admin/nodes/{id} reads four endpoints. The route was missing from this harness until the review
+ * measured 42px of horizontal overflow on it at 390 by hand - an overflow no assertion ever saw,
+ * because a route the harness does not visit is a route the gate cannot fail.
+ */
+const NODE_DETAIL = nodes[0];
+const nodeInstances = nodes.slice(0, 3).map((node, slot) => ({
+  id: 'inst-' + slot,
+  deploymentId: 'dep-' + slot,
+  slot,
+  nodeId: NODE_DETAIL.id,
+  pluginId: PLUGIN_IDS[slot],
+  version: '0.2.' + slot,
+  state: ['READY', 'READY', 'STARTING'][slot],
+  containerId: 'c0ffee' + slot + 'deadbeef',
+  restartCount: slot,
+  nodeName: node.name,
+  nodeStatus: node.status,
+  nodeLastSeenAt: node.lastSeenAt,
+}));
+const nodeHistory = Array.from({ length: 12 }, (_, index) => ({
+  sampleId: 'sample-' + index,
+  nodeId: NODE_DETAIL.id,
+  observedAt: ago(index * 0.25),
+  generation: 1,
+  cpuUtilization: 0.11 + index * 0.02,
+  memoryUsedBytes: 2_400_000_000 + index * 40_000_000,
+  memoryTotalBytes: 8_000_000_000,
+  // Varying, because a column that answers the same thing in twelve rows is not a column (§2.2):
+  // a constant fixture measured "Filesystem" at ratio 0.08 and failed the gate for the fixture's
+  // sake, which is the one failure mode a fixture must never cause.
+  filesystemUsedBytes: 40_000_000_000 + index * 1_700_000_000,
+  filesystemTotalBytes: 120_000_000_000,
+}));
+
 /** Deterministic answers for every data endpoint the eight audited routes read. */
 const FIXTURES: [RegExp, unknown | ((url: string) => unknown)][] = [
   [/\/api\/v1\/jobs\?/, { items: jobs, nextCursor: null }],
@@ -335,6 +376,9 @@ const FIXTURES: [RegExp, unknown | ((url: string) => unknown)][] = [
   [/\/api\/v1\/jobs\/[0-9a-f-]+$/, jobDetail],
   [/\/api\/v1\/audit/, auditEvents()],
   [/\/api\/v1\/nodes$/, nodes],
+  [/\/api\/v1\/nodes\/[0-9a-f-]+\/instances$/, nodeInstances],
+  [/\/api\/v1\/nodes\/[0-9a-f-]+\/resource-history/, nodeHistory],
+  [/\/api\/v1\/nodes\/[0-9a-f-]+$/, NODE_DETAIL],
   [/\/api\/v1\/plugins$/, plugins],
   [/\/api\/v1\/plugins\/[^/]+$/, pluginDetailFor],
   [/\/api\/v1\/publishers$/, publishers],
@@ -486,6 +530,8 @@ const ROUTES = [
   { key: 'jobs', route: '/admin/jobs' },
   { key: 'activity', route: '/admin/activity' },
   { key: 'nodes', route: '/admin/nodes' },
+  // The route the review measured by hand and the harness never visited.
+  { key: 'node-detail', route: '/admin/nodes/' + NODE_DETAIL.id },
   { key: 'plugins', route: '/admin/plugins' },
   { key: 'governance', route: '/admin/governance' },
   { key: 'access', route: '/admin/access' },
@@ -531,6 +577,167 @@ for (const viewport of VIEWPORTS) {
     });
   }
 }
+
+
+/**
+ * The usability half of the review's fifth finding.
+ *
+ * The geometry gate above can be satisfied without a reader being able to use the page - the four
+ * ways it was satisfied once are recorded in docs/design/ui-visual-v3 and this test keeps them out:
+ *
+ *   1. an identity key that carries the age, so a duplicated timestamp counts as a distinct row;
+ *   2. an empty state renamed instead of re-classified;
+ *   3. a row that paints `cursor: pointer`, a chevron and tabindex without opening anything;
+ *   4. a column dropped and replaced by a sentence promising a panel that does not exist.
+ *
+ * It writes _usable.json beside the metrics. It asserts nothing about taste - only that the fact the
+ * sentence claims is reachable, and that the number the gate reads is not the only thing that moved.
+ */
+test('usable', async ({ browser }) => {
+  test.setTimeout(180_000);
+  const record: Row = {};
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, baseURL: BASE });
+  await context.addInitScript(() => {
+    localStorage.setItem('opsweave-theme', 'light');
+    localStorage.setItem('opsweave-locale', 'en');
+  });
+  const page = await context.newPage();
+  await stub(page);
+  await page.goto(BASE + '/login');
+  await page.fill('input[type=email]', ADMIN_EMAIL);
+  await page.fill('input[type=password]', ADMIN_PASSWORD);
+  await page.click('[data-testid=login-submit]');
+  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+
+  const open = async (route: string) => {
+    await page.goto(BASE + route);
+    await page.waitForSelector('[data-async-state="ready"], [data-async-state="empty"]', { timeout: 20000 }).catch(() => undefined);
+    await page.waitForTimeout(350);
+  };
+
+  // 1. the identity key carries no clock, and the clock still appears exactly once per row
+  for (const route of ['/admin/jobs', '/admin/activity']) {
+    await open(route);
+    record[route] = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('table tbody tr')).filter((tr) => !tr.classList.contains('expanded-row'));
+      const keys = Array.from(document.querySelectorAll('[data-identity-key]')).map((el) => el.getAttribute('data-identity-key') || '');
+      const AGE = /\b\d+\s+(second|minute|hour|day|month|year)s?\s+ago\b|just now/i;
+      // The age printed anywhere else in the row (the occurred / created column) - counted so
+      // "the time went back to its own column" is a measurement and not a claim. innerText, not
+      // textContent: the stacked label ("Created") is display:none at 1440 and textContent would
+      // glue it to the value, hiding the boundary the regex needs.
+      const ageCells = rows.map((tr) => Array.from(tr.children).filter((td) => AGE.test((td as HTMLElement).innerText || '')).length);
+      return {
+        rows: rows.length,
+        identityKeys: keys,
+        identityWithClock: keys.filter((key) => AGE.test(key)),
+        ageCellsPerRow: ageCells,
+      };
+    });
+  }
+
+  // 3. the disclosure really opens: a button, a panel, and an aria state that says so
+  await open('/admin/activity');
+  record['/admin/activity'].disclosure = await page.evaluate(() => {
+    const row = document.querySelector('table tbody tr');
+    const button = row ? row.querySelector('[data-testid="activity-disclosure"]') : null;
+    return {
+      hasButton: Boolean(button),
+      ariaExpandedBefore: button ? button.getAttribute('aria-expanded') : null,
+      panelsBefore: document.querySelectorAll('tr.expanded-row').length,
+      note: (document.querySelector('[data-table-note]') || {}).textContent || null,
+    };
+  });
+  await page.click('table tbody tr:first-child [data-testid="activity-disclosure"]');
+  await page.waitForTimeout(250);
+  record['/admin/activity'].disclosureAfterClick = await page.evaluate(() => {
+    const button = document.querySelector('table tbody tr [data-testid="activity-disclosure"]');
+    const panel = document.querySelector('tr.expanded-row');
+    return {
+      ariaExpanded: button ? button.getAttribute('aria-expanded') : null,
+      ariaControls: button ? button.getAttribute('aria-controls') : null,
+      panels: document.querySelectorAll('tr.expanded-row').length,
+      panelId: panel ? panel.querySelector('td')!.id : null,
+      panelMentionsActor: panel ? /actor/i.test(panel.textContent || '') : false,
+      panelText: panel ? (panel.textContent || '').replace(/\s+/g, ' ').slice(0, 160) : null,
+    };
+  });
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(250);
+  record['/admin/activity'].disclosureAfterEnter = await page.evaluate(() => ({
+    panels: document.querySelectorAll('tr.expanded-row').length,
+  }));
+
+  // 2. Empty and Missing are two renderings, not two nouns
+  for (const route of ['/admin/governance', '/admin/ops-center']) {
+    await open(route);
+    record[route] = await page.evaluate(() => ({
+      // §M1: a dashed token is the Missing rendering; the Empty rendering is copy with no box.
+      missingTokens: document.querySelectorAll('[data-value="NO_DATA"]').length,
+      missingTokenShapes: Array.from(document.querySelectorAll('[data-value="NO_DATA"]')).map((el) => getComputedStyle(el).borderStyle),
+      emptyCopies: Array.from(document.querySelectorAll('[data-table-note]')).map((el) => (el.textContent || '').trim()),
+      // the per-row "no runs" copies this page used to print in every row
+      perRowNoRuns: Array.from(document.querySelectorAll('table tbody tr')).filter((tr) => /no runs/i.test(tr.textContent || '')).length,
+      rows: document.querySelectorAll('table tbody tr').length,
+    }));
+  }
+
+  // 6. one row height, one first-line band
+  for (const route of ['/admin/jobs', '/admin/activity', '/admin/governance', '/admin/settings/diagnostics']) {
+    await open(route);
+    const geometry = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('table tbody tr')).filter((tr) => !tr.classList.contains('expanded-row'));
+      const first = rows[0];
+      if (!first) return null;
+      const rowTop = first.getBoundingClientRect().top;
+      const lineTop = (cell: Element | null) => {
+        if (!cell) return null;
+        const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          if (!node.textContent || !node.textContent.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const box = range.getBoundingClientRect();
+          if (box.height > 0 && box.width > 0) return Math.round((box.top - rowTop) * 10) / 10;
+        }
+        return null;
+      };
+      const band = Array.from(first.children).map(lineTop).filter((value): value is number => value !== null);
+      return {
+        heights: Array.from(new Set(rows.map((tr) => Math.round(tr.getBoundingClientRect().height * 10) / 10))),
+        firstLineOffsets: Array.from(first.children).map(lineTop),
+        firstLineSpread: band.length ? Math.round((Math.max(...band) - Math.min(...band)) * 10) / 10 : null,
+      };
+    });
+    record[route] = { ...(record[route] as Row || {}), geometry };
+  }
+
+  // The route the harness did not visit: measure it, and say which box is too wide when it is.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open('/admin/nodes/' + NODE_DETAIL.id);
+  record['/admin/nodes/{id}@390'] = await page.evaluate(() => {
+    const de = document.documentElement;
+    const offenders = Array.from(document.querySelectorAll('body *'))
+      .filter((el) => el.getBoundingClientRect().right > de.clientWidth + 1.5)
+      .slice(0, 6)
+      .map((el) => {
+        const parent = el.parentElement as HTMLElement | null;
+        const style = parent ? getComputedStyle(parent) : null;
+        return {
+          tag: el.tagName.toLowerCase(),
+          cls: (el.className || '').toString().slice(0, 50),
+          right: Math.round(el.getBoundingClientRect().right),
+          parentCls: parent ? (parent.className || '').toString().slice(0, 40) : null,
+          parentFlex: style ? style.flexDirection + '/' + style.flexWrap + '/' + style.minWidth : null,
+        };
+      });
+    return { overflow: de.scrollWidth - de.clientWidth, clientW: de.clientWidth, offenders };
+  });
+
+  fs.writeFileSync(path.join(OUT, '_usable.json'), JSON.stringify(record, null, 1));
+  await context.close();
+});
 
 /**
  * §2.5's instrument, measured against the defect it exists for.

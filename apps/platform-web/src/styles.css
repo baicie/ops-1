@@ -529,9 +529,12 @@ input::placeholder { color: var(--ow-text-muted); }
 
 /* Diagnostics */
 .health-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--ow-border); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-md); overflow: hidden; }
-.health-strip-item { background: var(--ow-surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* One line per fact, not a label stacked over a value stacked over a note: the six cells measured
+   91px each and pushed the panel that carries the same six numbers off the first screen. The
+   strip is a reading of the kernel, so it is laid out like one (label · value · note). */
+.health-strip-item { background: var(--ow-surface); padding: 8px 12px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
 .health-strip-label { font-size: var(--ow-type-label); letter-spacing: .06em; text-transform: uppercase; color: var(--ow-text-muted); font-weight: 700; }
-.health-strip-item strong { font-size: var(--ow-type-lg); font-weight: 600; }
+.health-strip-item strong { font-size: var(--ow-type-meta); font-weight: 600; }
 .health-strip-item .muted { font-size: var(--ow-type-sm); }
 .json-view { background: var(--ow-code-bg); color: var(--ow-code-text); padding: 16px; max-height: 560px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: var(--ow-type-sm); border-radius: 0 0 var(--ow-radius-md) var(--ow-radius-md); }
 .command-block { position: relative; margin: 12px 16px; background: var(--ow-code-bg); border-radius: 6px; padding: 12px 44px 12px 12px; }
@@ -2292,11 +2295,41 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 @media (min-width: 769px) {
   .ow-table tbody tr { height: var(--ow-row); }
   .ow-table tbody td { padding-top: 4px; padding-bottom: 4px; vertical-align: middle; line-height: 1.2; }
+  /* §2.3's two tiers, reserved on every cell that prints a value: 15.6 + 15.4 = 31. A cell with
+     one line and a cell with two then start on one band; without this the two-line identity cell
+     centred 8px above the single-line status beside it, so one row read as two rows. */
+  /* flex, not block: a block would keep a baseline strut under a 32px control and add the
+     descender to the row (measured 43px on /admin/access, against §4.2's 42). */
+  .ow-table tbody td > .ow-cell-body {
+    display: flex;
+    align-items: flex-start;
+    /* 15.6 + 15.4, derived rather than retyped: the value tier at 1.2 and the qualifier tier at 1.4.
+       A height, not a min-height: a cell holding a 32px control would otherwise set the row to 43px
+       (measured on /admin/access) - the control is centred and spills 1.5px into the cell's own
+       padding instead of adding a row through the table. */
+    height: calc(var(--ow-type-meta) * 1.2 + var(--ow-type-label) * 1.4);
+  }
+  /* The same two tracks, pinned: the identity line measured 17.6px instead of 15.6 on some rows,
+     which is why one page rendered 40, 41 and 42px rows side by side. */
+  .ow-table tbody td > .ow-ident { height: calc(var(--ow-type-meta) * 1.2); min-height: calc(var(--ow-type-meta) * 1.2); }
+  .ow-table tbody td .ow-ident-meta { height: calc(var(--ow-type-label) * 1.4); }
 }
 /* §2.5 card target 132 = 12 padding + 20 identity + 8 gap + 3 x 22 facts + 12 padding + 12 slack. */
 @media (max-width: 768px) {
   .ow-table tbody tr { height: auto; }
   .ow-table tbody td { line-height: 1.4; }
+
+  /* A wrapper on the desktop table is a height device; a card aligns nothing, so the value goes
+     back to being a direct child of the cell (exactly the DOM §2.5 was measured against), and an
+     identity cell that has no qualifier does not reserve a line it cannot fill. */
+  .ow-table tbody td > .ow-cell-body { display: contents; }
+  .ow-table tbody td .ow-ident-meta:empty { display: none; }
+
+  /* A tab list is the narrowest control on the widest header: at 390 the 1h / 6h / 24h list on
+     /admin/nodes/{id} pushed the document 19px wide in English and 42px in Chinese (measured
+     r390-light-zh). It wraps instead of being clipped, so all three tabs stay reachable. */
+  .panel-head > div { min-width: 0; }
+  .panel-head [role='tablist'] { max-width: 100%; flex-wrap: wrap; height: auto; }
 
   /* §2.5 facts 4..n are not rendered at 390. A cell class, not the `hidden` utility: the legacy
      .nodes-table/.plugins-table rules above set display on tbody td at this same breakpoint with

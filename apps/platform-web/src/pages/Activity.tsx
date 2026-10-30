@@ -89,16 +89,33 @@ export function ActivityPage() {
   const cardFacts = rankCardFacts({
     outcome: events.map((event) => event.action + '\u0000' + event.result),
     occurred: events.map((event) => event.occurredAt),
+    // A uniform actor ranks last on its own (ratio 0), so this only ever earns a card slot on
+    // the pages where it actually separates rows.
+    actor: events.map((event) => event.actorType + '\u0000' + event.actorId),
   });
   /** §2.1: the disambiguator appears only when the page carries the same name twice. */
   const eventTypeCount = new Set(events.map((event) => event.eventType)).size;
   /**
    * §2.2: one actor across every row on the page is a column read once, so it is *read* here and
-   * stated once above the table - with the whole id, which the 8-character column could not give.
-   * A page of mixed actors keeps the per-row reading in each row's detail panel.
+   * stated once above the table - with the whole id, which a 72px column could not give.
+   *
+   * When actors differ the fact goes back INTO the row. It used to live only in the row's
+   * disclosure, which the page described with a sentence ("every row's own detail panel carries
+   * its actor") - a sentence is not a column, and a reader comparing two rows must not have to
+   * open two panels to find out who did each one.
    */
   const actorKeys = Array.from(new Set(events.map((event) => event.actorType + '\u0000' + event.actorId)));
   const singleActor = actorKeys.length === 1 ? events[0] : null;
+  const mixedActors = actorKeys.length > 1;
+  /** The actor cell names the kind; the whole id never fits a column and rides the cell title. */
+  const actorCell = (event: AuditEvent) => (
+    <StackCell label={t('table.actor')} className={cardCellClass(cardFacts.includes('actor'))} title={event.actorId}>
+      <div className="ow-cell">
+        <span className="ow-cell-value">{event.actorType}</span>
+        <span className="ow-cell-meta mono">{event.actorId.slice(0, 8)}</span>
+      </div>
+    </StackCell>
+  );
 
   return (
     <div className="page-stack">
@@ -160,17 +177,19 @@ export function ActivityPage() {
           )
         ) : (
           <section className="panel table-panel">
-            {/* table-spec §2.2 says a demoted column is stated above the table, once. */}
-            <p className="stat-note" data-table-note="demoted">
-              {singleActor
-                ? <>{t('activity.table.note.single', { type: singleActor.actorType })} <code>{singleActor.actorId}</code></>
-                : t('activity.table.note.many')}
-            </p>
+            {/* table-spec §2.2 says a demoted column is stated above the table, once - and only
+                a demoted column. A mixed-actor page keeps the column, so it has nothing to say. */}
+            {singleActor ? (
+              <p className="stat-note" data-table-note="demoted">
+                {t('activity.table.note.single', { type: singleActor.actorType })} <code>{singleActor.actorId}</code>
+              </p>
+            ) : null}
             <Table className={stackTable}>
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>{t('table.event')}</TableHead>
                   <TableHead>{t('table.outcome')}</TableHead>
+                  {mixedActors ? <TableHead>{t('table.actor')}</TableHead> : null}
                   <TableHead>{t('table.occurred')}</TableHead>
                   <TableHead aria-label={t('table.details')} />
                 </TableRow>
@@ -192,7 +211,12 @@ export function ActivityPage() {
                     : [event];
                   return (
                     <React.Fragment key={String(index)}>
-                      <TableRow className={cn('cursor-pointer focus-visible:outline-offset-[-2px] max-[768px]:relative', stackRow)} data-row-key={group.key} onClick={() => setExpanded(open ? null : String(index))} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') setExpanded(open ? null : String(index)); }}>
+                      <TableRow className={cn('cursor-pointer focus-visible:outline-offset-[-2px] max-[768px]:relative', stackRow)} data-row-key={group.key} data-expanded={open ? 'true' : 'false'} onClick={() => setExpanded(open ? null : String(index))} tabIndex={0} onKeyDown={(keyEvent) => {
+                        // Only when the row itself has focus: Enter on the disclosure button inside it
+                        // fires the button's own click as well, and the two toggles cancelled out.
+                        if (keyEvent.target !== keyEvent.currentTarget) return;
+                        if (keyEvent.key === 'Enter') setExpanded(open ? null : String(index));
+                      }}>
                         <IdentityCell label={t('table.event')} identity={identity} cardFact>
                           {/* §2.4: the run renders the first occurrence, its count and its span. */}
                           {group.count > 1 ? (
@@ -210,17 +234,34 @@ export function ActivityPage() {
                             <span className="ow-cell-meta">{event.action}</span>
                           </div>
                         </StackCell>
+                        {mixedActors ? actorCell(event) : null}
                         {/* §2.3: one timestamp, not two. The relative age and the absolute date are
                             the same fact; the second line made this cell 43.2px against §4.2's 42 and
                             the card 141.6 against §2.5's 140. The absolute moment stays reachable on
                             the cell (title) and in the row's own detail panel below. */}
                         <StackCell label={t('table.occurred')} className={cardCellClass(cardFacts.includes('occurred'))} title={formatDate(event.occurredAt)}><TimeAgo value={event.occurredAt} /></StackCell>
-                        {/* §2.5: the disclosure rides the identity line at 390. */}
-                        <TableCell className="row-action max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-0 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0"><Icon name={open ? 'down' : 'chevron'} size={15} /></TableCell>
+                        {/* §2.5: the disclosure rides the identity line at 390.
+                            A real button, not a drawn chevron: it says out loud whether the panel
+                            below is open (aria-expanded) and which panel it is (aria-controls), so
+                            "it looks clickable" and "it is clickable" are the same statement. */}
+                        <TableCell className="row-action max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-0 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0">
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            data-testid="activity-disclosure"
+                            data-expanded={open ? 'true' : 'false'}
+                            aria-expanded={open}
+                            aria-controls={'activity-detail-' + index}
+                            aria-label={t(open ? 'activity.detail.collapse' : 'activity.detail.expand')}
+                            onClick={(event2) => { event2.stopPropagation(); setExpanded(open ? null : String(index)); }}
+                          >
+                            <Icon name={open ? 'down' : 'chevron'} size={15} />
+                          </button>
+                        </TableCell>
                       </TableRow>
                       {open && (
-                        <TableRow className="expanded-row">
-                          <TableCell colSpan={4}>
+                        <TableRow className="expanded-row" data-testid="activity-detail">
+                          <TableCell id={'activity-detail-' + index} colSpan={mixedActors ? 5 : 4}>
                             <div className="event-detail">
                               <div className="event-detail-meta">
                                 <span>{t('activity.detail.subject')} <code>{event.subjectId}</code></span>
