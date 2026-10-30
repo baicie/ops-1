@@ -245,59 +245,90 @@ const governanceSummary = {
   ],
 };
 
-const pluginDetail = {
-  id: 'dev.opsweave.metrics',
-  name: 'Host Metrics',
-  publisher: 'trusted-team',
-  state: 'ENABLED',
-  activeVersion: '0.2.1',
-  activeRevision: { id: 'rev-2', version: '0.2.1', generation: 4, status: 'READY', activatedAt: ago(30) },
-  manifest: {},
-  permissions: ['metrics.read'],
-  provides: [{ id: 'host.metrics', version: '1' }],
-  requires: [],
-  isSystem: false,
-  packageVersions: [
-    { version: '0.2.2', status: 'PUBLISHED', signatureState: 'VERIFIED', imageRef: 'registry.local/opsweave/host-metrics@sha256:' + 'a1'.repeat(32), createdAt: ago(6) },
-    { version: '0.2.1', status: 'PUBLISHED', signatureState: 'VERIFIED', imageRef: 'registry.local/opsweave/host-metrics@sha256:' + 'b2'.repeat(32), createdAt: ago(30) },
-    { version: '0.2.0', status: 'REVOKED', signatureState: 'UNSIGNED', imageRef: null, createdAt: ago(60) },
-  ],
-  deployments: [{
-    id: 'dep-1',
-    pluginId: 'dev.opsweave.metrics',
-    version: '0.2.1',
-    desiredReplicas: 6,
-    generation: 4,
-    status: 'READY',
-    placement: {},
-    resources: { cpuMillis: 250, memoryMiB: 128 },
-    readyInstances: 5,
-    totalInstances: 6,
-    createdAt: ago(30),
-    updatedAt: ago(1),
-    instances: nodes.slice(0, 6).map((node, index) => ({
-      id: NODE_IDS[index],
-      deploymentId: 'dep-1',
-      slot: index,
-      nodeId: node.id,
-      nodeName: node.name,
-      nodeStatus: node.status,
-      nodeLastSeenAt: node.lastSeenAt,
-      state: ['RUNNING', 'RUNNING', 'ERROR', 'RUNNING', 'STARTING', 'STOPPED'][index],
-      containerId: 'c0ffee' + index + 'deadbeef',
-      restartCount: index % 3,
-      lastError: index === 2 ? 'exit code 137' : null,
-      observedAt: ago(index * 0.3),
-      pluginId: 'dev.opsweave.metrics',
-      version: '0.2.1',
-      deploymentStatus: 'READY',
-      streamId: 'stream-' + index,
+/**
+ * One detail per plugin, because the list route carries no digest and the page reads the detail
+ * route for it: /admin/plugins answers 12 rows from 12 detail reads. A `PackageVersion` declares
+ * `bundleDigest` as required (src/types.ts:75, written by kernel/src/packages.rs:242), so a fixture
+ * without it is not a shape the API can produce - it measured the digest column as twelve cells of
+ * NO_DATA and made a working column look like a broken one.
+ */
+function detailFor(index: number) {
+  const base = plugins[index];
+  const digest = (seed: string) => 'sha256:' + (seed + String(index).padStart(2, '0')).repeat(11).slice(0, 64);
+  const versions = [base.latestVersion, base.activeVersion]
+    .filter((version): version is string => Boolean(version))
+    .filter((version, position, all) => all.indexOf(version) === position);
+  return {
+    id: base.id,
+    name: base.name,
+    publisher: base.publisher,
+    state: base.state,
+    activeVersion: base.activeVersion,
+    activeRevision: base.activeVersion
+      ? { id: 'rev-' + index, version: base.activeVersion, generation: 2 + index, status: 'READY', activatedAt: ago(index + 1) }
+      : null,
+    manifest: {},
+    permissions: ['metrics.read'],
+    provides: [{ id: 'host.metrics', version: '1' }],
+    requires: [],
+    isSystem: base.isSystem,
+    packageVersions: versions.map((version, position) => ({
+      version,
+      status: position === 0 ? 'PUBLISHED' : 'REVOKED',
+      signatureState: base.signatureState,
+      imageRef: 'registry.local/opsweave/' + base.id.split('.').join('-') + '@sha256:' + digest('a1'),
+      bundleDigest: digest(position === 0 ? 'a1' : 'b2'),
+      artifactDigest: digest('c3'),
+      createdAt: ago(index * 6 + position * 24),
     })),
-  }],
-};
+    deployments: [{
+      id: 'dep-' + index,
+      pluginId: base.id,
+      version: base.activeVersion ?? base.latestVersion,
+      desiredReplicas: base.totalInstances,
+      generation: 2 + index,
+      status: 'READY',
+      placement: {},
+      resources: { cpuMillis: 250, memoryMiB: 128 },
+      readyInstances: base.readyInstances,
+      totalInstances: base.totalInstances,
+      createdAt: ago(index * 4),
+      updatedAt: ago(index * 0.5),
+      instances: nodes.slice(0, 3).map((node, slot) => ({
+        id: node.id,
+        deploymentId: 'dep-' + index,
+        slot,
+        nodeId: node.id,
+        nodeName: node.name,
+        nodeStatus: node.status,
+        nodeLastSeenAt: node.lastSeenAt,
+        state: ['RUNNING', 'RUNNING', 'ERROR'][slot],
+        containerId: 'c0ffee' + slot + 'deadbeef',
+        restartCount: slot % 3,
+        lastError: slot === 2 ? 'exit code 137' : null,
+        observedAt: ago(slot * 0.3),
+        pluginId: base.id,
+        version: base.activeVersion ?? base.latestVersion,
+        deploymentStatus: 'READY',
+        streamId: 'stream-' + slot,
+      })),
+    }],
+  };
+}
+
+/** One detail per plugin id: a single shared body would render twelve rows of one plugin's data. */
+const pluginDetails: Record<string, ReturnType<typeof detailFor>> = Object.fromEntries(
+  PLUGIN_IDS.map((id, index) => [id, detailFor(index)]),
+);
+
+function pluginDetailFor(url: string): unknown {
+  const marker = '/api/v1/plugins/';
+  const id = decodeURIComponent(url.slice(url.indexOf(marker) + marker.length).split('?')[0]);
+  return pluginDetails[id] ?? pluginDetails[PLUGIN_IDS[0]];
+}
 
 /** Deterministic answers for every data endpoint the eight audited routes read. */
-const FIXTURES: [RegExp, unknown][] = [
+const FIXTURES: [RegExp, unknown | ((url: string) => unknown)][] = [
   [/\/api\/v1\/jobs\?/, { items: jobs, nextCursor: null }],
   [/\/api\/v1\/jobs\/[0-9a-f-]+\/result$/, { status: 'RUNNING', output: { sampled: 42 }, resultDigest: 'sha256:' + '11'.repeat(32), errorCode: null, errorMessage: null }],
   [/\/api\/v1\/jobs\/[0-9a-f-]+\/diagnostics$/, jobDiagnostics],
@@ -305,7 +336,7 @@ const FIXTURES: [RegExp, unknown][] = [
   [/\/api\/v1\/audit/, auditEvents()],
   [/\/api\/v1\/nodes$/, nodes],
   [/\/api\/v1\/plugins$/, plugins],
-  [/\/api\/v1\/plugins\/[^/]+$/, pluginDetail],
+  [/\/api\/v1\/plugins\/[^/]+$/, pluginDetailFor],
   [/\/api\/v1\/publishers$/, publishers],
   [/\/api\/v1\/users$/, users],
   [/\/api\/v1\/diagnostics$/, diagnostics],
@@ -320,7 +351,8 @@ async function stub(page: Page) {
     const url = route.request().url();
     const hit = FIXTURES.find(([pattern]) => pattern.test(new URL(url).pathname + (url.includes('?') ? '?' : '')));
     if (!hit) return route.continue();
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(hit[1]) });
+    const body = typeof hit[1] === 'function' ? (hit[1] as (target: string) => unknown)(url) : hit[1];
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 }
 
@@ -403,9 +435,20 @@ async function measure(page: Page) {
         const label = td.querySelector('span');
         return Boolean(label && label.getBoundingClientRect().width > 0);
       }).length;
+      /**
+       * §2.5: the name part may ellipsise; the `disambiguator · age` on the same line never may,
+       * because those two are what make two cards tellable apart. It is lost in one of two ways:
+       * the cell paints past its own box (scrollWidth), or the tail is painted past the cell's
+       * right edge - what a fixed max-width on the line does once the name has shrunk to nothing.
+       */
+      const tail = cell.querySelector('.ow-ident-tail') as HTMLElement | null;
+      const cellBox = cell.getBoundingClientRect();
+      const tailOverflow = tail
+        ? tail.getBoundingClientRect().right > cellBox.right + 1 || tail.scrollWidth > tail.clientWidth + 1
+        : false;
       return {
         key: cell.getAttribute('data-identity-key') || '',
-        clipped: cell.scrollWidth > cell.clientWidth + 1,
+        clipped: cell.scrollWidth > cell.clientWidth + 1 || tailOverflow,
         width: Math.round(cell.getBoundingClientRect().width),
         facts,
       };
@@ -478,7 +521,9 @@ for (const viewport of VIEWPORTS) {
         await page.waitForSelector('[data-async-state="ready"], [data-async-state="empty"]', { timeout: 20000 }).catch(() => undefined);
         await page.waitForTimeout(500);
         pages[label][target.route] = await measure(page);
-        if (viewport.w === 390 || target.key === 'jobs' || target.key === 'activity') {
+        // The pages the table spec is about, at both viewports, so a before/after pair can be
+        // read side by side instead of argued about.
+        if (viewport.w === 390 || ['jobs', 'activity', 'nodes', 'plugins', 'governance'].includes(target.key)) {
           await page.screenshot({ path: path.join(OUT, label + '__' + target.key + '.png'), fullPage: true });
         }
       }
@@ -486,6 +531,46 @@ for (const viewport of VIEWPORTS) {
     });
   }
 }
+
+/**
+ * §2.5's instrument, measured against the defect it exists for.
+ *
+ * `scripts/check-ui-metrics.mjs` now fails on `cards[].clipped`, so the detector needs its red side
+ * on the record: the same page is measured twice at 390 - once as it ships, once with §1.4's fixed
+ * max-width forced onto the identity line - and both readings are written beside the artifact. A
+ * detector that cannot be made to fire proves nothing; this is the file that shows it does.
+ */
+test('clipped-probe', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, baseURL: BASE });
+  await context.addInitScript(() => {
+    localStorage.setItem('opsweave-theme', 'light');
+    localStorage.setItem('opsweave-locale', 'en');
+  });
+  const page = await context.newPage();
+  await stub(page);
+  await page.goto(BASE + '/login');
+  await page.fill('input[type=email]', ADMIN_EMAIL);
+  await page.fill('input[type=password]', ADMIN_PASSWORD);
+  await page.click('[data-testid=login-submit]');
+  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.goto(BASE + '/admin/jobs');
+  await page.waitForSelector('[data-async-state="ready"], [data-async-state="empty"]', { timeout: 20000 }).catch(() => undefined);
+  await page.waitForTimeout(400);
+  const asShipped = await measure(page);
+  await page.addStyleTag({ content: '@media (max-width: 768px) { .ow-ident-cell .ow-ident { max-width: 72px; } }' });
+  await page.waitForTimeout(150);
+  const truncated = await measure(page);
+  const probe = (measurement: any) => ({
+    cards: (measurement.cards || []).length,
+    clipped: (measurement.cards || []).filter((card: any) => card.clipped).length,
+  });
+  fs.writeFileSync(
+    path.join(OUT, '_clipped_probe.json'),
+    JSON.stringify({ route: '/admin/jobs', viewport: 390, asShipped: probe(asShipped), withFixedMaxWidth: probe(truncated) }, null, 1),
+  );
+  await context.close();
+});
 
 test.afterAll(() => {
   for (const [label, pageMap] of Object.entries(pages)) {

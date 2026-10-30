@@ -81,13 +81,24 @@ export function ActivityPage() {
     RUN_THRESHOLD,
   ), [events]);
   const pageGroups = groups.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+  /**
+   * table-spec §2.2: result and action are two halves of one answer - what happened - so they are
+   * one column, not two. Measured, the pair separates rows four times better than `result` alone
+   * did (0.94 against 0.18): a status word beside its verb is what a reader compares.
+   */
   const cardFacts = rankCardFacts({
-    result: events.map((event) => event.result),
-    actor: events.map((event) => event.actorType + event.actorId.slice(0, 4)),
+    outcome: events.map((event) => event.action + '\u0000' + event.result),
     occurred: events.map((event) => event.occurredAt),
   });
   /** §2.1: the disambiguator appears only when the page carries the same name twice. */
   const eventTypeCount = new Set(events.map((event) => event.eventType)).size;
+  /**
+   * §2.2: one actor across every row on the page is a column read once, so it is *read* here and
+   * stated once above the table - with the whole id, which the 8-character column could not give.
+   * A page of mixed actors keeps the per-row reading in each row's detail panel.
+   */
+  const actorKeys = Array.from(new Set(events.map((event) => event.actorType + '\u0000' + event.actorId)));
+  const singleActor = actorKeys.length === 1 ? events[0] : null;
 
   return (
     <div className="page-stack">
@@ -149,12 +160,17 @@ export function ActivityPage() {
           )
         ) : (
           <section className="panel table-panel">
+            {/* table-spec §2.2 says a demoted column is stated above the table, once. */}
+            <p className="stat-note" data-table-note="demoted">
+              {singleActor
+                ? <>{t('activity.table.note.single', { type: singleActor.actorType })} <code>{singleActor.actorId}</code></>
+                : t('activity.table.note.many')}
+            </p>
             <Table className={stackTable}>
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>{t('table.event')}</TableHead>
-                  <TableHead>{t('table.result')}</TableHead>
-                  <TableHead>{t('table.actor')}</TableHead>
+                  <TableHead>{t('table.outcome')}</TableHead>
                   <TableHead>{t('table.occurred')}</TableHead>
                   <TableHead aria-label={t('table.details')} />
                 </TableRow>
@@ -179,12 +195,21 @@ export function ActivityPage() {
                       <TableRow className={cn('cursor-pointer focus-visible:outline-offset-[-2px] max-[768px]:relative', stackRow)} data-row-key={group.key} onClick={() => setExpanded(open ? null : String(index))} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') setExpanded(open ? null : String(index)); }}>
                         <IdentityCell label={t('table.event')} identity={identity} cardFact>
                           {/* §2.4: the run renders the first occurrence, its count and its span. */}
-                          <span>{event.action}</span>
-                          {group.count > 1 ? <span>{t('table.runCount', { count: group.count })}</span> : null}
-                          {group.count > 1 ? <span>{t('table.runSpan', { first: relativeAge(locale, event.occurredAt), last: relativeAge(locale, group.lastAt) })}</span> : null}
+                          {group.count > 1 ? (
+                            <>
+                              <span>{t('table.runCount', { count: group.count })}</span>
+                              <span>{t('table.runSpan', { first: relativeAge(locale, event.occurredAt), last: relativeAge(locale, group.lastAt) })}</span>
+                            </>
+                          ) : undefined}
                         </IdentityCell>
-                        <StackCell label={t('table.result')} className={cardCellClass(cardFacts.includes('result'))}><StatusPill status={event.result} /></StackCell>
-                        <StackCell label={t('table.actor')} className={cardCellClass(cardFacts.includes('actor'))}><span title={event.actorId}>{event.actorType} · {event.actorId.slice(0, 4)}</span></StackCell>
+                        {/* §2.2: the two-column result and action are one answer, so they are one
+                            cell - the 13px status pill and the 11px verb it applied. */}
+                        <StackCell label={t('table.outcome')} className={cardCellClass(cardFacts.includes('outcome'))}>
+                          <div className="ow-cell">
+                            <StatusPill status={event.result} />
+                            <span className="ow-cell-meta">{event.action}</span>
+                          </div>
+                        </StackCell>
                         {/* §2.3: one timestamp, not two. The relative age and the absolute date are
                             the same fact; the second line made this cell 43.2px against §4.2's 42 and
                             the card 141.6 against §2.5's 140. The absolute moment stays reachable on
@@ -195,7 +220,7 @@ export function ActivityPage() {
                       </TableRow>
                       {open && (
                         <TableRow className="expanded-row">
-                          <TableCell colSpan={5}>
+                          <TableCell colSpan={4}>
                             <div className="event-detail">
                               <div className="event-detail-meta">
                                 <span>{t('activity.detail.subject')} <code>{event.subjectId}</code></span>

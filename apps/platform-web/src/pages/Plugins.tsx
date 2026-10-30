@@ -189,15 +189,23 @@ export function PluginsPage() {
 
   const summary = useMemo(() => summarize(plugins), [plugins]);
   /**
+   * table-spec §2.2: a column exists only while the rows can answer it. The list route carries no
+   * digest, trust, activation or replica count - those arrive one detail read per plugin - so when
+   * no detail has answered, the columns that depend on it are not drawn and §2.7's one sentence
+   * above the table says why, instead of twelve rows of a dashed box saying it twelve times.
+   */
+  const factsKnown = filtered.some((plugin) => {
+    const fact = facts[plugin.id];
+    return Boolean(fact && !fact.unavailable);
+  });
+  /**
    * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio over the
-   * rows on screen. Publisher and activation are the two columns the table already demotes below
-   * 1200px, so they are not card candidates either - they keep their desktop column.
+   * rows on screen.
    */
   const cardFacts = rankCardFacts({
     version: filtered.map((plugin) => plugin.activeVersion || plugin.latestVersion || ''),
     state: filtered.map((plugin) => plugin.state || ''),
     readyReplicas: filtered.map((plugin) => `${plugin.readyInstances}/${plugin.totalInstances}`),
-    digest: filtered.map((plugin) => (facts[plugin.id]?.digest ? shortDigest(facts[plugin.id].digest as string) : '')),
   });
   const selectable = canOperate ? filtered.filter((plugin) => !plugin.isSystem).map((plugin) => plugin.id) : [];
   const selectedPlugins = useMemo(() => plugins.filter((plugin) => selected.includes(plugin.id)), [plugins, selected]);
@@ -419,6 +427,11 @@ export function PluginsPage() {
           <EmptyState icon="plugins" title={plugins.length ? t('plugins.empty.filtered.title') : t('plugins.empty.none.title')} description={plugins.length ? t('plugins.empty.filtered.description') : t('plugins.empty.none.description')} action={quickFilter ? <Button variant="secondary" onClick={() => setQuickFilter(null)}>{t('plugins.quickFilter.clear')}</Button> : <Link className={buttonVariants()} to="/admin/plugins/install">{t('plugins.action.installPackage')}</Link>} />
         ) : (
           <section className="panel table-panel">
+            {/* table-spec §2.2/§2.7: one sentence above the table for every demoted or dropped
+                column, so the row never has to spend a cell saying it. */}
+            <p className="stat-note" data-table-note="demoted">
+              {factsKnown ? t('plugins.table.note') : t('plugins.table.noteNoFacts')}
+            </p>
             <Table className={cn('plugins-table', stackTable)}>
               <TableHeader className={stackHead}>
                 {/* Name and version are one block to read, so they lead. Deployment and runtime
@@ -439,11 +452,9 @@ export function PluginsPage() {
                   ) : null}
                   <TableHead>{t('table.plugin')}</TableHead>
                   <TableHead>{t('table.version')}</TableHead>
-                  <TableHead className="max-[1200px]:hidden">{t('table.publisher')}</TableHead>
                   <TableHead>{t('table.deployment')}</TableHead>
-                  <TableHead>{t('table.readyReplicas')}</TableHead>
-                  <TableHead>{t('table.digest')}</TableHead>
-                  <TableHead className="max-[1200px]:hidden">{t('table.activation')}</TableHead>
+                  {factsKnown ? <TableHead>{t('table.readyReplicas')}</TableHead> : null}
+                  {factsKnown ? <TableHead>{t('table.digest')}</TableHead> : null}
                   <TableHead aria-label={t('table.actions')} />
                 </TableRow>
               </TableHeader>
@@ -479,21 +490,19 @@ export function PluginsPage() {
                         </TableCell>
                       ) : null}
                       <IdentityCell label={t('table.plugin')} identity={formatIdentity({ name: plugin.name, id: plugin.id, locale, rowsOnPage: filtered.length })} cardFact className="max-[768px]:pl-5">
+                        {/* §2.2: the publisher was its own column at ratio 0.17 - a reader finds a
+                            difference in every sixth row - so it rides the name it qualifies. */}
                         <div className="entity-cell">
                           <span className={cn('entity-icon', plugin.isSystem && 'system')}><Icon name={plugin.isSystem ? 'ops' : 'box'} size={17} /></span>
 
                           {plugin.isSystem && <span className="tag">{t('common.tag.system')}</span>}
+                          <span className="text-muted-foreground">{plugin.publisher || t('common.none')}</span>
                         </div>
                       </IdentityCell>
                       <StackCell label={t('table.version')} className={cardCellClass(cardFacts.includes('version'))}>
                         <div className="ow-cell">
                           <span className="mono ow-cell-value">{plugin.activeVersion || plugin.latestVersion || null}{!(plugin.activeVersion || plugin.latestVersion) && <NoData detail={t('ui.noData.detail')} />}</span>
                           {upgrade ? <span className="ow-cell-meta">{t('plugins.upgrade.available', { version: plugin.latestVersion ?? '' })}</span> : null}
-                        </div>
-                      </StackCell>
-                      <StackCell label={t('table.publisher')} className={cn('max-[1200px]:hidden', cardCellClass(false))}>
-                        <div className="ow-cell">
-                          <span className="ow-cell-value">{plugin.publisher ? <span className="text-muted-foreground">{plugin.publisher}</span> : <NoData detail={t('ui.noData.detail')} />}</span>
                         </div>
                       </StackCell>
                       <StackCell label={t('table.state')} className={cardCellClass(cardFacts.includes('state'))}>
@@ -512,38 +521,39 @@ export function PluginsPage() {
                           >
                             <InstallationStatus state={plugin.state} />
                           </Link>
-                          {fact?.deploymentAt ? <TimeAgo value={fact.deploymentAt} /> : null}
+                          {/* §2.2: the activation generation was its own column at ratio 0.08 -
+                              one value for twelve rows. It is the deployment's own revision, so
+                              it rides the deployment state's second line. */}
+                          <span className="ow-cell-meta">
+                            {fact?.deploymentAt ? <TimeAgo value={fact.deploymentAt} /> : null}
+                            {fact?.generation !== null && fact?.generation !== undefined
+                              ? <>{fact?.deploymentAt ? ' · ' : ''}{t('plugins.table.generation', { generation: fact.generation })}</>
+                              : null}
+                          </span>
                           {installation.missing.length && !plugin.state ? <NoData detail={t('status.missingField', { field: installation.missing.join(', ') })} /> : null}
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.readyReplicas')} className={cardCellClass(cardFacts.includes('readyReplicas'))}>
-                        <div className="ow-cell">
-                          <span className="ow-cell-value">{!fact || fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
-                            <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : undefined}>{plugin.readyInstances}/{plugin.totalInstances}</span>
-                          )}</span>
-                        </div>
-                      </StackCell>
-                      <StackCell label={t('table.digest')} className={cardCellClass(cardFacts.includes('digest'))}>
-                        <div className="ow-cell">
-                          {fact?.digest ? <span className="mono ow-cell-value" title={fact.digest}>{shortDigest(fact.digest)}</span> : <NoData detail={t('plugins.table.digestHint')} />}
-                          {fact?.trust ? (
-                            <Link className="status-entity" to={entity} data-status-entity={plugin.id} title={t('plugins.status.openEntity', { name: plugin.name })} onClick={(event) => event.stopPropagation()}>
-                              <StatusIndicator state={indicatorStateForCode(fact.trust)} label={t('status.verified')} />
-                            </Link>
-                          ) : null}
-                        </div>
-                      </StackCell>
-                      <StackCell label={t('table.activation')} className={cn('max-[1200px]:hidden', cardCellClass(false))}>
-                        <div className="ow-cell">
-                          {fact?.generation !== null && fact?.generation !== undefined ? (
-                            <span className="mono ow-cell-value">{t('plugins.table.generation', { generation: fact.generation })}</span>
-                          ) : (
-                            <Link className="status-entity" to={entity} data-status-entity={plugin.id} title={t('plugins.status.openEntity', { name: plugin.name })} onClick={(event) => event.stopPropagation()}>
-                              <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />
-                            </Link>
-                          )}
-                        </div>
-                      </StackCell>
+                      {factsKnown ? (
+                        <StackCell label={t('table.readyReplicas')} className={cardCellClass(cardFacts.includes('readyReplicas'))}>
+                          <div className="ow-cell">
+                            <span className="ow-cell-value">{!fact || fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
+                              <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : undefined}>{plugin.readyInstances}/{plugin.totalInstances}</span>
+                            )}</span>
+                          </div>
+                        </StackCell>
+                      ) : null}
+                      {factsKnown ? (
+                        <StackCell label={t('table.digest')} className={cardCellClass(false)}>
+                          <div className="ow-cell">
+                            {fact?.digest ? <span className="mono ow-cell-value" title={fact.digest}>{shortDigest(fact.digest)}</span> : <NoData detail={t('plugins.table.digestHint')} />}
+                            {fact?.trust ? (
+                              <Link className="status-entity" to={entity} data-status-entity={plugin.id} title={t('plugins.status.openEntity', { name: plugin.name })} onClick={(event) => event.stopPropagation()}>
+                                <StatusIndicator state={indicatorStateForCode(fact.trust)} label={t('status.verified')} />
+                              </Link>
+                            ) : null}
+                          </div>
+                        </StackCell>
+                      ) : null}
                       <TableCell className={cn('w-8 text-right text-muted-foreground', cardActionCell)}>
                         <RowActions label={t('plugins.action.menu', { name: plugin.name })} actions={actionsFor(plugin)} />
                       </TableCell>

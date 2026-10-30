@@ -15,7 +15,6 @@ import { CopyButton, EmptyState, TimeAgo, useToast } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
-import { NoData } from '../components/app/status-indicator';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import { shortDigest } from '../format';
 import { useI18n, useT } from '../i18n';
@@ -300,8 +299,12 @@ export function AccessPage() {
                   <IdentityCell label={t('table.publisher')} identity={formatIdentity({ name: publisher.publisherId, id: publisher.fingerprint, at: publisher.createdAt, locale, rowsOnPage: (data || []).length })} cardFact />
                   <StackCell label={t('table.fingerprint')} className={cardCellClass(publisherCardFacts.includes('fingerprint'))}><span className="mono text-sm">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
                   <StackCell label={t('table.trust')} className={cardCellClass(publisherCardFacts.includes('trust'))}><StatusPill status={publisher.trustState} /></StackCell>
-                  {/* An absent note is a missing record, not an empty one: the reserved token, never a dash. */}
-                  <StackCell label={t('table.note')} className={cardCellClass(publisherCardFacts.includes('note'))}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                  {/* §2.7 / M1: three of six publishers have no note, and three dashed boxes spent
+                      a whole fact on saying one thing. A note that was never written is the source
+                      answering "none" - the empty state, rendered as copy (M1's third row) - not a
+                      sample that failed to arrive, which is what NO_DATA reserves. The notes that
+                      do exist keep their cell. */}
+                  <StackCell label={t('table.note')} className={cardCellClass(publisherCardFacts.includes('note'))}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <span className="ow-cell-meta">{t('common.none')}</span>}</StackCell>
                   {/* §2.5: a labelled cell IS a fact, so the verb menu is a plain cell - and at 390 it
                       rides the identity line instead of spending a line of the card. */}
                   <TableCell className={cn('w-8 text-right text-muted-foreground', cardActionCell)}>

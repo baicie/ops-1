@@ -19,7 +19,7 @@ import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../
 import { describeNodeState, nodeRevokedLanded } from '../lib/verified-writes';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
-import { NoData, StatusIndicator, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
+import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
@@ -123,16 +123,27 @@ export function NodesPage() {
     [nodes, stateFilter, osFilter],
   );
   /**
+   * table-spec §2.7: a column exists only while the rows can answer it. At half the rows without a
+   * sample the column is dropped (§2.7's own threshold) and one sentence above the table says why,
+   * instead of twelve rows spending four dashed boxes each on the same fact.
+   */
+  const sampledNodes = visible.filter((node) => Boolean(node.resourceSnapshot)).length;
+  const missingSamples = visible.length - sampledNodes;
+  const resourcesMeasurable = visible.length > 0 && sampledNodes / visible.length > 0.5;
+  /**
    * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio over the
-   * rows on screen. Capacity is a restatement of the memory column and `sampledAt` restates the
-   * observation age the identity line already carries, so neither is a candidate here: a card
-   * would spend a line saying what the line above it said. Both stay desktop columns.
+   * rows on screen. Capacity and the sample time are the second line of the resource cell, not
+   * facts of their own: a card would spend a line saying what the line above it said.
    */
   const cardFacts = rankCardFacts({
     status: visible.map((node) => nodeState(node)),
     instances: visible.map((node) => `${node.instancesReady}/${node.instancesTotal}`),
-    cpu: visible.map((node) => { const value = percentOf(node.resourceSnapshot?.cpuUtilization); return value === null ? '' : `${Math.round(value * 100)}%`; }),
-    memory: visible.map((node) => { const value = ratio(node.resourceSnapshot?.memoryUsedBytes, node.resourceSnapshot?.memoryTotalBytes); return value === null ? '' : `${Math.round(value * 100)}%`; }),
+    resources: visible.map((node) => {
+      const snapshot = node.resourceSnapshot;
+      const cpu = percentOf(snapshot?.cpuUtilization);
+      const memory = ratio(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes);
+      return snapshot && cpu !== null && memory !== null ? `${Math.round(cpu * 100)}/${Math.round(memory * 100)}` : '';
+    }),
   });
 
   async function createToken() {
@@ -238,16 +249,29 @@ export function NodesPage() {
         </section>
         {isStale(observedAt, 5000) ? <NoticeBar state="stale" title={t('ui.stale.title')} detail={t('ui.stale.detail', { at: observedAt ?? '' })} /> : null}
         <section className="panel table-panel">
+          {/* table-spec §2.2: four columns, not seven. CPU, memory, capacity and the sample time
+              are one fact about one sample, so they share one resource cell - the 13px value line
+              and the 11px label line §2.3 already defines - instead of four headings, four widths
+              and four borders for one reading. §2.7: a sample that never arrived is stated once,
+              here, above the table; the row says the same thing in words instead of spending its
+              cells on dashed boxes. */}
+          <p className="stat-note" data-table-note="resources">
+            {resourcesMeasurable ? t('nodes.table.note') : t('nodes.resource.none')}
+            {resourcesMeasurable && missingSamples > 0 ? (
+              <>
+                {' '}
+                <NoData detail={t('nodes.resource.missingSnapshot')} />{' '}
+                {t('nodes.resource.coverage', { missing: missingSamples, total: visible.length })}
+              </>
+            ) : null}
+          </p>
           <Table className={cn('nodes-table', stackTable)}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
                 <TableHead>{t('table.node')}</TableHead>
                 <TableHead>{t('table.status')}</TableHead>
                 <TableHead>{t('table.instances')}</TableHead>
-                <TableHead>{t('table.cpu')}</TableHead>
-                <TableHead>{t('table.memory')}</TableHead>
-                <TableHead className="max-[1200px]:hidden">{t('table.capacity')}</TableHead>
-                <TableHead>{t('table.sampledAt')}</TableHead>
+                {resourcesMeasurable ? <TableHead>{t('table.resources')}</TableHead> : null}
                 <TableHead aria-label={t('table.open')} />
               </TableRow>
             </TableHeader>
@@ -276,14 +300,36 @@ export function NodesPage() {
                       </div>
                     </StackCell>
                     <StackCell label={t('table.instances')} className={cardCellClass(cardFacts.includes('instances'))}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
-                    <StackCell label={t('table.cpu')} data-resource="cpu" className={cardCellClass(cardFacts.includes('cpu'))}>{cpu === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(cpu * 100)}%</span>}</StackCell>
-                    <StackCell label={t('table.memory')} data-resource="memory" className={cardCellClass(cardFacts.includes('memory'))}>{memory === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(memory * 100)}%</span>}</StackCell>
-                    <StackCell label={t('table.capacity')} data-resource="capacity" className={cn('max-[1200px]:hidden', cardCellClass(false))}>
-                      {snapshot?.memoryTotalBytes ? (
-                        <span className="ow-cell-meta ow-tnum">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
-                      ) : <NoData detail={t('nodes.resource.missingSnapshot')} />}
-                    </StackCell>
-                    <StackCell label={t('table.sampledAt')} data-resource="sampled-at" className={cardCellClass(false)}>{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
+                    {resourcesMeasurable ? (
+                      <StackCell label={t('table.resources')} data-resource="resources" className={cardCellClass(cardFacts.includes('resources'))}>
+                        {snapshot ? (
+                          <div className="ow-cell">
+                            <span className="ow-cell-value ow-tnum">
+                              {cpu === null
+                                ? <UnknownValue detail={t('nodes.resource.missingSnapshot')} />
+                                : <span data-resource="cpu" className="ow-utilization">{Math.round(cpu * 100)}%</span>}
+                              {' · '}
+                              {memory === null
+                                ? <UnknownValue detail={t('nodes.resource.missingSnapshot')} />
+                                : <span data-resource="memory" className="ow-utilization">{Math.round(memory * 100)}%</span>}
+                            </span>
+                            <span className="ow-cell-meta ow-tnum">
+                              {snapshot.memoryTotalBytes ? (
+                                <span data-resource="capacity">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
+                              ) : null}
+                              {snapshot.sampledAt ? (
+                                <>
+                                  {snapshot.memoryTotalBytes ? ' · ' : null}
+                                  <span data-resource="sampled-at"><TimeAgo value={snapshot.sampledAt} /></span>
+                                </>
+                              ) : null}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="ow-cell-meta" data-resource="absent">{t('nodes.resource.missingSnapshot')}</span>
+                        )}
+                      </StackCell>
+                    ) : null}
                     <TableCell className={cn('w-8 text-right text-muted-foreground', cardActionCell)}>
                       <RowActions label={t('nodes.action.menu', { name: node.name })} actions={nodeActions(node)} />
                     </TableCell>

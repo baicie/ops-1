@@ -134,7 +134,20 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-/* ── the nine assertions of §4.2 ───────────────────────────────────────────── */
+/* ── the nine assertions of §4.2, plus §2.5's one measured proxy ────────────── */
+
+/**
+ * §2.5: "the first line is the identity key, and it is not truncated by a fixed width. If it does
+ * not fit, the name part ellipsises and the disambiguator and the age never do - those are what
+ * make the card distinguishable." A clipped identity line has lost exactly that, so the floor is
+ * 0 and it is derived, not tuned.
+ *
+ * §4.2 has no row for it yet, which is why the number is declared here instead of parsed: the
+ * gate's rule is that a threshold carries its section, and this one carries §2.5 in the header it
+ * prints. The assertion itself still fails closed - a card entry with no boolean `clipped` is a
+ * violation, not a skip - so the day §4.2 gains the row, only this constant is deleted.
+ */
+const CARD_CLIPPED_MAX = 0;
 
 const CODES = [
   'page-errored',
@@ -156,6 +169,8 @@ const CODES = [
   'no-data-per-table',
   'card-facts-unmeasured',
   'card-facts-high',
+  'card-clipped-unmeasured',
+  'card-clipped',
 ];
 const tally = Object.fromEntries(CODES.map((code) => [code, 0]));
 
@@ -257,6 +272,21 @@ function violationsFor(m) {
       else if (m.cardFactCount > T.cardFactCount.value) {
         add('card-facts-high', m.cardFactCount + ' facts on a card > ' + T.cardFactCount.value);
       }
+      // §2.5's other half, and the one the 14 identical cards of §1.4 got past: cardFactCount says
+      // the card has few facts, not that its first line can still be told apart from its neighbour.
+      // A clipped identity line has cut the disambiguator or the age, which is the whole
+      // distinguishable part. This is the assertion that would have failed §1.4 on the day it
+      // shipped, and the reason 220px survived a green gate.
+      const unmeasured = m.cards.filter((card) => !card || typeof card.clipped !== 'boolean').length;
+      if (unmeasured > 0) {
+        add('card-clipped-unmeasured', unmeasured + ' of ' + m.cards.length + ' card(s) carry no boolean `clipped`');
+      } else {
+        const clipped = m.cards.filter((card) => card.clipped === true);
+        if (clipped.length > CARD_CLIPPED_MAX) {
+          add('card-clipped', clipped.length + '/' + m.cards.length + ' card identity line(s) are clipped, e.g. "' +
+            String(clipped[0].key || '').slice(0, 40) + '"');
+        }
+      }
     }
   }
   return found;
@@ -277,6 +307,7 @@ console.log(
   ' · noDataPerTable ≤ ' + T.noDataPerTable.value + ' (' + T.noDataPerTable.section + ')' +
   ' · cardFactCount ≤ ' + T.cardFactCount.value + ' @<768 (' + T.cardFactCount.section + ')',
 );
+console.log('  cardClipped = ' + CARD_CLIPPED_MAX + ' @<768 (§2.5 "the disambiguator · age is never ellipsised")');
 
 let failures = 0;
 let pages = 0;
@@ -341,6 +372,6 @@ console.log('');
 const fired = CODES.filter((code) => tally[code] > 0);
 console.log('  by assertion: ' + (fired.length ? fired.map((code) => code + ' ' + tally[code]).join(' | ') : 'none fired'));
 console.log(failures === 0
-  ? 'check-ui-metrics: PASS (' + pages + ' page measurements, 9 §4.2 assertions each)'
+  ? 'check-ui-metrics: PASS (' + pages + ' page measurements, 9 §4.2 assertions each + §2.5 card clipping)'
   : 'check-ui-metrics: FAIL (' + failures + ' violation(s) across ' + pages + ' page measurements)');
 process.exit(failures === 0 ? 0 : 1);
