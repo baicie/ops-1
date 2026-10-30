@@ -45,7 +45,12 @@ describe('cardCellClass', () => {
     // breakpoint; that is how those two cards rendered 6 facts where §2.5 asks for 3.
     expect(cardCellClass(false)).toBe('ow-card-extra');
     expect(cardCellClass(true)).not.toBe('ow-card-extra');
-    expect(cardActionCell).toContain('max-[768px]:absolute');
+    // The trigger's placement used to ride utility classes here, and the legacy
+    // .nodes-table/.plugins-table cell rule (0,1,2) outranked them (0,1,0): the same button sat
+    // 4px inside the card on /admin/jobs and 18px inside on /admin/nodes and /admin/plugins.
+    // The class is now the hook a rule of the same specificity targets, so the assertion is the
+    // hook's presence - not a utility that silently lost the cascade.
+    expect(cardActionCell).toContain('ow-row-action');
   });
 });
 

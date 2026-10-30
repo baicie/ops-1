@@ -285,7 +285,7 @@ export function NodesPage() {
                   <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-node-state={nodeState(node)} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
                     <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: visible.length })} cardFact>
                       <span className="mono">{node.os}/{node.arch}</span>
-                      <span>{t('nodes.table.generation', { generation: node.generation })}</span>
+                      <span className="ow-key">{t('nodes.table.generation', { generation: node.generation })}</span>
                     </IdentityCell>
                     {/* §2.3: a two-line cell must fit 40px, and this one did not - it printed
                         lastSeenAt a second time (the identity cell's age IS that field) on a 24px
@@ -475,9 +475,29 @@ export function NodeDetailPage() {
         </div>
         {!history?.length ? <EmptyState icon="activity" title={t('nodeDetail.history.empty.title')} description={t('nodeDetail.history.empty.description')} /> : (
           <div className="resource-history">
-            <svg viewBox="0 0 400 80" role="img" aria-label={t('nodeDetail.history.chartAria')} preserveAspectRatio="none">
-              {historySegments(history).map((points, index) => <polyline key={index} fill="none" stroke="var(--accent, #4f8cff)" strokeWidth="2" points={points} />)}
-            </svg>
+            {/* B4.2: no axis meant 3% and 100% drew the same picture - a flat line at the bottom
+                of a box with nothing to read it against. The 0-100% scale is printed beside the
+                plot and drawn as three gridlines, and the window's own two stamps sit under it,
+                so the plot answers how full and when instead of some shape. */}
+            <div className="resource-history-plot">
+              <div className="resource-history-axis" aria-hidden="true">
+                <span>100%</span>
+                <span>50%</span>
+                <span>0%</span>
+              </div>
+              <svg viewBox="0 0 400 80" role="img" aria-label={t('nodeDetail.history.chartAria')} preserveAspectRatio="none">
+                <g className="resource-history-grid" aria-hidden="true">
+                  <line x1="0" y1="0.5" x2="400" y2="0.5" />
+                  <line x1="0" y1="40" x2="400" y2="40" />
+                  <line x1="0" y1="79.5" x2="400" y2="79.5" />
+                </g>
+                {historySegments(history).map((points, index) => <polyline key={index} fill="none" stroke="var(--accent, #4f8cff)" strokeWidth="2" points={points} vectorEffect="non-scaling-stroke" />)}
+              </svg>
+            </div>
+            <p className="resource-history-axis-time">
+              <span>{formatDate(history[0].observedAt)}</span>
+              <span>{formatDate(history[history.length - 1].observedAt)}</span>
+            </p>
             <p className="text-sm text-muted-foreground">{t(history.length === 1 ? 'nodeDetail.history.one' : 'nodeDetail.history.many', { count: history.length, at: formatDate(history[0].observedAt) })} · {t('nodeDetail.generation', { generation: history[0].generation })}</p>
             <Table className={stackTable}>
               <TableHeader className={stackHead}>

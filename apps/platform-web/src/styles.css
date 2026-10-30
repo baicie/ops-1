@@ -319,6 +319,28 @@ input::placeholder { color: var(--ow-text-muted); }
 .page-header h1 { font-size: var(--ow-type-xl); font-weight: 700; line-height: 1.2; letter-spacing: -.015em; }
 .page-description { margin-top: 8px; color: var(--ow-text-secondary); max-width: 820px; }
 .page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* page-template §2.1/§2.5: one header height and one first-block position on every page.
+   160 = topbar 56 + header 80 + stack gap 24, so the canvas' top gutter is not a fifth term of
+   the sum - it is the header's own 80px, and the copy block is centred inside it. Measured
+   before this rule: headers of 36 / 60.2 / 72 / 86 / 122px and first blocks at 140 / 164.2 /
+   187.2 / 190 / 214, i.e. one page one ruler was one page one coincidence.
+   Below 768 the header keeps its content height: a phone has no 160 to hit, and clamping a
+   description to one line there would drop a sentence instead of fitting one. */
+@media (min-width: 769px) {
+  .main-content { padding-top: 0; }
+  .page-header { height: 80px; box-sizing: border-box; align-items: center; }
+  /* §2.2: the description is one line with an ellipsis. A header whose height depends on how
+     long the sentence is is the mechanism behind the five heights above. */
+  .page-description { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* §2.2: the meta chips ride the description's line instead of opening a third line. A chip row
+   of its own is 8px of margin plus a 21px chip, which is the difference between a 80px header
+   and the 86px one /admin/plugins/{id} measured. */
+.page-header-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.page-header-sub .page-description { margin-top: 0; }
+.page-header-sub .page-header-meta { margin-top: 0; flex: none; }
 .title-with-status { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .meta-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-sm); padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: 5px; background: var(--ow-surface); }
@@ -821,8 +843,9 @@ details.panel.advanced > summary { padding: 12px 16px; }
 /* Studio workspace: full-bleed, canvas-first */
 .main-content:has(.studio-page) { max-width: none; padding: 0; }
 .studio-page { padding: 16px 24px 24px; gap: 12px; }
-.studio-page .page-header { align-items: center; padding: 2px 2px 8px; border-bottom: 1px solid var(--ow-border); }
-.studio-page .page-header .page-description { margin-top: 4px; color: var(--ow-text-muted); }
+/* page-template §1.1: this was the third CSS treatment of one component (padding 2px 2px 8px
+   plus a rule under it). Studio pages render the same PageHeader as the admin pages now; only
+   the page's own padding stays studio-specific. */
 .studio-page .page-actions { gap: 4px; }
 .studio-shell {
   display: grid;
@@ -1832,6 +1855,13 @@ button.ow-summary-card:focus-visible,
      control gives back the 20px that turned "Overview" into "Overvi...". */
   .admin-breadcrumb { flex: 1 1 auto; min-width: 0; }
   .admin-breadcrumb .breadcrumb-item span[aria-current='page'] { max-width: 100%; }
+  /* The last crumb is the only location cue on a phone and it was the first thing to give way:
+     it gets the row's spare width before any control on the right does, and it keeps one line
+     so the trail reads as a place rather than as a wrapped sentence. */
+  .admin-topbar .breadcrumbs { flex: 1 1 auto; min-width: 3.5rem; }
+  .admin-breadcrumb .breadcrumb-item:last-child { flex: 0 1 auto; min-width: 0; }
+  .admin-breadcrumb .breadcrumb-item:last-child a,
+  .admin-breadcrumb .breadcrumb-item:last-child span { max-width: none; }
   .lang-select { width: 84px !important; }
   /* The older 560px rule turned the head into a column, which is what pushed the count onto
      its own line; a row that cannot wrap keeps title and count together. */
@@ -1962,6 +1992,11 @@ button.ow-summary-card:focus-visible,
 .summary-grid.plugin-detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
 @media (max-width: 1280px) { .summary-grid.plugin-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 1024px) { .summary-grid.plugin-detail-grid { grid-template-columns: minmax(0, 1fr); } }
+/* B4.1: this block had no media query, so /admin/plugins/{id}'s Instances panel rendered the
+   phone stack at 1440 - thead display:none, every td display:block. Measured on the panel:
+   thead height 0, table width 361 in a 1135px panel, 430px of stacked body under a head that
+   was not there. The stack is the phone's form; above 768 the table is the table. */
+@media (max-width: 768px) {
 .instance-compact thead { display: none; }
 .instance-compact table,
 .instance-compact tbody,
@@ -1985,6 +2020,7 @@ button.ow-summary-card:focus-visible,
   font-size: var(--ow-type-label);
   color: var(--ow-text-muted);
 }
+}
 
 /* ── 10. Chin: CJK copy is not uppercase-able and needs more air ─────────────────────
  * Uppercasing and positive tracking are Latin devices; applied to 中文 they only add
@@ -2007,6 +2043,14 @@ html[lang='zh-CN'] .ow-cell-meta { line-height: 1.6; }
  * "● STAGING · bdb93b0" cost the served-SHA self-proof its readable anchor and left a
  * separator free to hang when the rail wrapped. Labels are back; no interpunct is used. */
 .sidebar-meta-block { min-width: 0; border-top: 1px solid var(--ow-border); padding-top: 8px; }
+/* The rail form of the deployment block. At 64px the labelled rows measured Environment 0px,
+   Commit 0px and Deployed at 0px of value - four labels with their values clipped away. The
+   labelled rows are not deleted, they are the wide form; the rail form is one 40px control
+   whose accessible name and tooltip carry all four facts, so nothing becomes unreachable. */
+/* NOT FIXED, and deliberately not half-done: hiding the labelled rows here without a rail form
+   to carry their four values would turn "the values are clipped in the rail" into "the values
+   are gone in the rail" - the one direction this brief forbids. The wide form stays as it is
+   until the compact trigger exists in components/VersionBadge.tsx. */
 .sidebar-meta-rows { display: flex; flex-direction: column; gap: 2px; padding: 0 4px; }
 /* Two labelled pairs per row, each pair sized by its own content: a single four-column grid
    let the label column collapse and printed "STAGI..." where the environment belonged. */
@@ -2071,6 +2115,20 @@ html[lang='zh-CN'] .ow-cell-meta { line-height: 1.6; }
   }
   .plugins-table tbody td > *,
   .nodes-table tbody td > * { min-width: 0; }
+  /* The row menu is one control at one place on every page. These legacy cell rules (0,1,2)
+     outranked the utility classes that placed the trigger (0,1,0), so the same 32px button sat
+     4px inside the card on /admin/jobs and 18px inside on /admin/nodes and /admin/plugins -
+     measured with the row as the reference box. The cell is chrome: it carries no padding of
+     its own and takes the card's own right edge. */
+  .ow-table tbody td.ow-row-action {
+    display: block;
+    position: absolute;
+    top: 0;
+    right: 4px;
+    width: auto;
+    padding: 0;
+    border: 0;
+  }
   /* The record is the click target, so it keeps a whole-row hit area once it is a card. */
   .plugins-table tbody tr:focus-visible,
   .nodes-table tbody tr:focus-visible { outline-offset: 0; border-radius: var(--ow-radius-md); }
@@ -2328,10 +2386,18 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
  * the age are exactly what makes two rows tellable apart, so they never ellipsise. */
 .ow-ident { display: flex; align-items: baseline; min-width: 0; font-size: var(--ow-type-meta); line-height: 1.2; }
 .ow-ident-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.ow-ident-tail { flex: 0 0 auto; white-space: nowrap; color: var(--ow-text-muted); }
+/* §2.1's disambiguator is the only thing that tells two rows of one pipeline apart, so it is
+   painted at the text colour and at the name's weight instead of at caption grey - the review
+   measured it as the palest run on the page. The age after it stays subordinate. */
+.ow-ident-tail { flex: 0 0 auto; white-space: nowrap; color: var(--ow-text-secondary); font-weight: 600; }
 .ow-ident-cell { min-width: 0; }
 .ow-ident-meta { display: block; min-width: 0; font-size: var(--ow-type-label); line-height: 1.4; color: var(--ow-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ow-ident-meta > span + span::before { content: " · "; }
+/* §2.3 fixes the qualifier line at 15.4px (11 x 1.4) so the row stays 40px; that is the line's
+   height, not its contents' size. A value the row is scanned for - r9, attempts 1/3, generation
+   53, the four-hex disambiguator - takes the 12px step instead of the 11px caption step, and
+   12 x 1.2 = 14.4 still fits inside the line box, so nothing grows. */
+.ow-ident-meta .ow-key { font-size: var(--ow-type-sm); line-height: 1.2; color: var(--ow-text-secondary); }
 
 /* §2.6 the container never scrolls on a phone. The record was a <code class="mono small"> at
  * right:613 in a 390px viewport; a mono run that cannot wrap is the whole defect. */
@@ -2458,6 +2524,15 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
      nothing on every card. */
   .ow-table tbody td.ow-ident-cell { flex-direction: column; align-items: stretch; }
 
+  /* table-spec §2.5: the whole-row trigger rides the identity line, so the line reserves the
+     trigger's own box - 32px button + its 4px inset = 36. Before this, the identity line's box
+     ran 18px (Jobs) and 32px (Nodes, Plugins) underneath the button, which is the
+     18x15.4 / 32x15.4 the review measured on 14/14, 1/1 and 4/4 rows; no character was painted
+     under it yet only because every name on the reviewed pages was short enough for the ellipsis
+     to land left of the button. With the reservation the clip edge IS the button's left edge, so
+     the visible characters are unchanged and a longer name can no longer reach it. */
+  .ow-table tbody td.ow-ident-cell { padding-right: 36px; }
+
   /* The qualifier is ONE line, and the meta line is what clips it. Measured before this rule, on a
      row whose payload field is a 100-character request path: the actor on line one, the field's
      value on line two, 30.9px of qualifier and 166-170px of card - and nothing overflowed, so no
@@ -2498,3 +2573,18 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   .module-group-cards { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .module-group-cards > li { border-left: 0; padding-left: 0; }
 }
+
+/* B3.4 (part 2): a missing value rendered as a bordered token inside a table cell while every
+   state beside it rendered as an unbordered pill, so one column spoke two languages: a box
+   meant "missing" on /admin/plugins and "not a state at all" on /admin/access's role column.
+   In a cell the missing value now reads as inline muted text at the value tier. */
+.ow-table tbody td .value-token--no-data { border: 0; padding: 0; background: transparent; color: var(--ow-text-muted); }
+
+/* B4.2: the history chart had no axis, so 3% and 100% drew the same picture. The scale is
+   printed beside the plot (100 / 50 / 0 %) and the plot carries the same three gridlines, so a
+   flat line near the floor is a reading rather than a rendering. */
+.resource-history-plot { display: flex; align-items: stretch; gap: 8px; padding: 8px 16px 0; }
+.resource-history-axis { display: flex; flex-direction: column; justify-content: space-between; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; text-align: right; min-width: 2.75rem; }
+.resource-history-plot > svg { flex: 1 1 auto; min-width: 0; }
+.resource-history-axis-time { display: flex; justify-content: space-between; gap: 16px; padding: 2px 16px 8px 0; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+.resource-history-grid line { stroke: var(--ow-border); stroke-width: 1; vector-effect: non-scaling-stroke; }

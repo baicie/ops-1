@@ -16,7 +16,7 @@ import { useI18n, useT } from '../i18n';
 import { ageMessage, clockMessage } from '../lib/age';
 import { cn } from '../lib/utils';
 import { actorName, detailFact, presentEvents, subjectName, type PresentedRow } from './activity-facts';
-import { IdentityCell, StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardActionCell, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /** Radix Select cannot express "no value", so every "all" state is a sentinel the page maps back. */
 const ALL = 'ALL';
@@ -303,7 +303,7 @@ export function ActivityPage() {
                             <span className="ow-cell-meta mono">{clockMessage(locale, event.occurredAt)}</span>
                           </span>
                         </StackCell>
-                        <TableCell className="row-action max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-0 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0">
+                        <TableCell className={cn('row-action', cardActionCell)}>
                           <button
                             type="button"
                             className="icon-btn"

@@ -1,0 +1,227 @@
+{
+ "mode": "before",
+ "base": "http://82.156.234.84:3000",
+ "jobId": "111a3cfe-84ce-4cc5-a883-3703ccf61772",
+ "v1440": {
+  "clientWidth": 1440,
+  "scrollWidth": 1425,
+  "bodyScrollWidth": 1425,
+  "runs": [
+   {
+    "text": "host-metrics-pipeline",
+    "length": 21,
+    "lines": 1,
+    "charsPerLine": 21,
+    "charWidth": 17.33,
+    "boxWidth": 274.1,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "title"
+   },
+   {
+    "text": "host-metrics-pipeline",
+    "length": 21,
+    "lines": 1,
+    "charsPerLine": 21,
+    "charWidth": 8.43,
+    "boxWidth": 241.3,
+    "whiteSpace": "nowrap",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "111a3cfe-84ce-4cc5-a883-3703ccf61772",
+    "length": 36,
+    "lines": 2,
+    "charsPerLine": 18,
+    "charWidth": 8.43,
+    "boxWidth": 201.4,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "6fe135e9-1034-490d-bb91-e4d8dcfc1e1c",
+    "length": 36,
+    "lines": 2,
+    "charsPerLine": 18,
+    "charWidth": 7.22,
+    "boxWidth": 201.4,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "2026-10-29T09:31:19.605Z",
+    "length": 24,
+    "lines": 1,
+    "charsPerLine": 24,
+    "charWidth": 7.22,
+    "boxWidth": 201.4,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "9b426dab-27c4-45ce-9773-b51a3db4f246",
+    "length": 36,
+    "lines": 1,
+    "charsPerLine": 36,
+    "charWidth": 7.22,
+    "boxWidth": 519.8,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "sha256:64043eff005f46dd9b5dd254e664c4518",
+    "length": 71,
+    "lines": 1,
+    "charsPerLine": 71,
+    "charWidth": 7.22,
+    "boxWidth": 523,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "sha256:15f854dcdc498d67a8b3385662625172e",
+    "length": 71,
+    "lines": 1,
+    "charsPerLine": 71,
+    "charWidth": 7.22,
+    "boxWidth": 1135,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   }
+  ]
+ },
+ "nodeCell1440": {
+  "shown": "9b426dab-27c4-45ce-9773-b51a3db4f246",
+  "chars": 36,
+  "lines": 1,
+  "width": 519.8,
+  "title": null
+ },
+ "v390": {
+  "clientWidth": 390,
+  "scrollWidth": 375,
+  "bodyScrollWidth": 375,
+  "runs": [
+   {
+    "text": "host-metrics-pipeline",
+    "length": 21,
+    "lines": 1,
+    "charsPerLine": 21,
+    "charWidth": 13.11,
+    "boxWidth": 274.1,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "title"
+   },
+   {
+    "text": "host-metrics-pipeline",
+    "length": 21,
+    "lines": 1,
+    "charsPerLine": 21,
+    "charWidth": 8.43,
+    "boxWidth": 325,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "111a3cfe-84ce-4cc5-a883-3703ccf61772",
+    "length": 36,
+    "lines": 1,
+    "charsPerLine": 36,
+    "charWidth": 8.43,
+    "boxWidth": 325,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "6fe135e9-1034-490d-bb91-e4d8dcfc1e1c",
+    "length": 36,
+    "lines": 1,
+    "charsPerLine": 36,
+    "charWidth": 7.22,
+    "boxWidth": 325,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "2026-10-29T09:31:19.605Z",
+    "length": 24,
+    "lines": 1,
+    "charsPerLine": 24,
+    "charWidth": 7.22,
+    "boxWidth": 325,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "9b426dab-27c4-45ce-9773-b51a3db4f246",
+    "length": 36,
+    "lines": 10,
+    "charsPerLine": 3.6,
+    "charWidth": 7.22,
+    "boxWidth": 59.9,
+    "whiteSpace": "normal",
+    "scroller": "relative w-full overflow-auto",
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "sha256:64043eff005f46dd9b5dd254e664c4518",
+    "length": 71,
+    "lines": 3,
+    "charsPerLine": 23.7,
+    "charWidth": 7.22,
+    "boxWidth": 264.3,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   },
+   {
+    "text": "sha256:15f854dcdc498d67a8b3385662625172e",
+    "length": 71,
+    "lines": 2,
+    "charsPerLine": 35.5,
+    "charWidth": 7.22,
+    "boxWidth": 349,
+    "whiteSpace": "normal",
+    "scroller": null,
+    "clip": 0,
+    "role": "field"
+   }
+  ]
+ },
+ "nodeCell390": {
+  "shown": "9b426dab-27c4-45ce-9773-b51a3db4f246",
+  "chars": 36,
+  "lines": 10,
+  "width": 59.9,
+  "title": null
+ },
+ "shortId": null,
+ "shortIdTitle": null
+}

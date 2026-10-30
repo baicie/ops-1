@@ -1,0 +1,91 @@
+{
+ "clientWidth": 390,
+ "scrollWidth": 375,
+ "bodyScrollWidth": 375,
+ "runs": [
+  {
+   "text": "host-metrics-pipeline",
+   "length": 21,
+   "lines": 1,
+   "charsPerLine": 21,
+   "charWidth": 13.11,
+   "boxWidth": 245.2,
+   "whiteSpace": "normal",
+   "scroller": null,
+   "clip": 0,
+   "role": "title"
+  },
+  {
+   "text": "host-metrics-pipeline",
+   "length": 21,
+   "lines": 1,
+   "charsPerLine": 21,
+   "charWidth": 8.43,
+   "boxWidth": 168.2,
+   "whiteSpace": "nowrap",
+   "scroller": null,
+   "clip": 0,
+   "role": "field"
+  },
+  {
+   "text": "e273620e-0580-449f-b7ee-e23e3f065b9e",
+   "length": 36,
+   "lines": 1,
+   "charsPerLine": 36,
+   "charWidth": 7.22,
+   "boxWidth": 289,
+   "whiteSpace": "nowrap",
+   "scroller": null,
+   "clip": 0,
+   "role": "field"
+  },
+  {
+   "text": "dc77f93c-6f4f-40a4-ada6-3b4e24e44814",
+   "length": 36,
+   "lines": 1,
+   "charsPerLine": 36,
+   "charWidth": 7.22,
+   "boxWidth": 289,
+   "whiteSpace": "nowrap",
+   "scroller": null,
+   "clip": 0,
+   "role": "field"
+  },
+  {
+   "text": "2026-10-29T16:07:49.452Z",
+   "length": 24,
+   "lines": 1,
+   "charsPerLine": 24,
+   "charWidth": 7.22,
+   "boxWidth": 325,
+   "whiteSpace": "normal",
+   "scroller": null,
+   "clip": 0,
+   "role": "field"
+  },
+  {
+   "text": "sha256:64043eff005f4…9d9e7eb0",
+   "length": 29,
+   "lines": 1,
+   "charsPerLine": 29,
+   "charWidth": 7.22,
+   "boxWidth": 175,
+   "whiteSpace": "nowrap",
+   "scroller": null,
+   "clip": 35,
+   "role": "field"
+  },
+  {
+   "text": "sha256:476a6efd50469…b238da96",
+   "length": 29,
+   "lines": 1,
+   "charsPerLine": 29,
+   "charWidth": 7.22,
+   "boxWidth": 313,
+   "whiteSpace": "nowrap",
+   "scroller": null,
+   "clip": 0,
+   "role": "field"
+  }
+ ]
+}

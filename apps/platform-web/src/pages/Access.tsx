@@ -264,7 +264,10 @@ export function AccessPage() {
                     <IdentityCell label={t('table.user')} identity={formatIdentity({ name: item.displayName, id: item.id, at: item.createdAt, locale, rowsOnPage: (users || []).length })} cardFact>
                       <span>{item.email}</span>
                     </IdentityCell>
-                    <StackCell label={t('table.role')}><span className="role-pill">{item.role}</span></StackCell>
+                    {/* B3.4: a role is a word, not a state, and the status column beside it is a pill. The
+                  bordered box made one column read as a different kind of fact from its
+                  neighbour; the role sits at the value tier and the state keeps the pill. */}
+                  <StackCell label={t('table.role')}><span className="ow-cell-value">{item.role}</span></StackCell>
                     <StackCell label={t('table.status')}><UserStatusPill disabled={item.disabled} /></StackCell>
                     <StackCell label={t('table.actions')}>{item.id !== user?.id && <Button size="sm" variant={item.disabled ? 'default' : 'destructive'} onClick={() => setUserTarget({ account: item, disabled: !item.disabled })}>{item.disabled ? t('action.enable') : t('action.disable')}</Button>}</StackCell>
                   </TableRow>

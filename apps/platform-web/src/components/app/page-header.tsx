@@ -33,8 +33,17 @@ export function PageHeader({
       <div className="page-header-copy">
         {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
         <h1>{title}</h1>
-        {description ? <p className="page-description">{description}</p> : null}
-        {meta ? <div className="page-header-meta">{meta}</div> : null}
+        {/* page-template §2.2: one header height on every page, so the meta chips share the
+            description's line instead of opening a third one. A chip row of its own measured
+            8px of margin + 21px of chip, which is why /admin/plugins/{id} carried an 86px
+            header against a 36px one on /admin/nodes: the height was never declared, it was
+            the sum of whichever slots the page happened to pass. */}
+        {description || meta ? (
+          <div className="page-header-sub">
+            {description ? <p className="page-description">{description}</p> : null}
+            {meta ? <div className="page-header-meta">{meta}</div> : null}
+          </div>
+        ) : null}
       </div>
       {actions || primary ? (
         <div className="page-actions">

@@ -21,7 +21,7 @@ import { identityDisambiguator } from '../lib/identity';
 import { shortDigest } from '../format';
 import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
-import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { useStatusText } from '../components/app/status';
 
 const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
@@ -131,14 +131,14 @@ export function JobsPage() {
                     <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', stackRow)} data-job-row={job.jobId} onClick={() => navigate('/admin/jobs/' + job.jobId)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') navigate('/admin/jobs/' + job.jobId); }}>
                       <IdentityCell label={t('table.job')} identity={identity} cardFact className="job-id-cell">
                         {/* §2.2 demotion, not deletion: the two constants live on the qualifier line. */}
-                        <span>r{job.pipelineRevision}</span>
-                        <span>{t('table.attempts')} {job.attempts}/{job.maxAttempts}</span>
+                        <span className="ow-key">r{job.pipelineRevision}</span>
+                        <span className="ow-key">{t('table.attempts')} {job.attempts}/{job.maxAttempts}</span>
                       </IdentityCell>
                       <StackCell label={t('table.status')} className={cardCellClass(cardFacts.includes('status'))}><StatusPill status={job.status} /></StackCell>
                       <StackCell label={t('table.duration')} className={cn('whitespace-nowrap max-[768px]:whitespace-normal', cardCellClass(cardFacts.includes('duration')))}><span className="mono">{durationLabel(job)}</span></StackCell>
                       <StackCell label={t('table.created')} className={cardCellClass(cardFacts.includes('created'))}><span title={job.createdAt}>{relativeAge(locale, job.createdAt)}</span></StackCell>
                       {/* §2.5: the row menu rides the identity line at 390 instead of taking a row. */}
-                      <TableCell className="w-8 max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-0 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0">
+                      <TableCell className={cardActionCell}>
                         <RowActions label={t('jobs.action.menu', { id: identity.key })} actions={[copyIdAction(job.jobId, t('table.copyIdentifier')), { id: 'open', label: t('table.open'), icon: 'chevron', onSelect: () => navigate('/admin/jobs/' + job.jobId) }]} />
                       </TableCell>
                     </TableRow>

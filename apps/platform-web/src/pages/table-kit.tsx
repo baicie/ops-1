@@ -331,4 +331,4 @@ export function cardCellClass(isCardFact: boolean): string {
  * §2.5: the row menu rides the identity line at 390 instead of taking a line of its own - that
  * alone was 32 of today's 239px. The cell must not carry a label: a labelled cell is a fact.
  */
-export const cardActionCell = 'max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-2 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0';
+export const cardActionCell = 'w-8 ow-row-action max-[768px]:w-auto';

@@ -517,7 +517,7 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
           <StackCell label={t('table.slot')} className={cardCellClass(cardFacts.includes('slot'))}><span className="mono">#{instance.slot}</span></StackCell>
           <StackCell label={t('table.state')} className={cardCellClass(cardFacts.includes('state'))}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
           <StackCell label={t('table.container')} className={cardCellClass(cardFacts.includes('container'))}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-          <TableCell className={cardActionCell}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></TableCell>
+          <TableCell className="w-8"><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></TableCell>
         </TableRow>
       ))}</TableBody>
     </Table>

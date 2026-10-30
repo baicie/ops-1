@@ -52,9 +52,6 @@
       "maxFiles": 60,
       "note": "The 60 images visual-audit.md actually links as evidence: the 39 of its section 4.1 quota plus 21 that its section 4.2 says stay local but which the report body cites on a 证据 line. 9 further captures were tracked and cited nowhere; those left the index."
     },
-    "artifacts/ui/visual-v3/debt": {
-      "maxFiles": 6
-    },
     "artifacts/ui/visual-v3/deployed": {
       "maxFiles": 6,
       "note": "representative deployed-vs-local comparison; the full 36 were measured and discarded"
@@ -87,6 +84,14 @@
     },
     "docs/assets/0.0.4/ui-redesign": {
       "maxFiles": 10
+    },
+    "artifacts/ui/visual-v3/b3b4/before": {
+      "maxFiles": 3,
+      "maxBytes": 511985
+    },
+    "artifacts/ui/visual-v3/b3b4/after": {
+      "maxFiles": 3,
+      "maxBytes": 524506
     }
   },
   "knownMissingDocReferences": [

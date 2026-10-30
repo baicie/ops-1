@@ -1,0 +1,9727 @@
+{
+ "jobs@390": {
+  "url": "/admin/jobs",
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 375,
+  "docClientW": 390,
+  "header": {
+   "height": 114,
+   "title": "Jobs",
+   "titleCentre": 80,
+   "actionCentre": 164,
+   "eyebrow": false,
+   "descriptionLines": 2,
+   "metaRows": 0
+  },
+  "firstBlockY": 206,
+  "rows": 14,
+  "rowHeights": {
+   "p50": 144.6,
+   "p95": 144.6,
+   "max": 144.6
+  },
+  "rowProbe": [
+   {
+    "height": 144.6,
+    "row": {
+     "top": 437,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 450,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 480,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 436,
+     "height": 32
+    },
+    "qualifierText": "r9Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -194.8,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · e273",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -111.8,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 582,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 595,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 624,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 581,
+     "height": 32
+    },
+    "qualifierText": "r8Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -194.8,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · d577",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -111.4,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 726,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 739,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 769,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 725,
+     "height": 32
+    },
+    "qualifierText": "r7Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -195.7,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 1285",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -111.9,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 871,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 884,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 913,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 870,
+     "height": 32
+    },
+    "qualifierText": "r6Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -194.8,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 5988",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -109.1,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 1015,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1028,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1058,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 1014,
+     "height": 32
+    },
+    "qualifierText": "r6Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -194.8,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 111a",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -117,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 1160,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1173,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1202,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 1159,
+     "height": 32
+    },
+    "qualifierText": "r6Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -194.8,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · f0b6",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -113,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 1304,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1317,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1347,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 1303,
+     "height": 32
+    },
+    "qualifierText": "r5Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -195,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · d8ad",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -110.9,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 1449,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1462,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1492,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 1448,
+     "height": 32
+    },
+    "qualifierText": "r4Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -195,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 614d",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -111.6,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 1594,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1607,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1636,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 1593,
+     "height": 32
+    },
+    "qualifierText": "r3Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -194.9,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 3d6a",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -110.8,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 1738,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1751,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1781,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 1737,
+     "height": 32
+    },
+    "qualifierText": "r2Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -195.2,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 7531",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -112.8,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 1883,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1896,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1925,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 1882,
+     "height": 32
+    },
+    "qualifierText": "r2Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -195.2,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 302b",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -110.1,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 2027,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2040,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2070,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 2026,
+     "height": 32
+    },
+    "qualifierText": "r2Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -195.2,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 8285",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -109.6,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 144.6,
+    "row": {
+     "top": 2172,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2185,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2214,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 2171,
+     "height": 32
+    },
+    "qualifierText": "r2Attempts 0/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -193.2,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · 9363",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -109.5,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 140.6,
+    "row": {
+     "top": 2316,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2326,
+     "right": 322,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2356,
+     "right": 322,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 17,
+     "right": 358
+    },
+    "identBoxOverlap": {
+     "w": -4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -4,
+     "h": -11.6
+    },
+    "menu": {
+     "left": 326,
+     "right": 358,
+     "top": 2312,
+     "height": 32
+    },
+    "qualifierText": "r1Attempts 0/1",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -202.8,
+     "h": -11.6
+    },
+    "identText": "host-metrics-pipeline · b6b4",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -115.7,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Job",
+    "Status",
+    "Duration",
+    "Created",
+    ""
+   ]
+  ],
+  "headerCells": [
+   5
+  ],
+  "bodyCells": [
+   5
+  ],
+  "identityKeys": [
+   "host-metrics-pipeline · e273",
+   "host-metrics-pipeline · d577",
+   "host-metrics-pipeline · 1285",
+   "host-metrics-pipeline · 5988",
+   "host-metrics-pipeline · 111a",
+   "host-metrics-pipeline · f0b6",
+   "host-metrics-pipeline · d8ad",
+   "host-metrics-pipeline · 614d",
+   "host-metrics-pipeline · 3d6a",
+   "host-metrics-pipeline · 7531",
+   "host-metrics-pipeline · 302b",
+   "host-metrics-pipeline · 8285",
+   "host-metrics-pipeline · 9363",
+   "host-metrics-pipeline · b6b4"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "Jobs"
+   ],
+   "clipped": false,
+   "width": 56
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 260,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 0,
+    "firstRowHeight": 145,
+    "squeeze": -437,
+    "scrollerHeight": 2020,
+    "tableWidth": 349,
+    "scrollerScrollW": 349,
+    "scrollerClientW": 349,
+    "panelHeight": 2022
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Jobs",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 56,
+   "navClientW": 56,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 0,
+     "scrollW": 0,
+     "title": "Platform"
+    },
+    {
+     "text": "Jobs",
+     "clientW": 26,
+     "scrollW": 26,
+     "title": "Jobs"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 0,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "jobs@1440": {
+  "url": "/admin/jobs",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Jobs",
+   "titleCentre": 85.5,
+   "actionCentre": 96,
+   "eyebrow": false,
+   "descriptionLines": 1,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 14,
+  "rowHeights": {
+   "p50": 42,
+   "p95": 42,
+   "max": 42
+  },
+  "rowProbe": [
+   {
+    "height": 42,
+    "row": {
+     "top": 290,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 295,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 311,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 295,
+     "height": 32
+    },
+    "qualifierText": "r9 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.2,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · e273",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -891.8,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 332,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 337,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 353,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 337,
+     "height": 32
+    },
+    "qualifierText": "r8 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.2,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · d577",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -891.4,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 374,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 379,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 395,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 379,
+     "height": 32
+    },
+    "qualifierText": "r7 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -979.1,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 1285",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -891.9,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 416,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 421,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 437,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 421,
+     "height": 32
+    },
+    "qualifierText": "r6 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.2,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 5988",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -889.1,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 458,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 463,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 479,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 463,
+     "height": 32
+    },
+    "qualifierText": "r6 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.2,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 111a",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -897,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 500,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 505,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 521,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 505,
+     "height": 32
+    },
+    "qualifierText": "r6 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.2,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · f0b6",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -893,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 542,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 547,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 563,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 547,
+     "height": 32
+    },
+    "qualifierText": "r5 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.4,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · d8ad",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -890.9,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 584,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 589,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 605,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 589,
+     "height": 32
+    },
+    "qualifierText": "r4 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.3,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 614d",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -891.6,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 626,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 631,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 647,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 631,
+     "height": 32
+    },
+    "qualifierText": "r3 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.3,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 3d6a",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -890.8,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 668,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 673,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 689,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 673,
+     "height": 32
+    },
+    "qualifierText": "r2 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.6,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 7531",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -892.8,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 710,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 715,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 731,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 715,
+     "height": 32
+    },
+    "qualifierText": "r2 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.6,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 302b",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -890.1,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 752,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 757,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 773,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 757,
+     "height": 32
+    },
+    "qualifierText": "r2 Attempts 1/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -978.6,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 8285",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -889.6,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 41,
+    "row": {
+     "top": 794,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 799,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 815,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 799,
+     "height": 32
+    },
+    "qualifierText": "r2 Attempts 0/3",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -976.6,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · 9363",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -889.5,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 835,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 839,
+     "right": 710,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 855,
+     "right": 710,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 724
+    },
+    "identBoxOverlap": {
+     "w": -641.4,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -641.4,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1351,
+     "right": 1383,
+     "top": 839,
+     "height": 32
+    },
+    "qualifierText": "r1 Attempts 0/1",
+    "qualifierChars": 13,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 13,
+    "qualifierOverlap": {
+     "w": -981.7,
+     "h": 15
+    },
+    "identText": "host-metrics-pipeline · b6b4",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -891.2,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "12px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Job",
+    "Status",
+    "Duration",
+    "Created",
+    ""
+   ]
+  ],
+  "headerCells": [
+   5
+  ],
+  "bodyCells": [
+   5
+  ],
+  "identityKeys": [
+   "host-metrics-pipeline · e273",
+   "host-metrics-pipeline · d577",
+   "host-metrics-pipeline · 1285",
+   "host-metrics-pipeline · 5988",
+   "host-metrics-pipeline · 111a",
+   "host-metrics-pipeline · f0b6",
+   "host-metrics-pipeline · d8ad",
+   "host-metrics-pipeline · 614d",
+   "host-metrics-pipeline · 3d6a",
+   "host-metrics-pipeline · 7531",
+   "host-metrics-pipeline · 302b",
+   "host-metrics-pipeline · 8285",
+   "host-metrics-pipeline · 9363",
+   "host-metrics-pipeline · b6b4"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nJobs"
+   ],
+   "clipped": false,
+   "width": 90
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 32,
+    "firstRowHeight": 42,
+    "squeeze": 0,
+    "scrollerHeight": 619,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 621
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Jobs",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 90,
+   "navClientW": 90,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Jobs",
+     "clientW": 37,
+     "scrollW": 37,
+     "title": "Jobs"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "nodes@390": {
+  "url": "/admin/nodes",
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 375,
+  "docClientW": 390,
+  "header": {
+   "height": 72,
+   "title": "Nodes",
+   "titleCentre": 80,
+   "actionCentre": 122,
+   "eyebrow": false,
+   "descriptionLines": 0,
+   "metaRows": 0
+  },
+  "firstBlockY": 164,
+  "rows": 1,
+  "rowHeights": {
+   "p50": 158,
+   "p95": 158,
+   "max": 158
+  },
+  "rowProbe": [
+   {
+    "height": 158,
+    "row": {
+     "top": 495,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 505,
+     "right": 324,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 533,
+     "right": 324,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 15,
+     "right": 360
+    },
+    "identBoxOverlap": {
+     "w": -2,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -2,
+     "h": -9.6
+    },
+    "menu": {
+     "left": 326,
+     "right": 358,
+     "top": 491,
+     "height": 32
+    },
+    "qualifierText": "linux/x86_64gen 53",
+    "qualifierChars": 17,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 17,
+    "qualifierOverlap": {
+     "w": -169.7,
+     "h": -9.6
+    },
+    "identText": "staging-node",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -214,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Node",
+    "Status",
+    "Instances",
+    "Resources",
+    ""
+   ]
+  ],
+  "headerCells": [
+   5
+  ],
+  "bodyCells": [
+   5
+  ],
+  "identityKeys": [
+   "staging-node"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "Nodes"
+   ],
+   "clipped": false,
+   "width": 56
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 260,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 0,
+    "firstRowHeight": 158,
+    "squeeze": -495.2,
+    "scrollerHeight": 158,
+    "tableWidth": 349,
+    "scrollerScrollW": 349,
+    "scrollerClientW": 349,
+    "panelHeight": 193
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Nodes",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 56,
+   "navClientW": 56,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 0,
+     "scrollW": 0,
+     "title": "Platform"
+    },
+    {
+     "text": "Nodes",
+     "clientW": 34,
+     "scrollW": 34,
+     "title": "Nodes"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 0,
+   "ready": 1,
+   "platformIsReady": 0
+  }
+ },
+ "nodes@1440": {
+  "url": "/admin/nodes",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Nodes",
+   "titleCentre": 96,
+   "actionCentre": 96,
+   "eyebrow": false,
+   "descriptionLines": 0,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 1,
+  "rowHeights": {
+   "p50": 40,
+   "p95": 40,
+   "max": 40
+  },
+  "rowProbe": [
+   {
+    "height": 40,
+    "row": {
+     "top": 349,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 354,
+     "right": 589,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 369,
+     "right": 589,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 601
+    },
+    "identBoxOverlap": {
+     "w": -765.7,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -765.7,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1355,
+     "right": 1387,
+     "top": 353,
+     "height": 32
+    },
+    "qualifierText": "linux/x86_64 gen 53",
+    "qualifierChars": 17,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 17,
+    "qualifierOverlap": {
+     "w": -950.1,
+     "h": 15
+    },
+    "identText": "staging-node",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -991,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "12px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Node",
+    "Status",
+    "Instances",
+    "Resources",
+    ""
+   ]
+  ],
+  "headerCells": [
+   5
+  ],
+  "bodyCells": [
+   5
+  ],
+  "identityKeys": [
+   "staging-node"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nNodes"
+   ],
+   "clipped": false,
+   "width": 98
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 32,
+    "firstRowHeight": 40,
+    "squeeze": 0,
+    "scrollerHeight": 74,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 92
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Nodes",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 98,
+   "navClientW": 98,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Nodes",
+     "clientW": 46,
+     "scrollW": 46,
+     "title": "Nodes"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 1,
+   "platformIsReady": 0
+  }
+ },
+ "plugins@390": {
+  "url": "/admin/plugins",
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 375,
+  "docClientW": 390,
+  "header": {
+   "height": 72,
+   "title": "Plugins",
+   "titleCentre": 80,
+   "actionCentre": 122,
+   "eyebrow": false,
+   "descriptionLines": 0,
+   "metaRows": 0
+  },
+  "firstBlockY": 164,
+  "rows": 4,
+  "rowHeights": {
+   "p50": 161.6,
+   "p95": 161.6,
+   "max": 161.6
+  },
+  "rowProbe": [
+   {
+    "height": 161.6,
+    "row": {
+     "top": 573,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 586,
+     "right": 321,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 614,
+     "right": 321,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 18,
+     "right": 357
+    },
+    "identBoxOverlap": {
+     "w": -2,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -2,
+     "h": -9.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 572,
+     "height": 32
+    },
+    "qualifierText": "trusted-team",
+    "qualifierChars": 12,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 12,
+    "qualifierOverlap": {
+     "w": -207.1,
+     "h": -10.6
+    },
+    "identText": "Hello Ops",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -231.7,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 161.6,
+    "row": {
+     "top": 735,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 748,
+     "right": 321,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 775,
+     "right": 321,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 18,
+     "right": 357
+    },
+    "identBoxOverlap": {
+     "w": -2,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -2,
+     "h": -9.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 734,
+     "height": 32
+    },
+    "qualifierText": "trusted-team",
+    "qualifierChars": 12,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 12,
+    "qualifierOverlap": {
+     "w": -207.1,
+     "h": -10.6
+    },
+    "identText": "Data Catalog",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -211.2,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 161.6,
+    "row": {
+     "top": 896,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 909,
+     "right": 321,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 937,
+     "right": 321,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 18,
+     "right": 357
+    },
+    "identBoxOverlap": {
+     "w": -2,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -2,
+     "h": -9.6
+    },
+    "menu": {
+     "left": 323,
+     "right": 355,
+     "top": 895,
+     "height": 32
+    },
+    "qualifierText": "trusted-team",
+    "qualifierChars": 12,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 12,
+    "qualifierOverlap": {
+     "w": -207.1,
+     "h": -10.6
+    },
+    "identText": "Data Integration",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -190.7,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 160.7,
+    "row": {
+     "top": 1058,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1068,
+     "right": 324,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1095,
+     "right": 324,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 15,
+     "right": 360
+    },
+    "identBoxOverlap": {
+     "w": -2,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -2,
+     "h": -9.6
+    },
+    "menu": {
+     "left": 326,
+     "right": 358,
+     "top": 1054,
+     "height": 32
+    },
+    "qualifierText": "SYSTEM opsweave",
+    "qualifierChars": 14,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 14,
+    "qualifierOverlap": {
+     "w": -159,
+     "h": -10.6
+    },
+    "identText": "Ops Center",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -227.4,
+     "h": 16
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 1,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "",
+    "Plugin",
+    "Version",
+    "Deployment",
+    "READY replicas",
+    "Digest / trust",
+    ""
+   ]
+  ],
+  "headerCells": [
+   7
+  ],
+  "bodyCells": [
+   7
+  ],
+  "identityKeys": [
+   "Hello Ops",
+   "Data Catalog",
+   "Data Integration",
+   "Ops Center"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "Plugins"
+   ],
+   "clipped": false,
+   "width": 56
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 260,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 0,
+    "firstRowHeight": 162,
+    "squeeze": -573,
+    "scrollerHeight": 645,
+    "tableWidth": 349,
+    "scrollerScrollW": 349,
+    "scrollerClientW": 349,
+    "panelHeight": 697
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Plugins",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 56,
+   "navClientW": 56,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 0,
+     "scrollW": 0,
+     "title": "Platform"
+    },
+    {
+     "text": "Plugins",
+     "clientW": 39,
+     "scrollW": 39,
+     "title": "Plugins"
+    }
+   ]
+  },
+  "tagCount": 1,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 0,
+   "ready": 4,
+   "platformIsReady": 0
+  }
+ },
+ "plugins@1440": {
+  "url": "/admin/plugins",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Plugins",
+   "titleCentre": 96,
+   "actionCentre": 96,
+   "eyebrow": false,
+   "descriptionLines": 0,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 4,
+  "rowHeights": {
+   "p50": 42,
+   "p95": 42,
+   "max": 42
+  },
+  "rowProbe": [
+   {
+    "height": 42,
+    "row": {
+     "top": 395,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 401,
+     "right": 555,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 416,
+     "right": 555,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 309,
+     "right": 567
+    },
+    "identBoxOverlap": {
+     "w": -798.3,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -798.3,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1353,
+     "right": 1385,
+     "top": 400,
+     "height": 32
+    },
+    "qualifierText": "trusted-team",
+    "qualifierChars": 12,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 12,
+    "qualifierOverlap": {
+     "w": -946.6,
+     "h": 13
+    },
+    "identText": "Hello Ops",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -971.2,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 437,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 443,
+     "right": 555,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 458,
+     "right": 555,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 309,
+     "right": 567
+    },
+    "identBoxOverlap": {
+     "w": -798.3,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -798.3,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1353,
+     "right": 1385,
+     "top": 442,
+     "height": 32
+    },
+    "qualifierText": "trusted-team",
+    "qualifierChars": 12,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 12,
+    "qualifierOverlap": {
+     "w": -946.6,
+     "h": 13
+    },
+    "identText": "Data Catalog",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -950.7,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 41,
+    "row": {
+     "top": 479,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 485,
+     "right": 555,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 500,
+     "right": 555,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 309,
+     "right": 567
+    },
+    "identBoxOverlap": {
+     "w": -798.3,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -798.3,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1353,
+     "right": 1385,
+     "top": 484,
+     "height": 32
+    },
+    "qualifierText": "trusted-team",
+    "qualifierChars": 12,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 12,
+    "qualifierOverlap": {
+     "w": -946.6,
+     "h": 13
+    },
+    "identText": "Data Integration",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -930.2,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 520,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 525,
+     "right": 555,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 541,
+     "right": 555,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 309,
+     "right": 567
+    },
+    "identBoxOverlap": {
+     "w": -799.8,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -799.8,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1355,
+     "right": 1387,
+     "top": 525,
+     "height": 32
+    },
+    "qualifierText": "SYSTEM opsweave",
+    "qualifierChars": 14,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 14,
+    "qualifierOverlap": {
+     "w": -894,
+     "h": 13.1
+    },
+    "identText": "Ops Center",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -962.4,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 1,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "",
+    "Plugin",
+    "Version",
+    "Deployment",
+    "READY replicas",
+    "Digest / trust",
+    ""
+   ]
+  ],
+  "headerCells": [
+   7
+  ],
+  "bodyCells": [
+   7
+  ],
+  "identityKeys": [
+   "Hello Ops",
+   "Data Catalog",
+   "Data Integration",
+   "Ops Center"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nPlugins"
+   ],
+   "clipped": false,
+   "width": 103
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 32,
+    "firstRowHeight": 42,
+    "squeeze": 0,
+    "scrollerHeight": 199,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 217
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Plugins",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 103,
+   "navClientW": 103,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Plugins",
+     "clientW": 51,
+     "scrollW": 51,
+     "title": "Plugins"
+    }
+   ]
+  },
+  "tagCount": 1,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 1,
+   "platformIsReady": 0
+  }
+ },
+ "activity@390": {
+  "url": "/admin/activity",
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 375,
+  "docClientW": 390,
+  "header": {
+   "height": 114,
+   "title": "Activity",
+   "titleCentre": 80,
+   "actionCentre": 164,
+   "eyebrow": false,
+   "descriptionLines": 2,
+   "metaRows": 0
+  },
+  "firstBlockY": 206,
+  "rows": 25,
+  "rowHeights": {
+   "p50": 154.6,
+   "p95": 154.6,
+   "max": 154.6
+  },
+  "rowProbe": [
+   {
+    "height": 154.6,
+    "row": {
+     "top": 397,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 410,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 440,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fdeploymentId 7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc",
+    "qualifierChars": 75,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 55,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.activated · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 552,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 565,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 594,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fdeploymentId 7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc",
+    "qualifierChars": 75,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 55,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.enable_requested · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 706,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 719,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 749,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fdeploymentId 7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc",
+    "qualifierChars": 75,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 55,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.enable_requested · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 861,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 874,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 903,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782freason 从插件列表停用",
+    "qualifierChars": 25,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 25,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.disabled · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 1015,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1028,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1058,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline× 2 1d ago → 1d ago",
+    "qualifierChars": 75,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 62,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · bfa394a1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 1170,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1183,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1212,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · bfa394a1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 1324,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1337,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1367,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas",
+    "qualifierChars": 112,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 1479,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1492,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1522,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "qualifierChars": 104,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 1634,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1647,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1676,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "NODE 9b426dabstatus SUCCEEDED",
+    "qualifierChars": 27,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 27,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.job_completed · e273620e",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 1788,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1801,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1831,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:75dbbb496b4223dcc1651d54a7ce51de1abba160326886886656099cc7ff6a29",
+    "qualifierChars": 198,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 1943,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 1956,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1985,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fdraftId b654a2c7-bcb0-44ca-9dac-9a8d8916e3dd",
+    "qualifierChars": 74,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 58,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_published",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 2097,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2110,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2140,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas× 4 1d ago → 1d ago",
+    "qualifierChars": 125,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 2252,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2265,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2294,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · b654a2c7",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 2406,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2419,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2449,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · b654a2c7",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 2561,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2574,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2603,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline× 2 1d ago → 1d ago",
+    "qualifierChars": 75,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 62,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · db786d15",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 2715,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2728,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2758,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · db786d15",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 2870,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 2883,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 2913,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas",
+    "qualifierChars": 112,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 3025,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 3038,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 3067,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "qualifierChars": 104,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 3179,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 3192,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 3222,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "NODE 9b426dabstatus SUCCEEDED",
+    "qualifierChars": 27,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 27,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.job_completed · d577c70a",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 3334,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 3347,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 3376,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:ca46cdb52a030d33fe0da0a06bf9802dcd2464f7df3fdbb4e38f747cb81017d0",
+    "qualifierChars": 198,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 3488,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 3501,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 3531,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fdraftId e7e78f65-3d57-41bf-9105-9f932e0e7a50",
+    "qualifierChars": 75,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 61,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_published",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 3643,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 3656,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 3685,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalogpath /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas× 4 1d ago → 1d ago",
+    "qualifierChars": 125,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 49,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 3797,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 3810,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 3840,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · e7e78f65",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 154.6,
+    "row": {
+     "top": 3952,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 3965,
+     "right": 319,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 3995,
+     "right": 319,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 20,
+     "right": 355
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · e7e78f65",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 150.6,
+    "row": {
+     "top": 4107,
+     "left": 13,
+     "right": 362
+    },
+    "identBox": {
+     "top": 4117,
+     "right": 322,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 4146,
+     "right": 322,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 17,
+     "right": 358
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782fpipelineId host-metrics-pipeline× 2 1d ago → 1d ago",
+    "qualifierChars": 76,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 63,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · 26c0668b",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Event",
+    "Outcome",
+    "Occurred",
+    ""
+   ]
+  ],
+  "headerCells": [
+   4
+  ],
+  "bodyCells": [
+   4
+  ],
+  "identityKeys": [
+   "plugin.activated · dev.opsweave.he… · USER 3233782f · deploymentId=7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc · 2026-10-30T09:39:10",
+   "plugin.enable_requested · dev.opsweave.he… · USER 3233782f · deploymentId=7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc · 2026-10-30T08:41:02",
+   "plugin.enable_requested · dev.opsweave.he… · USER 3233782f · deploymentId=7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc · 2026-10-30T08:32:09",
+   "plugin.disabled · dev.opsweave.he… · USER 3233782f · reason=从插件列表停用 · 2026-10-30T08:31:21",
+   "pipeline.draft_updated · bfa394a1 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:56 · +1@2026-10-29T16:07:55",
+   "pipeline.draft_created · bfa394a1 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:55",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:07:52",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa · 2026-10-29T16:07:52",
+   "pipeline.job_completed · e273620e · NODE 9b426dab · status=SUCCEEDED · 2026-10-29T16:07:49",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:75dbbb496b4223dcc1651d54a7ce51de1abba160326886886656099cc7ff6a29 · 2026-10-29T16:07:49",
+   "pipeline.draft_published · USER 3233782f · draftId=b654a2c7-bcb0-44ca-9dac-9a8d8916e3dd · 2026-10-29T16:07:46",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:07:46 · +3@2026-10-29T16:07:46",
+   "pipeline.draft_updated · b654a2c7 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:45",
+   "pipeline.draft_created · b654a2c7 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:45",
+   "pipeline.draft_updated · db786d15 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:16 · +1@2026-10-29T16:03:15",
+   "pipeline.draft_created · db786d15 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:14",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:03:08",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa · 2026-10-29T16:03:08",
+   "pipeline.job_completed · d577c70a · NODE 9b426dab · status=SUCCEEDED · 2026-10-29T16:03:04",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:ca46cdb52a030d33fe0da0a06bf9802dcd2464f7df3fdbb4e38f747cb81017d0 · 2026-10-29T16:03:04",
+   "pipeline.draft_published · USER 3233782f · draftId=e7e78f65-3d57-41bf-9105-9f932e0e7a50 · 2026-10-29T16:03:02",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:03:02 · +3@2026-10-29T16:03:01",
+   "pipeline.draft_updated · e7e78f65 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:01",
+   "pipeline.draft_created · e7e78f65 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:00",
+   "pipeline.draft_updated · 26c0668b · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T11:09:01 · +1@2026-10-29T11:09:00"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "Activity"
+   ],
+   "clipped": false,
+   "width": 56
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 260,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 0,
+    "firstRowHeight": 155,
+    "squeeze": -397,
+    "scrollerHeight": 3860,
+    "tableWidth": 349,
+    "scrollerScrollW": 349,
+    "scrollerClientW": 349,
+    "panelHeight": 3953
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Activity",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 56,
+   "navClientW": 56,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 0,
+     "scrollW": 0,
+     "title": "Platform"
+    },
+    {
+     "text": "Activity",
+     "clientW": 41,
+     "scrollW": 41,
+     "title": "Activity"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 0,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "activity@1440": {
+  "url": "/admin/activity",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Activity",
+   "titleCentre": 85.5,
+   "actionCentre": 96,
+   "eyebrow": false,
+   "descriptionLines": 1,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 25,
+  "rowHeights": {
+   "p50": 42,
+   "p95": 42,
+   "max": 42
+  },
+  "rowProbe": [
+   {
+    "height": 42,
+    "row": {
+     "top": 259,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 264,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 280,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f deploymentId 7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc",
+    "qualifierChars": 60,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 60,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.activated · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 301,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 306,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 322,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f deploymentId 7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc",
+    "qualifierChars": 60,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 60,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.enable_requested · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 343,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 348,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 364,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f deploymentId 7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc",
+    "qualifierChars": 60,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 60,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.enable_requested · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 385,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 390,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 406,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f reason 从插件列表停用",
+    "qualifierChars": 25,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 25,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "plugin.disabled · dev.opsweave.he…",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 427,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 432,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 448,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline × 2 1d ago → 1d ago",
+    "qualifierChars": 56,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 56,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · bfa394a1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 469,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 474,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 490,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · bfa394a1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 511,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 516,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 532,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas",
+    "qualifierChars": 158,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 158,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 553,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 558,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 574,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "qualifierChars": 150,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 150,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 595,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 600,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 616,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "NODE 9b426dab status SUCCEEDED",
+    "qualifierChars": 27,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 27,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.job_completed · e273620e",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 637,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 642,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 658,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:75dbbb496b4223dcc1651d54a7ce51de1abba160326886886656099cc7ff6a29",
+    "qualifierChars": 244,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 175,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 679,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 684,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 700,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f draftId b654a2c7-bcb0-44ca-9dac-9a8d8916e3dd",
+    "qualifierChars": 55,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 55,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_published",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 721,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 726,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 742,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas × 4 1d ago → 1d ago",
+    "qualifierChars": 171,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 171,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 763,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 768,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 784,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · b654a2c7",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 805,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 810,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 826,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · b654a2c7",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 847,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 852,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 868,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline × 2 1d ago → 1d ago",
+    "qualifierChars": 56,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 56,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · db786d15",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 889,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 894,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 910,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · db786d15",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 931,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 936,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 952,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas",
+    "qualifierChars": 158,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 158,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 973,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 978,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 994,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "qualifierChars": 150,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 150,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1015,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 1020,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1036,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "NODE 9b426dab status SUCCEEDED",
+    "qualifierChars": 27,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 27,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.job_completed · d577c70a",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1057,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 1062,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1078,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:ca46cdb52a030d33fe0da0a06bf9802dcd2464f7df3fdbb4e38f747cb81017d0",
+    "qualifierChars": 244,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 175,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1099,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 1104,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1120,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f draftId e7e78f65-3d57-41bf-9105-9f932e0e7a50",
+    "qualifierChars": 55,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 55,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_published",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1141,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 1146,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1162,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "WORKLOAD opsweave.kernel.catalog path /api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas × 4 1d ago → 1d ago",
+    "qualifierChars": 171,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 171,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "capability.service_invoke · data.catalog.v1",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1183,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 1188,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1204,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · e7e78f65",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 41,
+    "row": {
+     "top": 1225,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 1230,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1246,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline",
+    "qualifierChars": 43,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 43,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_created · e7e78f65",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 1266,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 1270,
+     "right": 1012,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 1286,
+     "right": 1012,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 1026
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "USER 3233782f pipelineId host-metrics-pipeline × 2 1d ago → 1d ago",
+    "qualifierChars": 56,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 56,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "pipeline.draft_updated · 26c0668b",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": "rgb(75, 85, 99)",
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Event",
+    "Outcome",
+    "Occurred",
+    ""
+   ]
+  ],
+  "headerCells": [
+   4
+  ],
+  "bodyCells": [
+   4
+  ],
+  "identityKeys": [
+   "plugin.activated · dev.opsweave.he… · USER 3233782f · deploymentId=7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc · 2026-10-30T09:39:10",
+   "plugin.enable_requested · dev.opsweave.he… · USER 3233782f · deploymentId=7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc · 2026-10-30T08:41:02",
+   "plugin.enable_requested · dev.opsweave.he… · USER 3233782f · deploymentId=7ab1de1c-8d47-4bb4-b6b3-d0c1cf7e40fc · 2026-10-30T08:32:09",
+   "plugin.disabled · dev.opsweave.he… · USER 3233782f · reason=从插件列表停用 · 2026-10-30T08:31:21",
+   "pipeline.draft_updated · bfa394a1 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:56 · +1@2026-10-29T16:07:55",
+   "pipeline.draft_created · bfa394a1 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:55",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:07:52",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa · 2026-10-29T16:07:52",
+   "pipeline.job_completed · e273620e · NODE 9b426dab · status=SUCCEEDED · 2026-10-29T16:07:49",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:75dbbb496b4223dcc1651d54a7ce51de1abba160326886886656099cc7ff6a29 · 2026-10-29T16:07:49",
+   "pipeline.draft_published · USER 3233782f · draftId=b654a2c7-bcb0-44ca-9dac-9a8d8916e3dd · 2026-10-29T16:07:46",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:07:46 · +3@2026-10-29T16:07:46",
+   "pipeline.draft_updated · b654a2c7 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:45",
+   "pipeline.draft_created · b654a2c7 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:07:45",
+   "pipeline.draft_updated · db786d15 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:16 · +1@2026-10-29T16:03:15",
+   "pipeline.draft_created · db786d15 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:14",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:03:08",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa · 2026-10-29T16:03:08",
+   "pipeline.job_completed · d577c70a · NODE 9b426dab · status=SUCCEEDED · 2026-10-29T16:03:04",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/effect-receipts?effectId=efx:ca46cdb52a030d33fe0da0a06bf9802dcd2464f7df3fdbb4e38f747cb81017d0 · 2026-10-29T16:03:04",
+   "pipeline.draft_published · USER 3233782f · draftId=e7e78f65-3d57-41bf-9105-9f932e0e7a50 · 2026-10-29T16:03:02",
+   "capability.service_invoke · data.catalog.v1 · WORKLOAD opsweave.kernel.catalog · path=/api/data-catalog/datasets/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/schemas · 2026-10-29T16:03:02 · +3@2026-10-29T16:03:01",
+   "pipeline.draft_updated · e7e78f65 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:01",
+   "pipeline.draft_created · e7e78f65 · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T16:03:00",
+   "pipeline.draft_updated · 26c0668b · USER 3233782f · pipelineId=host-metrics-pipeline · 2026-10-29T11:09:01 · +1@2026-10-29T11:09:00"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nActivity"
+   ],
+   "clipped": false,
+   "width": 104
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": null,
+    "headHeight": 32,
+    "firstRowHeight": 42,
+    "squeeze": 0,
+    "scrollerHeight": 1081,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 1144
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Activity",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 104,
+   "navClientW": 104,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Activity",
+     "clientW": 52,
+     "scrollW": 52,
+     "title": "Activity"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "access@1440": {
+  "url": "/admin/access",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Access & trust",
+   "titleCentre": 85.5,
+   "actionCentre": 96,
+   "eyebrow": false,
+   "descriptionLines": 1,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 3,
+  "rowHeights": {
+   "p50": 40,
+   "p95": 41,
+   "max": 41
+  },
+  "rowProbe": [
+   {
+    "height": 41,
+    "row": {
+     "top": 607,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 612,
+     "right": 675,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 628,
+     "right": 675,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 689
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "admin@opsweave.local",
+    "qualifierChars": 20,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 20,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "Platform Admin",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 648,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 652,
+     "right": 675,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 668,
+     "right": 675,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 689
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "viewer@opsweave.local",
+    "qualifierChars": 21,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 21,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "Read Only",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 818,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 823,
+     "right": 403,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 838,
+     "right": 403,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 417
+    },
+    "identBoxOverlap": {
+     "w": -949.6,
+     "h": 15.6
+    },
+    "qualifierBoxOverlap": {
+     "w": -949.6,
+     "h": 15.4
+    },
+    "menu": {
+     "left": 1353,
+     "right": 1385,
+     "top": 822,
+     "height": 32
+    },
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "trusted-team",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": -988,
+     "h": 15.5
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "User",
+    "Role",
+    "Status",
+    "Actions"
+   ],
+   [
+    "Publisher",
+    "Fingerprint",
+    "Trust",
+    "Note",
+    ""
+   ]
+  ],
+  "headerCells": [
+   4,
+   5
+  ],
+  "bodyCells": [
+   4,
+   5
+  ],
+  "identityKeys": [
+   "Platform Admin",
+   "Read Only",
+   "trusted-team"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nAccess"
+   ],
+   "clipped": false,
+   "width": 102
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": "Workspace users",
+    "headHeight": 32,
+    "firstRowHeight": 41,
+    "squeeze": 0,
+    "scrollerHeight": 115,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 188
+   },
+   {
+    "heading": "Trusted publishers",
+    "headHeight": 32,
+    "firstRowHeight": 40,
+    "squeeze": 0,
+    "scrollerHeight": 74,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 147
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Access & trust",
+   "countOnPage": 1,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 102,
+   "navClientW": 102,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Access",
+     "clientW": 50,
+     "scrollW": 50,
+     "title": "Access"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "governance@1440": {
+  "url": "/admin/governance",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Governance",
+   "titleCentre": 85.5,
+   "actionCentre": 96,
+   "eyebrow": false,
+   "descriptionLines": 1,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 10,
+  "rowHeights": {
+   "p50": 42,
+   "p95": 42,
+   "max": 42
+  },
+  "rowProbe": [
+   {
+    "height": 42,
+    "row": {
+     "top": 387,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 393,
+     "right": 862,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 408,
+     "right": 862,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 876
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "ec55205d · 0 examined · 0 failed",
+    "qualifierChars": 26,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 26,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "ui-hosts-1793290050596",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 429,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 435,
+     "right": 862,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 450,
+     "right": 862,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 876
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "c50d3570 · 0 examined · 0 failed",
+    "qualifierChars": 26,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 26,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "ui-hosts-1793289996106",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 471,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 477,
+     "right": 862,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 492,
+     "right": 862,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 876
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "No runs",
+    "qualifierChars": 6,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 6,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "ui-hosts-1793289937020",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 513,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 519,
+     "right": 862,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 534,
+     "right": 862,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 876
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "No runs",
+    "qualifierChars": 6,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 6,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "ui-hosts-1793289813120",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 555,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 561,
+     "right": 862,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 576,
+     "right": 862,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 876
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "No runs",
+    "qualifierChars": 6,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 6,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "host-metrics",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 41,
+    "row": {
+     "top": 597,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 603,
+     "right": 862,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 618,
+     "right": 862,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 876
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "No runs",
+    "qualifierChars": 6,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 6,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "demo_orders_raw",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 638,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 643,
+     "right": 862,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 658,
+     "right": 862,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 876
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "No runs",
+    "qualifierChars": 6,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 6,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "demo_orders",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 41,
+    "row": {
+     "top": 809,
+     "left": 267,
+     "right": 884
+    },
+    "identBox": {
+     "top": 814,
+     "right": 663,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 830,
+     "right": 663,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 677
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "ui-hosts-1793290050596",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 850,
+     "left": 267,
+     "right": 884
+    },
+    "identBox": {
+     "top": 854,
+     "right": 663,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 870,
+     "right": 663,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 267,
+     "right": 677
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "ui-hosts-1793289996106",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 809,
+     "left": 905,
+     "right": 1399
+    },
+    "identBox": {
+     "top": 813,
+     "right": 1079,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 829,
+     "right": 1079,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 905,
+     "right": 1093
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "staging-node",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Dataset",
+    "Schema",
+    "Quality"
+   ],
+   [
+    "Dataset",
+    "Status"
+   ],
+   [
+    "Node",
+    "Status",
+    "Generation"
+   ]
+  ],
+  "headerCells": [
+   3,
+   2,
+   3
+  ],
+  "bodyCells": [
+   3,
+   2,
+   3
+  ],
+  "identityKeys": [
+   "ui-hosts-1793290050596",
+   "ui-hosts-1793289996106",
+   "ui-hosts-1793289937020",
+   "ui-hosts-1793289813120",
+   "host-metrics",
+   "demo_orders_raw",
+   "demo_orders",
+   "ui-hosts-1793290050596",
+   "ui-hosts-1793289996106",
+   "staging-node"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nGovernance"
+   ],
+   "clipped": false,
+   "width": 128
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [
+   {
+    "label": "Datasets",
+    "value": ""
+   },
+   {
+    "label": "Quality passed",
+    "value": ""
+   },
+   {
+    "label": "Lineage batches",
+    "value": ""
+   },
+   {
+    "label": "Nodes ready",
+    "value": ""
+   }
+  ],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": "Dataset quality status",
+    "headHeight": 32,
+    "firstRowHeight": 42,
+    "squeeze": 0,
+    "scrollerHeight": 325,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 398
+   },
+   {
+    "heading": "Recent quality failures",
+    "headHeight": 32,
+    "firstRowHeight": 41,
+    "squeeze": 0,
+    "scrollerHeight": 115,
+    "tableWidth": 621,
+    "scrollerScrollW": 621,
+    "scrollerClientW": 621,
+    "panelHeight": 188
+   },
+   {
+    "heading": "Node health",
+    "headHeight": 32,
+    "firstRowHeight": 40,
+    "squeeze": 0,
+    "scrollerHeight": 74,
+    "tableWidth": 496,
+    "scrollerScrollW": 496,
+    "scrollerClientW": 496,
+    "panelHeight": 147
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Governance",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 128,
+   "navClientW": 128,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Governance",
+     "clientW": 76,
+     "scrollW": 76,
+     "title": "Governance"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 1,
+   "platformIsReady": 0
+  }
+ },
+ "overview@1440": {
+  "url": "/admin/overview",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Overview",
+   "titleCentre": 96,
+   "actionCentre": 96,
+   "eyebrow": false,
+   "descriptionLines": 0,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 0,
+  "rowHeights": {
+   "p50": null,
+   "p95": null,
+   "max": null
+  },
+  "rowProbe": [],
+  "columnLabels": [],
+  "headerCells": [],
+  "bodyCells": [],
+  "identityKeys": [],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nOverview"
+   ],
+   "clipped": false,
+   "width": 114
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [],
+  "duplicateHits": {
+   "h1": "Overview",
+   "countOnPage": 3,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 114,
+   "navClientW": 114,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Overview",
+     "clientW": 61,
+     "scrollW": 61,
+     "title": "Overview"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 3,
+   "platformIsReady": 1
+  }
+ },
+ "job-detail@390": {
+  "url": "/admin/jobs/e273620e-0580-449f-b7ee-e23e3f065b9e",
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 375,
+  "docClientW": 390,
+  "header": {
+   "height": 116.5,
+   "title": "host-metrics-pipeline",
+   "titleCentre": 100.5,
+   "actionCentre": 166.5,
+   "eyebrow": true,
+   "descriptionLines": 4,
+   "metaRows": 0
+  },
+  "firstBlockY": 208.5,
+  "rows": 1,
+  "rowHeights": {
+   "p50": 52.5,
+   "p95": 52.5,
+   "max": 52.5
+  },
+  "rowProbe": [
+   {
+    "height": 52.5,
+    "row": {
+     "top": 1259,
+     "left": 15,
+     "right": 447
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Attempt",
+    "Status",
+    "Fence",
+    "Node",
+    "Started"
+   ]
+  ],
+  "headerCells": [
+   5
+  ],
+  "bodyCells": [
+   5
+  ],
+  "identityKeys": [],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/Jobs",
+    "Job detail"
+   ],
+   "clipped": false,
+   "width": 56
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [
+   {
+    "label": "Status",
+    "value": "Succeeded"
+   },
+   {
+    "label": "Execution",
+    "value": "64 ms"
+   },
+   {
+    "label": "Pipeline",
+    "value": "host-metrics-pipeline"
+   },
+   {
+    "label": "Revision",
+    "value": "r9"
+   }
+  ],
+  "sidebar": {
+   "width": 260,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": "Attempts",
+    "headHeight": 32,
+    "firstRowHeight": 53,
+    "squeeze": 0,
+    "scrollerHeight": 86,
+    "tableWidth": 435,
+    "scrollerScrollW": 435,
+    "scrollerClientW": 349,
+    "panelHeight": 120
+   }
+  ],
+  "duplicateHits": {
+   "h1": "host-metrics-pipeline",
+   "countOnPage": 2,
+   "cards": [
+    {
+     "text": "Pipelinehost-metrics-pipeline",
+     "top": 405
+    }
+   ]
+  },
+  "crumbClip": {
+   "navScrollW": 56,
+   "navClientW": 56,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 0,
+     "scrollW": 0,
+     "title": "Platform"
+    },
+    {
+     "text": "/Jobs",
+     "clientW": 0,
+     "scrollW": 0,
+     "title": "Jobs"
+    },
+    {
+     "text": "Job detail",
+     "clientW": 53,
+     "scrollW": 53,
+     "title": "Job detail"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 0,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "job-detail@1440": {
+  "url": "/admin/jobs/e273620e-0580-449f-b7ee-e23e3f065b9e",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "host-metrics-pipeline",
+   "titleCentre": 94.3,
+   "actionCentre": 96,
+   "eyebrow": true,
+   "descriptionLines": 4,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 1,
+  "rowHeights": {
+   "p50": 40.5,
+   "p95": 40.5,
+   "max": 40.5
+  },
+  "rowProbe": [
+   {
+    "height": 40.5,
+    "row": {
+     "top": 909,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Attempt",
+    "Status",
+    "Fence",
+    "Node",
+    "Started"
+   ]
+  ],
+  "headerCells": [
+   5
+  ],
+  "bodyCells": [
+   5
+  ],
+  "identityKeys": [],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nJobs",
+    "/\nJob detail"
+   ],
+   "clipped": false,
+   "width": 161
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [
+   {
+    "label": "Status",
+    "value": "Succeeded"
+   },
+   {
+    "label": "Execution",
+    "value": "64 ms"
+   },
+   {
+    "label": "Pipeline",
+    "value": "host-metrics-pipeline"
+   },
+   {
+    "label": "Revision",
+    "value": "r9"
+   }
+  ],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": "Attempts",
+    "headHeight": 32,
+    "firstRowHeight": 41,
+    "squeeze": 0,
+    "scrollerHeight": 74,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 108
+   }
+  ],
+  "duplicateHits": {
+   "h1": "host-metrics-pipeline",
+   "countOnPage": 2,
+   "cards": [
+    {
+     "text": "Pipelinehost-metrics-pipeline",
+     "top": 160
+    }
+   ]
+  },
+  "crumbClip": {
+   "navScrollW": 161,
+   "navClientW": 161,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Jobs",
+     "clientW": 37,
+     "scrollW": 37,
+     "title": "Jobs"
+    },
+    {
+     "text": "/ Job detail",
+     "clientW": 64,
+     "scrollW": 64,
+     "title": "Job detail"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "plugin-detail@1440": {
+  "url": "/admin/plugins/dev.opsweave.hello",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Hello Ops",
+   "titleCentre": 93.8,
+   "actionCentre": 96,
+   "eyebrow": true,
+   "descriptionLines": 0,
+   "metaRows": 1
+  },
+  "firstBlockY": 160,
+  "rows": 1,
+  "rowHeights": {
+   "p50": 40,
+   "p95": 40,
+   "max": 40
+  },
+  "rowProbe": [
+   {
+    "height": 40,
+    "row": {
+     "top": 303,
+     "left": 1041,
+     "right": 1501
+    },
+    "identBox": {
+     "top": 307,
+     "right": 1151,
+     "height": 15.6
+    },
+    "qualifierBox": {
+     "top": 323,
+     "right": 1151,
+     "height": 15.4
+    },
+    "cellBox": {
+     "left": 1041,
+     "right": 1165
+    },
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "READY Restarts 0",
+    "qualifierChars": 14,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 14,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "staging-node",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": "11px",
+    "qualifierChildFont": [
+     "11px",
+     "11px"
+    ],
+    "tailColor": {
+     "tail": null,
+     "name": "rgb(22, 26, 32)"
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Node",
+    "Slot",
+    "State",
+    "Container",
+    "Logs"
+   ]
+  ],
+  "headerCells": [
+   5
+  ],
+  "bodyCells": [
+   5
+  ],
+  "identityKeys": [
+   "staging-node"
+  ],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nPlugins",
+    "/\ndev.opsweave.hello"
+   ],
+   "clipped": false,
+   "width": 226
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [],
+  "tableStack": [
+   {
+    "heading": "Instances",
+    "headHeight": 32,
+    "firstRowHeight": 40,
+    "squeeze": 0,
+    "scrollerHeight": 74,
+    "tableWidth": 463,
+    "scrollerScrollW": 463,
+    "scrollerClientW": 361,
+    "panelHeight": 493
+   }
+  ],
+  "duplicateHits": {
+   "h1": "Hello Ops",
+   "countOnPage": 2,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 226,
+   "navClientW": 226,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Plugins",
+     "clientW": 50,
+     "scrollW": 50,
+     "title": "Plugins"
+    },
+    {
+     "text": "/ dev.opsweave.hello",
+     "clientW": 116,
+     "scrollW": 116,
+     "title": "dev.opsweave.hello"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 2,
+   "platformIsReady": 0
+  }
+ },
+ "node-detail@1440": {
+  "url": "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "staging-node",
+   "titleCentre": 95.3,
+   "actionCentre": 96,
+   "eyebrow": true,
+   "descriptionLines": 2,
+   "metaRows": 0
+  },
+  "firstBlockY": 160,
+  "rows": 23,
+  "rowHeights": {
+   "p50": 42,
+   "p95": 42,
+   "max": 42
+  },
+  "rowProbe": [
+   {
+    "height": 42,
+    "row": {
+     "top": 895,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 937,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 979,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1021,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1063,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1105,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1147,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1189,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1231,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1273,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1315,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1357,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1399,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1441,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1483,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1525,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1567,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1609,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 41,
+    "row": {
+     "top": 1651,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 1692,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 42,
+    "row": {
+     "top": 1863,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 41,
+    "row": {
+     "top": 1905,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   },
+   {
+    "height": 40,
+    "row": {
+     "top": 1946,
+     "left": 267,
+     "right": 1399
+    },
+    "identBox": null,
+    "qualifierBox": null,
+    "cellBox": null,
+    "identBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierBoxOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "menu": null,
+    "qualifierText": "",
+    "qualifierChars": 0,
+    "qualifierUnderMenu": 0,
+    "qualifierClear": 0,
+    "qualifierOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "identText": "",
+    "identUnderMenu": 0,
+    "identOverlap": {
+     "w": 0,
+     "h": 0
+    },
+    "qualifierFont": null,
+    "qualifierChildFont": [],
+    "tailColor": {
+     "tail": null,
+     "name": null
+    },
+    "tags": 0,
+    "pills": 0
+   }
+  ],
+  "columnLabels": [
+   [
+    "Observed",
+    "CPU",
+    "Memory",
+    "Filesystem"
+   ],
+   [
+    "Plugin",
+    "Version",
+    "State",
+    "Container",
+    "Logs"
+   ]
+  ],
+  "headerCells": [
+   4,
+   5
+  ],
+  "bodyCells": [
+   4,
+   5
+  ],
+  "identityKeys": [],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nNodes",
+    "/\n9b426dab-2…b4f246"
+   ],
+   "clipped": false,
+   "width": 234
+  },
+  "chart": {
+   "count": 1,
+   "text": [
+    []
+   ],
+   "labels": [
+    "CPU utilization history; gaps are not zero"
+   ]
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 240,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 53
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 46
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 44
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 132
+    }
+   ]
+  },
+  "drafts": {
+   "count": 0,
+   "sectionHeight": null,
+   "sectionTop": null,
+   "inFirstScreen": false,
+   "texts": [],
+   "widths": [],
+   "versionAligned": false
+  },
+  "charts": [
+   {
+    "label": "CPU utilization history; gaps are not zero",
+    "viewBox": "0 0 400 80",
+    "height": 210,
+    "texts": [],
+    "axisLines": 3,
+    "paths": 0
+   }
+  ],
+  "tableStack": [
+   {
+    "heading": "Resource history",
+    "headHeight": 32,
+    "firstRowHeight": 42,
+    "squeeze": 0,
+    "scrollerHeight": 871,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 1206
+   },
+   {
+    "heading": "Plugin instances",
+    "headHeight": 32,
+    "firstRowHeight": 42,
+    "squeeze": 0,
+    "scrollerHeight": 157,
+    "tableWidth": 1135,
+    "scrollerScrollW": 1135,
+    "scrollerClientW": 1135,
+    "panelHeight": 230
+   }
+  ],
+  "duplicateHits": {
+   "h1": "staging-node",
+   "countOnPage": 1,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 234,
+   "navClientW": 234,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Nodes",
+     "clientW": 45,
+     "scrollW": 45,
+     "title": "Nodes"
+    },
+    {
+     "text": "/ 9b426dab-2…b4f246",
+     "clientW": 128,
+     "scrollW": 128,
+     "title": "9b426dab-2…b4f246"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "studio@1280": {
+  "url": "/admin/pipelines/host-metrics-pipeline/editor",
+  "viewport": {
+   "w": 1280,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1265,
+  "docClientW": 1280,
+  "header": {
+   "height": 80,
+   "title": "Host Metrics Pipeline",
+   "titleCentre": 104.1,
+   "actionCentre": 187.7,
+   "eyebrow": true,
+   "descriptionLines": 1,
+   "metaRows": 1
+  },
+  "firstBlockY": 160,
+  "rows": 0,
+  "rowHeights": {
+   "p50": null,
+   "p95": null,
+   "max": null
+  },
+  "rowProbe": [],
+  "columnLabels": [],
+  "headerCells": [],
+  "bodyCells": [],
+  "identityKeys": [],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nPipelines",
+    "/\nPipeline detail",
+    "/\nPipeline Studio"
+   ],
+   "clipped": false,
+   "width": 304
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 64,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    }
+   ]
+  },
+  "drafts": {
+   "count": 22,
+   "sectionHeight": 156,
+   "sectionTop": 160,
+   "inFirstScreen": true,
+   "texts": [
+    "v3 · 10/30/2026, 12:07:56 AM",
+    "v3 · 10/30/2026, 12:07:46 AM",
+    "v3 · 10/30/2026, 12:03:16 AM",
+    "v3 · 10/30/2026, 12:03:02 AM"
+   ],
+   "widths": [
+    189,
+    189,
+    188,
+    190
+   ],
+   "versionAligned": true
+  },
+  "charts": [],
+  "tableStack": [],
+  "duplicateHits": {
+   "h1": "Host Metrics Pipeline",
+   "countOnPage": 1,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 304,
+   "navClientW": 304,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Pipelines",
+     "clientW": 59,
+     "scrollW": 59,
+     "title": "Pipelines"
+    },
+    {
+     "text": "/ Pipeline detail",
+     "clientW": 85,
+     "scrollW": 85,
+     "title": "Pipeline detail"
+    },
+    {
+     "text": "/ Pipeline Studio",
+     "clientW": 92,
+     "scrollW": 92,
+     "title": "Pipeline Studio"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ },
+ "studio@1440": {
+  "url": "/admin/pipelines/host-metrics-pipeline/editor",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "lang": "en",
+  "storedLocale": "en",
+  "overflow": -15,
+  "docScrollW": 1425,
+  "docClientW": 1440,
+  "header": {
+   "height": 80,
+   "title": "Host Metrics Pipeline",
+   "titleCentre": 108.1,
+   "actionCentre": 191.7,
+   "eyebrow": true,
+   "descriptionLines": 1,
+   "metaRows": 1
+  },
+  "firstBlockY": 164,
+  "rows": 0,
+  "rowHeights": {
+   "p50": null,
+   "p95": null,
+   "max": null
+  },
+  "rowProbe": [],
+  "columnLabels": [],
+  "headerCells": [],
+  "bodyCells": [],
+  "identityKeys": [],
+  "breadcrumb": {
+   "texts": [
+    "Platform",
+    "/\nPipelines",
+    "/\nPipeline detail",
+    "/\nPipeline Studio"
+   ],
+   "clipped": false,
+   "width": 304
+  },
+  "chart": {
+   "count": 0,
+   "text": [],
+   "labels": []
+  },
+  "metricCards": [],
+  "sidebar": {
+   "width": 64,
+   "hasMetaBlock": true,
+   "blockVisible": true,
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentSTAGING",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    },
+    {
+     "field": "commit",
+     "text": "Commit7fd54dd",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    },
+    {
+     "field": "status",
+     "text": "StatusReady",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-10-30 16:24 UTC",
+     "clipped": false,
+     "clippedByRail": false,
+     "valueWidth": 0
+    }
+   ]
+  },
+  "drafts": {
+   "count": 22,
+   "sectionHeight": 156,
+   "sectionTop": 164,
+   "inFirstScreen": true,
+   "texts": [
+    "v3 · 10/30/2026, 12:07:56 AM",
+    "v3 · 10/30/2026, 12:07:46 AM",
+    "v3 · 10/30/2026, 12:03:16 AM",
+    "v3 · 10/30/2026, 12:03:02 AM"
+   ],
+   "widths": [
+    189,
+    189,
+    188,
+    190
+   ],
+   "versionAligned": true
+  },
+  "charts": [],
+  "tableStack": [],
+  "duplicateHits": {
+   "h1": "Host Metrics Pipeline",
+   "countOnPage": 1,
+   "cards": []
+  },
+  "crumbClip": {
+   "navScrollW": 304,
+   "navClientW": 304,
+   "items": [
+    {
+     "text": "Platform",
+     "clientW": 44,
+     "scrollW": 44,
+     "title": "Platform"
+    },
+    {
+     "text": "/ Pipelines",
+     "clientW": 59,
+     "scrollW": 59,
+     "title": "Pipelines"
+    },
+    {
+     "text": "/ Pipeline detail",
+     "clientW": 85,
+     "scrollW": 85,
+     "title": "Pipeline detail"
+    },
+    {
+     "text": "/ Pipeline Studio",
+     "clientW": 92,
+     "scrollW": 92,
+     "title": "Pipeline Studio"
+    }
+   ]
+  },
+  "tagCount": 0,
+  "pillCount": 0,
+  "repeats": {
+   "platformReady": 1,
+   "ready": 0,
+   "platformIsReady": 0
+  }
+ }
+}
