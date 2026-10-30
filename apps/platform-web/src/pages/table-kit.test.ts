@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cardActionCell, cardCellClass, copyIdAction, rankCardFacts } from './table-kit';
+import { cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, rankCardFacts } from './table-kit';
 
 /**
  * The three primitives the card rules ride on (table-spec §2.1, §2.2, §2.5). A page can get each
@@ -51,6 +51,22 @@ describe('cardCellClass', () => {
     // The class is now the hook a rule of the same specificity targets, so the assertion is the
     // hook's presence - not a utility that silently lost the cascade.
     expect(cardActionCell).toContain('ow-row-action');
+  });
+});
+
+describe('the two-line card hooks', () => {
+  it('separates the row opt-in from the cell opt-in, so CSS can key on either', () => {
+    // The card layout is opted into per ROW (a page whose card has another shape keeps its own),
+    // and each fact that continues the qualifier line is opted into per CELL. One class for both
+    // would make "this page uses the two-line card" and "this cell rides line 2" the same
+    // question, and a page could then not have one without the other.
+    expect(cardTwoLineRow).toBe('ow-card-2l');
+    expect(cardLineAfter).toBe('ow-card-after');
+    expect(cardTwoLineRow).not.toBe(cardLineAfter);
+    // Neither may collide with the demotion hook: a cell cannot be both on the card and dropped
+    // from it.
+    expect(cardCellClass(false)).not.toBe(cardLineAfter);
+    expect(cardTwoLineRow).not.toBe(cardActionCell.split(' ')[1]);
   });
 });
 

@@ -2151,6 +2151,19 @@ html[lang='zh-CN'] .ow-cell-meta { line-height: 1.6; }
   box-shadow: none;
   color: var(--ow-chip-active-text);
 }
+/* At 390 the filter chips were the loudest thing above the fold: five 14px UPPERCASE wire codes
+ * (QUEUED RUNNING SUCCEEDED...) wrapping to two lines directly under a 20px title, so the filter
+ * shouted louder than the page it filters and louder than the data below it. The casing was fixed
+ * where it came from - the chips print the one status vocabulary now (Queued, Running, ...), not
+ * the wire code - and on a phone the chips take the label tier and lose the tracking as well, so
+ * they are a filter strip rather than a second headline. Nothing is removed and the 28px tap
+ * target stays: the chips are quieter, not smaller to hit. */
+@media (max-width: 768px) {
+  [role='tablist'] [role='tab'] {
+    font-size: var(--ow-type-label);
+    letter-spacing: 0;
+  }
+}
 
 /* c) The command palette listed 10 destinations in a 340px box and cut the tenth. Ten rows
  * are 38.4px each plus 8px of padding: the box now sizes to them, and a short viewport gets
@@ -2552,6 +2565,78 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   }
   .ow-ident-meta .event-detail-fact { display: inline; max-width: none; overflow: visible; white-space: nowrap; }
   .ow-ident-meta .event-detail-fact code { white-space: nowrap; }
+}
+
+/* ── §2.5 at 390: the card is two lines, not five ────────────────────────────────────
+ * Measured before this rule: 144.6px per card on /admin/jobs (14 rows, 2568px of list, 2 full
+ * rows to an 844px phone screen). Five short values were spent on five lines - an identity line
+ * and a qualifier on the left, three label|value rows on the right, ~150px of nothing between
+ * them, and on /admin/jobs the Duration label glued to its own value ("Duration1800.0 s") because
+ * a justify-between line with a wide value has no gap left to spend.
+ *
+ *   host-metrics · e273                             ✓ Succeeded  ⌄
+ *   r9 · Attempts 1/3 · 64 ms · 1d ago
+ *
+ * Nothing is deleted to get here. The identity cell stops generating a box so its two lines can
+ * join the two card lines; the fact cells keep their element, their data-label and their value
+ * and only change which line they ride (cardTwoLineRow / cardLineAfter in pages/table-kit). Every
+ * selector here is inside the 768px query and under .ow-card-2l, so §2.3's 40px row is untouched. */
+@media (max-width: 768px) {
+  .ow-table tbody tr.ow-card-2l {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 8px;
+    /* 3, not 4: the line-break pseudo below is an item of its own (zero-height, so the two 3px
+       gaps are the whole separation between the lines), and 6px around the card plus 6px between
+       the lines is the reading that measured ~70.8px, against the 144.6 this replaces. */
+    row-gap: 3px;
+    padding: 6px 8px;
+  }
+  /* The one line break. A full-basis zero-height item cannot be placed on line 1, so everything
+     after it starts on line 2. break-before: always does NOT do this inside a flex container -
+     both mechanisms were measured in one run - and leaving the break to the trigger's width would
+     put the qualifier on line 1 whenever the name is short. */
+  .ow-table tbody tr.ow-card-2l::before { content: ''; order: 4; flex: 0 0 100%; height: 0; }
+  /* The identity cell hands its two lines to the card instead of stacking them in a box. */
+  .ow-table tbody tr.ow-card-2l > td.ow-ident-cell { display: contents; }
+  /* flex-basis 0, not auto. A flex line is sized from each item's hypothetical size, so a long
+     name at its content width pushes the status badge onto line 2 (measured at 390 with a
+     34-character name: three lines, 76px). At basis 0 the name cannot win that argument; the
+     ellipsis on .ow-ident-name is what shortens it, and §2.1's disambiguator still never does. */
+  .ow-table tbody tr.ow-card-2l .ow-ident { order: 1; flex: 1 1 0; }
+  /* Line 1, right of the identity: the status badge. */
+  .ow-table tbody tr.ow-card-2l > td:not(.ow-card-after):not(.ow-row-action) {
+    order: 2;
+    flex: 0 0 auto;
+    padding: 0;
+  }
+  /* The trigger is a flex item on line 1, not an absolutely placed box laid over it. A box over
+     the line is what 84aaeea had to reserve 36px for, and a reservation is one name-length away
+     from being wrong again. Its -4px margins exist so a desktop row stays 40px; here they would
+     paint 4px of control into line 2, so they go. */
+  .ow-table tbody tr.ow-card-2l > td.ow-row-action { order: 3; position: static; flex: 0 0 auto; padding: 0; }
+  .ow-table tbody tr.ow-card-2l > td.ow-row-action > .icon-btn { margin: 0; }
+  /* Line 2: the qualifier, then the facts that each had a row, at one size and one colour. */
+  .ow-table tbody tr.ow-card-2l .ow-ident-meta,
+  .ow-table tbody tr.ow-card-2l > td.ow-card-after {
+    order: 6;
+    flex: 0 0 auto;
+    height: auto;
+    padding: 0;
+    font-size: var(--ow-type-sm);
+    line-height: 1.4;
+    text-align: left;
+    color: var(--ow-text-secondary);
+  }
+  .ow-table tbody tr.ow-card-2l > td.ow-card-after { display: flex; align-items: baseline; gap: 4px; }
+  /* The same interpunct the qualifier already puts between its own facts, between it and them. */
+  .ow-table tbody tr.ow-card-2l > td.ow-card-after::before { content: '·'; color: var(--ow-text-muted); }
+  /* The stack label is a column heading, and line 1 is the phone's heading: the WORD gives way,
+     the cell keeps data-label, the value keeps it in a tooltip, and the desktop header keeps it at
+     every width above this one. */
+  .ow-table tbody tr.ow-card-2l > td > span:first-child { display: none; }
 }
 
 /* ── overview: three ready rows are one row ──────────────────────────────────────────

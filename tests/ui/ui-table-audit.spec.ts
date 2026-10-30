@@ -1,4 +1,4 @@
-import { Page, test } from '@playwright/test';
+import { Page, expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -508,14 +508,134 @@ async function measure(page: Page) {
             codeLineBoxes: code ? new Set(Array.from(code.getClientRects()).map((box) => Math.round(box.top))).size : null,
           }
         : null;
+      // The five slots a card is measured on, as the reader gets them: the identity line
+      // (name · disambiguator), the qualifier line (revision · attempts), and one entry per fact
+      // cell. The label word is NOT in a slot: it is the column's, and the phone card may drop
+      // it. This is the column the "did the rearrangement lose a value" question is answered on.
+      const qualifierCell = cell.parentElement;
+      const identMeta = qualifierCell ? (qualifierCell.querySelector('.ow-ident-meta') as HTMLElement | null) : null;
+      const factTexts = Array.from(tr.querySelectorAll('td[data-label] .ow-cell-body'))
+        .map((body) => (body.textContent || '').trim())
+        .filter((text) => text.length > 0);
+      const slots = {
+        identity: (cell.textContent || '').trim(),
+        qualifier: identMeta ? (identMeta.textContent || '').trim() : '',
+        facts: factTexts,
+      };
+      // How many text lines the card actually spends, and how tall each one is. §2.5's target is
+      // two lines in ~70px; a card that prints the right values on three lines is still the defect
+      // this exists to catch, and a height alone cannot say which of the two happened.
+      const lineTops = Array.from(new Set(
+        Array.from(tr.querySelectorAll('.ow-ident, .ow-ident-meta, td')).map((el) => Math.round(el.getBoundingClientRect().top)),
+      )).sort((left, right) => left - right);
+      const cardLines = { count: lineTops.length, tops: lineTops, height: Math.round(tr.getBoundingClientRect().height * 10) / 10 };
+      // Where the pixels of a two-line card go, so "70px" can be read as an arithmetic sum instead
+      // of a number somebody tuned until the screenshot looked right.
+      const geometry = (() => {
+        if (!tr.classList.contains('ow-card-2l')) return null;
+        const at = (selector: string) => {
+          const el = tr.querySelector(selector) as HTMLElement | null;
+          if (!el) return null;
+          const box = el.getBoundingClientRect();
+          return { top: Math.round(box.top * 10) / 10, h: Math.round(box.height * 10) / 10 };
+        };
+        const style = getComputedStyle(tr);
+        return {
+          row: { top: Math.round(tr.getBoundingClientRect().top * 10) / 10, h: cardLines.height },
+          padding: style.paddingTop + ' ' + style.paddingBottom,
+          rowGap: style.rowGap,
+          ident: at('.ow-ident'),
+          meta: at('.ow-ident-meta'),
+          badge: at('[data-status]'),
+          menu: at('[data-testid=row-actions]'),
+          duration: at('td.ow-card-after'),
+        };
+      })();
       return {
         key: cell.getAttribute('data-identity-key') || '',
         clipped: cell.scrollWidth > cell.clientWidth + 1 || tailOverflow,
         width: Math.round(cell.getBoundingClientRect().width),
         facts,
         qualifier,
+        slots,
+        cardLines,
+        geometry,
+        values: [slots.identity, slots.qualifier, ...slots.facts].filter((text) => text.length > 0).length,
       };
     }).filter(Boolean);
+
+    /**
+     * Overlap, in pixels: what the row control sits on, and whether two cells share space.
+     *
+     * §2.5 put the row menu on the identity line; the reservation that rescued it is a promise
+     * about a box, and only a box can check it. So this compares the trigger's rect against every
+     * *painted* box of its own row - the identity line, the qualifier, the badge, every value the
+     * card prints - and sums the intersecting area. Ellipsised text paints inside its box, so a box
+     * that still reaches the button is the defect even when no character does.
+     *
+     * The action cell is absolute-positioned chrome and is therefore excluded from the cell-pair
+     * check (it is *meant* to sit over the row); the trigger is measured instead, which is the
+     * thing the reader can collide with.
+     */
+    const rectObj = (el: Element) => {
+      const box = el.getBoundingClientRect();
+      return { top: box.top, left: box.left, right: box.right, bottom: box.bottom, w: box.width, h: box.height };
+    };
+    const intersect = (a: ReturnType<typeof rectObj>, b: ReturnType<typeof rectObj>) => {
+      const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      return w > 1 && h > 1 ? { w, h } : null;
+    };
+    const PAINTED = '.ow-ident, .ow-ident-name, .ow-ident-tail, .ow-ident-meta, .ow-ident-meta > *, [data-status], td[data-label] > span:first-child, td[data-label] .ow-cell-body, td[data-label] .ow-cell-body *';
+    const overlapRows = rows.map((tr) => {
+      const trigger = tr.querySelector('[data-testid=row-actions]');
+      // A cell the row deliberately lays OVER itself is chrome, not content: the row menu on every
+      // table, and /admin/plugins' batch checkbox at 390. Those are checked by the trigger metric
+      // below; what this pair check is for is two *flow* cells sharing space.
+      const flowCells = (Array.from(tr.children) as HTMLElement[])
+        .filter((el) => {
+          if (el.tagName !== 'TD' || el.classList.contains('ow-row-action')) return false;
+          const position = getComputedStyle(el).position;
+          return position !== 'absolute' && position !== 'fixed';
+        })
+        .map(rectObj)
+        .filter((box) => box.w > 0 && box.h > 0);
+      let cellPairs = 0;
+      for (let i = 0; i < flowCells.length; i += 1) {
+        for (let j = i + 1; j < flowCells.length; j += 1) if (intersect(flowCells[i], flowCells[j])) cellPairs += 1;
+      }
+      if (!trigger) return { px: 0, boxes: 0, cellPairs };
+      const menu = rectObj(trigger);
+      let px = 0;
+      let boxes = 0;
+      for (const el of Array.from(tr.querySelectorAll(PAINTED)) as HTMLElement[]) {
+        if (el === trigger || trigger.contains(el) || el.contains(trigger)) continue;
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const box = rectObj(el);
+        if (!(box.w > 0 && box.h > 0)) continue;
+        boxes += 1;
+        const hit = intersect(menu, box);
+        if (hit) px += Math.round(hit.w * hit.h);
+      }
+      return { px, boxes, cellPairs };
+    });
+    const overlap = {
+      px: overlapRows.reduce((sum, row) => sum + row.px, 0),
+      rows: overlapRows.filter((row) => row.px > 0).length,
+      worst: overlapRows.reduce((max, row) => (row.px > max ? row.px : max), 0),
+      cellPairs: overlapRows.reduce((sum, row) => sum + row.cellPairs, 0),
+      cellRows: overlapRows.filter((row) => row.cellPairs > 0).length,
+      measured: rows.length,
+    };
+
+    /** §2.5's other half: how much of the list one phone screen actually shows. */
+    const screenRows = rows.map((tr) => tr.getBoundingClientRect());
+    const firstScreen = {
+      full: screenRows.filter((box) => box.top >= 0 && box.bottom <= window.innerHeight).length,
+      partial: screenRows.filter((box) => box.top < window.innerHeight && box.bottom > 0).length,
+      total: screenRows.length,
+    };
     return {
       overflow: de.scrollWidth - de.clientWidth,
       docScrollW: de.scrollWidth,
@@ -537,6 +657,8 @@ async function measure(page: Page) {
       viewport: { w: window.innerWidth, h: window.innerHeight },
       cardFactCount: window.innerWidth < 768 && cards.length ? Math.max(...cards.map((c: any) => c.facts)) : null,
       cards,
+      overlap,
+      firstScreen,
       tableWidth: tableRect ? Math.round(tableRect.width) : null,
       tablePanelWidth: (document.querySelector('.table-panel') as HTMLElement | null)?.clientWidth ?? null,
     };
@@ -590,6 +712,22 @@ for (const viewport of VIEWPORTS) {
         // read side by side instead of argued about.
         if (viewport.w === 390 || ['jobs', 'activity', 'nodes', 'plugins', 'governance'].includes(target.key)) {
           await page.screenshot({ path: path.join(OUT, label + '__' + target.key + '.png'), fullPage: true });
+        }
+      }
+      /**
+       * The three pages whose cards carry a row-menu on the identity line, and the one assertion
+       * that keeps it off the page's own text. Measured 14, 1 and 4 overlapping rows before
+       * 84aaeea and 0 after; a rearrangement of the card re-opens the question, so the answer is
+       * read on every run instead of remembered from a commit message.
+       *
+       * The number is a box-vs-box sum, and it is asserted only at 390: above 768 the menu is a
+       * cell of its own and cannot be laid over anything.
+       */
+      if (viewport.w === 390) {
+        for (const key of ['jobs', 'nodes', 'plugins']) {
+          const measured = pages[label]['/admin/' + key] as any;
+          expect(measured.overlap.px, label + ' /admin/' + key + ': the row menu may not sit on painted content (px=' + measured.overlap.px + ', rows=' + measured.overlap.rows + '/' + measured.overlap.measured + ')').toBe(0);
+          expect(measured.overlap.cellPairs, label + ' /admin/' + key + ': no two cells may be laid over each other (pairs=' + measured.overlap.cellPairs + ')').toBe(0);
         }
       }
       await context.close();

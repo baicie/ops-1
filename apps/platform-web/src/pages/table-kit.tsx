@@ -42,6 +42,28 @@ export const stackBody = 'max-[768px]:block';
 // padding + 12 slack - 12 of padding in total, so 6 a side. 10px a side spent the slack the
 // three facts needed (measured 142.6 on /admin/jobs). relative: the menu rides the identity line.
 export const stackRow = 'max-[768px]:relative max-[768px]:flex max-[768px]:flex-col max-[768px]:px-1 max-[768px]:py-1.5';
+
+/**
+ * §2.5 at 390: the card is TWO lines, not five.
+ *
+ * The five-value card measured 144.6px per row on /admin/jobs (14 rows, 2568px of list, 2.5 rows
+ * to a phone screen): the identity line and its qualifier on the left, three label|value rows on
+ * the right, and ~150px of nothing between them. The same five values fit on two lines because
+ * they are five short values, not a grid:
+ *
+ *   host-metrics · e273                             ✓ Succeeded  ⌄
+ *   r9 · Attempts 1/3 · 64 ms · 1d ago
+ *
+ * Nothing is deleted to get there. The row is a flex line that wraps once; the identity cell stops
+ * generating a box so its two lines can join the two card lines, and `cardLineAfter` marks the
+ * cells that continue the qualifier's line. Each fact cell keeps its element, its `data-label` and
+ * its value - only the label WORD gives way, and only on the phone, where the line above it is the
+ * heading. Opted into per row so a page whose card has a different shape keeps the layout it
+ * measured (styles.css, "the two-line card").
+ */
+export const cardTwoLineRow = 'ow-card-2l';
+/** A fact cell that continues the qualifier's line instead of taking a row of its own. */
+export const cardLineAfter = 'ow-card-after';
 const stackCell =
   'max-[768px]:flex max-[768px]:items-start max-[768px]:justify-between max-[768px]:gap-3.5 ' +
   'max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:py-1 max-[768px]:text-right';
@@ -213,16 +235,20 @@ export function IdentityCell({
   className?: string;
   children?: React.ReactNode;
 }) {
+  // The card's identity line is the box the reader hovers once the cell is `display: contents`
+  // (styles.css: the two-line card), so the full id and the age travel on it as well as on the
+  // cell. Same string, one owner: both are built from the same two fields.
+  const detail = [identity.fullId, identity.age].filter(Boolean).join(' · ') || undefined;
   return (
     <TableCell
       data-label={label}
       data-column={label}
-      title={[identity.fullId, identity.age].filter(Boolean).join(' · ') || undefined}
+      title={detail}
       data-card-fact={cardFact ? '' : undefined}
       className={cn(stackCell, 'ow-ident-cell max-[768px]:text-left', className)}
     >
       <span className={cn(stackLabel, 'max-[768px]:hidden')}>{label}</span>
-      <span className="ow-ident" data-identity-key={identity.key}>
+      <span className="ow-ident" data-identity-key={identity.key} title={detail}>
         <span className="ow-ident-name">{identity.name}</span>
         {identity.disambiguator ? <span className="ow-ident-tail">{' · ' + identity.disambiguator}</span> : null}
       </span>

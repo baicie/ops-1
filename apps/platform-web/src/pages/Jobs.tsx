@@ -21,7 +21,7 @@ import { identityDisambiguator } from '../lib/identity';
 import { shortDigest } from '../format';
 import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
-import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { useStatusText } from '../components/app/status';
 
 const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
@@ -30,6 +30,10 @@ export function JobsPage() {
   const t = useT();
   const { locale } = useI18n();
   const navigate = useNavigate();
+  // The status chips are the one place this page printed a wire code instead of copy: "QUEUED
+  // RUNNING SUCCEEDED…" at the body tier was the loudest thing above the fold, and in zh-CN it was
+  // English. Same vocabulary as the pill in each row, from the same table.
+  const statusText = useStatusText();
   useDocumentTitle(t('page.jobs'));
   const [data, setData] = useState<JobList | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -75,7 +79,7 @@ export function JobsPage() {
         </Select>
         <Tabs value={status} onValueChange={(value) => { setStatus(value); setCursor(null); }}>
           <TabsList className="h-auto max-w-full flex-wrap justify-start">
-            {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : value}</TabsTrigger>)}
+            {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : statusText(value)}</TabsTrigger>)}
           </TabsList>
         </Tabs>
         <span className="toolbar-count">{t('jobs.count', { shown: visibleJobs.length, total: data?.items.length ?? 0 })}</span>
@@ -127,16 +131,20 @@ export function JobsPage() {
                     duration: visibleJobs.map((row) => durationLabel(row)),
                     created: visibleJobs.map((row) => row.createdAt),
                   });
+                  // §2.5 at 390: two lines, not five. The identity, the status and the menu share the
+                  // first one; the qualifier line continues into duration and age on the second.
                   return (
-                    <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', stackRow)} data-job-row={job.jobId} onClick={() => navigate('/admin/jobs/' + job.jobId)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') navigate('/admin/jobs/' + job.jobId); }}>
+                    <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)} data-job-row={job.jobId} onClick={() => navigate('/admin/jobs/' + job.jobId)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') navigate('/admin/jobs/' + job.jobId); }}>
                       <IdentityCell label={t('table.job')} identity={identity} cardFact className="job-id-cell">
                         {/* §2.2 demotion, not deletion: the two constants live on the qualifier line. */}
                         <span className="ow-key">r{job.pipelineRevision}</span>
                         <span className="ow-key">{t('table.attempts')} {job.attempts}/{job.maxAttempts}</span>
                       </IdentityCell>
                       <StackCell label={t('table.status')} className={cardCellClass(cardFacts.includes('status'))}><StatusPill status={job.status} /></StackCell>
-                      <StackCell label={t('table.duration')} className={cn('whitespace-nowrap max-[768px]:whitespace-normal', cardCellClass(cardFacts.includes('duration')))}><span className="mono">{durationLabel(job)}</span></StackCell>
-                      <StackCell label={t('table.created')} className={cardCellClass(cardFacts.includes('created'))}><span title={job.createdAt}>{relativeAge(locale, job.createdAt)}</span></StackCell>
+                      {/* The column name is not printed on the card (the line above it is the heading) but it
+                          is not deleted either: data-label, the desktop header, and this tooltip keep it. */}
+                      <StackCell label={t('table.duration')} className={cn('whitespace-nowrap max-[768px]:whitespace-normal', cardLineAfter, cardCellClass(cardFacts.includes('duration')))}><span className="mono" title={t('table.duration')}>{durationLabel(job)}</span></StackCell>
+                      <StackCell label={t('table.created')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('created')))}><span title={job.createdAt}>{relativeAge(locale, job.createdAt)}</span></StackCell>
                       {/* §2.5: the row menu rides the identity line at 390 instead of taking a row. */}
                       <TableCell className={cardActionCell}>
                         <RowActions label={t('jobs.action.menu', { id: identity.key })} actions={[copyIdAction(job.jobId, t('table.copyIdentifier')), { id: 'open', label: t('table.open'), icon: 'chevron', onSelect: () => navigate('/admin/jobs/' + job.jobId) }]} />
