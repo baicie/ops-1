@@ -340,7 +340,23 @@ input::placeholder { color: var(--ow-text-muted); }
    and the 86px one /admin/plugins/{id} measured. */
 .page-header-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .page-header-sub .page-description { margin-top: 0; }
-.page-header-sub .page-header-meta { margin-top: 0; flex: none; }
+.page-header-sub .page-header-meta { margin-top: 0; flex: 0 1 auto; min-width: 0; }
+/* The meta row wraps (see .page-header-meta above) but that wrap was unreachable: as a flex item
+   of .page-header-sub this row carried `flex: none`, so flex-shrink was 0 and its flex-basis
+   resolved to its OWN MAX-CONTENT WIDTH - every chip on one line. A wrapping container laid out at
+   max-content never gets a reason to wrap, so at 390 it measured 629px inside a 390 viewport and
+   the page scrolled sideways (+251px en / +165px zh, worst element .page-header-meta).
+   Not a child with an unshrinkable min-width and not a missing flex-wrap: the row has wrap, and
+   every chip can shrink (.meta-chip-value is min-width:0 + overflow-wrap:anywhere). What was
+   missing was permission to be narrower than its content. Shrinking here lets the row's own wrap
+   do the work, so the chips reflow onto more lines instead of leaving the viewport - nothing is
+   clipped, and nothing needs an overflow:hidden to hide the symptom. */
+@media (max-width: 768px) {
+  /* The sub-line holds the description and the chips side by side. On a phone they take a line
+     each; the chips then get the full width to wrap within. */
+  .page-header-sub { flex-wrap: wrap; }
+  .page-header-sub .page-header-meta { flex: 1 1 100%; }
+}
 .title-with-status { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .meta-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-sm); padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: 5px; background: var(--ow-surface); }
@@ -2607,7 +2623,10 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
      ellipsis on .ow-ident-name is what shortens it, and §2.1's disambiguator still never does. */
   .ow-table tbody tr.ow-card-2l .ow-ident { order: 1; flex: 1 1 0; }
   /* Line 1, right of the identity: the status badge. */
-  .ow-table tbody tr.ow-card-2l > td:not(.ow-card-after):not(.ow-row-action) {
+  /* :not(.ow-card-lead) as well: that cell is line 1's first item (order 0, see the rule further
+     down) and this selector is (0,4,2) against the lead cell's (0,3,3), so leaving it in would
+     silently win the order back and park the batch checkbox between the name and the state. */
+  .ow-table tbody tr.ow-card-2l > td:not(.ow-card-after):not(.ow-row-action):not(.ow-card-lead) {
     order: 2;
     flex: 0 0 auto;
     padding: 0;
@@ -2618,6 +2637,19 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
      paint 4px of control into line 2, so they go. */
   .ow-table tbody tr.ow-card-2l > td.ow-row-action { order: 3; position: static; flex: 0 0 auto; padding: 0; }
   .ow-table tbody tr.ow-card-2l > td.ow-row-action > .icon-btn { margin: 0; }
+  /* /admin/plugins' batch checkbox was an absolutely placed box on the identity line (left 4,
+     top 8). That overlay only cleared the name because the identity cell reserved 20px of padding
+     for it — and a cell that is `display: contents` renders no padding at all, so the same box
+     would have landed on top of the name. As the first flex item of the line it takes its own
+     width instead of reserving one: no overlay, no reservation to get out of date, and the same
+     treatment the row menu above already gets. */
+  .ow-table tbody tr.ow-card-2l > td.ow-card-lead {
+    position: static;
+    order: 0;
+    flex: 0 0 auto;
+    width: auto;
+    padding: 0;
+  }
   /* Line 2: the qualifier, then the facts that each had a row, at one size and one colour. */
   .ow-table tbody tr.ow-card-2l .ow-ident-meta,
   .ow-table tbody tr.ow-card-2l > td.ow-card-after {

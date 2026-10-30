@@ -103,31 +103,73 @@ async function measure(page: Page): Promise<Measure> {
     if (table) {
       const tbody = table.querySelector('tbody') as HTMLElement;
       const rows = Array.from(table.querySelectorAll('tbody tr'));
-      // Two different layouts must be checked with two different rules: a record card stacks
-      // its cells vertically (then "overlap" means vertical), a desktop row lays them out side
-      // by side (then "overlap" means horizontal).
+      /**
+       * §2.5's 390 card is TWO lines, so two cells of one row may legitimately share a line.
+       * "No overlap" therefore has to become a real two-dimensional question - do two boxes share
+       * area on BOTH axes - instead of "is this cell's top below the previous cell's bottom".
+       *
+       * The one-dimensional rule this replaces was not merely different, it was weaker: at 390 it
+       * never looked at the horizontal axis at all (a card whose cells sat side by side with 200px
+       * of intersection passed), and it compared only CONSECUTIVE cells in DOM order (a cell laid
+       * over the one two places before it passed too). It also could not survive a two-line card
+       * without being deleted, which is exactly why it is being replaced by something that answers
+       * the question rather than by nothing.
+       */
       const stacked = window.matchMedia('(max-width: 768px)').matches;
       const rowReport = rows.map((row) => {
-        // A cell the breakpoint hides (`max-[1200px]:hidden`) has an all-zero rect, which is not
-        // an overlapping cell: only the cells that actually occupy space take part.
-        const cells = Array.from(row.querySelectorAll('td')).map(rect).filter((cell) => cell.width > 0 && cell.height > 0);
-        let overlap = false;
-        for (let i = 1; i < cells.length; i += 1) {
-          if (stacked) {
-            if (cells[i].top < cells[i - 1].bottom - 1) overlap = true;
-          } else if (cells[i].left < cells[i - 1].right - 1) {
-            overlap = true;
+        // A cell the breakpoint hides (`max-[1200px]:hidden`), a demoted card column
+        // (`ow-card-extra`) or an identity cell a two-line card flattens (`display: contents`)
+        // has an all-zero rect: it occupies no space, so it cannot overlap anything.
+        const boxes = Array.from(row.querySelectorAll('td'))
+          .map((td) => ({ td, box: rect(td), label: td.getAttribute('data-label') || '' }))
+          .filter((entry) => entry.box.width > 0 && entry.box.height > 0);
+        let overlapPairs = 0;
+        for (let i = 0; i < boxes.length; i += 1) {
+          for (let j = i + 1; j < boxes.length; j += 1) {
+            const a = boxes[i].box;
+            const b = boxes[j].box;
+            const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+            const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+            if (w > 1 && h > 1) overlapPairs += 1;
           }
         }
-        const tops = cells.map((cell) => cell.top);
+        // §2.5: a fact is a cell that is on screen and carries a VALUE. The identity line is the
+        // card's first line and is not one of the three facts, and the label word giving way on the
+        // phone is not the value giving way - so this counts values, never painted labels.
+        const identityCell = row.querySelector('[data-identity-key]');
+        const facts = boxes
+          .filter((entry) => !(identityCell && entry.td.contains(identityCell)))
+          .map((entry) => ({
+            label: entry.label,
+            text: ((entry.td.querySelector('.ow-cell-body') || entry.td).textContent || '').trim(),
+            box: entry.box,
+          }))
+          .filter((entry) => entry.text.length > 0);
+        // The facts, grouped by the visual line they landed on. 'facts' is in DOM order, so each
+        // group is too; the same groups re-sorted by left give the order the eye meets them in.
+        const lineOf = new Map<number, { label: string; left: number }[]>();
+        for (const entry of facts) {
+          const key = Math.round(entry.box.top);
+          const list = lineOf.get(key) || [];
+          list.push({ label: entry.label, left: entry.box.left });
+          lineOf.set(key, list);
+        }
+        const groups = Array.from(lineOf.keys()).sort((left, right) => left - right).map((key) => lineOf.get(key) as { label: string; left: number }[]);
+        const tops = boxes.map((entry) => entry.box.top);
         const box = rect(row);
         return {
-          cells: cells.length,
+          cells: boxes.length,
           rowHeight: box.height,
-          firstTop: cells[0] ? cells[0].top : 0,
-          lastBottom: cells.length ? cells[cells.length - 1].bottom : 0,
+          firstTop: boxes.length ? Math.min(...boxes.map((entry) => entry.box.top)) : 0,
+          lastBottom: boxes.length ? Math.max(...boxes.map((entry) => entry.box.bottom)) : 0,
           spread: tops.length ? Math.max(...tops) - Math.min(...tops) : 0,
-          overlap,
+          overlap: overlapPairs > 0,
+          overlapPairs,
+          factCount: facts.length,
+          factLabels: facts.map((entry) => entry.label),
+          factLines: groups.length,
+          // Each line's left-to-right reading order against the same line's declared order.
+          lineOrders: groups.map((group) => ({ byGeometry: group.slice().sort((left, right) => left.left - right.left).map((entry) => entry.label), declared: group.map((entry) => entry.label) })),
         };
       });
       tableReport = {
@@ -232,11 +274,34 @@ test('normal-state matrix: 3 pages x 3 viewports x 2 themes x 2 locales', async 
             }
             if (viewport.key === '390') {
               expect(measured.table.stacked, name + ': 390px uses the record layout').toBe(true);
-              expect(measured.table.cellHeights, name + ': the record layout stacks every cell').toBeGreaterThan(4);
-              // The defect the review measured was cells of one record printed over the next
-              // record, so the check that matters is across rows: each record's last cell must
-              // end before the next record's first cell starts.
               const rows = measured.table.rowReport;
+              /**
+               * §2.5's card is TWO lines. The rule that used to stand here - "every cell's top is
+               * at or below the previous cell's bottom" - was the rule of the five-line card, and
+               * it is false by construction once two facts share a line. It is replaced by the
+               * four claims the two-line card could actually break, in the order they could break:
+               *
+               *   1. no two cells share area - every pair, both axes (the old rule saw only
+               *      consecutive pairs and, at 390, only the vertical axis);
+               *   2. no fact lost - every fact still renders a value. The old rule asserted five
+               *      BOXES existed, so a card could hide a value and still pass as long as the
+               *      boxes were there;
+               *   3. no fact re-ordered - within a line, the left-to-right order is the declared
+               *      order. Nothing tested this before, and flex 'order' is exactly how a
+               *      rearrangement silently shuffles two facts;
+               *   4. §2.5's own target: a card is <= 140px. Measured before this change: 162
+               *      (nodes) and 177 (plugins).
+               *
+               * Then the cross-row rule the review's P0-1 finding was about, unchanged.
+               */
+              expect(rows.every((row) => row.overlapPairs === 0), name + ': no two cells of one record may share area (pairs per row: ' + JSON.stringify(rows.map((row) => row.overlapPairs)) + ')').toBe(true);
+              for (const [index, row] of rows.entries()) {
+                expect(row.factCount, name + ': record ' + index + ' may not lose a fact (' + row.factCount + ' values; labels ' + JSON.stringify(row.factLabels) + ')').toBeGreaterThanOrEqual(3);
+                for (const line of row.lineOrders) {
+                  expect(line.byGeometry, name + ': record ' + index + ' meets its facts on a line in the order they are declared').toEqual(line.declared);
+                }
+                expect(row.rowHeight, name + ': record ' + index + ' is at most 140px (§2.5) - ' + row.factLines + ' line(s)').toBeLessThanOrEqual(140);
+              }
               for (let i = 1; i < rows.length; i += 1) {
                 expect(rows[i].firstTop, name + ': record ' + i + ' may not start above the previous record\'s end (' + rows[i].firstTop + ' vs ' + rows[i - 1].lastBottom + ')').toBeGreaterThanOrEqual(rows[i - 1].lastBottom - 1);
               }

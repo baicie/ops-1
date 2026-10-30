@@ -21,7 +21,7 @@ import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../compon
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 import { ConfirmAction } from '../components/app/confirm-action';
-import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 /**
  * A revoked node is proven by the node route, not by the DELETE's 200. `DELETE /nodes/{id}`
@@ -281,8 +281,15 @@ export function NodesPage() {
                 const cpu = percentOf(snapshot?.cpuUtilization);
                 const memory = ratio(snapshot?.memoryUsedBytes, snapshot?.memoryTotalBytes);
                 const open = () => navigate(`/admin/nodes/${node.id}`);
+                /* §2.5 at 390: two lines. The identity and the state share the first one; the
+                   qualifier (os/arch, generation) continues into instances and resources on the
+                   second. Which cell rides which line is the same hook /admin/jobs uses, but the
+                   VALUES are this page's: jobs prints a duration and an age, a node prints an
+                   instances ratio and a utilisation pair, and each keeps its own cell, its own
+                   data-label and its own arithmetic (1/4 is ready-over-total, 12% is a ratio of
+                   one snapshot) - so the mapping is declared here rather than borrowed. */
                 return (
-                  <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-node-state={nodeState(node)} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
+                  <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', cardTwoLineRow, stackRow)} data-node-state={nodeState(node)} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
                     <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: visible.length })} cardFact>
                       <span className="mono">{node.os}/{node.arch}</span>
                       <span className="ow-key">{t('nodes.table.generation', { generation: node.generation })}</span>
@@ -299,9 +306,9 @@ export function NodesPage() {
                         </Link>
                       </div>
                     </StackCell>
-                    <StackCell label={t('table.instances')} className={cardCellClass(cardFacts.includes('instances'))}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
+                    <StackCell label={t('table.instances')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('instances')))}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
                     {resourcesMeasurable ? (
-                      <StackCell label={t('table.resources')} data-resource="resources" className={cardCellClass(cardFacts.includes('resources'))}>
+                      <StackCell label={t('table.resources')} data-resource="resources" className={cn(cardLineAfter, cardCellClass(cardFacts.includes('resources')))}>
                         {snapshot ? (
                           <div className="ow-cell">
                             <span className="ow-cell-value ow-tnum">

@@ -480,6 +480,23 @@ async function measure(page: Page) {
         return Boolean(label && label.getBoundingClientRect().width > 0);
       }).length;
       /**
+       * §2.5: how many facts the card actually SHOWS. Counted off the value, not off the label
+       * word, because the two-line card (table-kit's `cardTwoLineRow`) drops the label on the
+       * phone - the line above it is the heading - and a count of painted labels therefore falls
+       * to zero the moment a page opts into the layout. That is what happened to /admin/jobs: it
+       * measured 3 before 84aaeea and 0 after it, so the ≤3 cap this number feeds stopped
+       * measuring anything on that page while still printing "ok". A fact is a cell that is on
+       * screen and carries a value: the identity line is §2.5's first line and not one of the
+       * three, and a demoted cell (`ow-card-extra`) is display:none and not on screen at all.
+       */
+      const factValues = Array.from(tr.querySelectorAll('td[data-label]')).filter((td) => {
+        if (td.querySelector('[data-identity-key]')) return false;
+        const box = td.getBoundingClientRect();
+        if (!(box.width > 0 && box.height > 0)) return false;
+        const body = td.querySelector('.ow-cell-body') || td;
+        return ((body.textContent || '').trim().length > 0);
+      }).length;
+      /**
        * §2.5: the name part may ellipsise; the `disambiguator · age` on the same line never may,
        * because those two are what make two cards tellable apart. It is lost in one of two ways:
        * the cell paints past its own box (scrollWidth), or the tail is painted past the cell's
@@ -556,6 +573,7 @@ async function measure(page: Page) {
         clipped: cell.scrollWidth > cell.clientWidth + 1 || tailOverflow,
         width: Math.round(cell.getBoundingClientRect().width),
         facts,
+        factValues,
         qualifier,
         slots,
         cardLines,
@@ -655,7 +673,10 @@ async function measure(page: Page) {
       noDataPerTable,
       // §4.2 reads the column cap off the measured width, so it travels with the measurement.
       viewport: { w: window.innerWidth, h: window.innerHeight },
-      cardFactCount: window.innerWidth < 768 && cards.length ? Math.max(...cards.map((c: any) => c.facts)) : null,
+      // The value count, not the label count - see factValues above. cardFactCount is the field
+      // check-ui-metrics.mjs caps at §2.5's 3, so it must be the number the reader can see.
+      cardFactCount: window.innerWidth < 768 && cards.length ? Math.max(...cards.map((c: any) => c.factValues)) : null,
+      cardLabelCount: window.innerWidth < 768 && cards.length ? Math.max(...cards.map((c: any) => c.facts)) : null,
       cards,
       overlap,
       firstScreen,

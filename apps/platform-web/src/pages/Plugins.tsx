@@ -20,7 +20,7 @@ import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-writ
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
-import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 import { InstallationStatus } from '../components/app/status';
 import { deriveInstallationState } from '../lib/installation-state';
 import { filterPlugins, isAbnormal, matchesQuickFilter, type QuickFilter } from './plugins-filter';
@@ -445,12 +445,17 @@ export function PluginsPage() {
                   const entity = plugin.isSystem ? '/admin/ops-center' : `/admin/plugins/${plugin.id}`;
                   const open = () => navigate(entity);
                   const checked = selected.includes(plugin.id);
+                  /* §2.5 at 390: two lines. The identity and the installation state share the
+                     first one; the publisher line continues into version and ready-replicas on the
+                     second. The hook is /admin/jobs', the VALUES are this page's: a version is a
+                     release string, ready-replicas is ready-over-declared, and each keeps its own
+                     cell so the desktop header and the data-label still name it. */
                   return (
-                    <TableRow key={plugin.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-plugin={plugin.id} data-abnormal={isAbnormal(plugin) ? 'true' : undefined} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
+                    <TableRow key={plugin.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', cardTwoLineRow, stackRow)} data-plugin={plugin.id} data-abnormal={isAbnormal(plugin) ? 'true' : undefined} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
                       {/* §2.5: the row checkbox rides the identity line at 390 instead of taking a
                           line of its own - the 40px control box was 48px of the card. */}
                       {canOperate ? (
-                        <TableCell className="w-8 max-[768px]:absolute max-[768px]:left-1 max-[768px]:top-2 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0">
+                        <TableCell className="ow-card-lead w-8 max-[768px]:absolute max-[768px]:left-1 max-[768px]:top-2 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0">
                           <input
                             type="checkbox"
                             className="row-check"
@@ -476,7 +481,7 @@ export function PluginsPage() {
                           <span className="text-muted-foreground">{plugin.publisher || t('common.none')}</span>
                         </div>
                       </IdentityCell>
-                      <StackCell label={t('table.version')} className={cardCellClass(cardFacts.includes('version'))}>
+                      <StackCell label={t('table.version')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('version')))}>
                         <div className="ow-cell">
                           <span className="mono ow-cell-value">{plugin.activeVersion || plugin.latestVersion || null}{!(plugin.activeVersion || plugin.latestVersion) && <NoData detail={t('ui.noData.detail')} />}</span>
                           {upgrade ? <span className="ow-cell-meta">{t('plugins.upgrade.available', { version: plugin.latestVersion ?? '' })}</span> : null}
@@ -511,7 +516,7 @@ export function PluginsPage() {
                         </div>
                       </StackCell>
                       {factsKnown ? (
-                        <StackCell label={t('table.readyReplicas')} className={cardCellClass(cardFacts.includes('readyReplicas'))}>
+                        <StackCell label={t('table.readyReplicas')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('readyReplicas')))}>
                           <div className="ow-cell">
                             <span className="ow-cell-value">{!fact || fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
                               <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : undefined}>{plugin.readyInstances}/{plugin.totalInstances}</span>
