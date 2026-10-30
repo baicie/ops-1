@@ -234,7 +234,7 @@ export function InstallWizardPage() {
             <Field label={t('field.desiredReplicas')} hint={t('install.field.desiredReplicas.hint')}><Input type="number" min={0} max={20} value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} /></Field>
             <Field label={t('field.nodeSelector')} hint={t('install.field.nodeSelector.hint')}><Input value={selector} onChange={(event) => setSelector(event.target.value)} placeholder="role=node" /></Field>
           </div>
-          <div className="callout"><Icon name="nodes" size={16} /><p>{t('install.placement.note.before')} <strong>PENDING</strong>{t('install.placement.note.after')}</p></div>
+          <div className="callout"><Icon name="nodes" size={16} /><p>{t('install.placement.note.before')} <strong>{t('status.pending')}</strong>{t('install.placement.note.after')}</p></div>
           <div className="wizard-actions"><Button variant="secondary" onClick={() => setStep(2)}>{t('action.back')}</Button><Button onClick={() => void deploy()} disabled={busy}>{busy ? t('install.deploy.creating') : t('install.action.deployToNodes')}</Button></div>
         </section>
       )}

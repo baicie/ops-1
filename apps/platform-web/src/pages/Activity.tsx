@@ -21,12 +21,19 @@ const ALL_SUBJECTS = 'ALL';
 /** The page's own polling cadence; `isStale` compares the last observation against it. */
 const POLL_INTERVAL_MS = 8000;
 
+/**
+ * Rows per page. The ledger asked the API for 200 events and rendered all of them: measured
+ * 32,895px of page at 390px wide with no way to reach the middle. The window is a page now.
+ */
+const PAGE_SIZE = 25;
+
 export function ActivityPage() {
   const t = useT();
   const { formatDateTime } = useI18n();
   const [subjectType, setSubjectType] = useState('');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
   const { data, error, loading, reload, observedAt } = useObservedPolling(
     () => api.get<AuditEvent[]>(`/api/v1/audit?limit=200${subjectType ? `&subjectType=${encodeURIComponent(subjectType)}` : ''}`),
     POLL_INTERVAL_MS,
@@ -53,6 +60,13 @@ export function ActivityPage() {
   const filtered = Boolean(query || subjectType);
   const noRowsFromSource = Boolean(data && data.length === 0);
   const clearFilters = () => { setQuery(''); setSubjectType(''); };
+
+  // A filter that shrinks the result set must not leave the reader on a page that no longer
+  // exists; the window clamps rather than rendering an empty table.
+  React.useEffect(() => { setPage(0); }, [query, subjectType]);
+  const pageCount = Math.max(1, Math.ceil(events.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageEvents = events.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
 
   return (
     <div className="page-stack">
@@ -126,7 +140,7 @@ export function ActivityPage() {
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
-                {events.map((event) => (
+                {pageEvents.map((event) => (
                   <React.Fragment key={event.id}>
                     <TableRow className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} onClick={() => setExpanded(expanded === event.id ? null : event.id)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') setExpanded(expanded === event.id ? null : event.id); }}>
                       <StackCell label={t('table.event')}><strong>{event.eventType}</strong><div className="text-sm text-muted-foreground">{event.action}</div></StackCell>
@@ -141,6 +155,15 @@ export function ActivityPage() {
                 ))}
               </TableBody>
             </Table>
+            {pageCount > 1 && (
+              <div className="table-pager" data-testid="activity-pager">
+                <span className="table-pager-summary">{t('activity.pagination.summary', { page: currentPage + 1, pages: pageCount, total: events.length })}</span>
+                <div className="table-pager-actions">
+                  <Button variant="secondary" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t('pipelines.pagination.previous')}</Button>
+                  <Button variant="secondary" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>{t('pipelines.pagination.next')}</Button>
+                </div>
+              </div>
+            )}
           </section>
         )}
       </AsyncBoundary>

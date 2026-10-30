@@ -21,6 +21,8 @@ import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../compon
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
 import { RowActions, StackCell, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { InstallationStatus } from '../components/app/status';
+import { deriveInstallationState } from '../lib/installation-state';
 
 /** Per-plugin facts only the detail route exposes: digest, trust, activation and deployment health. */
 interface PluginFacts {
@@ -441,6 +443,9 @@ export function PluginsPage() {
               <TableBody className={stackBody}>
                 {filtered.map((plugin) => {
                   const fact = facts[plugin.id];
+                  // The same call the detail page makes, from the same field, so the list and
+                  // the detail cannot print two different words for one plugin.
+                  const installation = deriveInstallationState({ state: plugin.state });
                   const upgrade = Boolean(plugin.latestVersion && plugin.activeVersion && plugin.latestVersion !== plugin.activeVersion);
                   const entity = plugin.isSystem ? '/admin/ops-center' : `/admin/plugins/${plugin.id}`;
                   const open = () => navigate(entity);
@@ -482,24 +487,24 @@ export function PluginsPage() {
                           <span className="ow-cell-value">{plugin.publisher ? <span className="text-muted-foreground">{plugin.publisher}</span> : <NoData detail={t('ui.noData.detail')} />}</span>
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.deployment')}>
+                      <StackCell label={t('table.state')}>
                         <div className="ow-cell">
-                          {fact?.deploymentStatus ? (
-                            <>
-                              {/* A deployment state is an entity, not a word: it opens the plugin
-                                  whose deployment it describes. */}
-                              <Link
-                                className="status-entity"
-                                to={entity}
-                                data-status-entity={plugin.id}
-                                title={t('plugins.status.openEntity', { name: plugin.name })}
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <StatusIndicator state={indicatorStateForCode(fact.deploymentStatus)} label={indicatorStateForCode(fact.deploymentStatus) === 'unknown' ? fact.deploymentStatus : undefined} />
-                              </Link>
-                              {fact.deploymentAt ? <TimeAgo value={fact.deploymentAt} /> : null}
-                            </>
-                          ) : <NoData detail={t('plugins.health.none')} />}
+                          {/* The installation state, from the derivation both surfaces share.
+                              This cell used to read `fact.deploymentStatus` - a different
+                              endpoint's field - which is why the list said one thing and the
+                              detail's header chip said another. The deployment itself is still
+                              reachable through the entity link and the deployments tab. */}
+                          <Link
+                            className="status-entity"
+                            to={entity}
+                            data-status-entity={plugin.id}
+                            title={t('plugins.status.openEntity', { name: plugin.name })}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <InstallationStatus state={plugin.state} />
+                          </Link>
+                          {fact?.deploymentAt ? <TimeAgo value={fact.deploymentAt} /> : null}
+                          {installation.missing.length && !plugin.state ? <NoData detail={t('status.missingField', { field: installation.missing.join(', ') })} /> : null}
                         </div>
                       </StackCell>
                       <StackCell label={t('table.readyReplicas')}>

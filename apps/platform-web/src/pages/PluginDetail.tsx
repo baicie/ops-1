@@ -20,6 +20,7 @@ import { useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { InstallationStatus, useStatusText } from '../components/app/status';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
 const TAB_IDS: readonly Tab[] = ['overview', 'versions', 'deployments', 'capabilities', 'permissions', 'events'];
@@ -52,6 +53,7 @@ function MetaChip({ icon, label, value, mono = false }: { icon?: string; label?:
 
 export function PluginDetailPage() {
   const t = useT();
+  const statusText = useStatusText();
   const { id = '' } = useParams();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`), 4000);
@@ -237,7 +239,7 @@ export function PluginDetailPage() {
         title={<span className="title-with-status">{data.name}{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}</span>}
         meta={
           <div className="detail-meta">
-            <StatusPill status={data.state} />
+            <InstallationStatus state={data.state} />
             <MetaChip mono value={data.id} />
             {activeVersion
               ? <MetaChip label={t('pluginDetail.effectiveVersion')} value={activeVersion} mono />
@@ -282,7 +284,10 @@ export function PluginDetailPage() {
               {/* A fact the API did not answer prints NO_DATA: a revision of 0 and a replica count
                   of 0 would be numbers the Kernel never said. */}
               <div className="kv-grid">
-                <KV label={t('pluginDetail.field.installation')}>{data.state}</KV>
+                {/* Was `{data.state}`, which printed INSTALLED in English next to a header chip
+                    that said "Installed" in the reader's language. The state word comes from the
+                    one derivation, so the header and this row cannot disagree. */}
+                <KV label={t('pluginDetail.field.installation')}><InstallationStatus state={data.state} /></KV>
                 <KV label={t('pluginDetail.field.activeVersion')}>{activeVersion || t('pluginDetail.none')}</KV>
                 <KV label={t('pluginDetail.field.activeRevision')}>{data.activeRevision ? data.activeRevision.generation : <NoData detail={t('ui.noData.detail')} />}</KV>
                 <KV label={t('field.desiredReplicas')}>{activeDeployment?.desiredReplicas ?? latestDeployment?.desiredReplicas ?? <NoData detail={t('ui.noData.detail')} />}</KV>
@@ -412,7 +417,7 @@ export function PluginDetailPage() {
           <div className="form-stack">
             <FormField label={t('table.version')} hint={t('pluginDetail.deployModal.versionHint')} htmlFor={versionFieldId}>
               <select id={versionFieldId} value={deployVersion} onChange={(event) => setDeployVersion(event.target.value)}>
-                {versions.map((version) => <option key={version.version} value={version.version}>{version.version} ({version.status})</option>)}
+                {versions.map((version) => <option key={version.version} value={version.version}>{version.version} ({statusText(version.status)})</option>)}
               </select>
             </FormField>
             <div className="form-grid">

@@ -74,6 +74,9 @@ jobs:
       - run: pnpm --filter @opsweave/data-integration-web typecheck
       # Fails on a missing message key or a key built from a template literal.
       - run: node scripts/check-i18n.mjs
+      # One status vocabulary: a wire code rendered as copy fails the build. It sits beside the
+      # i18n gate because both answer the same question - what may a message say?
+      - run: node scripts/check-status-vocabulary.mjs
       - run: pnpm --filter @opsweave/platform-web build
       - run: pnpm --filter @opsweave/hello-web build
       - run: pnpm --filter @opsweave/data-catalog-web build

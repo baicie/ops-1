@@ -20,6 +20,7 @@ import { cn } from '../lib/utils';
 import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { useStatusText } from '../components/app/status';
 
 const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
 
@@ -237,6 +238,7 @@ export function JobDetailPage() {
 
 export function JobSubmitPage() {
   const t = useT();
+  const statusText = useStatusText();
   const { pipelineId = '' } = useParams();
   const navigate = useNavigate();
   useDocumentTitle(t('page.runPipeline'));
@@ -270,7 +272,7 @@ export function JobSubmitPage() {
           <Select value={revision === null ? '' : String(revision)} onValueChange={(value) => setRevision(Number(value))}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {detail.revisions.map((item) => <SelectItem key={item.revision} value={String(item.revision)}>r{item.revision} · {item.status}</SelectItem>)}
+              {detail.revisions.map((item) => <SelectItem key={item.revision} value={String(item.revision)}>r{item.revision} · {statusText(item.status)}</SelectItem>)}
             </SelectContent>
           </Select>
         </label>

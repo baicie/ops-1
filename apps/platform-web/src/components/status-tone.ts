@@ -28,7 +28,17 @@ export type StatusState =
   | 'unknown'
   | 'notConfigured';
 
-export type StatusEntry = { tone: StatusTone; state: StatusState; labelKey: MessageKey };
+export type StatusEntry = {
+  tone: StatusTone;
+  state: StatusState;
+  labelKey: MessageKey;
+  /**
+   * Optional per-code glyph. Two codes can share a tone and must still not share a shape: a
+   * green tick used to mean both "the box is up" (CONFIRMED) and "we wrote the request down"
+   * (ACCEPTED), which is how "we accepted it" and "it actually happened" became one picture.
+   */
+  glyph?: string;
+};
 
 export const STATUS_MAP: Record<string, StatusEntry> = {
   READY: { tone: 'ok', state: 'ready', labelKey: 'status.ready' },
@@ -42,8 +52,10 @@ export const STATUS_MAP: Record<string, StatusEntry> = {
   SUCCEEDED: { tone: 'ok', state: 'ready', labelKey: 'status.succeeded' },
   COMPLETED: { tone: 'ok', state: 'ready', labelKey: 'status.completed' },
   // A request the kernel admitted: the positive counterpart of REJECTED, not a claim that the
-  // work finished. Audit rows print this verbatim today because the code was unmapped.
-  ACCEPTED: { tone: 'ok', state: 'ready', labelKey: 'status.accepted' },
+  // work finished. It is neutral and drawn as an inbox, never as a green tick - ACCEPTED and
+  // CONFIRMED measured identical (bg #e6f6ef / fg #0f8a5f) while meaning different things.
+  // `state` stays 'running' because admitted work is in flight, not done.
+  ACCEPTED: { tone: 'neutral', state: 'running', labelKey: 'status.accepted', glyph: 'inbox' },
   VERIFIED: { tone: 'ok', state: 'ready', labelKey: 'status.verified' },
   RUNNING: { tone: 'info', state: 'running', labelKey: 'status.running' },
   CLAIMED: { tone: 'info', state: 'running', labelKey: 'status.claimed' },
@@ -92,6 +104,14 @@ export function glyphForTone(tone: StatusTone): string {
   if (tone === 'danger') return 'warning';
   if (tone === 'neutral') return 'pause';
   return 'rotate';
+}
+
+/**
+ * The glyph an entry paints: its own when the code needs to differ from its tone-mates,
+ * otherwise the tone's glyph.
+ */
+export function glyphForEntry(entry: StatusEntry): string {
+  return entry.glyph ?? glyphForTone(entry.tone);
 }
 
 /** shadcn `Badge` variant for a tone. */

@@ -157,7 +157,7 @@ export function GovernancePage() {
           </Table>
         )}</section>
       </div>
-      <div className="info-grid"><div className="callout"><p>{t('governance.footnote.before')} <strong>UNKNOWN</strong>{t('governance.footnote.after')}</p></div></div>
+      <div className="info-grid"><div className="callout"><p>{t('governance.footnote.before')} <strong>{t('status.unknown')}</strong>{t('governance.footnote.after')}</p></div></div>
     </AsyncBoundary>
   </div>;
 }

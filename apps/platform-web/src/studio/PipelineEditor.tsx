@@ -7,6 +7,7 @@ import { ErrorState, Skeleton } from '../components/Ui';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, UnknownValue } from '../components/app/status-indicator';
+import { useStatusText } from '../components/app/status';
 import { useDocumentTitle } from '../hooks';
 import { useT, type MessageKey, type TranslateParams } from '../i18n';
 import { GraphCanvas } from './GraphCanvas';
@@ -47,6 +48,7 @@ export function PipelineEditorPage() {
   const [searchParams] = useSearchParams();
   const draftParam = searchParams.get('draft');
   const t = useT();
+  const statusText = useStatusText();
   useDocumentTitle(t('studio.pageTitle'));
 
   const [detail, setDetail] = useState<PipelineDetail | null>(null);
@@ -359,7 +361,7 @@ export function PipelineEditorPage() {
         <label className="preview-input"><span>{t('studio.preview.sampleLabel')}</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
         {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
         {preview && <>
-          <div className="preview-summary"><strong>{preview.status}</strong><span>{t('studio.preview.recordCount', { count: preview.processedRecords })}</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">{t('studio.preview.truncated')}</span>}</div>
+          <div className="preview-summary"><strong>{statusText(preview.status)}</strong><span>{t('studio.preview.recordCount', { count: preview.processedRecords })}</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">{t('studio.preview.truncated')}</span>}</div>
           {preview.errors.length > 0 && <ul className="validation-list">{preview.errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
           <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">{t('studio.preview.nodeFlow', { input: node.inputCount, output: node.outputCount, ms: node.durationMs })}</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
         </>}

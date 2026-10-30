@@ -3,7 +3,7 @@ import { Icon } from '../components/Icons';
 import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { TableCell } from '../components/ui/table';
-import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import { Status } from '../components/app/status';
 import { useT } from '../i18n';
 import { cn } from '../lib/utils';
 
@@ -14,20 +14,17 @@ import { cn } from '../lib/utils';
  * the same row menu and the same record layout instead of growing three copies that drift.
  */
 
-/** Replaces the legacy .status pill: a Badge, the same glyph, the same localized label. */
+/**
+ * Kept as the call-site name the pages already use; the rendering itself lives in
+ * `components/app/status` so there is exactly one status renderer in the shell.
+ *
+ * The old body printed an unmapped code verbatim ("protocol data, not copy"). That is how
+ * `STAGED` and `INSTALLED` reached the screen: every code the tone table did not know became
+ * an English wire token sitting beside codes that had been translated. An unknown code now
+ * reads "Unknown" with the code in a tooltip and in `data-status`.
+ */
 export function StatusPill({ status }: { status: string }) {
-  const t = useT();
-  const code = status?.toUpperCase();
-  const known = code ? STATUS_MAP[code] : undefined;
-  const tone = known?.tone ?? 'unknown';
-  // A code the shared mapping does not know is protocol data, not copy: render it verbatim.
-  const text = known ? t(known.labelKey) : status || t('status.unknown');
-  return (
-    <Badge variant={badgeVariantForTone(tone)} data-status={code || undefined} className={cn(!known && 'border-dashed')}>
-      <Icon name={glyphForTone(tone)} size={12} />
-      {text}
-    </Badge>
-  );
+  return <Status code={status} />;
 }
 
 // ONE breakpoint for the record layout. V5 shipped two: these constants stacked the table at
