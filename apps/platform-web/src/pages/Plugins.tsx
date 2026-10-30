@@ -15,6 +15,7 @@ import { shortDigest } from '../format';
 import { useT } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { cn } from '../lib/utils';
+import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
@@ -171,6 +172,13 @@ export function PluginsPage() {
 
   const summary = useMemo(() => summarize(plugins), [plugins]);
   const selectable = canOperate ? filtered.filter((plugin) => !plugin.isSystem).map((plugin) => plugin.id) : [];
+  const selectedPlugins = useMemo(() => plugins.filter((plugin) => selected.includes(plugin.id)), [plugins, selected]);
+  /**
+   * The batch bar applies the same guards as the row menu. Without them the bar offered a Stop for
+   * a plugin with no active revision - a button whose only possible outcome was a Kernel rejection.
+   */
+  const selectionStoppable = selectedPlugins.length > 0 && selectedPlugins.every((plugin) => !plugin.isSystem && plugin.state !== 'DISABLED' && Boolean(plugin.activeVersion));
+  const selectionStartable = selectedPlugins.length > 0 && selectedPlugins.every((plugin) => !plugin.isSystem && plugin.state === 'DISABLED');
   const allSelected = selectable.length > 0 && selectable.every((id) => selected.includes(id));
 
   async function copyId(id: string) {
@@ -196,18 +204,45 @@ export function PluginsPage() {
     });
   }
 
+  /**
+   * What each verb promises, read off the resource the verb changes - never off its response body.
+   *
+   * `enable` promises a restart request, not INSTALLED: the Kernel writes STAGED on that path and
+   * no route in this build restores INSTALLED, so expecting INSTALLED here would report a working
+   * request as a failure. The copy next to the button says the same thing in one sentence.
+   */
+  function expectation(verb: Verb, targetVersion?: string) {
+    return (detail: PluginDetail): boolean => {
+      if (verb === 'disable') return detail.state === 'DISABLED';
+      if (verb === 'enable') return detail.state !== 'DISABLED';
+      if (verb === 'rollback') return detail.activeVersion === targetVersion;
+      return detail.state === 'UNINSTALLED';
+    };
+  }
+
+  /** One verb, verified: the write, then a fresh GET that has to show the change. */
+  function verified(verb: Verb, id: string, targetVersion?: string) {
+    return verifyAfterWrite<PluginDetail>({
+      write: () => call(verb, id, targetVersion),
+      read: () => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`),
+      expected: expectation(verb, targetVersion),
+      describe: (detail) => detail.state || 'NO_DATA',
+      absentIsExpected: verb === 'uninstall',
+    });
+  }
+
   async function runPending(): Promise<void> {
     if (!pending) return;
     const { verb, ids, targetVersion } = pending;
-    const failed: string[] = [];
+    const failures: Array<{ id: string; error: Error }> = [];
+    const states: string[] = [];
     // Sequential on purpose: the Kernel serialises activations per plugin, and a parallel burst
     // would make the first failure indistinguishable from the rest.
     for (const id of ids) {
-      try {
-        await call(verb, id, targetVersion);
-      } catch {
-        failed.push(id);
-      }
+      const result = await verified(verb, id, targetVersion);
+      const failure = verifiedWriteFailure(result, t);
+      if (failure) failures.push({ id, error: failure });
+      else states.push(result.state);
     }
     for (const id of ids) {
       requested.current.delete(`${id}@${plugins.find((plugin) => plugin.id === id)?.latestVersion ?? ''}`);
@@ -216,11 +251,14 @@ export function PluginsPage() {
     setFactsEpoch((value) => value + 1);
     setSelected([]);
     await reload();
-    if (failed.length > 0) {
-      toast.push({ tone: 'danger', title: t('plugins.verb.partial', { failed: failed.length, total: ids.length }), detail: failed.join(', ') });
-    } else {
-      toast.push({ tone: 'ok', title: t(VERB_DONE[verb], { count: ids.length }) });
+    // A 200 that did not change the state is a failure. Nothing landed -> the dialog stays open
+    // and prints the state that is really there; a partial batch names the ids that failed.
+    if (failures.length === ids.length) throw failures[0].error;
+    if (failures.length > 0) {
+      toast.push({ tone: 'danger', title: t('plugins.verb.partial', { failed: failures.length, total: ids.length }), detail: failures.map((item) => item.id).join(', ') });
+      return;
     }
+    toast.push({ tone: 'ok', title: t(VERB_DONE[verb], { count: ids.length }), detail: t('verify.state', { state: states.join(', ') }) });
   }
 
   function openVerb(verb: Verb, plugin: PluginSummary, targetVersion?: string) {
@@ -242,6 +280,8 @@ export function PluginsPage() {
       id: 'disable',
       label: t('action.disable'),
       icon: 'stop',
+      // Destructive and, in this build, not restorable from the UI: the row paints it as such.
+      danger: true,
       divider: true,
       disabled: system || disabled || !plugin.activeVersion,
       disabledReason: system ? t('plugins.verb.system') : disabled ? t('plugins.verb.alreadyDisabled') : t('plugins.verb.notActivated'),
@@ -333,8 +373,20 @@ export function PluginsPage() {
         {canOperate && selected.length > 0 ? (
           <div className="batch-bar" data-testid="plugins-batch" role="region" aria-label={t('plugins.batch.aria')}>
             <span className="batch-count">{t('plugins.batch.selected', { count: selected.length })}</span>
-            <Button variant="secondary" size="sm" onClick={() => setPending({ verb: 'disable', ids: selected, name: '' })}><Icon name="stop" size={14} /> {t('action.disable')}</Button>
-            <Button variant="secondary" size="sm" onClick={() => setPending({ verb: 'enable', ids: selected, name: '' })}><Icon name="play" size={14} /> {t('action.enable')}</Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={!selectionStoppable}
+              title={selectionStoppable ? undefined : t('plugins.verb.notActivated')}
+              onClick={() => setPending({ verb: 'disable', ids: selected, name: '' })}
+            ><Icon name="stop" size={14} /> {t('action.disable')}</Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!selectionStartable}
+              title={selectionStartable ? undefined : t('plugins.verb.notDisabled')}
+              onClick={() => setPending({ verb: 'enable', ids: selected, name: '' })}
+            ><Icon name="play" size={14} /> {t('action.enable')}</Button>
             <button type="button" className="text-link" onClick={() => setSelected([])}>{t('plugins.batch.clear')}</button>
           </div>
         ) : null}

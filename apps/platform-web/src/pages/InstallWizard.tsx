@@ -12,6 +12,7 @@ import { PageHeader } from '../components/app/page-header';
 import { NoData, UnknownValue } from '../components/app/status-indicator';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
+import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describePlacementReason } from '../placement-reason';
 import { StatusPill } from './table-kit';
 
@@ -106,16 +107,27 @@ export function InstallWizardPage() {
     }
   }
 
+  /**
+   * Activation is the only route that writes INSTALLED, so this success is the one most worth
+   * verifying: the plugin has to come back reading INSTALLED at this version, or the wizard says so.
+   */
   async function activate() {
     if (!pkg || !deployment) return;
     setBusy(true);
     try {
       const detail = await api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}`);
-      await api.post(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/activations`, {
-        version: pkg.version,
-        expectedRevision: detail.activeRevision?.generation ?? 0,
+      const result = await verifyAfterWrite<PluginDetail>({
+        write: () => api.post(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/activations`, {
+          version: pkg.version,
+          expectedRevision: detail.activeRevision?.generation ?? 0,
+        }),
+        read: () => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}`),
+        expected: (after) => after.state === 'INSTALLED' && after.activeVersion === pkg.version,
+        describe: (after) => after.state || 'NO_DATA',
       });
-      toast.push({ tone: 'ok', title: t('install.toast.activated', { pluginId: pkg.pluginId }), detail: t('install.toast.activated.detail', { version: pkg.version }) });
+      const failure = verifiedWriteFailure(result, t);
+      if (failure) throw failure;
+      toast.push({ tone: 'ok', title: t('install.toast.activated', { pluginId: pkg.pluginId }), detail: t('install.toast.activated.detail', { version: pkg.version }) + ' ' + verifiedWriteDetail(result, t) });
       navigate(`/admin/plugins/${pkg.pluginId}`);
     } catch (cause) {
       const apiError = cause as ApiError;

@@ -18,6 +18,7 @@ import { NoData, StatusIndicator } from '../components/app/status-indicator';
 import { formatDate, formatBytes, shortDigest } from '../format';
 import { useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
+import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
@@ -111,16 +112,34 @@ export function PluginDetailPage() {
   if (!data) return null;
 
   /**
-   * Performs one write and re-reads the detail. A rejection is deliberately not swallowed here:
-   * ConfirmAction keeps its dialog open, prints the failure and offers the same button again, so
-   * a refused uninstall or rollback is answered where it was asked instead of in a toast.
+   * Performs one write, then re-reads the detail and believes only the re-read
+   * (lib/verify-after-write.ts). A rejection is deliberately not swallowed here: ConfirmAction
+   * keeps its dialog open, prints the failure and offers the same button again - and a write the
+   * Kernel accepted that left the state unchanged is reported as a failure with the actual state,
+   * never as a success.
    */
-  async function perform(label: string, action: () => Promise<unknown>, success: string) {
-    setBusy(label);
+  async function perform(options: {
+    label: string;
+    write: () => Promise<unknown>;
+    /** True only when the re-read detail shows what the verb promised. */
+    expect: (detail: PluginDetail) => boolean;
+    success: string;
+    /** Uninstall succeeds by the resource going away; a 404 on re-read proves it. */
+    absentIsExpected?: boolean;
+  }) {
+    setBusy(options.label);
     try {
-      await action();
-      toast.push({ tone: 'ok', title: success });
+      const result = await verifyAfterWrite<PluginDetail>({
+        write: options.write,
+        read: () => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`),
+        expected: options.expect,
+        describe: (detail) => detail.state || 'NO_DATA',
+        absentIsExpected: options.absentIsExpected,
+      });
+      const failure = verifiedWriteFailure(result, t);
       await reload();
+      if (failure) throw failure;
+      toast.push({ tone: 'ok', title: options.success, detail: verifiedWriteDetail(result, t) });
     } finally {
       setBusy(null);
     }
@@ -128,12 +147,18 @@ export function PluginDetailPage() {
 
   async function deploy() {
     try {
-      await perform('deploy', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/deployments`, {
-        version: deployVersion,
-        desiredReplicas: replicas,
-        nodeSelector: Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2)),
-        maxInstancesPerNode: 1,
-      }), t('pluginDetail.toast.deploymentRequested', { version: deployVersion }));
+      await perform({
+        label: 'deploy',
+        write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/deployments`, {
+          version: deployVersion,
+          desiredReplicas: replicas,
+          nodeSelector: Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2)),
+          maxInstancesPerNode: 1,
+        }),
+        // A deployment exists for this version only after the create write landed.
+        expect: (detail) => detail.deployments.some((item) => item.version === deployVersion),
+        success: t('pluginDetail.toast.deploymentRequested', { version: deployVersion }),
+      });
       setDeployOpen(false);
       setTab('deployments');
     } catch (cause) {
@@ -143,30 +168,57 @@ export function PluginDetailPage() {
   }
 
   async function activate(version: string) {
-    await perform('activate', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/activations`, {
-      version,
-      expectedRevision: data?.activeRevision?.generation ?? 0,
-    }), t('pluginDetail.toast.activated', { version }));
+    await perform({
+      label: 'activate',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/activations`, {
+        version,
+        expectedRevision: data?.activeRevision?.generation ?? 0,
+      }),
+      expect: (detail) => detail.activeVersion === version,
+      success: t('pluginDetail.toast.activated', { version }),
+    });
   }
 
   async function disable() {
-    await perform('disable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/disable`, { reason: 'Disabled from plugin detail' }), t('pluginDetail.toast.disabled'));
+    await perform({
+      label: 'disable',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/disable`, { reason: 'Disabled from plugin detail' }),
+      expect: (detail) => detail.state === 'DISABLED',
+      success: t('pluginDetail.toast.disabled'),
+    });
   }
 
   async function enable() {
-    await perform('enable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/enable`, {}), t('pluginDetail.toast.redeploymentRequested'));
+    await perform({
+      label: 'enable',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/enable`, {}),
+      // Start is a restart request: the Kernel leaves DISABLED behind and stops at STAGED.
+      expect: (detail) => detail.state !== 'DISABLED',
+      success: t('pluginDetail.toast.redeploymentRequested'),
+    });
   }
 
   async function uninstall() {
-    await perform('uninstall', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/uninstall`, {}), t('pluginDetail.toast.uninstalled'));
+    await perform({
+      label: 'uninstall',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/uninstall`, {}),
+      expect: (detail) => detail.state === 'UNINSTALLED',
+      success: t('pluginDetail.toast.uninstalled'),
+      absentIsExpected: true,
+    });
   }
 
   async function rollback() {
-    await perform('rollback', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/rollback`, {
-      targetVersion: rollbackVersion,
-      expectedRevision: data?.activeRevision?.generation ?? 0,
-      desiredReplicas: 2,
-    }), t('pluginDetail.toast.rollbackRequested', { version: rollbackVersion }));
+    await perform({
+      label: 'rollback',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/rollback`, {
+        targetVersion: rollbackVersion,
+        expectedRevision: data?.activeRevision?.generation ?? 0,
+        desiredReplicas: 2,
+      }),
+      expect: (detail) => detail.activeVersion === rollbackVersion,
+      success: t('pluginDetail.toast.rollbackRequested', { version: rollbackVersion }),
+    });
   }
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = [

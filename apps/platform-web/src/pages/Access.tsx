@@ -19,6 +19,7 @@ import { NoData } from '../components/app/status-indicator';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
+import { ABSENT_STATE, verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type ManagedUser = { id: string; email: string; displayName: string; role: string; disabled: boolean; createdAt: string };
@@ -121,11 +122,22 @@ export function AccessPage() {
     } finally { setBusy(false); }
   }
 
+  /** Revoking trust is verified by what the publisher list says next, not by the DELETE status. */
   async function revokePublisher() {
     if (!revoke) return;
-    await api.del(`/api/v1/publishers/${encodeURIComponent(revoke)}`);
-    toast.push({ tone: 'ok', title: t('access.toast.publisherRevoked'), detail: t('access.toast.publisherRevoked.detail') });
+    const publisherId = revoke;
+    const result = await verifyAfterWrite<Publisher[]>({
+      write: () => api.del(`/api/v1/publishers/${encodeURIComponent(publisherId)}`),
+      read: () => api.get<Publisher[]>('/api/v1/publishers'),
+      expected: (publishers) => !publishers.some((item) => item.publisherId === publisherId && item.trustState === 'TRUSTED'),
+      describe: (publishers) => publishers.find((item) => item.publisherId === publisherId)?.trustState || ABSENT_STATE,
+      absentIsExpected: true,
+    });
+    const failure = verifiedWriteFailure(result, t);
     await reload();
+    // ConfirmAction keeps the dialog (and its retry) open when the trust state did not move.
+    if (failure) throw failure;
+    toast.push({ tone: 'ok', title: t('access.toast.publisherRevoked'), detail: t('access.toast.publisherRevoked.detail') + ' ' + verifiedWriteDetail(result, t) });
   }
 
   return (
