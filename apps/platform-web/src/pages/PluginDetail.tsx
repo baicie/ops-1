@@ -34,6 +34,21 @@ function FormField({ label, hint, htmlFor, children }: { label: string; hint?: s
   );
 }
 
+/**
+ * One recipe for every header fact: an optional 13px icon, an optional 11px muted label, and
+ * the 13px value. V4 rendered these five siblings five different ways (mono span, label plus
+ * strong, icon plus text, ...), so a reader had to decode the shape before the fact.
+ */
+function MetaChip({ icon, label, value, mono = false }: { icon?: string; label?: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <span className="meta-chip">
+      {icon ? <Icon name={icon} size={13} /> : null}
+      {label ? <span className="meta-chip-label">{label}</span> : null}
+      <strong className={mono ? 'meta-chip-value mono' : 'meta-chip-value'}>{value}</strong>
+    </span>
+  );
+}
+
 export function PluginDetailPage() {
   const t = useT();
   const { id = '' } = useParams();
@@ -91,8 +106,8 @@ export function PluginDetailPage() {
 
   // The header keeps its description in the loading and error states too: the page still is what
   // it says it is while the answer is missing or refused.
-  if (loading && !data) return <><PageHeader title={t('table.plugin')} description={t('pluginDetail.description')} /><Skeleton rows={6} /></>;
-  if (error) return <><PageHeader title={t('table.plugin')} description={t('pluginDetail.description')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
+  if (loading && !data) return <><PageHeader title={t('table.plugin')} /><Skeleton rows={6} /></>;
+  if (error) return <><PageHeader title={t('table.plugin')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
   if (!data) return null;
 
   /**
@@ -168,19 +183,18 @@ export function PluginDetailPage() {
       <PageHeader
         eyebrow={(data.publisher || t('pluginDetail.unknownPublisher')) + ' · ' + (data.isSystem ? t('pluginDetail.systemPlugin') : t('pluginDetail.trustedPackage'))}
         title={<span className="title-with-status">{data.name}{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}</span>}
-        description={t('pluginDetail.description')}
         meta={
           <div className="detail-meta">
             <StatusPill status={data.state} />
-            <span className="meta-chip mono">{data.id}</span>
+            <MetaChip mono value={data.id} />
             {activeVersion
-              ? <span className="meta-chip">{t('pluginDetail.effectiveVersion')} <strong className="mono">{activeVersion}</strong></span>
+              ? <MetaChip label={t('pluginDetail.effectiveVersion')} value={activeVersion} mono />
               : <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />}
             {data.activeRevision
-              ? <span className="meta-chip"><Icon name="activity" size={13} /> {t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })}</span>
+              ? <MetaChip icon="activity" value={t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })} />
               : <NoData detail={t('ui.noData.detail')} />}
-            {data.activeRevision?.activatedAt ? <span className="meta-chip">{t('pluginDetail.meta.activated')} <TimeAgo value={data.activeRevision.activatedAt} /></span> : null}
-            {data.isSystem ? <span className="meta-chip"><Icon name="access" size={13} /> {t('pluginDetail.hostOwnedRecovery')}</span> : null}
+            {data.activeRevision?.activatedAt ? <MetaChip label={t('pluginDetail.meta.activated')} value={<TimeAgo value={data.activeRevision.activatedAt} />} /> : null}
+            {data.isSystem ? <MetaChip icon="access" value={t('pluginDetail.hostOwnedRecovery')} /> : null}
           </div>
         }
         actions={<>
@@ -210,7 +224,7 @@ export function PluginDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-[18px] flex flex-col gap-[18px]">
-          <div className="summary-grid">
+          <div className="summary-grid plugin-detail-grid">
             <section className="panel">
               <div className="panel-head"><div><h2>{t('pluginDetail.effectiveState.title')}</h2><p>{t('pluginDetail.effectiveState.description')}</p></div></div>
               {/* A fact the API did not answer prints NO_DATA: a revision of 0 and a replica count
@@ -220,7 +234,7 @@ export function PluginDetailPage() {
                 <KV label={t('pluginDetail.field.activeVersion')}>{activeVersion || t('pluginDetail.none')}</KV>
                 <KV label={t('pluginDetail.field.activeRevision')}>{data.activeRevision ? data.activeRevision.generation : <NoData detail={t('ui.noData.detail')} />}</KV>
                 <KV label={t('field.desiredReplicas')}>{activeDeployment?.desiredReplicas ?? latestDeployment?.desiredReplicas ?? <NoData detail={t('ui.noData.detail')} />}</KV>
-                <KV label="READY">{activeDeployment ? `${activeDeployment.readyInstances}/${activeDeployment.totalInstances}` : t('pluginDetail.noActiveDeployment')}</KV>
+                <KV label={t('common.readyInstances')}>{activeDeployment ? `${activeDeployment.readyInstances}/${activeDeployment.totalInstances}` : t('pluginDetail.noActiveDeployment')}</KV>
                 <KV label={t('pluginDetail.field.deploymentStatus')}>{activeDeployment ? <StatusPill status={activeDeployment.status} /> : <NoData detail={t('pluginDetail.noActiveDeployment')} />}</KV>
               </div>
               {activeDeployment && <Progress value={activeDeployment.readyInstances} max={Math.max(activeDeployment.desiredReplicas, 1)} label={t('pluginDetail.readyReplicas')} />}
@@ -231,18 +245,22 @@ export function PluginDetailPage() {
                 <div className="kv-grid">
                   <KV label={t('table.publisher')}>{data.publisher || <NoData detail={t('ui.noData.detail')} />}</KV>
                   <KV label={t('table.signature')}><StatusPill status={trustVersion.signatureState} /></KV>
-                  <KV label={t('pluginDetail.field.image')} mono>{trustVersion.imageRef ? shortDigest(trustVersion.imageRef, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.imageRef} /></KV>
-                  <KV label={t('pluginDetail.field.bundle')} mono>{trustVersion.bundleDigest ? shortDigest(trustVersion.bundleDigest, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.bundleDigest} /></KV>
-                  <KV label={t('pluginDetail.field.artifact')} mono>{trustVersion.artifactDigest ? shortDigest(trustVersion.artifactDigest, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.artifactDigest} /></KV>
+                  {/* A hash and its copy control are one row: the hash truncates, the control
+                      never moves, and neither wraps onto a second line. */}
+                  <KV label={t('pluginDetail.field.image')} mono><span className="kv-hash">{trustVersion.imageRef ? shortDigest(trustVersion.imageRef, 22) : <NoData detail={t('ui.noData.detail')} />}</span> <CopyButton value={trustVersion.imageRef} /></KV>
+                  <KV label={t('pluginDetail.field.bundle')} mono><span className="kv-hash">{trustVersion.bundleDigest ? shortDigest(trustVersion.bundleDigest, 22) : <NoData detail={t('ui.noData.detail')} />}</span> <CopyButton value={trustVersion.bundleDigest} /></KV>
+                  <KV label={t('pluginDetail.field.artifact')} mono><span className="kv-hash">{trustVersion.artifactDigest ? shortDigest(trustVersion.artifactDigest, 22) : <NoData detail={t('ui.noData.detail')} />}</span> <CopyButton value={trustVersion.artifactDigest} /></KV>
                   <KV label={t('table.published')}>{trustVersion.createdAt ? formatDate(trustVersion.createdAt) : <NoData detail={t('ui.noData.detail')} />}</KV>
                 </div>
               ) : <EmptyState icon="file" title={t('pluginDetail.empty.systemPlugin.title')} description={t('pluginDetail.empty.systemPlugin.description')} />}
             </section>
+            <section className="panel">
+              <div className="panel-head"><div><h2>{t('table.instances')}</h2></div>{activeDeployment && <Link className="text-link" data-testid="plugin-detail-deployments-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
+              <div className="instance-compact">
+                <InstanceTable instances={activeDeployment?.instances || []} />
+              </div>
+            </section>
           </div>
-          <section className="panel">
-            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" data-testid="plugin-detail-deployments-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
-            <InstanceTable instances={activeDeployment?.instances || []} />
-          </section>
         </TabsContent>
 
         <TabsContent value="versions" className="mt-[18px]">

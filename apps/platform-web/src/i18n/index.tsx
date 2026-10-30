@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { setActiveLocale } from '../format';
 import en from './catalogs/en.json';
 import zhCN from './catalogs/zh-CN.json';
 
@@ -98,6 +99,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyDocumentLocale(locale);
+    // Date formatting lives outside React (format.ts); one call keeps it on the same locale
+    // as the copy around it instead of the browser's default.
+    setActiveLocale(locale);
     try {
       window.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
     } catch {

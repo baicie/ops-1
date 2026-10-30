@@ -122,7 +122,7 @@ export function PluginsPage() {
             <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('plugins.search.placeholder')} aria-label={t('plugins.search.aria')} className="pl-[33px]" />
           </div>
-          <div className="ow-filter-scroll">
+          <div className="ow-filter-scroll" data-testid="plugins-filter">
             <Tabs value={state} onValueChange={setState}>
               <TabsList aria-label={t('plugins.filter.aria')}>
                 {['ALL', 'INSTALLED', 'STAGED', 'DISABLED', 'AVAILABLE'].map((value) => (
@@ -169,37 +169,47 @@ export function PluginsPage() {
                         </div>
                       </StackCell>
                       <StackCell label={t('table.version')}>
-                        <div className="ow-cell-stack">
-                          <span className="mono">{plugin.activeVersion || plugin.latestVersion || null}{!(plugin.activeVersion || plugin.latestVersion) && <NoData detail={t('ui.noData.detail')} />}</span>
-                          {upgrade ? <span className="ow-cell-note">{t('plugins.upgrade.available', { version: plugin.latestVersion ?? '' })}</span> : null}
+                        <div className="ow-cell">
+                          <span className="mono ow-cell-value">{plugin.activeVersion || plugin.latestVersion || null}{!(plugin.activeVersion || plugin.latestVersion) && <NoData detail={t('ui.noData.detail')} />}</span>
+                          {upgrade ? <span className="ow-cell-meta">{t('plugins.upgrade.available', { version: plugin.latestVersion ?? '' })}</span> : null}
                         </div>
                       </StackCell>
-                      <StackCell label={t('table.publisher')} className="max-[1200px]:hidden">{plugin.publisher ? <span className="text-muted-foreground">{plugin.publisher}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                      <StackCell label={t('table.publisher')} className="max-[1200px]:hidden">
+                        <div className="ow-cell">
+                          <span className="ow-cell-value">{plugin.publisher ? <span className="text-muted-foreground">{plugin.publisher}</span> : <NoData detail={t('ui.noData.detail')} />}</span>
+                        </div>
+                      </StackCell>
                       <StackCell label={t('table.deployment')}>
-                        {fact?.deploymentStatus ? (
-                          <div className="ow-cell-stack">
-                            <StatusIndicator state={indicatorStateForCode(fact.deploymentStatus)} label={indicatorStateForCode(fact.deploymentStatus) === 'unknown' ? fact.deploymentStatus : undefined} />
-                            {fact.deploymentAt ? <TimeAgo value={fact.deploymentAt} /> : null}
-                          </div>
-                        ) : <NoData detail={t('plugins.health.none')} />}
+                        <div className="ow-cell">
+                          {fact?.deploymentStatus ? (
+                            <>
+                              <StatusIndicator state={indicatorStateForCode(fact.deploymentStatus)} label={indicatorStateForCode(fact.deploymentStatus) === 'unknown' ? fact.deploymentStatus : undefined} />
+                              {fact.deploymentAt ? <TimeAgo value={fact.deploymentAt} /> : null}
+                            </>
+                          ) : <NoData detail={t('plugins.health.none')} />}
+                        </div>
                       </StackCell>
                       <StackCell label={t('table.readyReplicas')}>
-                        {!fact || fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
-                          <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : undefined}>{plugin.readyInstances}/{plugin.totalInstances}</span>
-                        )}
+                        <div className="ow-cell">
+                          <span className="ow-cell-value">{!fact || fact.deploymentCount === 0 ? <NoData detail={t('plugins.replicas.none')} /> : (
+                            <span className={plugin.readyInstances < plugin.totalInstances ? 'text-warning' : undefined}>{plugin.readyInstances}/{plugin.totalInstances}</span>
+                          )}</span>
+                        </div>
                       </StackCell>
                       <StackCell label={t('table.digest')}>
-                        <div className="ow-cell-stack">
-                          {fact?.digest ? <span className="mono ow-cell-meta" title={fact.digest}>{shortDigest(fact.digest)}</span> : <NoData detail={t('plugins.table.digestHint')} />}
+                        <div className="ow-cell">
+                          {fact?.digest ? <span className="mono ow-cell-value" title={fact.digest}>{shortDigest(fact.digest)}</span> : <NoData detail={t('plugins.table.digestHint')} />}
                           {fact?.trust ? <StatusIndicator state={indicatorStateForCode(fact.trust)} label={t('status.verified')} /> : null}
                         </div>
                       </StackCell>
                       <StackCell label={t('table.activation')} className="max-[1200px]:hidden">
-                        {fact?.generation !== null && fact?.generation !== undefined ? (
-                          <span className="mono ow-cell-meta">{t('plugins.table.generation', { generation: fact.generation })}</span>
-                        ) : (
-                          <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />
-                        )}
+                        <div className="ow-cell">
+                          {fact?.generation !== null && fact?.generation !== undefined ? (
+                            <span className="mono ow-cell-value">{t('plugins.table.generation', { generation: fact.generation })}</span>
+                          ) : (
+                            <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />
+                          )}
+                        </div>
                       </StackCell>
                       <TableCell className="w-8 text-right text-muted-foreground max-[760px]:w-full max-[760px]:border-0 max-[760px]:px-3.5 max-[760px]:pt-0">
                         <DropdownMenu>
@@ -224,9 +234,6 @@ export function PluginsPage() {
           </section>
         )}
       </AsyncBoundary>
-      <div className="page-footnotes">
-        <p><Icon name="info" size={13} /> {t('plugins.footnote')}</p>
-      </div>
     </div>
   );
 }

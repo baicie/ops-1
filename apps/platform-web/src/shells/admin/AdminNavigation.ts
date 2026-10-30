@@ -62,10 +62,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { id: 'pipelines', to: '/admin/pipelines', labelKey: 'nav.pipelines', icon: 'pipeline', group: 'runtime', surface: 'admin' },
   { id: 'jobs', to: '/admin/jobs', labelKey: 'nav.jobs', icon: 'clock', group: 'runtime', surface: 'admin' },
   { id: 'governance', to: '/admin/governance', labelKey: 'nav.governance', icon: 'shield', group: 'runtime', surface: 'admin' },
-  { id: 'access', to: '/admin/access', labelKey: 'nav.access', icon: 'access', group: 'security', surface: 'admin' },
+  { id: 'access', to: '/admin/access', labelKey: 'nav.access', icon: 'users', group: 'security', surface: 'admin' },
   { id: 'activity', to: '/admin/activity', labelKey: 'nav.activity', icon: 'activity', group: 'security', surface: 'admin' },
   { id: 'settings', to: '/admin/settings', labelKey: 'nav.settings', icon: 'settings', group: 'security', surface: 'admin', end: true },
-  { id: 'opsCenter', to: '/admin/ops-center', labelKey: 'nav.opsCenter', icon: 'ops', group: 'security', surface: 'admin' },
+  { id: 'opsCenter', to: '/admin/ops-center', labelKey: 'nav.opsCenter', icon: 'radar', group: 'security', surface: 'admin' },
 ];
 
 /** Document title for the current route; unchanged mapping from the pre-G02 Layout. */

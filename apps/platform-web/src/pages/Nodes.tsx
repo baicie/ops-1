@@ -228,12 +228,6 @@ export function NodesPage() {
           </Table>
         </section>
       </AsyncBoundary>
-      {/* Two sentences that used to be two bordered callouts side by side: they explain a
-          column, they are not content, so they read as one muted footnote block. */}
-      <div className="page-footnotes">
-        <p><Icon name="access" size={13} /> {t('nodes.credentialsNote')}</p>
-        <p><Icon name="info" size={13} /> {t('nodes.staleNote.before')} <strong>UNREACHABLE</strong>{t('nodes.staleNote.after')}</p>
-      </div>
 
       <Dialog open={joinOpen} onOpenChange={(open) => { setJoinOpen(open); if (!open) { setToken(null); setShowToken(false); } }}>
         <DialogContent closeLabel={t('aria.closeDialog')} className="max-w-[860px]">

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Icon } from './Icons';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n';
 
@@ -33,17 +32,17 @@ const READINESS_LABEL_KEYS: Record<ReadinessCode, MessageKey> = {
  * failing version endpoint can never trigger the global 401/unauthorized path
  * or throw into the shell.
  *
- * V4: this used to be a permanent four-row table in the rail - environment, commit,
- * deployed-at and status, each 11px, with five hairlines inside a 240px column. An
- * administrator checks it occasionally; nobody reads it while working. It is now one line
- * (readiness dot, environment, commit) and the exact deploy time opens on request, so the
- * rail gives that space back to navigation without losing the fact.
+ * V5 reversed one V4 decision. V4 collapsed four labelled rows into `● STAGING · bdb93b0`,
+ * which saved 40px of rail and destroyed the readable anchor of the served-SHA self-proof:
+ * a reader could no longer tell that `bdb93b0` was a commit, and the two staging smoke
+ * checks that certify a deployment started failing on copy alone. The fields are labelled
+ * again on three 16px rows instead of five - compact, quiet, legible without a click. The
+ * interpunct separator is gone, so nothing can hang at the end of a wrapped line.
  */
 export function VersionBadge() {
   const { t, formatDateTime } = useI18n();
   const [identity, setIdentity] = useState<BuildIdentity | null>(null);
   const [status, setStatus] = useState<ReadinessCode>('UNKNOWN');
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,31 +85,36 @@ export function VersionBadge() {
 
   return (
     <footer className="sidebar-meta-block" aria-label="Deployment version">
-      <button
-        type="button"
-        className="sidebar-meta"
-        aria-expanded={open}
-        onClick={() => setOpen((previous) => !previous)}
-        data-testid="version-badge-toggle"
-      >
-        <span className="sidebar-meta-dot" data-state={status} aria-hidden="true" />
-        <span data-version-field="environment"><strong className="sidebar-meta-env">{environment}</strong></span>
-        <span aria-hidden="true">·</span>
-        <span data-version-field="commit" title={identity?.commitSha ?? undefined}><strong className="sidebar-meta-sha">{commit}</strong></span>
-        <Icon name="down" size={12} className="sidebar-meta-chevron" />
-      </button>
-      {open ? (
-        <dl className="sidebar-meta-details">
-          <div className="sidebar-meta-row">
-            <dt>{t('badge.status')}</dt>
-            <dd data-version-field="status"><strong>{t(READINESS_LABEL_KEYS[status])}</strong></dd>
-          </div>
-          <div className="sidebar-meta-row">
-            <dt>{t('badge.deployedAt')}</dt>
-            <dd data-version-field="deployedAt"><strong>{deployedAt}</strong></dd>
-          </div>
-        </dl>
-      ) : null}
+      <div className="sidebar-meta-rows">
+        {/* Row 1 and row 3 own the full 240px rail; only the two short pairs share row 2.
+            At two pairs per row on every line, "Environment STAGING" overflowed by 1px and
+            rendered "STAGI..." - a truncated value is not a self-proof. */}
+        <div className="sidebar-meta-row">
+          <span className="sidebar-meta-field" data-version-field="environment">
+            <span className="sidebar-meta-key">{t('badge.environment')}</span>
+            <strong className="sidebar-meta-env">{environment}</strong>
+          </span>
+        </div>
+        <div className="sidebar-meta-row">
+          <span className="sidebar-meta-field" data-version-field="commit">
+            <span className="sidebar-meta-key">{t('badge.commit')}</span>
+            <strong className="sidebar-meta-sha" title={identity?.commitSha ?? undefined}>{commit}</strong>
+          </span>
+          <span className="sidebar-meta-field" data-version-field="status">
+            <span className="sidebar-meta-key">{t('badge.status')}</span>
+            <strong className="sidebar-meta-readiness">
+              <span className="sidebar-meta-dot" data-state={status} aria-hidden="true" />
+              {t(READINESS_LABEL_KEYS[status])}
+            </strong>
+          </span>
+        </div>
+        <div className="sidebar-meta-row">
+          <span className="sidebar-meta-field" data-version-field="deployedAt">
+            <span className="sidebar-meta-key">{t('badge.deployedAt')}</span>
+            <strong className="sidebar-meta-time">{deployedAt}</strong>
+          </span>
+        </div>
+      </div>
     </footer>
   );
 }

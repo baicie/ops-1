@@ -1,0 +1,278 @@
+[
+  {
+    "shot": "state-error-1440.png",
+    "bytes": 65594
+  },
+  {
+    "shot": "state-loading-1440.png",
+    "bytes": 111533
+  },
+  {
+    "measure": "empty: rail fields",
+    "value": [
+      {
+        "field": "environment",
+        "text": "STAGING",
+        "scroll": 53,
+        "client": 53
+      },
+      {
+        "field": "commit",
+        "text": "df792a7",
+        "scroll": 46,
+        "client": 46
+      },
+      {
+        "field": "status",
+        "text": "READY",
+        "scroll": 48,
+        "client": 48
+      },
+      {
+        "field": "deployedAt",
+        "text": "2026-10-30 05:50 UTC",
+        "scroll": 132,
+        "client": 132
+      }
+    ]
+  },
+  {
+    "measure": "empty: verdict",
+    "value": "NOT_CONFIGURED"
+  },
+  {
+    "measure": "empty: metric[0]",
+    "value": "—"
+  },
+  {
+    "shot": "state-empty-1440.png",
+    "bytes": 144763
+  },
+  {
+    "shot": "state-forbidden-1440.png",
+    "bytes": 72832
+  },
+  {
+    "measure": "dialog: overlay",
+    "value": "rgba(0, 0, 0, 0.6)"
+  },
+  {
+    "shot": "state-dialog-1440.png",
+    "bytes": 126487
+  },
+  {
+    "shot": "state-form-error-1440.png",
+    "bytes": 63175
+  },
+  {
+    "measure": "drawer: scrim",
+    "value": {
+      "colour": "rgba(0, 0, 0, 0.4)",
+      "box": {
+        "x": 0,
+        "y": 0,
+        "width": 375,
+        "height": 844
+      }
+    }
+  },
+  {
+    "shot": "state-drawer-390.png",
+    "bytes": 48305
+  },
+  {
+    "measure": "command: desktop items",
+    "value": 10
+  },
+  {
+    "measure": "command: desktop top",
+    "value": 180
+  },
+  {
+    "shot": "state-command-1440.png",
+    "bytes": 166614
+  },
+  {
+    "measure": "command: mobile items",
+    "value": 10
+  },
+  {
+    "shot": "state-sheet-390.png",
+    "bytes": 61351
+  },
+  {
+    "measure": "hover: nav background",
+    "value": "rgb(240, 242, 245)"
+  },
+  {
+    "shot": "state-hover-1440.png",
+    "bytes": 126983
+  },
+  {
+    "measure": "focus: ring",
+    "value": {
+      "tag": "A",
+      "cls": "skip-link",
+      "width": "2px",
+      "offset": "2px",
+      "colour": "rgb(52, 87, 213)",
+      "style": "solid"
+    }
+  },
+  {
+    "shot": "state-focus-1440.png",
+    "bytes": 126994
+  },
+  {
+    "measure": "table: cell top offsets",
+    "value": [
+      {
+        "tag": "mono ow-cell-value",
+        "top": 294.75
+      },
+      {
+        "tag": "ow-cell-value",
+        "top": 294.75
+      },
+      {
+        "tag": "value-token value-token--no-data",
+        "top": 294.75
+      },
+      {
+        "tag": "ow-cell-value",
+        "top": 294.75
+      },
+      {
+        "tag": "mono ow-cell-value",
+        "top": 294.75
+      },
+      {
+        "tag": "status-indicator status-indicator--notConfigured",
+        "top": 294.75
+      }
+    ]
+  },
+  {
+    "measure": "table: baseline spread",
+    "value": 0
+  },
+  {
+    "measure": "table: row height",
+    "value": 60
+  },
+  {
+    "shot": "state-table-baseline-1440.png",
+    "bytes": 105315
+  },
+  {
+    "measure": "detail: columns",
+    "value": [
+      {
+        "x": 264,
+        "y": 247,
+        "w": 363
+      },
+      {
+        "x": 651,
+        "y": 247,
+        "w": 363
+      },
+      {
+        "x": 1038,
+        "y": 247,
+        "w": 363
+      }
+    ]
+  },
+  {
+    "measure": "detail: chip recipe",
+    "value": "8px|13px|5px"
+  },
+  {
+    "measure": "detail: hash rows",
+    "value": 3
+  },
+  {
+    "shot": "state-plugin-detail-1440.png",
+    "bytes": 148834
+  },
+  {
+    "measure": "390: tab strip",
+    "value": {
+      "scrollWidth": 392,
+      "clientWidth": 351,
+      "mask": "linear-gradient(to right, rgb(0, 0, 0) 0px, rgb(0, 0, 0) calc(100% - 32px), rgba(0, 0, 0, 0) 100%)"
+    }
+  },
+  {
+    "measure": "390: deployment block",
+    "value": "Environment / STAGING / Commit / df792a7 / Status / READY / Deployed At / 2026-10-30 05:50 UTC"
+  },
+  {
+    "measure": "390: truncated?",
+    "value": {
+      "env": {
+        "text": "STAGING",
+        "scroll": 53,
+        "client": 53
+      },
+      "crumb": {
+        "text": "Plugins",
+        "scroll": 39,
+        "client": 39
+      }
+    }
+  },
+  {
+    "measure": "390: odd summary cell",
+    "value": {
+      "card": 351,
+      "row": 351,
+      "columns": "171.5px 171.5px"
+    }
+  },
+  {
+    "measure": "390: panel head",
+    "value": {
+      "wrap": "nowrap",
+      "titleY": 478,
+      "countY": 483
+    }
+  },
+  {
+    "shot": "state-390-defects.png",
+    "bytes": 79349
+  },
+  {
+    "measure": "contrast",
+    "value": {
+      "statusOnSoft": 5.85,
+      "tertiaryOnSurface": 4.78,
+      "canvasText": 7.22
+    }
+  },
+  {
+    "measure": "attention",
+    "value": {
+      "rows": 1,
+      "marker": "3px",
+      "count": "1 open"
+    }
+  },
+  {
+    "shot": "state-attention-1440.png",
+    "bytes": 126515
+  },
+  {
+    "measure": "zh-CN",
+    "value": {
+      "bodyLineHeight": "22.4px",
+      "transform": "none",
+      "tracking": "normal"
+    }
+  },
+  {
+    "shot": "state-zh-1440.png",
+    "bytes": 121077
+  }
+]

@@ -35,6 +35,17 @@ const SEVERITY_LABEL: Record<string, MessageKey> = {
  */
 const QUIET_RESULTS = new Set(['ACCEPTED', 'SUCCEEDED', 'COMPLETED', 'VERIFIED', 'READY', 'OK', 'SUCCESS']);
 
+/**
+ * The three steps an empty platform has to clear before any number on this page can be true.
+ * Written as a table of keys rather than a template literal, so scripts/check-i18n.mjs can
+ * still resolve every message statically and a missing translation fails the build.
+ */
+const SETUP_STEPS: Array<{ step: MessageKey; detail: MessageKey }> = [
+  { step: 'overview.setup.step1', detail: 'overview.setup.step1.detail' },
+  { step: 'overview.setup.step2', detail: 'overview.setup.step2.detail' },
+  { step: 'overview.setup.step3', detail: 'overview.setup.step3.detail' },
+];
+
 /** Audit rows read as sentences, so the known event vocabulary gets a label. */
 const EVENT_LABELS: Record<string, MessageKey> = {
   'pipeline.draft_created': 'event.pipeline.draftCreated',
@@ -106,12 +117,20 @@ export function OverviewPage() {
   // PARTIAL means a source settled without answering. A source still pending is not a verdict.
   const partialSource = sourceStates.includes('missing');
 
+  // A green verdict on an empty platform is the exact failure rules/05 and AGENTS.md forbid:
+  // READY with zero nodes and zero plugins has proven nothing, because nothing exists yet. It
+  // is NOT_CONFIGURED - neutral, not green - and the page says what to do next instead of
+  // printing an all-clear over an empty install.
+  const unconfigured = Boolean(data && data.health === 'READY' && data.nodesTotal === 0 && data.pluginsInstalled === 0);
+
   const criticalCount = data ? data.attention.filter((item) => item.severity === 'critical').length : 0;
   // The band says one thing. Its three children (state, headline, when) are the same three
   // facts the old banner carried, minus the card frame and the icon bubble.
   const healthHeadline = !data
     ? ''
-    : data.health === 'READY'
+    : unconfigured
+      ? t('overview.health.notConfigured')
+      : data.health === 'READY'
       ? t('overview.health.ready')
       : data.health === 'DEGRADED'
         ? t(criticalCount === 1 ? 'overview.health.criticalIssue' : 'overview.health.criticalIssues', { count: criticalCount })
@@ -120,10 +139,14 @@ export function OverviewPage() {
 
   return (
     <div className="page-stack">
+      {/* One primary action. On an empty platform the next step is a node, not another
+          package: installing a plugin with no node enrolled would sit PENDING forever. */}
       <PageHeader
         title={t('page.overview')}
         actions={<Button variant="secondary" onClick={() => { void overview.reload(); void diagnostics.reload(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
-        primary={<Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link>}
+        primary={unconfigured
+          ? undefined
+          : <Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link>}
       />
       <AsyncBoundary
         loading={overview.loading}
@@ -138,16 +161,19 @@ export function OverviewPage() {
                 four modules each printing their own copy of it was four copies of one fact. */}
             <div className="status-summary">
               <section
-                className={`health-band tone-${data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn'}`}
+                className={`health-band tone-${unconfigured ? 'neutral' : data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn'}`}
                 aria-label={t('overview.health.aria')}
-                data-health={data.health}
+                data-health={unconfigured ? 'NOT_CONFIGURED' : data.health}
               >
                 <div className="health-band-state">
-                  <StatusIndicator state={indicatorStateForCode(data.health)} label={data.health} />
+                  <StatusIndicator
+                    state={unconfigured ? 'notConfigured' : indicatorStateForCode(data.health)}
+                    label={unconfigured ? t('overview.health.notConfigured') : data.health}
+                  />
                 </div>
                 <div className="health-band-copy">
                   <h2>{healthHeadline}</h2>
-                  <p>{data.attention.length ? data.attention[0].detail : t('overview.health.allClearDetail')}</p>
+                  <p>{unconfigured ? t('overview.health.notConfiguredDetail') : data.attention.length ? data.attention[0].detail : t('overview.health.allClearDetail')}</p>
                 </div>
                 <div className="health-band-side" data-testid="overview-observed">
                   <span title={observedAt ?? undefined}>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>
@@ -157,11 +183,14 @@ export function OverviewPage() {
 
               <section className="stat-block" aria-label={t('overview.kpi.aria')}>
                 <div className="stat-strip">
+                  {/* A denominator of zero is not a ratio: "0/0" claims a completeness the
+                      platform has not observed. Zero enrolled nodes prints an em dash and the
+                      reason, never a full fraction. */}
                   <MetricCard
                     label={t('overview.kpi.healthyNodes')}
-                    value={data.nodesReady}
-                    denominator={data.nodesTotal}
-                    detail={data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')}
+                    value={data.nodesTotal === 0 ? '—' : data.nodesReady}
+                    denominator={data.nodesTotal === 0 ? undefined : data.nodesTotal}
+                    detail={data.nodesTotal === 0 ? t('overview.module.nodes.none') : data.nodesReady === data.nodesTotal ? t('overview.kpi.healthyNodes.allObserved') : t('overview.kpi.healthyNodes.stale')}
                     showSampled={false}
                     href="/admin/nodes"
                   />
@@ -174,9 +203,9 @@ export function OverviewPage() {
                   />
                   <MetricCard
                     label={t('common.readyInstances')}
-                    value={data.instancesReady}
-                    denominator={data.instancesTotal}
-                    detail={t('overview.kpi.readyInstances.detail')}
+                    value={data.instancesTotal === 0 ? '—' : data.instancesReady}
+                    denominator={data.instancesTotal === 0 ? undefined : data.instancesTotal}
+                    detail={data.instancesTotal === 0 ? t('overview.module.runtime.none') : t('overview.kpi.readyInstances.detail')}
                     showSampled={false}
                     href="/admin/plugins"
                   />
@@ -198,10 +227,31 @@ export function OverviewPage() {
               <div className="console-aside">
                 <section className="panel" id="attention" aria-labelledby="overview-attention-title">
                   <div className="panel-head">
-                    <h2 id="overview-attention-title">{t('overview.attention.title')}</h2>
-                    <span className="panel-count">{t('overview.attention.count', { count: data.attention.length })}</span>
+                    <h2 id="overview-attention-title">{unconfigured ? t('overview.setup.title') : t('overview.attention.title')}</h2>
+                    <span className="panel-count">
+                      {unconfigured
+                        ? t('overview.setup.progress', { done: 0, total: SETUP_STEPS.length })
+                        : t('overview.attention.count', { count: data.attention.length })}
+                    </span>
                   </div>
-                  {data.attention.length === 0 ? (
+                  {unconfigured ? (
+                    <div className="setup-block" data-testid="overview-setup">
+                      <ol className="setup-steps" aria-label={t('overview.setup.aria')}>
+                        {SETUP_STEPS.map((entry, index) => (
+                          <li className="setup-step" key={entry.step} data-step={index + 1}>
+                            <span className="setup-step-num" aria-hidden="true">{index + 1}</span>
+                            <div className="setup-step-copy">
+                              <strong>{t(entry.step)}</strong>
+                              <p>{t(entry.detail)}</p>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                      <div className="setup-actions">
+                        <Link className={buttonVariants()} to="/admin/nodes"><Icon name="plus" size={15} /> {t('overview.setup.cta')}</Link>
+                      </div>
+                    </div>
+                  ) : data.attention.length === 0 ? (
                     <div className="attention-clear" data-testid="overview-attention-clear">
                       <span className="attention-clear-icon"><Icon name="check" size={13} /></span>
                       <div>

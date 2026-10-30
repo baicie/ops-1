@@ -70,7 +70,8 @@ const GLYPHS: Record<IndicatorState, string> = {
   error: 'warning',
   forbidden: 'access',
   conflict: 'copy',
-  notConfigured: 'settings',
+  // An empty outline, not a sliders/equals pair: "not set up" must not read as "adjusted".
+  notConfigured: 'circleDashed',
 };
 
 /**

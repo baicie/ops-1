@@ -52,6 +52,12 @@ const paths: Record<string, React.ReactNode> = {
   trash: <><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13" /></>,
   rotate: <><path d="M3.5 12a8.5 8.5 0 1 0 2.9-6.4L3.5 8" /><path d="M3.5 3v5h5" /></>,
   key: <><circle cx="8.5" cy="15" r="3.8" /><path d="m11.3 12.2 8.2-8.2M16.5 5.4l2.7 2.7M14.2 7.7l2.3 2.3" /></>,
+  // Access manages people and node identities, not a padlock.
+  users: <><circle cx="9" cy="8.2" r="3.4" /><path d="M3.2 20.2c0-3.2 2.6-5.4 5.8-5.4s5.8 2.2 5.8 5.4" /><path d="M16.2 5.2a3.4 3.4 0 0 1 0 6.6M17.6 14.9c1.9.6 3.2 2.2 3.2 4.4" /></>,
+  // Ops Center is a radar sweep: it watches the platform, it does not set a compass bearing.
+  radar: <><circle cx="12" cy="12" r="8.6" /><circle cx="12" cy="12" r="4.4" /><path d="M12 12 18 6.6" /><path d="M12 3.4v1.8M20.6 12h-1.8M12 20.6v-1.8M3.4 12h1.8" /></>,
+  // "Not configured" is an empty outline, not an equals-like pair of sliders.
+  circleDashed: <><circle cx="12" cy="12" r="8.6" strokeDasharray="3.2 3.1" /></>,
   terminal: <><path d="m4.5 7 5.5 5-5.5 5M12.5 17.5h7" /></>,
   arrowRight: <path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5" />,
   arrowLeft: <path d="M19.5 12h-14M11 6.5 5.5 12l5.5 5.5" />,
@@ -62,7 +68,11 @@ const paths: Record<string, React.ReactNode> = {
   unknown: <path d="m12 3.5 8.5 8.5-8.5 8.5L3.5 12 12 3.5Z" />,
 };
 
-export function Icon({ name, size = 18, className = '' }: { name: string; size?: number; className?: string }) {
+export function Icon({ name, size = 18, className = '', stroke }: { name: string; size?: number; className?: string; stroke?: number }) {
+  // The 24-unit grid is a drawing space, not a pixel size: a fixed strokeWidth="1.7" renders
+  // 0.85px at 12px, which is why a small tick read as the letter "v". Scaling the unit keeps
+  // the stroke 1.7 DEVICE pixels at every size (~1.75 at 12px after rounding).
+  const unit = stroke ?? Math.round((1.7 * 24) / size * 100) / 100;
   return (
     <svg
       className={`icon ${className}`}
@@ -71,7 +81,7 @@ export function Icon({ name, size = 18, className = '' }: { name: string; size?:
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.7"
+      strokeWidth={unit}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

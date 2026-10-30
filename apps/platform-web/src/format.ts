@@ -1,8 +1,21 @@
+/**
+ * The locale the shell is currently rendering in.
+ *
+ * `toLocaleString(undefined, ...)` follows the BROWSER, not the product: a Chinese console on
+ * an English browser printed "Oct 30, 01:24:35 PM". The provider sets this on every locale
+ * change, so a formatted date follows the same language as the sentence around it.
+ */
+let activeLocale: string | undefined;
+
+export function setActiveLocale(locale: string): void {
+  activeLocale = locale;
+}
+
 export function formatDate(value?: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return date.toLocaleString(activeLocale, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export function formatBytes(value?: number | null): string {
