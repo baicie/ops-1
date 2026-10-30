@@ -238,15 +238,33 @@ The audit harness writes, per route:
 "pages": { "/admin/jobs": {
   "overflow": -15,
   "identityKey": ["host-metrics · r9 · 18h ago", "…"],
-  "rowHeight": { "p50": 40, "p95": 40 },
+  "rowHeight": { "p50": 40, "p95": 40, "n": 14 },
   "columns": 5,
+  "columnLabels": ["Job", "Status", "Duration", "Created", "Attempts"],
   "distinctRatio": [0.93, 0.41, 0.28, 0.21, 0.35],
+  "tableRowCounts": [14],
+  "viewport": { "w": 1440, "h": 900 },
+  "rows": 14,
   "duplicateRunMax": 1,
   "noDataPerTable": 1,
   "cardFactCount": 3,
   "offenders": [ … ]
 } }
 ```
+
+The shape above is the contract the gate reads, so the two things it does not spell out are spelled out
+here. **Alignment**: `distinctRatio[i]` is the ratio of the column headed by `thead th[i]`, measured over
+`tbody td[i]` of *the same table*. A `th` with no text is chrome — the row-action cell, the select-all
+checkbox — not a column, and dropping it must not renumber the ones after it (§4.2's gate reports the
+label it measured, and a renumbered array reports the wrong label). **Several tables on one page**
+(`/admin/governance` has three): `distinctRatio` carries one entry per labelled column of every table on
+the page, `columns` is the widest table, and `noDataPerTable` is the largest `NO_DATA` count in any one
+table (§2.7 is per table). `null` in `distinctRatio` means the column had fewer than 10 rows on screen,
+which is §2.2's own `n ≥ 10` and not a measurement the gate can fail — and `tableRowCounts` is what makes
+that distinguishable from a measurement that simply produced nothing, because `n ≥ 10` counts the rows of
+one table, not of the page. `columnLabels` names the column each ratio belongs to, so a failure names a
+heading instead of an index. `viewport.w` is the measured `window.innerWidth`; §4.2's two viewport-scoped
+thresholds read the cap from it and fail closed when it is absent.
 
 ### 4.2 What fails
 
@@ -255,8 +273,8 @@ The audit harness writes, per route:
 | `overflow > 0` | fails | §1.5, the 223px record |
 | `overflow` missing | fails | §1.5 — “not measured” has meant “fine” for six rounds |
 | `distinct(identityKey).length / identityKey.length` | `< 1.0` fails | §2.1, §2.5 — the 14 identical cards |
-| `rowHeight.p95` | `> 42` fails | §2.3 |
-| `columns` | over the viewport cap fails | §2.2 |
+| `rowHeight.p95` | `> 42` fails (viewport ≥ 768; at 390 a row is a card, §2.3) | §2.3 |
+| `columns` | over the viewport cap fails (viewport ≥ 768; below it the cap is `cardFactCount`) | §2.2 |
 | `min(distinctRatio)` among kept columns | `< 0.2` fails | §2.2 |
 | `duplicateRunMax` | `> 2` fails | §2.4 |
 | `noDataPerTable` | `> 1` fails | §2.7 |
@@ -290,100 +308,22 @@ Same script, same tree, two datasets: the red is caused by the 223px, not by a h
 
 ### 4.5 The script
 
-```js
-#!/usr/bin/env node
-/**
- * check-ui-metrics.mjs - the geometry half of the UI spec gate.
- *
- * Reads the _metrics_*.json files the audit harness writes and fails on the numbers a human
- * review cannot check by eye. The rule that matters: a page with no measurement is a FAIL,
- * not a pass - artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json recorded 223px of
- * horizontal overflow on /admin/jobs/{id} and shipped anyway, because nothing read it.
- *
- *   node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json
- */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+`scripts/check-ui-metrics.mjs` is the gate, and §4.2 above is its only source of thresholds. It
+parses them out of that table at startup (plus the two §2.2 caps), prints each one beside the section
+that derives it, and refuses to run at all — exit 2 — when the spec has moved out from under it. That is
+deliberate: a second copy of `42`, `1.0`, `0.2`, `2`, `1`, `3` inside the script is a copy that can drift,
+and the drift would be invisible in exactly the direction that matters — a loosened number looks like a
+pass.
 
-const inputs = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const ROOT = process.cwd();
+Exit codes: `0` every assertion passed; `1` at least one violation, including any assertion whose field the
+artifact does not carry (fail closed — a page with no measurement is not a page with nothing wrong);
+`2` the gate could not run — no input files, a directory that expands to zero `_metrics_*.json`, or a
+spec it cannot parse.
 
-function expand(list) {
-  const out = [];
-  for (const item of list) {
-    const p = resolve(item);
-    if (statSync(p).isDirectory()) {
-      for (const name of readdirSync(p)) if (/_metrics_.*\.json$/.test(name)) out.push(join(p, name));
-    } else out.push(p);
-  }
-  return out;
-}
-if (inputs.length === 0) {
-  console.error('check-ui-metrics: pass one or more _metrics_*.json files or a directory');
-  process.exit(2);
-}
-
-let failures = 0;
-let pages = 0;
-for (const file of expand(inputs)) {
-  const doc = JSON.parse(readFileSync(file, 'utf8'));
-  const label = (doc.config && doc.config.label) || relative(ROOT, file);
-  const pageMap = doc.pages || {};
-  let localFailures = 0;
-  for (const [route, m] of Object.entries(pageMap)) {
-    if (!m || typeof m !== 'object' || m.error) continue;
-    pages += 1;
-    if (typeof m.overflow !== 'number') {
-      console.log('FAIL  overflow-unmeasured  ' + label + '  ' + route);
-      localFailures += 1;
-      continue;
-    }
-    if (m.overflow > 0) {
-      const worst = (m.offenders || [])[0];
-      const who = worst ? ' worst: <' + worst.tag + '> ' + (worst.cls || '') + ' right=' + worst.right : '';
-      console.log('FAIL  overflow>0  ' + label + '  ' + route + '  +' + m.overflow + 'px' + who);
-      localFailures += 1;
-    }
-  }
-  console.log((localFailures ? 'FAIL  ' : 'ok    ') + label + '  pages=' + Object.keys(pageMap).length + '  violations=' + localFailures);
-  failures += localFailures;
-}
-
-// rule 2 - template geometry: fail closed when the measurement is absent ---------
-if (process.argv.includes('--template')) {
-  for (const file of expand(inputs)) {
-    const doc = JSON.parse(readFileSync(file, 'utf8'));
-    const label = (doc.config && doc.config.label) || relative(ROOT, file);
-    const shape = (doc.config && doc.config.template) || {};
-    const missing = ['headerHeight', 'firstBlockY', 'controlRow'].filter((k) => !(k in shape));
-    if (missing.length) {
-      console.log('FAIL  template-unmeasured  ' + label + '  missing: ' + missing.join(', '));
-      failures += 1;
-      continue;
-    }
-    if (shape.headerHeight !== 80) {
-      console.log('FAIL  header-height  ' + label + '  ' + shape.headerHeight + ' != 80');
-      failures += 1;
-    }
-    if (shape.firstBlockY !== 160) {
-      console.log('FAIL  first-block-y  ' + label + '  ' + shape.firstBlockY + ' != 160');
-      failures += 1;
-    }
-    for (const row of shape.controlRow || []) {
-      const heights = [...new Set(row.heights)];
-      if (heights.length > 1) {
-        console.log('FAIL  control-row-mixed  ' + label + '  ' + row.selector + ' -> ' + heights.join('/'));
-        failures += 1;
-      }
-    }
-  }
-}
-console.log('');
-console.log(failures === 0
-  ? 'check-ui-metrics: PASS (' + pages + ' page measurements, no horizontal overflow)'
-  : 'check-ui-metrics: FAIL (' + failures + ' violation(s) across ' + pages + ' page measurements)');
-process.exit(failures === 0 ? 0 : 1);
-```
+The nine assertions, one line each: `overflow` present and `≤ 0`; `distinct(identityKey) = identityKey.length`;
+`rowHeight.p95 ≤ 42` at ≥ 768; `columns ≤ 5` at ≥ 1024 and `≤ 4` at 768–1023; `min(distinctRatio) ≥ 0.2`;
+`duplicateRunMax ≤ 2`; `noDataPerTable ≤ 1`; `cardFactCount ≤ 3` below 768. §4.3 and §4.4 show the red
+and the green run.
 
 `--template` adds the page-template assertions (header 80, first block y 160, one control height per row);
 `page-template.md` §4 shows that half red, green and mixed.
@@ -391,15 +331,37 @@ process.exit(failures === 0 ? 0 : 1);
 ### 4.6 Wiring
 
 ```yaml
-# .github/workflows/ci.yml, job `web`, after check-status-vocabulary.mjs
-      - run: node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
-# new job `web-metrics`: run the audit harness against the built app, then
-      - run: node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit
+# .github/workflows/staging-preview.yml, job `smoke`, after the Playwright core/surfaces steps
+      - name: Table geometry audit (table-spec §4.1, writes _metrics_*.json)
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        env:
+          V3_MODE: after
+          V3_CHANNEL: chromium
+          V3_OUT: ${{ github.workspace }}/artifacts/staging-preview/metrics
+        run: |
+          pnpm --filter @opsweave/ui-tests exec playwright test ui-table-audit.spec.ts
+      - name: Table geometry gate (table-spec §4.2)
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        run: node scripts/check-ui-metrics.mjs artifacts/staging-preview/metrics
 ```
 
 `check-ui-metrics.mjs` needs no browser — only the JSON. The browser half is the existing audit harness;
-the missing piece is that `ci.yml` never ran it. Until `web-metrics` exists, wiring the gate into
-`staging-preview.yml` (which already runs `playwright test`) closes the hole with no new infrastructure.
+the missing piece is that `ci.yml` never ran it.
+
+**Wired where the browser already is.** `staging-preview.yml`'s smoke job now runs
+`ui-table-audit.spec.ts` into `artifacts/staging-preview/metrics` and then runs this gate over that
+directory, as two steps ("Table geometry audit", "Table geometry gate"). The reason is auth: the harness
+stubs every data endpoint, but a login is a real `/api/v1/auth/login` round trip, so the audit needs a
+live kernel and a live web build. `ci.yml` has neither, and giving it one means a Rust release build
+plus a database in the PR path — a `web-metrics` job that costs more than the thing it gates. The
+staging job already installs Chromium and holds the admin credential, so the gate costs it one extra
+browser pass.
+
+**The gap this leaves, stated rather than implied**: the gate runs on a push to `main` and on
+`workflow_dispatch`, not on every pull request. A table regression is caught at the deploy, not at the
+review. Closing that needs the audit to authenticate without a kernel (a stub `/auth/login` behind an
+opt-in env flag), which is a change to what the harness proves — it would no longer be measuring against
+a real session — so it is written down here and not done.
 
 ---
 

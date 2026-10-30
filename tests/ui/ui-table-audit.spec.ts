@@ -11,8 +11,10 @@ import path from 'node:path';
  * cannot be measured against it. Auth still goes to the real kernel.
  */
 // This host has no Playwright-managed Chromium (the browser download is not part of the repo);
-// the installed Chrome is a real engine and the geometry measured here is engine-independent.
-test.use({ channel: 'chrome' });
+// the installed Chrome is a real engine and the geometry measured here is engine-independent. A CI
+// runner is the mirror image - Chromium is installed, branded Chrome is not - so the channel is an
+// input (V3_CHANNEL=chromium in staging-preview.yml) instead of an assumption either way.
+test.use({ channel: process.env.V3_CHANNEL || 'chrome' });
 
 const MODE = process.env.V3_MODE === 'after' ? 'after' : 'before';
 const OUT = process.env.V3_OUT || path.resolve('../../artifacts/ui/visual-v3/table', MODE);
@@ -341,17 +343,41 @@ async function measure(page: Page) {
       previous = key;
       if (run > runMax) runMax = run;
     }
-    // §2.2 distinct ratio per column, over the rows on screen.
-    // A column is a heading: the trailing action cell has no label, so it is chrome, not a column.
-    const headCount = Array.from(document.querySelectorAll('table thead th')).filter((th) => (th.textContent || '').trim().length > 0).length;
+    // §2.2 distinct ratio per column, over the rows on screen, measured one table at a time.
+    // A column is a heading: a th with no text is chrome (the row-action cell, the select-all
+    // checkbox in /admin/plugins). Position is what pairs a heading with its values, so an unlabeled
+    // th is skipped on its own index - filtering the th list and then indexing td with the filtered
+    // position is what shifted every ratio by one on a table whose first heading is a checkbox, and
+    // reading td[c] across every table on the page is what mixed /admin/governance's three tables.
     const ratios: (number | null)[] = [];
-    for (let column = 0; column < headCount; column += 1) {
-      const values = rows.map((tr) => {
-        const cells = Array.from(tr.children) as HTMLElement[];
-        const cell = cells.filter((el) => el.tagName === 'TD')[column];
-        return cell ? (cell.textContent || '').trim() : null;
-      }).filter((value): value is string => value !== null);
-      ratios.push(values.length >= 10 ? Math.round((new Set(values).size / values.length) * 100) / 100 : null);
+    // The heading each ratio belongs to, so §4.2's failure names the column instead of an index.
+    const columnLabels: string[] = [];
+    // §2.2's n >= 10 is per table, so the rows that fed each table travel with the ratios: without
+    // them "no column had 10 rows" and "nobody measured" look identical (see /admin/access, whose
+    // two tables have 8 and 6 rows on a page that reports 14).
+    const tableRowCounts: number[] = [];
+    let headCount = 0;
+    let noDataPerTable = 0;
+    for (const table of Array.from(document.querySelectorAll('table'))) {
+      const bodyRows = Array.from(table.querySelectorAll('tbody tr')).filter((tr) => !tr.classList.contains('expanded-row'));
+      const cellsOf = (tr: Element) => (Array.from(tr.children) as HTMLElement[]).filter((el) => el.tagName === 'TD');
+      let labelled = 0;
+      Array.from(table.querySelectorAll('thead th')).forEach((th, index) => {
+        if ((th.textContent || '').trim().length === 0) return;
+        labelled += 1;
+        columnLabels.push((th.textContent || '').trim());
+        const values = bodyRows
+          .map((tr) => cellsOf(tr)[index])
+          .filter((cell): cell is HTMLElement => Boolean(cell))
+          .map((cell) => (cell.textContent || '').trim());
+        ratios.push(values.length >= 10 ? Math.round((new Set(values).size / values.length) * 100) / 100 : null);
+      });
+      tableRowCounts.push(bodyRows.length);
+      if (labelled > headCount) headCount = labelled;
+      // §2.7: NO_DATA may appear at most once per table. Counted off the token's data attribute, so
+      // this reads what was rendered rather than looking for the copy in a localized string.
+      const noData = table.querySelectorAll('td [data-value="NO_DATA"]').length;
+      if (noData > noDataPerTable) noDataPerTable = noData;
     }
     const overflowers = Array.from(document.querySelectorAll('body *'))
       .filter((el) => {
@@ -395,8 +421,14 @@ async function measure(page: Page) {
       rowHeight: { p50: pct(heights, 50), p95: pct(heights, 95), max: heights.length ? Math.max(...heights) : null, n: heights.length },
       columns: headCount,
       distinctRatio: ratios,
+      columnLabels,
+      tableRowCounts,
       duplicateRunMax: runMax,
       rows: rows.length,
+      // §2.7, per table; the page reports its worst table.
+      noDataPerTable,
+      // §4.2 reads the column cap off the measured width, so it travels with the measurement.
+      viewport: { w: window.innerWidth, h: window.innerHeight },
       cardFactCount: window.innerWidth < 768 && cards.length ? Math.max(...cards.map((c: any) => c.facts)) : null,
       cards,
       tableWidth: tableRect ? Math.round(tableRect.width) : null,

@@ -715,6 +715,47 @@ jobs:
           sys.exit(0 if payload["ok"] else 1)
           PY
 
+      # table-spec §4.2: the nine geometry assertions, in two steps because they have two failure
+      # modes. The audit writes _metrics_*.json (a browser pass); the gate reads that JSON (no
+      # browser). Until this pair existed the numbers were produced and nothing consumed them:
+      # artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json recorded 223px of horizontal
+      # overflow on /admin/jobs/{id} and shipped, because scripts/check-ui-metrics.mjs only read
+      # `overflow` and only ci.yml ran it - and ci.yml has no browser.
+      #
+      # It lives here rather than in a new ci.yml job because a login is real: the harness stubs
+      # every data endpoint, but POST /api/v1/auth/login still reaches a kernel. A ci.yml job would
+      # have to build and start the Rust kernel plus a database for every pull request - more
+      # infrastructure than the gate it pays for. This job already installs Chromium and holds the
+      # admin credential, so the gate costs one extra browser pass.
+      #
+      # if: always() on both, and the steps are separate on purpose: a red core run must not skip
+      # the measurement, and a gate that receives no files must fail rather than find nothing wrong
+      # (check-ui-metrics.mjs exits 1 on an empty directory for exactly that reason).
+      - name: Table geometry audit (table-spec §4.1, writes _metrics_*.json)
+        id: metrics
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        timeout-minutes: 15
+        env:
+          V3_MODE: after
+          # This host has Chrome; a runner has Chromium. Same engine class, same geometry.
+          V3_CHANNEL: chromium
+          V3_OUT: ${{ github.workspace }}/artifacts/staging-preview/metrics
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-preview/metrics
+          pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/metrics \
+            ui-table-audit.spec.ts
+
+      - name: Table geometry gate (table-spec §4.2)
+        id: geometry
+        if: always() && steps.mode.outputs.mode == 'playwright'
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          # ls first: when the audit step died, this log says so instead of leaving a bare exit 1.
+          ls -la artifacts/staging-preview/metrics
+          node scripts/check-ui-metrics.mjs artifacts/staging-preview/metrics
+
       # The core and surfaces steps above drive admin-pages, admin-polish, g08-batch-c*,
       # overview-partial, async-stale, i18n-locale, dialog-a11y, business-workspace,
       # plugin-surfaces and admin-shell. Every one of those specs writes full-page PNGs into
