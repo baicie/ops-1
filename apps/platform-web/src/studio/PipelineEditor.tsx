@@ -285,24 +285,31 @@ export function PipelineEditorPage() {
           <span className="meta-chip">{draft ? t('studio.header.draftVersion', { version: draft.version }) : t('studio.header.publishedReadOnly')}</span>
           <StatusIndicator state={dirty ? 'attention' : 'ready'} label={dirty ? t('studio.header.unsavedChanges') : t('studio.header.saved')} />
         </>}
-        actions={<>
-          <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
-          <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
-          <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</button>
-          <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title={t('studio.action.layoutToggle')}><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? t('studio.action.horizontal') : t('studio.action.vertical')}</button>
-          <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
-          <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
-          <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
-          <Link className="btn btn-secondary" to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
-          {hasDraft && <>
-            <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
-            <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
-          </>}
+      />
+      {/* The nine controls are the workspace's toolbar, not the title's company: measured at 1440
+          they are 842px wide against a 1328px column whose description needs 496, so a header that
+          also carried them either wrapped into a row §2.2's declared 80px does not reserve or was
+          clipped by a scroller ("Create draft" at 1523..1651, outside the viewport). page-template
+          §2.1 already has the region for this row - between the header and the page's primary
+          region - so the header stays 80px, the first block still lands at y=160, and every control
+          keeps its tier and its hit area. */}
+      <div className="studio-toolbar" role="group" aria-label={t('studio.toolbar.aria')}>
+        <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
+        <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
+        <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</button>
+        <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title={t('studio.action.layoutToggle')}><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? t('studio.action.horizontal') : t('studio.action.vertical')}</button>
+        <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
+        <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
+        <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
+        <Link className="btn btn-secondary" to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
+        {hasDraft && <>
+          <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
+          <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
         </>}
-        primary={!hasDraft
+        {!hasDraft
           ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button>
           : <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</button>}
-      />
+      </div>
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
         <Icon name="warning" size={14} />

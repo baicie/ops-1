@@ -921,6 +921,7 @@
   "status.unreachable": "不可达",
   "status.verified": "已验证",
   "studio.action.autoLayout": "自动布局",
+  "studio.toolbar.aria": "流水线操作",
   "studio.action.createDraft": "创建草稿",
   "studio.action.detail": "详情",
   "studio.action.fitAll": "适配全部",

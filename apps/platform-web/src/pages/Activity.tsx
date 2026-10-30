@@ -284,7 +284,12 @@ export function ActivityPage() {
                           {row.detail ? <span className="event-detail-fact"><code>{row.detail.key}</code> {row.detail.value}</span> : null}
                           {row.count > 1 ? <span className="event-run">{t('table.runCount', { count: row.count })} {t('table.runSpan', { first: ageMessage(locale, row.firstAt), last: ageMessage(locale, row.lastAt) })}</span> : null}
                         </IdentityCell>
-                        <StackCell label={t('table.outcome')} className="max-[768px]:block">
+                        {/* max-[768px]:block is deliberately NOT passed: a block cell put the
+                            label and its value on two lines with the label alone and right-aligned
+                            ("Outcome" above the pill, "Occurred1m ago 05:02:45" with no gap). The
+                            cell keeps table-kit's stacked flex row, which is what every other card
+                            at 390 uses: label left, value right, 14px between them. */}
+                        <StackCell label={t('table.outcome')}>
                           <div className="ow-cell">
                             <StatusPill status={event.result} />
                             <span className="ow-cell-meta">{event.action}</span>
@@ -297,7 +302,7 @@ export function ActivityPage() {
                           cards whose text was byte-identical, clock included, because the fan-out
                           half was not printed at all.
                         */}
-                        <StackCell label={t('table.occurred')} className="max-[768px]:block" title={formatDate(event.occurredAt)}>
+                        <StackCell label={t('table.occurred')} title={formatDate(event.occurredAt)}>
                           <span className="event-when" data-when={event.occurredAt}>
                             <TimeAgo value={event.occurredAt} />
                             <span className="ow-cell-meta mono">{clockMessage(locale, event.occurredAt)}</span>

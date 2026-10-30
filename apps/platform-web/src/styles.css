@@ -26,6 +26,14 @@
   --ow-warn-soft: #fff4df;
   --ow-danger: #c03636;
   --ow-danger-soft: #fdecec;
+  /* The fill a destructive control paints behind its own foreground. --ow-danger is an INK first
+     (status words, error copy, a badge's text on --ow-danger-soft); used directly as a button fill
+     it is fine in light (5.49:1 under #ffffff) and 2.51:1 in dark, where the same token is a light
+     pink. A solid is a different job from an ink, so it is a different token. */
+  --ow-danger-solid: #c03636;
+  /* The one foreground a solid is expected to carry. Theme-independent on purpose: both themes
+     state a fill dark enough for this white (5.49:1 under #c03636, 7.01:1 under #a2302c). */
+  --ow-danger-solid-text: #ffffff;
   --ow-info: #2463a8;
   --ow-info-soft: #eaf2fb;
   /* The ramp above is the palette; these name the jobs it is used for. Theme-following by
@@ -142,6 +150,9 @@ html[data-theme="dark"] {
   --ow-warn-soft: #33260f;
   --ow-danger: #ff7b7b;
   --ow-danger-soft: #35191c;
+  /* 7.01:1 under the #ffffff the light theme also uses. The ink above is a fill here at 2.51:1 -
+     measured by the Gate B review on /admin/access and inside the confirm dialog. */
+  --ow-danger-solid: #a2302c;
   --ow-info: #7bb6f4;
   --ow-info-soft: #142538;
   --ow-chip-text: #a8b3c1;
@@ -457,7 +468,10 @@ input::placeholder { color: var(--ow-text-muted); }
 .attention-item-copy { flex: 1; min-width: 0; }
 .attention-item-copy strong { font-weight: 600; }
 .attention-item-copy p { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 2px; }
-.text-link { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ow-type-sm); font-weight: 500; white-space: nowrap; }
+/* background: transparent is load-bearing: preflight is disabled, so a <button> with no
+   background of its own paints the UA's ButtonFace - #efefef in light and #6b6b6b in dark, a grey
+   slab behind a text link. */
+.text-link { display: inline-flex; align-items: center; gap: 4px; background: transparent; font-size: var(--ow-type-sm); font-weight: 500; white-space: nowrap; }
 .text-link:hover { text-decoration: none; gap: 4px; }
 .event-list li { display: flex; align-items: flex-start; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--ow-border); }
 .event-list li:last-child { border-bottom: 0; }
@@ -861,17 +875,21 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .revision-list li { min-width: 0; }
 .revision-list .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Studio is the only page whose action row carries nine controls. At >=769 it wrapped into a second
-   line that .page-header's fixed 80px never reserves, so the drafts panel painted over it: measured
-   at 1440, 7 of the 9 (Auto layout, Vertical, Readable, Fit all, Preview, Detail, Create draft) had
-   section.panel on top of their centre point and could not be clicked. Below 768 the row already
-   scrolls rather than wraps; this gives 769+ the same one-row contract instead of a new header
-   height, so every control stays reachable and §2.1's single header height still holds. */
-@media (min-width: 769px) {
-  .studio-page .page-header { flex-wrap: nowrap; }
-  .studio-page .page-actions { flex-wrap: nowrap; min-width: 0; overflow-x: auto; }
-  .studio-page .page-actions > * { flex: none; }
-}
+/* Studio is the only page whose action row carries nine controls. Measured at 1440: 842px of
+   controls at one tier, against a copy column whose description alone needs 496 - in one 1328px
+   column the two cannot share a line. Both previous answers were the same defect in two places.
+   Wrapped, the second row fell outside .page-header's declared 80px and the drafts panel painted
+   over 7 of the 9. Scrolled, the row was squeezed to 591px and clipped: Create draft measured
+   1523..1651 in a 1440 viewport, and the document did not scroll because nothing was scrolled out
+   of it. So the controls take the region page-template §2.1 already declares for them - a toolbar
+   row between the header and the page's primary region. The header keeps §2.2's declared 80px and
+   the first block lands at y = 160; the row is §2.4's one row of one control tier (9 x 40px
+   controls + 8 x 4px gaps = 842, inside 1328 at 1440), with no scroll, no clip, no smaller type
+   and no control removed. At 1280 and 1024 the row still holds one line (measured rightmost 922 of
+   1168 and 858 of 977); where nine controls genuinely do not fit it wraps, which is the only
+   alternative left once clipping is off the table. */
+.studio-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: var(--ow-control-md); }
+.studio-toolbar > .btn { flex: 0 0 auto; }
 
 /* Job detail hierarchy */
 .job-subtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -883,13 +901,15 @@ details.panel.advanced > summary { padding: 12px 16px; }
 /* page-template §1.1: this was the third CSS treatment of one component (padding 2px 2px 8px
    plus a rule under it). Studio pages render the same PageHeader as the admin pages now; only
    the page's own padding stays studio-specific. */
-.studio-page .page-actions { gap: 4px; }
+/* the nine controls are .studio-toolbar (above); .page-actions stays the admin header's row */
 .studio-shell {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr) 300px;
   gap: 10px;
   align-items: stretch;
-  height: clamp(520px, calc(100vh - 236px), 820px);
+  /* 288 = the 236 the canvas was measured against (topbar 56 + header 80 + gutters) + the 40px
+     toolbar row + its 12px gap, so the new row costs the workspace nothing in page height. */
+  height: clamp(520px, calc(100vh - 288px), 820px);
   min-height: 520px;
 }
 .studio-palette, .studio-inspector {
@@ -971,7 +991,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 @media (max-width: 768px) {
   .main-content:has(.studio-page) { padding: 0; }
   .studio-page { padding: 12px 8px 24px; }
-  .studio-page .page-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .studio-page .studio-toolbar { width: 100%; }
   .studio-shell { grid-template-columns: 1fr; }
   .studio-canvas { height: 420px; }
   .studio-inspector { max-height: none; }
@@ -1048,8 +1068,8 @@ details.panel.advanced > summary { padding: 12px 16px; }
 
 /* Mobile toolbar wraps instead of clipping labels; node-list note stays in flow. */
 @media (max-width: 768px) {
-  .studio-page .page-actions { flex-wrap: wrap; overflow: visible; }
-  .studio-page .page-actions .btn { flex: 0 0 auto; }
+  .studio-page .studio-toolbar { flex-wrap: wrap; }
+  .studio-page .studio-toolbar .btn { flex: 0 0 auto; }
   .studio-page .studio-note { position: static; margin: 4px 8px 8px; }
   .studio-page .studio-canvas { height: auto; min-height: 440px; }
   .studio-page .mobile-node-list { max-height: 430px; }
@@ -2663,6 +2683,21 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   }
   .ow-ident-meta .event-detail-fact { display: inline; max-width: none; overflow: visible; white-space: nowrap; }
   .ow-ident-meta .event-detail-fact code { white-space: nowrap; }
+
+  /* The two-line card spends its second row on the qualifier, so that line keeps its ellipsis.
+     Every other stacked row has no second row to give away: on /admin/activity the payload field
+     measured right = 440 in a 390 viewport on 13 of 25 rows, the ancestor clipped it, and
+     documentElement.scrollWidth stayed inside clientWidth - so 121px of a value the reader came
+     for was not on the phone and could not be scrolled to. A vertical card lets its qualifier take
+     the lines it needs instead of deleting what does not fit. */
+  .ow-table tbody tr:not(.ow-card-2l) td.ow-ident-cell > .ow-ident-meta {
+    height: auto;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .ow-table tbody tr:not(.ow-card-2l) .ow-ident-meta .event-detail-fact { white-space: normal; overflow-wrap: anywhere; }
+  .ow-table tbody tr:not(.ow-card-2l) .ow-ident-meta .event-detail-fact code { white-space: normal; }
 }
 
 /* ── §2.5 at 390: the card is two lines, not five ────────────────────────────────────
@@ -2747,10 +2782,23 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   .ow-table tbody tr.ow-card-2l > td.ow-card-after { display: flex; align-items: baseline; gap: 4px; }
   /* The same interpunct the qualifier already puts between its own facts, between it and them. */
   .ow-table tbody tr.ow-card-2l > td.ow-card-after::before { content: '·'; color: var(--ow-text-muted); }
-  /* The stack label is a column heading, and line 1 is the phone's heading: the WORD gives way,
-     the cell keeps data-label, the value keeps it in a tooltip, and the desktop header keeps it at
-     every width above this one. */
+  /* The stack label is a column heading, and line 1 is the phone's heading: on the identity and
+     the status cells the WORD still gives way, the cell keeps data-label, and the desktop header
+     keeps it at every width above this one. */
   .ow-table tbody tr.ow-card-2l > td > span:first-child { display: none; }
+  /* A fact cell is the exception, and it is the one the 390 review measured: the label is the only
+     thing that says which quantity a number is, and without it the card read "64 ms · 1d ago" and
+     "trusted-team · 0.2.0 · 1/1" - two or three values with no owner, the middle dot doing the job
+     of a heading. The word is drawn at the label tier (11/1.2) inside the value's 13/1.2 line box,
+     so the line does not grow by a pixel for it; the '·' between cells still separates the facts.
+     Height is what this must not spend: 70.8 (jobs) / 81.1 (plugins) / 100.8 (nodes) before. */
+  .ow-table tbody tr.ow-card-2l > td.ow-card-after > span:first-child {
+    display: block;
+    flex: none;
+    font-size: var(--ow-type-label);
+    line-height: 1.2;
+    color: var(--ow-text-muted);
+  }
 }
 
 /* ── overview: three ready rows are one row ──────────────────────────────────────────

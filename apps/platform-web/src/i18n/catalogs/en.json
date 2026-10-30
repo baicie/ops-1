@@ -921,6 +921,7 @@
   "status.unreachable": "Unreachable",
   "status.verified": "Verified",
   "studio.action.autoLayout": "Auto layout",
+  "studio.toolbar.aria": "Pipeline actions",
   "studio.action.createDraft": "Create draft",
   "studio.action.detail": "Detail",
   "studio.action.fitAll": "Fit all",

@@ -42,7 +42,11 @@ export const DialogContent = React.forwardRef<
         <DialogPrimitive.Close
           className={cn(
             'absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-sm',
-            'border border-solid border-transparent text-muted-foreground transition-colors',
+            // bg-transparent is load-bearing, not decoration: preflight is off, so a <button> that
+            // declares no background paints the UA's ButtonFace - #6b6b6b in dark - which made the
+            // close control a grey slab on the dialog surface and its icon 1.64:1 against it.
+            // On --ow-surface the ink below is 7.56:1 in light and 8.99:1 in dark.
+            'border border-solid border-transparent bg-transparent text-foreground-secondary transition-colors',
             'hover:bg-secondary hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}
