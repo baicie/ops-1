@@ -194,15 +194,20 @@ has been the same outcome as “it is fine” for six rounds.
 
 ```
 $ node scripts/check-ui-metrics.mjs --template artifacts/ui/visual-v3/audit/_metrics_r1440-light-en.json
-ok    r1440-light-en  pages=26  violations=0
+ok    r1440-light-en  pages=10  violations=0
 FAIL  template-unmeasured  r1440-light-en  missing: headerHeight, firstBlockY, controlRow
 
-check-ui-metrics: FAIL (1 violation(s) across 25 page measurements)
+check-ui-metrics: FAIL (1 violation(s) across 10 page measurements)
 $ echo $?
 1
 ```
 
 ### 4.4 Proof the rule accepts a conforming run
+
+`fixture-template.json` and `fixture-mixed.json` ship in no repository: the blocks under §4.4 and §4.5 show
+the shape of the output, not a capture. Run as written they print `check-ui-metrics: no such file or directory:
+fixture-template.json` and exit 2. A real run's last line has read
+`PASS (N page measurements, 9 §4.2 assertions each + §2.5 card clipping)` since the assertion count was added.
 
 ```
 $ node scripts/check-ui-metrics.mjs --template fixture-template.json      # 80 / 160 / [40,40,40]

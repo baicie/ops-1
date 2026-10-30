@@ -4,7 +4,8 @@ These are **specifications**, not bug lists. Six review rounds produced six “p
 fixed every position; the next round still ended in “一坨”. The reason is mechanical: a position list can be
 fixed, and a rule cannot be fixed position by position. What was missing was the rule.
 
-Written against HEAD `7fd0c99` (`feat/ui-visual-excellence-v3`). Every number in the three files was produced
+Written against HEAD `7fd0c99` (`feat/ui-visual-excellence-v3`); every gate output quoted in §“What the gates
+prove today” and in each file's §4 was re-run at HEAD `1f1feeb`. Every number in the three files was produced
 by a command whose output is quoted next to it, and every rule has a gate that can fail a build.
 
 | file | answers | gate |
@@ -40,18 +41,26 @@ All four runs are on the unmodified tree — nothing was patched to make a point
 
 ```
 $ node scripts/check-ui-tokens.mjs
-FAIL radius-tier 120 / control-tier 15 / type-tier 7 / one-header 5 / uppercase-guard 22 / format-locale 4
+FAIL radius-tier 118 / control-tier 14 / type-tier 7 / one-header 5 / uppercase-guard 19 / format-locale 4
 exit 1
 
-$ node scripts/check-ui-tokens.mjs --ratchet ui-debt.json     # budgets at today’s counts
+$ node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json   # today’s budgets
 check-ui-tokens: PASS                                         exit 0
 
-$ node scripts/check-ui-metrics.mjs …/_metrics_r390-light-en.json   # the record that shipped
-FAIL overflow>0 /admin/jobs/1285fbe8-… +223px                      exit 1
+$ node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit          # 3 files × 10 routes each
+check-ui-metrics: PASS (30 page measurements, 9 §4.2 assertions each + §2.5 card clipping)   exit 0
 
-$ node scripts/check-ui-metrics.mjs …/_metrics_r1440-light-en.json
-check-ui-metrics: PASS (25 page measurements)                      exit 0
+$ node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json
+ok    r390-light-en  pages=10  violations=0
+check-ui-metrics: PASS (10 page measurements, 9 §4.2 assertions each + §2.5 card clipping)   exit 0
 ```
+
+**The red run is gone, and it went for a good reason.** The earlier revision of this page quoted
+`FAIL overflow>0 /admin/jobs/… +223px`. The re-collected `_metrics_r390-light-en.json` records
+`overflow: -15` on that route, so the same command prints `PASS`. `table-spec.md` §4.7 is the inventory of
+what the re-collection deleted and what that cost; §4.3 there keeps the old output, labelled as a record the
+current tree can no longer print. A spec that quietly loses its red proof is worse than one that never had
+it, so it stays written down — in the file that owns the artifact directory, not here.
 
 ## The question the review asked
 
@@ -68,7 +77,7 @@ because none of the six rounds’ measured defects was a colour defect. That is 
 
 ## Reading order for a reviewer
 
-1. `token-table.md` §1 — 120 radius findings, 8 type tokens against 19 sizes on screen, 6 control heights, 8 header shapes. This is the 现状 that each review round re-discovered from scratch.
+1. `token-table.md` §1 — 118 radius findings, 8 type tokens against 19 sizes on screen, 6 control heights, 8 header shapes. This is the 现状 that each review round re-discovered from scratch.
 2. `page-template.md` §2.1 — the template, on one screen. If the diagram is wrong, everything downstream is wrong.
 3. `table-spec.md` §2.3 — the 40px row arithmetic. The only place where a type tier, a control tier and a table rule meet, so the cheapest place to find a contradiction.
 4. `machine-language-rules.md` §2 M5 — the CI wiring. Until it lands, the other three files are advice.

@@ -14,7 +14,7 @@ build); numbers marked `[src]` are a census of HEAD `7fd0c99`; `[gate]` is the g
 
 ### 1.1 Radius: eleven rendered values, three of them synonyms
 
-`node /tmp/ow-gate/check-ui-tokens.mjs` reports **120 radius findings** `[gate]`: 107 `border-radius`
+`node scripts/check-ui-tokens.mjs` reports **118 radius findings** `[gate]`: 105 `border-radius`
 declarations in `styles.css` and 13 `rounded-*` utilities in TSX. Rendered values in use:
 
 | value | count | what it dresses |
@@ -38,7 +38,12 @@ element in this product (max box height 44px < 999): three spellings, one look, 
 `styles.css` declares eight `--ow-type-*` tokens: 11, 12, 13, 14, 16, `clamp(20px,2.1vw,26px)`, 21,
 `clamp(30px,4vw,44px)` `[src]`, plus one `.94em` (`code`, styles.css:175) and one `inherit`.
 
-The audit's runtime census of computed `font-size` over 25 routes `[audit]`:
+The audit's runtime census of computed `font-size` `[audit]`. Counted today, two ways: `App.tsx` declares
+42 `<Route>` elements, of which 36 are concrete paths (42 − 3 path-less layout wrappers − 3 `path="*"`), and
+the one committed harness — `tests/ui/ui-table-audit.spec.ts`, `ROUTES`, 10 entries — visits **10** routes,
+which over the 3 committed label files is **30 page measurements**. The census below was taken over the
+26-route artifact set `table-spec.md` §4.7 records as deleted on 2026-10-31, and no harness in the tree writes
+the `fontHist` it was read from: it is a record, not a command this tree can re-run.
 
 ```
 r1440-light-en: 19 distinct sizes
@@ -49,7 +54,7 @@ r1440-light-en: 19 distinct sizes
 Twelve of those nineteen are within 6px of each other. A reader cannot name the hierarchy from the page,
 and neither can a stylesheet.
 
-### 1.3 Controls and buttons: two component families, five heights
+### 1.3 Controls and buttons: two component families, six heights
 
 | height | where |
 |---|---|
@@ -188,9 +193,9 @@ Effort is a single engineer who has read this file; “risk” is what can break
 | # | step | files | changes | effort | risk |
 |---|---|---|---:|---|---|
 | T1 | Declare the new token set, keep the old names as aliases | `styles.css` (1 file) | +7 lines | 0.5h | none: aliases keep the tree building |
-| T2 | Radius: 107 CSS declarations + 13 TSX utilities → 3 tokens | `styles.css`, `components/ui/*.tsx` (13 files) | 120 edits | 3h | `50%`→pill on non-square boxes changes avatars to pills; check `.icon-btn` in toast (24×32) |
+| T2 | Radius: 105 CSS declarations + 13 TSX utilities → 3 tokens | `styles.css`, `components/ui/*.tsx` (13 files) | 118 edits | 3h | `50%`→pill on non-square boxes changes avatars to pills; check `.icon-btn` in toast (24×32) |
 | T3 | Type: 8 tokens → 4, delete `.94em` | `styles.css` | 9 declarations | 1h | 12px→13px reflows 121 declarations; long zh labels wrap (expected, the gate re-checks overflow) |
-| T4 | Controls: 6 heights → 2, plus rule C1 on 5 toolbars | `styles.css`, `components/ui/{button,input,select,tabs}.tsx` | 15 + 6 edits | 2.5h | tabs grow by 4px in three toolbars; `/admin/activity` pagination row grows 8px |
+| T4 | Controls: 6 heights → 2, plus rule C1 on 5 toolbars | `styles.css`, `components/ui/{button,input,select,tabs}.tsx` | 14 + 6 edits | 2.5h | tabs grow by 4px in three toolbars; `/admin/activity` pagination row grows 8px |
 | T5 | Buttons: delete `.btn` family, move 13 sites | `styles.css`, 13 page files | 13 JSX edits | 2h | a legacy `.btn.active` state (filter chips) has no shadcn equivalent — map to `variant="secondary"` + `aria-pressed` |
 | T6 | One `PageHeader`: delete `Ui.tsx` copy, repoint 3 importers | `components/Ui.tsx`, 3 files | 3 imports | 1h | `SurfaceChrome` is the 403 page: it must keep rendering a header without actions |
 | T7 | Header height 80px + one shape (drop `meta`/`primary` slots or fold them) | `components/app/page-header.tsx`, 34 call sites | 34 call sites, mechanical | 4h | pages that put a status chip in `meta` must move it into the description line or the body |
@@ -210,19 +215,19 @@ budget file is lowered by the PR that lands each row of §3, and reaches `{}` wh
       - run: node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
 ```
 
-### Proof it goes red (the tree as it stands at HEAD `7fd0c99`)
+### Proof it goes red (re-run at HEAD `1f1feeb`)
 
 ```
 $ node scripts/check-ui-tokens.mjs
-FAIL  radius-tier      120  budget 0
-FAIL  control-tier      15  budget 0
+FAIL  radius-tier      118  budget 0
+FAIL  control-tier      14  budget 0
 FAIL  type-tier          7  budget 0
 FAIL  one-header         5  budget 0
-FAIL  uppercase-guard   22  budget 0
+FAIL  uppercase-guard   19  budget 0
 FAIL  format-locale      4  budget 0
 
-  radius-tier  styles.css:175  border-radius: 4px;
-  radius-tier  styles.css:207  border-radius: 7px;
+  radius-tier  styles.css:176  border-radius: 4px;
+  radius-tier  styles.css:208  border-radius: 7px;
   control-tier  components/ui/button.tsx:19  h-9 on a control box
   uppercase-guard  styles.css:318  .eyebrow
   format-locale  format.ts:22  'No data'
@@ -232,15 +237,16 @@ $ echo $?
 1
 ```
 
-### Proof it goes green without touching the tree (ratchet at today's counts)
+### Proof it goes green without touching the tree (ratchet at the committed budgets)
 
 ```
-$ node scripts/check-ui-tokens.mjs --ratchet ui-debt.json   # {radius-tier:120, control-tier:15, ...}
-ok    radius-tier      120  budget 120
-ok    control-tier      15  budget 15
+$ node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
+                                    # the file holds {radius-tier:119, control-tier:14, ...}
+ok    radius-tier      118  budget 119
+ok    control-tier      14  budget 14
 ok    type-tier          7  budget 7
 ok    one-header         5  budget 5
-ok    uppercase-guard   22  budget 22
+ok    uppercase-guard   19  budget 19
 ok    format-locale      4  budget 4
 
 check-ui-tokens: PASS
@@ -248,19 +254,34 @@ $ echo $?
 0
 ```
 
+One budget sits one above the tree: `ui-debt.json` holds `radius-tier: 119` against 118 findings today, so the
+ratchet would absorb one new radius before it went red. Left as it stands — tightening a budget is a decision
+about the tree, not a documentation fix — and written down here so the gap is a number someone chose to leave,
+not a number nobody looked at.
+
 ### Proof the ratchet actually ratchets
 
-With the radius budget set one below reality (`radius-tier: 119`):
+With the radius budget set one below reality (`radius-tier: 117`, where the tree prints 118):
 
 ```
 $ node scripts/check-ui-tokens.mjs --ratchet ui-debt-tighter.json
-FAIL  radius-tier      120  budget 119
-ok    control-tier      15  budget 15
+FAIL  radius-tier      118  budget 117
+ok    control-tier      14  budget 14
+ok    type-tier          7  budget 7
+ok    one-header         5  budget 5
+ok    uppercase-guard   19  budget 19
+ok    format-locale      4  budget 4
+
+  radius-tier  styles.css:176  border-radius: 4px;
 ...
 check-ui-tokens: FAIL (1 rule(s) over budget)
 $ echo $?
 1
 ```
+
+`ui-debt-tighter.json` is not a file this repository ships: it is `ui-debt.json` with `radius-tier` lowered from
+119 to 117, kept outside the tree for the length of the run. The command above is the command that ran; only
+the copy's location differs from what a reader will have on disk.
 
 ### The script
 

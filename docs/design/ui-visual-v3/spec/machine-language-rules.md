@@ -13,18 +13,18 @@ a measurement that nobody read. Gate: `scripts/check-ui-tokens.mjs` (R5, R6) + `
 
 `components/app/status-indicator.tsx:150` renders `NO_DATA` verbatim with a dashed border
 (`.value-token--no-data { border-style: dashed }`, styles.css:1130), an `sr-only` localized meaning and a
-`title`. The component is right. The usage is not: `grep -rho "NoData"` finds **53 call sites** and the
+`title`. The component is right. The usage is not: `grep -rho "NoData"` finds **46 call sites** and the
 review counted **10 dashed boxes on `/admin/governance`** — that page renders `recordsExamined` and
 `recordsFailed` for five datasets, and every empty one is its own dashed rectangle. Ten boxes that all say
 “the source cannot answer” read as an unfinished page, and each one costs a border, a padding and a word.
 
-### 1.2 Thirty-five Chinese messages carry an untranslated wire code
+### 1.2 Thirty-six Chinese messages carry an untranslated wire code
 
-`[src]` — the catalog scan (zh-CN, 1194 messages) for a ≥3-letter uppercase Latin run in a string that also
+`[src]` — the catalog scan (zh-CN, 1243 messages) for a ≥3-letter uppercase Latin run in a string that also
 contains CJK:
 
 ```
-zh-CN messages: 1194   mixed CJK + CAPS: 35
+zh-CN messages: 1243   mixed CJK + CAPS: 36
   governance.failures.description  = 仅包含终态为 失败 或 ERROR 的运行。
   install.field.kernelApiMajor     = Kernel API 主版本
   diagnostics.field.apiMajor       = API 主版本
@@ -34,12 +34,12 @@ zh-CN messages: 1194   mixed CJK + CAPS: 35
 `en`: **0** mixed messages. The defect only exists in the locale that has no uppercase — which is exactly
 why the CSS could not reveal it: `text-transform: uppercase` **does nothing to Chinese characters**, so the
 Latin half of `KERNEL 自有` shouts while the Chinese half is untouched. The review saw the symptom; the
-cause is 35 strings, not 1.
+cause is 36 strings, not 1.
 
-### 1.3 Twenty-two uppercase rules, zero language guards
+### 1.3 Nineteen uppercase rules, zero language guards
 
-`grep -c "text-transform: uppercase"` = **22** in `styles.css`; `grep -c ":lang("` = **0**. So `.tag`,
-`.eyebrow`, `.metric-label`, `.nav-section-label`, `.data-table th` and 17 more uppercase every string they
+`grep -c "text-transform: uppercase"` = **19** in `styles.css`; `grep -c ":lang("` = **0**. So `.tag`,
+`.eyebrow`, `.metric-label`, `.nav-section-label`, `.data-table th` and 14 more uppercase every string they
 render, in both locales. `i18n/index.tsx:85` already sets `document.documentElement.lang = locale`, so the
 fix needs no JavaScript — only a selector.
 
@@ -71,9 +71,10 @@ destructive control still has to argue for itself.
 
 `artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json` recorded `overflow: 223` on `/admin/jobs/{id}`
 **and was never read by CI**: `.github/workflows/ci.yml` runs typecheck, three `check-*.mjs`, four builds and
-`vitest` — no metrics consumer, no browser. The artifact is also **stale**: `capturedAt 2026-10-29T14:22Z`
-against HEAD `7fd0c99` at `2026-10-30T18:05+08:00`. A record nobody reads and a record that no longer
-describes HEAD are the same record.
+`vitest` — no metrics consumer, no browser. That file has since been re-collected (`table-spec.md` §4.7) and
+now records `overflow: -15` on the same route, so the 223px survives only as the record that motivated the
+gate. A record nobody reads and a record nobody can date are the same record; §2 M5 is about the first half,
+and the second half is that nothing in the artifact says when it was measured.
 
 ---
 
@@ -111,15 +112,15 @@ describes HEAD are the same record.
 }
 ```
 
-- **The 22 rules keep their optics in `en` and lose nothing in `zh-CN`** — uppercase is a no-op on CJK, so
+- **The 19 rules keep their optics in `en` and lose nothing in `zh-CN`** — uppercase is a no-op on CJK, so
   this changes zero pixels in Chinese and zero pixels in English. What it removes is the mixed string in
   which half the glyphs shout because they happen to be Latin.
 - **A mixed string is a copy defect, not a casing defect.** `仅包含终态为 失败 或 ERROR 的运行` must become
   `仅包含终态为失败或错误的运行`; an acronym that is genuinely an acronym (`API`, `CLI`, `ZIP`, `OCI`) may stay,
-  and `scripts/check-status-vocabulary.mjs` already carries the acronym allowlist. **All 35 messages are
-  classified before the rule turns green**: thirty use a real acronym and need nothing; five carry a run
-  that is not an acronym — `ERROR`, `OPSWEAVE`, `REMOTES`, `SHA`, `ADR` — and each of the five needs a
-  decision, not a regex.
+  and `scripts/check-status-vocabulary.mjs` already carries the acronym allowlist. **All 36 messages are
+  classified before the rule turns green**: thirty-two use only acronyms the allowlist accepts and need
+  nothing; four carry a run that is not an acronym — `ERROR`, `OPSWEAVE`, `REMOTES`, `SHA`, `ADR`, five runs
+  across four messages — and each of the five runs needs a decision, not a regex.
 - **Violation** = a `text-transform: uppercase` declaration whose rule does not contain `:lang(en)`; a
   catalog message with a `[A-Z]{3,}` run adjacent to CJK whose run is not in the acronym allowlist.
 
@@ -181,10 +182,13 @@ They are promoted to a **gate input**:
 ```
 
 1. `overflow > 0` on any route at any viewport **fails the build** (`table-spec.md` §4.3 proves the red).
-2. **Staleness is not detected at all.** An earlier revision of this document described a `--max-age-hours` option that would reject artifacts older than the commit. The script never implemented it: running it returns `no such file or directory` with exit 2. `capturedAt` is recorded but nothing compares it to anything.
-   test. Today’s files are 28 hours older than HEAD `7fd0c99`, which is the mechanical definition of
-   “recorded, shipped, ignored”. In CI the default is off so the proof above stays reproducible; in the job
-   it is on, because that job captures its own artifacts.
+2. **Staleness is not detected at all.** An earlier revision of this document described a `--max-age-hours`
+   option that would reject artifacts older than the commit. The script never implemented it:
+   `node scripts/check-ui-metrics.mjs --max-age-hours 24 artifacts/ui/visual-v3/audit` prints
+   `check-ui-metrics: no such file or directory: 24` and exits 2, because `24` is parsed as an input path. Nor
+   is there a field to compare: the artifacts' `config` object holds `label`, `theme`, `mode`, `baseURL` and
+   `data`, and no `capturedAt` at all. An artifact is therefore worth “whenever it was written, against
+   whatever HEAD was then”, which is the mechanical definition of “recorded, shipped, ignored”.
 3. A route with **no measurement** fails. Absence has never once meant “fine”; it has meant “nobody looked”,
    six times in a row.
 
@@ -194,7 +198,7 @@ They are promoted to a **gate input**:
 
 | # | step | files | changes | effort | risk |
 |---|---|---|---:|---|---|
-| M1a | Classify the 35 mixed zh-CN messages: 30 keep their acronym, 5 need prose (`ERROR`→`错误`, `OPSWEAVE`/`REMOTES`→a localized sentence, `SHA`→`SHA256`, `ADR`→`架构决策记录`) | `i18n/catalogs/zh-CN.json` | 5 values | 1h | `ERROR` is *not* in the acronym allowlist, so the gate will point at each one; a reviewer must approve the 11 acronyms rather than the gate deciding |
+| M1a | Classify the 36 mixed zh-CN messages: 32 keep their acronym, 4 need prose (5 runs) (`ERROR`→`错误`, `OPSWEAVE`/`REMOTES`→a localized sentence, `SHA`→`SHA256`, `ADR`→`架构决策记录`) | `i18n/catalogs/zh-CN.json` | 4 values | 1h | `ERROR` is *not* in the acronym allowlist, so the gate will point at each one; a reviewer must approve the 11 acronyms rather than the gate deciding |
 | M1b | One dashed token per region: `recordsExamined` / `recordsFailed` stop rendering per-cell `NoData`; a column with ≥ 50% absence is dropped with one sentence | `Governance.tsx`, `Diagnostics.tsx`, `PluginDetail.tsx` | 3 pages | 2h | dropping a column changes what a screenshot shows; needs a before/after at 1440 |
 | M2 | `:lang(en)` scope for 22 rules, one rule | `styles.css` | 1 rule replacing 22 declarations | 1h | zero visible change in either locale (uppercase is a no-op on CJK); verify with a zh-CN screenshot that no spacing shifted (letter-spacing was scoped with it) |
 | M3 | `formatDuration(locale, s)` + `formatBytes` via `Intl`, delete `'No data'` | `format.ts`, `Diagnostics.tsx`, `jobDuration.ts`, `Jobs.tsx` | 4 files, 6 call sites | 1.5h | `jobDuration.ts` has its own label logic (`executionLabel`, `spanLabel`) and must not double-format; its unit tests are the contract |
@@ -213,18 +217,18 @@ They are promoted to a **gate input**:
 
 ```
 $ node scripts/check-ui-tokens.mjs | head -8
-FAIL  radius-tier      120  budget 0
-FAIL  control-tier      15  budget 0
+FAIL  radius-tier      118  budget 0
+FAIL  control-tier      14  budget 0
 FAIL  type-tier          7  budget 0
 FAIL  one-header         5  budget 0
-FAIL  uppercase-guard   22  budget 0
+FAIL  uppercase-guard   19  budget 0
 FAIL  format-locale      4  budget 0
 check-ui-tokens: FAIL (6 rule(s) over budget)
 $ echo $?
 1
 ```
 
-R5’s findings are the 22 selectors, printed with `file:line`; R6’s are `format.ts:22` (`'No data'`) and the
+R5’s findings are the 19 selectors, printed with `file:line`; R6’s are `format.ts:22` (`'No data'`) and the
 three duration templates.
 
 ### 4.2 The one rule this file adds
@@ -265,27 +269,30 @@ one definition, so a code cannot be an acronym for one and a wire token for the 
 
 ### 4.3 The measurement gate
 
-`check-ui-metrics.mjs` (full source in `table-spec.md` §4.5). The 223px record fails it today:
+`check-ui-metrics.mjs` (full source in `table-spec.md` §4.5). The file that used to fail it has been
+re-collected, and the rule now reads green on the route it used to name:
 
 ```
 $ node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json
-FAIL  overflow>0  r390-light-en  /admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae  +223px  worst: <code> mono small right=613
-check-ui-metrics: FAIL (1 violation(s) across 25 page measurements)
+ok    r390-light-en  pages=10  violations=0
+
+check-ui-metrics: PASS (10 page measurements, 9 §4.2 assertions each + §2.5 card clipping)
 $ echo $?
-1
+0
 ```
 
-and the clean 1440 run passes the same script (`table-spec.md` §4.4, `exit 0`). The staleness flag is what
-stops the *next* release from shipping on this file:
-
-```
-(removed: this block quoted a flag the script never implemented)
+That is not the gate relaxing. `/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51` — the route the `+223px`
+came from — now measures `overflow: -15`, and the whole directory passes on 30 page measurements.
+`table-spec.md` §4.3 keeps the old output beside the statement that this tree can no longer print it, and §4.7
+records what the re-collection deleted. The half of M5 that is still unproven is the dating: no artifact
+records when it was measured, and the `--max-age-hours` flag quoted in an earlier revision of this file never
+existed in the script.
 
 ---
 
 ## 5. 不做什么
 
-- **No copy rewrite beyond the 35 messages.** The tone of voice, the sentence length and the terminology are not in scope; only the untranslated machine vocabulary is.
+- **No copy rewrite beyond the 36 messages.** The tone of voice, the sentence length and the terminology are not in scope; only the untranslated machine vocabulary is.
 - **No new state token.** `NO_DATA`, `UNKNOWN` and `STALE` stay the protocol vocabulary; this spec designs their *rendering and budget*, not their names. Renaming them would break `data-status` and the e2e selectors that read it.
 - **No `Intl.RelativeTimeFormat` beyond the identity cell.** Every other timestamp keeps `formatDate`; a second age format would be a second thing to learn.
 - **No locale addition.** Only `en` and `zh-CN` are in scope (AGENTS.md), and the unit work is done by `Intl` precisely so that a third locale costs nothing later.
