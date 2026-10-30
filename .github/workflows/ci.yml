@@ -77,6 +77,7 @@ jobs:
       # One status vocabulary: a wire code rendered as copy fails the build. It sits beside the
       # i18n gate because both answer the same question - what may a message say?
       - run: node scripts/check-status-vocabulary.mjs
+      - run: node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
       - run: pnpm --filter @opsweave/platform-web build
       - run: pnpm --filter @opsweave/hello-web build
       - run: pnpm --filter @opsweave/data-catalog-web build
