@@ -4,7 +4,9 @@ import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { TableCell } from '../components/ui/table';
 import { Status } from '../components/app/status';
-import { useI18n, useT } from '../i18n';
+import { useI18n, useT, type Locale } from '../i18n';
+import { ageMessage } from '../lib/age';
+import { IDENTITY_MANY_ROWS, identityDisambiguator } from '../lib/identity';
 import { cn } from '../lib/utils';
 
 /**
@@ -128,7 +130,7 @@ export function RowActions({ label, actions, onOpenChange }: { label: string; ac
 /* ── table-spec §2.1: one identity per row, in human language ───────────────────────── */
 
 /** Above this row count 4 hex characters stop being enough; §2.1 derives 8 for its reason. */
-export const IDENTITY_MANY_ROWS = 100;
+export { IDENTITY_MANY_ROWS };
 
 /**
  * What the row is called: ⟨name⟩ · ⟨disambiguator⟩.
@@ -149,18 +151,16 @@ export interface Identity {
   fullId: string | null;
 }
 
-/** §2.1 names Intl.RelativeTimeFormat as the age source; the unit ladder matches TimeAgo. */
+/**
+ * §2.1's age, from the one ladder the shell has (lib/age.ts).
+ *
+ * This used to be `Intl.RelativeTimeFormat`, which is a correct formatter and a second dialect:
+ * the same row printed "24m ago" in its Occurred cell (the catalog form) and "3 hours ago" in the
+ * span of its run (this form). Two spellings of one fact on one line is the thing §1.4 called out,
+ * so the span now reads what the cell reads.
+ */
 export function relativeAge(locale: string, at?: string | null): string {
-  if (!at) return '';
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return '';
-  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
-  const abs = Math.abs(seconds);
-  const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
-  if (abs < 60) return format.format(seconds, 'second');
-  if (abs < 3600) return format.format(Math.round(seconds / 60), 'minute');
-  if (abs < 86400) return format.format(Math.round(seconds / 3600), 'hour');
-  return format.format(Math.round(seconds / 86400), 'day');
+  return ageMessage(locale as Locale, at);
 }
 
 /**
@@ -177,9 +177,7 @@ export function formatIdentity(options: {
   rowsOnPage?: number;
 }): Identity {
   const { name, id, at, locale, nameIsUnique = true, rowsOnPage = 0 } = options;
-  const hex = String(id || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
-  const width = rowsOnPage > IDENTITY_MANY_ROWS ? 8 : 4;
-  const disambiguator = nameIsUnique || hex.length < width ? '' : hex.slice(0, width);
+  const disambiguator = nameIsUnique ? '' : identityDisambiguator(id, rowsOnPage);
   const age = relativeAge(locale, at);
   return {
     key: [name, disambiguator].filter(Boolean).join(' · '),

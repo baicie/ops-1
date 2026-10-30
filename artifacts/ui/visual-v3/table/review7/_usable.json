@@ -1,0 +1,176 @@
+{
+ "/admin/jobs": {
+  "rows": 14,
+  "identityKeys": [
+   "host-metrics · 1285",
+   "host-metrics · e273",
+   "host-metrics · 9c4a",
+   "host-metrics · 3f8b",
+   "host-metrics · a71d",
+   "host-metrics · 5b6e",
+   "host-metrics · c04f",
+   "host-metrics · 7d2e",
+   "host-metrics · f19a",
+   "host-metrics · 6e35",
+   "host-metrics · 2a8f",
+   "host-metrics · b53c",
+   "host-metrics · 8f47",
+   "host-metrics · 41e6"
+  ],
+  "identityWithClock": [],
+  "ageCellsPerRow": [
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1
+  ],
+  "geometry": {
+   "heights": [
+    42,
+    41,
+    40
+   ],
+   "firstLineOffsets": [
+    4.5,
+    7.5,
+    5.5,
+    4.5,
+    null
+   ],
+   "firstLineSpread": 3
+  }
+ },
+ "/admin/activity": {
+  "rows": 17,
+  "identityKeys": [
+   "deployment.created · f0fe",
+   "plugin.enabled · 6b1c",
+   "node.enrolled · 22dd",
+   "plugin.disabled · d47a",
+   "policy.updated · 19e4",
+   "enrollment_token.issued · f0fe",
+   "deployment.failed · 6b1c",
+   "node.unreachable · 22dd",
+   "plugin.probed · 6b1c",
+   "plugin.enabled · 22dd",
+   "node.enrolled · d47a",
+   "plugin.disabled · 19e4",
+   "policy.updated · f0fe",
+   "enrollment_token.issued · 6b1c",
+   "deployment.failed · 22dd",
+   "node.unreachable · d47a",
+   "deployment.created · 19e4"
+  ],
+  "identityWithClock": [],
+  "ageCellsPerRow": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   1,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "disclosure": {
+   "hasButton": true,
+   "ariaExpandedBefore": "false",
+   "panelsBefore": 0,
+   "note": "The result rides the outcome column; every event on this page was recorded by one actor, so the actor is stated once here: USER 82475274-80eb-432e-85db-c2be567ee543"
+  },
+  "disclosureAfterClick": {
+   "ariaExpanded": "true",
+   "ariaControls": "activity-detail-0",
+   "panels": 1,
+   "panelId": "activity-detail-0",
+   "panelMentionsActor": true,
+   "panelText": "Subject f0fe3808-4531-4fd0-ad1c-d85c9e60b11aOccurred Oct 30, 09:55:33 PMActor 82475274-80eb-432e-85db-c2be567ee543Event ID event-000{ \"sequence\": 0 }"
+  },
+  "disclosureAfterEnter": {
+   "panels": 0
+  },
+  "geometry": {
+   "heights": [
+    42,
+    41,
+    40
+   ],
+   "firstLineOffsets": [
+    4.5,
+    4.5,
+    4.5,
+    null
+   ],
+   "firstLineSpread": 0
+  }
+ },
+ "/admin/governance": {
+  "missingTokens": 0,
+  "missingTokenShapes": [],
+  "emptyCopies": [
+   "No quality run has been recorded for any of these 12 datasets yet. Start one from the catalog; examined and failed counts appear here as soon as a run finishes."
+  ],
+  "perRowNoRuns": 0,
+  "rows": 27,
+  "geometry": {
+   "heights": [
+    42,
+    41,
+    40
+   ],
+   "firstLineOffsets": [
+    4.5,
+    4.5
+   ],
+   "firstLineSpread": 0
+  }
+ },
+ "/admin/ops-center": {
+  "missingTokens": 1,
+  "missingTokenShapes": [
+   "dashed"
+  ],
+  "emptyCopies": [],
+  "perRowNoRuns": 0,
+  "rows": 0
+ },
+ "/admin/settings/diagnostics": {
+  "geometry": {
+   "heights": [
+    42,
+    41,
+    40
+   ],
+   "firstLineOffsets": [
+    4.5,
+    7.5,
+    4.5
+   ],
+   "firstLineSpread": 3
+  }
+ },
+ "/admin/nodes/{id}@390": {
+  "overflow": -15,
+  "clientW": 390,
+  "offenders": []
+ }
+}

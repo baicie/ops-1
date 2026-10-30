@@ -11,29 +11,29 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 2524,
+   "docHeight": 2552,
    "offenders": [],
    "identityKey": [
-    "host-metrics · 1285 · 18小时前",
-    "host-metrics · e273 · 16小时前",
-    "host-metrics · 9c4a · 15小时前",
-    "host-metrics · 3f8b · 14小时前",
-    "host-metrics · a71d · 13小时前",
-    "host-metrics · 5b6e · 12小时前",
-    "host-metrics · c04f · 11小时前",
-    "host-metrics · 7d2e · 9小时前",
-    "host-metrics · f19a · 8小时前",
-    "host-metrics · 6e35 · 7小时前",
-    "host-metrics · 2a8f · 6小时前",
-    "host-metrics · b53c · 5小时前",
-    "host-metrics · 8f47 · 4小时前",
-    "host-metrics · 41e6 · 3小时前"
+    "host-metrics · 1285",
+    "host-metrics · e273",
+    "host-metrics · 9c4a",
+    "host-metrics · 3f8b",
+    "host-metrics · a71d",
+    "host-metrics · 5b6e",
+    "host-metrics · c04f",
+    "host-metrics · 7d2e",
+    "host-metrics · f19a",
+    "host-metrics · 6e35",
+    "host-metrics · 2a8f",
+    "host-metrics · b53c",
+    "host-metrics · 8f47",
+    "host-metrics · 41e6"
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 142.6,
-    "p95": 142.6,
-    "max": 142.6,
+    "p50": 144.6,
+    "p95": 144.6,
+    "max": 144.6,
     "n": 14
    },
    "columns": 4,
@@ -43,93 +43,205 @@
     0.36,
     1
    ],
+   "columnLabels": [
+    "任务",
+    "状态",
+    "耗时",
+    "创建时间"
+   ],
+   "tableRowCounts": [
+    14
+   ],
    "duplicateRunMax": 0,
    "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
    "cardFactCount": 3,
    "cards": [
     {
-     "key": "host-metrics · 1285 · 18小时前",
+     "key": "host-metrics · 1285",
      "clipped": false,
-     "width": 183,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · e273 · 16小时前",
+     "key": "host-metrics · e273",
      "clipped": false,
-     "width": 184,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 9c4a · 15小时前",
+     "key": "host-metrics · 9c4a",
      "clipped": false,
-     "width": 184,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 3f8b · 14小时前",
+     "key": "host-metrics · 3f8b",
      "clipped": false,
-     "width": 182,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · a71d · 13小时前",
+     "key": "host-metrics · a71d",
      "clipped": false,
-     "width": 181,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 5b6e · 12小时前",
+     "key": "host-metrics · 5b6e",
      "clipped": false,
-     "width": 184,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · c04f · 11小时前",
+     "key": "host-metrics · c04f",
      "clipped": false,
-     "width": 179,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 7d2e · 9小时前",
+     "key": "host-metrics · 7d2e",
      "clipped": false,
-     "width": 177,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · f19a · 8小时前",
+     "key": "host-metrics · f19a",
      "clipped": false,
-     "width": 173,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 6e35 · 7小时前",
+     "key": "host-metrics · 6e35",
      "clipped": false,
-     "width": 178,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 2a8f · 6小时前",
+     "key": "host-metrics · 2a8f",
      "clipped": false,
-     "width": 175,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · b53c · 5小时前",
+     "key": "host-metrics · b53c",
      "clipped": false,
-     "width": 178,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 8f47 · 4小时前",
+     "key": "host-metrics · 8f47",
      "clipped": false,
-     "width": 175,
-     "facts": 3
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "host-metrics · 41e6 · 3小时前",
+     "key": "host-metrics · 41e6",
      "clipped": false,
-     "width": 177,
-     "facts": 3
+     "width": 313,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     }
    ],
    "tableWidth": 349,
@@ -139,146 +251,277 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 3100,
+   "docHeight": 3148,
    "offenders": [],
    "identityKey": [
-    "deployment.created · f0fe · 2分钟前",
-    "plugin.enabled · 6b1c · 26分钟前",
-    "node.enrolled · 22dd · 50分钟前",
-    "plugin.disabled · d47a · 1小时前",
-    "policy.updated · 19e4 · 2小时前",
-    "enrollment_token.issued · f0fe · 2小时前",
-    "deployment.failed · 6b1c · 2小时前",
-    "node.unreachable · 22dd · 3小时前",
-    "plugin.probed · 6b1c · 3小时前",
-    "plugin.enabled · 22dd · 7小时前",
-    "node.enrolled · d47a · 7小时前",
-    "plugin.disabled · 19e4 · 8小时前",
-    "policy.updated · f0fe · 8小时前",
-    "enrollment_token.issued · 6b1c · 8小时前",
-    "deployment.failed · 22dd · 9小时前",
-    "node.unreachable · d47a · 9小时前",
-    "deployment.created · 19e4 · 10小时前"
+    "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T16:27:04",
+    "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T16:03:04",
+    "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T15:39:04",
+    "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T15:15:04",
+    "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T14:51:04",
+    "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T14:27:04",
+    "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T14:03:04",
+    "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T13:39:04",
+    "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T13:15:04 · +8@2026-10-30T09:39:04",
+    "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T09:39:04",
+    "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T09:15:04",
+    "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T08:51:04",
+    "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T08:27:04",
+    "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T08:03:04",
+    "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T07:39:04",
+    "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T07:15:04",
+    "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T06:51:04"
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 157,
-    "p95": 157,
-    "max": 157,
+    "p50": 155.2,
+    "p95": 155.2,
+    "max": 155.2,
     "n": 17
    },
-   "columns": 4,
+   "columns": 3,
    "distinctRatio": [
     1,
-    0.18,
-    0.06,
+    0.94,
     1
+   ],
+   "columnLabels": [
+    "事件",
+    "结果",
+    "发生时间"
+   ],
+   "tableRowCounts": [
+    17
    ],
    "duplicateRunMax": 1,
    "rows": 17,
-   "cardFactCount": 3,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
    "cards": [
     {
-     "key": "deployment.created · f0fe · 2分钟前",
+     "key": "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T16:27:04",
      "clipped": false,
-     "width": 202,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "plugin.enabled · 6b1c · 26分钟前",
+     "key": "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T16:03:04",
      "clipped": false,
-     "width": 196,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "node.enrolled · 22dd · 50分钟前",
+     "key": "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T15:39:04",
      "clipped": false,
-     "width": 192,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "plugin.disabled · d47a · 1小时前",
+     "key": "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T15:15:04",
      "clipped": false,
-     "width": 190,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "policy.updated · 19e4 · 2小时前",
+     "key": "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T14:51:04",
      "clipped": false,
-     "width": 189,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "enrollment_token.issued · f0fe · 2小时前",
+     "key": "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T14:27:04",
      "clipped": false,
-     "width": 236,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "deployment.failed · 6b1c · 2小时前",
+     "key": "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T14:03:04",
      "clipped": false,
-     "width": 198,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "node.unreachable · 22dd · 3小时前",
+     "key": "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T13:39:04",
      "clipped": false,
-     "width": 211,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "plugin.probed · 6b1c · 3小时前",
+     "key": "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T13:15:04 · +8@2026-10-30T09:39:04",
      "clipped": false,
-     "width": 141,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "plugin.enabled · 22dd · 7小时前",
+     "key": "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T09:39:04",
      "clipped": false,
-     "width": 190,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "node.enrolled · d47a · 7小时前",
+     "key": "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T09:15:04",
      "clipped": false,
-     "width": 182,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "plugin.disabled · 19e4 · 8小时前",
+     "key": "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T08:51:04",
      "clipped": false,
-     "width": 192,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "policy.updated · f0fe · 8小时前",
+     "key": "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T08:27:04",
      "clipped": false,
-     "width": 184,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "enrollment_token.issued · 6b1c · 8小时前",
+     "key": "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T08:03:04",
      "clipped": false,
-     "width": 237,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "deployment.failed · 22dd · 9小时前",
+     "key": "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T07:39:04",
      "clipped": false,
-     "width": 199,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "node.unreachable · d47a · 9小时前",
+     "key": "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T07:15:04",
      "clipped": false,
-     "width": 210,
-     "facts": 3
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     },
     {
-     "key": "deployment.created · 19e4 · 10小时前",
+     "key": "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T06:51:04",
      "clipped": false,
-     "width": 209,
-     "facts": 3
+     "width": 313,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     }
     }
    ],
    "tableWidth": 349,
@@ -288,116 +531,264 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 3670,
+   "docHeight": 2530,
    "offenders": [],
    "identityKey": [
-    "lab-node-1 · 2分钟前",
-    "lab-node-2 · 44分钟前",
-    "edge-ams-3 · 1小时前",
-    "edge-fra-1 · 2小时前",
-    "edge-sin-2 · 3小时前",
-    "edge-iad-4 · 4小时前",
-    "batch-05 · 4小时前",
-    "batch-06 · 5小时前",
-    "gpu-01 · 6小时前",
-    "gpu-02 · 6小时前",
-    "spare-07 · 7小时前",
-    "spare-08 · 8小时前"
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 261.8,
-    "p95": 266.1,
-    "max": 266.1,
+    "p50": 163.6,
+    "p95": 163.6,
+    "max": 163.6,
     "n": 12
    },
-   "columns": 7,
+   "columns": 4,
    "distinctRatio": [
     1,
-    0.83,
+    0.33,
     0.25,
-    1,
-    1,
-    0.92,
     1
+   ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "实例",
+    "资源"
+   ],
+   "tableRowCounts": [
+    12
    ],
    "duplicateRunMax": 0,
    "rows": 12,
-   "cardFactCount": 6,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
    "cards": [
     {
-     "key": "lab-node-1 · 2分钟前",
+     "key": "lab-node-1",
      "clipped": false,
-     "width": 124,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "lab-node-2 · 44分钟前",
+     "key": "lab-node-2",
      "clipped": false,
-     "width": 134,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-ams-3 · 1小时前",
+     "key": "edge-ams-3",
      "clipped": false,
-     "width": 131,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-fra-1 · 2小时前",
+     "key": "edge-fra-1",
      "clipped": false,
-     "width": 122,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-sin-2 · 3小时前",
+     "key": "edge-sin-2",
      "clipped": false,
-     "width": 125,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-iad-4 · 4小时前",
+     "key": "edge-iad-4",
      "clipped": false,
-     "width": 126,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "batch-05 · 4小时前",
+     "key": "batch-05",
      "clipped": false,
-     "width": 114,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "batch-06 · 5小时前",
+     "key": "batch-06",
      "clipped": false,
-     "width": 114,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "gpu-01 · 6小时前",
+     "key": "gpu-01",
      "clipped": false,
-     "width": 100,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "gpu-02 · 6小时前",
+     "key": "gpu-02",
      "clipped": false,
-     "width": 102,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "spare-07 · 7小时前",
+     "key": "spare-07",
      "clipped": false,
-     "width": 111,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "spare-08 · 8小时前",
+     "key": "spare-08",
      "clipped": false,
-     "width": 114,
-     "facts": 6
+     "width": 321,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     }
    ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5305,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 97.4,
+    "p95": 135.5,
+    "max": 135.5,
+    "n": 15
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    0.42,
+    1,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "观测时间",
+    "CPU",
+    "内存",
+    "文件系统",
+    "插件",
+    "版本",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    12,
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 15,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": null,
+   "cards": [],
    "tableWidth": 349,
    "tablePanelWidth": 349
   },
@@ -405,7 +796,7 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 4856,
+   "docHeight": 2648,
    "offenders": [],
    "identityKey": [
     "Hello Ops",
@@ -423,96 +814,193 @@
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 358.8,
-    "p95": 358.8,
-    "max": 358.8,
+    "p50": 177,
+    "p95": 177,
+    "max": 177,
     "n": 12
    },
-   "columns": 7,
+   "columns": 5,
    "distinctRatio": [
-    0.08,
     1,
     1,
-    0.17,
+    1,
     0.25,
-    0.25,
-    0.08
+    1
+   ],
+   "columnLabels": [
+    "插件",
+    "版本",
+    "部署状态",
+    "就绪 副本",
+    "摘要 / 信任"
+   ],
+   "tableRowCounts": [
+    12
    ],
    "duplicateRunMax": 0,
    "rows": 12,
-   "cardFactCount": 6,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
    "cards": [
     {
      "key": "Hello Ops",
      "clipped": false,
-     "width": 61,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Host Metrics",
      "clipped": false,
-     "width": 81,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Log Tail",
      "clipped": false,
-     "width": 48,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Data Catalog",
      "clipped": false,
-     "width": 82,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Policy Engine",
      "clipped": false,
-     "width": 84,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Registry Mirror",
      "clipped": false,
-     "width": 95,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Edge Probe",
      "clipped": false,
-     "width": 73,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Edge Tunnel",
      "clipped": false,
-     "width": 78,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Fault Lab",
      "clipped": false,
-     "width": 58,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Replay Lab",
      "clipped": false,
-     "width": 69,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Audit Sink",
      "clipped": false,
-     "width": 64,
-     "facts": 6
+     "width": 315,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "Console Bridge",
      "clipped": false,
-     "width": 96,
-     "facts": 6
+     "width": 321,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     }
    ],
    "tableWidth": 349,
@@ -522,7 +1010,7 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 4706,
+   "docHeight": 3925,
    "offenders": [],
    "identityKey": [
     "orders-raw",
@@ -537,207 +1025,412 @@
     "audit-ledger",
     "risk-scores",
     "stale-feed",
-    "orders-curated · 4小时前",
-    "inventory · 10小时前",
-    "orders-curated · 昨天",
-    "lab-node-1 · 2分钟前",
-    "lab-node-2 · 44分钟前",
-    "edge-ams-3 · 1小时前",
-    "edge-fra-1 · 2小时前",
-    "edge-sin-2 · 3小时前",
-    "edge-iad-4 · 4小时前",
-    "batch-05 · 4小时前",
-    "batch-06 · 5小时前",
-    "gpu-01 · 6小时前",
-    "gpu-02 · 6小时前",
-    "spare-07 · 7小时前",
-    "spare-08 · 8小时前"
+    "orders-curated · 4f1c",
+    "inventory · b93d",
+    "orders-curated · 71ae",
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 108.8,
-    "p95": 173.4,
-    "max": 173.4,
+    "p50": 97.4,
+    "p95": 117.8,
+    "max": 117.8,
     "n": 27
    },
-   "columns": 10,
+   "columns": 3,
    "distinctRatio": [
     1,
-    0.37,
-    0.17,
-    0.08,
-    0.08,
+    0.33,
     null,
     null,
-    null,
-    null,
-    null
+    1,
+    0.33,
+    0.25
+   ],
+   "columnLabels": [
+    "数据集",
+    "Schema",
+    "数据集",
+    "状态",
+    "节点",
+    "状态",
+    "代次"
+   ],
+   "tableRowCounts": [
+    12,
+    3,
+    12
    ],
    "duplicateRunMax": 0,
    "rows": 27,
-   "cardFactCount": 4,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
    "cards": [
     {
      "key": "orders-raw",
      "clipped": false,
-     "width": 70,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "orders-curated",
      "clipped": false,
-     "width": 96,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "shipments",
      "clipped": false,
-     "width": 66,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "events-click",
      "clipped": false,
-     "width": 78,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "events-impression",
      "clipped": false,
-     "width": 118,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "inventory",
      "clipped": false,
-     "width": 59,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "invoice-lines",
      "clipped": false,
-     "width": 80,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "node-metrics",
      "clipped": false,
-     "width": 86,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "plugin-invocations",
      "clipped": false,
-     "width": 118,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "audit-ledger",
      "clipped": false,
-     "width": 79,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "risk-scores",
      "clipped": false,
-     "width": 71,
-     "facts": 4
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
      "key": "stale-feed",
      "clipped": false,
-     "width": 65,
-     "facts": 4
+     "width": 313,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "orders-curated · 4小时前",
+     "key": "orders-curated · 4f1c",
      "clipped": false,
-     "width": 151,
-     "facts": 1
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "inventory · 10小时前",
+     "key": "inventory · b93d",
      "clipped": false,
-     "width": 120,
-     "facts": 1
+     "width": 307,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "orders-curated · 昨天",
+     "key": "orders-curated · 71ae",
      "clipped": false,
-     "width": 130,
-     "facts": 1
+     "width": 313,
+     "facts": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "lab-node-1 · 2分钟前",
+     "key": "lab-node-1",
      "clipped": false,
-     "width": 124,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "lab-node-2 · 44分钟前",
+     "key": "lab-node-2",
      "clipped": false,
-     "width": 134,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-ams-3 · 1小时前",
+     "key": "edge-ams-3",
      "clipped": false,
-     "width": 131,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-fra-1 · 2小时前",
+     "key": "edge-fra-1",
      "clipped": false,
-     "width": 122,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-sin-2 · 3小时前",
+     "key": "edge-sin-2",
      "clipped": false,
-     "width": 125,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-iad-4 · 4小时前",
+     "key": "edge-iad-4",
      "clipped": false,
-     "width": 126,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "batch-05 · 4小时前",
+     "key": "batch-05",
      "clipped": false,
-     "width": 114,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "batch-06 · 5小时前",
+     "key": "batch-06",
      "clipped": false,
-     "width": 114,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "gpu-01 · 6小时前",
+     "key": "gpu-01",
      "clipped": false,
-     "width": 100,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "gpu-02 · 6小时前",
+     "key": "gpu-02",
      "clipped": false,
-     "width": 102,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "spare-07 · 7小时前",
+     "key": "spare-07",
      "clipped": false,
-     "width": 111,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "spare-08 · 8小时前",
+     "key": "spare-08",
      "clipped": false,
-     "width": 114,
-     "facts": 2
+     "width": 313,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     }
    ],
    "tableWidth": 349,
@@ -747,74 +1440,246 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 3506,
+   "docHeight": 3433,
    "offenders": [],
    "identityKey": [
-    "trusted-team · 2分钟前",
-    "lab · 昨天",
-    "partner-a · 前天",
-    "partner-b · 3天前",
-    "community · 4天前",
-    "vendor-x · 5天前"
+    "Platform Admin",
+    "Dana Ops",
+    "Lee Chen",
+    "Sam Ito",
+    "Nia Park",
+    "Rui Costa",
+    "Aki Tan",
+    "Noa Berg",
+    "trusted-team",
+    "lab",
+    "partner-a",
+    "partner-b",
+    "community",
+    "vendor-x"
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 161.2,
-    "p95": 185.1,
-    "max": 185.1,
+    "p50": 165.8,
+    "p95": 165.8,
+    "max": 165.8,
     "n": 14
    },
-   "columns": 9,
+   "columns": 4,
    "distinctRatio": [
-    1,
-    0.71,
-    0.29,
-    0.29,
+    null,
+    null,
+    null,
     null,
     null,
     null,
     null,
     null
    ],
+   "columnLabels": [
+    "用户",
+    "角色",
+    "状态",
+    "操作",
+    "发布者",
+    "指纹",
+    "信任状态",
+    "备注"
+   ],
+   "tableRowCounts": [
+    8,
+    6
+   ],
    "duplicateRunMax": 0,
    "rows": 14,
-   "cardFactCount": 4,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
    "cards": [
     {
-     "key": "trusted-team · 2分钟前",
+     "key": "Platform Admin",
      "clipped": false,
-     "width": 138,
-     "facts": 4
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "lab · 昨天",
+     "key": "Dana Ops",
      "clipped": false,
-     "width": 53,
-     "facts": 4
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "partner-a · 前天",
+     "key": "Lee Chen",
      "clipped": false,
-     "width": 94,
-     "facts": 4
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "partner-b · 3天前",
+     "key": "Sam Ito",
      "clipped": false,
-     "width": 102,
-     "facts": 4
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "community · 4天前",
+     "key": "Nia Park",
      "clipped": false,
-     "width": 112,
-     "facts": 4
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "vendor-x · 5天前",
+     "key": "Rui Costa",
      "clipped": false,
-     "width": 98,
-     "facts": 4
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "Aki Tan",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "Noa Berg",
+     "clipped": false,
+     "width": 313,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "trusted-team",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "lab",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "partner-a",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "partner-b",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "community",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
+    },
+    {
+     "key": "vendor-x",
+     "clipped": false,
+     "width": 313,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     }
    ],
    "tableWidth": 349,
@@ -824,27 +1689,27 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 3714,
+   "docHeight": 3615,
    "offenders": [],
    "identityKey": [
-    "lab-node-1 · 2分钟前",
-    "lab-node-2 · 44分钟前",
-    "edge-ams-3 · 1小时前",
-    "edge-fra-1 · 2小时前",
-    "edge-sin-2 · 3小时前",
-    "edge-iad-4 · 4小时前",
-    "batch-05 · 4小时前",
-    "batch-06 · 5小时前",
-    "gpu-01 · 6小时前",
-    "gpu-02 · 6小时前",
-    "spare-07 · 7小时前",
-    "spare-08 · 8小时前"
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 112,
-    "p95": 112,
-    "max": 112,
+    "p50": 121,
+    "p95": 121,
+    "max": 121,
     "n": 12
    },
    "columns": 3,
@@ -853,81 +1718,178 @@
     0.33,
     0.75
    ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "最近观测"
+   ],
+   "tableRowCounts": [
+    12
+   ],
    "duplicateRunMax": 0,
    "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
    "cardFactCount": 2,
    "cards": [
     {
-     "key": "lab-node-1 · 2分钟前",
+     "key": "lab-node-1",
      "clipped": false,
-     "width": 124,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "lab-node-2 · 44分钟前",
+     "key": "lab-node-2",
      "clipped": false,
-     "width": 134,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-ams-3 · 1小时前",
+     "key": "edge-ams-3",
      "clipped": false,
-     "width": 131,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-fra-1 · 2小时前",
+     "key": "edge-fra-1",
      "clipped": false,
-     "width": 122,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-sin-2 · 3小时前",
+     "key": "edge-sin-2",
      "clipped": false,
-     "width": 125,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-iad-4 · 4小时前",
+     "key": "edge-iad-4",
      "clipped": false,
-     "width": 126,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "batch-05 · 4小时前",
+     "key": "batch-05",
      "clipped": false,
-     "width": 114,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "batch-06 · 5小时前",
+     "key": "batch-06",
      "clipped": false,
-     "width": 114,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "gpu-01 · 6小时前",
+     "key": "gpu-01",
      "clipped": false,
-     "width": 100,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "gpu-02 · 6小时前",
+     "key": "gpu-02",
      "clipped": false,
-     "width": 102,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "spare-07 · 7小时前",
+     "key": "spare-07",
      "clipped": false,
-     "width": 111,
-     "facts": 2
+     "width": 307,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "spare-08 · 8小时前",
+     "key": "spare-08",
      "clipped": false,
-     "width": 114,
-     "facts": 2
+     "width": 313,
+     "facts": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     }
    ],
    "tableWidth": 349,
@@ -937,41 +1899,38 @@
    "overflow": -15,
    "docScrollW": 375,
    "docClientW": 390,
-   "docHeight": 2248,
+   "docHeight": 1889,
    "offenders": [
     {
      "tag": "button",
      "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
-     "left": 322,
-     "right": 400
+     "left": 321,
+     "right": 399
     },
     {
      "tag": "button",
      "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
-     "left": 404,
-     "right": 490
+     "left": 403,
+     "right": 488
     },
     {
      "tag": "span",
      "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
-     "left": 450,
-     "right": 477
+     "left": 449,
+     "right": 475
     }
    ],
    "identityKey": [
-    "lab-node-1 · 2分钟前",
-    "lab-node-2 · 20分钟前",
-    "edge-ams-3 · 38分钟前",
-    "edge-fra-1 · 56分钟前",
-    "edge-sin-2 · 1小时前",
-    "edge-iad-4 · 2小时前"
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3"
    ],
    "identityUnique": 1,
    "rowHeight": {
-    "p50": 137.2,
-    "p95": 137.2,
-    "max": 137.2,
-    "n": 6
+    "p50": 154.5,
+    "p95": 154.5,
+    "max": 154.5,
+    "n": 3
    },
    "columns": 5,
    "distinctRatio": [
@@ -981,45 +1940,63 @@
     null,
     null
    ],
+   "columnLabels": [
+    "节点",
+    "槽位",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    3
+   ],
    "duplicateRunMax": 0,
-   "rows": 6,
-   "cardFactCount": 4,
+   "rows": 3,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
    "cards": [
     {
-     "key": "lab-node-1 · 2分钟前",
+     "key": "lab-node-1",
      "clipped": false,
-     "width": 124,
-     "facts": 4
+     "width": 343,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "lab-node-2 · 20分钟前",
+     "key": "lab-node-2",
      "clipped": false,
-     "width": 134,
-     "facts": 4
+     "width": 343,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     },
     {
-     "key": "edge-ams-3 · 38分钟前",
+     "key": "edge-ams-3",
      "clipped": false,
-     "width": 141,
-     "facts": 4
-    },
-    {
-     "key": "edge-fra-1 · 56分钟前",
-     "clipped": false,
-     "width": 130,
-     "facts": 4
-    },
-    {
-     "key": "edge-sin-2 · 1小时前",
-     "clipped": false,
-     "width": 123,
-     "facts": 4
-    },
-    {
-     "key": "edge-iad-4 · 2小时前",
-     "clipped": false,
-     "width": 126,
-     "facts": 4
+     "width": 349,
+     "facts": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     }
     }
    ],
    "tableWidth": 349,
@@ -1047,8 +2024,23 @@
     null,
     null
    ],
+   "columnLabels": [
+    "尝试",
+    "状态",
+    "栅栏",
+    "节点",
+    "开始时间"
+   ],
+   "tableRowCounts": [
+    2
+   ],
    "duplicateRunMax": 0,
    "rows": 2,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
    "cardFactCount": null,
    "cards": [],
    "tableWidth": 349,

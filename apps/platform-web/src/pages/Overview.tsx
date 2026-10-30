@@ -221,12 +221,18 @@ export function OverviewPage() {
                   {/* A verdict with no verb is a status snapshot. The band now hands the
                       operator the destination of the first thing that needs doing, instead of
                       an in-page anchor to a list they still have to read. */}
+                  {/* Both links are answers to "what needs doing", so with nothing open neither is
+                      offered: "Review issues" pointed at a list that, on a healthy platform, holds
+                      one sentence saying there is nothing to review. Measured at 0 open issues it
+                      was the only dead target on the first screen. */}
                   {data.attention.length > 0 ? (
-                    <Link className="text-link" to={data.attention[0].link} data-testid="overview-fix-first">
-                      {t('overview.action.fixIssue')} <Icon name="arrowRight" size={12} />
-                    </Link>
+                    <>
+                      <Link className="text-link" to={data.attention[0].link} data-testid="overview-fix-first">
+                        {t('overview.action.fixIssue')} <Icon name="arrowRight" size={12} />
+                      </Link>
+                      <a className="text-link" href="#attention">{t('overview.action.reviewIssues')} <Icon name="arrowRight" size={12} /></a>
+                    </>
                   ) : null}
-                  <a className="text-link" href="#attention">{t('overview.action.reviewIssues')} <Icon name="arrowRight" size={12} /></a>
                 </div>
               </section>
 
@@ -339,29 +345,25 @@ export function OverviewPage() {
                     <h2 id="overview-modules-title">{t('overview.modules.title')}</h2>
                   </div>
                   <ul className="module-strip" aria-label={t('overview.modules.aria')}>
-                    {modules.map((module) => {
-                      const body = (
-                        <>
-                          <div className="module-card-head">
-                            <span className="module-card-name">{t(module.labelKey)}</span>
-                            <StatusIndicator state={module.state} />
-                          </div>
-                          <p className="module-card-detail">{module.detail}</p>
-                          {module.href ? <span className="module-card-go" aria-hidden="true"><Icon name="arrowRight" size={14} /></span> : null}
-                        </>
-                      );
-                      return (
-                        <li key={module.id} className="module-row">
-                          {module.href ? (
-                            <Link className="module-card" to={module.href} data-module={module.id} data-indicator={module.state}>
-                              {body}
-                            </Link>
-                          ) : (
-                            <div className="module-card" data-module={module.id} data-indicator={module.state}>{body}</div>
-                          )}
+                    {groupModules(modules).map((group) =>
+                      group.rows.length === 1 ? (
+                        <li key={group.rows[0].id} className="module-row">
+                          <ModuleCard module={group.rows[0]} t={t} showState />
                         </li>
-                      );
-                    })}
+                      ) : (
+                        <li key={group.state + ':' + group.rows[0].id} className="module-row module-row-group" data-indicator={group.state} data-module-count={group.rows.length}>
+                          <div className="module-group-head">
+                            <StatusIndicator state={group.state} />
+                            <span className="module-group-count">{t('overview.modules.grouped', { count: group.rows.length })}</span>
+                          </div>
+                          <ul className="module-group-cards">
+                            {group.rows.map((module) => (
+                              <li key={module.id}><ModuleCard module={module} t={t} showState={false} /></li>
+                            ))}
+                          </ul>
+                        </li>
+                      ),
+                    )}
                   </ul>
                   {partialSource ? <NoticeBar state="partial" title={t('state.partial')} detail={t('ui.partial.sources', { ok: sourcesAnswered, total: sourceStates.length })} /> : null}
                 </section>
@@ -437,6 +439,57 @@ type ModuleRow = {
  * repeat are in the glance strip, so a row carries only the state and the reason - two
  * lines in every row, which is what keeps the ledger even.
  */
+type Translation = (key: MessageKey, params?: Record<string, string | number>) => string;
+
+/**
+ * Consecutive modules that agree on their state are one row.
+ *
+ * Availability used to print one row per module, and on a healthy platform three of those four
+ * rows opened with the same word: Ready, Ready, Ready. The verdict is one fact; the module
+ * details are three. Grouping keeps both - the row states the verdict once, and each module in it
+ * is still its own link with its own detail. Grouping is by CONSECUTIVE state and never sorts, so
+ * a degraded module between two ready ones still gets its own row instead of being folded into a
+ * verdict that would then be false for it.
+ */
+function groupModules(rows: ModuleRow[]): { state: IndicatorState; rows: ModuleRow[] }[] {
+  const groups: { state: IndicatorState; rows: ModuleRow[] }[] = [];
+  for (const row of rows) {
+    const last = groups[groups.length - 1];
+    if (last && last.state === row.state) last.rows.push(row);
+    else groups.push({ state: row.state, rows: [row] });
+  }
+  return groups;
+}
+
+/**
+ * One module: its own destination, its own name, its own detail.
+ *
+ * showState is false inside a group, because that row already states the state for the modules it
+ * holds - printing it three more times is the repetition the grouping exists to remove, and
+ * printing it on the row while also printing it per card would be four.
+ */
+function ModuleCard({ module, t, showState }: { module: ModuleRow; t: Translation; showState: boolean }) {
+  const body = (
+    <>
+      <div className="module-card-head">
+        <span className="module-card-name">{t(module.labelKey)}</span>
+        {showState ? <StatusIndicator state={module.state} /> : null}
+      </div>
+      <p className="module-card-detail">{module.detail}</p>
+      {module.href ? <span className="module-card-go" aria-hidden="true"><Icon name="arrowRight" size={14} /></span> : null}
+    </>
+  );
+  // A card inside a row that already printed the state does not print it again.
+  const className = showState ? 'module-card' : 'module-card module-card-inline';
+  return module.href ? (
+    <Link className={className} to={module.href} data-module={module.id} data-indicator={module.state}>
+      {body}
+    </Link>
+  ) : (
+    <div className={className} data-module={module.id} data-indicator={module.state}>{body}</div>
+  );
+}
+
 function buildModules(
   t: (key: MessageKey, params?: Record<string, string | number>) => string,
   data: Overview | null,

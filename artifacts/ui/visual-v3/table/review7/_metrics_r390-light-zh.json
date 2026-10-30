@@ -1,0 +1,1273 @@
+{
+ "config": {
+  "label": "r390-light-zh",
+  "theme": "light",
+  "mode": "before",
+  "baseURL": "http://127.0.0.1:5173",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/admin/jobs": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2141,
+   "offenders": [],
+   "identityKey": [
+    "host-metrics · 1285",
+    "host-metrics · e273",
+    "host-metrics · 9c4a",
+    "host-metrics · 3f8b",
+    "host-metrics · a71d",
+    "host-metrics · 5b6e",
+    "host-metrics · c04f",
+    "host-metrics · 7d2e",
+    "host-metrics · f19a",
+    "host-metrics · 6e35",
+    "host-metrics · 2a8f",
+    "host-metrics · b53c",
+    "host-metrics · 8f47",
+    "host-metrics · 41e6"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 115.2,
+    "p95": 115.2,
+    "max": 115.2,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.36,
+    0.36,
+    1
+   ],
+   "columnLabels": [
+    "任务",
+    "状态",
+    "耗时",
+    "创建时间"
+   ],
+   "tableRowCounts": [
+    14
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cards": [
+    {
+     "key": "host-metrics · 1285",
+     "clipped": false,
+     "width": 119,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · e273",
+     "clipped": false,
+     "width": 119,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 9c4a",
+     "clipped": false,
+     "width": 120,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 3f8b",
+     "clipped": false,
+     "width": 118,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · a71d",
+     "clipped": false,
+     "width": 117,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 5b6e",
+     "clipped": false,
+     "width": 121,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · c04f",
+     "clipped": false,
+     "width": 117,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 7d2e",
+     "clipped": false,
+     "width": 119,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · f19a",
+     "clipped": false,
+     "width": 115,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 6e35",
+     "clipped": false,
+     "width": 121,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 2a8f",
+     "clipped": false,
+     "width": 117,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · b53c",
+     "clipped": false,
+     "width": 120,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 8f47",
+     "clipped": false,
+     "width": 117,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 41e6",
+     "clipped": false,
+     "width": 119,
+     "facts": 3
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/activity": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2570,
+   "offenders": [],
+   "identityKey": [
+    "deployment.created · f0fe",
+    "plugin.enabled · 6b1c",
+    "node.enrolled · 22dd",
+    "plugin.disabled · d47a",
+    "policy.updated · 19e4",
+    "enrollment_token.issued · f0fe",
+    "deployment.failed · 6b1c",
+    "node.unreachable · 22dd",
+    "plugin.probed · 6b1c",
+    "plugin.enabled · 22dd",
+    "node.enrolled · d47a",
+    "plugin.disabled · 19e4",
+    "policy.updated · f0fe",
+    "enrollment_token.issued · 6b1c",
+    "deployment.failed · 22dd",
+    "node.unreachable · d47a",
+    "deployment.created · 19e4"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 123.8,
+    "p95": 123.8,
+    "max": 123.8,
+    "n": 17
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.94,
+    0.59
+   ],
+   "columnLabels": [
+    "事件",
+    "结果",
+    "发生时间"
+   ],
+   "tableRowCounts": [
+    17
+   ],
+   "duplicateRunMax": 1,
+   "rows": 17,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cards": [
+    {
+     "key": "deployment.created · f0fe",
+     "clipped": false,
+     "width": 159,
+     "facts": 2
+    },
+    {
+     "key": "plugin.enabled · 6b1c",
+     "clipped": false,
+     "width": 130,
+     "facts": 2
+    },
+    {
+     "key": "node.enrolled · 22dd",
+     "clipped": false,
+     "width": 126,
+     "facts": 2
+    },
+    {
+     "key": "plugin.disabled · d47a",
+     "clipped": false,
+     "width": 134,
+     "facts": 2
+    },
+    {
+     "key": "policy.updated · 19e4",
+     "clipped": false,
+     "width": 131,
+     "facts": 2
+    },
+    {
+     "key": "enrollment_token.issued · f0fe",
+     "clipped": false,
+     "width": 189,
+     "facts": 2
+    },
+    {
+     "key": "deployment.failed · 6b1c",
+     "clipped": false,
+     "width": 150,
+     "facts": 2
+    },
+    {
+     "key": "node.unreachable · 22dd",
+     "clipped": false,
+     "width": 153,
+     "facts": 2
+    },
+    {
+     "key": "plugin.probed · 6b1c",
+     "clipped": false,
+     "width": 125,
+     "facts": 2
+    },
+    {
+     "key": "plugin.enabled · 22dd",
+     "clipped": false,
+     "width": 132,
+     "facts": 2
+    },
+    {
+     "key": "node.enrolled · d47a",
+     "clipped": false,
+     "width": 124,
+     "facts": 2
+    },
+    {
+     "key": "plugin.disabled · 19e4",
+     "clipped": false,
+     "width": 134,
+     "facts": 2
+    },
+    {
+     "key": "policy.updated · f0fe",
+     "clipped": false,
+     "width": 126,
+     "facts": 2
+    },
+    {
+     "key": "enrollment_token.issued · 6b1c",
+     "clipped": false,
+     "width": 193,
+     "facts": 2
+    },
+    {
+     "key": "deployment.failed · 22dd",
+     "clipped": false,
+     "width": 153,
+     "facts": 2
+    },
+    {
+     "key": "node.unreachable · d47a",
+     "clipped": false,
+     "width": 151,
+     "facts": 2
+    },
+    {
+     "key": "deployment.created · 19e4",
+     "clipped": false,
+     "width": 165,
+     "facts": 2
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2201,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 136.2,
+    "p95": 136.2,
+    "max": 136.2,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "实例",
+    "资源"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 70,
+     "facts": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 71,
+     "facts": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 79,
+     "facts": 3
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 68,
+     "facts": 3
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 71,
+     "facts": 3
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 72,
+     "facts": 3
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 59,
+     "facts": 3
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 59,
+     "facts": 3
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 45,
+     "facts": 3
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 47,
+     "facts": 3
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 58,
+     "facts": 3
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 59,
+     "facts": 3
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5305,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 97.4,
+    "p95": 135.5,
+    "max": 135.5,
+    "n": 15
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    0.42,
+    1,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "观测时间",
+    "CPU",
+    "内存",
+    "文件系统",
+    "插件",
+    "版本",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    12,
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 15,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2319,
+   "offenders": [],
+   "identityKey": [
+    "Hello Ops",
+    "Host Metrics",
+    "Log Tail",
+    "Data Catalog",
+    "Policy Engine",
+    "Registry Mirror",
+    "Edge Probe",
+    "Edge Tunnel",
+    "Fault Lab",
+    "Replay Lab",
+    "Audit Sink",
+    "Console Bridge"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 149.6,
+    "p95": 149.6,
+    "max": 149.6,
+    "n": 12
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    1,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "插件",
+    "版本",
+    "部署状态",
+    "就绪 副本",
+    "摘要 / 信任"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cards": [
+    {
+     "key": "Hello Ops",
+     "clipped": false,
+     "width": 61,
+     "facts": 3
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 81,
+     "facts": 3
+    },
+    {
+     "key": "Log Tail",
+     "clipped": false,
+     "width": 48,
+     "facts": 3
+    },
+    {
+     "key": "Data Catalog",
+     "clipped": false,
+     "width": 82,
+     "facts": 3
+    },
+    {
+     "key": "Policy Engine",
+     "clipped": false,
+     "width": 84,
+     "facts": 3
+    },
+    {
+     "key": "Registry Mirror",
+     "clipped": false,
+     "width": 95,
+     "facts": 3
+    },
+    {
+     "key": "Edge Probe",
+     "clipped": false,
+     "width": 73,
+     "facts": 3
+    },
+    {
+     "key": "Edge Tunnel",
+     "clipped": false,
+     "width": 78,
+     "facts": 3
+    },
+    {
+     "key": "Fault Lab",
+     "clipped": false,
+     "width": 58,
+     "facts": 3
+    },
+    {
+     "key": "Replay Lab",
+     "clipped": false,
+     "width": 69,
+     "facts": 3
+    },
+    {
+     "key": "Audit Sink",
+     "clipped": false,
+     "width": 64,
+     "facts": 3
+    },
+    {
+     "key": "Console Bridge",
+     "clipped": false,
+     "width": 96,
+     "facts": 3
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3131,
+   "offenders": [],
+   "identityKey": [
+    "orders-raw",
+    "orders-curated",
+    "shipments",
+    "events-click",
+    "events-impression",
+    "inventory",
+    "invoice-lines",
+    "node-metrics",
+    "plugin-invocations",
+    "audit-ledger",
+    "risk-scores",
+    "stale-feed",
+    "orders-curated · 4f1c",
+    "inventory · b93d",
+    "orders-curated · 71ae",
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 68,
+    "p95": 88.4,
+    "max": 88.4,
+    "n": 27
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    null,
+    null,
+    1,
+    0.33,
+    0.25
+   ],
+   "columnLabels": [
+    "数据集",
+    "Schema",
+    "数据集",
+    "状态",
+    "节点",
+    "状态",
+    "代次"
+   ],
+   "tableRowCounts": [
+    12,
+    3,
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cards": [
+    {
+     "key": "orders-raw",
+     "clipped": false,
+     "width": 70,
+     "facts": 1
+    },
+    {
+     "key": "orders-curated",
+     "clipped": false,
+     "width": 96,
+     "facts": 1
+    },
+    {
+     "key": "shipments",
+     "clipped": false,
+     "width": 66,
+     "facts": 1
+    },
+    {
+     "key": "events-click",
+     "clipped": false,
+     "width": 78,
+     "facts": 1
+    },
+    {
+     "key": "events-impression",
+     "clipped": false,
+     "width": 118,
+     "facts": 1
+    },
+    {
+     "key": "inventory",
+     "clipped": false,
+     "width": 59,
+     "facts": 1
+    },
+    {
+     "key": "invoice-lines",
+     "clipped": false,
+     "width": 80,
+     "facts": 1
+    },
+    {
+     "key": "node-metrics",
+     "clipped": false,
+     "width": 86,
+     "facts": 1
+    },
+    {
+     "key": "plugin-invocations",
+     "clipped": false,
+     "width": 118,
+     "facts": 1
+    },
+    {
+     "key": "audit-ledger",
+     "clipped": false,
+     "width": 79,
+     "facts": 1
+    },
+    {
+     "key": "risk-scores",
+     "clipped": false,
+     "width": 71,
+     "facts": 1
+    },
+    {
+     "key": "stale-feed",
+     "clipped": false,
+     "width": 65,
+     "facts": 1
+    },
+    {
+     "key": "orders-curated · 4f1c",
+     "clipped": false,
+     "width": 130,
+     "facts": 1
+    },
+    {
+     "key": "inventory · b93d",
+     "clipped": false,
+     "width": 99,
+     "facts": 1
+    },
+    {
+     "key": "orders-curated · 71ae",
+     "clipped": false,
+     "width": 131,
+     "facts": 1
+    },
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 70,
+     "facts": 2
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 71,
+     "facts": 2
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 79,
+     "facts": 2
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 68,
+     "facts": 2
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 71,
+     "facts": 2
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 72,
+     "facts": 2
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 59,
+     "facts": 2
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 59,
+     "facts": 2
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 45,
+     "facts": 2
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 47,
+     "facts": 2
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 58,
+     "facts": 2
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 59,
+     "facts": 2
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3021,
+   "offenders": [],
+   "identityKey": [
+    "Platform Admin",
+    "Dana Ops",
+    "Lee Chen",
+    "Sam Ito",
+    "Nia Park",
+    "Rui Costa",
+    "Aki Tan",
+    "Noa Berg",
+    "trusted-team",
+    "lab",
+    "partner-a",
+    "partner-b",
+    "community",
+    "vendor-x"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 136.4,
+    "p95": 136.4,
+    "max": 136.4,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "用户",
+    "角色",
+    "状态",
+    "操作",
+    "发布者",
+    "指纹",
+    "信任状态",
+    "备注"
+   ],
+   "tableRowCounts": [
+    8,
+    6
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cards": [
+    {
+     "key": "Platform Admin",
+     "clipped": false,
+     "width": 98,
+     "facts": 3
+    },
+    {
+     "key": "Dana Ops",
+     "clipped": false,
+     "width": 61,
+     "facts": 3
+    },
+    {
+     "key": "Lee Chen",
+     "clipped": false,
+     "width": 59,
+     "facts": 3
+    },
+    {
+     "key": "Sam Ito",
+     "clipped": false,
+     "width": 48,
+     "facts": 3
+    },
+    {
+     "key": "Nia Park",
+     "clipped": false,
+     "width": 53,
+     "facts": 3
+    },
+    {
+     "key": "Rui Costa",
+     "clipped": false,
+     "width": 60,
+     "facts": 3
+    },
+    {
+     "key": "Aki Tan",
+     "clipped": false,
+     "width": 46,
+     "facts": 3
+    },
+    {
+     "key": "Noa Berg",
+     "clipped": false,
+     "width": 58,
+     "facts": 3
+    },
+    {
+     "key": "trusted-team",
+     "clipped": false,
+     "width": 84,
+     "facts": 3
+    },
+    {
+     "key": "lab",
+     "clipped": false,
+     "width": 19,
+     "facts": 3
+    },
+    {
+     "key": "partner-a",
+     "clipped": false,
+     "width": 60,
+     "facts": 3
+    },
+    {
+     "key": "partner-b",
+     "clipped": false,
+     "width": 61,
+     "facts": 3
+    },
+    {
+     "key": "community",
+     "clipped": false,
+     "width": 71,
+     "facts": 3
+    },
+    {
+     "key": "vendor-x",
+     "clipped": false,
+     "width": 57,
+     "facts": 3
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3262,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 91.6,
+    "p95": 91.6,
+    "max": 91.6,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "最近观测"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 70,
+     "facts": 2
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 71,
+     "facts": 2
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 79,
+     "facts": 2
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 68,
+     "facts": 2
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 71,
+     "facts": 2
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 72,
+     "facts": 2
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 59,
+     "facts": 2
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 59,
+     "facts": 2
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 45,
+     "facts": 2
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 47,
+     "facts": 2
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 58,
+     "facts": 2
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 59,
+     "facts": 2
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1731,
+   "offenders": [
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 321,
+     "right": 399
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 403,
+     "right": 488
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 449,
+     "right": 475
+    }
+   ],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 102,
+    "p95": 102,
+    "max": 102,
+    "n": 3
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "节点",
+    "槽位",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 3,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 70,
+     "facts": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 71,
+     "facts": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 79,
+     "facts": 3
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1739,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 156.4,
+    "p95": 156.4,
+    "max": 156.4,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "尝试",
+    "状态",
+    "栅栏",
+    "节点",
+    "开始时间"
+   ],
+   "tableRowCounts": [
+    2
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  }
+ }
+}

@@ -271,8 +271,19 @@ test('overview offers at least three metrics that navigate somewhere', async ({ 
   for (const card of await moduleCards.all()) {
     const detail = await card.locator('.module-card-detail').innerText();
     expect(detail.trim().length, 'module card must state its state or its reason').toBeGreaterThan(0);
-    await expect(card.locator('.status-indicator')).toHaveCount(1);
   }
+  // The state is stated once per ROW, not once per card: modules that agree on their state share a
+  // row, and that row prints the verdict for every module it holds. The assertion keeps its
+  // strength by covering the cards instead of counting indicators - a module inside no row, or a
+  // row that states no state, still fails.
+  const moduleRows = page.locator('[data-testid="overview-modules"] .module-row');
+  expect(await moduleRows.count(), 'the module strip renders rows').toBeGreaterThan(0);
+  let covered = 0;
+  for (const row of await moduleRows.all()) {
+    await expect(row.locator('.status-indicator').first()).toHaveCount(1);
+    covered += await row.locator('[data-module]').count();
+  }
+  expect(covered, 'every module card sits in a row that states its state').toBe(4);
   await metrics.first().click();
   await expect(page).toHaveURL(/\/nodes$/);
 });

@@ -2422,3 +2422,84 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
      is the flattening, and it is a layout change that needs its own measurement run. */
   .ow-table tbody .ow-cell { grid-template-rows: none; }
 }
+/* ── /admin/activity: the row's own facts, at the width the row has ──────────────────
+   Four additions, all of them facts that were previously reachable only by opening a row
+   or not printed at all: who did it, the payload field that differs, the clock, and the
+   count of a folded run. No border-radius and no literal font size here - the token gate
+   counts both, and the sizes that already exist do the job. */
+
+/* The actor is the one part of the qualifier line that is never allowed to be the part that
+   ellipsises, so it is painted at text weight while the rest stays muted. */
+/* The payload field can be a 200-character request path, so the span that carries it states its
+   own width instead of letting the table size the column to it: without this cap the identity
+   column measured 1204px at 1440 and pushed Outcome and Occurred out of the panel. An inline
+   element ignores max-width, hence inline-block. */
+.ow-ident-meta .event-detail-fact { display: inline-block; max-width: 22rem; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ow-ident-meta .event-actor { color: var(--ow-text); white-space: nowrap; }
+.ow-ident-meta .event-detail-fact code { color: var(--ow-text-muted); }
+.ow-ident-meta .event-run { font-variant-numeric: tabular-nums; color: var(--ow-text); }
+
+/* One timestamp on one line: the age, then when. Both halves are the same fact at two
+   precisions, and the second half is what separates two rows a poller wrote in one minute. */
+.event-when { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.event-when .ow-cell-meta { font-variant-numeric: tabular-nums; }
+
+/* The opened row: label/value pairs, so a 36-character id wraps under its own label instead of
+   pushing the value off the panel. */
+.event-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0 0 12px; font-size: var(--ow-type-sm); }
+.event-facts dt { color: var(--ow-text-muted); }
+.event-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.event-facts code { word-break: break-all; }
+.event-detail h4 { margin: 12px 0 6px; font-size: var(--ow-type-sm); font-weight: 600; color: var(--ow-text-muted); }
+.event-detail .detail-list code { word-break: break-all; }
+@media (max-width: 768px) {
+  /* At 390 the panel is 330px wide: a max-content label column would leave the value a
+     character per line, so the pairs stack. */
+  .event-facts { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .event-facts dt { margin-top: 6px; }
+
+  /* §2.5's card gives the identity line to the NAME. The qualifier (actor + payload field) is a
+     second line under it: as a flex sibling it took the line's width and the name ellipsised to
+     nothing on every card. */
+  .ow-table tbody td.ow-ident-cell { flex-direction: column; align-items: stretch; }
+
+  /* The qualifier is ONE line, and the meta line is what clips it. Measured before this rule, on a
+     row whose payload field is a 100-character request path: the actor on line one, the field's
+     value on line two, 30.9px of qualifier and 166-170px of card - and nothing overflowed, so no
+     gate moved. The box that wrapped is the payload span: a flex item capped at 9rem, whose inline
+     content is longer than the cap. A flex line cannot be clipped by an ancestor either - each item
+     is its own formatting context - so the line goes back to what the base rule and the desktop
+     rule already are: inline content in a nowrap block with one ellipsis at the row's edge. The
+     actor is first in the DOM and therefore survives the clip; the payload field is what gives
+     way, and its whole value is one tap away in the opened row. */
+  .ow-table tbody td.ow-ident-cell > .ow-ident-meta {
+    display: block;
+    height: calc(var(--ow-type-label) * 1.4);
+    text-align: left;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .ow-ident-meta .event-detail-fact { display: inline; max-width: none; overflow: visible; white-space: nowrap; }
+  .ow-ident-meta .event-detail-fact code { white-space: nowrap; }
+}
+
+/* ── overview: three ready rows are one row ──────────────────────────────────────────
+   Availability printed four rows; three of them said the same word ("Ready") about three modules
+   whose details differ by one noun. The repeated part is the verdict, not the facts, so the rows
+   that share a state become one row that states the verdict once and keeps every module - each
+   still its own link, its own name and its own detail. A module whose state differs keeps a row of
+   its own: "Ready" never stands in for a state it does not cover. */
+.module-row-group { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 4px 12px; padding: 10px 16px; }
+.module-group-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.module-group-head .status-indicator { padding: 0; border: 0; background: transparent; font-size: var(--ow-type-label); font-weight: 600; gap: 4px; }
+.module-group-count { color: var(--ow-text-muted); font-size: var(--ow-type-label); }
+.module-group-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0 16px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.module-group-cards > li { min-width: 0; border-left: 1px solid var(--ow-border); padding-left: 12px; }
+.module-group-cards > li:first-child { border-left: 0; padding-left: 0; }
+.module-card-inline { padding: 0; gap: 1px; }
+@media (max-width: 768px) {
+  .module-row-group { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .module-group-cards { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .module-group-cards > li { border-left: 0; padding-left: 0; }
+}

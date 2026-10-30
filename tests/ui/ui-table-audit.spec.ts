@@ -490,11 +490,30 @@ async function measure(page: Page) {
       const tailOverflow = tail
         ? tail.getBoundingClientRect().right > cellBox.right + 1 || tail.scrollWidth > tail.clientWidth + 1
         : false;
+      /**
+       * The qualifier line (actor / payload field / run span) is one line by contract: it is the
+       * 15.4px second track of a 40px row, and on a 390 card it is the line that says WHICH of two
+       * identical-looking events this is. When it becomes two lines nothing clips and nothing
+       * overflows - every card just grows ~15px - so a geometry gate that only reads p95 row height
+       * stays green. This reads the line boxes, not the height.
+       */
+      const meta = cell.parentElement ? (cell.parentElement.querySelector('.ow-ident-meta') as HTMLElement | null) : null;
+      const code = meta ? (meta.querySelector('code') as HTMLElement | null) : null;
+      const qualifier = meta
+        ? {
+            height: Math.round(meta.getBoundingClientRect().height * 10) / 10,
+            lines: new Set(Array.from(meta.children).map((child) => Math.round(child.getBoundingClientRect().top))).size,
+            overflow: meta.scrollWidth - meta.clientWidth,
+            codeWhiteSpace: code ? getComputedStyle(code).whiteSpace : null,
+            codeLineBoxes: code ? new Set(Array.from(code.getClientRects()).map((box) => Math.round(box.top))).size : null,
+          }
+        : null;
       return {
         key: cell.getAttribute('data-identity-key') || '',
         clipped: cell.scrollWidth > cell.clientWidth + 1 || tailOverflow,
         width: Math.round(cell.getBoundingClientRect().width),
         facts,
+        qualifier,
       };
     }).filter(Boolean);
     return {
@@ -621,7 +640,14 @@ test('usable', async ({ browser }) => {
     record[route] = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll('table tbody tr')).filter((tr) => !tr.classList.contains('expanded-row'));
       const keys = Array.from(document.querySelectorAll('[data-identity-key]')).map((el) => el.getAttribute('data-identity-key') || '');
-      const AGE = /\b\d+\s+(second|minute|hour|day|month|year)s?\s+ago\b|just now/i;
+      /**
+       * Both dialects of the one width. The product prints the catalog form ("3h ago", from
+       * lib/age.ts) and used to print Intl's long form ("3 hours ago") beside it; the harness was
+       * written against the long form and, once the dialect was unified, read 0 ages per row on
+       * every page - a probe that still ran, still passed, and measured nothing. It matches both
+       * now, so the reading does not silently go to zero again if a surface ever moves back.
+       */
+      const AGE = /\b\d+\s*(?:s|m|h|d)\s+ago\b|\b\d+\s+(?:second|minute|hour|day|month|year)s?\s+ago\b|just now/i;
       // The age printed anywhere else in the row (the occurred / created column) - counted so
       // "the time went back to its own column" is a measurement and not a claim. innerText, not
       // textContent: the stacked label ("Created") is display:none at 1440 and textContent would
