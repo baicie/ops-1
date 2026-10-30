@@ -306,7 +306,7 @@ export function NodesPage() {
                         </Link>
                       </div>
                     </StackCell>
-                    <StackCell label={t('table.instances')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('instances')))}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
+                    <StackCell label={t('table.instances')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('instances')))}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta ms-1">{t('status.ready')}</span></StackCell>
                     {resourcesMeasurable ? (
                       <StackCell label={t('table.resources')} data-resource="resources" className={cn(cardLineAfter, cardCellClass(cardFacts.includes('resources')))}>
                         {snapshot ? (

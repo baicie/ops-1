@@ -12,7 +12,9 @@
   --ow-separator: var(--ow-border);
   --ow-text: #161a20;
   --ow-text-secondary: #4b5563;
-  --ow-text-muted: #6b7380;
+  /* #6b7380 measured 4.39:1 on --ow-bg (#f4f5f7) - just under AA for the 11-13px copy that uses
+     it (breadcrumb links, toolbar counts, every .ow-cell-meta). Six units darker keeps the role. */
+  --ow-text-muted: #656d7a;
   --ow-accent: #3457d5;
   --ow-accent-soft: #e9edfc;
   --ow-accent-text: #ffffff;
@@ -230,7 +232,10 @@ input::placeholder { color: var(--ow-text-muted); }
 /* Status and tags */
 .status { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ow-type-sm); font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
 .status svg { flex: none; }
-.status-ok { color: var(--ow-ok); background: var(--ow-ok-soft); border-color: color-mix(in srgb, var(--ow-ok) 26%, transparent); }
+/* --ow-ok-ink is the token that exists for status TEXT (5.2:1 on this soft fill, where the fill
+   token measured 3.9:1) and the pill was still painted with the fill token. Same two colours, the
+   readable one. */
+.status-ok { color: var(--ow-ok-ink); background: var(--ow-ok-soft); border-color: color-mix(in srgb, var(--ow-ok) 26%, transparent); }
 .status-warn { color: var(--ow-warn); background: var(--ow-warn-soft); border-color: color-mix(in srgb, var(--ow-warn) 26%, transparent); }
 .status-danger { color: var(--ow-danger); background: var(--ow-danger-soft); border-color: color-mix(in srgb, var(--ow-danger) 26%, transparent); }
 .status-info { color: var(--ow-info); background: var(--ow-info-soft); border-color: color-mix(in srgb, var(--ow-info) 26%, transparent); }
@@ -288,7 +293,10 @@ input::placeholder { color: var(--ow-text-muted); }
 .mobile-menu { display: none; }
 .breadcrumbs { display: flex; align-items: center; gap: 8px; color: var(--ow-text-muted); font-size: var(--ow-type-sm); min-width: 0; overflow: hidden; white-space: nowrap; }
 .breadcrumbs a { color: var(--ow-text-secondary); }
-.crumb-sep { color: var(--ow-border-strong); }
+/* A separator is text, so it reads with a text token. It was --ow-border-strong: #cbd2dc on
+   #f4f5f7 = 1.4:1, the lowest ratio on 13 of the 15 focus pages (#3a4655 on #0d1015 = 1.98:1 in
+   dark). A border token is meant to be seen against a fill, not read on one. */
+.crumb-sep { color: var(--ow-text-secondary); }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .health-pill { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ow-type-sm); font-weight: 600; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--ow-border); background: var(--ow-surface-2); }
 .health-dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -766,7 +774,10 @@ input::placeholder { color: var(--ow-text-muted); }
 .studio-banner-error { border-color: var(--ow-danger); background: color-mix(in srgb, var(--ow-danger) 10%, var(--ow-surface)); color: var(--ow-danger); }
 .studio-banner-error .btn { margin-left: auto; }
 .studio-drafts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: var(--ow-type-sm); }
+/* One scrolling row instead of twenty-two stacked ones: at 390 the draft list measured 700px of a
+   1715px page, and the wrapping never made another chip reachable - they were all there already. */
 .draft-row { display: flex; gap: 4px; flex-wrap: wrap; }
+@media (max-width: 768px) { .draft-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; } }
 .config-form { display: flex; flex-direction: column; gap: 8px; }
 .config-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
 .config-form input:not([type=checkbox]), .config-form textarea { width: 100%; padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: 5px; background: var(--ow-surface-2); color: var(--ow-text); font: inherit; }
@@ -849,6 +860,18 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .job-mini-table .truncate { max-width: 100%; }
 .revision-list li { min-width: 0; }
 .revision-list .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Studio is the only page whose action row carries nine controls. At >=769 it wrapped into a second
+   line that .page-header's fixed 80px never reserves, so the drafts panel painted over it: measured
+   at 1440, 7 of the 9 (Auto layout, Vertical, Readable, Fit all, Preview, Detail, Create draft) had
+   section.panel on top of their centre point and could not be clicked. Below 768 the row already
+   scrolls rather than wraps; this gives 769+ the same one-row contract instead of a new header
+   height, so every control stays reachable and §2.1's single header height still holds. */
+@media (min-width: 769px) {
+  .studio-page .page-header { flex-wrap: nowrap; }
+  .studio-page .page-actions { flex-wrap: nowrap; min-width: 0; overflow-x: auto; }
+  .studio-page .page-actions > * { flex: none; }
+}
 
 /* Job detail hierarchy */
 .job-subtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
