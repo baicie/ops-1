@@ -69,6 +69,10 @@
     },
     "docs/assets/0.0.4/ui-redesign": {
       "maxFiles": 10
+    },
+    "artifacts/ui/visual-v3/deployed": {
+      "maxFiles": 6,
+      "note": "representative deployed-vs-local comparison; the full 36 were measured and discarded"
     }
   },
   "knownMissingDocReferences": [
