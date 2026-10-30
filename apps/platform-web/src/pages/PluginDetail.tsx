@@ -288,7 +288,7 @@ export function PluginDetailPage() {
                         <StackCell label={t('table.signature')}><StatusPill status={version.signatureState} /></StackCell>
                         <StackCell label={t('table.imageDigest')}>{version.imageRef ? <span className="mono text-sm">{shortDigest(version.imageRef, 18)}</span> : <NoData detail={t('ui.noData.detail')} />}<CopyButton value={version.imageRef} /></StackCell>
                         <StackCell label={t('table.published')}><TimeAgo value={version.createdAt} /></StackCell>
-                        <StackCell label={t('table.actions')} className="max-[760px]:flex-wrap">
+                        <StackCell label={t('table.actions')} className="max-[768px]:flex-wrap">
                           {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('activate'); }}>{t('action.activate')}</Button>}
                           {(!deployment || ['DISABLED', 'DEGRADED', 'FAILED'].includes(deployment.status)) && version.version !== activeVersion && <Button variant="outline" size="sm" onClick={() => { setDeployVersion(version.version); setDeployOpen(true); }}>{deployment ? t('action.redeploy') : t('action.deploy')}</Button>}
                           {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button variant="outline" size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('rollback'); }}>{t('action.rollback')}</Button>}

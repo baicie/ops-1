@@ -134,7 +134,7 @@ export function ActivityPage() {
                       <StackCell label={t('table.subject')}><span className="text-sm text-muted-foreground">{event.subjectType}</span><div className="mono text-sm">{event.subjectId}</div></StackCell>
                       <StackCell label={t('table.actor')}><span className="text-sm text-muted-foreground">{event.actorType}</span><div className="mono text-sm">{event.actorId.slice(0, 12)}</div></StackCell>
                       <StackCell label={t('table.occurred')}><TimeAgo value={event.occurredAt} /><div className="text-sm text-muted-foreground">{formatDate(event.occurredAt)}</div></StackCell>
-                      <TableCell className="row-action max-[760px]:hidden"><Icon name={expanded === event.id ? 'down' : 'chevron'} size={15} /></TableCell>
+                      <TableCell className="row-action max-[768px]:hidden"><Icon name={expanded === event.id ? 'down' : 'chevron'} size={15} /></TableCell>
                     </TableRow>
                     {expanded === event.id && <TableRow className="expanded-row"><TableCell colSpan={6}><div className="event-detail"><div className="event-detail-meta"><span>{t('activity.detail.eventId')} <code>{event.id}</code></span>{event.requestId && <span>{t('activity.detail.request')} <code>{event.requestId}</code></span>}</div><pre>{JSON.stringify(event.details, null, 2)}</pre></div></TableCell></TableRow>}
                   </React.Fragment>

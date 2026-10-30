@@ -107,14 +107,14 @@ export function JobsPage() {
               <TableBody className={stackBody}>
                 {visibleJobs.map((job) => (
                   <TableRow key={job.jobId} className={cn('cursor-pointer', stackRow)}>
-                    <StackCell label={t('table.job')} className="job-id-cell max-[760px]:w-auto max-[760px]:max-w-none"><Link className="mono min-w-0 truncate max-[760px]:max-w-[220px]" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
-                    <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[760px]:whitespace-normal">{job.pipelineId}</StackCell>
+                    <StackCell label={t('table.job')} className="job-id-cell max-[768px]:w-auto max-[768px]:max-w-none"><Link className="mono min-w-0 truncate max-[768px]:max-w-[220px]" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
+                    <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[768px]:whitespace-normal">{job.pipelineId}</StackCell>
                     <StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell>
                     <StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell>
                     <StackCell label={t('table.attempts')}>{job.attempts}/{job.maxAttempts}</StackCell>
-                    <StackCell label={t('table.duration')} className="whitespace-nowrap max-[760px]:whitespace-normal"><span className="mono">{durationLabel(job)}</span></StackCell>
+                    <StackCell label={t('table.duration')} className="whitespace-nowrap max-[768px]:whitespace-normal"><span className="mono">{durationLabel(job)}</span></StackCell>
                     <StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Icon name="chevron" size={16} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -18,6 +18,8 @@ import { cn } from '../lib/utils';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
+import { ConfirmAction } from '../components/app/confirm-action';
+import { RowActions, StackCell, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 /**
  * Status rendering for every node surface: colour + glyph + text, and the effective state is
@@ -46,27 +48,9 @@ function percentOf(value?: number | null): number | null {
   return value;
 }
 
-// The legacy .data-table card layout at <=760px (thead hidden, one row per node) keyed off
-// the .data-table selector; these constants carry the same breakpoint as Tailwind variants so
-// the tables no longer need that selector at all.
-const stackTable = 'max-[768px]:block';
-const stackHead = 'max-[768px]:hidden';
-const stackBody = 'max-[768px]:block';
-const stackRow = 'max-[768px]:flex max-[768px]:flex-col max-[768px]:px-1 max-[768px]:py-2.5';
-const stackCell =
-  'max-[768px]:flex max-[768px]:items-start max-[768px]:justify-between max-[768px]:gap-3.5 ' +
-  'max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:py-[5px] max-[768px]:text-right';
-const stackLabel = 'hidden text-muted-foreground max-[768px]:inline';
-
-/** Table cell that keeps its data-label and prints that label inline only in the stacked layout. */
-function StackCell({ label, className, children, ...props }: React.TdHTMLAttributes<HTMLTableCellElement> & { label: string }) {
-  return (
-    <TableCell data-label={label} className={cn(stackCell, className)} {...props}>
-      <span className={stackLabel}>{label}</span>
-      {children}
-    </TableCell>
-  );
-}
+// The record layout, the row menu and the status pill come from ./table-kit: one breakpoint
+// (768px) shared with Plugins and with the card CSS in styles.css, so a viewport can never be
+// stacked without also getting the labels.
 
 /** Label + control + hint, the shadcn replacement for the shared Field wrapper. */
 function FormField({ label, hint, htmlFor, children }: { label: string; hint?: string; htmlFor?: string; children: React.ReactNode }) {
@@ -103,6 +87,11 @@ export function NodesPage() {
   const ttlFieldId = useId();
   const tokenFieldId = useId();
   const navigate = useNavigate();
+  const toast = useToast();
+  const isAdmin = user?.role === 'admin';
+  // Revoking a node used to require opening the node, finding Revoke, and confirming there:
+  // four interactions for a verb that belongs on the row it applies to.
+  const [revokeTarget, setRevokeTarget] = useState<NodeView | null>(null);
   const nodes = data || [];
   const operatingSystems = useMemo(
     () => Array.from(new Set(nodes.map((node) => node.os).filter(Boolean))).sort(),
@@ -129,6 +118,34 @@ export function NodesPage() {
     }
   }
 
+  async function revokeNode(): Promise<void> {
+    if (!revokeTarget) return;
+    await api.del(`/api/v1/nodes/${revokeTarget.id}`);
+    toast.push({ tone: 'ok', title: t('nodeDetail.revoked.title'), detail: t('nodeDetail.revoked.detail') });
+    await reload();
+  }
+
+  /** Every verb one node row may run, with the reason printed when one is refused. */
+  function nodeActions(node: NodeView): RowAction[] {
+    const actions: RowAction[] = [
+      { id: 'details', label: t('nodes.action.open'), icon: 'external', onSelect: () => navigate(`/admin/nodes/${node.id}`) },
+      { id: 'instances', label: t('nodes.action.instances'), icon: 'box', onSelect: () => navigate(`/admin/nodes/${node.id}`) },
+      { id: 'copy', label: t('nodes.action.copyId'), icon: 'copy', onSelect: () => { void navigator.clipboard.writeText(node.id); toast.push({ tone: 'ok', title: t('nodes.action.copyId'), detail: node.id }); } },
+    ];
+    actions.push({
+      id: 'revoke',
+      label: t('action.revoke'),
+      icon: 'trash',
+      danger: true,
+      divider: true,
+      // DELETE /api/v1/nodes/{id} is require_admin; the other roles are told why, not handed a 403.
+      disabled: !isAdmin || Boolean(node.revokedAt),
+      disabledReason: !isAdmin ? t('nodes.action.adminOnly') : t('nodes.action.alreadyRevoked'),
+      onSelect: () => setRevokeTarget(node),
+    });
+    return actions;
+  }
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -151,13 +168,16 @@ export function NodesPage() {
             offered the same five choices twice, 40px apart. */}
         <section className="stat-block" aria-label={t('nodes.summary.aria')} data-testid="nodes-summary">
           <div className="ow-summary">
-            <button type="button" className="ow-summary-card" aria-pressed={stateFilter === 'ALL'} onClick={() => setStateFilter('ALL')}>
+            <button type="button" className={cn('ow-summary-card', stateFilter === 'ALL' && 'is-active')} aria-pressed={stateFilter === 'ALL'} onClick={() => setStateFilter('ALL')}>
               <span className="ow-summary-label">{t('nodes.summary.total')}</span>
               <span className="ow-summary-value">{nodes.length}</span>
               <span className="ow-summary-definition">{t('nodes.summary.definition')}</span>
             </button>
             {(['ready', 'stale', 'unreachable', 'revoked'] as IndicatorState[]).map((state) => (
-              <button type="button" className="ow-summary-card" key={state} aria-pressed={stateFilter === state.toUpperCase()} onClick={() => setStateFilter(state.toUpperCase())}>
+              // Keyed on the IndicatorState itself, never on its upper-cased display form: the
+              // filter below compares nodeState() values, which are lower case, so an upper-cased
+              // key selected zero rows and the table emptied on click.
+              <button type="button" className={cn('ow-summary-card', stateFilter === state && 'is-active')} key={state} aria-pressed={stateFilter === state} onClick={() => setStateFilter((current) => current === state ? 'ALL' : state)}>
                 <span className="ow-summary-label state-count">
                   <span className="state-count-dot" data-indicator={state} aria-hidden="true" />
                   {t(labelKeyForState(state))}
@@ -206,7 +226,10 @@ export function NodesPage() {
                     <StackCell label={t('table.node')}><div className="entity-cell"><span className="entity-icon"><Icon name="server" size={17} /></span><div><strong>{node.name}</strong><span className="mono">{node.id.slice(0, 13)}…</span></div></div></StackCell>
                     <StackCell label={t('table.status')}>
                       <div className="ow-cell-stack">
-                        <StatusIndicator state={nodeState(node)} />
+                        {/* The state is an entity: it opens the node it describes. */}
+                        <Link className="status-entity" to={`/admin/nodes/${node.id}`} data-status-entity={node.id} title={t('nodes.status.openEntity', { name: node.name })} onClick={(event) => event.stopPropagation()}>
+                          <StatusIndicator state={nodeState(node)} />
+                        </Link>
                         <span className="text-sm text-muted-foreground">{t('table.lastObserved')} <TimeAgo value={node.lastSeenAt} /></span>
                       </div>
                     </StackCell>
@@ -220,7 +243,9 @@ export function NodesPage() {
                       ) : <NoData detail={t('nodes.resource.missingSnapshot')} />}
                     </StackCell>
                     <StackCell label={t('table.sampledAt')} data-resource="sampled-at">{snapshot?.sampledAt ? <TimeAgo value={snapshot.sampledAt} /> : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:w-full max-[768px]:border-0 max-[768px]:px-3.5 max-[768px]:pt-0">
+                      <RowActions label={t('nodes.action.menu', { name: node.name })} actions={nodeActions(node)} />
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -228,6 +253,15 @@ export function NodesPage() {
           </Table>
         </section>
       </AsyncBoundary>
+
+      <ConfirmAction
+        open={revokeTarget !== null}
+        title={t('nodeDetail.confirmRevoke.title', { name: revokeTarget?.name ?? '' })}
+        description={t('nodeDetail.confirmRevoke.description')}
+        confirmLabel={t('action.revoke')}
+        onConfirm={revokeNode}
+        onClose={() => setRevokeTarget(null)}
+      />
 
       <Dialog open={joinOpen} onOpenChange={(open) => { setJoinOpen(open); if (!open) { setToken(null); setShowToken(false); } }}>
         <DialogContent closeLabel={t('aria.closeDialog')} className="max-w-[860px]">

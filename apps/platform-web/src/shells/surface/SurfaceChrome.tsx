@@ -251,14 +251,42 @@ export function AccountMenu({ surface }: { surface: Surface }) {
 
 /**
  * /403. Deliberately shell-less: an unauthorized user gets no navigation into the platform
- * console, and the page names no resource, title or id - only the missing capability and
- * the two ways out.
+ * console, and the page names no resource, title or id - only the missing capability and the
+ * ways out.
+ *
+ * A permission wall is a dead end unless it says what to do next, so the page carries three
+ * real recovery paths and no write action:
+ *   1. Retry - re-reads /auth/me; a grant made while this tab was open is picked up here.
+ *   2. Sign out and back in - the session's surface grant is decided at login, so a role
+ *      change only reaches this tab through a new session.
+ *   3. Return to the business workspace, if this account holds that surface.
+ * There is no "+ Install plugin" and no other mutation on this page: an account that cannot
+ * read the console must not be offered a verb that changes it.
  */
 export function ForbiddenPage() {
   const { t } = useI18n();
-  const { access, accessSource, logout } = useAuth();
+  const { access, accessSource, logout, refresh } = useAuth();
   const navigate = useNavigate();
   const canReachWorkspace = canEnterSurface(access, 'workspace');
+  const canReachAdmin = canEnterSurface(access, 'admin');
+  const [retrying, setRetrying] = React.useState(false);
+  const [retriedAt, setRetriedAt] = React.useState<string | null>(null);
+
+  // A retry that succeeded must not leave the operator staring at the wall it removed.
+  React.useEffect(() => {
+    if (retriedAt && canReachAdmin) navigate(surfaceEntryPath('admin'), { replace: true });
+  }, [retriedAt, canReachAdmin, navigate]);
+
+  async function retry() {
+    setRetrying(true);
+    try {
+      await refresh();
+    } finally {
+      setRetrying(false);
+      setRetriedAt(new Date().toISOString());
+    }
+  }
+
   return (
     <main id="main-content" className="main-content forbidden-page">
       <div className="page-stack">
@@ -272,9 +300,40 @@ export function ForbiddenPage() {
               {t('forbidden.hint.unavailable')}
             </p>
           ) : null}
+          <ol className="forbidden-steps" data-testid="forbidden-recovery">
+            <li data-step="ask">
+              <span className="forbidden-step-num" aria-hidden="true">1</span>
+              <div>
+                <strong>{t('forbidden.step.ask.title')}</strong>
+                <p>{t('forbidden.step.ask.detail')} <code>platform:access</code></p>
+              </div>
+            </li>
+            <li data-step="retry">
+              <span className="forbidden-step-num" aria-hidden="true">2</span>
+              <div>
+                <strong>{t('forbidden.step.retry.title')}</strong>
+                <p>{t('forbidden.step.retry.detail')}</p>
+              </div>
+            </li>
+            <li data-step="session">
+              <span className="forbidden-step-num" aria-hidden="true">3</span>
+              <div>
+                <strong>{t('forbidden.step.session.title')}</strong>
+                <p>{t('forbidden.step.session.detail')}</p>
+              </div>
+            </li>
+          </ol>
+          {retriedAt ? (
+            <p className="muted small" role="status" data-testid="forbidden-retry-result" data-still-denied={canReachAdmin ? 'false' : 'true'}>
+              {canReachAdmin ? t('forbidden.retry.granted') : t('forbidden.retry.denied')}
+            </p>
+          ) : null}
           <div className="page-actions">
+            <Button data-testid="forbidden-retry" onClick={() => void retry()} disabled={retrying}>
+              <Icon name="refresh" size={15} /> {retrying ? t('forbidden.retry.working') : t('action.retry')}
+            </Button>
             {canReachWorkspace ? (
-              <Link className={buttonVariants()} to={surfaceEntryPath('workspace')} data-testid="forbidden-to-workspace">
+              <Link className={buttonVariants({ variant: 'secondary' })} to={surfaceEntryPath('workspace')} data-testid="forbidden-to-workspace">
                 {t('forbidden.action.workspace')}
               </Link>
             ) : null}

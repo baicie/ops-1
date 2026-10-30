@@ -604,7 +604,7 @@ input::placeholder { color: var(--ow-text-muted); }
   .login-brand { display: none; }
   .login-panel { min-height: 100vh; }
 }
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .main-content { padding: 16px 12px 42px; }
   .page-header { gap: 12px; }
   .page-actions { width: 100%; }
@@ -714,7 +714,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .config-form input:not([type=checkbox]), .config-form textarea { width: 100%; padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: 5px; background: var(--ow-surface-2); color: var(--ow-text); font: inherit; }
 .config-form textarea { font-family: var(--ow-font-mono, monospace); font-size: var(--ow-type-xs); }
 .config-form .config-checkbox { flex-direction: row; align-items: center; }
-.run-panel { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
+.run-panel { display: flex; flex-direction: column; gap: 12px; max-width: 768px; }
 .run-panel label { display: flex; flex-direction: column; gap: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
 .run-panel select, .run-panel textarea { padding: 8px 8px; border: 1px solid var(--ow-border); border-radius: 6px; background: var(--ow-surface-2); color: var(--ow-text); font: inherit; }
 .run-panel textarea { font-family: var(--ow-font-mono, monospace); }
@@ -881,7 +881,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
   .studio-canvas { height: 540px; }
   .studio-inspector { max-height: 540px; }
 }
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .main-content:has(.studio-page) { padding: 0; }
   .studio-page { padding: 12px 8px 24px; }
   .studio-page .page-actions { width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
@@ -956,7 +956,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 
 /* Mobile Studio node list / canvas switch */
 .mobile-view-toggle { display: none; }
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .mobile-view-toggle { display: flex; gap: 4px; padding: 8px 8px 0; }
   .mobile-view-toggle button { flex: 1; min-height: 38px; border: 1px solid var(--ow-border); background: var(--ow-surface); border-radius: 6px; }
   .mobile-view-toggle button.active { border-color: var(--ow-accent); color: var(--ow-accent); background: var(--ow-accent-soft); }
@@ -972,7 +972,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .link-button:hover { text-decoration: underline; }
 
 /* Mobile toolbar wraps instead of clipping labels; node-list note stays in flow. */
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .studio-page .page-actions { flex-wrap: wrap; overflow: visible; }
   .studio-page .page-actions .btn { flex: 0 0 auto; }
   .studio-page .studio-note { position: static; margin: 4px 8px 8px; }
@@ -1147,7 +1147,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 @media (max-width: 1180px) {
   .metric-grid, .module-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .metric-grid, .module-strip { grid-template-columns: 1fr; }
   .notice-bar { align-items: flex-start; flex-direction: column; }
   .notice-action { margin-left: 0; }
@@ -1236,7 +1236,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
   .business-card-slot { border-right: 0; border-bottom: 1px solid var(--ow-border); }
   .business-card-slot:last-child { border-bottom: 0; }
 }
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .task-grid { grid-template-columns: minmax(0, 1fr); }
   .investigation-layout { grid-template-columns: minmax(0, 1fr); }
   .investigation-region[data-region="detail"] { grid-column: auto; }
@@ -1677,7 +1677,7 @@ button.ow-summary-card { font: inherit; color: inherit; cursor: pointer; }
   .stat-strip,
   .ow-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .health-band { grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; padding-left: 12px; }
   .health-band-side { grid-column: 1 / -1; padding-top: 8px; font-size: var(--ow-type-xs); }
   .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1719,7 +1719,7 @@ button.ow-summary-card { font: inherit; color: inherit; cursor: pointer; }
 
 /* A phone header cannot reserve 236px for a text field it cannot fit: the trigger collapses
    to its icon and the page stops overflowing horizontally. */
-@media (max-width: 760px) {
+@media (max-width: 768px) {
   .topbar-command { min-width: 0; width: 36px; justify-content: center; padding: 0; }
   .topbar-command .kbd, .topbar-command-text { display: none; }
   .topbar-right { gap: 8px; }
@@ -1854,14 +1854,50 @@ button.ow-summary-card:focus-visible,
   .stat-strip > *:last-child:nth-child(odd),
   .ow-summary-card:last-child:nth-child(odd) { grid-column: span 2; }
 }
-.ow-filter-scroll { scrollbar-width: none; }
+.ow-filter-shell { position: relative; min-width: 0; max-width: 100%; }
+.ow-filter-scroll { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .ow-filter-scroll::-webkit-scrollbar { display: none; }
 @media (max-width: 900px) {
   .toolbar { gap: 12px; }
-  .ow-filter-scroll { flex: 1 1 auto; min-width: 0; }
+  .ow-filter-shell { flex: 1 1 auto; min-width: 0; }
   .ow-filter-scroll [role='tablist'] { flex-wrap: nowrap; width: max-content; }
-  .ow-filter-scroll { -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 32px), transparent 100%); mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 32px), transparent 100%); }
 }
+
+/* ── 5b. A clipped strip says so, and only when it is true ────────────────────────────
+ * The scroller used to wear a permanent right-hand mask: when the strip fitted, nothing was
+ * hidden yet the last chip still looked cut, and at the end of the strip the selected chip
+ * could sit outside the window. FilterScroller measures the real overflow and mounts one fade
+ * per edge that genuinely hides content; data-overflow on the shell states the same fact in
+ * machine-readable form. */
+/* The paint is a mask on the scroller, not a coloured overlay above it: masking fades the
+   chips themselves toward whatever surface the toolbar already has, so the fade is correct in
+   both themes without carrying a background colour of its own. It is applied per edge, and
+   only while that edge actually hides content (FilterScroller measures it) - the permanent
+   mask this replaced is what made the last chip look cut even when the strip already fitted.
+   The .ow-filter-fade spans remain as the DOM marker for the same fact, so an assertion can
+   ask "is this edge hiding something?" without reading computed styles. */
+.ow-filter-shell[data-overflow='end'] .ow-filter-scroll {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 32px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 32px), transparent 100%);
+}
+.ow-filter-shell[data-overflow='start'] .ow-filter-scroll {
+  -webkit-mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 32px), transparent 100%);
+  mask-image: linear-gradient(to left, #000 0, #000 calc(100% - 32px), transparent 100%);
+}
+.ow-filter-shell[data-overflow='both'] .ow-filter-scroll {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
+}
+.ow-filter-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  pointer-events: none;
+  z-index: 1;
+}
+.ow-filter-fade.is-end { right: 0; }
+.ow-filter-fade.is-start { left: 0; }
 
 /* ── 6. One chip recipe ──────────────────────────────────────────────────────────────
  * Five sibling chips used to be five shapes. One shape now: optional 13px icon, optional
@@ -2113,3 +2149,105 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
  * gap 0px against a 24px column gap everywhere else). The wrapper carries the same rhythm. */
 [data-async-state='ready'],
 [data-async-state='empty'] { display: flex; flex-direction: column; gap: var(--ow-space-6); min-width: 0; }
+
+/* ── 5c. The control surface: row verbs, batch, and states that are entities ──────────
+ * These four rules are what turn three report pages into instruments. Nothing here is a new
+ * visual language: every one of them dresses an existing control in the existing tokens. */
+
+/* A row checkbox is a control, not a decoration: 16px of target inside a 28px cell so a
+   finger on a phone still hits it, and the stacked card keeps it on its own line. */
+.row-check {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--ow-accent);
+  cursor: pointer;
+}
+.row-check:disabled { cursor: not-allowed; opacity: .45; }
+
+/* A status that opens the entity it describes must not look like prose. It keeps the pill's
+   own paint and gains only a hit area and a focus ring - no underline, which read as a link
+   in the middle of a status column. */
+.status-entity {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: var(--ow-radius-md);
+  color: inherit;
+  text-decoration: none;
+}
+.status-entity:hover { text-decoration: none; box-shadow: 0 0 0 2px var(--ow-accent-soft); }
+.status-entity:focus-visible { outline: 2px solid var(--ow-accent); outline-offset: 1px; }
+
+/* The filter a count applied, stated on the page and removable in one click. */
+.quick-filter-bar,
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ow-border);
+  border-radius: var(--ow-radius-card);
+  background: var(--ow-surface-2);
+  font-size: var(--ow-type-sm);
+  color: var(--ow-text-secondary);
+}
+.quick-filter-bar { border-left: 3px solid var(--ow-accent); }
+.batch-bar { border-left: 3px solid var(--ow-warn); }
+.batch-count { font-weight: 600; color: var(--ow-text); }
+.quick-filter-bar .text-link,
+.batch-bar .text-link { margin-left: auto; }
+
+@media (max-width: 768px) {
+  .quick-filter-bar,
+  .batch-bar { padding: 8px 10px; }
+  .quick-filter-bar .text-link,
+  .batch-bar .text-link { margin-left: 0; }
+}
+
+
+/* ── 5d. /403 is a wall with a door in it ─────────────────────────────────────────────
+ * The page was one 265px card floating in a 760px canvas: the verdict was correct and the
+ * page still left the reader with nothing to press. The panel now carries the three recovery
+ * steps and the verbs that perform them, so its height is content, not padding. */
+.forbidden-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+.forbidden-steps li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--ow-border);
+  border-radius: var(--ow-radius-md);
+  background: var(--ow-surface-2);
+}
+.forbidden-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--ow-accent-soft);
+  color: var(--ow-accent);
+  font-size: var(--ow-type-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.forbidden-steps strong { display: block; font-size: var(--ow-type-base); color: var(--ow-text); }
+.forbidden-steps p { margin: 2px 0 0; font-size: var(--ow-type-sm); color: var(--ow-text-secondary); overflow-wrap: anywhere; }
+.forbidden-steps code { font-family: var(--ow-font-mono); font-size: var(--ow-type-xs); padding: 1px 5px; border-radius: 4px; background: var(--ow-surface-3); }
+
+@media (max-width: 768px) {
+  .forbidden-steps li { grid-template-columns: 20px minmax(0, 1fr); padding: 9px 10px; }
+}
+

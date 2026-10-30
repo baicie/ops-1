@@ -147,7 +147,8 @@ export function OverviewPage() {
         title={t('page.overview')}
         actions={<Button variant="secondary" onClick={() => { void overview.reload(); void diagnostics.reload(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
         primary={unconfigured
-          ? undefined
+          // The setup steps say "enroll a node first"; the page used to offer no verb for it.
+          ? <Link className={buttonVariants()} to="/admin/nodes" data-testid="overview-primary-join"><Icon name="plus" size={15} /> {t('common.joinNode')}</Link>
           : <Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('overview.action.installPlugin')}</Link>}
       />
       <AsyncBoundary
@@ -183,7 +184,15 @@ export function OverviewPage() {
                 </div>
                 <div className="health-band-side" data-testid="overview-observed">
                   <span title={observedAt ?? undefined}>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>
-                  {data.attention.length > 0 ? <a className="text-link" href="#attention">{t('overview.action.reviewIssues')} <Icon name="arrowRight" size={12} /></a> : null}
+                  {/* A verdict with no verb is a status snapshot. The band now hands the
+                      operator the destination of the first thing that needs doing, instead of
+                      an in-page anchor to a list they still have to read. */}
+                  {data.attention.length > 0 ? (
+                    <Link className="text-link" to={data.attention[0].link} data-testid="overview-fix-first">
+                      {t('overview.action.fixIssue')} <Icon name="arrowRight" size={12} />
+                    </Link>
+                  ) : null}
+                  <a className="text-link" href="#attention">{t('overview.action.reviewIssues')} <Icon name="arrowRight" size={12} /></a>
                 </div>
               </section>
 
@@ -378,6 +387,9 @@ export function OverviewPage() {
   );
 }
 
+/** Where the kernel module's state can be acted on. A module row with no door is a dead end. */
+const KERNEL_HREF = '/admin/settings/diagnostics';
+
 type ModuleRow = {
   id: string;
   labelKey: MessageKey;
@@ -401,11 +413,11 @@ function buildModules(
 ): ModuleRow[] {
   const kernel: ModuleRow = (() => {
     if (!isAdmin) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.denied') };
-    if (diagnosticsError) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.error') };
+    if (diagnosticsError) return { id: 'kernel', labelKey: 'overview.module.kernel', state: 'unknown', detail: t('overview.module.kernel.error'), href: KERNEL_HREF };
     // Still asking is LOADING; asked and settled with nothing (a 200 with an empty body) is UNKNOWN
     // with the reason attached - the same rule the nodes and runtime cards already follow below.
     if (!diagnostics) {
-      return { id: 'kernel', labelKey: 'overview.module.kernel', state: kernelSource === 'pending' ? 'loading' : 'unknown', detail: t('ui.notObserved') };
+      return { id: 'kernel', labelKey: 'overview.module.kernel', state: kernelSource === 'pending' ? 'loading' : 'unknown', detail: t('ui.notObserved'), href: KERNEL_HREF };
     }
     const database = diagnostics.kernel.database === 'connected' ? t('overview.module.kernel.dbConnected') : t('overview.module.kernel.dbUnavailable');
     return {
@@ -413,6 +425,7 @@ function buildModules(
       labelKey: 'overview.module.kernel',
       state: diagnostics.kernel.database === 'connected' ? 'ready' : 'degraded',
       detail: t('overview.module.kernel.detail', { version: diagnostics.kernel.version, database }),
+      href: KERNEL_HREF,
     };
   })();
   const nodes: ModuleRow = !data
@@ -439,7 +452,7 @@ function buildModules(
         };
   // The Kernel exposes no Catalog health source. Marking it READY because plugins exist would
   // be exactly the inference §4.5 A forbids, so it stays UNKNOWN with the reason attached.
-  const catalog: ModuleRow = { id: 'catalog', labelKey: 'overview.module.catalog', state: 'unknown', detail: t('overview.module.catalog.unavailable') };
+  const catalog: ModuleRow = { id: 'catalog', labelKey: 'overview.module.catalog', state: 'unknown', detail: t('overview.module.catalog.unavailable'), href: '/admin/plugins' };
   return [kernel, nodes, runtime, catalog];
 }
 
