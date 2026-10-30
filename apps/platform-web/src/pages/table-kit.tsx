@@ -4,7 +4,7 @@ import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { TableCell } from '../components/ui/table';
 import { Status } from '../components/app/status';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
 
 /**
@@ -112,4 +112,183 @@ export function RowActions({ label, actions, onOpenChange }: { label: string; ac
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+/* ── table-spec §2.1: one identity per row, in human language ───────────────────────── */
+
+/** Above this row count 4 hex characters stop being enough; §2.1 derives 8 for its reason. */
+export const IDENTITY_MANY_ROWS = 100;
+
+export interface Identity {
+  /** What the row is called: ⟨name⟩ · ⟨disambiguator⟩ · ⟨age⟩. */
+  key: string;
+  name: string;
+  disambiguator: string;
+  age: string;
+  fullId: string | null;
+}
+
+/** §2.1 names Intl.RelativeTimeFormat as the age source; the unit ladder matches TimeAgo. */
+export function relativeAge(locale: string, at?: string | null): string {
+  if (!at) return '';
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return '';
+  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const abs = Math.abs(seconds);
+  const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  if (abs < 60) return format.format(seconds, 'second');
+  if (abs < 3600) return format.format(Math.round(seconds / 60), 'minute');
+  if (abs < 86400) return format.format(Math.round(seconds / 3600), 'hour');
+  return format.format(Math.round(seconds / 86400), 'day');
+}
+
+/**
+ * §2.1: the canonical UUID first 4 hex characters, and only when the name is not unique on
+ * the page (8 characters above 100 rows). The full id is never displayed - it goes to the
+ * title and to the row menu copy item.
+ */
+export function formatIdentity(options: {
+  name: string;
+  id?: string | null;
+  at?: string | null;
+  locale: string;
+  nameIsUnique?: boolean;
+  rowsOnPage?: number;
+}): Identity {
+  const { name, id, at, locale, nameIsUnique = true, rowsOnPage = 0 } = options;
+  const hex = String(id || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
+  const width = rowsOnPage > IDENTITY_MANY_ROWS ? 8 : 4;
+  const disambiguator = nameIsUnique || hex.length < width ? '' : hex.slice(0, width);
+  const age = relativeAge(locale, at);
+  return {
+    key: [name, disambiguator, age].filter(Boolean).join(' · '),
+    name,
+    disambiguator,
+    age,
+    fullId: id || null,
+  };
+}
+
+/**
+ * The one identity cell. title carries the full id; data-identity-key is the machine
+ * reading of the cell the audit harness compares for uniqueness (table-spec §4.1).
+ *
+ * cardFact marks the <=3 columns §2.5 keeps at 390; every other cell is a desktop column the
+ * card drops, not information that was deleted.
+ */
+export function IdentityCell({
+  label,
+  identity,
+  cardFact,
+  className,
+  children,
+}: {
+  label: string;
+  identity: Identity;
+  cardFact?: boolean;
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <TableCell
+      data-label={label}
+      data-column={label}
+      title={identity.fullId || undefined}
+      data-card-fact={cardFact ? '' : undefined}
+      className={cn(stackCell, 'ow-ident-cell max-[768px]:text-left', className)}
+    >
+      <span className={cn(stackLabel, 'max-[768px]:hidden')}>{label}</span>
+      <span className="ow-ident" data-identity-key={identity.key}>
+        <span className="ow-ident-name">{identity.name}</span>
+        {identity.disambiguator || identity.age ? (
+          <span className="ow-ident-tail">
+            {identity.disambiguator ? ' · ' + identity.disambiguator : ''}
+            {identity.age ? ' · ' + identity.age : ''}
+          </span>
+        ) : null}
+      </span>
+      {children ? <span className="ow-ident-meta">{children}</span> : null}
+    </TableCell>
+  );
+}
+
+/** §2.1: the full id is one click away - a 36-character UUID cannot be transcribed by eye. */
+export function copyIdAction(id: string, label: string): RowAction {
+  return {
+    id: 'copy-id',
+    label,
+    icon: 'copy',
+    onSelect: () => {
+      void navigator.clipboard?.writeText(id);
+    },
+  };
+}
+
+/* ── table-spec §2.4: three in a row is one fact ────────────────────────────────────── */
+
+export interface CollapsedRun<T> {
+  /** The row the run is rendered with: the first occurrence (§2.4). */
+  row: T;
+  /** 1 for a row that is its own fact; >= threshold for a collapsed run. */
+  count: number;
+  /** The last occurrence timestamp, for the run first -> last span. */
+  lastAt: string;
+  key: string;
+}
+
+/**
+ * Consecutive rows sharing a key collapse into one entry once the run reaches threshold.
+ * Threshold 3: 2 identical rows can be two genuine actions and collapsing a pair hides one;
+ * 3 on one page can only be a poller, a fan-out or a retry loop.
+ */
+export function collapseRuns<T>(
+  rows: T[],
+  keyOf: (row: T) => string,
+  at: (row: T) => string,
+  threshold = 3,
+): CollapsedRun<T>[] {
+  const out: CollapsedRun<T>[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    const key = keyOf(rows[index]);
+    let end = index;
+    while (end + 1 < rows.length && keyOf(rows[end + 1]) === key) end += 1;
+    const count = end - index + 1;
+    if (count >= threshold) {
+      out.push({ row: rows[index], count, lastAt: at(rows[end]), key });
+      index = end + 1;
+    } else {
+      for (let i = index; i <= end; i += 1) out.push({ row: rows[i], count: 1, lastAt: at(rows[i]), key });
+      index = end + 1;
+    }
+  }
+  return out;
+}
+
+/* ── table-spec §2.2 / §2.5: which columns earn the card ────────────────────────────── */
+
+/**
+ * Distinct-value ratio per column over the rows on screen, highest first. §2.2 keeps a
+ * column at >= 0.2; §2.5 card keeps the top 3 by the same ranking. Stable: ties keep the
+ * caller order, so the card does not reshuffle between renders.
+ */
+export function rankCardFacts(
+  columns: Record<string, Array<string | number | null | undefined>>,
+  max = 3,
+): string[] {
+  return Object.keys(columns)
+    .map((key, order) => {
+      const values = columns[key].map((value) => (value === null || value === undefined ? '' : String(value)));
+      const nonEmpty = values.filter((value) => value !== '');
+      const ratio = values.length && nonEmpty.length >= 10 ? new Set(nonEmpty).size / values.length : 0;
+      return { key, ratio, order };
+    })
+    .sort((left, right) => (right.ratio - left.ratio) || (left.order - right.order))
+    .slice(0, max)
+    .map((entry) => entry.key);
+}
+
+/** The desktop-only cell of a demoted column: present in the table, dropped on the card. */
+export function cardCellClass(isCardFact: boolean): string {
+  return isCardFact ? 'max-[768px]:block' : 'max-[768px]:hidden';
 }

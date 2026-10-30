@@ -1,8 +1,8 @@
 {
-  "radius-tier": 120,
-  "control-tier": 15,
+  "radius-tier": 119,
+  "control-tier": 14,
   "type-tier": 7,
   "one-header": 5,
-  "uppercase-guard": 22,
+  "uppercase-guard": 20,
   "format-locale": 4
 }

@@ -12,7 +12,7 @@ import { PageHeader } from '../components/app/page-header';
 import { formatDate } from '../format';
 import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardCellClass, collapseRuns, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /** The subject filter has an "all subjects" state, which Radix Select cannot express
  *  (an item value is never "no value"): the empty string the API expects is mapped here. */
@@ -27,9 +27,12 @@ const POLL_INTERVAL_MS = 8000;
  */
 const PAGE_SIZE = 25;
 
+/** table-spec §2.4: three identical rows in a row can only be a poller, a fan-out or a retry loop. */
+const RUN_THRESHOLD = 3;
+
 export function ActivityPage() {
   const t = useT();
-  const { formatDateTime } = useI18n();
+  const { formatDateTime, locale } = useI18n();
   const [subjectType, setSubjectType] = useState('');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -66,7 +69,25 @@ export function ActivityPage() {
   React.useEffect(() => { setPage(0); }, [query, subjectType]);
   const pageCount = Math.max(1, Math.ceil(events.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount - 1);
-  const pageEvents = events.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+  /**
+   * table-spec §2.4 / migration S3: collapse runs of >= 3 identical (eventType, action,
+   * subjectId) over the WHOLE filtered set, then slice - collapsing after the slice would
+   * split a run across two pages and make the count wrong on both.
+   */
+  const groups = React.useMemo(() => collapseRuns(
+    events,
+    (event) => event.eventType + '\u0000' + event.action + '\u0000' + event.subjectId,
+    (event) => event.occurredAt,
+    RUN_THRESHOLD,
+  ), [events]);
+  const pageGroups = groups.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
+  const cardFacts = rankCardFacts({
+    result: events.map((event) => event.result),
+    actor: events.map((event) => event.actorType + event.actorId.slice(0, 4)),
+    occurred: events.map((event) => event.occurredAt),
+  });
+  /** §2.1: the disambiguator appears only when the page carries the same name twice. */
+  const eventTypeCount = new Set(events.map((event) => event.eventType)).size;
 
   return (
     <div className="page-stack">
@@ -133,26 +154,65 @@ export function ActivityPage() {
                 <TableRow className="hover:bg-transparent">
                   <TableHead>{t('table.event')}</TableHead>
                   <TableHead>{t('table.result')}</TableHead>
-                  <TableHead>{t('table.subject')}</TableHead>
                   <TableHead>{t('table.actor')}</TableHead>
                   <TableHead>{t('table.occurred')}</TableHead>
                   <TableHead aria-label={t('table.details')} />
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
-                {pageEvents.map((event) => (
-                  <React.Fragment key={event.id}>
-                    <TableRow className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} onClick={() => setExpanded(expanded === event.id ? null : event.id)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') setExpanded(expanded === event.id ? null : event.id); }}>
-                      <StackCell label={t('table.event')}><strong>{event.eventType}</strong><div className="text-sm text-muted-foreground">{event.action}</div></StackCell>
-                      <StackCell label={t('table.result')}><StatusPill status={event.result} /></StackCell>
-                      <StackCell label={t('table.subject')}><span className="text-sm text-muted-foreground">{event.subjectType}</span><div className="mono text-sm">{event.subjectId}</div></StackCell>
-                      <StackCell label={t('table.actor')}><span className="text-sm text-muted-foreground">{event.actorType}</span><div className="mono text-sm">{event.actorId.slice(0, 12)}</div></StackCell>
-                      <StackCell label={t('table.occurred')}><TimeAgo value={event.occurredAt} /><div className="text-sm text-muted-foreground">{formatDate(event.occurredAt)}</div></StackCell>
-                      <TableCell className="row-action max-[768px]:hidden"><Icon name={expanded === event.id ? 'down' : 'chevron'} size={15} /></TableCell>
-                    </TableRow>
-                    {expanded === event.id && <TableRow className="expanded-row"><TableCell colSpan={6}><div className="event-detail"><div className="event-detail-meta"><span>{t('activity.detail.eventId')} <code>{event.id}</code></span>{event.requestId && <span>{t('activity.detail.request')} <code>{event.requestId}</code></span>}</div><pre>{JSON.stringify(event.details, null, 2)}</pre></div></TableCell></TableRow>}
-                  </React.Fragment>
-                ))}
+                {pageGroups.map((group, index) => {
+                  const event = group.row;
+                  const open = expanded === String(index);
+                  const identity = formatIdentity({
+                    name: event.eventType,
+                    id: event.subjectId,
+                    at: event.occurredAt,
+                    locale,
+                    nameIsUnique: eventTypeCount === events.length,
+                    rowsOnPage: events.length,
+                  });
+                  const members = group.count > 1
+                    ? events.filter((candidate) => candidate.eventType === event.eventType && candidate.action === event.action && candidate.subjectId === event.subjectId && candidate.occurredAt >= event.occurredAt && candidate.occurredAt <= group.lastAt)
+                    : [event];
+                  return (
+                    <React.Fragment key={String(index)}>
+                      <TableRow className={cn('cursor-pointer focus-visible:outline-offset-[-2px] max-[768px]:relative', stackRow)} data-row-key={group.key} onClick={() => setExpanded(open ? null : String(index))} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') setExpanded(open ? null : String(index)); }}>
+                        <IdentityCell label={t('table.event')} identity={identity} cardFact>
+                          {/* §2.4: the run renders the first occurrence, its count and its span. */}
+                          <span>{event.action}</span>
+                          {group.count > 1 ? <span>{t('table.runCount', { count: group.count })}</span> : null}
+                          {group.count > 1 ? <span>{t('table.runSpan', { first: relativeAge(locale, event.occurredAt), last: relativeAge(locale, group.lastAt) })}</span> : null}
+                        </IdentityCell>
+                        <StackCell label={t('table.result')} className={cardCellClass(cardFacts.includes('result'))}><StatusPill status={event.result} /></StackCell>
+                        <StackCell label={t('table.actor')} className={cardCellClass(cardFacts.includes('actor'))}><span title={event.actorId}>{event.actorType} · {event.actorId.slice(0, 4)}</span></StackCell>
+                        <StackCell label={t('table.occurred')} className={cardCellClass(cardFacts.includes('occurred'))}><TimeAgo value={event.occurredAt} /><span className="ow-ident-meta">{formatDate(event.occurredAt)}</span></StackCell>
+                        {/* §2.5: the disclosure rides the identity line at 390. */}
+                        <TableCell className="row-action max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-0 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0"><Icon name={open ? 'down' : 'chevron'} size={15} /></TableCell>
+                      </TableRow>
+                      {open && (
+                        <TableRow className="expanded-row">
+                          <TableCell colSpan={5}>
+                            <div className="event-detail">
+                              <div className="event-detail-meta">
+                                <span>{t('activity.detail.subject')} <code>{event.subjectId}</code></span>
+                                <span>{t('table.actor')} <code>{event.actorId}</code></span>
+                                <span>{t('activity.detail.eventId')} <code>{event.id}</code></span>
+                                {event.requestId && <span>{t('activity.detail.request')} <code>{event.requestId}</code></span>}
+                              </div>
+                              {group.count > 1 ? (
+                                <ol className="detail-list">
+                                  {members.map((member) => <li key={member.id}><span>{member.eventType}</span><code>{member.id}</code><TimeAgo value={member.occurredAt} /></li>)}
+                                </ol>
+                              ) : (
+                                <pre>{JSON.stringify(event.details, null, 2)}</pre>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
             {pageCount > 1 && (

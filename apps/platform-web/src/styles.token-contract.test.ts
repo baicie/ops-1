@@ -29,7 +29,10 @@ describe('styles.css token contract', () => {
   it('keeps the reading baseline at 14px and the dense step below it', () => {
     expect(css).toMatch(/--ow-type-base: 14px;/);
     expect(css).toMatch(/--ow-type-sm: 12px;/);
-    expect(css).toMatch(/--ow-type-xs: 11px;/);
+    // table-spec §2.3 / token-table T3 name the two tiers a table row is made of: the
+    // 11px qualifier line and the 13px value line. Those are label/meta, not xs/row.
+    expect(css).toMatch(/--ow-type-label: 11px;/);
+    expect(css).toMatch(/--ow-type-meta: 13px;/);
   });
 
   it('leaves .truncate and .block to Tailwind', () => {

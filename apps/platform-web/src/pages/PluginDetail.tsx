@@ -16,10 +16,10 @@ import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator } from '../components/app/status-indicator';
 import { formatDate, formatBytes, shortDigest } from '../format';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { InstallationStatus, useStatusText } from '../components/app/status';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
@@ -485,28 +485,28 @@ export function PluginDetailPage() {
 
 function InstanceTable({ instances }: { instances: PluginDetail['deployments'][number]['instances'] }) {
   const t = useT();
+  const { locale } = useI18n();
   if (!instances.length) return <EmptyState icon="nodes" title={t('pluginDetail.instances.empty.title')} description={t('pluginDetail.instances.empty.description')} />;
   return (
     <Table className={stackTable}>
       <TableHeader className={stackHead}>
         <TableRow className="hover:bg-transparent">
-          <TableHead>{t('table.slot')}</TableHead>
           <TableHead>{t('table.node')}</TableHead>
+          <TableHead>{t('table.slot')}</TableHead>
           <TableHead>{t('table.state')}</TableHead>
           <TableHead>{t('table.container')}</TableHead>
-          <TableHead>{t('table.restarts')}</TableHead>
-          <TableHead>{t('table.observed')}</TableHead>
           <TableHead>{t('table.logs')}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody className={stackBody}>{instances.map((instance) => (
         <TableRow key={instance.id} className={stackRow}>
+          <IdentityCell label={t('table.node')} identity={formatIdentity({ name: instance.nodeName || instance.nodeId.slice(0, 8), id: instance.nodeId, at: instance.observedAt, locale, rowsOnPage: instances.length })} cardFact>
+            <span>{instance.nodeStatus}</span>
+            <span>{t('table.restarts')} {instance.restartCount}</span>
+          </IdentityCell>
           <StackCell label={t('table.slot')}><span className="mono">#{instance.slot}</span></StackCell>
-          <StackCell label={t('table.node')}><strong>{instance.nodeName || instance.nodeId.slice(0, 8)}</strong><div className="text-sm text-muted-foreground">{instance.nodeStatus}</div></StackCell>
           <StackCell label={t('table.state')}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
           <StackCell label={t('table.container')}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-          <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
-          <StackCell label={t('table.observed')}><TimeAgo value={instance.observedAt} /></StackCell>
           <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
         </TableRow>
       ))}</TableBody>

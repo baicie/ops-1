@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { CopyButton, EmptyState, ErrorState, KV, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { formatBytes, formatDate } from '../format';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeNodeState, nodeRevokedLanded } from '../lib/verified-writes';
@@ -21,7 +21,7 @@ import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../compon
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 import { ConfirmAction } from '../components/app/confirm-action';
-import { RowActions, StackCell, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, formatIdentity, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 /**
  * A revoked node is proven by the node route, not by the DELETE's 200. `DELETE /nodes/{id}`
@@ -90,6 +90,7 @@ opsweave-node`;
 
 export function NodesPage() {
   const t = useT();
+  const { locale } = useI18n();
   const { data, error, loading, reload, observedAt } = useObservedPolling(() => api.get<NodeView[]>('/api/v1/nodes'), 5000);
   const { user } = useAuth();
   const [stateFilter, setStateFilter] = useState('ALL');
@@ -227,7 +228,6 @@ export function NodesPage() {
               <TableRow className="hover:bg-transparent">
                 <TableHead>{t('table.node')}</TableHead>
                 <TableHead>{t('table.status')}</TableHead>
-                <TableHead>{t('table.identity')}</TableHead>
                 <TableHead>{t('table.instances')}</TableHead>
                 <TableHead>{t('table.cpu')}</TableHead>
                 <TableHead>{t('table.memory')}</TableHead>
@@ -244,7 +244,10 @@ export function NodesPage() {
                 const open = () => navigate(`/admin/nodes/${node.id}`);
                 return (
                   <TableRow key={node.id} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} data-node-state={nodeState(node)} onClick={open} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') open(); }}>
-                    <StackCell label={t('table.node')}><div className="entity-cell"><span className="entity-icon"><Icon name="server" size={17} /></span><div><strong>{node.name}</strong><span className="mono">{node.id.slice(0, 13)}…</span></div></div></StackCell>
+                    <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: visible.length })} cardFact>
+                      <span className="mono">{node.os}/{node.arch}</span>
+                      <span>{t('nodes.table.generation', { generation: node.generation })}</span>
+                    </IdentityCell>
                     <StackCell label={t('table.status')}>
                       <div className="ow-cell-stack">
                         {/* The state is an entity: it opens the node it describes. */}
@@ -254,7 +257,6 @@ export function NodesPage() {
                         <span className="text-sm text-muted-foreground">{t('table.lastObserved')} <TimeAgo value={node.lastSeenAt} /></span>
                       </div>
                     </StackCell>
-                    <StackCell label={t('table.identity')}><span className="mono text-sm">{node.os}/{node.arch}</span><div className="text-sm text-muted-foreground">{t('nodes.table.generation', { generation: node.generation })}</div></StackCell>
                     <StackCell label={t('table.instances')}><strong className="ow-tnum">{node.instancesReady}/{node.instancesTotal}</strong><span className="ow-cell-meta"> {t('status.ready')}</span></StackCell>
                     <StackCell label={t('table.cpu')} data-resource="cpu">{cpu === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(cpu * 100)}%</span>}</StackCell>
                     <StackCell label={t('table.memory')} data-resource="memory">{memory === null ? <NoData detail={t('nodes.resource.missingSnapshot')} /> : <span className="ow-utilization">{Math.round(memory * 100)}%</span>}</StackCell>

@@ -1,0 +1,1145 @@
+{
+ "config": {
+  "label": "r390-light-en",
+  "theme": "light",
+  "mode": "after",
+  "baseURL": "http://127.0.0.1:5173",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/admin/jobs": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2540,
+   "offenders": [],
+   "identityKey": [
+    "host-metrics · 1285 · 18 hours ago",
+    "host-metrics · e273 · 16 hours ago",
+    "host-metrics · 9c4a · 15 hours ago",
+    "host-metrics · 3f8b · 14 hours ago",
+    "host-metrics · a71d · 13 hours ago",
+    "host-metrics · 5b6e · 12 hours ago",
+    "host-metrics · c04f · 11 hours ago",
+    "host-metrics · 7d2e · 9 hours ago",
+    "host-metrics · f19a · 8 hours ago",
+    "host-metrics · 6e35 · 7 hours ago",
+    "host-metrics · 2a8f · 6 hours ago",
+    "host-metrics · b53c · 5 hours ago",
+    "host-metrics · 8f47 · 4 hours ago",
+    "host-metrics · 41e6 · 3 hours ago"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 142.6,
+    "p95": 142.6,
+    "max": 142.6,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.36,
+    0.36,
+    1
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": 3,
+   "cards": [
+    {
+     "key": "host-metrics · 1285 · 18 hours ago",
+     "clipped": false,
+     "width": 207,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · e273 · 16 hours ago",
+     "clipped": false,
+     "width": 206,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 9c4a · 15 hours ago",
+     "clipped": false,
+     "width": 206,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 3f8b · 14 hours ago",
+     "clipped": false,
+     "width": 207,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · a71d · 13 hours ago",
+     "clipped": false,
+     "width": 205,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 5b6e · 12 hours ago",
+     "clipped": false,
+     "width": 206,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · c04f · 11 hours ago",
+     "clipped": false,
+     "width": 204,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 7d2e · 9 hours ago",
+     "clipped": false,
+     "width": 202,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · f19a · 8 hours ago",
+     "clipped": false,
+     "width": 198,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 6e35 · 7 hours ago",
+     "clipped": false,
+     "width": 203,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 2a8f · 6 hours ago",
+     "clipped": false,
+     "width": 200,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · b53c · 5 hours ago",
+     "clipped": false,
+     "width": 203,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 8f47 · 4 hours ago",
+     "clipped": false,
+     "width": 200,
+     "facts": 3
+    },
+    {
+     "key": "host-metrics · 41e6 · 3 hours ago",
+     "clipped": false,
+     "width": 202,
+     "facts": 3
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/activity": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3112,
+   "offenders": [
+    {
+     "tag": "span",
+     "cls": "",
+     "left": 276,
+     "right": 426
+    }
+   ],
+   "identityKey": [
+    "deployment.created · f0fe · 59 seconds ago",
+    "plugin.enabled · 6b1c · 25 minutes ago",
+    "node.enrolled · 22dd · 49 minutes ago",
+    "plugin.disabled · d47a · 1 hour ago",
+    "policy.updated · 19e4 · 2 hours ago",
+    "enrollment_token.issued · f0fe · 2 hours ago",
+    "deployment.failed · 6b1c · 2 hours ago",
+    "node.unreachable · 22dd · 3 hours ago",
+    "plugin.probed · 6b1c · 3 hours ago",
+    "plugin.enabled · 22dd · 7 hours ago",
+    "node.enrolled · d47a · 7 hours ago",
+    "plugin.disabled · 19e4 · 8 hours ago",
+    "policy.updated · f0fe · 8 hours ago",
+    "enrollment_token.issued · 6b1c · 8 hours ago",
+    "deployment.failed · 22dd · 9 hours ago",
+    "node.unreachable · d47a · 9 hours ago",
+    "deployment.created · 19e4 · 10 hours ago"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 157,
+    "p95": 157,
+    "max": 157,
+    "n": 17
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.18,
+    0.06,
+    1
+   ],
+   "duplicateRunMax": 1,
+   "rows": 17,
+   "cardFactCount": 3,
+   "cards": [
+    {
+     "key": "deployment.created · f0fe · 59 seconds ago",
+     "clipped": false,
+     "width": 214,
+     "facts": 3
+    },
+    {
+     "key": "plugin.enabled · 6b1c · 25 minutes ago",
+     "clipped": false,
+     "width": 225,
+     "facts": 3
+    },
+    {
+     "key": "node.enrolled · 22dd · 49 minutes ago",
+     "clipped": false,
+     "width": 231,
+     "facts": 3
+    },
+    {
+     "key": "plugin.disabled · d47a · 1 hour ago",
+     "clipped": false,
+     "width": 209,
+     "facts": 3
+    },
+    {
+     "key": "policy.updated · 19e4 · 2 hours ago",
+     "clipped": false,
+     "width": 214,
+     "facts": 3
+    },
+    {
+     "key": "enrollment_token.issued · f0fe · 2 hours ago",
+     "clipped": false,
+     "width": 240,
+     "facts": 3
+    },
+    {
+     "key": "deployment.failed · 6b1c · 2 hours ago",
+     "clipped": false,
+     "width": 205,
+     "facts": 3
+    },
+    {
+     "key": "node.unreachable · 22dd · 3 hours ago",
+     "clipped": false,
+     "width": 225,
+     "facts": 3
+    },
+    {
+     "key": "plugin.probed · 6b1c · 3 hours ago",
+     "clipped": false,
+     "width": 135,
+     "facts": 3
+    },
+    {
+     "key": "plugin.enabled · 22dd · 7 hours ago",
+     "clipped": false,
+     "width": 215,
+     "facts": 3
+    },
+    {
+     "key": "node.enrolled · d47a · 7 hours ago",
+     "clipped": false,
+     "width": 207,
+     "facts": 3
+    },
+    {
+     "key": "plugin.disabled · 19e4 · 8 hours ago",
+     "clipped": false,
+     "width": 217,
+     "facts": 3
+    },
+    {
+     "key": "policy.updated · f0fe · 8 hours ago",
+     "clipped": false,
+     "width": 209,
+     "facts": 3
+    },
+    {
+     "key": "enrollment_token.issued · 6b1c · 8 hours ago",
+     "clipped": false,
+     "width": 241,
+     "facts": 3
+    },
+    {
+     "key": "deployment.failed · 22dd · 9 hours ago",
+     "clipped": false,
+     "width": 206,
+     "facts": 3
+    },
+    {
+     "key": "node.unreachable · d47a · 9 hours ago",
+     "clipped": false,
+     "width": 225,
+     "facts": 3
+    },
+    {
+     "key": "deployment.created · 19e4 · 10 hours ago",
+     "clipped": false,
+     "width": 216,
+     "facts": 3
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3665,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1 · 1 minute ago",
+    "lab-node-2 · 43 minutes ago",
+    "edge-ams-3 · 1 hour ago",
+    "edge-fra-1 · 2 hours ago",
+    "edge-sin-2 · 3 hours ago",
+    "edge-iad-4 · 4 hours ago",
+    "batch-05 · 4 hours ago",
+    "batch-06 · 5 hours ago",
+    "gpu-01 · 6 hours ago",
+    "gpu-02 · 6 hours ago",
+    "spare-07 · 7 hours ago",
+    "spare-08 · 8 hours ago"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 261.8,
+    "p95": 266.1,
+    "max": 266.1,
+    "n": 12
+   },
+   "columns": 7,
+   "distinctRatio": [
+    1,
+    0.83,
+    0.25,
+    1,
+    1,
+    0.92,
+    1
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": 6,
+   "cards": [
+    {
+     "key": "lab-node-1 · 1 minute ago",
+     "clipped": false,
+     "width": 154,
+     "facts": 6
+    },
+    {
+     "key": "lab-node-2 · 43 minutes ago",
+     "clipped": false,
+     "width": 173,
+     "facts": 6
+    },
+    {
+     "key": "edge-ams-3 · 1 hour ago",
+     "clipped": false,
+     "width": 149,
+     "facts": 6
+    },
+    {
+     "key": "edge-fra-1 · 2 hours ago",
+     "clipped": false,
+     "width": 147,
+     "facts": 6
+    },
+    {
+     "key": "edge-sin-2 · 3 hours ago",
+     "clipped": false,
+     "width": 150,
+     "facts": 6
+    },
+    {
+     "key": "edge-iad-4 · 4 hours ago",
+     "clipped": false,
+     "width": 151,
+     "facts": 6
+    },
+    {
+     "key": "batch-05 · 4 hours ago",
+     "clipped": false,
+     "width": 139,
+     "facts": 6
+    },
+    {
+     "key": "batch-06 · 5 hours ago",
+     "clipped": false,
+     "width": 139,
+     "facts": 6
+    },
+    {
+     "key": "gpu-01 · 6 hours ago",
+     "clipped": false,
+     "width": 125,
+     "facts": 6
+    },
+    {
+     "key": "gpu-02 · 6 hours ago",
+     "clipped": false,
+     "width": 127,
+     "facts": 6
+    },
+    {
+     "key": "spare-07 · 7 hours ago",
+     "clipped": false,
+     "width": 136,
+     "facts": 6
+    },
+    {
+     "key": "spare-08 · 8 hours ago",
+     "clipped": false,
+     "width": 138,
+     "facts": 6
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4868,
+   "offenders": [
+    {
+     "tag": "div",
+     "cls": "inline-flex h-9 items-center justify-center gap-1 rounded-md",
+     "left": 12,
+     "right": 404
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 314,
+     "right": 399
+    }
+   ],
+   "identityKey": [
+    "Hello Ops",
+    "Host Metrics",
+    "Log Tail",
+    "Data Catalog",
+    "Policy Engine",
+    "Registry Mirror",
+    "Edge Probe",
+    "Edge Tunnel",
+    "Fault Lab",
+    "Replay Lab",
+    "Audit Sink",
+    "Console Bridge"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 358.8,
+    "p95": 358.8,
+    "max": 358.8,
+    "n": 12
+   },
+   "columns": 7,
+   "distinctRatio": [
+    0.08,
+    1,
+    1,
+    0.17,
+    0.25,
+    0.25,
+    0.08
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": 6,
+   "cards": [
+    {
+     "key": "Hello Ops",
+     "clipped": false,
+     "width": 61,
+     "facts": 6
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 81,
+     "facts": 6
+    },
+    {
+     "key": "Log Tail",
+     "clipped": false,
+     "width": 48,
+     "facts": 6
+    },
+    {
+     "key": "Data Catalog",
+     "clipped": false,
+     "width": 82,
+     "facts": 6
+    },
+    {
+     "key": "Policy Engine",
+     "clipped": false,
+     "width": 84,
+     "facts": 6
+    },
+    {
+     "key": "Registry Mirror",
+     "clipped": false,
+     "width": 95,
+     "facts": 6
+    },
+    {
+     "key": "Edge Probe",
+     "clipped": false,
+     "width": 73,
+     "facts": 6
+    },
+    {
+     "key": "Edge Tunnel",
+     "clipped": false,
+     "width": 78,
+     "facts": 6
+    },
+    {
+     "key": "Fault Lab",
+     "clipped": false,
+     "width": 58,
+     "facts": 6
+    },
+    {
+     "key": "Replay Lab",
+     "clipped": false,
+     "width": 69,
+     "facts": 6
+    },
+    {
+     "key": "Audit Sink",
+     "clipped": false,
+     "width": 64,
+     "facts": 6
+    },
+    {
+     "key": "Console Bridge",
+     "clipped": false,
+     "width": 96,
+     "facts": 6
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4733,
+   "offenders": [],
+   "identityKey": [
+    "orders-raw",
+    "orders-curated",
+    "shipments",
+    "events-click",
+    "events-impression",
+    "inventory",
+    "invoice-lines",
+    "node-metrics",
+    "plugin-invocations",
+    "audit-ledger",
+    "risk-scores",
+    "stale-feed",
+    "orders-curated · 4 hours ago",
+    "inventory · 10 hours ago",
+    "orders-curated · yesterday",
+    "lab-node-1 · 1 minute ago",
+    "lab-node-2 · 43 minutes ago",
+    "edge-ams-3 · 1 hour ago",
+    "edge-fra-1 · 2 hours ago",
+    "edge-sin-2 · 3 hours ago",
+    "edge-iad-4 · 4 hours ago",
+    "batch-05 · 4 hours ago",
+    "batch-06 · 5 hours ago",
+    "gpu-01 · 6 hours ago",
+    "gpu-02 · 6 hours ago",
+    "spare-07 · 7 hours ago",
+    "spare-08 · 8 hours ago"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 108.8,
+    "p95": 173.4,
+    "max": 173.4,
+    "n": 27
+   },
+   "columns": 10,
+   "distinctRatio": [
+    1,
+    0.37,
+    0.17,
+    0.08,
+    0.08,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "cardFactCount": 4,
+   "cards": [
+    {
+     "key": "orders-raw",
+     "clipped": false,
+     "width": 70,
+     "facts": 4
+    },
+    {
+     "key": "orders-curated",
+     "clipped": false,
+     "width": 96,
+     "facts": 4
+    },
+    {
+     "key": "shipments",
+     "clipped": false,
+     "width": 66,
+     "facts": 4
+    },
+    {
+     "key": "events-click",
+     "clipped": false,
+     "width": 78,
+     "facts": 4
+    },
+    {
+     "key": "events-impression",
+     "clipped": false,
+     "width": 118,
+     "facts": 4
+    },
+    {
+     "key": "inventory",
+     "clipped": false,
+     "width": 59,
+     "facts": 4
+    },
+    {
+     "key": "invoice-lines",
+     "clipped": false,
+     "width": 80,
+     "facts": 4
+    },
+    {
+     "key": "node-metrics",
+     "clipped": false,
+     "width": 86,
+     "facts": 4
+    },
+    {
+     "key": "plugin-invocations",
+     "clipped": false,
+     "width": 118,
+     "facts": 4
+    },
+    {
+     "key": "audit-ledger",
+     "clipped": false,
+     "width": 79,
+     "facts": 4
+    },
+    {
+     "key": "risk-scores",
+     "clipped": false,
+     "width": 71,
+     "facts": 4
+    },
+    {
+     "key": "stale-feed",
+     "clipped": false,
+     "width": 65,
+     "facts": 4
+    },
+    {
+     "key": "orders-curated · 4 hours ago",
+     "clipped": false,
+     "width": 176,
+     "facts": 1
+    },
+    {
+     "key": "inventory · 10 hours ago",
+     "clipped": false,
+     "width": 145,
+     "facts": 1
+    },
+    {
+     "key": "orders-curated · yesterday",
+     "clipped": false,
+     "width": 163,
+     "facts": 1
+    },
+    {
+     "key": "lab-node-1 · 1 minute ago",
+     "clipped": false,
+     "width": 154,
+     "facts": 2
+    },
+    {
+     "key": "lab-node-2 · 43 minutes ago",
+     "clipped": false,
+     "width": 173,
+     "facts": 2
+    },
+    {
+     "key": "edge-ams-3 · 1 hour ago",
+     "clipped": false,
+     "width": 149,
+     "facts": 2
+    },
+    {
+     "key": "edge-fra-1 · 2 hours ago",
+     "clipped": false,
+     "width": 147,
+     "facts": 2
+    },
+    {
+     "key": "edge-sin-2 · 3 hours ago",
+     "clipped": false,
+     "width": 150,
+     "facts": 2
+    },
+    {
+     "key": "edge-iad-4 · 4 hours ago",
+     "clipped": false,
+     "width": 151,
+     "facts": 2
+    },
+    {
+     "key": "batch-05 · 4 hours ago",
+     "clipped": false,
+     "width": 139,
+     "facts": 2
+    },
+    {
+     "key": "batch-06 · 5 hours ago",
+     "clipped": false,
+     "width": 139,
+     "facts": 2
+    },
+    {
+     "key": "gpu-01 · 6 hours ago",
+     "clipped": false,
+     "width": 125,
+     "facts": 2
+    },
+    {
+     "key": "gpu-02 · 6 hours ago",
+     "clipped": false,
+     "width": 127,
+     "facts": 2
+    },
+    {
+     "key": "spare-07 · 7 hours ago",
+     "clipped": false,
+     "width": 136,
+     "facts": 2
+    },
+    {
+     "key": "spare-08 · 8 hours ago",
+     "clipped": false,
+     "width": 138,
+     "facts": 2
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3690,
+   "offenders": [],
+   "identityKey": [
+    "trusted-team · 1 minute ago",
+    "lab · yesterday",
+    "partner-a · 2 days ago",
+    "partner-b · 3 days ago",
+    "community · 4 days ago",
+    "vendor-x · 5 days ago"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 161.2,
+    "p95": 194.7,
+    "max": 194.7,
+    "n": 14
+   },
+   "columns": 9,
+   "distinctRatio": [
+    1,
+    0.71,
+    0.29,
+    0.29,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": 4,
+   "cards": [
+    {
+     "key": "trusted-team · 1 minute ago",
+     "clipped": false,
+     "width": 168,
+     "facts": 4
+    },
+    {
+     "key": "lab · yesterday",
+     "clipped": false,
+     "width": 86,
+     "facts": 4
+    },
+    {
+     "key": "partner-a · 2 days ago",
+     "clipped": false,
+     "width": 133,
+     "facts": 4
+    },
+    {
+     "key": "partner-b · 3 days ago",
+     "clipped": false,
+     "width": 134,
+     "facts": 4
+    },
+    {
+     "key": "community · 4 days ago",
+     "clipped": false,
+     "width": 144,
+     "facts": 4
+    },
+    {
+     "key": "vendor-x · 5 days ago",
+     "clipped": false,
+     "width": 130,
+     "facts": 4
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3645,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1 · 1 minute ago",
+    "lab-node-2 · 43 minutes ago",
+    "edge-ams-3 · 1 hour ago",
+    "edge-fra-1 · 2 hours ago",
+    "edge-sin-2 · 3 hours ago",
+    "edge-iad-4 · 4 hours ago",
+    "batch-05 · 4 hours ago",
+    "batch-06 · 5 hours ago",
+    "gpu-01 · 6 hours ago",
+    "gpu-02 · 6 hours ago",
+    "spare-07 · 7 hours ago",
+    "spare-08 · 8 hours ago"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 112,
+    "p95": 112,
+    "max": 112,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": 2,
+   "cards": [
+    {
+     "key": "lab-node-1 · 1 minute ago",
+     "clipped": false,
+     "width": 154,
+     "facts": 2
+    },
+    {
+     "key": "lab-node-2 · 43 minutes ago",
+     "clipped": false,
+     "width": 173,
+     "facts": 2
+    },
+    {
+     "key": "edge-ams-3 · 1 hour ago",
+     "clipped": false,
+     "width": 149,
+     "facts": 2
+    },
+    {
+     "key": "edge-fra-1 · 2 hours ago",
+     "clipped": false,
+     "width": 147,
+     "facts": 2
+    },
+    {
+     "key": "edge-sin-2 · 3 hours ago",
+     "clipped": false,
+     "width": 150,
+     "facts": 2
+    },
+    {
+     "key": "edge-iad-4 · 4 hours ago",
+     "clipped": false,
+     "width": 151,
+     "facts": 2
+    },
+    {
+     "key": "batch-05 · 4 hours ago",
+     "clipped": false,
+     "width": 139,
+     "facts": 2
+    },
+    {
+     "key": "batch-06 · 5 hours ago",
+     "clipped": false,
+     "width": 139,
+     "facts": 2
+    },
+    {
+     "key": "gpu-01 · 6 hours ago",
+     "clipped": false,
+     "width": 125,
+     "facts": 2
+    },
+    {
+     "key": "gpu-02 · 6 hours ago",
+     "clipped": false,
+     "width": 127,
+     "facts": 2
+    },
+    {
+     "key": "spare-07 · 7 hours ago",
+     "clipped": false,
+     "width": 136,
+     "facts": 2
+    },
+    {
+     "key": "spare-08 · 8 hours ago",
+     "clipped": false,
+     "width": 138,
+     "facts": 2
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2240,
+   "offenders": [
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 362,
+     "right": 489
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 457,
+     "right": 476
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 493,
+     "right": 623
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 591,
+     "right": 610
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 627,
+     "right": 729
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 689,
+     "right": 716
+    }
+   ],
+   "identityKey": [
+    "lab-node-1 · 1 minute ago",
+    "lab-node-2 · 19 minutes ago",
+    "edge-ams-3 · 37 minutes ago",
+    "edge-fra-1 · 55 minutes ago",
+    "edge-sin-2 · 1 hour ago",
+    "edge-iad-4 · 2 hours ago"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 137.2,
+    "p95": 137.2,
+    "max": 137.2,
+    "n": 6
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 6,
+   "cardFactCount": 4,
+   "cards": [
+    {
+     "key": "lab-node-1 · 1 minute ago",
+     "clipped": false,
+     "width": 154,
+     "facts": 4
+    },
+    {
+     "key": "lab-node-2 · 19 minutes ago",
+     "clipped": false,
+     "width": 171,
+     "facts": 4
+    },
+    {
+     "key": "edge-ams-3 · 37 minutes ago",
+     "clipped": false,
+     "width": 179,
+     "facts": 4
+    },
+    {
+     "key": "edge-fra-1 · 55 minutes ago",
+     "clipped": false,
+     "width": 157,
+     "facts": 4
+    },
+    {
+     "key": "edge-sin-2 · 1 hour ago",
+     "clipped": false,
+     "width": 141,
+     "facts": 4
+    },
+    {
+     "key": "edge-iad-4 · 2 hours ago",
+     "clipped": false,
+     "width": 151,
+     "facts": 4
+    }
+   ],
+   "tableWidth": 349,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1777,
+   "offenders": [
+    {
+     "tag": "table",
+     "cls": "ow-table w-full border-collapse caption-bottom text-base",
+     "left": 13,
+     "right": 398
+    },
+    {
+     "tag": "thead",
+     "cls": "border-b border-solid border-border",
+     "left": 15,
+     "right": 396
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors data-[",
+     "left": 15,
+     "right": 396
+    },
+    {
+     "tag": "th",
+     "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
+     "left": 324,
+     "right": 396
+    },
+    {
+     "tag": "tbody",
+     "cls": "[&_tr:last-child]:border-0",
+     "left": 15,
+     "right": 396
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors hover:",
+     "left": 15,
+     "right": 396
+    },
+    {
+     "tag": "td",
+     "cls": "px-3.5 py-2.5 align-middle text-base",
+     "left": 324,
+     "right": 396
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors hover:",
+     "left": 15,
+     "right": 396
+    }
+   ],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 190,
+    "p95": 190,
+    "max": 190,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 385,
+   "tablePanelWidth": 349
+  }
+ }
+}

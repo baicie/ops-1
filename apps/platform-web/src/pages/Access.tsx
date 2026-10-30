@@ -18,7 +18,7 @@ import { PageHeader } from '../components/app/page-header';
 import { NoData } from '../components/app/status-indicator';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import { shortDigest } from '../format';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { ABSENT_STATE, verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import {
   describePublisherTrust,
@@ -28,7 +28,7 @@ import {
   userCreatedLanded,
   userStateLanded,
 } from '../lib/verified-writes';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type ManagedUser = { id: string; email: string; displayName: string; role: string; disabled: boolean; createdAt: string };
 
@@ -63,6 +63,7 @@ function FormField({ label, hint, htmlFor, children }: { label: string; hint?: s
 
 export function AccessPage() {
   const t = useT();
+  const { locale } = useI18n();
   const { user } = useAuth();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<Publisher[]>('/api/v1/publishers'), 0);
@@ -229,7 +230,6 @@ export function AccessPage() {
                   <TableHead>{t('table.user')}</TableHead>
                   <TableHead>{t('table.role')}</TableHead>
                   <TableHead>{t('table.status')}</TableHead>
-                  <TableHead>{t('table.created')}</TableHead>
                   <TableHead>{t('table.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -239,7 +239,6 @@ export function AccessPage() {
                     <StackCell label={t('table.user')}><strong>{item.displayName}</strong><div className="text-sm text-muted-foreground">{item.email}</div></StackCell>
                     <StackCell label={t('table.role')}><span className="role-pill">{item.role}</span></StackCell>
                     <StackCell label={t('table.status')}><UserStatusPill disabled={item.disabled} /></StackCell>
-                    <StackCell label={t('table.created')}><TimeAgo value={item.createdAt} /></StackCell>
                     <StackCell label={t('table.actions')}>{item.id !== user?.id && <Button size="sm" variant={item.disabled ? 'default' : 'destructive'} onClick={() => setUserTarget({ account: item, disabled: !item.disabled })}>{item.disabled ? t('action.enable') : t('action.disable')}</Button>}</StackCell>
                   </TableRow>
                 ))}
@@ -265,7 +264,6 @@ export function AccessPage() {
                 <TableHead>{t('table.publisher')}</TableHead>
                 <TableHead>{t('table.fingerprint')}</TableHead>
                 <TableHead>{t('table.trust')}</TableHead>
-                <TableHead>{t('table.added')}</TableHead>
                 <TableHead>{t('table.note')}</TableHead>
                 {user?.role === 'admin' && <TableHead>{t('table.actions')}</TableHead>}
               </TableRow>
@@ -273,10 +271,9 @@ export function AccessPage() {
             <TableBody className={stackBody}>
               {(data || []).map((publisher) => (
                 <TableRow key={publisher.publisherId} className={stackRow}>
-                  <StackCell label={t('table.publisher')}><strong>{publisher.publisherId}</strong></StackCell>
+                  <IdentityCell label={t('table.publisher')} identity={formatIdentity({ name: publisher.publisherId, id: publisher.fingerprint, at: publisher.createdAt, locale, rowsOnPage: (data || []).length })} cardFact />
                   <StackCell label={t('table.fingerprint')}><span className="mono text-sm">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
                   <StackCell label={t('table.trust')}><StatusPill status={publisher.trustState} /></StackCell>
-                  <StackCell label={t('table.added')}><TimeAgo value={publisher.createdAt} /></StackCell>
                   {/* An absent note is a missing record, not an empty one: the reserved token, never a dash. */}
                   <StackCell label={t('table.note')}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
                   {user?.role === 'admin' && <StackCell label={t('table.actions')}>{publisher.trustState === 'TRUSTED' && <Button size="sm" variant="destructive" onClick={() => setRevoke(publisher.publisherId)}>{t('action.revoke')}</Button>}</StackCell>}

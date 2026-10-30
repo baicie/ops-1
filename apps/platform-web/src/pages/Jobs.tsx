@@ -15,17 +15,19 @@ import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { useDocumentTitle } from '../hooks';
 import { executionLabel as durationLabel, spanLabel } from './jobDuration';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
 import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, RowActions, StackCell, StatusPill, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { useStatusText } from '../components/app/status';
 
 const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
 
 export function JobsPage() {
   const t = useT();
+  const { locale } = useI18n();
+  const navigate = useNavigate();
   useDocumentTitle(t('page.jobs'));
   const [data, setData] = useState<JobList | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -49,6 +51,8 @@ export function JobsPage() {
   }, [status, cursor, reload]);
   const visibleJobs = (data?.items || []).filter((job) => (pipelineFilter === 'ALL' || job.pipelineId === pipelineFilter) && `${job.jobId} ${job.pipelineId}`.toLowerCase().includes(query.toLowerCase()));
   const pipelines = Array.from(new Set((data?.items || []).map((job) => job.pipelineId))).sort();
+  /** §2.1: the disambiguator appears only when the page carries the same name twice. */
+  const pipelineCount = new Set(visibleJobs.map((job) => job.pipelineId)).size;
   /** The status tab is a Kernel query, so an empty answer under it is a filtered miss. */
   const filtering = query !== '' || pipelineFilter !== 'ALL' || status !== 'ALL';
   const clearFilters = () => { setQuery(''); setPipelineFilter('ALL'); setStatus('ALL'); setCursor(null); };
@@ -95,31 +99,49 @@ export function JobsPage() {
         ) : (
           <section className="panel table-panel">
             <Table className={stackTable}>
+              {/* table-spec §2.2: pipeline and revision are the same value in 14/14 rows here
+                  (ratio 0.00 and 0.07), so they stop being columns. 7 -> 4 data columns. */}
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>{t('table.job')}</TableHead>
-                  <TableHead>{t('table.pipeline')}</TableHead>
-                  <TableHead>{t('table.revision')}</TableHead>
                   <TableHead>{t('table.status')}</TableHead>
-                  <TableHead>{t('table.attempts')}</TableHead>
                   <TableHead>{t('table.duration')}</TableHead>
                   <TableHead>{t('table.created')}</TableHead>
-                  <TableHead />
+                  <TableHead aria-label={t('table.actions')} />
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
-                {visibleJobs.map((job) => (
-                  <TableRow key={job.jobId} className={cn('cursor-pointer', stackRow)}>
-                    <StackCell label={t('table.job')} className="job-id-cell max-[768px]:w-auto max-[768px]:max-w-none"><Link className="mono min-w-0 truncate max-[768px]:max-w-[220px]" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
-                    <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[768px]:whitespace-normal">{job.pipelineId}</StackCell>
-                    <StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell>
-                    <StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell>
-                    <StackCell label={t('table.attempts')}>{job.attempts}/{job.maxAttempts}</StackCell>
-                    <StackCell label={t('table.duration')} className="whitespace-nowrap max-[768px]:whitespace-normal"><span className="mono">{durationLabel(job)}</span></StackCell>
-                    <StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Icon name="chevron" size={16} /></TableCell>
-                  </TableRow>
-                ))}
+                {visibleJobs.map((job) => {
+                  const identity = formatIdentity({
+                    name: job.pipelineId,
+                    id: job.jobId,
+                    at: job.startedAt || job.createdAt,
+                    locale,
+                    nameIsUnique: pipelineCount === visibleJobs.length,
+                    rowsOnPage: visibleJobs.length,
+                  });
+                  const cardFacts = rankCardFacts({
+                    status: visibleJobs.map((row) => row.status),
+                    duration: visibleJobs.map((row) => durationLabel(row)),
+                    created: visibleJobs.map((row) => row.createdAt),
+                  });
+                  return (
+                    <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', stackRow)} data-job-row={job.jobId} onClick={() => navigate('/admin/jobs/' + job.jobId)} tabIndex={0} onKeyDown={(keyEvent) => { if (keyEvent.key === 'Enter') navigate('/admin/jobs/' + job.jobId); }}>
+                      <IdentityCell label={t('table.job')} identity={identity} cardFact className="job-id-cell">
+                        {/* §2.2 demotion, not deletion: the two constants live on the qualifier line. */}
+                        <span>r{job.pipelineRevision}</span>
+                        <span>{t('table.attempts')} {job.attempts}/{job.maxAttempts}</span>
+                      </IdentityCell>
+                      <StackCell label={t('table.status')} className={cardCellClass(cardFacts.includes('status'))}><StatusPill status={job.status} /></StackCell>
+                      <StackCell label={t('table.duration')} className={cn('whitespace-nowrap max-[768px]:whitespace-normal', cardCellClass(cardFacts.includes('duration')))}><span className="mono">{durationLabel(job)}</span></StackCell>
+                      <StackCell label={t('table.created')} className={cardCellClass(cardFacts.includes('created'))}><span title={job.createdAt}>{relativeAge(locale, job.createdAt)}</span></StackCell>
+                      {/* §2.5: the row menu rides the identity line at 390 instead of taking a row. */}
+                      <TableCell className="w-8 max-[768px]:absolute max-[768px]:right-1 max-[768px]:top-0 max-[768px]:w-auto max-[768px]:border-0 max-[768px]:p-0">
+                        <RowActions label={t('jobs.action.menu', { id: identity.key })} actions={[copyIdAction(job.jobId, t('table.copyIdentifier')), { id: 'open', label: t('table.open'), icon: 'chevron', onSelect: () => navigate('/admin/jobs/' + job.jobId) }]} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </section>

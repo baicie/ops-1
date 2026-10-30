@@ -12,7 +12,7 @@ import { NoData, UnknownValue } from '../components/app/status-indicator';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
 import { formatDuration } from '../format';
 import { useI18n, useT } from '../i18n';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 const commands = `opsctl status
 opsctl doctor
@@ -41,6 +41,7 @@ function DatabasePill({ database }: { database: string }) {
 
 export function DiagnosticsPage() {
   const t = useT();
+  const { locale } = useI18n();
   const { formatDateTime } = useI18n();
   const { data, error, loading, reload, observedAt } = useObservedPolling(() => api.get<Diagnostics>('/api/v1/diagnostics'), POLL_INTERVAL_MS);
   const [raw, setRaw] = useState(false);
@@ -120,7 +121,7 @@ export function DiagnosticsPage() {
                       <TableBody className={stackBody}>
                         {nodes.map((node) => (
                           <TableRow key={node.id} className={stackRow}>
-                            <StackCell label={t('table.node')}><strong>{node.name}</strong><div className="mono text-sm">{node.id}</div></StackCell>
+                            <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale })} cardFact />
                             <StackCell label={t('table.status')}><StatusPill status={node.status} /></StackCell>
                             {/* No recorded heartbeat is NO_DATA, not "never" and not a blank cell. */}
                             <StackCell label={t('table.lastObserved')}>{node.lastSeenAt ? <TimeAgo value={node.lastSeenAt} /> : <NoData detail={t('ui.noData.detail')} />}</StackCell>

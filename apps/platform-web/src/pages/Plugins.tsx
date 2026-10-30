@@ -12,7 +12,7 @@ import { EmptyState, TimeAgo, useToast } from '../components/Ui';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { FilterScroller } from '../components/app/filter-scroller';
 import { shortDigest } from '../format';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { createFactsLedger, type FactsLedger } from '../lib/facts-ledger';
 import { cn } from '../lib/utils';
@@ -20,7 +20,7 @@ import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-writ
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
-import { RowActions, StackCell, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, formatIdentity, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 import { InstallationStatus } from '../components/app/status';
 import { deriveInstallationState } from '../lib/installation-state';
 
@@ -148,6 +148,7 @@ export function PluginsPage() {
   const { user } = useAuth();
   const canOperate = user?.role === 'admin' || user?.role === 'operator';
   const isAdmin = user?.role === 'admin';
+  const { locale } = useI18n();
   const { data, error, loading, reload, observedAt } = useObservedPolling(() => api.get<PluginSummary[]>('/api/v1/plugins'), 8000);
   const [query, setQuery] = useState('');
   const [state, setState] = useState('ALL');
@@ -469,13 +470,13 @@ export function PluginsPage() {
                           />
                         </TableCell>
                       ) : null}
-                      <StackCell label={t('table.plugin')}>
+                      <IdentityCell label={t('table.plugin')} identity={formatIdentity({ name: plugin.name, id: plugin.id, locale, rowsOnPage: filtered.length })} cardFact>
                         <div className="entity-cell">
                           <span className={cn('entity-icon', plugin.isSystem && 'system')}><Icon name={plugin.isSystem ? 'ops' : 'box'} size={17} /></span>
-                          <div><strong>{plugin.name}</strong><span className="mono">{plugin.id}</span></div>
+
                           {plugin.isSystem && <span className="tag">{t('common.tag.system')}</span>}
                         </div>
-                      </StackCell>
+                      </IdentityCell>
                       <StackCell label={t('table.version')}>
                         <div className="ow-cell">
                           <span className="mono ow-cell-value">{plugin.activeVersion || plugin.latestVersion || null}{!(plugin.activeVersion || plugin.latestVersion) && <NoData detail={t('ui.noData.detail')} />}</span>

@@ -10,9 +10,9 @@ import { EmptyState } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { formatDate } from '../format';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Dataset = { datasetId: string; name: string; schemaRevision: number; updatedAt: string };
 type QualityRun = { runId: string; datasetId: string; status: string; recordsExamined: number; recordsFailed: number; completedAt: string | null; createdAt: string };
@@ -26,6 +26,7 @@ type Summary = {
 
 export function GovernancePage() {
   const t = useT();
+  const { locale } = useI18n();
   const { data: nodes, error: nodeError, loading: nodeLoading, reload: reloadNodes } = usePolling(() => api.get<NodeView[]>('/api/v1/nodes'), 10000);
   const [datasets, setDatasets] = useState<DatasetQuality[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -91,22 +92,20 @@ export function GovernancePage() {
                 <TableHead>{t('table.quality')}</TableHead>
                 <TableHead>{t('table.examined')}</TableHead>
                 <TableHead>{t('table.failed')}</TableHead>
-                <TableHead>{t('table.latestRun')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
               {datasets.map((dataset) => (
                 <TableRow key={dataset.datasetId} className={stackRow} data-dataset={dataset.datasetId}>
-                  <StackCell label={t('table.dataset')}>
-                    <strong>{dataset.name}</strong>
-                    <div className="mono text-sm text-muted-foreground">{dataset.datasetId.slice(0, 13)}…</div>
-                  </StackCell>
+                  <IdentityCell label={t('table.dataset')} identity={formatIdentity({ name: dataset.name, id: dataset.datasetId, at: dataset.latest?.createdAt, locale, rowsOnPage: datasets.length })} cardFact>
+                    <span>r{dataset.schemaRevision}</span>
+                    <span>{dataset.latest ? dataset.latest.runId.slice(0, 8) : t('common.noRuns')}</span>
+                  </IdentityCell>
                   <StackCell label={t('table.schema')}>r{dataset.schemaRevision}</StackCell>
                   <StackCell label={t('table.quality')}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <StatusPill status="UNKNOWN" />}</StackCell>
                   {/* A run that examined no records reported nothing: NO_DATA, not a 0 count. */}
                   <StackCell label={t('table.examined')}>{dataset.latest ? dataset.latest.recordsExamined : <NoData detail={t('ui.noData.detail')} />}</StackCell>
                   <StackCell label={t('table.failed')}>{dataset.latest ? dataset.latest.recordsFailed : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-                  <StackCell label={t('table.latestRun')}>{dataset.latest ? <Link className="text-link" to="/admin/ext/trusted-team/data-catalog"><span className="mono">{dataset.latest.runId.slice(0, 8)}</span></Link> : <span className="text-muted-foreground">{t('common.noRuns')}</span>}</StackCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -120,15 +119,13 @@ export function GovernancePage() {
               <TableRow className="hover:bg-transparent">
                 <TableHead>{t('table.dataset')}</TableHead>
                 <TableHead>{t('table.status')}</TableHead>
-                <TableHead>{t('table.when')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
               {recentFailures.map((run) => (
                 <TableRow key={run.runId} className={stackRow}>
-                  <StackCell label={t('table.dataset')}>{run.datasetName}</StackCell>
+                  <IdentityCell label={t('table.dataset')} identity={formatIdentity({ name: run.datasetName, id: run.runId, at: run.completedAt || run.createdAt, locale, rowsOnPage: recentFailures.length })} cardFact />
                   <StackCell label={t('table.status')}><StatusPill status={run.status} /></StackCell>
-                  <StackCell label={t('table.when')}>{run.completedAt ? formatDate(run.completedAt) : formatDate(run.createdAt)}</StackCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -146,7 +143,7 @@ export function GovernancePage() {
             <TableBody className={stackBody}>
               {nodeList.map((node) => (
                 <TableRow key={node.id} className={stackRow}>
-                  <StackCell label={t('table.node')}><Link className="text-link" to={`/admin/nodes/${node.id}`}>{node.name}</Link></StackCell>
+                  <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: nodeList.length })} cardFact />
                   {/* docs/04 §4.5 C: a node that stopped reporting is STALE, which is a different
                       answer from UNREACHABLE and from a green READY. */}
                   <StackCell label={t('table.status')}><StatusIndicator state={indicatorStateForCode(node.status, { stale: node.stale, revoked: Boolean(node.revokedAt) })} /></StackCell>
