@@ -15,11 +15,29 @@ import { CopyButton, EmptyState, ErrorState, KV, Skeleton, TimeAgo, useToast } f
 import { formatBytes, formatDate } from '../format';
 import { useT } from '../i18n';
 import { cn } from '../lib/utils';
+import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
+import { describeNodeState, nodeRevokedLanded } from '../lib/verified-writes';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { RowActions, StackCell, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+
+/**
+ * A revoked node is proven by the node route, not by the DELETE's 200. `DELETE /nodes/{id}`
+ * writes `revoked_at`, and the row keeps answering 200 with that timestamp; a node the Kernel has
+ * since dropped answers 404 instead, which is the same fact stated by absence (hence
+ * `absentIsExpected` - nothing else is allowed to read as success).
+ */
+function revokeSpec(id: string) {
+  return verifyAfterWrite<NodeView>({
+    write: () => api.del(`/api/v1/nodes/${id}`),
+    read: () => api.get<NodeView>(`/api/v1/nodes/${id}`),
+    expected: nodeRevokedLanded,
+    describe: describeNodeState,
+    absentIsExpected: true,
+  });
+}
 
 /**
  * Status rendering for every node surface: colour + glyph + text, and the effective state is
@@ -120,9 +138,12 @@ export function NodesPage() {
 
   async function revokeNode(): Promise<void> {
     if (!revokeTarget) return;
-    await api.del(`/api/v1/nodes/${revokeTarget.id}`);
-    toast.push({ tone: 'ok', title: t('nodeDetail.revoked.title'), detail: t('nodeDetail.revoked.detail') });
+    const result = await revokeSpec(revokeTarget.id);
+    const failure = verifiedWriteFailure(result, t);
     await reload();
+    // ConfirmAction keeps the dialog (and its retry) open when the node is still serving.
+    if (failure) throw failure;
+    toast.push({ tone: 'ok', title: t('nodeDetail.revoked.title'), detail: t('nodeDetail.revoked.detail') + ' ' + verifiedWriteDetail(result, t) });
   }
 
   /** Every verb one node row may run, with the reason printed when one is refused. */
@@ -332,9 +353,11 @@ export function NodeDetailPage() {
   async function revoke() {
     setBusy(true);
     try {
-      await api.del(`/api/v1/nodes/${id}`);
-      toast.push({ tone: 'ok', title: t('nodeDetail.revoked.title'), detail: t('nodeDetail.revoked.detail') });
+      const result = await revokeSpec(id);
+      const failure = verifiedWriteFailure(result, t);
       await reload();
+      if (failure) throw failure;
+      toast.push({ tone: 'ok', title: t('nodeDetail.revoked.title'), detail: t('nodeDetail.revoked.detail') + ' ' + verifiedWriteDetail(result, t) });
     } catch (cause: any) {
       toast.push({ tone: 'danger', title: t('common.revokeFailed'), detail: cause.message });
     } finally {

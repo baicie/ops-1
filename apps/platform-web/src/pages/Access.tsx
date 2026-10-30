@@ -20,6 +20,14 @@ import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/sta
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
 import { ABSENT_STATE, verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
+import {
+  describePublisherTrust,
+  describeUserRole,
+  describeUserState,
+  publisherTrustedLanded,
+  userCreatedLanded,
+  userStateLanded,
+} from '../lib/verified-writes';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type ManagedUser = { id: string; email: string; displayName: string; role: string; disabled: boolean; createdAt: string };
@@ -79,14 +87,27 @@ export function AccessPage() {
   const publicKeyFieldId = useId();
   const noteFieldId = useId();
 
+  /** The account list is the only route that answers "who exists": there is no GET /users/{id}. */
+  const readUsers = () => api.get<ManagedUser[]>('/api/v1/users');
+
   async function createUser() {
     setUserBusy(true);
     setUserError(null);
     try {
-      await api.post('/api/v1/users', { email: newEmail, displayName: newName, password: newPassword, role: newRole });
+      // A created account is not proven by the POST's 201: the list has to carry it, with the
+      // role that was requested. An account created as admin when operator was asked is a lie
+      // the old 201 toast told in full confidence.
+      const result = await verifyAfterWrite<ManagedUser[]>({
+        write: () => api.post('/api/v1/users', { email: newEmail, displayName: newName, password: newPassword, role: newRole }),
+        read: readUsers,
+        expected: (users) => userCreatedLanded(users, newEmail, newRole),
+        describe: (users) => describeUserRole(users, newEmail),
+      });
+      const failure = verifiedWriteFailure(result, t);
+      await reloadUsers();
+      if (failure) throw failure;
       toast.push({ tone: 'ok', title: t('access.toast.userCreated'), detail: t('access.toast.userCreated.detail', { email: newEmail, role: newRole }) });
       setUserOpen(false); setNewEmail(''); setNewName(''); setNewPassword(''); setNewRole('viewer');
-      await reloadUsers();
     } catch (cause: any) {
       setUserError(cause.message);
     } finally { setUserBusy(false); }
@@ -97,9 +118,23 @@ export function AccessPage() {
    * privilege change: it goes through ConfirmAction and only a server answer ends the dialog.
    */
   async function applyUserState(target: { account: ManagedUser; disabled: boolean }) {
-    await api.patch(`/api/v1/users/${target.account.id}`, { disabled: target.disabled });
+    // The PATCH is a request. The list is the truth, and it is what the row above prints: only a
+    // row that reports `disabled` as asked proves the account really lost or regained access.
+    const result = await verifyAfterWrite<ManagedUser[]>({
+      write: () => api.patch(`/api/v1/users/${target.account.id}`, { disabled: target.disabled }),
+      read: readUsers,
+      expected: (users) => userStateLanded(users, target.account.id, target.disabled),
+      describe: (users) => describeUserState(users, target.account.id),
+    });
+    const failure = verifiedWriteFailure(result, t);
     await reloadUsers();
-    toast.push({ tone: 'ok', title: target.disabled ? t('access.toast.userDisabled') : t('access.toast.userEnabled') });
+    // ConfirmAction keeps the dialog (and its retry) open when the state did not move.
+    if (failure) throw failure;
+    toast.push({
+      tone: 'ok',
+      title: target.disabled ? t('access.toast.userDisabled') : t('access.toast.userEnabled'),
+      detail: verifiedWriteDetail(result, t),
+    });
   }
 
   const [addOpen, setAddOpen] = useState(false);
@@ -112,11 +147,20 @@ export function AccessPage() {
   async function addPublisher() {
     setBusy(true);
     try {
-      await api.post('/api/v1/publishers', { publisherId, publicKeyHex: publicKey.trim(), note });
-      toast.push({ tone: 'ok', title: t('access.toast.publisherTrusted'), detail: publisherId });
+      // Trusting a key is proven by the publisher list: a POST that answered 201 while the
+      // publisher stayed untrusted would let unsigned bundles through on the strength of a toast.
+      const result = await verifyAfterWrite<Publisher[]>({
+        write: () => api.post('/api/v1/publishers', { publisherId, publicKeyHex: publicKey.trim(), note }),
+        read: () => api.get<Publisher[]>('/api/v1/publishers'),
+        expected: (publishers) => publisherTrustedLanded(publishers, publisherId),
+        describe: (publishers) => describePublisherTrust(publishers, publisherId),
+      });
+      const failure = verifiedWriteFailure(result, t);
+      await reload();
+      if (failure) throw failure;
+      toast.push({ tone: 'ok', title: t('access.toast.publisherTrusted'), detail: publisherId + ' · ' + verifiedWriteDetail(result, t) });
       setAddOpen(false);
       setPublisherId(''); setPublicKey(''); setNote('');
-      await reload();
     } catch (cause: any) {
       toast.push({ tone: 'danger', title: t('access.toast.addPublisherFailed'), detail: cause.message });
     } finally { setBusy(false); }

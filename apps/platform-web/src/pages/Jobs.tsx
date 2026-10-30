@@ -17,6 +17,8 @@ import { useDocumentTitle } from '../hooks';
 import { executionLabel as durationLabel, spanLabel } from './jobDuration';
 import { useT } from '../i18n';
 import { cn } from '../lib/utils';
+import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
+import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
@@ -173,10 +175,25 @@ export function JobDetailPage() {
     return () => { cancelled = true; };
   }, [jobId, refresh]);
 
-  /** Cancelling ends the run for good: confirmation, one in-flight request, retry on failure. */
+  /**
+   * Cancelling ends the run for good: confirmation, one in-flight request, retry on failure.
+   *
+   * The 200 from /cancel is the Kernel accepting the request, not the job being cancelled - a
+   * job whose worker just took a lease can answer 200 and keep running. Only the job route
+   * reporting CANCELLED is the cancellation, and anything else is printed as what it is.
+   */
   const cancelJob = async () => {
-    await api.post(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {}, newIdempotencyKey());
+    const result = await verifyAfterWrite<JobView>({
+      write: () => api.post(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {}, newIdempotencyKey()),
+      read: () => api.get<JobView>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
+      expected: jobCancelledLanded,
+      describe: describeJobStatus,
+    });
+    const failure = verifiedWriteFailure(result, t);
     setRefresh((value) => value + 1);
+    // ConfirmAction keeps the dialog open on a rejection, so the operator reads the state that
+    // is really there instead of a closed dialog and a job that is still running.
+    if (failure) throw failure;
   };
   if (error) return (
     <div className="page-stack">

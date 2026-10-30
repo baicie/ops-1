@@ -14,6 +14,7 @@ import { FilterScroller } from '../components/app/filter-scroller';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
 import type { MessageKey } from '../i18n';
+import { createFactsLedger, type FactsLedger } from '../lib/facts-ledger';
 import { cn } from '../lib/utils';
 import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
@@ -38,6 +39,34 @@ const EMPTY_FACTS: PluginFacts = { digest: null, trust: null, generation: null, 
 
 /** At most this many detail lookups per render pass; the operator sees the first page anyway. */
 const FACT_LIMIT = 40;
+
+/** One detail answer per plugin per package version: a version is what the facts describe. */
+function factKey(plugin: PluginSummary): string {
+  return `${plugin.id}@${plugin.latestVersion ?? ''}`;
+}
+
+/**
+ * The facts only the detail route exposes. A route that cannot answer throws, and the ledger
+ * turns that into EMPTY_FACTS - NO_DATA on screen, never a zero dressed up as a reading.
+ */
+async function readFacts(plugin: PluginSummary): Promise<PluginFacts> {
+  const detail = await api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(plugin.id)}`);
+  const latest = detail.packageVersions?.[0];
+  const deployment = detail.deployments?.[0];
+  const activeVersion = detail.activeVersion ?? plugin.activeVersion;
+  // A rollback target must be a READY deployment that is not the one running now.
+  const rollbackTarget = (detail.deployments || []).find((item) => item.status === 'READY' && item.version !== activeVersion)?.version ?? null;
+  return {
+    digest: latest?.bundleDigest ?? null,
+    trust: latest?.signatureState ?? null,
+    generation: detail.activeRevision?.generation ?? null,
+    deploymentStatus: deployment?.status ?? null,
+    deploymentAt: deployment?.updatedAt ?? null,
+    deploymentCount: detail.deployments?.length ?? 0,
+    rollbackTarget,
+    unavailable: false,
+  };
+}
 
 /** The verb a row - or a batch of rows - is about to run. */
 type Verb = 'disable' | 'enable' | 'rollback' | 'uninstall';
@@ -125,42 +154,27 @@ export function PluginsPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [pending, setPending] = useState<PendingVerb | null>(null);
   const [factsEpoch, setFactsEpoch] = useState(0);
-  const requested = useRef(new Set<string>());
+  // The ledger, not a Set: a key is remembered only once its read resolved, an in-flight read is
+  // adopted by the next cycle instead of abandoned, and an answer stays writable after the effect
+  // that asked for it was replaced by the next poll (lib/facts-ledger.ts has the incident).
+  const ledgerRef = useRef<FactsLedger<PluginFacts> | null>(null);
+  if (!ledgerRef.current) ledgerRef.current = createFactsLedger<PluginFacts>();
   const plugins = useMemo(() => data || [], [data]);
 
   // One detail read per plugin per package version. The list endpoint carries no digest or
-  // deployment status, so the columns that need them ask the plugin route exactly once.
+  // deployment status, so the columns that need them ask the plugin route.
   useEffect(() => {
-    let cancelled = false;
-    const pendingReads = plugins
-      .filter((plugin) => !requested.current.has(`${plugin.id}@${plugin.latestVersion ?? ''}`))
-      .slice(0, FACT_LIMIT);
-    for (const plugin of pendingReads) requested.current.add(`${plugin.id}@${plugin.latestVersion ?? ''}`);
-    void Promise.all(pendingReads.map(async (plugin) => {
-      let next: PluginFacts = EMPTY_FACTS;
-      try {
-        const detail = await api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(plugin.id)}`);
-        const latest = detail.packageVersions?.[0];
-        const deployment = detail.deployments?.[0];
-        const activeVersion = detail.activeVersion ?? plugin.activeVersion;
-        // A rollback target must be a READY deployment that is not the one running now.
-        const rollbackTarget = (detail.deployments || []).find((item) => item.status === 'READY' && item.version !== activeVersion)?.version ?? null;
-        next = {
-          digest: latest?.bundleDigest ?? null,
-          trust: latest?.signatureState ?? null,
-          generation: detail.activeRevision?.generation ?? null,
-          deploymentStatus: deployment?.status ?? null,
-          deploymentAt: deployment?.updatedAt ?? null,
-          deploymentCount: detail.deployments?.length ?? 0,
-          rollbackTarget,
-          unavailable: false,
-        };
-      } catch {
-        // A plugin the detail route cannot answer keeps NO_DATA rather than a guessed value.
-      }
-      if (!cancelled) setFacts((previous) => ({ ...previous, [plugin.id]: next }));
-    }));
-    return () => { cancelled = true; };
+    const ledger = ledgerRef.current;
+    if (!ledger) return;
+    const wanted = plugins.filter((plugin) => ledger.needs(factKey(plugin))).slice(0, FACT_LIMIT);
+    for (const plugin of wanted) {
+      void ledger.load({ id: plugin.id, key: factKey(plugin), read: () => readFacts(plugin), missing: EMPTY_FACTS })
+        .then((answer) => {
+          // Deliberately not gated on a `cancelled` flag: this answer describes the plugin, and
+          // the row that asked for it is still on screen. A verb invalidates it via `forget`.
+          if (answer) setFacts((previous) => ({ ...previous, [answer.id]: answer.value }));
+        });
+    }
   }, [plugins, factsEpoch]);
 
   const filtered = useMemo(() => plugins.filter((plugin) => {
@@ -244,8 +258,10 @@ export function PluginsPage() {
       if (failure) failures.push({ id, error: failure });
       else states.push(result.state);
     }
+    // A verb changed these plugins: the facts read before it describe the previous state, so
+    // every answer in flight is disowned and the next cycle reads the post-verb resource.
     for (const id of ids) {
-      requested.current.delete(`${id}@${plugins.find((plugin) => plugin.id === id)?.latestVersion ?? ''}`);
+      ledgerRef.current?.forget(id);
       setFacts((previous) => { const next = { ...previous }; delete next[id]; return next; });
     }
     setFactsEpoch((value) => value + 1);
@@ -436,7 +452,7 @@ export function PluginsPage() {
                           <input
                             type="checkbox"
                             className="row-check"
-                            data-testid="plugins-select-`{plugin.id}"
+                            data-testid={`plugins-select-${plugin.id}`}
                             aria-label={t('plugins.batch.select', { name: plugin.name })}
                             checked={checked}
                             disabled={plugin.isSystem}
