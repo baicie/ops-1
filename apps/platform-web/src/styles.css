@@ -295,7 +295,6 @@ input::placeholder { color: var(--ow-text-muted); }
 .health-ok .health-dot { background: var(--ow-ok); box-shadow: 0 0 0 3px var(--ow-ok-soft); }
 .health-warn .health-dot { background: var(--ow-warn); box-shadow: 0 0 0 3px var(--ow-warn-soft); }
 .health-danger .health-dot { background: var(--ow-danger); box-shadow: 0 0 0 3px var(--ow-danger-soft); }
-.topbar-meta { font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
 .user-menu-wrap { position: relative; }
 .user-button { display: flex; align-items: center; gap: 8px; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px 4px; }
 .user-button:hover { background: var(--ow-surface-2); }
@@ -402,7 +401,6 @@ input::placeholder { color: var(--ow-text-muted); }
 .attention-copy { flex: 1; min-width: 0; }
 .attention-copy h2 { font-size: var(--ow-type-lg); }
 .attention-copy p { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 2px; }
-.overview-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .attention-list, .event-list { list-style: none; margin: 0; padding: 4px 0; }
 .attention-item { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--ow-border); }
 .attention-item:last-child { border-bottom: 0; }
@@ -510,7 +508,6 @@ input::placeholder { color: var(--ow-text-muted); }
 /* Activity expanded */
 .expanded-row td { background: var(--ow-surface-2); padding: 0; }
 .event-detail { padding: 12px 16px; }
-.event-detail-meta { display: flex; gap: 24px; flex-wrap: wrap; color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-bottom: 8px; }
 .event-detail pre { background: var(--ow-code-bg); color: var(--ow-code-text); padding: 12px; border-radius: 5px; overflow: auto; font-size: var(--ow-type-sm); }
 
 /* Access */
@@ -574,8 +571,6 @@ input::placeholder { color: var(--ow-text-muted); }
 .modal-head h2 { font-size: var(--ow-type-lg); }
 .modal-body { padding: 16px; overflow-y: auto; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--ow-border); }
-.confirm-copy { color: var(--ow-text-secondary); line-height: 1.6; }
-.confirm-copy code { background: var(--ow-surface-2); }
 .toast-stack { position: fixed; right: 20px; bottom: 20px; z-index: 120; display: flex; flex-direction: column; gap: 8px; max-width: 390px; pointer-events: auto; }
 .toast { display: flex; align-items: flex-start; gap: 8px; padding: 12px 12px; background: var(--ow-surface); border: 1px solid var(--ow-border); border-left: 3px solid var(--ow-accent); border-radius: 6px; box-shadow: var(--ow-shadow); font-size: var(--ow-type-sm); animation: toast-in .18s ease-out; }
 .toast strong { display: block; font-weight: 600; }
@@ -599,18 +594,13 @@ input::placeholder { color: var(--ow-text-muted); }
    distributes the same words over both lines; 30ch keeps the measure readable either way. */
 .login-copy h1 { font-size: var(--ow-type-hero); line-height: 1.12; letter-spacing: -.035em; font-weight: 700; margin-top: 8px; text-wrap: balance; max-width: 30ch; }
 .login-copy > p:last-child { color: var(--ow-text-secondary); font-size: var(--ow-type-base); line-height: 1.6; margin-top: 16px; max-width: 560px; }
-.login-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; color: var(--ow-text-secondary); }
-.login-points li { display: flex; gap: 8px; align-items: flex-start; }
-.login-points svg { color: var(--ow-ok); margin-top: 4px; }
 .login-footnote { margin-top: auto; color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
 .login-panel { display: flex; align-items: center; justify-content: center; padding: 24px; }
 .login-form { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 16px; }
 .login-form-head h2 { font-size: var(--ow-type-xl); letter-spacing: -.025em; }
 .login-form-head p:last-child { color: var(--ow-text-muted); margin-top: 4px; font-size: var(--ow-type-sm); }
-.login-help { color: var(--ow-text-muted); font-size: var(--ow-type-sm); line-height: 1.55; text-align: center; }
 
 @media (max-width: 1280px) {
-  .overview-grid { grid-template-columns: 1fr; }
   .health-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 1024px) {
@@ -629,7 +619,6 @@ input::placeholder { color: var(--ow-text-muted); }
   .mobile-menu { display: inline-flex; }
   .sidebar-scrim { display: block; position: fixed; inset: 0; background: rgba(10,14,20,.4); z-index: 35; }
   .topbar { padding: 0 16px; gap: 8px; }
-  .topbar-meta { display: none; }
   .login-page { grid-template-columns: 1fr; }
   .login-brand { display: none; }
   .login-panel { min-height: 100vh; }
@@ -640,7 +629,7 @@ input::placeholder { color: var(--ow-text-muted); }
   .page-actions { width: 100%; }
   .page-actions .btn { flex: 1; }
   .health-strip { grid-template-columns: 1fr 1fr; }
-  .summary-grid, .overview-grid { gap: 12px; }
+  .summary-grid { gap: 12px; }
   .panel-head { padding: 12px 12px; }
   .kv-grid { padding: 4px 12px 8px; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   .data-table thead { display: none; }
@@ -1020,13 +1009,6 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .nav-link-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-sidebar .sidebar-footer { flex-direction: column; align-items: stretch; gap: 4px; padding-top: 8px; }
 .sidebar-foot-actions { display: flex; align-items: center; gap: 4px; }
-/* The badge is a page footer elsewhere; here it is compressed into the rail. */
-.admin-sidebar .version-badge { padding: 2px 0 0 !important; border-top: 0 !important; gap: 4px; }
-.admin-sidebar .version-badge .meta-chip { width: 100%; justify-content: space-between; gap: 4px; padding: 2px 4px; font-size: var(--ow-type-label); }
-.admin-sidebar .version-badge .meta-chip strong { font-size: var(--ow-type-label); }
-/* A 64px rail has no room for four chips: hide the badge, keep the toggle. */
-.shell-collapsed .admin-sidebar .version-badge,
-.shell:has(.studio-page) .admin-sidebar .version-badge { display: none; }
 .shell-collapsed .admin-sidebar .sidebar-footer { align-items: center; }
 .shell-collapsed .admin-sidebar .sidebar-foot-actions { justify-content: center; }
 
@@ -1141,8 +1123,6 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .module-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .module-card-name { font-size: var(--ow-type-base); font-weight: 600; }
 .module-card-detail { font-size: var(--ow-type-sm); color: var(--ow-text-secondary); overflow-wrap: anywhere; }
-.module-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; font-size: var(--ow-type-label); color: var(--ow-text-muted); }
-.module-card-observed { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 
 /* Async boundary panels and the not-current notices. */
@@ -1160,7 +1140,6 @@ details.panel.advanced > summary { padding: 12px 16px; }
 
 .page-header-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .ow-cell-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
-.ow-cell-note { font-size: var(--ow-type-label); color: var(--ow-warn); }
 .ow-utilization { font-variant-numeric: tabular-nums; font-weight: 600; }
 .ow-filter-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
 .ow-filter-select { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
@@ -1390,8 +1369,6 @@ button.ow-summary-card[aria-pressed='true'] .ow-summary-label { color: var(--ow-
 .server-quote { margin: 0; font-size: var(--ow-type-sm); color: var(--ow-text-secondary); overflow-wrap: anywhere; }
 .server-source { display: inline-flex; align-items: center; margin-right: 6px; padding: 0 4px; border: 1px dashed var(--ow-border-strong); border-radius: 4px; font-size: var(--ow-type-label); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ow-text-muted); }
 .ow-metric-den { font-size: var(--ow-type-base); font-weight: 500; color: var(--ow-text-muted); margin-left: -4px; }
-.stat-provenance { display: none; }
-.stat-provenance { display: none; }
 
 /* ── 3. Two-column console ───────────────────────────────────────────────────────────
  * Named areas, not source order: on a phone the attention list must come first even though
@@ -1471,7 +1448,6 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
   width: 100%;
   padding: 9px 16px;
 }
-.event-list > li:last-child .event-day-note { border-bottom: 0; }
 .event-time {
   font-size: var(--ow-type-label);
   color: var(--ow-text-muted);
@@ -1550,9 +1526,6 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
 .sidebar-meta-dot[data-state="NOT_READY"] { background: var(--ow-danger); }
 .sidebar-meta-env { font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ow-text-secondary); }
 .sidebar-meta-sha { font-family: var(--ow-font-mono); }
-.sidebar-meta-chevron { margin-left: auto; transition: transform var(--ow-motion-fast); }
-.sidebar-meta[aria-expanded="true"] .sidebar-meta-chevron { transform: rotate(180deg); }
-.sidebar-meta-details { display: grid; gap: 2px; margin: 0; padding: 2px 4px 4px; border-top: 1px solid var(--ow-border); }
 .sidebar-meta-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: var(--ow-type-label); }
 .sidebar-meta-row dt { color: var(--ow-text-tertiary); }
 .sidebar-meta-row dd { margin: 0; color: var(--ow-text-secondary); font-family: var(--ow-font-mono); }
@@ -1652,7 +1625,6 @@ html[data-theme="dark"] .lang-select {
 .ow-command-label { font-weight: 500; }
 .ow-command-path { font-size: var(--ow-type-label); color: var(--ow-text-tertiary); font-variant-numeric: tabular-nums; }
 .ow-command-item.is-active .ow-command-path { color: var(--ow-accent); }
-.ow-command-section { padding: 8px 8px 4px; font-size: var(--ow-type-label); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ow-text-tertiary); }
 .ow-command-empty { padding: 24px 12px; text-align: center; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
 .ow-command-hint { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--ow-border); color: var(--ow-text-tertiary); font-size: var(--ow-type-label); }
 .ow-command-hint kbd { margin: 0 2px; }
@@ -1671,7 +1643,6 @@ html[data-theme="dark"] .lang-select {
 .plugins-table .entity-cell strong, .nodes-table .entity-cell strong { font-size: var(--ow-type-base); font-weight: 600; }
 .plugins-table .entity-cell span.mono, .nodes-table .entity-cell span.mono { font-size: var(--ow-type-label); }
 .ow-cell-meta { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
-.ow-cell-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .ow-tnum { font-variant-numeric: tabular-nums; }
 
 /* Summary cells that double as a filter keep one affordance only: the pressed state is the
@@ -1685,12 +1656,7 @@ button.ow-summary-card { font: inherit; color: inherit; cursor: pointer; }
 .state-count-dot[data-indicator="attention"], .state-count-dot[data-indicator="degraded"] { background: var(--ow-warn); }
 .state-count-dot[data-indicator="unreachable"], .state-count-dot[data-indicator="error"] { background: var(--ow-danger); }
 .state-count-dot[data-indicator="stopped"], .state-count-dot[data-indicator="unknown"], .state-count-dot[data-indicator="notConfigured"] { background: var(--ow-text-tertiary); }
-.state-count-label { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
 
-/* A page-level footnote is one muted line, not a bordered callout per sentence. */
-.page-footnotes { display: flex; flex-direction: column; gap: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-label); }
-.page-footnotes p { display: flex; align-items: flex-start; gap: 4px; max-width: 120ch; }
-.page-footnotes .icon { margin-top: 1px; flex: none; color: var(--ow-text-tertiary); }
 
 /* ── 12. Responsive ─────────────────────────────────────────────────────────────────── */
 @media (max-width: 1280px) {
@@ -2023,7 +1989,6 @@ button.ow-summary-card:focus-visible,
 html[lang='zh-CN'] body { line-height: 1.6; }
 html[lang='zh-CN'] .nav-section-label,
 html[lang='zh-CN'] .event-day,
-html[lang='zh-CN'] .ow-command-section,
 html[lang='zh-CN'] .ow-summary-label,
 html[lang='zh-CN'] .stat-strip .ow-metric-label,
 html[lang='zh-CN'] .user-copy small,

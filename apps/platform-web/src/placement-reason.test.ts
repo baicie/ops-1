@@ -120,6 +120,9 @@ describe('placement reason display', () => {
       const reason = statusReason(code, 'staging-node', DETAILS[code]);
       for (const t of [en, zh]) {
         const display = describePlacementReason(reason, t);
+        // Asserted before the negative one: `expect(undefined).not.toBe(x)` passes, so without
+        // this line the two checks below could never fail for a code that renders nothing.
+        expect(display, code).not.toBeNull();
         expect(display?.title, code).not.toBe(reason);
         expect(display?.title, code).not.toContain('placement.reason.');
         expect(display?.raw, code).toBe(reason);
@@ -149,6 +152,9 @@ describe('placement reason display', () => {
       const detailed = parsePlacementReason(statusReason(code, 'n1', DETAILS[code]));
       const generic = parsePlacementReason(statusReason(code, 'n1', 'the kernel reworded this in a later release'));
       for (const key of [detailed?.titleKey, generic?.titleKey]) {
+        // `if (!key) continue` made this test pass with an empty body for every code whose
+        // reason did not parse. The absence is the failure, so it is asserted first.
+        expect(key, code).toBeDefined();
         if (!key) continue;
         expect(translate('en', key), key).not.toBe(key);
         expect(translate('zh-CN', key), key).not.toBe(key);

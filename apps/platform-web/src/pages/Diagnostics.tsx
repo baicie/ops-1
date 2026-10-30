@@ -9,7 +9,7 @@ import { CopyButton, EmptyState, KV, TimeAgo } from '../components/Ui';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, UnknownValue } from '../components/app/status-indicator';
-import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import { badgeVariantForTone, glyphForTone, statusForCode } from '../components/status-tone';
 import { formatDuration } from '../format';
 import { useI18n, useT } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -41,10 +41,11 @@ const POLL_INTERVAL_MS = 8000;
  * from STATUS_MAP, so the pill is painted here instead of through StatusPill, which localizes.
  */
 function DatabasePill({ database }: { database: string }) {
-  const code = database === 'connected' ? 'READY' : 'FAILED';
-  const tone = STATUS_MAP[code].tone;
+  // The wire value is `database`; this is the row of the one status table its pill borrows.
+  const statusCode = database === 'connected' ? 'READY' : 'FAILED';
+  const tone = statusForCode(statusCode)?.tone ?? 'unknown';
   return (
-    <Badge variant={badgeVariantForTone(tone)} data-status={code}>
+    <Badge variant={badgeVariantForTone(tone)} data-status={statusCode}>
       <Icon name={glyphForTone(tone)} size={12} />
       {database}
     </Badge>

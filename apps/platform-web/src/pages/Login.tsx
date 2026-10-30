@@ -15,7 +15,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (!loading && user) return <Navigate to="/" replace />;
-  const from = (location.state as any)?.from || '/';
+  const from = (location.state as { from?: string } | null)?.from || '/';
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();

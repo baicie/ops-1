@@ -94,12 +94,6 @@ export function readPlatformSnapshot(): PlatformSnapshot {
   return snapshot;
 }
 
-/** Test seam: the store is module state, so a test must be able to start from zero. */
-export function resetPlatformStatus(): void {
-  snapshot = INITIAL;
-  for (const listener of listeners) listener();
-}
-
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };

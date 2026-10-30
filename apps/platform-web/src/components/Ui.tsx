@@ -202,46 +202,6 @@ export function Modal({
   );
 }
 
-export function ConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel,
-  danger = false,
-  busy = false,
-  onConfirm,
-  onClose,
-}: {
-  open: boolean;
-  title: string;
-  description: React.ReactNode;
-  confirmLabel?: string;
-  danger?: boolean;
-  busy?: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  const t = useT();
-  const resolvedConfirmLabel = confirmLabel ?? t('action.confirm');
-  return (
-    <DialogShell
-      open={open}
-      onClose={onClose}
-      title={title}
-      size="small"
-      testId="confirm-dialog"
-      footer={<>
-        <Button variant="secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</Button>
-        <Button variant={danger ? 'destructive' : 'default'} onClick={onConfirm} disabled={busy}>
-          {busy ? t('action.working') : resolvedConfirmLabel}
-        </Button>
-      </>}
-    >
-      <div className="confirm-copy">{description}</div>
-    </DialogShell>
-  );
-}
-
 type Toast = { id: string; tone: 'ok' | 'danger' | 'info'; title: string; detail?: string };
 const ToastContext = createContext<{ push(t: Omit<Toast, 'id'>): void } | null>(null);
 

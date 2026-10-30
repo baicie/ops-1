@@ -257,47 +257,6 @@ export function copyIdAction(
   };
 }
 
-/* ── table-spec §2.4: three in a row is one fact ────────────────────────────────────── */
-
-export interface CollapsedRun<T> {
-  /** The row the run is rendered with: the first occurrence (§2.4). */
-  row: T;
-  /** 1 for a row that is its own fact; >= threshold for a collapsed run. */
-  count: number;
-  /** The last occurrence timestamp, for the run first -> last span. */
-  lastAt: string;
-  key: string;
-}
-
-/**
- * Consecutive rows sharing a key collapse into one entry once the run reaches threshold.
- * Threshold 3: 2 identical rows can be two genuine actions and collapsing a pair hides one;
- * 3 on one page can only be a poller, a fan-out or a retry loop.
- */
-export function collapseRuns<T>(
-  rows: T[],
-  keyOf: (row: T) => string,
-  at: (row: T) => string,
-  threshold = 3,
-): CollapsedRun<T>[] {
-  const out: CollapsedRun<T>[] = [];
-  let index = 0;
-  while (index < rows.length) {
-    const key = keyOf(rows[index]);
-    let end = index;
-    while (end + 1 < rows.length && keyOf(rows[end + 1]) === key) end += 1;
-    const count = end - index + 1;
-    if (count >= threshold) {
-      out.push({ row: rows[index], count, lastAt: at(rows[end]), key });
-      index = end + 1;
-    } else {
-      for (let i = index; i <= end; i += 1) out.push({ row: rows[i], count: 1, lastAt: at(rows[i]), key });
-      index = end + 1;
-    }
-  }
-  return out;
-}
-
 /* ── table-spec §2.2 / §2.5: which columns earn the card ────────────────────────────── */
 
 /**

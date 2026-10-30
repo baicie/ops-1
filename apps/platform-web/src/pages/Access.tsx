@@ -15,7 +15,7 @@ import { CopyButton, EmptyState, TimeAgo, useToast } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
-import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import { badgeVariantForTone, glyphForTone, statusForCode } from '../components/status-tone';
 import { shortDigest } from '../format';
 import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
@@ -41,7 +41,9 @@ type ManagedUser = { id: string; email: string; displayName: string; role: strin
 function UserStatusPill({ disabled }: { disabled: boolean }) {
   const t = useT();
   const code = disabled ? 'DISABLED' : 'READY';
-  const tone = STATUS_MAP[code].tone;
+  // Fail-closed read of the one status table: a code the table does not carry paints `unknown`
+  // instead of throwing on the way to `.tone`.
+  const tone = statusForCode(code)?.tone ?? 'unknown';
   return (
     <Badge variant={badgeVariantForTone(tone)} data-status={code}>
       <Icon name={glyphForTone(tone)} size={12} />
