@@ -162,15 +162,34 @@ export function OverviewPage() {
   const criticalCount = data ? data.attention.filter((item) => item.severity === 'critical').length : 0;
   // The band says one thing. Its three children (state, headline, when) are the same three
   // facts the old banner carried, minus the card frame and the icon bubble.
+  //
+  // The healthy branch is the one V5 left repeating itself: the chip read "READY", the headline
+  // read "Platform is ready" and the line under it said "every desired replica is READY", while
+  // the topbar pill already said "Platform ready" - one verdict, four times. The chip carries
+  // the word (the rule v5-acceptance pins: the chip states it, the headline explains it), so the
+  // headline now states the grounds no other line on the page states.
   const healthHeadline = !data
     ? ''
     : unconfigured
       ? t('overview.setup.headline')
       : data.health === 'READY'
-      ? t('overview.health.ready')
+      ? t('overview.health.allClearDetail')
       : data.health === 'DEGRADED'
         ? t(criticalCount === 1 ? 'overview.health.criticalIssue' : 'overview.health.criticalIssues', { count: criticalCount })
         : t('overview.health.attention');
+  // Which state the chip draws, and whether it must print a wire code: a code this build does
+  // not map is the one case where the verbatim token is the honest label (status-indicator.ts).
+  const bandState = unconfigured ? 'notConfigured' : indicatorStateForCode(data?.health);
+  const bandCode = !unconfigured && bandState === 'unknown' ? data?.health ?? undefined : undefined;
+  // The detail line is rendered only where it adds a fact: the setup instructions, or the first
+  // open issue. Under a headline that already states the grounds it was that sentence twice.
+  const healthDetail = !data
+    ? null
+    : unconfigured
+      ? t('overview.health.notConfiguredDetail')
+      : data.attention.length
+        ? localizeAttentionDetail(data.attention[0].detail, t).text
+        : null;
   const days = data ? groupEventsByDay(data.recentEvents) : [];
 
   return (
@@ -203,18 +222,15 @@ export function OverviewPage() {
                 data-health={unconfigured ? 'NOT_CONFIGURED' : data.health}
               >
                 <div className="health-band-state">
-                  <StatusIndicator
-                    state={unconfigured ? 'notConfigured' : indicatorStateForCode(data.health)}
-                    label={unconfigured ? t('state.notConfigured') : data.health}
-                  />
+                  {/* No label prop: a state this mapping knows prints its own localized word.
+                      The raw code was reaching the reader as "READY" next to a headline that said
+                      the same thing in English; the code stays machine-readable in the
+                      data-indicator chip attribute and in the band's data-health. */}
+                  <StatusIndicator state={bandState} label={bandCode} />
                 </div>
                 <div className="health-band-copy">
                   <h2>{healthHeadline}</h2>
-                  <p>{unconfigured
-                    ? t('overview.health.notConfiguredDetail')
-                    : data.attention.length
-                      ? localizeAttentionDetail(data.attention[0].detail, t).text
-                      : t('overview.health.allClearDetail')}</p>
+                  {healthDetail ? <p>{healthDetail}</p> : null}
                 </div>
                 <div className="health-band-side" data-testid="overview-observed">
                   <span title={observedAt ?? undefined}>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>

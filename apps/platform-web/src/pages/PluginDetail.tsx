@@ -311,7 +311,7 @@ export function PluginDetailPage() {
                 </div>
               ) : <EmptyState icon="file" title={t('pluginDetail.empty.systemPlugin.title')} description={t('pluginDetail.empty.systemPlugin.description')} />}
             </section>
-            <section className="panel">
+            <section className="panel plugin-instances-panel">
               <div className="panel-head"><div><h2>{t('table.instances')}</h2></div>{activeDeployment && <Link className="text-link" data-testid="plugin-detail-deployments-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
               <div className="instance-compact">
                 <InstanceTable instances={activeDeployment?.instances || []} />
