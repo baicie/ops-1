@@ -17,22 +17,36 @@ import { NoData, UnknownValue } from './status-indicator';
 export function MetricCard({
   label,
   value,
+  /** The other half of a ratio, rendered muted right after the value ("3 / 3"). */
+  denominator,
   unit,
   detail,
   sampledAt,
   href,
   state = 'ready',
+  showSampled = true,
   className,
+  /** A stable identity for evidence: the visible label is localized, this one is not. */
+  metricId,
 }: {
   label: string;
   value?: React.ReactNode;
+  /** Rendered as "/ n" so a count with a total and one without share one shape. */
+  denominator?: React.ReactNode;
   unit?: string;
   detail?: React.ReactNode;
   /** When the value was observed. Rendered as an absolute time, never invented. */
   sampledAt?: string | null;
   href?: string;
   state?: 'ready' | 'noData' | 'unknown';
+  /**
+   * Whether this card prints its own observation time. A strip whose members share one source
+   * prints that time once for the strip, and four copies of it was the repetition the v3 audit
+   * called out - so the card stops repeating it instead of the CSS hiding four nodes.
+   */
+  showSampled?: boolean;
   className?: string;
+  metricId?: string;
 }) {
   const t = useT();
   const body = (
@@ -42,6 +56,7 @@ export function MetricCard({
         {state === 'ready' ? (
           <>
             {value}
+            {denominator !== undefined ? <span className="ow-metric-den">/{denominator}</span> : null}
             {unit ? <span className="ow-metric-unit">{unit}</span> : null}
           </>
         ) : state === 'noData' ? (
@@ -51,16 +66,18 @@ export function MetricCard({
         )}
       </span>
       {detail ? <span className="ow-metric-detail">{detail}</span> : null}
-      <span className="ow-metric-sampled">
-        {sampledAt ? t('ui.observedAt', { at: formatDate(sampledAt) }) : t('ui.notObserved')}
-      </span>
+      {showSampled ? (
+        <span className="ow-metric-sampled">
+          {sampledAt ? t('ui.observedAt', { at: formatDate(sampledAt) }) : t('ui.notObserved')}
+        </span>
+      ) : null}
       {href ? <span className="ow-metric-go" aria-hidden="true"><Icon name="arrowRight" size={14} /></span> : null}
     </>
   );
 
-  if (!href) return <div className={cn('ow-metric', className)}>{body}</div>;
+  if (!href) return <div className={cn('ow-metric', className)} data-metric={metricId}>{body}</div>;
   return (
-    <Link to={href} className={cn('ow-metric', 'ow-metric-link', className)} data-metric-card="" data-metric-href={href}>
+    <Link to={href} className={cn('ow-metric', 'ow-metric-link', className)} data-metric-card="" data-metric={metricId} data-metric-href={href}>
       {body}
     </Link>
   );

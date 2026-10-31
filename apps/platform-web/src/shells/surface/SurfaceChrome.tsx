@@ -29,32 +29,86 @@ export function useCompactViewport(query = '(max-width: 1024px)'): boolean {
   return compact;
 }
 
-const THEME_STORAGE_KEY = 'opsweave-theme';
+/**
+ * Which theme is the browser in?
+ *
+ * V5 read `opsweave-theme` from localStorage and defaulted to light, so a visitor whose OS
+ * asked for dark got a light console and a `prefers-color-scheme: dark` media query that could
+ * never match. The order is now: an explicit choice the visitor made (persisted), then the
+ * system preference, live. It lives beside the toggle that writes it, and `main.tsx` imports
+ * `resolveInitialTheme` so the first paint uses the same rule.
+ */
+export const THEME_STORAGE_KEY = 'opsweave-theme';
 
-type Theme = 'light' | 'dark';
+/** The OS preference as a media query, so a mid-session change is followed too. */
+export const DARK_SCHEME_QUERY = '(prefers-color-scheme: dark)';
 
-function readStoredTheme(): Theme {
+export type Theme = 'light' | 'dark';
+
+function storedTheme(): Theme | null {
   try {
-    return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'dark' || stored === 'light' ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The system preference; light when the browser cannot answer. */
+export function systemTheme(): Theme {
+  try {
+    return window.matchMedia(DARK_SCHEME_QUERY).matches ? 'dark' : 'light';
   } catch {
     return 'light';
   }
 }
 
+/** First paint: the persisted choice, else what the OS asks for. */
+export function resolveInitialTheme(): Theme {
+  return storedTheme() ?? systemTheme();
+}
+
+/** Sets `html[data-theme]`, the attribute every token block keys off. */
+export function applyDocumentTheme(theme: Theme): void {
+  if (typeof document !== 'undefined') document.documentElement.dataset.theme = theme;
+}
+
 /** One preference for the whole product: switching shell must not flip the theme. */
 export function useTheme() {
-  const [theme, setTheme] = React.useState<Theme>(readStoredTheme);
+  const [theme, setTheme] = React.useState<Theme>(resolveInitialTheme);
+  const [chosen, setChosen] = React.useState<boolean>(() => storedTheme() !== null);
+
   React.useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch {
-      // A blocked storage keeps the theme for this session only.
-    }
+    applyDocumentTheme(theme);
   }, [theme]);
+
+  React.useEffect(() => {
+    if (chosen) return;
+    let list: MediaQueryList;
+    try {
+      list = window.matchMedia(DARK_SCHEME_QUERY);
+    } catch {
+      return;
+    }
+    const sync = () => setTheme(list.matches ? 'dark' : 'light');
+    sync();
+    list.addEventListener('change', sync);
+    return () => list.removeEventListener('change', sync);
+  }, [chosen]);
+
   return {
     theme,
-    toggle: () => setTheme((previous) => (previous === 'light' ? 'dark' : 'light')),
+    chosen,
+    toggle: () => setTheme((previous) => {
+      const next = previous === 'light' ? 'dark' : 'light';
+      setChosen(true);
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, next);
+      } catch {
+        // A blocked storage keeps the choice for this session only.
+      }
+      return next;
+    }),
   };
 }
 
@@ -73,7 +127,6 @@ export function LanguageSwitcher() {
       aria-label={t('nav.language')}
       value={locale}
       onChange={(event) => setLocale(event.target.value as Locale)}
-      style={{ flex: '0 0 auto', width: 104, background: 'var(--ow-surface-2)', border: '1px solid var(--ow-border)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
     >
       {SUPPORTED_LOCALES.map((option) => (
         <option key={option} value={option}>{t(LOCALE_LABEL_KEYS[option])}</option>
@@ -198,14 +251,42 @@ export function AccountMenu({ surface }: { surface: Surface }) {
 
 /**
  * /403. Deliberately shell-less: an unauthorized user gets no navigation into the platform
- * console, and the page names no resource, title or id - only the missing capability and
- * the two ways out.
+ * console, and the page names no resource, title or id - only the missing capability and the
+ * ways out.
+ *
+ * A permission wall is a dead end unless it says what to do next, so the page carries three
+ * real recovery paths and no write action:
+ *   1. Retry - re-reads /auth/me; a grant made while this tab was open is picked up here.
+ *   2. Sign out and back in - the session's surface grant is decided at login, so a role
+ *      change only reaches this tab through a new session.
+ *   3. Return to the business workspace, if this account holds that surface.
+ * There is no "+ Install plugin" and no other mutation on this page: an account that cannot
+ * read the console must not be offered a verb that changes it.
  */
 export function ForbiddenPage() {
   const { t } = useI18n();
-  const { access, accessSource, logout } = useAuth();
+  const { access, accessSource, logout, refresh } = useAuth();
   const navigate = useNavigate();
   const canReachWorkspace = canEnterSurface(access, 'workspace');
+  const canReachAdmin = canEnterSurface(access, 'admin');
+  const [retrying, setRetrying] = React.useState(false);
+  const [retriedAt, setRetriedAt] = React.useState<string | null>(null);
+
+  // A retry that succeeded must not leave the operator staring at the wall it removed.
+  React.useEffect(() => {
+    if (retriedAt && canReachAdmin) navigate(surfaceEntryPath('admin'), { replace: true });
+  }, [retriedAt, canReachAdmin, navigate]);
+
+  async function retry() {
+    setRetrying(true);
+    try {
+      await refresh();
+    } finally {
+      setRetrying(false);
+      setRetriedAt(new Date().toISOString());
+    }
+  }
+
   return (
     <main id="main-content" className="main-content forbidden-page">
       <div className="page-stack">
@@ -219,9 +300,40 @@ export function ForbiddenPage() {
               {t('forbidden.hint.unavailable')}
             </p>
           ) : null}
+          <ol className="forbidden-steps" data-testid="forbidden-recovery">
+            <li data-step="ask">
+              <span className="forbidden-step-num" aria-hidden="true">1</span>
+              <div>
+                <strong>{t('forbidden.step.ask.title')}</strong>
+                <p>{t('forbidden.step.ask.detail')} <code>platform:access</code></p>
+              </div>
+            </li>
+            <li data-step="retry">
+              <span className="forbidden-step-num" aria-hidden="true">2</span>
+              <div>
+                <strong>{t('forbidden.step.retry.title')}</strong>
+                <p>{t('forbidden.step.retry.detail')}</p>
+              </div>
+            </li>
+            <li data-step="session">
+              <span className="forbidden-step-num" aria-hidden="true">3</span>
+              <div>
+                <strong>{t('forbidden.step.session.title')}</strong>
+                <p>{t('forbidden.step.session.detail')}</p>
+              </div>
+            </li>
+          </ol>
+          {retriedAt ? (
+            <p className="muted small" role="status" data-testid="forbidden-retry-result" data-still-denied={canReachAdmin ? 'false' : 'true'}>
+              {canReachAdmin ? t('forbidden.retry.granted') : t('forbidden.retry.denied')}
+            </p>
+          ) : null}
           <div className="page-actions">
+            <Button data-testid="forbidden-retry" onClick={() => void retry()} disabled={retrying}>
+              <Icon name="refresh" size={15} /> {retrying ? t('forbidden.retry.working') : t('action.retry')}
+            </Button>
             {canReachWorkspace ? (
-              <Link className={buttonVariants()} to={surfaceEntryPath('workspace')} data-testid="forbidden-to-workspace">
+              <Link className={buttonVariants({ variant: 'secondary' })} to={surfaceEntryPath('workspace')} data-testid="forbidden-to-workspace">
                 {t('forbidden.action.workspace')}
               </Link>
             ) : null}

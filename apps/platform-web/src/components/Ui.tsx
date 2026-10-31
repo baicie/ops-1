@@ -2,7 +2,8 @@ import React, { createContext, useCallback, useContext, useRef, useState } from 
 import { Icon } from './Icons';
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
+import { ageMessage } from '../lib/age';
 import { STATUS_MAP, glyphForTone } from './status-tone';
 import { Button } from './ui/button';
 import type { MessageKey } from '../i18n';
@@ -99,25 +100,21 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
 
 export function TimeAgo({ value }: { value?: string | null }) {
   const t = useT();
+  const { locale } = useI18n();
   if (!value) return <span className="muted">{t('time.never')}</span>;
   const date = new Date(value);
-  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
-  // Literal keys, never a template: scripts/check-i18n.mjs verifies every key is present in all locales.
-  let relative = '';
-  if (seconds < 10) relative = t('time.justNow');
-  else if (seconds < 60) relative = t('time.secondsAgo', { count: seconds });
-  else if (seconds < 3600) relative = t('time.minutesAgo', { count: Math.floor(seconds / 60) });
-  else if (seconds < 86400) relative = t('time.hoursAgo', { count: Math.floor(seconds / 3600) });
-  else relative = t('time.daysAgo', { count: Math.floor(seconds / 86400) });
-  return <time dateTime={value} title={date.toISOString()}>{relative}</time>;
+  // One ladder for every age in the shell (lib/age.ts): the span of a run and the Occurred cell
+  // beside it state the same fact, so they must not be two spellings of it.
+  return <time dateTime={value} title={date.toISOString()}>{ageMessage(locale, value)}</time>;
 }
 
-export function CopyButton({ value, label }: { value?: string | null; label?: string }) {
+export function CopyButton({ value, label, testId }: { value?: string | null; label?: string; testId?: string }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
   const text = label || t('action.copy');
   return (
     <button
+      data-testid={testId}
       className="icon-btn"
       title={text}
       aria-label={text}
@@ -202,46 +199,6 @@ export function Modal({
   return (
     <DialogShell open={open} onClose={onClose} title={title} size={size} footer={footer}>
       {children}
-    </DialogShell>
-  );
-}
-
-export function ConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel,
-  danger = false,
-  busy = false,
-  onConfirm,
-  onClose,
-}: {
-  open: boolean;
-  title: string;
-  description: React.ReactNode;
-  confirmLabel?: string;
-  danger?: boolean;
-  busy?: boolean;
-  onConfirm: () => void;
-  onClose: () => void;
-}) {
-  const t = useT();
-  const resolvedConfirmLabel = confirmLabel ?? t('action.confirm');
-  return (
-    <DialogShell
-      open={open}
-      onClose={onClose}
-      title={title}
-      size="small"
-      testId="confirm-dialog"
-      footer={<>
-        <Button variant="secondary" onClick={onClose} disabled={busy}>{t('action.cancel')}</Button>
-        <Button variant={danger ? 'destructive' : 'default'} onClick={onConfirm} disabled={busy}>
-          {busy ? t('action.working') : resolvedConfirmLabel}
-        </Button>
-      </>}
-    >
-      <div className="confirm-copy">{description}</div>
     </DialogShell>
   );
 }

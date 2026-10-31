@@ -9,16 +9,18 @@ import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { CopyButton, EmptyState, ErrorState, KV, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator } from '../components/app/status-indicator';
 import { formatDate, formatBytes, shortDigest } from '../format';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
+import { IdentityCell, StackCell, StatusPill, cardActionCell, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { InstallationStatus, useStatusText } from '../components/app/status';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
 const TAB_IDS: readonly Tab[] = ['overview', 'versions', 'deployments', 'capabilities', 'permissions', 'events'];
@@ -34,8 +36,24 @@ function FormField({ label, hint, htmlFor, children }: { label: string; hint?: s
   );
 }
 
+/**
+ * One recipe for every header fact: an optional 13px icon, an optional 11px muted label, and
+ * the 13px value. V4 rendered these five siblings five different ways (mono span, label plus
+ * strong, icon plus text, ...), so a reader had to decode the shape before the fact.
+ */
+function MetaChip({ icon, label, value, mono = false }: { icon?: string; label?: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <span className="meta-chip">
+      {icon ? <Icon name={icon} size={13} /> : null}
+      {label ? <span className="meta-chip-label">{label}</span> : null}
+      <strong className={mono ? 'meta-chip-value mono' : 'meta-chip-value'}>{value}</strong>
+    </span>
+  );
+}
+
 export function PluginDetailPage() {
   const t = useT();
+  const statusText = useStatusText();
   const { id = '' } = useParams();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`), 4000);
@@ -91,21 +109,39 @@ export function PluginDetailPage() {
 
   // The header keeps its description in the loading and error states too: the page still is what
   // it says it is while the answer is missing or refused.
-  if (loading && !data) return <><PageHeader title={t('table.plugin')} description={t('pluginDetail.description')} /><Skeleton rows={6} /></>;
-  if (error) return <><PageHeader title={t('table.plugin')} description={t('pluginDetail.description')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
+  if (loading && !data) return <><PageHeader title={t('table.plugin')} /><Skeleton rows={6} /></>;
+  if (error) return <><PageHeader title={t('table.plugin')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
   if (!data) return null;
 
   /**
-   * Performs one write and re-reads the detail. A rejection is deliberately not swallowed here:
-   * ConfirmAction keeps its dialog open, prints the failure and offers the same button again, so
-   * a refused uninstall or rollback is answered where it was asked instead of in a toast.
+   * Performs one write, then re-reads the detail and believes only the re-read
+   * (lib/verify-after-write.ts). A rejection is deliberately not swallowed here: ConfirmAction
+   * keeps its dialog open, prints the failure and offers the same button again - and a write the
+   * Kernel accepted that left the state unchanged is reported as a failure with the actual state,
+   * never as a success.
    */
-  async function perform(label: string, action: () => Promise<unknown>, success: string) {
-    setBusy(label);
+  async function perform(options: {
+    label: string;
+    write: () => Promise<unknown>;
+    /** True only when the re-read detail shows what the verb promised. */
+    expect: (detail: PluginDetail) => boolean;
+    success: string;
+    /** Uninstall succeeds by the resource going away; a 404 on re-read proves it. */
+    absentIsExpected?: boolean;
+  }) {
+    setBusy(options.label);
     try {
-      await action();
-      toast.push({ tone: 'ok', title: success });
+      const result = await verifyAfterWrite<PluginDetail>({
+        write: options.write,
+        read: () => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`),
+        expected: options.expect,
+        describe: (detail) => detail.state || 'NO_DATA',
+        absentIsExpected: options.absentIsExpected,
+      });
+      const failure = verifiedWriteFailure(result, t);
       await reload();
+      if (failure) throw failure;
+      toast.push({ tone: 'ok', title: options.success, detail: verifiedWriteDetail(result, t) });
     } finally {
       setBusy(null);
     }
@@ -113,12 +149,18 @@ export function PluginDetailPage() {
 
   async function deploy() {
     try {
-      await perform('deploy', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/deployments`, {
-        version: deployVersion,
-        desiredReplicas: replicas,
-        nodeSelector: Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2)),
-        maxInstancesPerNode: 1,
-      }), t('pluginDetail.toast.deploymentRequested', { version: deployVersion }));
+      await perform({
+        label: 'deploy',
+        write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/deployments`, {
+          version: deployVersion,
+          desiredReplicas: replicas,
+          nodeSelector: Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2)),
+          maxInstancesPerNode: 1,
+        }),
+        // A deployment exists for this version only after the create write landed.
+        expect: (detail) => detail.deployments.some((item) => item.version === deployVersion),
+        success: t('pluginDetail.toast.deploymentRequested', { version: deployVersion }),
+      });
       setDeployOpen(false);
       setTab('deployments');
     } catch (cause) {
@@ -128,30 +170,57 @@ export function PluginDetailPage() {
   }
 
   async function activate(version: string) {
-    await perform('activate', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/activations`, {
-      version,
-      expectedRevision: data?.activeRevision?.generation ?? 0,
-    }), t('pluginDetail.toast.activated', { version }));
+    await perform({
+      label: 'activate',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/activations`, {
+        version,
+        expectedRevision: data?.activeRevision?.generation ?? 0,
+      }),
+      expect: (detail) => detail.activeVersion === version,
+      success: t('pluginDetail.toast.activated', { version }),
+    });
   }
 
   async function disable() {
-    await perform('disable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/disable`, { reason: 'Disabled from plugin detail' }), t('pluginDetail.toast.disabled'));
+    await perform({
+      label: 'disable',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/disable`, { reason: 'Disabled from plugin detail' }),
+      expect: (detail) => detail.state === 'DISABLED',
+      success: t('pluginDetail.toast.disabled'),
+    });
   }
 
   async function enable() {
-    await perform('enable', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/enable`, {}), t('pluginDetail.toast.redeploymentRequested'));
+    await perform({
+      label: 'enable',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/enable`, {}),
+      // Start is a restart request: the Kernel leaves DISABLED behind and stops at STAGED.
+      expect: (detail) => detail.state !== 'DISABLED',
+      success: t('pluginDetail.toast.redeploymentRequested'),
+    });
   }
 
   async function uninstall() {
-    await perform('uninstall', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/uninstall`, {}), t('pluginDetail.toast.uninstalled'));
+    await perform({
+      label: 'uninstall',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/uninstall`, {}),
+      expect: (detail) => detail.state === 'UNINSTALLED',
+      success: t('pluginDetail.toast.uninstalled'),
+      absentIsExpected: true,
+    });
   }
 
   async function rollback() {
-    await perform('rollback', () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/rollback`, {
-      targetVersion: rollbackVersion,
-      expectedRevision: data?.activeRevision?.generation ?? 0,
-      desiredReplicas: 2,
-    }), t('pluginDetail.toast.rollbackRequested', { version: rollbackVersion }));
+    await perform({
+      label: 'rollback',
+      write: () => api.post(`/api/v1/plugins/${encodeURIComponent(id)}/rollback`, {
+        targetVersion: rollbackVersion,
+        expectedRevision: data?.activeRevision?.generation ?? 0,
+        desiredReplicas: 2,
+      }),
+      expect: (detail) => detail.activeVersion === rollbackVersion,
+      success: t('pluginDetail.toast.rollbackRequested', { version: rollbackVersion }),
+    });
   }
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = [
@@ -168,19 +237,18 @@ export function PluginDetailPage() {
       <PageHeader
         eyebrow={(data.publisher || t('pluginDetail.unknownPublisher')) + ' · ' + (data.isSystem ? t('pluginDetail.systemPlugin') : t('pluginDetail.trustedPackage'))}
         title={<span className="title-with-status">{data.name}{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}</span>}
-        description={t('pluginDetail.description')}
         meta={
           <div className="detail-meta">
-            <StatusPill status={data.state} />
-            <span className="meta-chip mono">{data.id}</span>
+            <InstallationStatus state={data.state} />
+            <MetaChip mono value={data.id} />
             {activeVersion
-              ? <span className="meta-chip">{t('pluginDetail.effectiveVersion')} <strong className="mono">{activeVersion}</strong></span>
+              ? <MetaChip label={t('pluginDetail.effectiveVersion')} value={activeVersion} mono />
               : <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />}
             {data.activeRevision
-              ? <span className="meta-chip"><Icon name="activity" size={13} /> {t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })}</span>
+              ? <MetaChip icon="activity" value={t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })} />
               : <NoData detail={t('ui.noData.detail')} />}
-            {data.activeRevision?.activatedAt ? <span className="meta-chip">{t('pluginDetail.meta.activated')} <TimeAgo value={data.activeRevision.activatedAt} /></span> : null}
-            {data.isSystem ? <span className="meta-chip"><Icon name="access" size={13} /> {t('pluginDetail.hostOwnedRecovery')}</span> : null}
+            {data.activeRevision?.activatedAt ? <MetaChip label={t('pluginDetail.meta.activated')} value={<TimeAgo value={data.activeRevision.activatedAt} />} /> : null}
+            {data.isSystem ? <MetaChip icon="access" value={t('pluginDetail.hostOwnedRecovery')} /> : null}
           </div>
         }
         actions={<>
@@ -210,17 +278,20 @@ export function PluginDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-[18px] flex flex-col gap-[18px]">
-          <div className="summary-grid">
+          <div className="summary-grid plugin-detail-grid">
             <section className="panel">
               <div className="panel-head"><div><h2>{t('pluginDetail.effectiveState.title')}</h2><p>{t('pluginDetail.effectiveState.description')}</p></div></div>
               {/* A fact the API did not answer prints NO_DATA: a revision of 0 and a replica count
                   of 0 would be numbers the Kernel never said. */}
               <div className="kv-grid">
-                <KV label={t('pluginDetail.field.installation')}>{data.state}</KV>
+                {/* Was `{data.state}`, which printed INSTALLED in English next to a header chip
+                    that said "Installed" in the reader's language. The state word comes from the
+                    one derivation, so the header and this row cannot disagree. */}
+                <KV label={t('pluginDetail.field.installation')}><InstallationStatus state={data.state} /></KV>
                 <KV label={t('pluginDetail.field.activeVersion')}>{activeVersion || t('pluginDetail.none')}</KV>
                 <KV label={t('pluginDetail.field.activeRevision')}>{data.activeRevision ? data.activeRevision.generation : <NoData detail={t('ui.noData.detail')} />}</KV>
                 <KV label={t('field.desiredReplicas')}>{activeDeployment?.desiredReplicas ?? latestDeployment?.desiredReplicas ?? <NoData detail={t('ui.noData.detail')} />}</KV>
-                <KV label="READY">{activeDeployment ? `${activeDeployment.readyInstances}/${activeDeployment.totalInstances}` : t('pluginDetail.noActiveDeployment')}</KV>
+                <KV label={t('common.readyInstances')}>{activeDeployment ? `${activeDeployment.readyInstances}/${activeDeployment.totalInstances}` : t('pluginDetail.noActiveDeployment')}</KV>
                 <KV label={t('pluginDetail.field.deploymentStatus')}>{activeDeployment ? <StatusPill status={activeDeployment.status} /> : <NoData detail={t('pluginDetail.noActiveDeployment')} />}</KV>
               </div>
               {activeDeployment && <Progress value={activeDeployment.readyInstances} max={Math.max(activeDeployment.desiredReplicas, 1)} label={t('pluginDetail.readyReplicas')} />}
@@ -231,18 +302,22 @@ export function PluginDetailPage() {
                 <div className="kv-grid">
                   <KV label={t('table.publisher')}>{data.publisher || <NoData detail={t('ui.noData.detail')} />}</KV>
                   <KV label={t('table.signature')}><StatusPill status={trustVersion.signatureState} /></KV>
-                  <KV label={t('pluginDetail.field.image')} mono>{trustVersion.imageRef ? shortDigest(trustVersion.imageRef, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.imageRef} /></KV>
-                  <KV label={t('pluginDetail.field.bundle')} mono>{trustVersion.bundleDigest ? shortDigest(trustVersion.bundleDigest, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.bundleDigest} /></KV>
-                  <KV label={t('pluginDetail.field.artifact')} mono>{trustVersion.artifactDigest ? shortDigest(trustVersion.artifactDigest, 22) : <NoData detail={t('ui.noData.detail')} />} <CopyButton value={trustVersion.artifactDigest} /></KV>
+                  {/* A hash and its copy control are one row: the hash truncates, the control
+                      never moves, and neither wraps onto a second line. */}
+                  <KV label={t('pluginDetail.field.image')} mono><span className="kv-hash">{trustVersion.imageRef ? shortDigest(trustVersion.imageRef, 22) : <NoData detail={t('ui.noData.detail')} />}</span> <CopyButton value={trustVersion.imageRef} /></KV>
+                  <KV label={t('pluginDetail.field.bundle')} mono><span className="kv-hash">{trustVersion.bundleDigest ? shortDigest(trustVersion.bundleDigest, 22) : <NoData detail={t('ui.noData.detail')} />}</span> <CopyButton value={trustVersion.bundleDigest} /></KV>
+                  <KV label={t('pluginDetail.field.artifact')} mono><span className="kv-hash">{trustVersion.artifactDigest ? shortDigest(trustVersion.artifactDigest, 22) : <NoData detail={t('ui.noData.detail')} />}</span> <CopyButton value={trustVersion.artifactDigest} /></KV>
                   <KV label={t('table.published')}>{trustVersion.createdAt ? formatDate(trustVersion.createdAt) : <NoData detail={t('ui.noData.detail')} />}</KV>
                 </div>
               ) : <EmptyState icon="file" title={t('pluginDetail.empty.systemPlugin.title')} description={t('pluginDetail.empty.systemPlugin.description')} />}
             </section>
+            <section className="panel plugin-instances-panel">
+              <div className="panel-head"><div><h2>{t('table.instances')}</h2></div>{activeDeployment && <Link className="text-link" data-testid="plugin-detail-deployments-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
+              <div className="instance-compact">
+                <InstanceTable instances={activeDeployment?.instances || []} />
+              </div>
+            </section>
           </div>
-          <section className="panel">
-            <div className="panel-head"><div><h2>{t('table.instances')}</h2><p>{t('pluginDetail.instances.description')}</p></div>{activeDeployment && <Link className="text-link" data-testid="plugin-detail-deployments-link" to={`/admin/plugins/${data.id}?tab=deployments`}>{t('pluginDetail.instances.deploymentDetail')} <Icon name="arrowRight" size={14} /></Link>}</div>
-            <InstanceTable instances={activeDeployment?.instances || []} />
-          </section>
         </TabsContent>
 
         <TabsContent value="versions" className="mt-[18px]">
@@ -270,7 +345,7 @@ export function PluginDetailPage() {
                         <StackCell label={t('table.signature')}><StatusPill status={version.signatureState} /></StackCell>
                         <StackCell label={t('table.imageDigest')}>{version.imageRef ? <span className="mono text-sm">{shortDigest(version.imageRef, 18)}</span> : <NoData detail={t('ui.noData.detail')} />}<CopyButton value={version.imageRef} /></StackCell>
                         <StackCell label={t('table.published')}><TimeAgo value={version.createdAt} /></StackCell>
-                        <StackCell label={t('table.actions')} className="max-[760px]:flex-wrap">
+                        <StackCell label={t('table.actions')} className="max-[768px]:flex-wrap">
                           {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('activate'); }}>{t('action.activate')}</Button>}
                           {(!deployment || ['DISABLED', 'DEGRADED', 'FAILED'].includes(deployment.status)) && version.version !== activeVersion && <Button variant="outline" size="sm" onClick={() => { setDeployVersion(version.version); setDeployOpen(true); }}>{deployment ? t('action.redeploy') : t('action.deploy')}</Button>}
                           {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button variant="outline" size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('rollback'); }}>{t('action.rollback')}</Button>}
@@ -342,7 +417,7 @@ export function PluginDetailPage() {
           <div className="form-stack">
             <FormField label={t('table.version')} hint={t('pluginDetail.deployModal.versionHint')} htmlFor={versionFieldId}>
               <select id={versionFieldId} value={deployVersion} onChange={(event) => setDeployVersion(event.target.value)}>
-                {versions.map((version) => <option key={version.version} value={version.version}>{version.version} ({version.status})</option>)}
+                {versions.map((version) => <option key={version.version} value={version.version}>{version.version} ({statusText(version.status)})</option>)}
               </select>
             </FormField>
             <div className="form-grid">
@@ -410,29 +485,39 @@ export function PluginDetailPage() {
 
 function InstanceTable({ instances }: { instances: PluginDetail['deployments'][number]['instances'] }) {
   const t = useT();
+  const { locale } = useI18n();
   if (!instances.length) return <EmptyState icon="nodes" title={t('pluginDetail.instances.empty.title')} description={t('pluginDetail.instances.empty.description')} />;
+  /**
+   * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio. The log
+   * link is the card's verb, not a fourth fact - it rides the identity line at 390, so the card
+   * stays a way into the logs instead of a dead end.
+   */
+  const cardFacts = rankCardFacts({
+    slot: instances.map((instance) => '#' + instance.slot),
+    state: instances.map((instance) => instance.state),
+    container: instances.map((instance) => (instance.containerId ? instance.containerId.slice(0, 12) : '')),
+  });
   return (
     <Table className={stackTable}>
       <TableHeader className={stackHead}>
         <TableRow className="hover:bg-transparent">
-          <TableHead>{t('table.slot')}</TableHead>
           <TableHead>{t('table.node')}</TableHead>
+          <TableHead>{t('table.slot')}</TableHead>
           <TableHead>{t('table.state')}</TableHead>
           <TableHead>{t('table.container')}</TableHead>
-          <TableHead>{t('table.restarts')}</TableHead>
-          <TableHead>{t('table.observed')}</TableHead>
           <TableHead>{t('table.logs')}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody className={stackBody}>{instances.map((instance) => (
         <TableRow key={instance.id} className={stackRow}>
-          <StackCell label={t('table.slot')}><span className="mono">#{instance.slot}</span></StackCell>
-          <StackCell label={t('table.node')}><strong>{instance.nodeName || instance.nodeId.slice(0, 8)}</strong><div className="text-sm text-muted-foreground">{instance.nodeStatus}</div></StackCell>
-          <StackCell label={t('table.state')}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
-          <StackCell label={t('table.container')}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-          <StackCell label={t('table.restarts')}>{instance.restartCount}</StackCell>
-          <StackCell label={t('table.observed')}><TimeAgo value={instance.observedAt} /></StackCell>
-          <StackCell label={t('table.logs')}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></StackCell>
+          <IdentityCell label={t('table.node')} identity={formatIdentity({ name: instance.nodeName || instance.nodeId.slice(0, 8), id: instance.nodeId, at: instance.observedAt, locale, rowsOnPage: instances.length })} cardFact>
+            <span>{instance.nodeStatus}</span>
+            <span>{t('table.restarts')} {instance.restartCount}</span>
+          </IdentityCell>
+          <StackCell label={t('table.slot')} className={cardCellClass(cardFacts.includes('slot'))}><span className="mono">#{instance.slot}</span></StackCell>
+          <StackCell label={t('table.state')} className={cardCellClass(cardFacts.includes('state'))}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
+          <StackCell label={t('table.container')} className={cardCellClass(cardFacts.includes('container'))}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+          <TableCell className="w-8"><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></TableCell>
         </TableRow>
       ))}</TableBody>
     </Table>

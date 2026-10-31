@@ -26,4 +26,10 @@
 - `schema/data-catalog.v1.schema.json` — Catalog domain objects and write receipts.
 - `schema/data-integration.v1.schema.json` — Integration domain objects and run/quality/lineage objects.
 
+## 0.1.0 G11 business slice contract (draft)
+
+- `openapi/incident-v1.yaml` — Incident → Evidence → Human Verdict: the operations the Kernel exposes under `/api/v1/incidents`, the closed value sets for severity/status/source/kind/trust/verdict, and the role-scoped visibility rule (admin and viewer read all; operator reads only what it owns, mirroring the job list predicate).
+- Field minimality, the incident state machine, the permission matrix and the concurrency/idempotency rules are argued in [docs/design/g11-incident/incident-adr.md](../docs/design/g11-incident/incident-adr.md); that ADR must be edited before this schema gains a field.
+- `evidenceRefs` and `humanVerdict` on an incident are **derived at read time** from `kernel.incident_evidence` / `kernel.incident_verdicts` and are never stored columns, so a client must not treat them as writable inputs.
+
 These are design contracts. The Kernel/API implementation must be verified separately; schema presence is not evidence that an endpoint or authorization rule exists.

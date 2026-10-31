@@ -62,10 +62,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { id: 'pipelines', to: '/admin/pipelines', labelKey: 'nav.pipelines', icon: 'pipeline', group: 'runtime', surface: 'admin' },
   { id: 'jobs', to: '/admin/jobs', labelKey: 'nav.jobs', icon: 'clock', group: 'runtime', surface: 'admin' },
   { id: 'governance', to: '/admin/governance', labelKey: 'nav.governance', icon: 'shield', group: 'runtime', surface: 'admin' },
-  { id: 'access', to: '/admin/access', labelKey: 'nav.access', icon: 'access', group: 'security', surface: 'admin' },
+  { id: 'access', to: '/admin/access', labelKey: 'nav.access', icon: 'users', group: 'security', surface: 'admin' },
   { id: 'activity', to: '/admin/activity', labelKey: 'nav.activity', icon: 'activity', group: 'security', surface: 'admin' },
   { id: 'settings', to: '/admin/settings', labelKey: 'nav.settings', icon: 'settings', group: 'security', surface: 'admin', end: true },
-  { id: 'opsCenter', to: '/admin/ops-center', labelKey: 'nav.opsCenter', icon: 'ops', group: 'security', surface: 'admin' },
+  { id: 'opsCenter', to: '/admin/ops-center', labelKey: 'nav.opsCenter', icon: 'radar', group: 'security', surface: 'admin' },
 ];
 
 /** Document title for the current route; unchanged mapping from the pre-G02 Layout. */
@@ -118,7 +118,10 @@ export function breadcrumbTrail(pathname: string): AdminBreadcrumbNode[] {
   const absolute = (parts: string[]) => ADMIN_SURFACE_PREFIX + '/' + parts.join('/');
   if (segments.length === 0) return [{ labelKey: 'page.overview', to: '/admin/overview' }];
   const top = ADMIN_NAV_ITEMS.find((item) => item.to === absolute([segments[0]]));
+  // The surface name is the first crumb: without it the trail is a single word that repeats
+  // the page title, which is why the topbar read as a second H1 instead of as a location.
   const nodes: AdminBreadcrumbNode[] = [
+    { labelKey: 'nav.section.platform', to: '/admin/overview' },
     { labelKey: top?.labelKey, text: top ? undefined : shorten(decodeURIComponent(segments[0])), to: absolute([segments[0]]) },
   ];
   for (let index = 1; index < segments.length; index += 1) {

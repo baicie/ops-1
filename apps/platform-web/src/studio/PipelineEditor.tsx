@@ -7,6 +7,7 @@ import { ErrorState, Skeleton } from '../components/Ui';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, UnknownValue } from '../components/app/status-indicator';
+import { useStatusText } from '../components/app/status';
 import { useDocumentTitle } from '../hooks';
 import { useT, type MessageKey, type TranslateParams } from '../i18n';
 import { GraphCanvas } from './GraphCanvas';
@@ -47,6 +48,7 @@ export function PipelineEditorPage() {
   const [searchParams] = useSearchParams();
   const draftParam = searchParams.get('draft');
   const t = useT();
+  const statusText = useStatusText();
   useDocumentTitle(t('studio.pageTitle'));
 
   const [detail, setDetail] = useState<PipelineDetail | null>(null);
@@ -283,24 +285,31 @@ export function PipelineEditorPage() {
           <span className="meta-chip">{draft ? t('studio.header.draftVersion', { version: draft.version }) : t('studio.header.publishedReadOnly')}</span>
           <StatusIndicator state={dirty ? 'attention' : 'ready'} label={dirty ? t('studio.header.unsavedChanges') : t('studio.header.saved')} />
         </>}
-        actions={<>
-          <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
-          <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
-          <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</button>
-          <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title={t('studio.action.layoutToggle')}><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? t('studio.action.horizontal') : t('studio.action.vertical')}</button>
-          <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
-          <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
-          <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
-          <Link className="btn btn-secondary" to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
-          {hasDraft && <>
-            <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
-            <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
-          </>}
+      />
+      {/* The nine controls are the workspace's toolbar, not the title's company: measured at 1440
+          they are 842px wide against a 1328px column whose description needs 496, so a header that
+          also carried them either wrapped into a row §2.2's declared 80px does not reserve or was
+          clipped by a scroller ("Create draft" at 1523..1651, outside the viewport). page-template
+          §2.1 already has the region for this row - between the header and the page's primary
+          region - so the header stays 80px, the first block still lands at y=160, and every control
+          keeps its tier and its hit area. */}
+      <div className="studio-toolbar" role="group" aria-label={t('studio.toolbar.aria')}>
+        <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
+        <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
+        <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</button>
+        <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title={t('studio.action.layoutToggle')}><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? t('studio.action.horizontal') : t('studio.action.vertical')}</button>
+        <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
+        <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
+        <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
+        <Link className="btn btn-secondary" to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
+        {hasDraft && <>
+          <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
+          <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
         </>}
-        primary={!hasDraft
+        {!hasDraft
           ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button>
           : <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</button>}
-      />
+      </div>
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
         <Icon name="warning" size={14} />
@@ -359,9 +368,14 @@ export function PipelineEditorPage() {
         <label className="preview-input"><span>{t('studio.preview.sampleLabel')}</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
         {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
         {preview && <>
-          <div className="preview-summary"><strong>{preview.status}</strong><span>{t('studio.preview.recordCount', { count: preview.processedRecords })}</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">{t('studio.preview.truncated')}</span>}</div>
+          {/* The summary paints catalog copy, so it cannot be asserted by its text: the same run
+              reads "Completed" in en and "已完成" in zh-CN. The wire code and the counts ride along
+              in data-* exactly as Status does with data-status - protocol data, never translated,
+              never the label. records is the number the server actually processed, so a test can
+              pin it instead of looking for the word "records". */}
+          <div className="preview-summary" data-status={preview.status} data-records={preview.processedRecords} data-node-count={preview.nodeOutputs.length}><strong>{statusText(preview.status)}</strong><span>{t('studio.preview.recordCount', { count: preview.processedRecords })}</span><span>{preview.elapsedMs} ms</span>{preview.truncated && <span className="tag">{t('studio.preview.truncated')}</span>}</div>
           {preview.errors.length > 0 && <ul className="validation-list">{preview.errors.map((item, index) => <li key={`${item.code}-${index}`}><button onClick={() => item.nodeId && setSelectedId(item.nodeId)}><strong>{item.code}</strong><span>{item.message}</span></button></li>)}</ul>}
-          <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">{t('studio.preview.nodeFlow', { input: node.inputCount, output: node.outputCount, ms: node.durationMs })}</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
+          <div className="preview-grid">{preview.nodeOutputs.map((node) => <article className="panel preview-node" key={node.nodeId} data-node-id={node.nodeId} data-output-count={node.outputCount} data-input-count={node.inputCount} data-error-count={node.errors.length}><div className="pipeline-node-head"><strong>{node.nodeId}</strong><span className="tag">{node.outputCount}</span></div><small className="mono">{node.nodeType}</small><p className="muted small">{t('studio.preview.nodeFlow', { input: node.inputCount, output: node.outputCount, ms: node.durationMs })}</p>{node.errors.map((error) => <p className="text-danger small" key={error.code}>{error.code}: {error.message}</p>)}<pre>{JSON.stringify(node.sampleRows, null, 2)}</pre></article>)}</div>
         </>}
         {!preview && !previewError && <p className="muted small">{t('studio.preview.notAJob')}</p>}
       </section>}

@@ -15,7 +15,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   if (!loading && user) return <Navigate to="/" replace />;
-  const from = (location.state as any)?.from || '/';
+  const from = (location.state as { from?: string } | null)?.from || '/';
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -44,11 +44,10 @@ export function LoginPage() {
           <h1>{t('login.headline')}</h1>
           <p>{t('login.lead')}</p>
         </div>
-        <ul className="login-points">
-          <li><Icon name="check" size={16} /> {t('login.point.stateSeparate')}</li>
-          <li><Icon name="check" size={16} /> {t('login.point.gatewayReady')}</li>
-          <li><Icon name="check" size={16} /> {t('login.point.recoveryIndependent')}</li>
-        </ul>
+        {/* The three ticks that used to sit here were design declarations, not facts about
+            this deployment: "kernel recovery never depends on a business plugin" is a property
+            of the architecture, and a sign-in screen is not where it is proven. Deleted rather
+            than reworded. The one caveat that IS about this environment stays. */}
         <p className="login-footnote">{t('login.footnote')}</p>
       </section>
       <section className="login-panel">
@@ -68,7 +67,6 @@ export function LoginPage() {
             <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
           </label>
           <Button type="submit" data-testid="login-submit" className="w-full" disabled={busy}>{busy ? t('login.submitPending') : t('login.submit')}</Button>
-          <p className="login-help">{t('login.help')}</p>
         </form>
       </section>
     </div>

@@ -1,0 +1,365 @@
+{
+ "config": {
+  "label": "r390-light-zh",
+  "theme": "light",
+  "mode": "before",
+  "baseURL": "http://127.0.0.1:5173",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/admin/jobs": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4078,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 253.5,
+    "p95": 253.5,
+    "max": 253.5,
+    "n": 14
+   },
+   "columns": 8,
+   "distinctRatio": [
+    1,
+    0.07,
+    0.07,
+    0.36,
+    0.21,
+    0.36,
+    1,
+    0.07
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/activity": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5550,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 204.7,
+    "p95": 204.7,
+    "max": 204.7,
+    "n": 25
+   },
+   "columns": 6,
+   "distinctRatio": [
+    0.36,
+    0.12,
+    0.56,
+    0.04,
+    0.96,
+    0.04
+   ],
+   "duplicateRunMax": 0,
+   "rows": 25,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4575,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 337.5,
+    "p95": 337.5,
+    "max": 337.5,
+    "n": 12
+   },
+   "columns": 9,
+   "distinctRatio": [
+    1,
+    0.83,
+    0.5,
+    0.25,
+    1,
+    1,
+    0.92,
+    1,
+    0.08
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5374,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 402,
+    "p95": 402,
+    "max": 402,
+    "n": 12
+   },
+   "columns": 9,
+   "distinctRatio": [
+    0.08,
+    1,
+    1,
+    0.17,
+    0.25,
+    0.25,
+    0.08,
+    0.08,
+    0.08
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5553,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 124,
+    "p95": 221.1,
+    "max": 221.1,
+    "n": 27
+   },
+   "columns": 12,
+   "distinctRatio": [
+    0.96,
+    0.37,
+    0.26,
+    0.08,
+    0.08,
+    0.08,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4145,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 201.2,
+    "p95": 236.4,
+    "max": 236.4,
+    "n": 14
+   },
+   "columns": 11,
+   "distinctRatio": [
+    1,
+    0.71,
+    0.29,
+    1,
+    0.29,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4126,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 146.4,
+    "p95": 146.4,
+    "max": 146.4,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2670,
+   "offenders": [
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 322,
+     "right": 400
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 404,
+     "right": 490
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 450,
+     "right": 477
+    }
+   ],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 207.5,
+    "p95": 207.5,
+    "max": 207.5,
+    "n": 6
+   },
+   "columns": 7,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 6,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": 172,
+   "docScrollW": 562,
+   "docClientW": 390,
+   "docHeight": 1896,
+   "offenders": [
+    {
+     "tag": "table",
+     "cls": "w-full border-collapse caption-bottom text-base",
+     "left": 13,
+     "right": 424
+    },
+    {
+     "tag": "thead",
+     "cls": "border-b border-solid border-border",
+     "left": 15,
+     "right": 423
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors data-[",
+     "left": 15,
+     "right": 423
+    },
+    {
+     "tag": "th",
+     "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
+     "left": 344,
+     "right": 423
+    },
+    {
+     "tag": "tbody",
+     "cls": "[&_tr:last-child]:border-0",
+     "left": 15,
+     "right": 423
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors hover:",
+     "left": 15,
+     "right": 423
+    },
+    {
+     "tag": "td",
+     "cls": "px-3.5 py-2.5 align-middle text-base",
+     "left": 344,
+     "right": 423
+    },
+    {
+     "tag": "time",
+     "cls": "",
+     "left": 358,
+     "right": 401
+    }
+   ],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 98.8,
+    "p95": 98.8,
+    "max": 98.8,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 411,
+   "tablePanelWidth": 349
+  }
+ }
+}

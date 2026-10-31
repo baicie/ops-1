@@ -110,17 +110,23 @@ export function PipelinesPage() {
                   <TableHead>{t('table.revision')}</TableHead>
                   <TableHead>{t('table.created')}</TableHead>
                   <TableHead>{t('table.updated')}</TableHead>
-                  <TableHead aria-label={t('table.open')} />
+                  {/* A row-menu slot, not a column: 44px of empty header above the chevron was a hole,
+                      and titling it would put a constant column under the audit's min(distinctRatio). */}
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
                 {items.map((pipeline) => (
-                  <TableRow key={pipeline.pipelineId} className={cn('cursor-pointer focus-visible:outline-offset-[-2px]', stackRow)} tabIndex={0}>
+                  // This row carried tabIndex=0 with no onClick and no key handler: a Tab stop that
+                  // did nothing at all, on a row that painted cursor:pointer anyway. The name is the
+                  // link and the chevron below is one too, so the row itself is not a control.
+                  <TableRow key={pipeline.pipelineId} className={stackRow}>
                     <StackCell label={t('table.pipeline')}><Link to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
                     <StackCell label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
                     <StackCell label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></StackCell>
                     <StackCell label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
+                    {/* The chevron promised a click and did nothing. Same destination as the name, but
+                        the two are one stop apart, so it is labelled rather than duplicated speech. */}
+                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Link className="ow-row-go" aria-label={t('table.open')} to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><Icon name="chevron" size={16} /></Link></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -248,7 +254,7 @@ export function PipelineDetailPage() {
       <section className="panel panel-pad">
         <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">{t('pipelines.jobs.empty')}</p> : (
-          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[760px]:!w-auto max-[760px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
+          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[768px]:!w-auto max-[768px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
         )}
       </section>
       <p className="table-footnote"><Icon name="alert" size={13} /> {t('pipelines.footnote')}</p>

@@ -15,14 +15,25 @@ import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { useDocumentTitle } from '../hooks';
 import { executionLabel as durationLabel, spanLabel } from './jobDuration';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { identityDisambiguator } from '../lib/identity';
+import { shortDigest } from '../format';
+import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
+import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
+import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { useStatusText } from '../components/app/status';
 
 const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
 
 export function JobsPage() {
   const t = useT();
+  const { locale } = useI18n();
+  const navigate = useNavigate();
+  // The status chips are the one place this page printed a wire code instead of copy: "QUEUED
+  // RUNNING SUCCEEDED…" at the body tier was the loudest thing above the fold, and in zh-CN it was
+  // English. Same vocabulary as the pill in each row, from the same table.
+  const statusText = useStatusText();
   useDocumentTitle(t('page.jobs'));
   const [data, setData] = useState<JobList | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -46,6 +57,8 @@ export function JobsPage() {
   }, [status, cursor, reload]);
   const visibleJobs = (data?.items || []).filter((job) => (pipelineFilter === 'ALL' || job.pipelineId === pipelineFilter) && `${job.jobId} ${job.pipelineId}`.toLowerCase().includes(query.toLowerCase()));
   const pipelines = Array.from(new Set((data?.items || []).map((job) => job.pipelineId))).sort();
+  /** §2.1: the disambiguator appears only when the page carries the same name twice. */
+  const pipelineCount = new Set(visibleJobs.map((job) => job.pipelineId)).size;
   /** The status tab is a Kernel query, so an empty answer under it is a filtered miss. */
   const filtering = query !== '' || pipelineFilter !== 'ALL' || status !== 'ALL';
   const clearFilters = () => { setQuery(''); setPipelineFilter('ALL'); setStatus('ALL'); setCursor(null); };
@@ -66,7 +79,7 @@ export function JobsPage() {
         </Select>
         <Tabs value={status} onValueChange={(value) => { setStatus(value); setCursor(null); }}>
           <TabsList className="h-auto max-w-full flex-wrap justify-start">
-            {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : value}</TabsTrigger>)}
+            {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : statusText(value)}</TabsTrigger>)}
           </TabsList>
         </Tabs>
         <span className="toolbar-count">{t('jobs.count', { shown: visibleJobs.length, total: data?.items.length ?? 0 })}</span>
@@ -92,31 +105,62 @@ export function JobsPage() {
         ) : (
           <section className="panel table-panel">
             <Table className={stackTable}>
+              {/* table-spec §2.2: pipeline and revision are the same value in 14/14 rows here
+                  (ratio 0.00 and 0.07), so they stop being columns. 7 -> 4 data columns. */}
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
                   <TableHead>{t('table.job')}</TableHead>
-                  <TableHead>{t('table.pipeline')}</TableHead>
-                  <TableHead>{t('table.revision')}</TableHead>
                   <TableHead>{t('table.status')}</TableHead>
-                  <TableHead>{t('table.attempts')}</TableHead>
                   <TableHead>{t('table.duration')}</TableHead>
                   <TableHead>{t('table.created')}</TableHead>
-                  <TableHead />
+                                    {/* The trailing cell is a row-MENU slot, not a column: its header held nothing but
+                      an aria-label, and above a 44-62px body cell that read as a hole in the header
+                      band. Titling it is not available - a labelled column enters the audit's
+                      min(distinctRatio) and a column of identical chevrons measures 0.07 - so the
+                      header cell goes and the band is filled by the header row itself. No column is
+                      added or removed from the body, and the menu keeps its trailing edge. */}
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
-                {visibleJobs.map((job) => (
-                  <TableRow key={job.jobId} className={cn('cursor-pointer', stackRow)}>
-                    <StackCell label={t('table.job')} className="job-id-cell max-[760px]:w-auto max-[760px]:max-w-none"><Link className="mono min-w-0 truncate max-[760px]:max-w-[220px]" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell>
-                    <StackCell label={t('table.pipeline')} className="whitespace-nowrap max-[760px]:whitespace-normal">{job.pipelineId}</StackCell>
-                    <StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell>
-                    <StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell>
-                    <StackCell label={t('table.attempts')}>{job.attempts}/{job.maxAttempts}</StackCell>
-                    <StackCell label={t('table.duration')} className="whitespace-nowrap max-[760px]:whitespace-normal"><span className="mono">{durationLabel(job)}</span></StackCell>
-                    <StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell>
-                    <TableCell className="w-8 text-right text-muted-foreground max-[760px]:hidden"><Icon name="chevron" size={16} /></TableCell>
-                  </TableRow>
-                ))}
+                {visibleJobs.map((job) => {
+                  const identity = formatIdentity({
+                    name: job.pipelineId,
+                    id: job.jobId,
+                    at: job.startedAt || job.createdAt,
+                    locale,
+                    nameIsUnique: pipelineCount === visibleJobs.length,
+                    rowsOnPage: visibleJobs.length,
+                  });
+                  const cardFacts = rankCardFacts({
+                    status: visibleJobs.map((row) => row.status),
+                    duration: visibleJobs.map((row) => durationLabel(row)),
+                    created: visibleJobs.map((row) => row.createdAt),
+                  });
+                  // §2.5 at 390: two lines, not five. The identity, the status and the menu share the
+                  // first one; the qualifier line continues into duration and age on the second.
+                  return (
+                    // The row is the pointer target and the identity is the keyboard one. It used to
+                    // be a focusable <tr> with an Enter handler: a Tab stop announced as a plain row,
+                    // with no href to copy, middle-click or read out. One stop per row, and it is an
+                    // anchor now, which is also what a keyboard assertion can actually verify.
+                    <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)} data-job-row={job.jobId} onClick={() => navigate('/admin/jobs/' + job.jobId)}>
+                      <IdentityCell label={t('table.job')} identity={identity} href={'/admin/jobs/' + job.jobId} cardFact className="job-id-cell">
+                        {/* §2.2 demotion, not deletion: the two constants live on the qualifier line. */}
+                        <span className="ow-key">r{job.pipelineRevision}</span>
+                        <span className="ow-key">{t('table.attempts')} {job.attempts}/{job.maxAttempts}</span>
+                      </IdentityCell>
+                      <StackCell label={t('table.status')} className={cardCellClass(cardFacts.includes('status'))}><StatusPill status={job.status} /></StackCell>
+                      {/* The column name is not printed on the card (the line above it is the heading) but it
+                          is not deleted either: data-label, the desktop header, and this tooltip keep it. */}
+                      <StackCell label={t('table.duration')} className={cn('whitespace-nowrap max-[768px]:whitespace-normal', cardLineAfter, cardCellClass(cardFacts.includes('duration')))}><span className="mono" title={t('table.duration')}>{durationLabel(job)}</span></StackCell>
+                      <StackCell label={t('table.created')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('created')))}><span title={job.createdAt}>{relativeAge(locale, job.createdAt)}</span></StackCell>
+                      {/* §2.5: the row menu rides the identity line at 390 instead of taking a row. */}
+                      <TableCell className={cardActionCell}>
+                        <RowActions label={t('jobs.action.menu', { id: identity.key })} actions={[copyIdAction(job.jobId, t('table.copyIdentifier')), { id: 'open', label: t('table.open'), icon: 'chevron', onSelect: () => navigate('/admin/jobs/' + job.jobId) }]} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </section>
@@ -134,7 +178,7 @@ function JobDetailHeader({ jobId, subtitle, actions }: { jobId: string; subtitle
     <PageHeader
       eyebrow={t('jobs.eyebrow')}
       title={t('page.jobDetail')}
-      description={<span className="job-subtitle"><span className="mono">{jobId}</span>{subtitle}</span>}
+      description={<span className="job-subtitle"><span className="job-short-id" title={jobId} data-testid="job-short-id">{t('jobs.runShortId', { id: identityDisambiguator(jobId) })}</span>{subtitle}</span>}
       actions={actions}
     />
   );
@@ -173,10 +217,25 @@ export function JobDetailPage() {
     return () => { cancelled = true; };
   }, [jobId, refresh]);
 
-  /** Cancelling ends the run for good: confirmation, one in-flight request, retry on failure. */
+  /**
+   * Cancelling ends the run for good: confirmation, one in-flight request, retry on failure.
+   *
+   * The 200 from /cancel is the Kernel accepting the request, not the job being cancelled - a
+   * job whose worker just took a lease can answer 200 and keep running. Only the job route
+   * reporting CANCELLED is the cancellation, and anything else is printed as what it is.
+   */
   const cancelJob = async () => {
-    await api.post(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {}, newIdempotencyKey());
+    const result = await verifyAfterWrite<JobView>({
+      write: () => api.post(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {}, newIdempotencyKey()),
+      read: () => api.get<JobView>(`/api/v1/jobs/${encodeURIComponent(jobId)}`),
+      expected: jobCancelledLanded,
+      describe: describeJobStatus,
+    });
+    const failure = verifiedWriteFailure(result, t);
     setRefresh((value) => value + 1);
+    // ConfirmAction keeps the dialog open on a rejection, so the operator reads the state that
+    // is really there instead of a closed dialog and a job that is still running.
+    if (failure) throw failure;
   };
   if (error) return (
     <div className="page-stack">
@@ -193,22 +252,28 @@ export function JobDetailPage() {
   const cancellable = ['QUEUED', 'CLAIMED', 'RUNNING'].includes(job.status);
   return (
     <div className="page-stack">
-      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId}>{t('jobs.runShortId', { id: job.jobId.slice(0, 8) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId} data-testid="job-short-id">{t('jobs.runShortId', { id: identityDisambiguator(job.jobId) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
       <section className="summary-grid job-stats">
         <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><StatusPill status={job.status} /></strong></div>
         <div className="panel metric-card"><span className="metric-label">{t('jobs.metric.execution')}</span><strong className="metric-value mono">{durationLabel(job)}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('table.pipeline')}</span><strong className="metric-value mono">{job.pipelineId}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('table.revision')}</span><strong className="metric-value">r{job.pipelineRevision}</strong></div>
+        {/* Was the pipeline id, which is the h1 79px above it: one string printed twice on one
+            screen. The strip carries the attempt count instead - a fact that until now lived only
+            inside the collapsed "advanced" panel, so the card states something new rather than
+            disappearing. */}
+        <div className="panel metric-card"><span className="metric-label">{t('table.attempts')}</span><strong className="metric-value mono">{job.attempts} / {job.maxAttempts}</strong></div>
+        {/* Was the pipeline revision, which the page subtitle 79px above already prints as
+            "Revision r9" - a second copy of one word on one screen, and the fourth card of a band
+            whose other three each state a fact that appears nowhere else. Three cards, unchanged. */}
       </section>
-      <details className="advanced panel"><summary>{t('jobs.advanced.summary')}</summary><div className="kv-grid"><div className="kv"><span className="kv-label">{t('jobs.field.jobId')}</span><button type="button" className="link-button mono" title={t('jobs.copyJobId')} onClick={() => void navigator.clipboard?.writeText(job.jobId)}>{job.jobId}</button></div><div className="kv"><span className="kv-label">{t('table.attempts')}</span><span className="kv-value mono">{job.attempts} / {job.maxAttempts}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.fence')}</span><span className="kv-value mono">{job.currentFence}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.lease')}</span><span className="kv-value mono">{job.currentLeaseId || '—'}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.queueWait')}</span><span className="kv-value mono">{spanLabel(job.createdAt, job.startedAt)}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.totalElapsed')}</span><span className="kv-value mono">{spanLabel(job.createdAt, job.finishedAt)}</span></div><div className="kv"><span className="kv-label">{t('table.updated')}</span><span className="kv-value mono">{new Date(job.updatedAt).toISOString()}</span></div></div></details>
+      <details className="advanced panel"><summary>{t('jobs.advanced.summary')}</summary><div className="kv-grid"><div className="kv"><span className="kv-label">{t('jobs.field.jobId')}</span><span className="kv-value"><LongId value={job.jobId} label={t('jobs.copyJobId')} scroll testId="job-id-full" /></span></div><div className="kv"><span className="kv-label">{t('jobs.field.fence')}</span><span className="kv-value mono">{job.currentFence}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.lease')}</span><span className="kv-value"><LongId value={job.currentLeaseId} label={t('table.copyIdentifier')} scroll /></span></div><div className="kv"><span className="kv-label">{t('jobs.field.queueWait')}</span><span className="kv-value mono">{spanLabel(job.createdAt, job.startedAt)}</span></div><div className="kv"><span className="kv-label">{t('jobs.field.totalElapsed')}</span><span className="kv-value mono">{spanLabel(job.createdAt, job.finishedAt)}</span></div><div className="kv"><span className="kv-label">{t('table.updated')}</span><span className="kv-value mono">{new Date(job.updatedAt).toISOString()}</span></div></div></details>
       <section className="panel panel-pad"><h2>{t('jobs.lifecycle.title')}</h2><ul className="detail-list"><li><span>{t('table.created')}</span><TimeAgo value={job.createdAt} /></li><li><span>{t('table.updated')}</span><TimeAgo value={job.updatedAt} /></li><li><span>{t('jobs.field.errorCode')}</span><code>{job.lastErrorCode || '—'}</code></li></ul><p className="muted small">{t('jobs.lifecycle.note')}</p></section>
       <section className="panel panel-pad"><h2>{t('jobs.timeline.title')}</h2>{!diagnostics ? <p className="muted small">{t('jobs.timeline.unavailable')}</p> : diagnostics.events.length === 0 ? <p className="muted small">{t('jobs.timeline.empty')}</p> : <ol className="timeline">{diagnostics.events.map((event) => <li key={event.eventId}><span className="timeline-dot" /><div><strong>{event.eventType}</strong>{event.toStatus && <span className="tag">{event.toStatus}</span>}{event.fencingSequence != null && <span className="muted small">{t('jobs.timeline.fence', { fence: event.fencingSequence })}</span>}<TimeAgo value={event.occurredAt} /></div></li>)}</ol>}{diagnostics?.truncated && <p className="muted small">{t('jobs.timeline.truncated')}</p>}</section>
-      {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>{t('table.attempts')}</h2><div className="table-panel"><Table><TableHeader><TableRow className="hover:bg-transparent"><TableHead>{t('jobs.field.attempt')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('jobs.field.fence')}</TableHead><TableHead>{t('table.node')}</TableHead><TableHead>{t('table.started')}</TableHead></TableRow></TableHeader><TableBody>{diagnostics.attempts.map((attempt) => <TableRow key={attempt.attemptNumber}><TableCell>#{attempt.attemptNumber}</TableCell><TableCell><StatusPill status={attempt.status} /></TableCell><TableCell className="mono">{attempt.fencingSequence}</TableCell><TableCell className="mono text-sm">{attempt.nodeId}</TableCell><TableCell><TimeAgo value={attempt.startedAt} /></TableCell></TableRow>)}</TableBody></Table></div></section>}
-      {diagnostics && diagnostics.checkpoints.length > 0 && <section className="panel panel-pad"><h2>{t('jobs.checkpoints.title')}</h2><ul className="detail-list">{diagnostics.checkpoints.map((checkpoint) => <li key={checkpoint.checkpointId}><span>{t('jobs.checkpoints.entry', { attempt: checkpoint.attemptNumber, sequence: checkpoint.sequence })}</span><code className="mono small">{checkpoint.stateDigest}</code></li>)}</ul></section>}
-      {result ? <section className="panel panel-pad"><h2>{t('table.result')}</h2><p className="small">{t('table.status')} <StatusPill status={result.status} /></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json">{JSON.stringify(result.output, null, 2)}</pre><details className="advanced"><summary>{t('jobs.result.metadata')}</summary><p className="mono small">{result.resultDigest || t('jobs.result.noDigest')}</p></details></section> : resultError ? <p className="muted small">{t('jobs.result.error', { message: resultError })}</p> : null}
+      {diagnostics && diagnostics.attempts.length > 0 && <section className="panel panel-pad"><h2>{t('table.attempts')}</h2><div className="table-panel"><Table><TableHeader><TableRow className="hover:bg-transparent"><TableHead>{t('jobs.field.attempt')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('jobs.field.fence')}</TableHead><TableHead>{t('table.node')}</TableHead><TableHead>{t('table.started')}</TableHead></TableRow></TableHeader><TableBody>{diagnostics.attempts.map((attempt) => <TableRow key={attempt.attemptNumber}><TableCell>#{attempt.attemptNumber}</TableCell><TableCell><StatusPill status={attempt.status} /></TableCell><TableCell className="mono">{attempt.fencingSequence}</TableCell><TableCell><LongId value={attempt.nodeId} display={identityDisambiguator(attempt.nodeId)} label={t('table.copyIdentifier')} /></TableCell><TableCell><TimeAgo value={attempt.startedAt} /></TableCell></TableRow>)}</TableBody></Table></div></section>}
+      {diagnostics && diagnostics.checkpoints.length > 0 && <section className="panel panel-pad"><h2>{t('jobs.checkpoints.title')}</h2><ul className="detail-list">{diagnostics.checkpoints.map((checkpoint) => <li key={checkpoint.checkpointId}><span>{t('jobs.checkpoints.entry', { attempt: checkpoint.attemptNumber, sequence: checkpoint.sequence })}</span><LongId value={checkpoint.stateDigest} display={shortDigest(checkpoint.stateDigest, 20)} label={t('table.copyIdentifier')} /></li>)}</ul></section>}
+      {result ? <section className="panel panel-pad"><h2>{t('table.result')}</h2><p className="small">{t('table.status')} <StatusPill status={result.status} /></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json ow-scroll-x">{JSON.stringify(result.output, null, 2)}</pre><details className="advanced"><summary>{t('jobs.result.metadata')}</summary><p className="small">{result.resultDigest ? <LongId value={result.resultDigest} display={shortDigest(result.resultDigest, 20)} label={t('table.copyIdentifier')} /> : t('jobs.result.noDigest')}</p></details></section> : resultError ? <p className="muted small">{t('jobs.result.error', { message: resultError })}</p> : null}
       <ConfirmAction
         open={cancelOpen}
-        title={t('jobs.cancelConfirm.title', { id: job.jobId.slice(0, 8) })}
+        title={t('jobs.cancelConfirm.title', { id: identityDisambiguator(job.jobId) })}
         description={t('jobs.cancelConfirm.description')}
         confirmLabel={t('jobs.cancelConfirm.confirm')}
         onConfirm={cancelJob}
@@ -220,6 +285,7 @@ export function JobDetailPage() {
 
 export function JobSubmitPage() {
   const t = useT();
+  const statusText = useStatusText();
   const { pipelineId = '' } = useParams();
   const navigate = useNavigate();
   useDocumentTitle(t('page.runPipeline'));
@@ -253,7 +319,7 @@ export function JobSubmitPage() {
           <Select value={revision === null ? '' : String(revision)} onValueChange={(value) => setRevision(Number(value))}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {detail.revisions.map((item) => <SelectItem key={item.revision} value={String(item.revision)}>r{item.revision} · {item.status}</SelectItem>)}
+              {detail.revisions.map((item) => <SelectItem key={item.revision} value={String(item.revision)}>r{item.revision} · {statusText(item.status)}</SelectItem>)}
             </SelectContent>
           </Select>
         </label>

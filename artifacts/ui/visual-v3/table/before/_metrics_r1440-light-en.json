@@ -1,0 +1,297 @@
+{
+ "config": {
+  "label": "r1440-light-en",
+  "theme": "light",
+  "mode": "before",
+  "baseURL": "http://127.0.0.1:5173",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/admin/jobs": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1185,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 47,
+    "p95": 65,
+    "max": 65,
+    "n": 14
+   },
+   "columns": 8,
+   "distinctRatio": [
+    1,
+    0.07,
+    0.07,
+    0.36,
+    0.21,
+    0.36,
+    1,
+    0.07
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/activity": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1920,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 62,
+    "p95": 62,
+    "max": 62,
+    "n": 25
+   },
+   "columns": 6,
+   "distinctRatio": [
+    0.36,
+    0.12,
+    0.56,
+    0.04,
+    0.96,
+    0.04
+   ],
+   "duplicateRunMax": 0,
+   "rows": 25,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/nodes": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1248,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 71,
+    "p95": 71,
+    "max": 71,
+    "n": 12
+   },
+   "columns": 9,
+   "distinctRatio": [
+    1,
+    0.83,
+    0.5,
+    0.25,
+    1,
+    1,
+    0.92,
+    1,
+    0.08
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1302,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 72,
+    "p95": 72,
+    "max": 72,
+    "n": 12
+   },
+   "columns": 9,
+   "distinctRatio": [
+    0.08,
+    1,
+    1,
+    0.17,
+    0.25,
+    0.25,
+    0.08,
+    0.08,
+    0.08
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1950,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 46,
+    "p95": 62,
+    "max": 62,
+    "n": 27
+   },
+   "columns": 12,
+   "distinctRatio": [
+    0.96,
+    0.37,
+    0.26,
+    0.08,
+    0.08,
+    0.08,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1633,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 61,
+    "p95": 62,
+    "max": 62,
+    "n": 14
+   },
+   "columns": 11,
+   "distinctRatio": [
+    1,
+    0.71,
+    0.29,
+    1,
+    0.29,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 2233,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 62,
+    "p95": 62,
+    "max": 62,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1511,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 192,
+    "p95": 192,
+    "max": 192,
+    "n": 6
+   },
+   "columns": 7,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 6,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 361,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1102,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 46,
+    "p95": 46,
+    "max": 46,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  }
+ }
+}

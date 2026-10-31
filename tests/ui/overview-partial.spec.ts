@@ -283,8 +283,10 @@ test('overview: DEGRADED renders when a module reports it - and it is not PARTIA
   await expect(runtime.locator('.module-card-detail')).toHaveText(copy('overview.module.runtime.detail', forcedReplicas));
 
   // The strip and the KPI agree because both read the payload that really rendered.
+  // V4 prints a ratio the same way in every cell: 0/1, with the total muted rather than a
+  // differently formatted number in the next cell over.
   await expect(page.locator('a[data-metric-card][data-metric-href="/admin/nodes"] .ow-metric-value'))
-    .toHaveText(forcedNodes.ready + ' / ' + forcedNodes.total);
+    .toHaveText(forcedNodes.ready + '/' + forcedNodes.total);
 
   // DEGRADED is an answer, not a missing source: no PARTIAL notice rides along with it.
   await expect(page.locator(PARTIAL_NOTICE)).toHaveCount(0);
@@ -331,9 +333,12 @@ test('overview: a warning attention item renders the ATTENTION indicator, not a 
   await expect(page.locator('#attention .panel-count')).toHaveText(copy('overview.attention.count', { count: 1 }));
   await expect(page.locator('#attention')).not.toContainText(copy('overview.attention.empty.title'));
 
-  // health=ATTENTION drives the banner tone and its copy (Overview.tsx:70-73), and it links to the list.
-  await expect(page.locator('section.attention-banner.tone-warn h2')).toHaveText(copy('overview.health.attention'));
-  await expect(page.locator('section.attention-banner a[href="#attention"]')).toHaveCount(1);
+  // health=ATTENTION drives Layer 1's verdict band - the same three facts the old .attention-banner
+  // carried (state, headline copy, link to the list), now framed by .health-band (Overview.tsx:118-138).
+  const band = page.locator('section.health-band[data-health="ATTENTION"]');
+  await expect(band).toHaveClass(/tone-warn/);
+  await expect(band.locator('h2')).toHaveText(copy('overview.health.attention'));
+  await expect(band.locator('a[href="#attention"]')).toHaveCount(1);
 
   await page.screenshot({ path: path.join(OUT, 'state-overview-attention.png'), fullPage: true });
 });

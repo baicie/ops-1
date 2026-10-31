@@ -1,0 +1,396 @@
+{
+ "config": {
+  "label": "r390-light-en",
+  "theme": "light",
+  "mode": "before",
+  "baseURL": "http://127.0.0.1:5173",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/admin/jobs": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3960,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 244,
+    "p95": 244,
+    "max": 244,
+    "n": 14
+   },
+   "columns": 8,
+   "distinctRatio": [
+    1,
+    0.07,
+    0.07,
+    0.36,
+    0.21,
+    0.36,
+    1,
+    0.07
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/activity": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5405,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 197,
+    "p95": 215,
+    "max": 215,
+    "n": 25
+   },
+   "columns": 6,
+   "distinctRatio": [
+    0.36,
+    0.12,
+    0.56,
+    0.04,
+    0.96,
+    0.04
+   ],
+   "duplicateRunMax": 0,
+   "rows": 25,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4455,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 328,
+    "p95": 328,
+    "max": 328,
+    "n": 12
+   },
+   "columns": 9,
+   "distinctRatio": [
+    1,
+    0.83,
+    0.5,
+    0.25,
+    1,
+    1,
+    0.92,
+    1,
+    0.08
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5387,
+   "offenders": [
+    {
+     "tag": "div",
+     "cls": "inline-flex h-9 items-center justify-center gap-1 rounded-md",
+     "left": 12,
+     "right": 404
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 314,
+     "right": 399
+    }
+   ],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 402,
+    "p95": 402,
+    "max": 402,
+    "n": 12
+   },
+   "columns": 9,
+   "distinctRatio": [
+    0.08,
+    1,
+    1,
+    0.17,
+    0.25,
+    0.25,
+    0.08,
+    0.08,
+    0.08
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5474,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 120,
+    "p95": 234,
+    "max": 234,
+    "n": 27
+   },
+   "columns": 12,
+   "distinctRatio": [
+    0.96,
+    0.37,
+    0.26,
+    0.08,
+    0.08,
+    0.08,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 4218,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 196,
+    "p95": 235,
+    "max": 235,
+    "n": 14
+   },
+   "columns": 11,
+   "distinctRatio": [
+    1,
+    0.71,
+    0.29,
+    1,
+    0.29,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3993,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 141,
+    "p95": 141,
+    "max": 141,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2605,
+   "offenders": [
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 362,
+     "right": 489
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 457,
+     "right": 476
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 493,
+     "right": 623
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 591,
+     "right": 610
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 627,
+     "right": 729
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-full border border-solid border-border bg-m",
+     "left": 689,
+     "right": 716
+    }
+   ],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 198,
+    "p95": 198,
+    "max": 198,
+    "n": 6
+   },
+   "columns": 7,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 6,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 349,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": 221,
+   "docScrollW": 611,
+   "docClientW": 390,
+   "docHeight": 1631,
+   "offenders": [
+    {
+     "tag": "table",
+     "cls": "w-full border-collapse caption-bottom text-base",
+     "left": 13,
+     "right": 462
+    },
+    {
+     "tag": "thead",
+     "cls": "border-b border-solid border-border",
+     "left": 15,
+     "right": 461
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors data-[",
+     "left": 15,
+     "right": 461
+    },
+    {
+     "tag": "th",
+     "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
+     "left": 385,
+     "right": 461
+    },
+    {
+     "tag": "tbody",
+     "cls": "[&_tr:last-child]:border-0",
+     "left": 15,
+     "right": 461
+    },
+    {
+     "tag": "tr",
+     "cls": "border-b border-solid border-border transition-colors hover:",
+     "left": 15,
+     "right": 461
+    },
+    {
+     "tag": "td",
+     "cls": "px-3.5 py-2.5 align-middle text-base",
+     "left": 385,
+     "right": 461
+    },
+    {
+     "tag": "time",
+     "cls": "",
+     "left": 399,
+     "right": 423
+    }
+   ],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 94,
+    "p95": 94,
+    "max": 94,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "cardFactCount": null,
+   "cards": [],
+   "tableWidth": 449,
+   "tablePanelWidth": 349
+  }
+ }
+}

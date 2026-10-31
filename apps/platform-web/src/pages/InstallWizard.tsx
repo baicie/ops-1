@@ -12,6 +12,8 @@ import { PageHeader } from '../components/app/page-header';
 import { NoData, UnknownValue } from '../components/app/status-indicator';
 import { shortDigest } from '../format';
 import { useT } from '../i18n';
+import { deployReadbackFailure, verifyDeployAfterWrite } from '../lib/deploy-readback';
+import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describePlacementReason } from '../placement-reason';
 import { StatusPill } from './table-kit';
 
@@ -84,20 +86,46 @@ export function InstallWizardPage() {
     }
   }
 
+  /**
+   * The create is a request; the deployment on screen is the one a GET returned. The wizard used
+   * to render the POST body - which is why lib/deploy-readback.ts exists. On an unconfirmed
+   * readback the wizard says so and does not advance: a 200 with no deployment behind it is not
+   * a deployment.
+   */
   async function deploy() {
     if (!pkg) return;
     setBusy(true);
     setDeploymentError(null);
     try {
       const nodeSelector = Object.fromEntries(selector.split(',').map((pair) => pair.trim().split('=')).filter((pair) => pair.length === 2));
-      const result = await api.post<DeploymentView>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/deployments`, {
-        version: pkg.version,
-        desiredReplicas: replicas,
-        nodeSelector,
-        maxInstancesPerNode: 1,
+      const result = await verifyDeployAfterWrite<DeploymentView>({
+        write: () => api.post<DeploymentView>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/deployments`, {
+          version: pkg.version,
+          desiredReplicas: replicas,
+          nodeSelector,
+          maxInstancesPerNode: 1,
+        }),
+        read: () => api.get<DeploymentView[]>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/deployments`),
+        idOf: (item) => item.id,
+        statusOf: (item) => item.status,
       });
-      setDeployment(result);
-      setStep(4);
+      const failure = deployReadbackFailure(result, t);
+      if (result.deployment) {
+        // Step 4 renders this object as-is, so a FAILED or PENDING deployment reads as FAILED or
+        // PENDING - never as the success the write would have liked to report.
+        setDeployment(result.deployment);
+        setStep(4);
+      }
+      if (failure) {
+        setDeploymentError(failure.message);
+        toast.push({ tone: 'danger', title: t('install.toast.deployFailed'), detail: failure.message });
+        return;
+      }
+      toast.push({
+        tone: 'ok',
+        title: t('install.toast.deployed', { pluginId: pkg.pluginId }),
+        detail: t('verify.state', { state: result.state }),
+      });
     } catch (cause) {
       const apiError = cause as ApiError;
       toast.push({ tone: 'danger', title: apiError.code || t('install.toast.deployFailed'), detail: apiError.message });
@@ -106,16 +134,27 @@ export function InstallWizardPage() {
     }
   }
 
+  /**
+   * Activation is the only route that writes INSTALLED, so this success is the one most worth
+   * verifying: the plugin has to come back reading INSTALLED at this version, or the wizard says so.
+   */
   async function activate() {
     if (!pkg || !deployment) return;
     setBusy(true);
     try {
       const detail = await api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}`);
-      await api.post(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/activations`, {
-        version: pkg.version,
-        expectedRevision: detail.activeRevision?.generation ?? 0,
+      const result = await verifyAfterWrite<PluginDetail>({
+        write: () => api.post(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}/activations`, {
+          version: pkg.version,
+          expectedRevision: detail.activeRevision?.generation ?? 0,
+        }),
+        read: () => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(pkg.pluginId)}`),
+        expected: (after) => after.state === 'INSTALLED' && after.activeVersion === pkg.version,
+        describe: (after) => after.state || 'NO_DATA',
       });
-      toast.push({ tone: 'ok', title: t('install.toast.activated', { pluginId: pkg.pluginId }), detail: t('install.toast.activated.detail', { version: pkg.version }) });
+      const failure = verifiedWriteFailure(result, t);
+      if (failure) throw failure;
+      toast.push({ tone: 'ok', title: t('install.toast.activated', { pluginId: pkg.pluginId }), detail: t('install.toast.activated.detail', { version: pkg.version }) + ' ' + verifiedWriteDetail(result, t) });
       navigate(`/admin/plugins/${pkg.pluginId}`);
     } catch (cause) {
       const apiError = cause as ApiError;
@@ -222,7 +261,7 @@ export function InstallWizardPage() {
             <Field label={t('field.desiredReplicas')} hint={t('install.field.desiredReplicas.hint')}><Input type="number" min={0} max={20} value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} /></Field>
             <Field label={t('field.nodeSelector')} hint={t('install.field.nodeSelector.hint')}><Input value={selector} onChange={(event) => setSelector(event.target.value)} placeholder="role=node" /></Field>
           </div>
-          <div className="callout"><Icon name="nodes" size={16} /><p>{t('install.placement.note.before')} <strong>PENDING</strong>{t('install.placement.note.after')}</p></div>
+          <div className="callout"><Icon name="nodes" size={16} /><p>{t('install.placement.note.before')} <strong>{t('status.pending')}</strong>{t('install.placement.note.after')}</p></div>
           <div className="wizard-actions"><Button variant="secondary" onClick={() => setStep(2)}>{t('action.back')}</Button><Button onClick={() => void deploy()} disabled={busy}>{busy ? t('install.deploy.creating') : t('install.action.deployToNodes')}</Button></div>
         </section>
       )}

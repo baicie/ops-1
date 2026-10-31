@@ -196,6 +196,7 @@ sudo nohup python3 -m http.server 18090 --bind 172.17.0.1 \
 # clean up (the fixture is not a service; nothing else depends on it)
 sudo kill "$(sudo cat /srv/opsweave-staging/demo-source/http-18090.pid)"
 sudo rm -f /srv/opsweave-staging/demo-source/data-hosts.json \
+           /srv/opsweave-staging/demo-source/hosts.json \
            /srv/opsweave-staging/demo-source/http-18090.pid
 ```
 

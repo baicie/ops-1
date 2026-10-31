@@ -1,0 +1,333 @@
+import { expect, test, type Page } from '@playwright/test';
+
+/**
+ * G11 D4 - the real golden path, in a real browser against a real kernel and a real database.
+ *
+ * Six steps are proven here and nothing is stubbed: the browser creates an incident, reloads and
+ * finds it, appends evidence whose source and content reference it then reads back from the API,
+ * queries the list through the filters, records a human verdict that survives a reload, and meets
+ * the permission wall for a viewer and the data scope of an operator.
+ *
+ * Two consequences of "nothing is stubbed" are worth stating rather than hiding:
+ *
+ *   * this spec WRITES to the kernel it points at (users, incidents, evidence, verdicts), so it
+ *     must run against a throw-away database - the same rule as
+ *     tests/acceptance/incident_slice_api.sh;
+ *   * every account it needs is created through the admin API, so it needs only the admin
+ *     credentials below. Nothing is read from a fixture and no response is intercepted.
+ *
+ * Selectors are data attributes and roles only - never localized copy (rules/06) - so the same
+ * spec runs with the shell in English or Chinese.
+ */
+
+const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
+const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
+const RUN = process.env.OPSWEAVE_G11_RUN || Date.now().toString(36).slice(-6);
+const SHOTS = process.env.OPSWEAVE_G11_SHOTS || 'artifacts/g11-d3';
+
+interface Account {
+  email: string;
+  password: string;
+  displayName: string;
+  role: 'operator' | 'viewer';
+}
+
+const OPERATOR: Account = { email: `g11-operator-${RUN}@example.invalid`, password: `operator-password-${RUN}`, displayName: `G11 operator ${RUN}`, role: 'operator' };
+const VIEWER: Account = { email: `g11-viewer-${RUN}@example.invalid`, password: `viewer-password-${RUN}`, displayName: `G11 viewer ${RUN}`, role: 'viewer' };
+
+/** The three records this run keeps track of across serial tests. */
+let concludedId = '';
+let openId = '';
+let operatorIncidentId = '';
+
+async function signIn(page: Page, email: string, password: string) {
+  await page.goto('/login');
+  await page.fill('input[type=email]', email);
+  await page.fill('input[type=password]', password);
+  await page.click('[data-testid="login-submit"]');
+  await expect(page).not.toHaveURL(/\/login/);
+}
+
+/** Drops the session cookie so the next sign-in is a different account. */
+async function signOut(page: Page) {
+  await page.context().clearCookies();
+}
+
+/** Creates the two non-admin accounts through the admin API, as an admin would. */
+async function createAccount(page: Page, account: Account) {
+  const login = await page.request.post('/api/v1/auth/login', { data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
+  expect(login.ok(), 'admin login for account setup').toBeTruthy();
+  const { csrfToken } = await login.json();
+  const created = await page.request.post('/api/v1/users', {
+    headers: { 'x-csrf-token': csrfToken },
+    data: { email: account.email, displayName: account.displayName, password: account.password, role: account.role },
+  });
+  expect([200, 201], 'create ' + account.role).toContain(created.status());
+}
+
+/** Reads the record id out of the detail route the page navigated to. */
+async function incidentIdFromUrl(page: Page): Promise<string> {
+  await page.waitForURL(/\/app\/incidents\/[0-9a-f-]{36}$/);
+  const match = /\/app\/incidents\/([0-9a-f-]{36})$/.exec(page.url());
+  expect(match, 'detail route carries the incident id').not.toBeNull();
+  return (match as RegExpExecArray)[1];
+}
+
+async function createIncident(page: Page, title: string, severity: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'WARNING' = 'MAJOR'): Promise<string> {
+  await page.goto('/app/incidents');
+  await expect(page.getByTestId('incidents-page')).toBeVisible();
+  await page.getByTestId('incident-create-open').click();
+  await page.getByTestId('incident-create-title').fill(title);
+  await page.getByTestId('incident-create-severity').click();
+  await page.locator('[data-testid="incident-create-severity-option-' + severity + '"]').click();
+  await page.getByTestId('incident-create-related').fill('api-gateway');
+  await page.getByTestId('incident-create-submit').click();
+  return incidentIdFromUrl(page);
+}
+
+test.describe.configure({ mode: 'serial' });
+
+test('the admin creates an incident, it survives a reload, evidence is verifiable, the list queries it, and a verdict sticks', async ({ page }) => {
+  await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await createAccount(page, OPERATOR);
+  await createAccount(page, VIEWER);
+
+  // 1. Create on the page, marked as a manual record.
+  const title = `G11 e2e gateway 5xx spike ${RUN}`;
+  concludedId = await createIncident(page, title);
+  const detail = page.getByTestId('incident-detail');
+  await expect(detail).toHaveAttribute('data-incident-id', concludedId);
+  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+  // The record says where it came from: a manual entry, because that is the only way this page writes.
+  await expect(page.getByTestId('incident-detail-source')).toHaveAttribute('data-source', 'MANUAL');
+  await expect(page.locator('[data-testid="incident-detail-status"] [data-status]')).toHaveAttribute('data-status', 'OPEN');
+  await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'missing');
+  await page.screenshot({ path: SHOTS + '/01-created-detail.png', fullPage: true });
+
+  // 2. Reload: the record is in the database, not in component state.
+  await page.reload();
+  await expect(detail).toHaveAttribute('data-incident-id', concludedId);
+  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+
+  // 3. Evidence whose source and content reference are read back as typed.
+  const contentRef = 'sha256:g11-e2e-' + RUN + '-log-excerpt';
+  const source = 'operator:' + ADMIN_EMAIL;
+  await page.getByTestId('incident-evidence-source').fill(source);
+  await page.getByTestId('incident-evidence-content-ref').fill(contentRef);
+  await page.getByTestId('incident-evidence-submit').click();
+  await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'present');
+  const evidenceRow = page.locator('[data-evidence-row]').first();
+  await expect(evidenceRow).toBeVisible();
+  await expect(page.locator('[data-testid="evidence-content-ref"]').first()).toHaveText(contentRef);
+  await expect(evidenceRow.locator('[data-evidence-source]')).toHaveAttribute('data-evidence-source', source);
+  await expect(evidenceRow.locator('[data-evidence-kind]')).toHaveAttribute('data-evidence-kind', 'LOG_EXCERPT');
+  await expect(page.getByTestId('incident-detail-evidence-count')).toHaveText('1');
+  // The first evidence row moves the incident into investigation (kernel state machine, T2).
+  await expect(page.locator('[data-testid="incident-detail-status"] [data-status]')).toHaveAttribute('data-status', 'INVESTIGATING');
+  await page.reload();
+  await expect(page.locator('[data-testid="evidence-content-ref"]').first()).toHaveText(contentRef);
+  await page.screenshot({ path: SHOTS + '/02-evidence-persisted.png', fullPage: true });
+
+  // 4. The list queries it: the filters run in the kernel, and a filter that cannot match says so.
+  await page.goto('/app/incidents');
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toBeVisible();
+  await page.getByTestId('incident-filter-status').click();
+  await page.locator('[data-testid="incident-filter-status-option-INVESTIGATING"]').click();
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toBeVisible();
+  await page.getByTestId('incident-filter-severity').click();
+  await page.locator('[data-testid="incident-filter-severity-option-MINOR"]').click();
+  await expect(page.getByTestId('incidents-empty')).toHaveAttribute('data-empty-state', 'filtered');
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(0);
+  await page.getByTestId('incident-filter-severity').click();
+  await page.locator('[data-testid="incident-filter-severity-option-MAJOR"]').click();
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toBeVisible();
+  await page.screenshot({ path: SHOTS + '/03-list-filtered.png', fullPage: true });
+
+  // 5. The human verdict is written once and survives a reload.
+  await page.goto('/app/incidents/' + concludedId);
+  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'open');
+  await page.getByTestId('incident-verdict-value').click();
+  await page.locator('[data-testid="incident-verdict-option-CONFIRMED"]').click();
+  await page.getByTestId('incident-verdict-rationale').fill('gateway returned 502 for four minutes; the log excerpt matches that window (' + RUN + ')');
+  await page.getByTestId('incident-verdict-submit').click();
+  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'recorded');
+  await expect(page.getByTestId('incident-verdict-record')).toHaveAttribute('data-verdict-value', 'CONFIRMED');
+  await expect(page.locator('[data-testid="incident-detail-status"] [data-status]')).toHaveAttribute('data-status', 'CONCLUDED');
+  await page.reload();
+  await expect(page.getByTestId('incident-verdict-record')).toHaveAttribute('data-verdict-value', 'CONFIRMED');
+  await page.screenshot({ path: SHOTS + '/04-verdict-persisted.png', fullPage: true });
+
+  // Evidence is still appendable after the verdict (ADR-G11-001 §3.1: a late paste during review
+  // is a real audit case), and appending it must not reopen the incident. This is the one place
+  // the page previously claimed the opposite, so it is asserted rather than assumed.
+  await expect(page.getByTestId('incident-evidence-form')).toBeVisible();
+  await page.getByTestId('incident-evidence-content-ref').fill('sha256:g11-e2e-' + RUN + '-post-verdict-review');
+  await page.getByTestId('incident-evidence-submit').click();
+  await expect(page.getByTestId('incident-detail-evidence-count')).toHaveText('2');
+  await expect(page.locator('[data-testid="incident-detail-status"] [data-status]')).toHaveAttribute('data-status', 'CONCLUDED');
+  await expect(page.getByTestId('incident-verdict-record')).toHaveAttribute('data-verdict-value', 'CONFIRMED');
+
+  // The list reflects the verdict: a CONCLUDED filter finds it, an OPEN filter does not.
+  await page.goto('/app/incidents');
+  await page.getByTestId('incident-filter-status').click();
+  await page.locator('[data-testid="incident-filter-status-option-CONCLUDED"]').click();
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toBeVisible();
+  await page.getByTestId('incident-filter-status').click();
+  await page.locator('[data-testid="incident-filter-status-option-OPEN"]').click();
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(0);
+
+  // A second incident is left open on purpose: the viewer and the operator need a record that
+  // can still accept a verdict, and this one has no evidence at all.
+  openId = await createIncident(page, `G11 e2e unproven incident ${RUN}`, 'MINOR');
+  await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'missing');
+});
+
+test('a viewer reads every incident and is refused every write, with the refusal explained', async ({ page }) => {
+  await signOut(page);
+  await signIn(page, VIEWER.email, VIEWER.password);
+
+  // Read: a viewer sees incidents it does not own.
+  await page.goto('/app/incidents');
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toBeVisible();
+  await expect(page.locator('[data-incident-row="' + openId + '"]')).toBeVisible();
+  await page.goto('/app/incidents/' + concludedId);
+  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'recorded');
+
+  // Write: creating is refused by the server (403), and the page says which code refused it.
+  await page.goto('/app/incidents');
+  await page.getByTestId('incident-create-open').click();
+  await page.getByTestId('incident-create-title').fill('G11 e2e viewer must not create this ' + RUN);
+  await page.getByTestId('incident-create-submit').click();
+  const createError = page.getByTestId('incident-create-error');
+  await expect(createError).toBeVisible();
+  await expect(createError).toHaveAttribute('data-error-code', 'FORBIDDEN');
+  await page.screenshot({ path: SHOTS + '/05-viewer-create-refused.png', fullPage: true });
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(1);
+
+  // Write: a verdict is refused for the same reason, on a record that could otherwise accept one.
+  await page.goto('/app/incidents/' + openId);
+  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'open');
+  await page.getByTestId('incident-verdict-rationale').fill('viewer attempts a verdict; the server must refuse it (' + RUN + ')');
+  await page.getByTestId('incident-verdict-submit').click();
+  const verdictError = page.getByTestId('incident-verdict-error');
+  await expect(verdictError).toBeVisible();
+  await expect(verdictError).toHaveAttribute('data-error-code', 'FORBIDDEN');
+  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'open');
+  await page.screenshot({ path: SHOTS + '/06-viewer-verdict-refused.png', fullPage: true });
+});
+
+test('an operator cannot see a record owned by someone else, and can still close its own loop', async ({ page }) => {
+  await signOut(page);
+  await signIn(page, OPERATOR.email, OPERATOR.password);
+
+  // Scope: nothing is visible yet, and the page says "no incident", not "healthy".
+  await page.goto('/app/incidents');
+  await expect(page.getByTestId('incidents-empty')).toHaveAttribute('data-empty-state', 'none');
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(0);
+  await page.screenshot({ path: SHOTS + '/07-operator-empty-state.png', fullPage: true });
+
+  // Scope: the admin's record is a 404 for this operator, not a redacted row.
+  await page.goto('/app/incidents/' + concludedId);
+  await expect(page.getByTestId('incident-detail')).toHaveAttribute('data-detail-state', 'not-found');
+  await expect(page.getByTestId('incident-not-found')).toBeVisible();
+  await page.screenshot({ path: SHOTS + '/08-operator-not-found.png', fullPage: true });
+
+  // The operator's own record goes through the whole loop, and INCONCLUSIVE is allowed with no
+  // evidence - the one verdict the kernel accepts without any.
+  operatorIncidentId = await createIncident(page, `G11 e2e operator incident ${RUN}`, 'WARNING');
+  await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'missing');
+  await page.getByTestId('incident-verdict-rationale').fill('no evidence could be collected before the window closed (' + RUN + ')');
+  await page.getByTestId('incident-verdict-submit').click();
+  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'recorded');
+  await expect(page.getByTestId('incident-verdict-record')).toHaveAttribute('data-verdict-value', 'INCONCLUSIVE');
+  await page.reload();
+  await expect(page.getByTestId('incident-verdict-record')).toHaveAttribute('data-verdict-value', 'INCONCLUSIVE');
+
+  // And the operator's list contains that record and still not the admin's.
+  await page.goto('/app/incidents');
+  await expect(page.locator('[data-incident-row="' + operatorIncidentId + '"]')).toBeVisible();
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(0);
+  await page.screenshot({ path: SHOTS + '/09-operator-scoped-list.png', fullPage: true });
+});
+
+test('the loading state is a real pending read, and a real transport failure is reported as stale', async ({ page }) => {
+  await signOut(page);
+  await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await page.goto('/app/incidents');
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toBeVisible();
+
+  // Slow the transport down (CDP network emulation - no response is intercepted or rewritten),
+  // then navigate inside the app: the detail page must show its pending state, not a blank page
+  // and not a zero.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 1500, downloadThroughput: 250000, uploadThroughput: 250000 });
+  await page.locator('[data-incident-row="' + concludedId + '"] a.ow-ident-link').click();
+  const pending = page.getByTestId('incident-detail');
+  await expect(pending).toHaveAttribute('data-detail-state', 'loading');
+  await page.screenshot({ path: SHOTS + '/10-loading-state.png', fullPage: true });
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'recorded');
+
+  // A real transport failure: the transport is taken away and the page is asked to refresh. It
+  // keeps the data it read before, marks itself stale, and names the read time - the alternative
+  // (an empty panel, or silently showing old rows as current) is what this assertion forbids.
+  await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 });
+  await page.getByTestId('incident-refresh').click();
+  const stale = page.getByTestId('incident-freshness');
+  await expect(stale).toHaveAttribute('data-stale', 'true');
+  // The rows it already had are still there: a failed refresh does not erase evidence.
+  await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'present');
+  await page.screenshot({ path: SHOTS + '/11-offline-refresh-stale.png', fullPage: true });
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  await page.getByTestId('incident-refresh').click();
+  await expect(page.getByTestId('incident-freshness')).toHaveCount(0);
+});
+/**
+ * AGENTS.md requires a UI change to be reviewed at 1440/1024/390 in both themes. This test takes
+ * those captures from the same real backend (no fixture) and asserts the two things a screenshot
+ * cannot: the page never scrolls sideways, and the header's primary action is the element a click
+ * actually reaches.
+ *
+ * The second assertion is a regression guard, not a formality: the first run of this spec found
+ * .page-header's fixed 80px height (styles.css, page-template §2.1) letting a wrapped header put
+ * its actions under the next panel, which then intercepted every click on the create button.
+ */
+test('the list and the detail survive 1440/1024/390 in both themes, and the header action is reachable', async ({ page }) => {
+  await signOut(page);
+  await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await page.goto('/app/incidents');
+  await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toBeVisible();
+
+  for (const theme of ['light', 'dark'] as const) {
+    const current = await page.evaluate(() => document.documentElement.dataset.theme);
+    if (current !== theme) {
+      await page.getByTestId('theme-toggle').click();
+      await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+    }
+    for (const width of [1440, 1024, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const [path, name] of [['/app/incidents', 'list'], ['/app/incidents/' + concludedId, 'detail']] as const) {
+        await page.goto(path);
+        await expect(page.locator('[data-testid="incident-detail"], [data-testid="incidents-page"]').first()).toBeVisible();
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(overflow, path + ' at ' + width + '/' + theme).toBeLessThanOrEqual(1);
+        await page.screenshot({ path: SHOTS + '/matrix-' + width + '-' + theme + '-' + name + '.png', fullPage: true });
+      }
+    }
+  }
+
+  // Geometry, not a screenshot: at 1440 the create button must be the element the pointer reaches.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/app/incidents');
+  const create = page.getByTestId('incident-create-open');
+  await expect(create).toBeVisible();
+  const box = await create.boundingBox();
+  expect(box).not.toBeNull();
+  const reached = await page.evaluate(({ x, y }) => {
+    const element = document.elementFromPoint(x, y);
+    return Boolean(element && element.closest('[data-testid="incident-create-open"]'));
+  }, { x: (box as { x: number; width: number }).x + (box as { width: number }).width / 2, y: (box as { y: number; height: number }).y + (box as { height: number }).height / 2 });
+  expect(reached, 'the header primary action is not covered by the next panel').toBe(true);
+});

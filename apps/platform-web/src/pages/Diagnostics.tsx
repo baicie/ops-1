@@ -9,10 +9,22 @@ import { CopyButton, EmptyState, KV, TimeAgo } from '../components/Ui';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, UnknownValue } from '../components/app/status-indicator';
-import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
+import { badgeVariantForTone, glyphForTone, statusForCode } from '../components/status-tone';
 import { formatDuration } from '../format';
 import { useI18n, useT } from '../i18n';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import type { MessageKey } from '../i18n';
+import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+
+/**
+ * The runtime policies arrive as config keys ("bundle.signature", "placement.fence") and used to
+ * be printed as their own labels, so the panel read as two English dot-paths with a number after
+ * each. These are the two keys the kernel ships; a key this table does not know still shows its
+ * own name, because an invented label would be worse than a dot-path.
+ */
+const POLICY_LABELS: Record<string, { label: MessageKey; hint: MessageKey }> = {
+  'bundle.signature': { label: 'diagnostics.policy.signature.label', hint: 'diagnostics.policy.signature.hint' },
+  'placement.fence': { label: 'diagnostics.policy.fence.label', hint: 'diagnostics.policy.fence.hint' },
+};
 
 const commands = `opsctl status
 opsctl doctor
@@ -29,10 +41,11 @@ const POLL_INTERVAL_MS = 8000;
  * from STATUS_MAP, so the pill is painted here instead of through StatusPill, which localizes.
  */
 function DatabasePill({ database }: { database: string }) {
-  const code = database === 'connected' ? 'READY' : 'FAILED';
-  const tone = STATUS_MAP[code].tone;
+  // The wire value is `database`; this is the row of the one status table its pill borrows.
+  const statusCode = database === 'connected' ? 'READY' : 'FAILED';
+  const tone = statusForCode(statusCode)?.tone ?? 'unknown';
   return (
-    <Badge variant={badgeVariantForTone(tone)} data-status={code}>
+    <Badge variant={badgeVariantForTone(tone)} data-status={statusCode}>
       <Icon name={glyphForTone(tone)} size={12} />
       {database}
     </Badge>
@@ -41,6 +54,7 @@ function DatabasePill({ database }: { database: string }) {
 
 export function DiagnosticsPage() {
   const t = useT();
+  const { locale } = useI18n();
   const { formatDateTime } = useI18n();
   const { data, error, loading, reload, observedAt } = useObservedPolling(() => api.get<Diagnostics>('/api/v1/diagnostics'), POLL_INTERVAL_MS);
   const [raw, setRaw] = useState(false);
@@ -120,7 +134,7 @@ export function DiagnosticsPage() {
                       <TableBody className={stackBody}>
                         {nodes.map((node) => (
                           <TableRow key={node.id} className={stackRow}>
-                            <StackCell label={t('table.node')}><strong>{node.name}</strong><div className="mono text-sm">{node.id}</div></StackCell>
+                            <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale })} cardFact />
                             <StackCell label={t('table.status')}><StatusPill status={node.status} /></StackCell>
                             {/* No recorded heartbeat is NO_DATA, not "never" and not a blank cell. */}
                             <StackCell label={t('table.lastObserved')}>{node.lastSeenAt ? <TimeAgo value={node.lastSeenAt} /> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
@@ -130,7 +144,12 @@ export function DiagnosticsPage() {
                     </Table>
                   )}
                 </section>
-                <section className="panel"><div className="panel-head"><div><h2>{t('common.runtimePolicies')}</h2><p>{t('diagnostics.policies.description')}</p></div></div>{policies.length === 0 ? <EmptyState icon="settings" title={t('diagnostics.policies.empty')} /> : <div className="kv-grid">{policies.map(([key, value]) => <KV key={key} label={key}>{value}</KV>)}</div>}</section>
+                <section className="panel"><div className="panel-head"><div><h2>{t('common.runtimePolicies')}</h2><p>{t('diagnostics.policies.description')}</p></div></div>{policies.length === 0 ? <EmptyState icon="settings" title={t('diagnostics.policies.empty')} /> : <div className="kv-grid">{policies.map(([key, value]) => (
+                  <KV key={key} label={POLICY_LABELS[key] ? t(POLICY_LABELS[key].label) : key}>
+                    <span className="mono">{String(value)}</span>
+                    {POLICY_LABELS[key] ? <span className="text-sm text-muted-foreground"> {t(POLICY_LABELS[key].hint)}</span> : null}
+                  </KV>
+                ))}</div>}</section>
                 <section className="panel"><div className="panel-head"><div><h2>{t('diagnostics.audit.title')}</h2><p>{t('diagnostics.audit.description')}</p></div></div>{events.length === 0 ? <EmptyState icon="activity" title={t('diagnostics.audit.empty')} /> : (
                   <ul className="event-list">{events.map((event) => <li key={event.id}><div className="event-marker"><Icon name={event.result === 'REJECTED' ? 'warning' : 'check'} size={13} /></div><div className="event-copy"><div className="event-title"><strong>{event.eventType}</strong><StatusPill status={event.result} /></div><p>{event.subjectType} <span className="mono">{event.subjectId}</span></p></div><TimeAgo value={event.occurredAt} /></li>)}</ul>
                 )}</section>

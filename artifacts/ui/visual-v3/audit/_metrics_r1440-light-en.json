@@ -1,0 +1,5397 @@
+{
+ "config": {
+  "label": "r1440-light-en",
+  "theme": "light",
+  "mode": "after",
+  "baseURL": "http://127.0.0.1:5173",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/admin/jobs": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 970,
+   "offenders": [],
+   "identityKey": [
+    "host-metrics · 1285",
+    "host-metrics · e273",
+    "host-metrics · 9c4a",
+    "host-metrics · 3f8b",
+    "host-metrics · a71d",
+    "host-metrics · 5b6e",
+    "host-metrics · c04f",
+    "host-metrics · 7d2e",
+    "host-metrics · f19a",
+    "host-metrics · 6e35",
+    "host-metrics · 2a8f",
+    "host-metrics · b53c",
+    "host-metrics · 8f47",
+    "host-metrics · 41e6"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.36,
+    0.36,
+    1
+   ],
+   "columnLabels": [
+    "Job",
+    "Status",
+    "Duration",
+    "Created"
+   ],
+   "tableRowCounts": [
+    14
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "host-metrics · 1285",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 1285",
+      "qualifier": "r7Attempts 1/3",
+      "facts": [
+       "Succeeded",
+       "1800.0 s",
+       "18h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       260,
+       265,
+       281
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 259.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 265,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 280.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 265,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 264.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 259.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · e273",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · e273",
+      "qualifier": "r7Attempts 2/3",
+      "facts": [
+       "Succeeded",
+       "1800.0 s",
+       "16h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       302,
+       307,
+       323
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 301.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 307,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 322.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 307,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 306.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 301.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 9c4a",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 9c4a",
+      "qualifier": "r7Attempts 3/3",
+      "facts": [
+       "Running",
+       "54723.3 s running",
+       "15h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       344,
+       349,
+       365
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 343.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 349,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 364.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 349,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 348.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 343.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 3f8b",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 3f8b",
+      "qualifier": "r7Attempts 1/3",
+      "facts": [
+       "Failed",
+       "1800.0 s",
+       "14h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       386,
+       391,
+       407
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 385.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 391,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 406.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 391,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 390.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 385.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · a71d",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · a71d",
+      "qualifier": "r7Attempts 2/3",
+      "facts": [
+       "Succeeded",
+       "1800.0 s",
+       "13h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       428,
+       433,
+       449
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 427.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 433,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 448.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 433,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 432.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 427.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 5b6e",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 5b6e",
+      "qualifier": "r7Attempts 3/3",
+      "facts": [
+       "Queued",
+       "Queued",
+       "12h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       470,
+       475,
+       491
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 469.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 475,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 490.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 475,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 474.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 469.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · c04f",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · c04f",
+      "qualifier": "r7Attempts 1/3",
+      "facts": [
+       "Succeeded",
+       "1800.0 s",
+       "11h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       512,
+       517,
+       533
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 511.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 517,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 532.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 517,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 516.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 511.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 7d2e",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 7d2e",
+      "qualifier": "r7Attempts 2/3",
+      "facts": [
+       "Cancelled",
+       "1800.0 s",
+       "9h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       554,
+       559,
+       575
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 553.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 559,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 574.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 559,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 558.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 553.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · f19a",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · f19a",
+      "qualifier": "r7Attempts 3/3",
+      "facts": [
+       "Running",
+       "29883.3 s running",
+       "8h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       596,
+       601,
+       617
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 595.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 601,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 616.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 601,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 600.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 595.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 6e35",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 6e35",
+      "qualifier": "r7Attempts 1/3",
+      "facts": [
+       "Succeeded",
+       "1800.0 s",
+       "7h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       638,
+       643,
+       659
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 637.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 643,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 658.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 643,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 642.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 637.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 2a8f",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 2a8f",
+      "qualifier": "r7Attempts 2/3",
+      "facts": [
+       "Failed",
+       "1800.0 s",
+       "6h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       680,
+       685,
+       701
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 679.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 685,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 700.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 685,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 684.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 679.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · b53c",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · b53c",
+      "qualifier": "r7Attempts 3/3",
+      "facts": [
+       "Succeeded",
+       "1800.0 s",
+       "5h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       722,
+       727,
+       743
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 721.5,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 727,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 742.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 727,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 726.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 721.5,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 8f47",
+     "clipped": false,
+     "width": 277,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 8f47",
+      "qualifier": "r7Attempts 1/3",
+      "facts": [
+       "Running",
+       "13323.3 s running",
+       "4h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       764,
+       769,
+       785
+      ],
+      "height": 41
+     },
+     "geometry": {
+      "row": {
+       "top": 763.5,
+       "h": 41
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 769,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 784.6,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 769,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 768.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 763.5,
+       "h": 41
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 41e6",
+     "clipped": false,
+     "width": 279,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 41e6",
+      "qualifier": "r7Attempts 2/3",
+      "facts": [
+       "Succeeded",
+       "1800.0 s",
+       "3h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       805,
+       809,
+       825
+      ],
+      "height": 40
+     },
+     "geometry": {
+      "row": {
+       "top": 804.5,
+       "h": 40
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 809.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 824.8,
+       "h": 15.4
+      },
+      "badge": {
+       "top": 809.3,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 808.8,
+       "h": 32
+      },
+      "duration": {
+       "top": 804.5,
+       "h": 40
+      }
+     },
+     "values": 5
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 14
+   },
+   "firstScreen": {
+    "full": 14,
+    "partial": 14,
+    "total": 14
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/activity": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1077,
+   "offenders": [],
+   "identityKey": [
+    "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
+    "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
+    "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
+    "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
+    "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
+    "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
+    "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
+    "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
+    "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
+    "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
+    "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
+    "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
+    "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
+    "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
+    "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
+    "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
+    "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 17
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.94,
+    1
+   ],
+   "columnLabels": [
+    "Event",
+    "Outcome",
+    "Occurred"
+   ],
+   "tableRowCounts": [
+    17
+   ],
+   "duplicateRunMax": 1,
+   "rows": 17,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.created · f0fe",
+      "qualifier": "USER 82475274sequence 0",
+      "facts": [
+       "Accepteddeployment.create",
+       "just now05:02:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       259,
+       264,
+       280
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.enabled · 6b1c",
+      "qualifier": "USER 82475274sequence 1",
+      "facts": [
+       "Succeededplugin.enable",
+       "24m ago04:38:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       301,
+       306,
+       322
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.enrolled · 22dd",
+      "qualifier": "USER 82475274sequence 2",
+      "facts": [
+       "Unknownnode.enroll",
+       "48m ago04:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       343,
+       348,
+       364
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.disabled · d47a",
+      "qualifier": "USER 82475274sequence 3",
+      "facts": [
+       "Acceptedplugin.disable",
+       "1h ago03:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       385,
+       390,
+       406
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "policy.updated · 19e4",
+      "qualifier": "USER 82475274sequence 4",
+      "facts": [
+       "Succeededpolicy.update",
+       "1h ago03:26:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       427,
+       432,
+       448
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "enrollment_token.issued · f0fe",
+      "qualifier": "USER 82475274sequence 5",
+      "facts": [
+       "Unknowntoken.issue",
+       "2h ago03:02:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       469,
+       474,
+       490
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.failed · 6b1c",
+      "qualifier": "USER 82475274sequence 6",
+      "facts": [
+       "Accepteddeployment.deploy",
+       "2h ago02:38:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       511,
+       516,
+       532
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.unreachable · 22dd",
+      "qualifier": "USER 82475274sequence 7",
+      "facts": [
+       "Succeedednode.observe",
+       "2h ago02:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       553,
+       558,
+       574
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.probed · 6b1c",
+      "qualifier": "USER 82475274sequence 8× 9 3h ago → 6h ago",
+      "facts": [
+       "Acceptedplugin.probe",
+       "3h ago01:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       595,
+       600,
+       616
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.enabled · 22dd",
+      "qualifier": "USER 82475274sequence 17",
+      "facts": [
+       "Unknownplugin.enable",
+       "6h ago22:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       637,
+       642,
+       658
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.enrolled · d47a",
+      "qualifier": "USER 82475274sequence 18",
+      "facts": [
+       "Acceptednode.enroll",
+       "7h ago21:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       679,
+       684,
+       700
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.disabled · 19e4",
+      "qualifier": "USER 82475274sequence 19",
+      "facts": [
+       "Succeededplugin.disable",
+       "7h ago21:26:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       721,
+       726,
+       742
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "policy.updated · f0fe",
+      "qualifier": "USER 82475274sequence 20",
+      "facts": [
+       "Unknownpolicy.update",
+       "8h ago21:02:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       763,
+       768,
+       784
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "enrollment_token.issued · 6b1c",
+      "qualifier": "USER 82475274sequence 21",
+      "facts": [
+       "Acceptedtoken.issue",
+       "8h ago20:38:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       805,
+       810,
+       826
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.failed · 22dd",
+      "qualifier": "USER 82475274sequence 22",
+      "facts": [
+       "Succeededdeployment.deploy",
+       "8h ago20:14:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       847,
+       852,
+       868
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
+     "clipped": false,
+     "width": 533,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.unreachable · d47a",
+      "qualifier": "USER 82475274sequence 23",
+      "facts": [
+       "Unknownnode.observe",
+       "9h ago19:50:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       889,
+       894,
+       910
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45",
+     "clipped": false,
+     "width": 535,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "nowrap",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.created · 19e4",
+      "qualifier": "USER 82475274sequence 24",
+      "facts": [
+       "Accepteddeployment.create",
+       "9h ago19:26:45"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       930,
+       934,
+       950
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 4
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 17
+   },
+   "firstScreen": {
+    "full": 15,
+    "partial": 16,
+    "total": 17
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/nodes": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 953,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "Node",
+    "Status",
+    "Instances",
+    "Resources"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "macos/aarch64gen 1",
+      "facts": [
+       "Ready",
+       "1/4 Ready",
+       "12% · 31%2.3 GiB / 7.5 GiB · just now"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       387,
+       393,
+       409
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 387.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 392.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 408.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 392.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 387.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "linux/x86_64gen 2",
+      "facts": [
+       "Ready",
+       "2/4 Ready",
+       "18% · 32%2.4 GiB / 7.5 GiB · 3m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       429,
+       435,
+       451
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 429.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 434.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 450.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 434.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 429.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "macos/aarch64gen 3",
+      "facts": [
+       "Ready",
+       "3/4 Ready",
+       "24% · 34%2.5 GiB / 7.5 GiB · 6m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       471,
+       477,
+       493
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 471.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 476.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 492.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 476.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 471.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "linux/x86_64gen 1",
+      "facts": [
+       "Unreachable",
+       "1/4 Ready",
+       "This node reported no resource snapshot for the window."
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       513,
+       519,
+       535
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 513.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 518.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 534.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 518.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 513.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "macos/aarch64gen 2",
+      "facts": [
+       "Ready",
+       "2/4 Ready",
+       "36% · 36%2.7 GiB / 7.5 GiB · 12m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       555,
+       561,
+       577
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 555.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 560.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 576.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 560.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 555.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "linux/x86_64gen 3",
+      "facts": [
+       "Stale",
+       "3/4 Ready",
+       "42% · 37%2.7 GiB / 7.5 GiB · 15m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       597,
+       603,
+       619
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 597.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 602.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 618.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 602.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 597.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "macos/aarch64gen 1",
+      "facts": [
+       "Ready",
+       "1/4 Ready",
+       "48% · 38%2.8 GiB / 7.5 GiB · 18m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       639,
+       645,
+       661
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 639.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 644.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 660.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 644.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 639.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "linux/x86_64gen 2",
+      "facts": [
+       "Ready",
+       "2/4 Ready",
+       "54% · 39%2.9 GiB / 7.5 GiB · 21m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       681,
+       687,
+       703
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 681.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 686.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 702.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 686.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 681.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "macos/aarch64gen 3",
+      "facts": [
+       "Ready",
+       "3/4 Ready",
+       "60% · 40%3.0 GiB / 7.5 GiB · 24m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       723,
+       729,
+       745
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 723.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 728.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 744.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 728.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 723.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "linux/x86_64gen 1",
+      "facts": [
+       "Needs attention",
+       "1/4 Ready",
+       "66% · 41%3.1 GiB / 7.5 GiB · 27m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       765,
+       771,
+       787
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 765.4,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 770.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 786.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 770.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 765.4,
+       "h": 42
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 207,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "macos/aarch64gen 2",
+      "facts": [
+       "Ready",
+       "2/4 Ready",
+       "72% · 43%3.2 GiB / 7.5 GiB · 30m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       807,
+       813,
+       829
+      ],
+      "height": 41
+     },
+     "geometry": {
+      "row": {
+       "top": 807.4,
+       "h": 41
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 812.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 828.5,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 812.4,
+       "h": 32
+      },
+      "duration": {
+       "top": 807.4,
+       "h": 41
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 209,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "linux/x86_64gen 3",
+      "facts": [
+       "Ready",
+       "3/4 Ready",
+       "78% · 44%3.3 GiB / 7.5 GiB · 33m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       848,
+       853,
+       869
+      ],
+      "height": 40
+     },
+     "geometry": {
+      "row": {
+       "top": 848.4,
+       "h": 40
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 853.2,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 868.8,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 852.7,
+       "h": 32
+      },
+      "duration": {
+       "top": 848.4,
+       "h": 40
+      }
+     },
+     "values": 5
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 12,
+    "partial": 12,
+    "total": 12
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 3990,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 15
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    0.42,
+    1,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "Observed",
+    "CPU",
+    "Memory",
+    "Filesystem",
+    "Plugin",
+    "Version",
+    "State",
+    "Container",
+    "Logs"
+   ],
+   "tableRowCounts": [
+    12,
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 15,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 15
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 1,
+    "total": 15
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 961,
+   "offenders": [],
+   "identityKey": [
+    "Hello Ops",
+    "Host Metrics",
+    "Log Tail",
+    "Data Catalog",
+    "Policy Engine",
+    "Registry Mirror",
+    "Edge Probe",
+    "Edge Tunnel",
+    "Fault Lab",
+    "Replay Lab",
+    "Audit Sink",
+    "Console Bridge"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    1,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "Plugin",
+    "Version",
+    "Deployment",
+    "READY replicas",
+    "Digest / trust"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "Hello Ops",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Hello Ops",
+      "qualifier": "Systemtrusted-team",
+      "facts": [
+       "0.2.0",
+       "Installed27s ago · gen 2",
+       "0/3",
+       "sha256:a100a10…a100a100Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       395,
+       401,
+       416
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 395.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 400.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 416.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 400.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 395.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Host Metrics",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1",
+       "Installed30m ago · gen 3",
+       "1/3",
+       "sha256:a101a10…a101a101Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       437,
+       443,
+       458
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 437.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 442.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 458.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 442.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 437.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Log Tail",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Log Tail",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2",
+       "Disabled1h ago · gen 4",
+       "2/3",
+       "sha256:a102a10…a102a102Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       479,
+       485,
+       500
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 479.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 484.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 500.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 484.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 479.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Data Catalog",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Data Catalog",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0Newer package 0.2.3",
+       "Installed1h ago · gen 5",
+       "0/3",
+       "sha256:a103a10…a103a103Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       521,
+       527,
+       542
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 521.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 526.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 542.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 526.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 521.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Policy Engine",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Policy Engine",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1Newer package 0.2.0",
+       "Staged2h ago · gen 6",
+       "1/3",
+       "sha256:a104a10…a104a104Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       563,
+       569,
+       584
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 563.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 568.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 584.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 568.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 563.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Registry Mirror",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Registry Mirror",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2Newer package 0.2.1",
+       "Failed2h ago · gen 7",
+       "2/3",
+       "sha256:a105a10…a105a105Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       605,
+       611,
+       626
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 605.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 610.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 626.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 610.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 605.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Edge Probe",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Edge Probe",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0Newer package 0.2.2",
+       "Installed3h ago · gen 8",
+       "0/3",
+       "sha256:a106a10…a106a106Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       647,
+       653,
+       668
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 647.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 652.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 668.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 652.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 647.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Edge Tunnel",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Edge Tunnel",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1Newer package 0.2.3",
+       "Installed3h ago · gen 9",
+       "1/3",
+       "sha256:a107a10…a107a107Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       689,
+       695,
+       710
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 689.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 694.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 710.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 694.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 689.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Fault Lab",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Fault Lab",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2Newer package 0.2.0",
+       "Staged4h ago · gen 10",
+       "2/3",
+       "sha256:a108a10…a108a108Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       731,
+       737,
+       752
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 731.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 736.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 752.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 736.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 731.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Replay Lab",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Replay Lab",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0Newer package 0.2.1",
+       "Installed4h ago · gen 11",
+       "0/3",
+       "sha256:a109a10…a109a109Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       773,
+       779,
+       794
+      ],
+      "height": 42
+     },
+     "geometry": {
+      "row": {
+       "top": 773.3,
+       "h": 42
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 778.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 794.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 778.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 773.3,
+       "h": 42
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Audit Sink",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Audit Sink",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1Newer package 0.2.2",
+       "Installed5h ago · gen 12",
+       "1/3",
+       "sha256:a110a11…a110a110Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       815,
+       821,
+       836
+      ],
+      "height": 41
+     },
+     "geometry": {
+      "row": {
+       "top": 815.3,
+       "h": 41
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 820.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 836.3,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 820.3,
+       "h": 32
+      },
+      "duration": {
+       "top": 815.3,
+       "h": 41
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Console Bridge",
+     "clipped": false,
+     "width": 229,
+     "facts": 0,
+     "factValues": 4,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Console Bridge",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.3",
+       "Disabled5h ago",
+       "2/3",
+       "sha256:a111a11…a111a111Verified"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       856,
+       861,
+       877
+      ],
+      "height": 40
+     },
+     "geometry": {
+      "row": {
+       "top": 856.3,
+       "h": 40
+      },
+      "padding": "0px 0px",
+      "rowGap": "normal",
+      "ident": {
+       "top": 861,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 876.6,
+       "h": 15.4
+      },
+      "badge": null,
+      "menu": {
+       "top": 860.5,
+       "h": 32
+      },
+      "duration": {
+       "top": 856.3,
+       "h": 40
+      }
+     },
+     "values": 6
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 12,
+    "partial": 12,
+    "total": 12
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1679,
+   "offenders": [],
+   "identityKey": [
+    "orders-raw",
+    "orders-curated",
+    "shipments",
+    "events-click",
+    "events-impression",
+    "inventory",
+    "invoice-lines",
+    "node-metrics",
+    "plugin-invocations",
+    "audit-ledger",
+    "risk-scores",
+    "stale-feed",
+    "orders-curated · 4f1c",
+    "inventory · b93d",
+    "orders-curated · 71ae",
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 27
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    null,
+    null,
+    1,
+    0.33,
+    0.25
+   ],
+   "columnLabels": [
+    "Dataset",
+    "Schema",
+    "Dataset",
+    "Status",
+    "Node",
+    "Status",
+    "Generation"
+   ],
+   "tableRowCounts": [
+    12,
+    3,
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "orders-raw",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-raw",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       404,
+       409,
+       425
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       446,
+       451,
+       467
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "shipments",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "shipments",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       488,
+       493,
+       509
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "events-click",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "events-click",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       530,
+       535,
+       551
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "events-impression",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "events-impression",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       572,
+       577,
+       593
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "inventory",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "inventory",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       614,
+       619,
+       635
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "invoice-lines",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "invoice-lines",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       656,
+       661,
+       677
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "node-metrics",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "node-metrics",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       698,
+       703,
+       719
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "plugin-invocations",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "plugin-invocations",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       740,
+       745,
+       761
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "audit-ledger",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "audit-ledger",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       782,
+       787,
+       803
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "risk-scores",
+     "clipped": false,
+     "width": 721,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "risk-scores",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       824,
+       829,
+       845
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "stale-feed",
+     "clipped": false,
+     "width": 723,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "stale-feed",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       865,
+       869,
+       885
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated · 4f1c",
+     "clipped": false,
+     "width": 326,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated · 4f1c",
+      "qualifier": "",
+      "facts": [
+       "Failed"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1035,
+       1041,
+       1056
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "inventory · b93d",
+     "clipped": false,
+     "width": 326,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "inventory · b93d",
+      "qualifier": "",
+      "facts": [
+       "Unknown"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1077,
+       1083,
+       1098
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated · 71ae",
+     "clipped": false,
+     "width": 328,
+     "facts": 0,
+     "factValues": 1,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated · 71ae",
+      "qualifier": "",
+      "facts": [
+       "Failed"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1118,
+       1123,
+       1138
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1035,
+       1041,
+       1056
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1077,
+       1083,
+       1098
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1119,
+       1125,
+       1140
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "",
+      "facts": [
+       "Unreachable",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1161,
+       1167,
+       1182
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1203,
+       1209,
+       1224
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "",
+      "facts": [
+       "Stale",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1245,
+       1251,
+       1266
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1287,
+       1293,
+       1308
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1329,
+       1335,
+       1350
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1371,
+       1377,
+       1392
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "",
+      "facts": [
+       "Needs attention",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1413,
+       1419,
+       1434
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 125,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1455,
+       1461,
+       1476
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 127,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1496,
+       1501,
+       1516
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 3
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 27
+   },
+   "firstScreen": {
+    "full": 11,
+    "partial": 12,
+    "total": 27
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1384,
+   "offenders": [],
+   "identityKey": [
+    "Platform Admin",
+    "Dana Ops",
+    "Lee Chen",
+    "Sam Ito",
+    "Nia Park",
+    "Rui Costa",
+    "Aki Tan",
+    "Noa Berg",
+    "trusted-team",
+    "lab",
+    "partner-a",
+    "partner-b",
+    "community",
+    "vendor-x"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "User",
+    "Role",
+    "Status",
+    "Actions",
+    "Publisher",
+    "Fingerprint",
+    "Trust",
+    "Note"
+   ],
+   "tableRowCounts": [
+    8,
+    6
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "Platform Admin",
+     "clipped": false,
+     "width": 336,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Platform Admin",
+      "qualifier": "admin@opsweave.local",
+      "facts": [
+       "admin",
+       "Active",
+       "Disable"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       607,
+       612,
+       628
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Dana Ops",
+     "clipped": false,
+     "width": 336,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Dana Ops",
+      "qualifier": "dana@opsweave.local",
+      "facts": [
+       "operator",
+       "Active",
+       "Disable"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       649,
+       654,
+       670
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Lee Chen",
+     "clipped": false,
+     "width": 336,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Lee Chen",
+      "qualifier": "lee@opsweave.local",
+      "facts": [
+       "viewer",
+       "Active",
+       "Disable"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       691,
+       696,
+       712
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Sam Ito",
+     "clipped": false,
+     "width": 336,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Sam Ito",
+      "qualifier": "sam@opsweave.local",
+      "facts": [
+       "operator",
+       "Active",
+       "Disable"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       733,
+       738,
+       754
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Nia Park",
+     "clipped": false,
+     "width": 336,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Nia Park",
+      "qualifier": "nia@opsweave.local",
+      "facts": [
+       "viewer",
+       "Active",
+       "Disable"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       775,
+       780,
+       796
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Rui Costa",
+     "clipped": false,
+     "width": 336,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Rui Costa",
+      "qualifier": "rui@opsweave.local",
+      "facts": [
+       "operator",
+       "Active",
+       "Disable"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       817,
+       822,
+       838
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Aki Tan",
+     "clipped": false,
+     "width": 336,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Aki Tan",
+      "qualifier": "aki@opsweave.local",
+      "facts": [
+       "auditor",
+       "Active",
+       "Disable"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       859,
+       864,
+       880
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Noa Berg",
+     "clipped": false,
+     "width": 338,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Noa Berg",
+      "qualifier": "noa@opsweave.local",
+      "facts": [
+       "viewer",
+       "Disabled",
+       "Start replicas"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       900,
+       904,
+       920
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "trusted-team",
+     "clipped": false,
+     "width": 151,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "trusted-team",
+      "qualifier": "",
+      "facts": [
+       "sha256:1111111111111…11111111",
+       "Unknown",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1070,
+       1076,
+       1091
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "lab",
+     "clipped": false,
+     "width": 151,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab",
+      "qualifier": "",
+      "facts": [
+       "sha256:2222222222222…22222222",
+       "Unknown",
+       "None"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1112,
+       1118,
+       1133
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "partner-a",
+     "clipped": false,
+     "width": 151,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "partner-a",
+      "qualifier": "",
+      "facts": [
+       "sha256:3333333333333…33333333",
+       "Pending",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1154,
+       1160,
+       1175
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "partner-b",
+     "clipped": false,
+     "width": 151,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "partner-b",
+      "qualifier": "",
+      "facts": [
+       "sha256:4444444444444…44444444",
+       "Unknown",
+       "None"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1196,
+       1202,
+       1217
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "community",
+     "clipped": false,
+     "width": 151,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "community",
+      "qualifier": "",
+      "facts": [
+       "sha256:5555555555555…55555555",
+       "Unknown",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1238,
+       1244,
+       1259
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "vendor-x",
+     "clipped": false,
+     "width": 152,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "vendor-x",
+      "qualifier": "",
+      "facts": [
+       "sha256:6666666666666…66666666",
+       "Pending",
+       "None"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1279,
+       1284,
+       1299
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 4
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 14
+   },
+   "firstScreen": {
+    "full": 7,
+    "partial": 8,
+    "total": 14
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1915,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "columnLabels": [
+    "Node",
+    "Status",
+    "Last observed"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "30s ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       626,
+       631,
+       647
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "42m ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       668,
+       673,
+       689
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "1h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       710,
+       715,
+       731
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "",
+      "facts": [
+       "Unreachable",
+       "2h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       752,
+       757,
+       773
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "2h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       794,
+       799,
+       815
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "",
+      "facts": [
+       "Unknown",
+       "3h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       836,
+       841,
+       857
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "4h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       878,
+       883,
+       899
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "4h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       920,
+       925,
+       941
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "5h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       962,
+       967,
+       983
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "",
+      "facts": [
+       "Draining",
+       "6h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1004,
+       1009,
+       1025
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 317,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "7h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1046,
+       1051,
+       1067
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 319,
+     "facts": 0,
+     "factValues": 2,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "",
+      "facts": [
+       "Ready",
+       "7h ago"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       1087,
+       1091,
+       1107
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 3
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 6,
+    "partial": 7,
+    "total": 12
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 900,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 41,
+    "p95": 42,
+    "max": 42,
+    "n": 3
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "Node",
+    "Slot",
+    "State",
+    "Container",
+    "Logs"
+   ],
+   "tableRowCounts": [
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 3,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 246,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "READYRestarts 0",
+      "facts": [
+       "#0",
+       "Running",
+       "c0ffee0deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       640,
+       645,
+       661
+      ],
+      "height": 42
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 246,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "READYRestarts 1",
+      "facts": [
+       "#1",
+       "Running",
+       "c0ffee1deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       682,
+       687,
+       703
+      ],
+      "height": 41
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 247,
+     "facts": 0,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "READYRestarts 2",
+      "facts": [
+       "#2",
+       "Unknownexit code 137",
+       "c0ffee2deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 3,
+      "tops": [
+       723,
+       727,
+       743
+      ],
+      "height": 40
+     },
+     "geometry": null,
+     "values": 5
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 3
+   },
+   "firstScreen": {
+    "full": 3,
+    "partial": 3,
+    "total": 3
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1083,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "Attempt",
+    "Status",
+    "Fence",
+    "Node",
+    "Started"
+   ],
+   "tableRowCounts": [
+    2
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 2
+   },
+   "firstScreen": {
+    "full": 2,
+    "partial": 2,
+    "total": 2
+   },
+   "tableWidth": 1135,
+   "tablePanelWidth": 1135
+  }
+ }
+}

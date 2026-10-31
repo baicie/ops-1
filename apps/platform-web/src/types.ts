@@ -493,3 +493,53 @@ export interface JobDiagnostics {
   result?: JobResultView | null;
   truncated: boolean;
 }
+
+/* ── G11 incident slice (contracts/openapi/incident-v1.yaml) ─────────────────────────── */
+
+/**
+ * One incident as the kernel derives it. `evidenceRefs` is capped at the newest 100 by the
+ * shared projection, so it is a reference list and never a total: the evidence endpoint is the
+ * complete set, and the UI must not print a count derived from this field as if it were all.
+ */
+export interface IncidentView {
+  id: string;
+  title: string;
+  severity: string;
+  status: string;
+  source: string;
+  nativeId: string | null;
+  relatedEntity: string | null;
+  startedAt: string;
+  updatedAt: string;
+  owner: string;
+  evidenceRefs: string[];
+  humanVerdict: IncidentVerdict | null;
+}
+
+export interface IncidentVerdict {
+  incidentId: string;
+  verdict: string;
+  rationale: string;
+  decidedBy: string;
+  decidedAt: string;
+}
+
+export interface IncidentEvidence {
+  id: string;
+  incidentId: string;
+  kind: string;
+  source: string;
+  collectedAt: string;
+  /** An opaque locator (digest or storage key). The kernel never fetches it; neither may the UI. */
+  contentRef: string;
+  trust: string;
+}
+
+export interface IncidentList {
+  items: IncidentView[];
+  nextCursor: string | null;
+}
+
+export interface IncidentEvidenceList {
+  items: IncidentEvidence[];
+}

@@ -11,7 +11,10 @@ const variantStyles = {
   secondary: 'bg-secondary text-secondary-foreground hover:bg-surface-3',
   outline: 'border-border-strong bg-card text-foreground hover:bg-secondary',
   ghost: 'border-transparent text-foreground hover:bg-secondary',
-  destructive: 'bg-destructive text-destructive-foreground hover:opacity-90',
+  // The SOLID pair, not the ink. --destructive/--ow-danger is an ink: in dark it is #ff7b7b, a
+  // light pink that measured 2.51:1 under this variant's #ffffff. --ow-danger-solid states a fill
+  // per theme that the one foreground is legible on (5.49:1 light, 7.01:1 dark).
+  destructive: 'border-[var(--ow-danger-solid)] bg-[var(--ow-danger-solid)] text-[var(--ow-danger-solid-text)] hover:opacity-90',
   link: 'border-transparent text-primary underline-offset-4 hover:underline',
 } as const;
 

@@ -8,7 +8,9 @@ export const DialogClose = DialogPrimitive.Close;
 
 const overlayClass =
   // z-[100] matches .modal-backdrop in src/styles.css so migrated and legacy overlays stack alike.
-  'fixed inset-0 z-[100] bg-[rgba(10,14,20,0.48)] backdrop-blur-[2px]';
+  // V5 owns the wash itself (.ow-dialog-overlay = rgba(0,0,0,.6)): a dialog that leaves the page
+  // behind it fully legible is not modal, it is a floating card.
+  'ow-dialog-overlay fixed inset-0 z-[100] backdrop-blur-[2px]';
 
 export interface DialogContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   /** Accessible name for the corner dismiss button; omit to render no button (localised copy is the caller's). */
@@ -40,7 +42,11 @@ export const DialogContent = React.forwardRef<
         <DialogPrimitive.Close
           className={cn(
             'absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-sm',
-            'border border-solid border-transparent text-muted-foreground transition-colors',
+            // bg-transparent is load-bearing, not decoration: preflight is off, so a <button> that
+            // declares no background paints the UA's ButtonFace - #6b6b6b in dark - which made the
+            // close control a grey slab on the dialog surface and its icon 1.64:1 against it.
+            // On --ow-surface the ink below is 7.56:1 in light and 8.99:1 in dark.
+            'border border-solid border-transparent bg-transparent text-foreground-secondary transition-colors',
             'hover:bg-secondary hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           )}

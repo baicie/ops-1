@@ -6,6 +6,7 @@ import { useAuth } from './auth';
 import type { AccessInfo, Surface } from './surface';
 import type { ContributionRejection, Extension } from './types';
 import { EmptyState, ErrorState, Skeleton } from './components/Ui';
+import { Icon } from './components/Icons';
 import { SidebarGroup } from './components/app/sidebar';
 import { useT } from './i18n';
 import type { MessageKey, TranslateParams } from './i18n';
@@ -406,7 +407,10 @@ export function ExtensionNavigation({ surface }: { surface: Surface }) {
             data-testid={`extension-nav-${item.id}`}
             data-extension-surface={item.surface}
           >
-            {label}
+            {/* An extension destination without a glyph was the only rail entry with no icon,
+                which read as a second, lesser navigation group. */}
+            <Icon name="plugins" size={15} className="icon" />
+            <span>{label}</span>
           </Link>
         );
       })}

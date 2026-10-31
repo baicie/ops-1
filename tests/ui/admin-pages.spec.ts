@@ -110,22 +110,17 @@ test('nodes keep NO_DATA distinct from a measured 0%', async ({ page }) => {
   const rows = page.locator('.nodes-table tbody tr');
   await expect(rows.first()).toBeVisible();
 
-  // Live data: this stack reports capacity and a sample time but no CPU/memory utilisation,
-  // so both must render the NO_DATA token rather than 0%.
-  const cpuCells = page.locator('.nodes-table [data-resource="cpu"]');
-  expect(await cpuCells.count()).toBeGreaterThan(0);
-  for (const cell of await cpuCells.all()) {
-    const token = cell.locator('.value-token');
-    if (await token.count() > 0) {
-      expect(await token.first().getAttribute('data-value'), 'missing sample must be the reserved token').toBe('NO_DATA');
-    } else {
-      expect((await cell.locator('.ow-utilization').innerText()).trim()).toMatch(/^\d+%$/);
-    }
-  }
-  const sampledCells = page.locator('.nodes-table [data-resource="sampled-at"]');
-  for (const cell of await sampledCells.all()) {
+  // Live data: this stack reports capacity and a sample time but no CPU/memory utilisation, and
+  // the resource cell never turns a missing reading into a measured 0% (§2.7 / M1).
+  const resourceCells = page.locator('.nodes-table [data-resource="resources"]');
+  expect(await resourceCells.count()).toBeGreaterThan(0);
+  for (const cell of await resourceCells.all()) {
     const text = (await cell.innerText()).trim();
-    expect(text.length, 'sample time cell is never empty').toBeGreaterThan(0);
+    expect(text.length, 'a resource cell is never empty').toBeGreaterThan(0);
+    const utilisation = cell.locator('[data-resource="cpu"]');
+    if (await utilisation.count() > 0) {
+      expect((await utilisation.innerText()).trim()).toMatch(/^\d+%$/);
+    }
   }
 
   // Intercepted response: one node without a snapshot, one that really measured 0%.
@@ -146,20 +141,40 @@ test('nodes keep NO_DATA distinct from a measured 0%', async ({ page }) => {
             filesystemTotalBytes: 1073741824,
           },
         },
+        {
+          // One row in three without a sample is under §2.7's half, so the column stays and the
+          // row says in words what it could not measure.
+          ...NODE_TEMPLATE,
+          id: '00000000-0000-4000-8000-000000000003',
+          name: 'measured-node',
+          resourceSnapshot: {
+            sampledAt: new Date().toISOString(),
+            cpuUtilization: 0.42,
+            memoryUsedBytes: 2147483648,
+            memoryTotalBytes: 8589934592,
+            filesystemUsedBytes: 1073741824,
+            filesystemTotalBytes: 1073741824,
+          },
+        },
       ],
     });
   });
   await page.reload();
-  await expect(page.locator('.nodes-table tbody tr')).toHaveCount(2);
+  await expect(page.locator('.nodes-table tbody tr')).toHaveCount(3);
   const missingRow = page.locator('.nodes-table tbody tr').filter({ hasText: 'no-snapshot' });
   const zeroRow = page.locator('.nodes-table tbody tr').filter({ hasText: 'zero-usage' });
+  // §2.7: NO_DATA appears at most once per table, so the token is printed once above the table and
+  // the row that has no sample says so in words. A cell never carries the dashed box.
+  await expect(page.locator('.nodes-table td .value-token[data-value="NO_DATA"]')).toHaveCount(0);
+  await expect(page.locator('.table-panel [data-table-note="resources"] .value-token')).toHaveAttribute('data-value', 'NO_DATA');
+  await expect(missingRow.locator('[data-resource="resources"]')).toContainText('no resource snapshot');
   for (const resource of ['cpu', 'memory']) {
-    await expect(missingRow.locator('[data-resource="' + resource + '"] .value-token')).toHaveAttribute('data-value', 'NO_DATA');
-    await expect(zeroRow.locator('[data-resource="' + resource + '"] .ow-utilization')).toHaveText('0%');
+    await expect(missingRow.locator('[data-resource="' + resource + '"]')).toHaveCount(0);
+    await expect(zeroRow.locator('[data-resource="' + resource + '"]')).toHaveText('0%');
   }
-  await expect(missingRow.locator('[data-resource="sampled-at"] .value-token')).toHaveAttribute('data-value', 'NO_DATA');
+  await expect(missingRow.locator('[data-resource="sampled-at"]')).toHaveCount(0);
+  await expect(zeroRow.locator('[data-resource="sampled-at"]')).not.toBeEmpty();
   await expect(zeroRow.locator('[data-resource="capacity"]')).toContainText('GiB');
-  expect(await missingRow.locator('[data-resource="cpu"]').innerText()).not.toBe(await zeroRow.locator('[data-resource="cpu"]').innerText());
 });
 
 test('node states render four different colours and never rely on colour alone', async ({ page }) => {
@@ -210,21 +225,31 @@ test('plugins print the counting rule next to the summary', async ({ page }) => 
   const summary = page.getByTestId('plugins-summary');
   await expect(summary).toBeVisible();
   await expect(summary).toContainText('Installed');
-  await expect(summary).toContainText('Installation state is INSTALLED');
   await expect(summary).toContainText('Upgrade available');
-  await expect(summary).toContainText('The newest uploaded package version differs from the active version');
   await expect(summary).toContainText('Needs attention');
-  await expect(summary).toContainText('READY replicas below desired');
+  // V4 moved the counting rule from a three-line paragraph under each card to the cell's
+  // title and accessible name: the number still carries its definition, the strip is 56px
+  // tall instead of 130px. The rule itself is still asserted, just where it now lives.
+  const rules = await summary.locator('.ow-summary-card').evaluateAll((cards) => cards.map((card) => card.getAttribute('title') || ''));
+  expect(rules).toHaveLength(3);
+  expect(rules[0]).toContain('INSTALLED');
+  expect(rules[1]).toContain('Newest version differs from active');
+  expect(rules[2]).toContain('Replicas below desired');
+  for (const rule of rules) expect(rule.length, 'every count states what it counts').toBeGreaterThan(0);
   const values = summary.locator('.ow-summary-value');
   await expect(values).toHaveCount(3);
   for (const value of await values.all()) {
     expect((await value.innerText()).trim()).toMatch(/^\d+$/);
   }
-  // Column vocabulary of §4.5 B, and NO_DATA where the API answers nothing.
+  // Column vocabulary of §4.5 B, trimmed to §2.2's cap: the publisher rides the plugin name and
+  // the activation generation rides the deployment state instead of each holding a column.
   const head = page.locator('.plugins-table thead');
-  for (const column of ['Plugin', 'Publisher', 'Version', 'Digest / trust', 'Activation', 'READY replicas']) {
+  for (const column of ['Plugin', 'Version', 'Deployment', 'Digest / trust', 'READY replicas']) {
     await expect(head).toContainText(column);
   }
+  await expect(head).not.toContainText('Publisher');
+  await expect(head).not.toContainText('Activation');
+  await expect(page.locator('.plugins-table tbody tr').first().locator('.ow-ident-meta')).not.toBeEmpty();
 });
 
 test('overview offers at least three metrics that navigate somewhere', async ({ page }) => {
@@ -238,13 +263,27 @@ test('overview offers at least three metrics that navigate somewhere', async ({ 
     expect((await metric.locator('.ow-metric-label').innerText()).trim().length).toBeGreaterThan(0);
   }
   await expect(page.getByTestId('overview-modules')).toBeVisible();
-  // Every first-layer module states when it was observed or why it could not be.
+  // Every first-layer module states what it is doing; the observation time of the whole view
+  // is stated once (V4), because four copies of one polling timestamp was not four facts.
   const moduleCards = page.locator('[data-module]');
   expect(await moduleCards.count()).toBe(4);
+  await expect(page.getByTestId('overview-observed')).not.toBeEmpty();
   for (const card of await moduleCards.all()) {
-    const observed = await card.locator('.module-card-observed').innerText();
-    expect(observed.trim().length, 'module card must state its observation time').toBeGreaterThan(0);
+    const detail = await card.locator('.module-card-detail').innerText();
+    expect(detail.trim().length, 'module card must state its state or its reason').toBeGreaterThan(0);
   }
+  // The state is stated once per ROW, not once per card: modules that agree on their state share a
+  // row, and that row prints the verdict for every module it holds. The assertion keeps its
+  // strength by covering the cards instead of counting indicators - a module inside no row, or a
+  // row that states no state, still fails.
+  const moduleRows = page.locator('[data-testid="overview-modules"] .module-row');
+  expect(await moduleRows.count(), 'the module strip renders rows').toBeGreaterThan(0);
+  let covered = 0;
+  for (const row of await moduleRows.all()) {
+    await expect(row.locator('.status-indicator').first()).toHaveCount(1);
+    covered += await row.locator('[data-module]').count();
+  }
+  expect(covered, 'every module card sits in a row that states its state').toBe(4);
   await metrics.first().click();
   await expect(page).toHaveURL(/\/nodes$/);
 });

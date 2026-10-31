@@ -10,9 +10,9 @@ import { EmptyState } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
-import { useT } from '../i18n';
+import { useI18n, useT } from '../i18n';
 import { formatDate } from '../format';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Dataset = { datasetId: string; name: string; schemaRevision: number; updatedAt: string };
 type QualityRun = { runId: string; datasetId: string; status: string; recordsExamined: number; recordsFailed: number; completedAt: string | null; createdAt: string };
@@ -26,6 +26,7 @@ type Summary = {
 
 export function GovernancePage() {
   const t = useT();
+  const { locale } = useI18n();
   const { data: nodes, error: nodeError, loading: nodeLoading, reload: reloadNodes } = usePolling(() => api.get<NodeView[]>('/api/v1/nodes'), 10000);
   const [datasets, setDatasets] = useState<DatasetQuality[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -60,6 +61,22 @@ export function GovernancePage() {
   const unreachable = nodeList.filter((node) => node.status === 'UNREACHABLE' || node.stale).length;
   const recentFailures = summary?.recentFailures || [];
   const quality = summary?.latestQuality;
+  /**
+   * table-spec §2.2: a column exists while it separates rows. Until a run has been sampled, every
+   * dataset answers the same thing, so the quality column is not drawn and one sentence above the
+   * table carries that one fact (§2.7) instead of twelve rows of it. Examined and failed are the
+   * run's own counts, so they ride the run on the identity cell's second line.
+   */
+  const qualityMeasurable = datasets.some((dataset) => Boolean(dataset.latest));
+  const number = new Intl.NumberFormat(locale);
+  /**
+   * table-spec §2.5: the three facts the 390 card keeps, ranked by §2.2's distinct ratio over the
+   * rows on screen. The other two tables on this page already sit at 2 and 3 facts.
+   */
+  const cardFacts = rankCardFacts({
+    schema: datasets.map((dataset) => `r${dataset.schemaRevision}`),
+    quality: datasets.map((dataset) => (dataset.latest ? dataset.latest.status : '')),
+  });
 
   return <div className="page-stack">
     <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="secondary" onClick={() => { void load(); void reloadNodes(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
@@ -82,36 +99,49 @@ export function GovernancePage() {
       </div>
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>{t('governance.quality.title')}</h2><p>{t('governance.quality.description')}</p></div><Link className="text-link" to="/admin/ext/trusted-team/data-catalog">{t('governance.quality.openCatalog')}</Link></div>
-        {datasets.length === 0 ? <EmptyState icon="catalog" title={t('governance.quality.empty.title')} description={t('governance.quality.empty.description')} /> : (
+        {datasets.length === 0 ? <EmptyState icon="catalog" title={t('governance.quality.empty.title')} description={t('governance.quality.empty.description')} /> : (<>
+          {/* M1: an Empty panel says "none" ONCE, above the table - it does not print the same
+              "no runs" in twelve rows. §2.2/§2.7 owe the dropped column one sentence, and that
+              sentence is where the count and the way out belong. */}
+          {!qualityMeasurable ? <p className="stat-note" data-table-note="demoted:empty">{t('governance.quality.note', { total: datasets.length })}</p> : null}
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
                 <TableHead>{t('table.dataset')}</TableHead>
                 <TableHead>{t('table.schema')}</TableHead>
-                <TableHead>{t('table.quality')}</TableHead>
-                <TableHead>{t('table.examined')}</TableHead>
-                <TableHead>{t('table.failed')}</TableHead>
-                <TableHead>{t('table.latestRun')}</TableHead>
+                {qualityMeasurable ? <TableHead>{t('table.quality')}</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
               {datasets.map((dataset) => (
                 <TableRow key={dataset.datasetId} className={stackRow} data-dataset={dataset.datasetId}>
-                  <StackCell label={t('table.dataset')}>
-                    <strong>{dataset.name}</strong>
-                    <div className="mono text-sm text-muted-foreground">{dataset.datasetId.slice(0, 13)}…</div>
-                  </StackCell>
-                  <StackCell label={t('table.schema')}>r{dataset.schemaRevision}</StackCell>
-                  <StackCell label={t('table.quality')}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <StatusPill status="UNKNOWN" />}</StackCell>
-                  {/* A run that examined no records reported nothing: NO_DATA, not a 0 count. */}
-                  <StackCell label={t('table.examined')}>{dataset.latest ? dataset.latest.recordsExamined : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-                  <StackCell label={t('table.failed')}>{dataset.latest ? dataset.latest.recordsFailed : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-                  <StackCell label={t('table.latestRun')}>{dataset.latest ? <Link className="text-link" to="/admin/ext/trusted-team/data-catalog"><span className="mono">{dataset.latest.runId.slice(0, 8)}</span></Link> : <span className="text-muted-foreground">{t('common.noRuns')}</span>}</StackCell>
+                  <IdentityCell label={t('table.dataset')} identity={formatIdentity({ name: dataset.name, id: dataset.datasetId, at: dataset.latest?.createdAt, locale, rowsOnPage: datasets.length })} cardFact>
+                    {/* Examined and failed were two columns that answered nothing for every row;
+                        they are the run's counts, so they are read where the run is named. A
+                        dataset the catalog has never run answers zero runs - that is the source
+                        saying "none", not a source that could not answer (§2.7 / M1). */}
+                    {dataset.latest ? (
+                      <span>
+                        {dataset.latest.runId.slice(0, 8)}{' · '}
+                        {t('governance.quality.counts', { examined: number.format(dataset.latest.recordsExamined), failed: number.format(dataset.latest.recordsFailed) })}
+                      </span>
+                    ) : qualityMeasurable ? (
+                      // A single dataset with no run, inside a page that has runs: that row is the
+                      // answer to its own question, so it says "no runs" where the count would go.
+                      <span>{t('common.noRuns')}</span>
+                    ) : null}
+                    {/* Nothing here when NO dataset has a run: the sentence above the table is the
+                        one place that fact is stated (M1: once, not per row). */}
+                  </IdentityCell>
+                  <StackCell label={t('table.schema')} className={cardCellClass(cardFacts.includes('schema'))}>r{dataset.schemaRevision}</StackCell>
+                  {qualityMeasurable ? (
+                    <StackCell label={t('table.quality')} className={cardCellClass(cardFacts.includes('quality'))}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <span className="ow-cell-meta">{t('common.noRuns')}</span>}</StackCell>
+                  ) : null}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        )}
+        </>)}
       </section>
       <div className="governance-grid">
         <section className="panel table-panel"><div className="panel-head"><div><h2>{t('governance.failures.title')}</h2><p>{t('governance.failures.description')}</p></div></div>{recentFailures.length === 0 ? <EmptyState icon="check" title={t('governance.failures.empty.title')} /> : (
@@ -120,15 +150,26 @@ export function GovernancePage() {
               <TableRow className="hover:bg-transparent">
                 <TableHead>{t('table.dataset')}</TableHead>
                 <TableHead>{t('table.status')}</TableHead>
-                <TableHead>{t('table.when')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
               {recentFailures.map((run) => (
                 <TableRow key={run.runId} className={stackRow}>
-                  <StackCell label={t('table.dataset')}>{run.datasetName}</StackCell>
+                  {/* §2.1's disambiguator, earned: the same dataset can fail twice on this page, and
+                      without it the two rows carry one identity (measured 24/27 distinct). */}
+                  <IdentityCell
+                    label={t('table.dataset')}
+                    identity={formatIdentity({
+                      name: run.datasetName,
+                      id: run.runId,
+                      at: run.completedAt || run.createdAt,
+                      locale,
+                      nameIsUnique: new Set(recentFailures.map((item) => item.datasetName)).size === recentFailures.length,
+                      rowsOnPage: recentFailures.length,
+                    })}
+                    cardFact
+                  />
                   <StackCell label={t('table.status')}><StatusPill status={run.status} /></StackCell>
-                  <StackCell label={t('table.when')}>{run.completedAt ? formatDate(run.completedAt) : formatDate(run.createdAt)}</StackCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -146,7 +187,7 @@ export function GovernancePage() {
             <TableBody className={stackBody}>
               {nodeList.map((node) => (
                 <TableRow key={node.id} className={stackRow}>
-                  <StackCell label={t('table.node')}><Link className="text-link" to={`/admin/nodes/${node.id}`}>{node.name}</Link></StackCell>
+                  <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: nodeList.length })} cardFact />
                   {/* docs/04 §4.5 C: a node that stopped reporting is STALE, which is a different
                       answer from UNREACHABLE and from a green READY. */}
                   <StackCell label={t('table.status')}><StatusIndicator state={indicatorStateForCode(node.status, { stale: node.stale, revoked: Boolean(node.revokedAt) })} /></StackCell>
@@ -157,7 +198,7 @@ export function GovernancePage() {
           </Table>
         )}</section>
       </div>
-      <div className="info-grid"><div className="callout"><p>{t('governance.footnote.before')} <strong>UNKNOWN</strong>{t('governance.footnote.after')}</p></div></div>
+      <div className="info-grid"><div className="callout"><p>{t('governance.footnote.before')} <strong>{t('status.unknown')}</strong>{t('governance.footnote.after')}</p></div></div>
     </AsyncBoundary>
   </div>;
 }

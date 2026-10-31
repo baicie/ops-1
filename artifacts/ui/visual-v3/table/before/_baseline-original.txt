@@ -1,0 +1,23 @@
+# Baseline: the 23, measured with the ORIGINAL harness and HEAD 8437740 page code
+
+    $ node scripts/check-ui-metrics.mjs <artifacts produced by the pre-fix audit harness>
+    FAIL  distinct-ratio-low        r1440-light-en  /admin/activity  0.06 < 0.2 at column 2 "Actor" of 4
+    FAIL  columns-over-cap          r1440-light-en  /admin/nodes  7 > 5 at 1440px
+    FAIL  no-data-per-table         r1440-light-en  /admin/nodes  4 NO_DATA cell(s) in one table > 1
+    FAIL  columns-over-cap          r1440-light-en  /admin/plugins  7 > 5 at 1440px
+    FAIL  distinct-ratio-low        r1440-light-en  /admin/plugins  0.08 < 0.2 at column 5 "Digest / trust" of 7
+    FAIL  no-data-per-table         r1440-light-en  /admin/plugins  12 NO_DATA cell(s) in one table > 1
+    FAIL  distinct-ratio-low        r1440-light-en  /admin/governance  0.08 < 0.2 at column 2 "Quality" of 10
+    FAIL  no-data-per-table         r1440-light-en  /admin/governance  24 NO_DATA cell(s) in one table > 1
+    FAIL  no-data-per-table         r1440-light-en  /admin/access  3 NO_DATA cell(s) in one table > 1
+    FAIL  r1440-light-en  pages=9  violations=9
+    FAIL  r390-light-en  ...(the same seven, minus the two column caps)  violations=7
+    FAIL  r390-light-zh  ...(the same seven, minus the two column caps)  violations=7
+      by assertion: columns-over-cap 2 | distinct-ratio-low 9 | no-data-per-table 12
+    check-ui-metrics: FAIL (23 violation(s) across 27 page measurements)   exit=1
+
+The JSON of that run was overwritten by the before/after screenshot pair, which was taken with the
+CORRECTED harness fixture (one plugin detail per plugin, carrying the bundleDigest the API declares).
+That pair therefore reads 21, not 23: the six plugins findings (12 NO_DATA and digest 0.08 in three
+files) were the fixture omitting a required field, and disappear on HEAD page code alone. See this
+directory's _metrics_r1440-light-en.json -> /admin/plugins (cols=7, noData=0, Digest / trust = 1.00).

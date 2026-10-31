@@ -1,0 +1,4 @@
+[
+  {"id":"host-1","name":"host-1.example","cpu_percent":12.5,"observed_at":"2026-10-22T00:00:00Z"},
+  {"id":"host-2","name":"host-2.example","cpu_percent":88.1,"observed_at":"2026-10-22T00:00:00Z"}
+]

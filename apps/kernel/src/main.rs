@@ -8,6 +8,7 @@ mod deployments;
 mod diagnostics;
 mod error;
 mod gateway;
+mod incidents;
 mod jobs;
 mod logs;
 mod nodes;
