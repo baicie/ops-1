@@ -15,7 +15,9 @@ import { TooltipProvider } from './components/ui/tooltip';
 import { AdminShell } from './shells/admin/AdminShell';
 import { WorkspaceShell } from './shells/workspace/WorkspaceShell';
 import { ForbiddenPage } from './shells/surface/SurfaceChrome';
-import { IncidentWorkspacePage, WorkspaceHomePage, SurfaceNotYetPage } from './pages/workspace';
+import { WorkspaceHomePage, SurfaceNotYetPage } from './pages/workspace';
+import { IncidentsPage } from './pages/Incidents';
+import { IncidentDetailPage } from './pages/IncidentDetail';
 import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
 import { PluginsPage } from './pages/Plugins';
@@ -166,8 +168,10 @@ export function App() {
                     <Route path="/app" element={<WorkspaceShell />}>
                       <Route index element={<Navigate to="/app/home" replace />} />
                       <Route path="home" element={<WorkspaceHomePage />} />
-                      {/* G07: the absence banner plus the investigation layout it will use. */}
-                      <Route path="incidents" element={<IncidentWorkspacePage />} />
+                      {/* G11 D3: the real slice. The list and the detail are separate routes so a
+                          record has a link that can be copied, bookmarked and reloaded. */}
+                      <Route path="incidents" element={<IncidentsPage />} />
+                      <Route path="incidents/:incidentId" element={<IncidentDetailPage />} />
                       <Route path="investigations" element={<SurfaceNotYetPage capability="investigations" />} />
                       <Route path="observability" element={<SurfaceNotYetPage capability="observability" />} />
                       <Route path="resources" element={<SurfaceNotYetPage capability="resources" />} />

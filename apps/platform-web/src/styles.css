@@ -348,7 +348,17 @@ input::placeholder { color: var(--ow-text-muted); }
    description to one line there would drop a sentence instead of fitting one. */
 @media (min-width: 769px) {
   .main-content { padding-top: 0; }
-  .page-header { height: 80px; box-sizing: border-box; align-items: center; }
+  /* 80 is the floor, not the ceiling. Declared as `height`, 80 was also a bound: a header whose
+     copy and actions do not fit one line wraps them to a second flex line (flex-wrap above), the
+     second line falls outside the declared box, and the next section - a later sibling in flow,
+     so painted on top of the escaped pixels - took every click. That is how the incident page's
+     create button became unclickable while its screenshot looked fine.
+     `min-height` keeps the invariant where it is load-bearing (a header whose content already
+     fits measures exactly 80 and the first block still lands at 160) and lets the box grow only
+     on the pages where the alternative is a control painted underneath a panel. The 80px was
+     never doing the clipping - nothing here sets overflow - it was only failing to reserve the
+     space its content needed. */
+  .page-header { min-height: 80px; box-sizing: border-box; align-items: center; }
   /* §2.2: the description is one line with an ellipsis. A header whose height depends on how
      long the sentence is is the mechanism behind the five heights above. */
   .page-description { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -15,8 +15,9 @@
  *   C. each listed directory's file count must be within its cap, and its names must match an
  *      optional filename pattern;
  *   D. the global file-count and byte ceilings must hold;
- *   E. every *.png a markdown file points at must still exist - a screenshot a document cites is an
- *      evidence link, so deleting it silently breaks the document.
+ *   E. every *.png a markdown file points at must still be tracked by git - a screenshot a document
+ *      cites is an evidence link, so deleting it silently breaks the document. "Tracked", not "present
+ *      on disk": see the comment above the alive set for the run that made the two disagree.
  *
  * Usage:
  *   node tests/ci/check-tracked-png-budget.mjs                  # check, exit 1 on violation
@@ -63,12 +64,28 @@ function walk(dir, out) {
 }
 
 // ---- collect ---------------------------------------------------------------------------------
-const files = []; // index entries that still have bytes on disk
-const indexOnly = []; // index entries whose working-tree file is gone (an uncommitted deletion)
+// Count what the repository holds, not what this working tree happens to have. A tracked file that
+// is absent here but present in the index would otherwise be dropped from the count locally and kept
+// in it by CI, which is the difference between a green run and a red one at a full ceiling.
+const indexSizes = new Map();
+try {
+  const raw = execFileSync('git', ['ls-tree', '-r', '-l', 'HEAD', '--'].concat(tracked), {
+    cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+  for (const line of raw.split('\n')) {
+    const m = /^\d+ blob [0-9a-f]+\s+(\d+)\t(.+)$/.exec(line);
+    if (m) indexSizes.set(m[2], Number(m[1]));
+  }
+} catch { /* fall through to disk sizes */ }
+
+const files = []; // every tracked entry, sized from the commit
+const indexOnly = []; // tracked, present in the commit, absent from this working tree
 for (const rel of tracked) {
   const abs = path.join(root, rel);
-  if (existsSync(abs)) files.push({ rel, size: statSync(abs).size });
-  else indexOnly.push(rel);
+  const onDisk = existsSync(abs);
+  if (!onDisk) indexOnly.push(rel);
+  const size = indexSizes.has(rel) ? indexSizes.get(rel) : (onDisk ? statSync(abs).size : 0);
+  files.push({ rel, size });
 }
 
 const violations = [];
@@ -165,7 +182,12 @@ if (totalBytes > manifest.totals.maxBytes) {
 }
 
 // ---- E: doc reference integrity ---------------------------------------------------------------
-const alive = new Set(walk(root, []).filter((p) => p.endsWith('.png')).map((p) => path.relative(root, p)));
+// Judged against the git index, never against the working tree. A fresh CI checkout contains exactly
+// the tracked set, so "this file is on my disk" and "a reader can open this path" are different
+// claims: 25 captures left untracked in artifacts/g11-d3 made this check pass locally while the same
+// commit failed in CI. Judging the index also gets the uncommitted-deletion case right - git still
+// has the file, so the checkout will too, so the reference still resolves.
+const alive = new Set(tracked);
 const aliveByBase = new Map();
 for (const rel of alive) {
   const base = path.posix.basename(rel);
@@ -191,19 +213,28 @@ for (const doc of onlyMd) {
     const asRootRelative = path.posix.normalize(ref);
     const resolved =
       alive.has(asSibling) || alive.has(asRootRelative) || (aliveByBase.get(path.posix.basename(ref)) || []).length > 0;
-    if (!resolved && !knownMissing.has(ref)) {
-      if (!missingRefs.has(ref)) missingRefs.set(ref, new Set());
-      missingRefs.get(ref).add(relDoc);
+    if (resolved || knownMissing.has(ref)) continue;
+    if (!missingRefs.has(ref)) {
+      // The exact failure worth naming: the capture is sitting in the author's working tree, so the
+      // path looks fine while you read the doc, but git never received it and no reader has it.
+      const onDisk =
+        existsSync(path.join(root, asRootRelative)) || existsSync(path.join(root, asSibling));
+      missingRefs.set(ref, { docs: new Set(), untracked: onDisk });
     }
+    missingRefs.get(ref).docs.add(relDoc);
   }
 }
-for (const entry of missingRefs.entries()) {
+for (const [ref, entry] of missingRefs) {
   fail(
     'E dangling doc reference',
-    [...entry[1]].join(', ') +
+    [...entry.docs].join(', ') +
       ' points at ' +
-      entry[0] +
-      ', which is not in the tree. Restore the screenshot or fix the reference; a cited screenshot is an evidence link.',
+      ref +
+      ', which git does not track.' +
+      (entry.untracked
+        ? ' The file is present in this working tree but untracked, so a fresh checkout has nothing at that path: ' +
+          'a document that cites it is true only on this machine. Commit it within budget, or state what was verified instead of citing a path.'
+        : ' Restore the screenshot or fix the reference; a cited screenshot is an evidence link.'),
   );
 }
 

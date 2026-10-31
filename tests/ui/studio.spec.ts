@@ -166,24 +166,54 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   fs.mkdirSync(OUT, { recursive: true });
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/editor`);
-  await page.getByRole('button', { name: 'Create draft' }).click();
+  // Every step below is stated as the precondition the product needs instead of being left to the
+  // click's own retry loop. Create draft only exists while no draft is attached, Save draft only
+  // renders for a loaded draft and only enables on a dirty form, so a missing precondition used to
+  // spend the whole 60s test budget inside a click that never becomes actionable - reported as
+  // "Test timeout exceeded" with no indication of which state was absent.
+  const createDraft = page.getByRole('button', { name: 'Create draft' });
+  await expect(createDraft).toBeEnabled();
+  await createDraft.click();
   await expect(page.getByRole('status')).toContainText('Draft created');
+  // The second tab is pointed at this URL, so the draft id has to be in it before it is read:
+  // a URL taken before the editor navigates drops the second tab on the read-only published view.
+  await expect(page).toHaveURL(/[?&]draft=[0-9a-f-]{36}/);
   const draftUrl = page.url();
   const pageB = await context.newPage();
   await pageB.goto(draftUrl);
+  const saveA = page.getByRole('button', { name: 'Save draft' });
+  const saveB = pageB.getByRole('button', { name: 'Save draft' });
+  // Save draft renders only when the editor holds a draft, so this is the proof that the second
+  // tab attached to the same draft rather than to the published, read-only definition.
+  await expect(saveB).toBeVisible();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
   await pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
-  await page.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('18');
-  await pageB.locator('.studio-inspector').getByLabel('timeoutSeconds').fill('19');
-  await page.getByRole('button', { name: 'Save draft' }).click();
+  const timeoutA = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
+  const timeoutB = pageB.locator('.studio-inspector').getByLabel('timeoutSeconds');
+  // A read-only inspector is the "no draft" state; filling it would wait instead of failing.
+  await expect(timeoutA).toBeEnabled();
+  await expect(timeoutB).toBeEnabled();
+  // Same reason the case above reads the live value: 18 and 19 are only different from what is
+  // published until a database has been published to a few times, and a write equal to the live
+  // value leaves the form clean - Save draft then stays disabled and the click waits out the test.
+  // Derive both numbers from what is live right now.
+  const liveTimeout = Number.parseInt(await timeoutA.inputValue(), 10);
+  const base = Number.isFinite(liveTimeout) && liveTimeout > 0 ? liveTimeout : 15;
+  const savedTimeout = String(base + 1);
+  const localTimeout = String(base + 2);
+  await timeoutA.fill(savedTimeout);
+  await timeoutB.fill(localTimeout);
+  await expect(saveA).toBeEnabled();
+  await saveA.click();
   await expect(page.getByRole('status')).toContainText('Draft saved');
-  await pageB.getByRole('button', { name: 'Save draft' }).click();
+  await expect(saveB).toBeEnabled();
+  await saveB.click();
   await expect(pageB.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
-  await expect(pageB.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue('19');
+  await expect(timeoutB).toHaveValue(localTimeout);
   await expect(pageB.getByRole('button', { name: 'Use local & retry' })).toBeVisible();
   await expect(pageB.locator('.conflict-diff')).toContainText('timeoutSeconds');
-  await expect(pageB.locator('.conflict-diff')).toContainText('19');
-  await expect(pageB.locator('.conflict-diff')).toContainText('18');
+  await expect(pageB.locator('.conflict-diff')).toContainText(localTimeout);
+  await expect(pageB.locator('.conflict-diff')).toContainText(savedTimeout);
   await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict.png') });
   // G08 batch C item 1: the two overwriting writes ask through the shared ConfirmAction instead of
   // window.confirm. This is the real-draft half of that: the dialog opens idle, and the write it

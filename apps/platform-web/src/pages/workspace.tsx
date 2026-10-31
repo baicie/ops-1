@@ -4,7 +4,6 @@ import { useAuth } from '../auth';
 import { canEnterSurface, surfaceEntryPath } from '../surface';
 import { EmptyState, KV, PageHeader } from '../components/Ui';
 import { Icon } from '../components/Icons';
-import { InvestigationLayout, type InvestigationRegion } from '../components/app/investigation-layout';
 import { buttonVariants } from '../components/ui/button';
 import { BusinessPluginCard, BusinessStatePanel, PlatformVersionCard } from '../shells/workspace/business-states';
 import { useI18n } from '../i18n';
@@ -34,8 +33,14 @@ export type SurfaceNavGroup = 'work' | 'discover' | 'results';
 interface CapabilityCopy {
   to: string;
   labelKey: MessageKey;
-  /** The interface this page is waiting for; the only thing an unshipped page may say. */
-  missingKey: MessageKey;
+  /**
+   * What this page is waiting for (unshipped), or what it actually exposes (shipped). The two
+   * cases are one field on purpose: the home board and the "not shipped" page both have to
+   * read it, and a shipped capability must never still be described by its missing interface.
+   */
+  detailKey: MessageKey;
+  /** True only for a capability this build really serves end to end. */
+  shipped: boolean;
   icon: string;
   /** Sidebar group; the shell derives its navigation from this registry. */
   navGroup: SurfaceNavGroup;
@@ -50,12 +55,13 @@ interface CapabilityCopy {
 
 /** One registry behind the sidebar, the task space and the "not shipped" pages. */
 export const SURFACE_CAPABILITIES: Record<SurfaceCapability, CapabilityCopy> = {
-  incidents: { to: '/app/incidents', labelKey: 'workspace.nav.incidents', missingKey: 'workspace.notYet.incidents.missing', icon: 'alert', navGroup: 'work', inNavigation: true },
-  investigations: { to: '/app/investigations', labelKey: 'workspace.nav.investigations', missingKey: 'workspace.notYet.investigations.missing', icon: 'search', navGroup: 'work', inNavigation: true },
-  observability: { to: '/app/observability', labelKey: 'workspace.nav.observability', missingKey: 'workspace.notYet.observability.missing', icon: 'activity', navGroup: 'discover', inNavigation: true },
-  resources: { to: '/app/resources', labelKey: 'workspace.nav.resources', missingKey: 'workspace.notYet.resources.missing', icon: 'box', navGroup: 'discover', inNavigation: true },
-  sources: { to: '/app/sources', labelKey: 'workspace.nav.sources', missingKey: 'workspace.notYet.sources.missing', icon: 'upload', navGroup: 'results', inNavigation: false },
-  reports: { to: '/app/reports', labelKey: 'workspace.nav.reports', missingKey: 'workspace.notYet.reports.missing', icon: 'file', navGroup: 'results', inNavigation: true },
+  // G11 D3: the incident slice is served by the kernel, so the workspace stops calling it missing.
+  incidents: { to: '/app/incidents', labelKey: 'workspace.nav.incidents', detailKey: 'workspace.capabilities.incidents.shipped', shipped: true, icon: 'alert', navGroup: 'work', inNavigation: true },
+  investigations: { to: '/app/investigations', labelKey: 'workspace.nav.investigations', detailKey: 'workspace.notYet.investigations.missing', shipped: false, icon: 'search', navGroup: 'work', inNavigation: true },
+  observability: { to: '/app/observability', labelKey: 'workspace.nav.observability', detailKey: 'workspace.notYet.observability.missing', shipped: false, icon: 'activity', navGroup: 'discover', inNavigation: true },
+  resources: { to: '/app/resources', labelKey: 'workspace.nav.resources', detailKey: 'workspace.notYet.resources.missing', shipped: false, icon: 'box', navGroup: 'discover', inNavigation: true },
+  sources: { to: '/app/sources', labelKey: 'workspace.nav.sources', detailKey: 'workspace.notYet.sources.missing', shipped: false, icon: 'upload', navGroup: 'results', inNavigation: false },
+  reports: { to: '/app/reports', labelKey: 'workspace.nav.reports', detailKey: 'workspace.notYet.reports.missing', shipped: false, icon: 'file', navGroup: 'results', inNavigation: true },
 };
 
 export const SURFACE_CAPABILITY_ORDER: SurfaceCapability[] = ['incidents', 'investigations', 'observability', 'resources', 'sources', 'reports'];
@@ -142,8 +148,8 @@ export function WorkspaceHomePage() {
                 aria-labelledby={headingId}
                 data-testid={`home-${area.id}`}
                 data-task={area.id}
-                data-source-status="unavailable"
-                data-missing-capability={area.capability}
+                data-source-status={copy.shipped ? 'available' : 'unavailable'}
+                data-missing-capability={copy.shipped ? undefined : area.capability}
               >
                 <div className="panel-head">
                   <div>
@@ -152,11 +158,12 @@ export function WorkspaceHomePage() {
                   </div>
                 </div>
                 <BusinessStatePanel
-                  state="unavailable"
-                  title={t('workspace.state.notConnected')}
+                  state={copy.shipped ? 'ready' : 'unavailable'}
+                  title={copy.shipped ? t('workspace.home.taskSpace.shippedTitle') : t('workspace.state.notConnected')}
                   detail={(
                     <>
-                      {t('workspace.notYet.missingLabel')} {t(copy.missingKey)}
+                      {copy.shipped ? null : t('workspace.notYet.missingLabel') + ' '}
+                      {t(copy.detailKey)}
                       {area.noteKey ? <span className="task-scope"> {t(area.noteKey)}</span> : null}
                     </>
                   )}
@@ -240,73 +247,15 @@ export function WorkspaceHomePage() {
           {SURFACE_CAPABILITY_ORDER.map((capability) => {
             const copy = SURFACE_CAPABILITIES[capability];
             return (
-              <li key={capability} data-surface-status="not-shipped" data-capability={capability}>
+              <li key={capability} data-surface-status={copy.shipped ? 'shipped' : 'not-shipped'} data-capability={capability}>
                 <Icon name={copy.icon} size={15} />
                 <Link to={copy.to}>{t(copy.labelKey)}</Link>
-                <span className="capability-status-code">{t('workspace.home.capabilities.status')}</span>
-                <span className="capability-status-missing">{t(copy.missingKey)}</span>
+                <span className="capability-status-code">{copy.shipped ? t('workspace.home.capabilities.shipped') : t('workspace.home.capabilities.status')}</span>
+                <span className="capability-status-missing">{t(copy.detailKey)}</span>
               </li>
             );
           })}
         </ul>
-      </section>
-    </div>
-  );
-}
-
-/**
- * `/app/incidents` - the incident list and the investigation workspace behind it.
- *
- * The absence panel stays: the page owes the reader the name of the missing dependency before
- * it shows a layout. Under it the investigation workspace is laid out for real - three
- * regions with their owners and their empty slots - so the shape is settled while the data
- * contract is not. No event, no timestamp, no hypothesis and no model conclusion is rendered
- * here, and the empty slots say why rather than looking like a successful empty query.
- */
-export function IncidentWorkspacePage() {
-  const { t } = useI18n();
-  const copy = SURFACE_CAPABILITIES.incidents;
-
-  const regions: InvestigationRegion[] = [
-    { id: 'timeline', title: t('workspace.region.timeline'), plan: t('workspace.region.timeline.plan'), requirement: t('workspace.notYet.incidents.missing') },
-    { id: 'analysis', title: t('workspace.region.analysis'), plan: t('workspace.region.analysis.plan'), requirement: t('workspace.notYet.investigations.missing') },
-    { id: 'detail', title: t('workspace.region.detail'), plan: t('workspace.region.detail.plan'), requirement: t('workspace.notYet.incidents.missing') },
-  ];
-
-  return (
-    <div className="page-stack" data-testid="incidents-page">
-      <PageHeader
-        eyebrow={t('workspace.incidents.eyebrow')}
-        title={t(copy.labelKey)}
-        description={t('workspace.incidents.description')}
-      />
-
-      <section
-        className="panel"
-        data-testid="surface-not-yet"
-        data-surface-status="not-shipped"
-        data-capability="incidents"
-      >
-        <div className="panel-head">
-          <div>
-            <h2 data-testid="surface-not-yet-status">{t('workspace.notYet.status')}</h2>
-            <p>{t('workspace.notYet.description')}</p>
-          </div>
-        </div>
-        <div className="callout">
-          <Icon name="warning" size={16} />
-          <p>{t('workspace.notYet.missingLabel')} {t(copy.missingKey)}</p>
-        </div>
-      </section>
-
-      <section className="panel" aria-labelledby="workspace-incident-layout">
-        <div className="panel-head">
-          <div>
-            <h2 id="workspace-incident-layout">{t('workspace.incidents.layout.title')}</h2>
-            <p>{t('workspace.incidents.layout.description')}</p>
-          </div>
-        </div>
-        <InvestigationLayout label={t('workspace.incidents.layout.title')} regions={regions} />
       </section>
     </div>
   );
@@ -324,7 +273,7 @@ export function SurfaceNotYetPage({ capability }: { capability: SurfaceCapabilit
       <PageHeader
         eyebrow={t('workspace.notYet.eyebrow')}
         title={t(copy.labelKey)}
-        description={t(copy.missingKey)}
+        description={t(copy.detailKey)}
       />
       <section
         className="panel"
@@ -340,7 +289,7 @@ export function SurfaceNotYetPage({ capability }: { capability: SurfaceCapabilit
         </div>
         <div className="callout">
           <Icon name="warning" size={16} />
-          <p>{t('workspace.notYet.missingLabel')} {t(copy.missingKey)}</p>
+          <p>{t('workspace.notYet.missingLabel')} {t(copy.detailKey)}</p>
         </div>
         <EmptyState
           icon="inbox"

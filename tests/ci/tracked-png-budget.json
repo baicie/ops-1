@@ -96,10 +96,6 @@
   },
   "knownMissingDocReferences": [
     {
-      "ref": "artifacts/staging-preview/screenshots/dialog-zh-1440.png",
-      "why": "Pre-existing broken link in docs/acceptance/0.0.5-web-i18n-shadcn.md:111, unrelated to the PNG cleanup - that file was never committed."
-    },
-    {
       "ref": "light.png",
       "why": "Regex fragment of a markdown table header (`|-light.png|`) in docs/ui/visual-review.md, not a path."
     },

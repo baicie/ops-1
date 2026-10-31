@@ -150,7 +150,10 @@ async function probe(page: Page) {
         contrast('#main-content .kv-label'),
         contrast('#main-content table tbody td'),
       ].filter(Boolean),
-      primaryActions: Array.from(document.querySelectorAll('#main-content .page-actions .btn, #main-content .page-actions button')).filter(visible).map(text),
+      // Studio states its controls in the toolbar row (page-template §2.1) and no longer in the
+      // header's action row, so a census that reads only .page-actions reports that one page as
+      // having no primary action at all.
+      primaryActions: Array.from(document.querySelectorAll('#main-content .page-actions .btn, #main-content .page-actions button, #main-content .studio-toolbar .btn, #main-content .studio-toolbar button')).filter(visible).map(text),
     };
   });
 }
