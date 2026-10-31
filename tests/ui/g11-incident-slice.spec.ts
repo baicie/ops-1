@@ -1,4 +1,5 @@
 import { expect, request, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import { adminSeed, createAccount as createSeededAccount } from './support/accounts';
 
 /**
  * G11 D4 - the real golden path, in a real browser against a real kernel and a real database.
@@ -61,16 +62,24 @@ async function signOut(page: Page) {
   await page.context().clearCookies();
 }
 
-/** Creates the non-admin accounts through the admin API, as an admin would. */
+/**
+ * Creates the non-admin accounts through the admin API, as an admin would - and grants each one
+ * the legacy business workspace, which is the half this seed was missing (G12 D5,
+ * docs/design/g12-scope/d5-business-workspace-adr.md section 3.4: an account created AFTER the
+ * migration is a member of nothing until an administrator grants it).
+ *
+ * The missing half was invisible rather than merely wrong. Before D5 a viewer read every
+ * incident on the platform, so "the viewer reads the operator's record" passed on a predicate
+ * that said nothing about the accounts this spec fabricates; after D5 the same assertion can
+ * only be true because of a grant. That is why the creation and the grant now live together in
+ * tests/ui/support/accounts.ts instead of being retyped per spec: a spec that forgets the grant
+ * gets an account that reads nothing and can file nothing, which is a failure three assertions
+ * away from its cause. adminSeed() also gives THIS test's administrator the one grant a fresh
+ * database needs before it can create a single incident (ADR section 3.4).
+ */
 async function createAccount(page: Page, account: Account) {
-  const login = await page.request.post('/api/v1/auth/login', { data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
-  expect(login.ok(), 'admin login for account setup').toBeTruthy();
-  const { csrfToken } = await login.json();
-  const created = await page.request.post('/api/v1/users', {
-    headers: { 'x-csrf-token': csrfToken },
-    data: { email: account.email, displayName: account.displayName, password: account.password, role: account.role },
-  });
-  expect([200, 201], 'create ' + account.role).toContain(created.status());
+  const admin = await adminSeed(page.request, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await createSeededAccount(page.request, admin, account);
 }
 
 /** One API session: its own cookie jar, and the token a write needs. */

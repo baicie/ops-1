@@ -1,4 +1,5 @@
 import { expect, request, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import { adminSeed, createAccount as createSeededAccount, type AccountSpec } from './support/accounts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -151,16 +152,17 @@ test('a viewer is told it cannot write, and the kernel still refuses the write i
   const page = await context.newPage();
 
   // --- the fixture half: an admin creates both accounts, the operator creates the record ------
-  const admin = await page.request.post('/api/v1/auth/login', { data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
-  expect(admin.ok(), 'admin login for fixture setup').toBeTruthy();
-  const { csrfToken } = await admin.json();
-  for (const account of [{ ...VIEWER, role: 'viewer' }, { ...OPERATOR, role: 'operator' }]) {
-    const created = await page.request.post('/api/v1/users', {
-      headers: { 'x-csrf-token': csrfToken },
-      data: { email: account.email, displayName: account.displayName, password: account.password, role: account.role },
-    });
-    expect([200, 201], 'create the ' + account.role + ' account').toContain(created.status());
-  }
+  // Both accounts are put inside the legacy business workspace by the seed, because "create an
+  // account" stopped being enough on its own: an account created after migration 0022 belongs to
+  // no workspace, so the operator could not file the record under test and the viewer could not
+  // read it - both would be refused for a reason that has nothing to do with the role the pair
+  // below varies (G12 D5, docs/design/g12-scope/d5-business-workspace-adr.md section 3.4).
+  const admin = await adminSeed(page.request, ADMIN_EMAIL, ADMIN_PASSWORD);
+  const seed: AccountSpec[] = [
+    { ...VIEWER, role: 'viewer' },
+    { ...OPERATOR, role: 'operator' },
+  ];
+  for (const account of seed) await createSeededAccount(page.request, admin, account);
   const operatorSession = await apiSignIn(origin, OPERATOR.email, OPERATOR.password);
   const incidentResponse = await operatorSession.api.post('/api/v1/incidents', {
     headers: { 'x-csrf-token': operatorSession.csrfToken },

@@ -1,4 +1,5 @@
 import { expect, request, test, type APIRequestContext } from '@playwright/test';
+import { adminSeed, createAccount as createSeededAccount } from './support/accounts';
 
 /**
  * G12 Phase C - the incident lifecycle in a real browser against the real kernel.
@@ -54,20 +55,21 @@ async function makeUser(
   baseURL: string | undefined,
   prefix: string,
   displayName: string,
-  role: string,
+  role: 'operator' | 'viewer',
 ): Promise<Actor> {
   const { email, password } = credentials(prefix);
-  const response = await admin.ctx.post('/api/v1/users', {
-    headers: { 'x-csrf-token': admin.csrf },
-    data: { email, displayName, password, role },
-  });
-  // The kernel answers a created account with 200 and the row (users::create_user does not
-  // set 201), so the assertion is on the body's id rather than on a status code it never sends.
-  expect(response.ok(), await response.text()).toBeTruthy();
-  const created = await response.json();
+  // Creation and the business-workspace grant are one act here, because they are one act for the
+  // spec: an account created through the admin API belongs to no workspace, so opB could not be
+  // handed a record (the kernel refuses a handover to a target that could never read it) and the
+  // viewer could not read the one it is supposed to be told about. G12 D5, ADR section 3.4.
+  const created = await createSeededAccount(
+    admin.ctx,
+    { csrf: admin.csrf, userId: admin.id },
+    { email, password, displayName, role },
+  );
   const ctx = await request.newContext({ baseURL });
   const csrf = await signInApi(ctx, email, password);
-  return { ctx, csrf, email, password, id: created.id as string };
+  return { ctx, csrf, email, password, id: created.id };
 }
 
 async function signInPage(page: import('@playwright/test').Page, email: string, password: string) {
@@ -83,8 +85,11 @@ test('G12 C: an operator closes a concluded incident, hands another one over, an
 
   // ---- fixtures --------------------------------------------------------------
   const adminCtx = await request.newContext({ baseURL });
-  const adminCsrf = await signInApi(adminCtx, ADMIN_EMAIL, ADMIN_PASSWORD);
-  const admin: Actor = { ctx: adminCtx, csrf: adminCsrf, email: ADMIN_EMAIL, password: ADMIN_PASSWORD, id: '' };
+  // adminSeed signs in and performs the one grant a fresh database needs before the platform
+  // administrator can create a single incident: migrations run before the bootstrap account
+  // exists, so the migration's one-time membership grant does not cover it (ADR section 3.4).
+  const adminSession = await adminSeed(adminCtx, ADMIN_EMAIL, ADMIN_PASSWORD);
+  const admin: Actor = { ctx: adminCtx, csrf: adminSession.csrf, email: ADMIN_EMAIL, password: ADMIN_PASSWORD, id: adminSession.userId };
   const opA = await makeUser(admin, baseURL, 'op-a', 'G12C Op Alice', 'operator');
   const opB = await makeUser(admin, baseURL, 'op-b', 'G12C Op Bob', 'operator');
   await makeUser(admin, baseURL, 'viewer', 'G12C Vic Viewer', 'viewer');
