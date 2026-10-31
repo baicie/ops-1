@@ -18,10 +18,15 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use chrono::{DateTime, Utc};
+use hmac::{Hmac, Mac};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{FromRow, PgPool};
+use std::collections::HashMap;
 use uuid::Uuid;
+
+type HmacSha256 = Hmac<Sha256>;
 
 const SEVERITIES: &[&str] = &["CRITICAL", "MAJOR", "MINOR", "WARNING"];
 const STATUSES: &[&str] = &["OPEN", "INVESTIGATING", "CONCLUDED", "CLOSED"];
@@ -32,8 +37,16 @@ const EVIDENCE_KINDS: &[&str] = &[
     "QUERY_RESULT",
     "OPERATOR_NOTE",
 ];
-const EVIDENCE_TRUSTS: &[&str] = &["SOURCE_ATTESTED", "OPERATOR_ASSERTED", "UNVERIFIED"];
+/// What a submitter is allowed to say about its own row. SOURCE_ATTESTED is
+/// absent on purpose: it is the one value that means "the Kernel checked", and a
+/// caller cannot perform that check on the Kernel's behalf.
+const CLAIMABLE_TRUSTS: &[&str] = &["OPERATOR_ASSERTED", "UNVERIFIED"];
 const VERDICT_VALUES: &[&str] = &["CONFIRMED", "REFUTED", "INCONCLUSIVE"];
+/// An attestation older or newer than this is refused as a replay, so a
+/// signature captured off the wire cannot be reused indefinitely.
+const ATTESTATION_MAX_SKEW_SECONDS: i64 = 300;
+/// The version tag inside every signed payload. Adding a field means a new tag.
+const ATTESTATION_VERSION: &str = "opsweave-evidence-attestation-v1";
 
 /// Who is asking, reduced to the two facts the SQL layer needs.
 ///
@@ -76,7 +89,38 @@ pub struct CreateEvidenceRequest {
     pub source: String,
     pub collected_at: DateTime<Utc>,
     pub content_ref: String,
-    pub trust: String,
+    /// The pre-0017 field, still parsed only so its rejection is a named 400
+    /// with a stable code instead of a generic "unknown field" message. Its value
+    /// is never read: no request body decides verifiedTrust (G12 A1).
+    #[serde(default)]
+    pub trust: Option<String>,
+    /// What the submitter says about the row it is writing. Absent means
+    /// OPERATOR_ASSERTED, which is what an authenticated operator's own
+    /// submission actually is.
+    #[serde(default)]
+    pub claimed_trust: Option<String>,
+    /// A source adapter's proof. Its presence is the only path to
+    /// SOURCE_ATTESTED, and only after the signature verifies.
+    #[serde(default)]
+    pub attestation: Option<AttestationRequest>,
+}
+
+/// What an adapter has to present to vouch for a row.
+///
+/// The adapter holds a secret the Kernel was configured with
+/// (OPSWEAVE_EVIDENCE_ADAPTERS); the signature proves possession of it. The
+/// signed bytes are fixed by attestation_payload and documented in
+/// contracts/openapi/incident-v1.yaml, because an adapter written in another
+/// language has to reproduce them exactly.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AttestationRequest {
+    /// Which configured adapter is speaking. Also recorded as verifierIdentity.
+    pub adapter_id: String,
+    /// When the adapter signed. Bounded by ATTESTATION_MAX_SKEW_SECONDS.
+    pub issued_at: DateTime<Utc>,
+    /// base64url (no padding) HMAC-SHA256 over attestation_payload.
+    pub signature: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,8 +183,22 @@ pub struct VerdictView {
     pub rationale: String,
     pub decided_by: Uuid,
     pub decided_at: DateTime<Utc>,
+    /// A3: how many evidence rows the signing transaction actually read. This is
+    /// the number the verdict stands on, not the number the incident holds now.
+    pub considered_evidence_count: i32,
+    /// sha256 (hex) over that set, or null when none was recorded.
+    pub considered_evidence_digest: Option<String>,
+    /// RECORDED | PRE_MIGRATION_UNRECORDED. The second value is a statement, not
+    /// a placeholder: it says the considered set was never stored and stays
+    /// unknown instead of being reconstructed from timestamps.
+    pub snapshot_kind: String,
 }
 
+/// One evidence row, with the two trust concepts kept apart.
+///
+/// Before G12 A1 there was one field, populated from the request body, and it
+/// was rendered as if the Kernel had checked. Now the reader is told both what
+/// was claimed and what was established, and by which method.
 #[derive(Debug, Clone, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct EvidenceView {
@@ -151,7 +209,28 @@ pub struct EvidenceView {
     pub source: String,
     pub collected_at: DateTime<Utc>,
     pub content_ref: String,
-    pub trust: String,
+    /// What the submitter said about its own row. Kept because it is a fact about
+    /// the submission, and never because it decides anything.
+    pub claimed_trust: String,
+    /// What the Kernel established. The only field a reader or a verdict may
+    /// treat as provenance.
+    pub verified_trust: String,
+    /// NONE | OPERATOR_IDENTITY | SOURCE_ADAPTER.
+    pub verification_method: String,
+    pub verified_at: Option<DateTime<Utc>>,
+    /// The authenticated adapter that vouched, for SOURCE_ADAPTER rows.
+    pub verifier_identity: Option<String>,
+    /// Who submitted. Null for rows that predate submitted_by where the audit
+    /// trail did not answer; never filled with a guess.
+    pub submitted_by: Option<Uuid>,
+    /// Why this row carries the verification it carries, when that needs saying
+    /// (the 0017 downgrade note is the case that exists today).
+    pub verification_note: Option<String>,
+    /// When the row was recorded, which is separable from collectedAt.
+    pub created_at: DateTime<Utc>,
+    /// A3: true when this row was appended after the incident's verdict was
+    /// signed, so it was never part of the set the signer weighed.
+    pub after_verdict: bool,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -171,6 +250,9 @@ struct IncidentRow {
     verdict_rationale: Option<String>,
     verdict_decided_by: Option<Uuid>,
     verdict_decided_at: Option<DateTime<Utc>>,
+    verdict_considered_count: Option<i32>,
+    verdict_considered_digest: Option<String>,
+    verdict_snapshot_kind: Option<String>,
 }
 
 impl IncidentRow {
@@ -180,16 +262,26 @@ impl IncidentRow {
             self.verdict_rationale,
             self.verdict_decided_by,
             self.verdict_decided_at,
+            self.verdict_considered_count,
+            self.verdict_snapshot_kind,
         ) {
-            (Some(verdict), Some(rationale), Some(decided_by), Some(decided_at)) => {
-                Some(VerdictView {
-                    incident_id: self.incident_id,
-                    verdict,
-                    rationale,
-                    decided_by,
-                    decided_at,
-                })
-            }
+            (
+                Some(verdict),
+                Some(rationale),
+                Some(decided_by),
+                Some(decided_at),
+                Some(considered_evidence_count),
+                Some(snapshot_kind),
+            ) => Some(VerdictView {
+                incident_id: self.incident_id,
+                verdict,
+                rationale,
+                decided_by,
+                decided_at,
+                considered_evidence_count,
+                considered_evidence_digest: self.verdict_considered_digest,
+                snapshot_kind,
+            }),
             // No verdict row, or a partially readable one: report absence rather
             // than inventing a conclusion.
             _ => None,
@@ -262,7 +354,17 @@ pub async fn append_evidence(
     auth.require_operator()?;
     let payload: CreateEvidenceRequest = parse_json(body)?;
     let caller = Caller::from_auth(&auth);
-    let (created, evidence) = insert_evidence(&state.db, caller, incident_id, payload).await?;
+    // The adapter secret set travels with the call instead of being read from a
+    // global, so a test can hand in its own adapters and prove a forged
+    // attestation is refused without depending on the process environment.
+    let (created, evidence) = insert_evidence(
+        &state.db,
+        &state.config.evidence_adapters,
+        caller,
+        incident_id,
+        payload,
+    )
+    .await?;
     let status = if created {
         StatusCode::CREATED
     } else {
@@ -494,6 +596,7 @@ async fn query_incident(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppRe
 
 async fn insert_evidence(
     db: &PgPool,
+    adapters: &HashMap<String, String>,
     caller: Caller,
     incident_id: Uuid,
     payload: CreateEvidenceRequest,
@@ -501,7 +604,17 @@ async fn insert_evidence(
     let kind = closed_set(&payload.kind, EVIDENCE_KINDS, "kind")?;
     let source = bounded(&payload.source, "source", 2, 200)?;
     let content_ref = bounded(&payload.content_ref, "contentRef", 2, 1000)?;
-    let trust = closed_set(&payload.trust, EVIDENCE_TRUSTS, "trust")?;
+    // G12 A1: the trust of this row is decided here, before any SQL runs, and
+    // nothing in the request body can set verified_trust except a signature the
+    // Kernel can check. The pre-0017 body field is refused, not migrated.
+    let tuple = EvidenceTuple {
+        incident_id,
+        kind: &kind,
+        source: &source,
+        collected_at: payload.collected_at,
+        content_ref: &content_ref,
+    };
+    let trust = resolve_evidence_trust(adapters, &tuple, &payload)?;
 
     let status = incident_status(db, caller, incident_id).await?;
     if status == "CLOSED" {
@@ -516,13 +629,14 @@ async fn insert_evidence(
     // together: rolled back after the transition, an audit failure would leave
     // the incident investigating evidence that this endpoint never accepted.
     let mut tx = db.begin().await?;
-    let inserted = sqlx::query_as::<_, EvidenceView>(
+    let inserted: Option<Uuid> = sqlx::query_scalar(
         r#"
         INSERT INTO kernel.incident_evidence
-          (evidence_id,incident_id,kind,source,collected_at,content_ref,trust)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+          (evidence_id,incident_id,kind,source,collected_at,content_ref,claimed_trust,
+           verified_trust,verification_method,verified_at,verifier_identity,submitted_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
         ON CONFLICT DO NOTHING
-        RETURNING evidence_id,incident_id,kind,source,collected_at,content_ref,trust
+        RETURNING evidence_id
         "#,
     )
     .bind(evidence_id)
@@ -531,19 +645,25 @@ async fn insert_evidence(
     .bind(&source)
     .bind(payload.collected_at)
     .bind(&content_ref)
-    .bind(&trust)
+    .bind(&trust.claimed)
+    .bind(&trust.verified)
+    .bind(trust.method)
+    .bind(trust.verified_at)
+    .bind(trust.verifier_identity.as_deref())
+    .bind(caller.user_id)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let Some(evidence) = inserted else {
+    let Some(stored_id) = inserted else {
         tx.rollback().await?;
-        let existing = sqlx::query_as::<_, EvidenceView>(
-            r#"
-            SELECT evidence_id,incident_id,kind,source,collected_at,content_ref,trust
-            FROM kernel.incident_evidence
-            WHERE incident_id=$1 AND kind=$2 AND source=$3 AND content_ref=$4
-            "#,
-        )
+        // A replay answers with the row that already exists - unchanged. That is
+        // a security property, not only idempotency: presenting a valid
+        // attestation for an already-stored UNVERIFIED row returns the stored
+        // row, so a replay can never upgrade a settled trust value.
+        let existing = sqlx::query_as::<_, EvidenceView>(&format!(
+            "{EVIDENCE_SELECT} WHERE e.incident_id=$1 AND e.kind=$2 AND e.source=$3
+             AND e.content_ref=$4"
+        ))
         .bind(incident_id)
         .bind(&kind)
         .bind(&source)
@@ -576,14 +696,20 @@ async fn insert_evidence(
         incident_id,
         "ADD_EVIDENCE",
         serde_json::json!({
-            "evidenceId": evidence.evidence_id,
-            "kind": &evidence.kind,
-            "trust": &evidence.trust,
+            "evidenceId": stored_id,
+            "kind": &kind,
+            // The audit row records both concepts, so an investigator reading the
+            // trail later can see what was claimed and what was established.
+            "claimedTrust": &trust.claimed,
+            "verifiedTrust": &trust.verified,
+            "verificationMethod": trust.method,
+            "verifierIdentity": trust.verifier_identity,
         }),
     )
     .await?;
     tx.commit().await?;
 
+    let evidence = query_evidence_row(db, stored_id).await?;
     Ok((true, evidence))
 }
 
@@ -593,14 +719,10 @@ async fn query_evidence(
     incident_id: Uuid,
 ) -> AppResult<Vec<EvidenceView>> {
     incident_status(db, caller, incident_id).await?;
-    Ok(sqlx::query_as::<_, EvidenceView>(
-        r#"
-        SELECT evidence_id,incident_id,kind,source,collected_at,content_ref,trust
-        FROM kernel.incident_evidence
-        WHERE incident_id=$1
-        ORDER BY collected_at DESC, evidence_id DESC
-        "#,
-    )
+    Ok(sqlx::query_as::<_, EvidenceView>(&format!(
+        "{EVIDENCE_SELECT} WHERE e.incident_id=$1
+         ORDER BY e.collected_at DESC, e.evidence_id DESC"
+    ))
     .bind(incident_id)
     .fetch_all(db)
     .await?)
@@ -649,34 +771,64 @@ async fn insert_verdict(
             "this incident already has a human verdict; a verdict is write-once",
         ));
     }
-    if requires_evidence {
-        let has_evidence: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM kernel.incident_evidence WHERE incident_id=$1)",
-        )
-        .bind(incident_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if !has_evidence {
-            return Err(AppError::conflict(
-                "INCIDENT_EVIDENCE_REQUIRED",
-                "CONFIRMED and REFUTED need at least one evidence row; use INCONCLUSIVE when evidence is missing",
-            ));
-        }
+    // A3: freeze the set this verdict stands on, read inside the transaction that
+    // writes the verdict. Counting rows at read time instead would let evidence
+    // appended after signing be reported as if the signer had weighed it.
+    let considered: Vec<(Uuid, String, String, String, String)> = sqlx::query_as(
+        "SELECT evidence_id, kind, source, content_ref, verified_trust
+         FROM kernel.incident_evidence WHERE incident_id=$1 ORDER BY evidence_id",
+    )
+    .bind(incident_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    if requires_evidence && considered.is_empty() {
+        return Err(AppError::conflict(
+            "INCIDENT_EVIDENCE_REQUIRED",
+            "CONFIRMED and REFUTED need at least one evidence row; use INCONCLUSIVE when evidence is missing",
+        ));
     }
+    let snapshot: Vec<(Uuid, String)> = considered
+        .iter()
+        .map(|(id, kind, source, content_ref, verified)| {
+            (
+                *id,
+                evidence_row_digest(*id, kind, source, content_ref, verified),
+            )
+        })
+        .collect();
+    let considered_digest = considered_set_digest(&snapshot);
     let view = sqlx::query_as::<_, VerdictView>(
         r#"
         INSERT INTO kernel.incident_verdicts
-          (incident_id,verdict,rationale,decided_by)
-        VALUES ($1,$2,$3,$4)
-        RETURNING incident_id,verdict,rationale,decided_by,decided_at
+          (incident_id,verdict,rationale,decided_by,
+           considered_evidence_count,considered_evidence_digest,snapshot_kind)
+        VALUES ($1,$2,$3,$4,$5,$6,'RECORDED')
+        RETURNING incident_id,verdict,rationale,decided_by,decided_at,
+                  considered_evidence_count,considered_evidence_digest,snapshot_kind
         "#,
     )
     .bind(incident_id)
     .bind(&verdict)
     .bind(&rationale)
     .bind(caller.user_id)
+    .bind(snapshot.len() as i32)
+    .bind(&considered_digest)
     .fetch_one(&mut *tx)
     .await?;
+    // The per-row snapshots. Written after the verdict row so the foreign key
+    // holds, and in the same transaction so a verdict can never be committed
+    // with a partially recorded considered set.
+    for (evidence_id, digest) in &snapshot {
+        sqlx::query(
+            "INSERT INTO kernel.incident_verdict_evidence (incident_id,evidence_id,evidence_digest)
+             VALUES ($1,$2,$3)",
+        )
+        .bind(incident_id)
+        .bind(*evidence_id)
+        .bind(digest)
+        .execute(&mut *tx)
+        .await?;
+    }
     // Compare-and-set on the status too: if anything moved the incident out of a
     // concludable state, the verdict rolls back rather than being left attached
     // to an inconsistent status.
@@ -701,7 +853,11 @@ async fn insert_verdict(
         caller.user_id,
         incident_id,
         "RECORD_VERDICT",
-        serde_json::json!({ "verdict": &view.verdict }),
+        serde_json::json!({
+            "verdict": &view.verdict,
+            "consideredEvidenceCount": view.considered_evidence_count,
+            "consideredEvidenceDigest": &view.considered_evidence_digest,
+        }),
     )
     .await?;
     tx.commit().await?;
@@ -710,10 +866,9 @@ async fn insert_verdict(
 
 async fn query_verdict(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppResult<VerdictView> {
     incident_status(db, caller, incident_id).await?;
-    sqlx::query_as::<_, VerdictView>(
-        "SELECT incident_id,verdict,rationale,decided_by,decided_at
-         FROM kernel.incident_verdicts WHERE incident_id=$1",
-    )
+    sqlx::query_as::<_, VerdictView>(&format!(
+        "SELECT {VERDICT_COLUMNS} FROM kernel.incident_verdicts WHERE incident_id=$1"
+    ))
     .bind(incident_id)
     .fetch_optional(db)
     .await?
@@ -739,6 +894,253 @@ async fn incident_status(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppR
     .ok_or_else(incident_not_found)
 }
 
+async fn query_evidence_row(db: &PgPool, evidence_id: Uuid) -> AppResult<EvidenceView> {
+    sqlx::query_as::<_, EvidenceView>(&format!("{EVIDENCE_SELECT} WHERE e.evidence_id=$1"))
+        .bind(evidence_id)
+        .fetch_optional(db)
+        .await?
+        .ok_or_else(|| {
+            AppError::internal(format!(
+                "evidence {evidence_id} was committed but cannot be read back"
+            ))
+        })
+}
+
+// ---------------------------------------------------------------------------
+// G12 A1 · What the Kernel is allowed to conclude about one evidence row
+//
+// The defect: verified provenance used to be a request field. POST
+// {"trust":"SOURCE_ATTESTED"} produced a row indistinguishable from one a
+// connector vouched for, and the two had the same column, the same JSON field
+// and the same badge. Splitting the concept fixes the read side; this block
+// fixes the write side, and it is the only place verified_trust is decided.
+// ---------------------------------------------------------------------------
+
+/// The tuple an attestation binds: the fields that make one evidence row itself.
+///
+/// One struct rather than a run of &str parameters, because both the signer and
+/// the verifier have to cover every field, and a loose argument list is exactly
+/// how one of them gets a field the other forgets.
+struct EvidenceTuple<'a> {
+    incident_id: Uuid,
+    kind: &'a str,
+    source: &'a str,
+    collected_at: DateTime<Utc>,
+    content_ref: &'a str,
+}
+
+/// The Kernel's conclusion about one evidence row, settled before any SQL runs.
+struct EvidenceTrust {
+    claimed: String,
+    verified: String,
+    method: &'static str,
+    verified_at: Option<DateTime<Utc>>,
+    verifier_identity: Option<String>,
+}
+
+/// The claimed/verified split, decided from the request and the adapter set.
+///
+/// Three outcomes and no fourth:
+///   * a signed, fresh attestation from a configured adapter -> SOURCE_ATTESTED;
+///   * no attestation at all -> the caller's claim, which can be at most
+///     OPERATOR_ASSERTED (the caller is an authenticated operator: that much the
+///     Kernel did verify);
+///   * anything that asks to be taken on its word for attestation -> 400/401.
+fn resolve_evidence_trust(
+    adapters: &HashMap<String, String>,
+    tuple: &EvidenceTuple<'_>,
+    payload: &CreateEvidenceRequest,
+) -> AppResult<EvidenceTrust> {
+    // Refused rather than reinterpreted: until this release the value in this
+    // field was what granted attestation, so silently mapping it onto a claim
+    // would keep a "looks like it worked" path alive for old clients.
+    if payload.trust.is_some() {
+        return Err(trust_not_self_assertable());
+    }
+    let claimed = match payload.claimed_trust.as_deref() {
+        Some(raw) => {
+            if raw.trim().eq_ignore_ascii_case("SOURCE_ATTESTED") {
+                return Err(trust_not_self_assertable());
+            }
+            closed_set(raw, CLAIMABLE_TRUSTS, "claimedTrust")?
+        }
+        // An operator submitting its own note is asserting it; that is the
+        // truthful default rather than the most flattering one.
+        None => "OPERATOR_ASSERTED".to_string(),
+    };
+
+    let Some(attestation) = payload.attestation.as_ref() else {
+        let verified = claimed.clone();
+        let verified_at = (verified == "OPERATOR_ASSERTED").then(Utc::now);
+        return Ok(EvidenceTrust {
+            claimed,
+            verified,
+            method: if verified_at.is_some() {
+                "OPERATOR_IDENTITY"
+            } else {
+                "NONE"
+            },
+            verified_at,
+            verifier_identity: None,
+        });
+    };
+
+    let adapter_id = bounded(&attestation.adapter_id, "attestation.adapterId", 1, 100)?;
+    verify_attestation(adapters, &adapter_id, attestation, tuple)?;
+    Ok(EvidenceTrust {
+        claimed,
+        verified: "SOURCE_ATTESTED".to_string(),
+        method: "SOURCE_ADAPTER",
+        verified_at: Some(Utc::now()),
+        verifier_identity: Some(adapter_id),
+    })
+}
+
+/// Checks that the adapter exists, that its signature is fresh and that the
+/// signature covers exactly this evidence tuple.
+///
+/// A failure here is a 401, never a downgrade to UNVERIFIED: an unverifiable
+/// attestation is an attempt to claim provenance the caller cannot prove, and
+/// storing the row anyway would bury it in the evidence table as if it were an
+/// ordinary note.
+fn verify_attestation(
+    adapters: &HashMap<String, String>,
+    adapter_id: &str,
+    attestation: &AttestationRequest,
+    tuple: &EvidenceTuple<'_>,
+) -> AppResult<()> {
+    let Some(secret) = adapters.get(adapter_id) else {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "EVIDENCE_ADAPTER_UNKNOWN",
+            "no configured source adapter answers to this adapterId, so its attestation cannot be checked",
+        ));
+    };
+    let skewed = (Utc::now() - attestation.issued_at).num_seconds().abs();
+    if skewed > ATTESTATION_MAX_SKEW_SECONDS {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "EVIDENCE_ATTESTATION_STALE",
+            format!(
+                "this attestation is {skewed}s away from the Kernel clock; a signature is accepted for {ATTESTATION_MAX_SKEW_SECONDS}s either side so it cannot be replayed"
+            ),
+        ));
+    }
+    let payload = attestation_payload(adapter_id, tuple, attestation.issued_at)?;
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .map_err(|_| AppError::internal("evidence adapter secret is not a usable HMAC key"))?;
+    mac.update(payload.as_bytes());
+    use base64::Engine;
+    let expected =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    if !constant_time_eq(expected.as_bytes(), attestation.signature.trim().as_bytes()) {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "EVIDENCE_ATTESTATION_INVALID",
+            "the attestation signature does not cover this evidence tuple under this adapter's secret",
+        ));
+    }
+    Ok(())
+}
+
+/// The exact bytes an adapter signs.
+///
+/// JSON with a fixed key order, because the alternative - a separator-joined
+/// string - lets a newline inside source or contentRef move the field boundary
+/// and make two different tuples sign identically. Escaping removes that.
+///
+/// camelCase because the published contract says so (incident-v1.yaml,
+/// components.schemas.Attestation) and every other field on this API is
+/// camelCase. Without rename_all serde would emit adapter_id/collected_at_unix
+/// and an adapter written from the contract would produce a signature this
+/// Kernel silently rejects - a mistake an in-process test cannot see, because
+/// both sides would be wrong the same way.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttestationClaims<'a> {
+    v: &'a str,
+    adapter_id: &'a str,
+    incident_id: String,
+    kind: &'a str,
+    source: &'a str,
+    collected_at_unix: i64,
+    content_ref: &'a str,
+    issued_at_unix: i64,
+}
+
+fn attestation_payload(
+    adapter_id: &str,
+    tuple: &EvidenceTuple<'_>,
+    issued_at: DateTime<Utc>,
+) -> AppResult<String> {
+    serde_json::to_string(&AttestationClaims {
+        v: ATTESTATION_VERSION,
+        adapter_id,
+        incident_id: tuple.incident_id.to_string(),
+        kind: tuple.kind,
+        source: tuple.source,
+        collected_at_unix: tuple.collected_at.timestamp(),
+        content_ref: tuple.content_ref,
+        issued_at_unix: issued_at.timestamp(),
+    })
+    .map_err(AppError::internal)
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut diff = 0_u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
+}
+
+fn trust_not_self_assertable() -> AppError {
+    AppError::new(
+        StatusCode::BAD_REQUEST,
+        "EVIDENCE_TRUST_NOT_SELF_ASSERTABLE",
+        "trust is the Kernel's verdict, not a request field: send claimedTrust (OPERATOR_ASSERTED or UNVERIFIED), and obtain SOURCE_ATTESTED only by presenting a signed attestation from a configured source adapter",
+    )
+}
+
+// ---------------------------------------------------------------------------
+// G12 A3 · The set a verdict stands on
+// ---------------------------------------------------------------------------
+
+/// sha256 (hex) of one evidence row's identity and content at signing time.
+/// Length prefixes keep concatenation unambiguous; the digest is what makes a
+/// later edit to a contentRef detectable even though the id is unchanged.
+fn evidence_row_digest(
+    evidence_id: Uuid,
+    kind: &str,
+    source: &str,
+    content_ref: &str,
+    verified_trust: &str,
+) -> String {
+    let mut hasher = Sha256::new();
+    for part in [kind, source, content_ref, verified_trust] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    hasher.update(evidence_id.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// sha256 (hex) over the whole considered set, ordered by evidence id so the
+/// digest depends on the set and not on the order rows happened to arrive in.
+fn considered_set_digest(snapshot: &[(Uuid, String)]) -> String {
+    let mut ordered: Vec<&(Uuid, String)> = snapshot.iter().collect();
+    ordered.sort_by_key(|(id, _)| *id);
+    let mut hasher = Sha256::new();
+    for (id, digest) in ordered {
+        hasher.update(id.as_bytes());
+        hasher.update(digest.as_bytes());
+    }
+    hex::encode(hasher.finalize())
+}
+
 /// Shared projection: one SELECT shape drives both the list and the detail, so a
 /// derived field cannot exist on one and be missing on the other. The evidence
 /// refs are capped at the newest 100; the evidence endpoint is the complete list.
@@ -758,9 +1160,41 @@ SELECT i.incident_id, i.title, i.severity, i.status, i.source,
        v.verdict AS verdict_value,
        v.rationale AS verdict_rationale,
        v.decided_by AS verdict_decided_by,
-       v.decided_at AS verdict_decided_at
+       v.decided_at AS verdict_decided_at,
+       v.considered_evidence_count AS verdict_considered_count,
+       v.considered_evidence_digest AS verdict_considered_digest,
+       v.snapshot_kind AS verdict_snapshot_kind
 FROM kernel.incidents i
 LEFT JOIN kernel.incident_verdicts v ON v.incident_id = i.incident_id"#;
+
+/// One evidence projection, used by the list, the single-row read and the replay
+/// branch of the insert, so the three can never disagree about what an evidence
+/// row contains.
+///
+/// afterVerdict is derived here rather than stored: the stored fact is the
+/// signed snapshot (kernel.incident_verdict_evidence), and a boolean column
+/// would be a second copy of it that could drift. For a verdict signed before
+/// 0017 there is no snapshot, so the only defensible answer is the recorded
+/// timestamps, and the verdict itself reports snapshotKind =
+/// PRE_MIGRATION_UNRECORDED so the reader knows which rule produced the answer.
+const EVIDENCE_SELECT: &str = r#"
+SELECT e.evidence_id, e.incident_id, e.kind, e.source, e.collected_at, e.content_ref,
+       e.claimed_trust, e.verified_trust, e.verification_method, e.verified_at,
+       e.verifier_identity, e.submitted_by, e.verification_note, e.created_at,
+       CASE
+         WHEN v.incident_id IS NULL THEN false
+         WHEN v.snapshot_kind = 'RECORDED' THEN NOT EXISTS (
+           SELECT 1 FROM kernel.incident_verdict_evidence s
+           WHERE s.incident_id = e.incident_id AND s.evidence_id = e.evidence_id
+         )
+         ELSE e.created_at > v.decided_at
+       END AS after_verdict
+FROM kernel.incident_evidence e
+LEFT JOIN kernel.incident_verdicts v ON v.incident_id = e.incident_id"#;
+
+/// The verdict projection, in one place for the same reason.
+const VERDICT_COLUMNS: &str = "incident_id,verdict,rationale,decided_by,decided_at,
+       considered_evidence_count,considered_evidence_digest,snapshot_kind";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1023,14 +1457,111 @@ mod tests {
         }
     }
 
+    /// A plain operator submission: no attestation, so at most OPERATOR_ASSERTED.
+    /// The pre-G12 version of this helper asked for SOURCE_ATTESTED in the body,
+    /// which is exactly the defect - it is kept out of the fixtures on purpose.
     fn evidence_request(content_ref: &str) -> CreateEvidenceRequest {
         CreateEvidenceRequest {
             kind: "METRIC_SNAPSHOT".to_string(),
             source: "prometheus".to_string(),
             collected_at: Utc::now(),
             content_ref: content_ref.to_string(),
-            trust: "SOURCE_ATTESTED".to_string(),
+            trust: None,
+            claimed_trust: None,
+            attestation: None,
         }
+    }
+
+    /// The adapter set a test hands to insert_evidence. Empty unless a test is
+    /// exercising the attested path, so no test proves attestation by accident.
+    fn no_adapters() -> HashMap<String, String> {
+        HashMap::new()
+    }
+
+    const ADAPTER_ID: &str = "zabbix-main";
+    const ADAPTER_SECRET: &str = "adapter-secret-for-tests";
+
+    fn adapters() -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        map.insert(ADAPTER_ID.to_string(), ADAPTER_SECRET.to_string());
+        map
+    }
+
+    /// The tuple a test signs over, kept in one place so a test cannot sign one
+    /// set of fields and submit another by accident.
+    fn tuple<'a>(
+        incident_id: Uuid,
+        kind: &'a str,
+        source: &'a str,
+        content_ref: &'a str,
+        collected_at: DateTime<Utc>,
+    ) -> EvidenceTuple<'a> {
+        EvidenceTuple {
+            incident_id,
+            kind,
+            source,
+            collected_at,
+            content_ref,
+        }
+    }
+
+    /// Builds the attestation an honest adapter would send for this tuple.
+    fn attested_request(
+        bound: &EvidenceTuple<'_>,
+        adapter_id: &str,
+        secret: &str,
+        issued_at: DateTime<Utc>,
+    ) -> CreateEvidenceRequest {
+        let payload = attestation_payload(adapter_id, bound, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        CreateEvidenceRequest {
+            kind: bound.kind.to_string(),
+            source: bound.source.to_string(),
+            collected_at: bound.collected_at,
+            content_ref: bound.content_ref.to_string(),
+            trust: None,
+            claimed_trust: None,
+            attestation: Some(AttestationRequest {
+                adapter_id: adapter_id.to_string(),
+                issued_at,
+                signature,
+            }),
+        }
+    }
+
+    /// Golden vector for the signed payload.
+    ///
+    /// The in-process attestation tests cannot catch a key-format mistake: both
+    /// sides call attestation_payload, so both would be wrong the same way. This
+    /// asserts the literal bytes an adapter written from the contract produces.
+    #[test]
+    fn attestation_payload_matches_the_published_golden_vector() {
+        let bound = tuple(
+            Uuid::parse_str("b17265e7-3ac8-4877-bad4-40c4d2df4a87").unwrap(),
+            "METRIC_SNAPSHOT",
+            "zabbix:probe",
+            "sha256:probe-1",
+            DateTime::parse_from_rfc3339("2026-10-31T05:17:24Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        let issued_at = DateTime::parse_from_rfc3339("2026-10-31T05:17:24Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            attestation_payload("zabbix-main", &bound, issued_at).unwrap(),
+            concat!(
+                r#"{"v":"opsweave-evidence-attestation-v1","adapterId":"zabbix-main","#,
+                r#""incidentId":"b17265e7-3ac8-4877-bad4-40c4d2df4a87","#,
+                r#""kind":"METRIC_SNAPSHOT","source":"zabbix:probe","#,
+                r#""collectedAtUnix":1793423844,"contentRef":"sha256:probe-1","#,
+                r#""issuedAtUnix":1793423844}"#
+            )
+        );
     }
 
     fn verdict_request(verdict: &str) -> CreateVerdictRequest {
@@ -1057,7 +1588,10 @@ mod tests {
         assert!(error.message.contains("CRITICAL, MAJOR, MINOR, WARNING"));
         // A value the table CHECK would reject must never reach the database.
         assert!(closed_set("ZABBIX", SOURCES, "source").is_err());
-        assert!(closed_set("AI_INFERENCE", EVIDENCE_TRUSTS, "trust").is_err());
+        assert!(closed_set("AI_INFERENCE", CLAIMABLE_TRUSTS, "claimedTrust").is_err());
+        // G12 A1: the claimable set is strictly smaller than the stored set. A
+        // caller can never name the one value that means "the Kernel checked".
+        assert!(!CLAIMABLE_TRUSTS.contains(&"SOURCE_ATTESTED"));
     }
 
     #[test]
@@ -1095,6 +1629,9 @@ mod tests {
             verdict_rationale: None,
             verdict_decided_by: None,
             verdict_decided_at: None,
+            verdict_considered_count: None,
+            verdict_considered_digest: None,
+            verdict_snapshot_kind: None,
         };
         let encoded = encode_cursor(&row);
         let (time, id) = decode_cursor(&encoded).unwrap();
@@ -1315,6 +1852,7 @@ mod tests {
 
         let (created, first) = insert_evidence(
             &pool,
+            &no_adapters(),
             caller(user),
             incident.id,
             evidence_request("sha256:metric-window-1"),
@@ -1325,6 +1863,7 @@ mod tests {
 
         let (created_again, second) = insert_evidence(
             &pool,
+            &no_adapters(),
             caller(user),
             incident.id,
             evidence_request("sha256:metric-window-1"),
@@ -1381,6 +1920,7 @@ mod tests {
 
         insert_evidence(
             &pool,
+            &no_adapters(),
             caller(user),
             incident.id,
             evidence_request("sha256:oom-log"),
@@ -1462,6 +2002,7 @@ mod tests {
 
         let error = insert_evidence(
             &pool,
+            &no_adapters(),
             caller(user),
             incident.id,
             evidence_request("sha256:late"),
@@ -1601,6 +2142,7 @@ mod tests {
                 .unwrap();
         insert_evidence(
             &pool,
+            &no_adapters(),
             caller(user),
             incident.id,
             evidence_request("sha256:oom-log"),
@@ -1725,6 +2267,7 @@ mod tests {
         let probe = refuse_audit(&pool, "INCIDENT_EVIDENCE_ADDED", user).await;
         let refused = insert_evidence(
             &pool,
+            &no_adapters(),
             caller(user),
             incident.id,
             evidence_request("sha256:first"),
@@ -1818,5 +2361,747 @@ mod tests {
         assert_eq!(seen.id, first.id);
 
         cleanup(&pool, &[operator_a, operator_b, admin]).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // G12 A1 - the negative tests. Every test below asserts both the refusal AND
+    // that nothing was written: a rejection that still stores the row is the same
+    // defect wearing a different status code.
+    // -----------------------------------------------------------------------
+
+    /// The pre-0017 request field. Refused as a field, not reinterpreted as a
+    /// claim: a client that still sends it must learn the field moved, because
+    /// until this release its value was what granted attestation.
+    #[tokio::test]
+    async fn a_body_trust_field_is_refused_and_writes_nothing() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("body trust", None))
+                .await
+                .unwrap();
+
+        for requested in ["SOURCE_ATTESTED", "OPERATOR_ASSERTED", "UNVERIFIED"] {
+            let mut payload = evidence_request("sha256:body-trust");
+            payload.trust = Some(requested.to_string());
+            let error = insert_evidence(&pool, &no_adapters(), caller(user), incident.id, payload)
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code, "EVIDENCE_TRUST_NOT_SELF_ASSERTABLE",
+                "trust={requested} must be refused as a request field"
+            );
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        }
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, 0, "a refused evidence write must not store a row");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// The new field is a claim, and the claim set excludes the one value that
+    /// means "the Kernel checked".
+    #[tokio::test]
+    async fn a_caller_cannot_claim_attested_trust() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("claim attested", None),
+        )
+        .await
+        .unwrap();
+
+        let mut payload = evidence_request("sha256:claim-attested");
+        payload.claimed_trust = Some("source_attested".to_string());
+        let error = insert_evidence(&pool, &no_adapters(), caller(user), incident.id, payload)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_TRUST_NOT_SELF_ASSERTABLE");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+
+        let mut payload = evidence_request("sha256:claim-bogus");
+        payload.claimed_trust = Some("AI_INFERENCE".to_string());
+        let error = insert_evidence(&pool, &no_adapters(), caller(user), incident.id, payload)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "INVALID_REQUEST");
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, 0);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// What an operator's own submission actually earns: the Kernel verified the
+    /// identity of the operator, and nothing more.
+    #[tokio::test]
+    async fn an_operator_submission_is_verified_as_operator_identity_only() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("operator only", None))
+                .await
+                .unwrap();
+
+        let (created, row) = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            evidence_request("sha256:operator-row"),
+        )
+        .await
+        .unwrap();
+        assert!(created);
+        assert_eq!(row.claimed_trust, "OPERATOR_ASSERTED");
+        assert_eq!(row.verified_trust, "OPERATOR_ASSERTED");
+        assert_eq!(row.verification_method, "OPERATOR_IDENTITY");
+        assert!(row.verified_at.is_some(), "an operator verdict is dated");
+        assert_eq!(
+            row.verifier_identity, None,
+            "no adapter vouched, so no adapter identity is claimed"
+        );
+        assert_eq!(row.submitted_by, Some(user));
+        assert_eq!(row.verification_note, None);
+        assert!(!row.after_verdict);
+
+        let mut payload = evidence_request("sha256:self-declared");
+        payload.claimed_trust = Some("UNVERIFIED".to_string());
+        let (_, row) = insert_evidence(&pool, &no_adapters(), caller(user), incident.id, payload)
+            .await
+            .unwrap();
+        assert_eq!(row.claimed_trust, "UNVERIFIED");
+        assert_eq!(row.verified_trust, "UNVERIFIED");
+        assert_eq!(row.verification_method, "NONE");
+        assert_eq!(row.verified_at, None);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// The positive path: a configured adapter's signature is the only thing that
+    /// produces SOURCE_ATTESTED, and it records who vouched and how.
+    #[tokio::test]
+    async fn a_valid_adapter_attestation_is_the_only_path_to_attested_trust() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("attested row", None))
+                .await
+                .unwrap();
+
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let payload = attested_request(
+            &tuple(
+                incident.id,
+                "METRIC_SNAPSHOT",
+                "zabbix",
+                "sha256:attested-1",
+                collected_at,
+            ),
+            ADAPTER_ID,
+            ADAPTER_SECRET,
+            issued_at,
+        );
+        let (created, row) =
+            insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
+                .await
+                .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
+        assert_eq!(row.verification_method, "SOURCE_ADAPTER");
+        assert_eq!(row.verifier_identity.as_deref(), Some(ADAPTER_ID));
+        assert!(row.verified_at.is_some());
+        assert_eq!(row.submitted_by, Some(user));
+        // The claim is not silently upgraded to match the verdict: they answer
+        // different questions and are stored separately.
+        assert_eq!(row.claimed_trust, "OPERATOR_ASSERTED");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// Four ways an attestation can be wrong. All four are refused, none of them
+    /// degrades to UNVERIFIED: an unverifiable attestation is an attempt to claim
+    /// provenance, and storing it as an ordinary row would bury it.
+    #[tokio::test]
+    async fn forged_and_stale_attestations_are_refused_and_write_nothing() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("forged attempt", None),
+        )
+        .await
+        .unwrap();
+
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let build =
+            |content_ref: &str, adapter_id: &str, secret: &str, issued_at: DateTime<Utc>| {
+                attested_request(
+                    &tuple(
+                        incident.id,
+                        "METRIC_SNAPSHOT",
+                        "prometheus",
+                        content_ref,
+                        collected_at,
+                    ),
+                    adapter_id,
+                    secret,
+                    issued_at,
+                )
+            };
+
+        // (a) right adapter, wrong secret.
+        let error = insert_evidence(
+            &pool,
+            &adapters(),
+            caller(user),
+            incident.id,
+            build(
+                "sha256:forged-signature",
+                ADAPTER_ID,
+                "not-the-secret",
+                issued_at,
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_INVALID");
+        assert_eq!(error.status, StatusCode::UNAUTHORIZED);
+
+        // (b) an adapter the Kernel does not know.
+        let error = insert_evidence(
+            &pool,
+            &adapters(),
+            caller(user),
+            incident.id,
+            build(
+                "sha256:unknown-adapter",
+                "zabbix-impostor",
+                ADAPTER_SECRET,
+                issued_at,
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ADAPTER_UNKNOWN");
+        assert_eq!(error.status, StatusCode::UNAUTHORIZED);
+
+        // (c) a genuine signature over a different tuple, replayed onto this one:
+        // the signature binds contentRef, so moving it invalidates the proof.
+        let mut moved = build("sha256:original-ref", ADAPTER_ID, ADAPTER_SECRET, issued_at);
+        moved.content_ref = "sha256:moved-ref".to_string();
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, moved)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_INVALID");
+
+        // (d) a genuine signature captured and replayed later.
+        let stale_at = Utc::now() - chrono::Duration::seconds(ATTESTATION_MAX_SKEW_SECONDS + 60);
+        let error = insert_evidence(
+            &pool,
+            &adapters(),
+            caller(user),
+            incident.id,
+            build("sha256:stale", ADAPTER_ID, ADAPTER_SECRET, stale_at),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_STALE");
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, 0, "not one of the four attempts may leave a row");
+
+        // And with no adapter configured at all, even a correct-looking
+        // attestation proves nothing.
+        let error = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            build("sha256:no-adapters", ADAPTER_ID, ADAPTER_SECRET, issued_at),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ADAPTER_UNKNOWN");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// A replay answers with the stored row, so it cannot be used to upgrade a
+    /// settled UNVERIFIED/OPERATOR_ASSERTED row into an attested one.
+    #[tokio::test]
+    async fn a_replay_cannot_upgrade_a_settled_trust() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("replay upgrade", None),
+        )
+        .await
+        .unwrap();
+
+        let (created, first) = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            evidence_request("sha256:settled"),
+        )
+        .await
+        .unwrap();
+        assert!(created);
+        assert_eq!(first.verified_trust, "OPERATOR_ASSERTED");
+
+        let issued_at = Utc::now();
+        let upgrade = attested_request(
+            &tuple(
+                incident.id,
+                "METRIC_SNAPSHOT",
+                "prometheus",
+                "sha256:settled",
+                first.collected_at,
+            ),
+            ADAPTER_ID,
+            ADAPTER_SECRET,
+            issued_at,
+        );
+        let (created_again, second) =
+            insert_evidence(&pool, &adapters(), caller(user), incident.id, upgrade)
+                .await
+                .unwrap();
+        assert!(!created_again, "the identical tuple is one row, not two");
+        assert_eq!(second.evidence_id, first.evidence_id);
+        assert_eq!(
+            second.verified_trust, "OPERATOR_ASSERTED",
+            "a replay must not raise the trust of the row it answers with"
+        );
+        assert_eq!(second.verification_method, "OPERATOR_IDENTITY");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// HTTP-level role matrix. The handler gate is the authority, so this drives
+    /// the real axum handler with a real AuthUser per role instead of trusting
+    /// that require_operator() is called.
+    #[tokio::test]
+    async fn viewer_is_refused_at_the_handler_and_operator_and_admin_are_not() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use axum::routing::post;
+        use opsweave_contracts::Role;
+        use tower::ServiceExt;
+
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let viewer = seed_user(&pool, "viewer").await;
+        let admin = seed_user(&pool, "admin").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(owner), incident_request("role matrix", None))
+                .await
+                .unwrap();
+
+        let state = AppState::new(
+            crate::config::Config::from_env(),
+            pool.clone(),
+            vec![7_u8; 32],
+        )
+        .expect("test AppState");
+
+        async fn post_as(
+            state: AppState,
+            user: AuthUser,
+            incident_id: Uuid,
+            ref_name: &str,
+        ) -> (StatusCode, String) {
+            use axum::middleware;
+            let router = axum::Router::new()
+                .route(
+                    "/api/v1/incidents/{incident_id}/evidence",
+                    post(append_evidence),
+                )
+                .layer(middleware::from_fn(
+                    move |mut request: axum::extract::Request, next: middleware::Next| {
+                        let user = user.clone();
+                        async move {
+                            request.extensions_mut().insert(user);
+                            next.run(request).await
+                        }
+                    },
+                ))
+                .with_state(state);
+            let body = serde_json::json!({
+                "kind": "OPERATOR_NOTE",
+                "source": "operator:role-matrix",
+                "collectedAt": Utc::now().to_rfc3339(),
+                "contentRef": ref_name,
+            })
+            .to_string();
+            let response = router
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/v1/incidents/{incident_id}/evidence"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+                .await
+                .unwrap();
+            (status, String::from_utf8_lossy(&bytes).to_string())
+        }
+
+        let as_role = |role: Role, id: Uuid| AuthUser {
+            user_id: id,
+            email: format!("{id}@example.invalid"),
+            display_name: "role matrix".to_string(),
+            role,
+            session_id: Uuid::new_v4(),
+            csrf_token: "csrf".to_string(),
+            via_cookie: true,
+        };
+
+        let (status, body) = post_as(
+            state.clone(),
+            as_role(Role::Viewer, viewer),
+            incident.id,
+            "note:viewer",
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "body was {body}");
+        assert!(body.contains("FORBIDDEN"));
+
+        let (status, body) = post_as(
+            state.clone(),
+            as_role(Role::Operator, owner),
+            incident.id,
+            "note:operator",
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "body was {body}");
+        assert!(
+            body.contains("\"verifiedTrust\":\"OPERATOR_ASSERTED\""),
+            "body was {body}"
+        );
+
+        let (status, body) = post_as(
+            state.clone(),
+            as_role(Role::Admin, admin),
+            incident.id,
+            "note:admin",
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "body was {body}");
+
+        // Not one of the three writes produced attestation, whatever the role.
+        let attested: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence
+              WHERE incident_id=$1 AND (verified_trust='SOURCE_ATTESTED'
+                 OR claimed_trust='SOURCE_ATTESTED')",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(attested, 0);
+
+        cleanup(&pool, &[owner, viewer, admin]).await;
+    }
+
+    /// Second gate: even a hand-written INSERT cannot mint attestation. The
+    /// handler is the first gate, this constraint is the one that survives a bug
+    /// in the handler.
+    #[tokio::test]
+    async fn the_database_refuses_a_hand_written_attested_row() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(&pool, caller(user), incident_request("db gate", None))
+            .await
+            .unwrap();
+
+        let direct = sqlx::query(
+            "INSERT INTO kernel.incident_evidence
+               (evidence_id,incident_id,kind,source,collected_at,content_ref,
+                claimed_trust,verified_trust)
+             VALUES ($1,$2,'LOG_EXCERPT','syslog',now(),'sha256:hand-written',
+                     'SOURCE_ATTESTED','SOURCE_ATTESTED')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(incident.id)
+        .execute(&pool)
+        .await;
+        let error = direct.expect_err("the schema must refuse SOURCE_ATTESTED without an adapter");
+        let message = error.to_string();
+        assert!(
+            message.contains("incident_evidence_attestation_requires_adapter")
+                || message.contains("incident_evidence_verification_check"),
+            "unexpected database refusal: {message}"
+        );
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, 0);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // G12 A3 - the evidence set a verdict stands on.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_verdict_freezes_the_evidence_set_it_considered() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("freeze the set", None),
+        )
+        .await
+        .unwrap();
+
+        for reference in ["sha256:considered-1", "sha256:considered-2"] {
+            insert_evidence(
+                &pool,
+                &no_adapters(),
+                caller(user),
+                incident.id,
+                evidence_request(reference),
+            )
+            .await
+            .unwrap();
+        }
+        let before = query_evidence(&pool, caller(user), incident.id)
+            .await
+            .unwrap();
+        assert!(before.iter().all(|row| !row.after_verdict));
+
+        let verdict = insert_verdict(
+            &pool,
+            caller(user),
+            incident.id,
+            verdict_request("CONFIRMED"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(verdict.considered_evidence_count, 2);
+        assert_eq!(verdict.snapshot_kind, "RECORDED");
+        let digest = verdict
+            .considered_evidence_digest
+            .clone()
+            .expect("a recorded snapshot has a digest");
+        assert_eq!(digest.len(), 64);
+        assert!(digest.chars().all(|c| c.is_ascii_hexdigit()));
+
+        // The capability is preserved: CONCLUDED still accepts evidence.
+        let (created, late) = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            evidence_request("sha256:after-signing"),
+        )
+        .await
+        .unwrap();
+        assert!(created, "CONCLUDED must still accept evidence");
+        assert!(
+            late.after_verdict,
+            "evidence added after signing was never before the signer"
+        );
+
+        let rows = query_evidence(&pool, caller(user), incident.id)
+            .await
+            .unwrap();
+        let late_rows: Vec<_> = rows.iter().filter(|row| row.after_verdict).collect();
+        assert_eq!(late_rows.len(), 1);
+        assert_eq!(late_rows[0].evidence_id, late.evidence_id);
+        let considered: Vec<_> = rows.iter().filter(|row| !row.after_verdict).collect();
+        assert_eq!(considered.len(), 2);
+
+        // The signed facts did not move when the evidence set did.
+        let re_read = query_verdict(&pool, caller(user), incident.id)
+            .await
+            .unwrap();
+        assert_eq!(re_read.considered_evidence_count, 2);
+        assert_eq!(
+            re_read.considered_evidence_digest.as_deref(),
+            Some(digest.as_str())
+        );
+        assert_eq!(re_read.snapshot_kind, "RECORDED");
+        let incident_view = query_incident(&pool, caller(user), incident.id)
+            .await
+            .unwrap();
+        let human = incident_view.human_verdict.unwrap();
+        assert_eq!(human.considered_evidence_count, 2);
+        assert_eq!(
+            human.considered_evidence_digest.as_deref(),
+            Some(digest.as_str())
+        );
+
+        // Same set, same digest; the value is a function of the set only.
+        let snapshot: Vec<(Uuid, String)> = considered
+            .iter()
+            .map(|row| {
+                (
+                    row.evidence_id,
+                    evidence_row_digest(
+                        row.evidence_id,
+                        &row.kind,
+                        &row.source,
+                        &row.content_ref,
+                        &row.verified_trust,
+                    ),
+                )
+            })
+            .collect();
+        assert_eq!(considered_set_digest(&snapshot), digest);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// A verdict signed before 0017 has no recorded set. It says so, and the
+    /// after-verdict flag falls back to the only thing left - the timestamps -
+    /// instead of pretending a reconstruction is a record.
+    #[tokio::test]
+    async fn a_pre_migration_verdict_reports_an_unknown_considered_set() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("legacy verdict", None),
+        )
+        .await
+        .unwrap();
+        insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            evidence_request("sha256:legacy-considered"),
+        )
+        .await
+        .unwrap();
+        insert_verdict(
+            &pool,
+            caller(user),
+            incident.id,
+            verdict_request("CONFIRMED"),
+        )
+        .await
+        .unwrap();
+
+        // Rewrite the row into the shape 0017 produces for a pre-existing
+        // verdict: no snapshot, no digest, no count.
+        sqlx::query("DELETE FROM kernel.incident_verdict_evidence WHERE incident_id=$1")
+            .bind(incident.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE kernel.incident_verdicts
+                SET snapshot_kind='PRE_MIGRATION_UNRECORDED',
+                    considered_evidence_count=0,
+                    considered_evidence_digest=NULL
+              WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let verdict = query_verdict(&pool, caller(user), incident.id)
+            .await
+            .unwrap();
+        assert_eq!(verdict.snapshot_kind, "PRE_MIGRATION_UNRECORDED");
+        assert_eq!(verdict.considered_evidence_count, 0);
+        assert_eq!(
+            verdict.considered_evidence_digest, None,
+            "an unrecorded set must not be given a digest it never had"
+        );
+
+        // Evidence collected before the verdict stays on the signer's side of it.
+        sqlx::query(
+            "INSERT INTO kernel.incident_evidence
+               (evidence_id,incident_id,kind,source,collected_at,content_ref,claimed_trust,
+                verified_trust,verification_method,verified_at,submitted_by)
+             VALUES ($1,$2,'LOG_EXCERPT','syslog',now(),'sha256:legacy-late','UNVERIFIED',
+                     'UNVERIFIED','NONE',NULL,$3)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(incident.id)
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let rows = query_evidence(&pool, caller(user), incident.id)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter().any(|row| row.after_verdict),
+            "a row recorded after a legacy verdict is flagged by its timestamp"
+        );
+        assert!(
+            rows.iter().any(|row| !row.after_verdict),
+            "the row the signer could see is not flagged"
+        );
+
+        cleanup(&pool, &[user]).await;
     }
 }

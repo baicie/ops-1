@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { IncidentEvidence, IncidentView } from './types';
+import type { IncidentEvidence, IncidentVerdict, IncidentView } from './types';
 import {
+  CLAIMABLE_TRUST_CODES,
+  EVIDENCE_TRUST_CODES,
+  classifyFailure,
+  clearsSensitiveView,
+  detailPhase,
+  detailReducer,
+  emptyDetail,
   evidenceKindKey,
   evidencePanelState,
   evidenceTrustKey,
@@ -10,10 +17,15 @@ import {
   incidentListQuery,
   incidentSourceKey,
   ownerFilterValue,
+  partitionEvidence,
+  projectDetail,
   shortOwner,
   toIsoInstant,
   toLocalInputValue,
+  trustMismatch,
   verdictPanelState,
+  verdictSnapshotState,
+  verificationMethodKey,
 } from './incidents';
 
 /**
@@ -21,8 +33,9 @@ import {
  *
  * These assertions exist because each one is a place the page could quietly tell a lie: a filter
  * sent as the word ALL (400 from the kernel), an empty evidence array standing in for a failed
- * request, a timeline entry made of a timestamp the kernel never sent, or a failure code rendered
- * as a server sentence instead of copy.
+ * request, a timeline entry made of a timestamp the kernel never sent, a previous incident still
+ * on screen under a new id, or evidence appended after signing rendered as if the signer weighed
+ * it.
  */
 
 function incident(overrides: Partial<IncidentView> = {}): IncidentView {
@@ -43,17 +56,52 @@ function incident(overrides: Partial<IncidentView> = {}): IncidentView {
   };
 }
 
+const OTHER_INCIDENT_ID = '44444444-4444-4444-8444-444444444444';
+const ROUTE_ID = '11111111-1111-4111-8111-111111111111';
+
+/** A second incident, so a "the route changed" test cannot pass by accident. */
+function otherIncident(): IncidentView {
+  return incident({ id: OTHER_INCIDENT_ID, title: 'disk full on web-01' });
+}
+
+function verdict(overrides: Partial<IncidentVerdict> = {}): IncidentVerdict {
+  return {
+    incidentId: ROUTE_ID,
+    verdict: 'CONFIRMED',
+    rationale: 'cpu saturation matches the reported window',
+    decidedBy: '22222222-2222-4222-8222-222222222222',
+    decidedAt: '2026-10-30T23:00:00Z',
+    consideredEvidenceCount: 2,
+    consideredEvidenceDigest: 'a'.repeat(64),
+    snapshotKind: 'RECORDED',
+    ...overrides,
+  };
+}
+
 function evidence(overrides: Partial<IncidentEvidence> = {}): IncidentEvidence {
   return {
     id: '33333333-3333-4333-8333-333333333333',
-    incidentId: '11111111-1111-4111-8111-111111111111',
+    incidentId: ROUTE_ID,
     kind: 'LOG_EXCERPT',
     source: 'operator:admin@opsweave.local',
     collectedAt: '2026-10-30T22:16:00Z',
     contentRef: 'sha256:abc',
-    trust: 'OPERATOR_ASSERTED',
+    claimedTrust: 'OPERATOR_ASSERTED',
+    verifiedTrust: 'OPERATOR_ASSERTED',
+    verificationMethod: 'OPERATOR_IDENTITY',
+    verifiedAt: '2026-10-30T22:16:00Z',
+    verifierIdentity: null,
+    submittedBy: '22222222-2222-4222-8222-222222222222',
+    verificationNote: null,
+    createdAt: '2026-10-30T22:16:00Z',
+    afterVerdict: false,
     ...overrides,
   };
+}
+
+/** The shape of a thrown ApiError, as the reducer sees it. */
+function apiFailure(status: number, code: string) {
+  return Object.assign(new Error(code), { status, code });
 }
 
 describe('incidentListQuery', () => {
@@ -110,6 +158,10 @@ describe('incidentFailureKey', () => {
       'INCIDENT_STATE_CONFLICT',
       'INCIDENT_VERDICT_NOT_FOUND',
       'INCIDENT_WRITE_CONFLICT',
+      'EVIDENCE_TRUST_NOT_SELF_ASSERTABLE',
+      'EVIDENCE_ATTESTATION_INVALID',
+      'EVIDENCE_ATTESTATION_STALE',
+      'EVIDENCE_ADAPTER_UNKNOWN',
     ]) {
       expect(incidentFailureKey(code), code).toMatch(/^incidents\.error\./);
     }
@@ -118,6 +170,12 @@ describe('incidentFailureKey', () => {
   it('answers null for a code it has no sentence for, so the caller can show the code instead', () => {
     expect(incidentFailureKey('SOMETHING_NEW')).toBeNull();
     expect(incidentFailureKey(null)).toBeNull();
+  });
+
+  it('keeps the trust refusals apart: an invalid signature and a stale one are different mistakes', () => {
+    const keys = ['EVIDENCE_TRUST_NOT_SELF_ASSERTABLE', 'EVIDENCE_ATTESTATION_INVALID', 'EVIDENCE_ATTESTATION_STALE', 'EVIDENCE_ADAPTER_UNKNOWN']
+      .map((code) => incidentFailureKey(code));
+    expect(new Set(keys).size).toBe(4);
   });
 });
 
@@ -142,7 +200,7 @@ describe('verdictPanelState', () => {
   it('shows the record instead of the form once a verdict exists', () => {
     expect(verdictPanelState(incident({
       status: 'CONCLUDED',
-      humanVerdict: { incidentId: 'i', verdict: 'CONFIRMED', rationale: 'because', decidedBy: 'u', decidedAt: '2026-10-30T23:00:00Z' },
+      humanVerdict: verdict(),
     }))).toBe('recorded');
   });
 
@@ -154,9 +212,7 @@ describe('verdictPanelState', () => {
 describe('incidentFacts', () => {
   it('builds the timeline from returned timestamps only, newest first', () => {
     const facts = incidentFacts(
-      incident({
-        humanVerdict: { incidentId: 'i', verdict: 'CONFIRMED', rationale: 'r', decidedBy: 'u', decidedAt: '2026-10-30T23:00:00Z' },
-      }),
+      incident({ humanVerdict: verdict() }),
       [evidence()],
     );
     expect(facts.map((fact) => fact.kind)).toEqual(['verdict', 'evidence', 'started']);
@@ -209,5 +265,171 @@ describe('instant conversion', () => {
   it('refuses a value the kernel could not parse', () => {
     expect(toIsoInstant('')).toBeNull();
     expect(toIsoInstant('not-a-time')).toBeNull();
+  });
+});
+
+/* ── G12 A1: the claim is not the verdict ───────────────────────────────────────────── */
+
+describe('claim versus verification', () => {
+  it('never lets the form offer the value the kernel reserves for itself', () => {
+    expect(CLAIMABLE_TRUST_CODES).not.toContain('SOURCE_ATTESTED');
+    // The read set still contains it: hiding the write option is not the same as
+    // pretending the value does not exist.
+    expect(EVIDENCE_TRUST_CODES).toContain('SOURCE_ATTESTED');
+    expect(EVIDENCE_TRUST_CODES.length).toBe(CLAIMABLE_TRUST_CODES.length + 1);
+  });
+
+  it('reports a disagreement between the claim and the verdict', () => {
+    expect(trustMismatch({ claimedTrust: 'SOURCE_ATTESTED', verifiedTrust: 'UNVERIFIED' })).toBe(true);
+    expect(trustMismatch({ claimedTrust: 'UNVERIFIED', verifiedTrust: 'OPERATOR_ASSERTED' })).toBe(true);
+    expect(trustMismatch({ claimedTrust: 'OPERATOR_ASSERTED', verifiedTrust: 'OPERATOR_ASSERTED' })).toBe(false);
+    expect(trustMismatch({ claimedTrust: 'source_attested', verifiedTrust: 'SOURCE_ATTESTED' })).toBe(false);
+  });
+
+  it('names the verification method, and names an unknown one honestly', () => {
+    expect(verificationMethodKey('NONE')).toBe('incidents.verificationMethod.none');
+    expect(verificationMethodKey('OPERATOR_IDENTITY')).toBe('incidents.verificationMethod.operatorIdentity');
+    expect(verificationMethodKey('SOURCE_ADAPTER')).toBe('incidents.verificationMethod.sourceAdapter');
+    expect(verificationMethodKey('TRUST_ME')).toBe('incidents.verificationMethod.unknown');
+  });
+});
+
+/* ── G12 A2: route identity, refresh, ordering, and answer codes ─────────────────────── */
+
+describe('classifyFailure and the clear rule', () => {
+  it('reads status and code off a thrown error and survives a non-error', () => {
+    expect(classifyFailure(apiFailure(403, 'FORBIDDEN'))).toEqual({ status: 403, code: 'FORBIDDEN' });
+    expect(classifyFailure('boom')).toEqual({ status: null, code: null });
+    expect(classifyFailure(null)).toEqual({ status: null, code: null });
+  });
+
+  it('clears the view on an answer and keeps it on an absence of an answer', () => {
+    for (const status of [401, 403, 404]) {
+      expect(clearsSensitiveView({ status, code: null }), String(status)).toBe(true);
+    }
+    for (const status of [500, 502, 503, 504, null]) {
+      expect(clearsSensitiveView({ status, code: null }), String(status)).toBe(false);
+    }
+  });
+});
+
+describe('detailReducer: route identity is not a refresh', () => {
+  function loaded(): ReturnType<typeof detailReducer> {
+    let state = emptyDetail(ROUTE_ID);
+    state = detailReducer(state, { type: 'incident', routeId: ROUTE_ID, incident: incident(), observedAt: '2026-10-30T22:20:00Z' });
+    state = detailReducer(state, { type: 'evidence', routeId: ROUTE_ID, evidence: [evidence()] });
+    return state;
+  }
+
+  it('clears everything when the route id changes', () => {
+    const next = detailReducer(loaded(), { type: 'route', routeId: OTHER_INCIDENT_ID });
+    expect(next.routeId).toBe(OTHER_INCIDENT_ID);
+    expect(next.incident).toBeNull();
+    expect(next.evidence).toBeNull();
+    expect(next.observedAt).toBeNull();
+    expect(detailPhase(next)).toBe('loading');
+  });
+
+  it('keeps the data when the id did not change', () => {
+    const state = loaded();
+    expect(detailReducer(state, { type: 'route', routeId: ROUTE_ID })).toBe(state);
+    const refreshing = detailReducer(state, { type: 'refresh' });
+    expect(refreshing.refreshing).toBe(true);
+    expect(refreshing.incident?.id).toBe(ROUTE_ID);
+    expect(refreshing.evidence?.length).toBe(1);
+  });
+
+  it('drops an answer that belongs to the previous route instead of applying it', () => {
+    const onB = detailReducer(loaded(), { type: 'route', routeId: OTHER_INCIDENT_ID });
+    // A slow answer for A arrives now. It is compared against the snapshot's own
+    // route id and discarded; no timer is involved.
+    const leaked = detailReducer(onB, { type: 'incident', routeId: ROUTE_ID, incident: incident(), observedAt: '2026-10-30T22:25:00Z' });
+    expect(leaked).toBe(onB);
+    expect(leaked.incident).toBeNull();
+    const leakedEvidence = detailReducer(onB, { type: 'evidence', routeId: ROUTE_ID, evidence: [evidence()] });
+    expect(leakedEvidence).toBe(onB);
+  });
+
+  it('drops a late failure for the previous route too', () => {
+    const onB = detailReducer(loaded(), { type: 'route', routeId: OTHER_INCIDENT_ID });
+    const leaked = detailReducer(onB, { type: 'incident-failed', routeId: ROUTE_ID, cause: apiFailure(404, 'INCIDENT_NOT_FOUND') });
+    expect(leaked).toBe(onB);
+  });
+
+  it('clears the view on 401, 403 and 404 rather than leaving the old record on screen', () => {
+    for (const [status, phase] of [[401, 'denied'], [403, 'denied'], [404, 'not-found']] as const) {
+      const cleared = detailReducer(loaded(), { type: 'incident-failed', routeId: ROUTE_ID, cause: apiFailure(status, 'X') });
+      expect(cleared.incident, String(status)).toBeNull();
+      expect(cleared.evidence, String(status)).toBeNull();
+      expect(detailPhase(cleared)).toBe(phase);
+    }
+  });
+
+  it('keeps the record, and its read time, when a same-id refresh fails on the network', () => {
+    const failed = detailReducer(loaded(), { type: 'incident-failed', routeId: ROUTE_ID, cause: apiFailure(503, 'UNAVAILABLE') });
+    expect(failed.incident?.id).toBe(ROUTE_ID);
+    expect(failed.evidence?.length).toBe(1);
+    expect(failed.observedAt).toBe('2026-10-30T22:20:00Z');
+    expect(detailPhase(failed)).toBe('ready');
+    expect(failed.incidentError).toBeTruthy();
+  });
+
+  it('clears a denied evidence list without taking the incident with it', () => {
+    const denied = detailReducer(loaded(), { type: 'evidence-failed', routeId: ROUTE_ID, cause: apiFailure(403, 'FORBIDDEN') });
+    expect(denied.evidence).toBeNull();
+    expect(denied.incident?.id).toBe(ROUTE_ID);
+    expect(evidencePanelState(denied.evidence, Boolean(denied.evidenceError))).toBe('unavailable');
+  });
+});
+
+describe('projectDetail is the last line of defence', () => {
+  it('refuses to render a snapshot under a different route id', () => {
+    let state = emptyDetail(ROUTE_ID);
+    state = detailReducer(state, { type: 'incident', routeId: ROUTE_ID, incident: incident(), observedAt: '2026-10-30T22:20:00Z' });
+    const projected = projectDetail(state, OTHER_INCIDENT_ID);
+    expect(projected.routeId).toBe(OTHER_INCIDENT_ID);
+    expect(projected.incident).toBeNull();
+    expect(detailPhase(projected)).toBe('loading');
+    // And the identity case passes the snapshot straight through.
+    expect(projectDetail(state, ROUTE_ID)).toBe(state);
+  });
+});
+
+/* ── G12 A3: considered at signing versus appended after ─────────────────────────────── */
+
+describe('partitionEvidence', () => {
+  const consideredOne = evidence({ id: '33333333-3333-4333-8333-333333333331', afterVerdict: false });
+  const consideredTwo = evidence({ id: '33333333-3333-4333-8333-333333333332', afterVerdict: false });
+  const appended = evidence({ id: '33333333-3333-4333-8333-33333333333a', afterVerdict: true });
+
+  it('treats every row as ordinary evidence while no verdict exists', () => {
+    const split = partitionEvidence([consideredOne, appended], null);
+    expect(split.considered.length).toBe(2);
+    expect(split.afterVerdict).toEqual([]);
+  });
+
+  it('separates what was signed from what was appended afterwards', () => {
+    const split = partitionEvidence([consideredOne, consideredTwo, appended], verdict());
+    expect(split.considered.map((row) => row.id)).toEqual([consideredOne.id, consideredTwo.id]);
+    expect(split.afterVerdict.map((row) => row.id)).toEqual([appended.id]);
+  });
+
+  it('never moves a row across the line because of its timestamp', () => {
+    // An appended row can carry an older collectedAt than the verdict: the flag is
+    // the kernel's, and this module does not re-derive it.
+    const oldButLate = evidence({ id: '33333333-3333-4333-8333-33333333333b', collectedAt: '2026-10-01T00:00:00Z', afterVerdict: true });
+    const split = partitionEvidence([oldButLate, consideredOne], verdict());
+    expect(split.afterVerdict.map((row) => row.id)).toEqual([oldButLate.id]);
+  });
+});
+
+describe('verdictSnapshotState', () => {
+  it('treats a recorded set as a record and an unrecorded one as unknown', () => {
+    expect(verdictSnapshotState(verdict())).toBe('recorded');
+    expect(verdictSnapshotState(verdict({ snapshotKind: 'PRE_MIGRATION_UNRECORDED', consideredEvidenceCount: 0, consideredEvidenceDigest: null }))).toBe('unknown');
+  });
+
+  it('does not treat an unrecognised kind as a record', () => {
+    expect(verdictSnapshotState(verdict({ snapshotKind: 'SOMETHING_ELSE' }))).toBe('unknown');
   });
 });

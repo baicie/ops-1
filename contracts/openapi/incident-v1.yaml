@@ -122,7 +122,17 @@ paths:
       description: >
         The first evidence moves an OPEN incident to INVESTIGATING. A CLOSED
         incident rejects new evidence with 409. Replaying the same
-        (kind, source, contentRef) returns 200 with the existing row.
+        (kind, source, contentRef) returns 200 with the existing row, unchanged:
+        a replay cannot raise the trust of a row that is already stored.
+
+        Since G12 the request does not decide verifiedTrust. The caller may state
+        claimedTrust (OPERATOR_ASSERTED or UNVERIFIED, and nothing else); the
+        body field "trust" is refused with EVIDENCE_TRUST_NOT_SELF_ASSERTABLE
+        rather than reinterpreted. SOURCE_ATTESTED is produced only when the
+        request carries an attestation that verifies against a configured source
+        adapter: an HMAC-SHA256 signature over the exact evidence tuple, keyed by
+        a secret the Kernel holds and the client does not. The Kernel records the
+        adapter id, the method, the instant and the submitter on the row.
       parameters:
         - {$ref: '#/components/parameters/incidentId'}
       requestBody:
@@ -141,8 +151,22 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Evidence'}
-        '400': {description: INVALID_REQUEST}
-        '401': {description: UNAUTHENTICATED}
+        '400':
+          description: >
+            INVALID_REQUEST — field shape/value rejected, including a
+            claimedTrust outside {OPERATOR_ASSERTED, UNVERIFIED}.
+            EVIDENCE_TRUST_NOT_SELF_ASSERTABLE — the request tried to state
+            verifiedTrust: either it carried the retired "trust" field, or it
+            named SOURCE_ATTESTED as a claim. Nothing was written.
+        '401':
+          description: >
+            UNAUTHENTICATED, or the attestation did not verify:
+            EVIDENCE_ATTESTATION_INVALID (the signature does not cover this
+            tuple), EVIDENCE_ATTESTATION_STALE (signed outside the ±300s window,
+            so it cannot be a replay), or EVIDENCE_ADAPTER_UNKNOWN (no configured
+            adapter answers to that adapterId). Nothing was written in any of
+            these cases — an unverifiable attestation is never downgraded to an
+            ordinary row.
         '403': {description: FORBIDDEN — viewer may not append evidence}
         '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
         '409':
@@ -249,8 +273,57 @@ components:
       type: string
       enum: [SOURCE_ATTESTED, OPERATOR_ASSERTED, UNVERIFIED]
       description: >
-        How much weight this evidence can carry. Without it a hand-typed note
-        and a source-attested snapshot would be indistinguishable.
+        The closed set of trust values a stored row may carry, in the field the
+        Kernel established (verifiedTrust). G12 A1: this is a server verdict, not
+        a client input, and it is the only field a reader or a verdict may treat
+        as provenance.
+    EvidenceTrustClaim:
+      type: string
+      enum: [OPERATOR_ASSERTED, UNVERIFIED]
+      description: >
+        What a submitter is allowed to say about its own row (claimedTrust). It
+        is deliberately smaller than EvidenceTrust: SOURCE_ATTESTED means "the
+        Kernel checked", and a caller cannot perform that check on the Kernel's
+        behalf by typing it. A request naming SOURCE_ATTESTED here is refused with
+        EVIDENCE_TRUST_NOT_SELF_ASSERTABLE rather than quietly lowered.
+    VerificationMethod:
+      type: string
+      enum: [NONE, OPERATOR_IDENTITY, SOURCE_ADAPTER]
+      description: >
+        How the Kernel reached verifiedTrust. NONE: nothing was verified.
+        OPERATOR_IDENTITY: an authenticated operator holding the write permission
+        submitted the row. SOURCE_ADAPTER: a configured adapter proved possession
+        of its secret over this exact tuple.
+    Attestation:
+      type: object
+      additionalProperties: false
+      required: [adapterId, issuedAt, signature]
+      description: >
+        Proof a configured source adapter vouches for one evidence row.
+
+        The signed bytes are the UTF-8 encoding of this JSON object, serialized
+        with exactly this key order and no whitespace (serde_json::to_string of
+        the claims struct in apps/kernel/src/incidents.rs):
+
+          {"v":"opsweave-evidence-attestation-v1","adapterId":...,
+           "incidentId":...,"kind":...,"source":...,
+           "collectedAtUnix":...,"contentRef":...,"issuedAtUnix":...}
+
+        where incidentId is the lowercase hyphenated UUID, collectedAtUnix and
+        issuedAtUnix are the integer seconds of collectedAt and issuedAt, and
+        signature is base64url without padding (HMAC-SHA256 keyed by that
+        adapter's secret from OPSWEAVE_EVIDENCE_ADAPTERS). Signing the tuple, and
+        not just the adapter id, is what stops a genuine attestation being moved
+        onto different evidence. issuedAt is bounded to ±300s so a captured
+        attestation cannot be replayed later.
+      properties:
+        adapterId: {type: string, minLength: 1, maxLength: 100}
+        issuedAt: {type: string, format: date-time}
+        signature:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: base64url (no padding) HMAC-SHA256 over the canonical claims
     VerdictValue:
       type: string
       enum: [CONFIRMED, REFUTED, INCONCLUSIVE]
@@ -323,7 +396,7 @@ components:
     CreateEvidenceRequest:
       type: object
       additionalProperties: false
-      required: [kind, source, collectedAt, contentRef, trust]
+      required: [kind, source, collectedAt, contentRef]
       properties:
         kind: {$ref: '#/components/schemas/EvidenceKind'}
         source: {type: string, minLength: 2, maxLength: 200}
@@ -335,11 +408,36 @@ components:
           description: >
             Opaque locator (content digest or store key). Never inline payload:
             the Kernel does not fetch it, so it also carries no SSRF surface.
-        trust: {$ref: '#/components/schemas/EvidenceTrust'}
+        claimedTrust:
+          allOf: [{$ref: '#/components/schemas/EvidenceTrustClaim'}]
+          description: >
+            What the submitter asserts about this row. Defaults to
+            OPERATOR_ASSERTED, which is what an authenticated operator's own
+            submission actually is. Recorded as claimedTrust and never read as
+            verifiedTrust.
+        attestation:
+          oneOf:
+            - {$ref: '#/components/schemas/Attestation'}
+            - {type: 'null'}
+          description: >
+            Present only when a source adapter is vouching. Its successful
+            verification is the sole route to verifiedTrust=SOURCE_ATTESTED; an
+            attestation that fails to verify is a 401, never a downgrade.
+        trust:
+          type: string
+          deprecated: true
+          description: >
+            Retired by G12 A1 and refused with EVIDENCE_TRUST_NOT_SELF_ASSERTABLE
+            when present, whatever its value. It is listed so the refusal is
+            discoverable: before this change the value in this field was what
+            granted attestation.
     Evidence:
       type: object
       additionalProperties: false
-      required: [id, incidentId, kind, source, collectedAt, contentRef, trust]
+      required:
+        [id, incidentId, kind, source, collectedAt, contentRef,
+         claimedTrust, verifiedTrust, verificationMethod, verifiedAt,
+         verifierIdentity, submittedBy, verificationNote, createdAt, afterVerdict]
       properties:
         id: {type: string, format: uuid}
         incidentId: {type: string, format: uuid}
@@ -347,7 +445,46 @@ components:
         source: {type: string}
         collectedAt: {type: string, format: date-time}
         contentRef: {type: string}
-        trust: {$ref: '#/components/schemas/EvidenceTrust'}
+        claimedTrust:
+          $ref: '#/components/schemas/EvidenceTrust'
+          # Validity note: historical rows may carry SOURCE_ATTESTED here, because
+          # that is what a pre-0017 client claimed. The claim is kept as a fact;
+          # verifiedTrust is what the Kernel could establish, and migration 0017
+          # downgraded every one of those claims to UNVERIFIED with a note.
+        verifiedTrust: {$ref: '#/components/schemas/EvidenceTrust'}
+        verificationMethod: {$ref: '#/components/schemas/VerificationMethod'}
+        verifiedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the verification ran; null when nothing was verified.
+        verifierIdentity:
+          type: [string, 'null']
+          description: >
+            The authenticated adapter id for SOURCE_ADAPTER rows. Null otherwise:
+            for OPERATOR_IDENTITY the vouching identity is submittedBy, and
+            naming an adapter there would be a claim the Kernel cannot support.
+        submittedBy:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            The account that submitted the row. Null for rows recorded before the
+            column existed where the audit trail did not answer; never filled with
+            a guess.
+        verificationNote:
+          type: [string, 'null']
+          description: >
+            Why the row carries the verification it carries. The only value in use
+            today is the migration 0017 note that explains a downgraded
+            SOURCE_ATTESTED claim.
+        createdAt: {type: string, format: date-time}
+        afterVerdict:
+          type: boolean
+          description: >
+            G12 A3: true when this row was appended after the incident's verdict
+            was signed, so it was never part of the set the signer weighed. When
+            the verdict's snapshotKind is RECORDED this is membership of the
+            recorded set; for a PRE_MIGRATION_UNRECORDED verdict it falls back to
+            createdAt > decidedAt, and the verdict says which rule applied.
     EvidenceList:
       type: object
       additionalProperties: false
@@ -366,10 +503,35 @@ components:
     Verdict:
       type: object
       additionalProperties: false
-      required: [incidentId, verdict, rationale, decidedBy, decidedAt]
+      required:
+        [incidentId, verdict, rationale, decidedBy, decidedAt,
+         consideredEvidenceCount, consideredEvidenceDigest, snapshotKind]
       properties:
         incidentId: {type: string, format: uuid}
         verdict: {$ref: '#/components/schemas/VerdictValue'}
         rationale: {type: string}
         decidedBy: {type: string, format: uuid}
         decidedAt: {type: string, format: date-time}
+        consideredEvidenceCount:
+          type: integer
+          minimum: 0
+          description: >
+            G12 A3: how many evidence rows the signing transaction read. This is
+            the number the verdict stands on. It must never be recomputed as the
+            number of rows the incident holds now, because CONCLUDED still accepts
+            evidence.
+        consideredEvidenceDigest:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: >
+            sha256 (hex) over the considered set, ordered by evidence id. Null
+            when no set was recorded.
+        snapshotKind:
+          type: string
+          enum: [RECORDED, PRE_MIGRATION_UNRECORDED]
+          description: >
+            RECORDED means consideredEvidenceCount/Digest are a record of the set
+            the signer weighed. PRE_MIGRATION_UNRECORDED means the verdict was
+            signed before the snapshot existed: the set was never stored, so it is
+            unknown, and presenting a reconstruction as the record would be a
+            silent rewrite of what was signed.
