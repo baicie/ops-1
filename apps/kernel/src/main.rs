@@ -9,6 +9,7 @@ mod diagnostics;
 mod error;
 mod gateway;
 mod incidents;
+mod investigations;
 mod jobs;
 mod logs;
 mod nodes;

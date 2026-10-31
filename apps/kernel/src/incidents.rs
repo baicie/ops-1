@@ -27,6 +27,7 @@ use axum::response::Response;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
+use opsweave_contracts::Role;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -60,7 +61,7 @@ const ATTESTATION_VERSION: &str = "opsweave-evidence-attestation-v1";
 type StoredContent = (String, Vec<u8>, i32, String, DateTime<Utc>);
 /// The evidence list's query window, as (since, until). Both are None or both are
 /// Some; evidence_window enforces that before any SQL runs.
-type EvidenceWindow = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
+pub(crate) type EvidenceWindow = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
 /// The two content types the Kernel stores and serves back verbatim. Exact match,
 /// no charset parameter and no text/html: a content type the Kernel cannot serve
 /// under its own security headers is a content type it does not accept
@@ -108,16 +109,27 @@ const TIMELINE_MAX_EVENTS: i64 = 200;
 /// resources cannot drift apart. This is data scoping, not a permission gate:
 /// every write endpoint still calls AuthUser::require_operator() first.
 #[derive(Debug, Clone, Copy)]
-struct Caller {
-    user_id: Uuid,
-    sees_all: bool,
+pub(crate) struct Caller {
+    pub(crate) user_id: Uuid,
+    pub(crate) sees_all: bool,
 }
 
 impl Caller {
-    fn from_auth(auth: &AuthUser) -> Self {
+    pub(crate) fn from_auth(auth: &AuthUser) -> Self {
+        Self::from_role(auth.user_id, auth.role)
+    }
+
+    /// The same predicate, built from a role read at a different moment.
+    ///
+    /// G12 E needs this because the actor of an investigation's tool calls is not the
+    /// actor of the HTTP request that started it: the caller of a tool is whatever the
+    /// kernel can establish about the run's scope account *at the instant of the read*.
+    /// Sharing the constructor is what keeps the two callers from drifting into two
+    /// different definitions of "sees all".
+    pub(crate) fn from_role(user_id: Uuid, role: Role) -> Self {
         Self {
-            user_id: auth.user_id,
-            sees_all: auth.role.is_admin() || !auth.role.can_operate(),
+            user_id,
+            sees_all: role.is_admin() || !role.can_operate(),
         }
     }
 }
@@ -284,6 +296,13 @@ pub struct IncidentListQuery {
     /// D3: the list page filters by owner. This narrows the caller's data scope; it
     /// can never widen it, because the sees_all/owner predicate is still applied.
     pub owner: Option<String>,
+    /// G12 E: exact-match filter on relatedEntity, added for get_related_context.
+    ///
+    /// It is a NARROWING filter and nothing else: the sees_all/owner predicate is still
+    /// applied on the same query, so a caller cannot reach an incident it could not
+    /// already list. It exists so the investigator's related-context tool reuses this
+    /// query instead of writing a second, unaudited one.
+    pub related_entity: Option<String>,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
@@ -898,7 +917,7 @@ async fn insert_incident(
     Ok((false, query_incident(db, caller, existing).await?))
 }
 
-async fn query_incidents(
+pub(crate) async fn query_incidents(
     db: &PgPool,
     caller: Caller,
     query: IncidentListQuery,
@@ -924,6 +943,15 @@ async fn query_incidents(
         ),
         None => None,
     };
+    let related_entity = match query
+        .related_entity
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => Some(bounded(value, "relatedEntity filter", 3, 200)?),
+        None => None,
+    };
     let (cursor_time, cursor_id) = match query.cursor.as_deref() {
         Some(value) => {
             let (time, id) = decode_cursor(value)?;
@@ -938,6 +966,7 @@ async fn query_incidents(
            AND ($4::text IS NULL OR i.severity=$4)
            AND ($5::timestamptz IS NULL OR (i.started_at,i.incident_id) < ($5,$6::uuid))
            AND ($8::uuid IS NULL OR i.owner=$8)
+           AND ($9::text IS NULL OR i.related_entity=$9)
          ORDER BY i.started_at DESC, i.incident_id DESC
          LIMIT $7"
     );
@@ -950,6 +979,7 @@ async fn query_incidents(
         .bind(cursor_id)
         .bind(limit + 1)
         .bind(owner)
+        .bind(related_entity.as_deref())
         .fetch_all(db)
         .await?;
     let has_more = rows.len() as i64 > limit;
@@ -971,7 +1001,11 @@ async fn query_incidents(
     Ok((items, next_cursor))
 }
 
-async fn query_incident(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppResult<IncidentView> {
+pub(crate) async fn query_incident(
+    db: &PgPool,
+    caller: Caller,
+    incident_id: Uuid,
+) -> AppResult<IncidentView> {
     let sql = format!("{INCIDENT_SELECT} WHERE i.incident_id=$3 AND ($1::boolean OR i.owner=$2)");
     let row = sqlx::query_as::<_, IncidentRow>(&sql)
         .bind(caller.sees_all)
@@ -1172,7 +1206,7 @@ async fn insert_evidence(
     Ok((true, evidence))
 }
 
-async fn query_evidence(
+pub(crate) async fn query_evidence(
     db: &PgPool,
     caller: Caller,
     incident_id: Uuid,
@@ -1614,7 +1648,7 @@ async fn transfer_incident_owner(
     })
 }
 
-async fn query_timeline(
+pub(crate) async fn query_timeline(
     db: &PgPool,
     caller: Caller,
     incident_id: Uuid,
@@ -1671,7 +1705,11 @@ async fn query_verdict(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppRes
     })
 }
 
-async fn incident_status(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppResult<String> {
+pub(crate) async fn incident_status(
+    db: &PgPool,
+    caller: Caller,
+    incident_id: Uuid,
+) -> AppResult<String> {
     sqlx::query_scalar(
         "SELECT status FROM kernel.incidents
           WHERE incident_id=$1 AND ($2::boolean OR owner=$3)",
@@ -1932,7 +1970,7 @@ fn digest_of(body: &[u8]) -> String {
 /// header), or an error naming both digests and both lengths. It never repairs
 /// anything: a stored digest that no longer matches its bytes is a fact about the
 /// database, and rewriting the digest would launder the tamper into a normal row.
-fn verify_stored_content(
+pub(crate) fn verify_stored_content(
     evidence_id: Uuid,
     content_bytes: i32,
     body: &[u8],

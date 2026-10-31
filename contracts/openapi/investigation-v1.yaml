@@ -1,0 +1,472 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Investigation API
+  version: 1.0.0
+  description: |
+    G12 Phase E: a bounded, read-only AI investigator for one incident.
+
+    Two facts about every response in this document, stated on the wire so a consumer
+    cannot miss them:
+
+      * `isHumanVerdict` is always `false`. Nothing here is a Human Verdict, and no
+        endpoint in this document can create one.
+      * `adapter` names what answered. `TEST_FIXTURE` means a deterministic test adapter
+        produced the hypotheses from the incident's real evidence; it is not a model and its
+        output must not be presented as one.
+
+    Authority, the seven E1 questions, the ten E3 limits and the BLOCKED real-model path are
+    argued in docs/design/g12-ai/investigation-adr.md (ADR-G12-004).
+servers:
+  - url: /api/v1
+security:
+  - cookieSession: []
+paths:
+  /incidents/{incidentId}/investigations:
+    parameters:
+      - $ref: '#/components/parameters/incidentId'
+    get:
+      operationId: listInvestigations
+      summary: The investigation history of one incident, newest first.
+      description: |
+        Scoped by the incident read predicate, so an investigation is exactly as visible as
+        the incident it is about. Out of scope and nonexistent both answer 404
+        INCIDENT_NOT_FOUND.
+      responses:
+        '200':
+          description: Up to 20 runs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InvestigationRun'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: startInvestigation
+      summary: Start a bounded investigation and answer with its finished record.
+      description: |
+        The run executes inside this request. It is bounded by the budget in the body, by a
+        hard ceiling of 200 steps, 500 tool calls and 300 seconds, and by one absolute
+        deadline. The response is the finished run, not a handle: there is no queue behind
+        this endpoint (ADR-G12-004 section 8).
+
+        `idempotencyKey` is required. A replay answers 200 with the run that already exists
+        and `idempotentReplay: true`, instead of spending a second budget.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartInvestigationRequest'
+      responses:
+        '201':
+          description: A run was created and finished.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationRun'
+        '200':
+          description: The run this key already started.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            MODEL_PROVIDER_NOT_CONFIGURED when the named provider is not one this kernel has.
+            The deterministic fixture is the only provider that always exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /incidents/{incidentId}/investigations/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/incidentId'
+      - $ref: '#/components/parameters/runId'
+    get:
+      operationId: getInvestigation
+      summary: One run, with its tool transcript, hypotheses and citations.
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationRun'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /incidents/{incidentId}/investigations/{runId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/incidentId'
+      - $ref: '#/components/parameters/runId'
+    post:
+      operationId: cancelInvestigation
+      summary: Ask a running investigation to stop at its next step boundary.
+      description: |
+        Cooperative: this records the request and the loop observes it before its next step,
+        so the response is not proof that the run has stopped. Read `status`.
+      responses:
+        '200':
+          description: The cancellation was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationRun'
+        '409':
+          description: INVESTIGATION_ALREADY_CANCELLED or INVESTIGATION_NOT_RUNNING.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /incidents/{incidentId}/investigations/{runId}/review:
+    parameters:
+      - $ref: '#/components/parameters/incidentId'
+      - $ref: '#/components/parameters/runId'
+    post:
+      operationId: reviewInvestigation
+      summary: A human's judgement on the INVESTIGATION, which is not a verdict on the incident.
+      description: |
+        `ACCEPTED` and `REJECTED` say whether the reasoning is usable for triage. They
+        are deliberately not `CONFIRMED`, `REFUTED` or `INCONCLUSIVE`, and no code path
+        in this module writes into the incident's verdict table. Write-once per run: a second
+        opinion is a second run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+      responses:
+        '200':
+          description: The review was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationRun'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: |
+            INVESTIGATION_NOT_FINISHED (a review of a running run is a review of nothing) or
+            INVESTIGATION_ALREADY_REVIEWED.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: opsweave_session
+  parameters:
+    incidentId:
+      name: incidentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    runId:
+      name: runId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    BadRequest:
+      description: A stable error code; see ErrorBody.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    NotFound:
+      description: INCIDENT_NOT_FOUND, so out of scope and nonexistent are indistinguishable.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+  schemas:
+    ErrorBody:
+      type: object
+      required: [code, message, requestId, retryable]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        requestId: { type: string }
+        retryable: { type: boolean }
+    StartInvestigationRequest:
+      type: object
+      additionalProperties: false
+      required: [idempotencyKey]
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+        providerId:
+          type: string
+          description: Defaults to the deployment's configured provider, or the test fixture.
+        maxSteps: { type: integer, minimum: 1, maximum: 200, default: 8 }
+        maxToolCalls: { type: integer, minimum: 1, maximum: 500, default: 12 }
+        toolTimeoutMs: { type: integer, minimum: 100, maximum: 60000, default: 2000 }
+        maxRetries: { type: integer, minimum: 0, maximum: 5, default: 1 }
+        tokenBudget: { type: integer, minimum: 1, maximum: 4000000, default: 20000 }
+        deadlineSeconds: { type: integer, minimum: 1, maximum: 300, default: 30 }
+        scenario:
+          type: string
+          enum: [AUTO, PACED_TOOL_LOOP, BUDGET_TOOL_CALLS, RELATED_CONTEXT, CROSS_SCOPE_PROBE]
+          description: |
+            A deterministic fixture script. Refused for any provider that is not the test
+            fixture, so a scenario can never steer a real model.
+        probeIncidentId:
+          type: string
+          format: uuid
+          description: |
+            Fixture-only, and only with scenario CROSS_SCOPE_PROBE: the incident id the tools
+            are asked for, so an acceptance run can make them reach outside their own incident
+            and show them refusing.
+        probeEvidenceId:
+          type: string
+          format: uuid
+    ReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [decision, note]
+      properties:
+        decision:
+          type: string
+          enum: [ACCEPTED, REJECTED]
+        note: { type: string, minLength: 10, maxLength: 2000 }
+    Budget:
+      type: object
+      required: [maxSteps, maxToolCalls, toolTimeoutMs, maxRetries, tokenBudget, deadlineSeconds]
+      properties:
+        maxSteps: { type: integer }
+        maxToolCalls: { type: integer }
+        toolTimeoutMs: { type: integer }
+        maxRetries: { type: integer }
+        tokenBudget: { type: integer }
+        deadlineSeconds: { type: integer }
+    Usage:
+      type: object
+      required: [steps, toolCalls, retries, hypotheses, promptTokens, completionTokens, totalTokens, costMicros, costBasis]
+      properties:
+        steps: { type: integer }
+        toolCalls: { type: integer }
+        retries: { type: integer }
+        hypotheses: { type: integer }
+        promptTokens: { type: integer }
+        completionTokens: { type: integer }
+        totalTokens:
+          type: integer
+          description: |
+            A measurement, not a promise: a turn's usage is only known after it has been
+            answered, so this may exceed budget.tokenBudget by at most one turn.
+        costMicros:
+          type: integer
+          description: Millionths of the account currency, or 0 when no price is known.
+        costBasis:
+          type: string
+          enum: [NO_COST, TEST_FIXTURE_NO_COST, CONFIGURED_PRICE, PROVIDER_REPORTED]
+    Citation:
+      type: object
+      required: [evidenceId, role, kind, verifiedTrust, collectedAt, contentStatus, invocationId]
+      properties:
+        evidenceId:
+          type: string
+          format: uuid
+          description: A real evidence row of this incident; the database refuses anything else.
+        role: { type: string, enum: [SUPPORTING, CONTRADICTING] }
+        kind: { type: string }
+        verifiedTrust: { type: string, enum: [SOURCE_ATTESTED, OPERATOR_ASSERTED, UNVERIFIED] }
+        collectedAt: { type: string, format: date-time }
+        contentStatus: { type: string, enum: [STORED, LEGACY_REFERENCE] }
+        invocationId:
+          type: [string, 'null']
+          format: uuid
+          description: The tool call that returned this row, so the citation is traceable to a read.
+    Hypothesis:
+      type: object
+      required: [hypothesisId, ordinal, statement, stance, confidence, reasoning, uncertainty, gapCodes, supportingEvidence, contradictingEvidence, isHumanVerdict]
+      properties:
+        hypothesisId: { type: string, format: uuid }
+        ordinal: { type: integer, minimum: 1 }
+        statement: { type: string, minLength: 12, maxLength: 1000 }
+        stance:
+          type: string
+          enum: [SUPPORTED, CONTRADICTED, UNCERTAIN, CONFLICTED]
+          description: |
+            Disjoint from the Human Verdict vocabulary (CONFIRMED, REFUTED, INCONCLUSIVE). A
+            hypothesis cannot be stored with a verdict's word.
+        confidence: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        reasoning: { type: string, minLength: 10, maxLength: 4000 }
+        uncertainty:
+          type: [string, 'null']
+          description: |
+            Required, with at least one gap code, whenever the stance is UNCERTAIN or
+            CONFLICTED.
+        gapCodes:
+          type: array
+          items:
+            type: string
+            enum:
+              - NO_EVIDENCE_ROWS
+              - EVIDENCE_PREDATES_INCIDENT
+              - EVIDENCE_UNVERIFIED
+              - TOOL_REFUSED
+              - TOOL_FAILED
+              - TOOL_TIMED_OUT
+              - SOURCE_UNAVAILABLE
+              - BUDGET_EXHAUSTED
+        supportingEvidence:
+          type: array
+          items: { $ref: '#/components/schemas/Citation' }
+        contradictingEvidence:
+          type: array
+          items: { $ref: '#/components/schemas/Citation' }
+        isHumanVerdict:
+          type: boolean
+          enum: [false]
+    ToolInvocation:
+      type: object
+      required: [invocationId, sequence, attempt, tool, arguments, outcome, errorCode, errorDetail, authorizationPredicate, scopeActor, resultBytes, evidenceRefs, durationMs, startedAt, finishedAt]
+      properties:
+        invocationId: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1 }
+        attempt: { type: integer, minimum: 1, maximum: 6 }
+        tool:
+          type: string
+          enum: [get_incident, list_evidence, read_evidence, get_incident_timeline, get_related_context]
+        arguments:
+          type: object
+          description: |
+            The arguments the MODEL produced, kept verbatim, so what was asked for is
+            auditable and not only what was allowed.
+        outcome: { type: string, enum: [OK, REFUSED, ERROR, TIMEOUT, BUDGET_EXHAUSTED] }
+        errorCode: { type: [string, 'null'] }
+        errorDetail:
+          type: [string, 'null']
+          description: The kernel's sentence for an auditor. The UI localizes errorCode instead.
+        authorizationPredicate:
+          type: [string, 'null']
+          description: Required for outcome OK, so a read always names the authority it ran under.
+        scopeActor: { type: [string, 'null'], format: uuid }
+        resultBytes: { type: [integer, 'null'] }
+        evidenceRefs:
+          type: array
+          items: { type: string, format: uuid }
+        durationMs: { type: integer, minimum: 0 }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    Review:
+      type: object
+      required: [decision, note, reviewedBy, reviewedAt, isHumanVerdict]
+      properties:
+        decision: { type: string, enum: [ACCEPTED, REJECTED] }
+        note: { type: string }
+        reviewedBy: { type: string, format: uuid }
+        reviewedAt: { type: string, format: date-time }
+        isHumanVerdict:
+          type: boolean
+          enum: [false]
+    InvestigationRun:
+      type: object
+      required:
+        - runId
+        - incidentId
+        - status
+        - stale
+        - adapter
+        - adapterLabel
+        - adapterProviderId
+        - synthetic
+        - hypothesisKind
+        - isHumanVerdict
+        - idempotencyKey
+        - idempotentReplay
+        - requestedBy
+        - scopeUserId
+        - budget
+        - usage
+        - stopReason
+        - detail
+        - startedAt
+        - finishedAt
+        - deadlineAt
+        - hypotheses
+        - toolInvocations
+        - review
+      properties:
+        runId: { type: string, format: uuid }
+        incidentId: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [RUNNING, SUCCEEDED, PARTIAL, FAILED, CANCELLED, EXPIRED, BUDGET_EXHAUSTED]
+        stale:
+          type: boolean
+          description: |
+            True when the row still says RUNNING although its deadline has passed: an
+            abandoned run is reported as abandoned instead of being called running.
+        adapter:
+          type: string
+          enum: [TEST_FIXTURE, HTTP_OPENAI_COMPATIBLE]
+          description: The discernible marker. TEST_FIXTURE means no model answered.
+        adapterLabel: { type: string }
+        adapterProviderId: { type: string }
+        adapterModelId: { type: [string, 'null'] }
+        synthetic:
+          type: boolean
+          description: True exactly when the test adapter answered.
+        hypothesisKind:
+          type: string
+          enum: [AI_HYPOTHESIS]
+        isHumanVerdict:
+          type: boolean
+          enum: [false]
+        idempotencyKey: { type: string }
+        idempotentReplay:
+          type: boolean
+          description: True when this response is the run that already existed for the key.
+        requestedBy: { type: string, format: uuid }
+        scopeUserId:
+          type: string
+          format: uuid
+          description: The account whose authority every tool call was performed under.
+        budget: { $ref: '#/components/schemas/Budget' }
+        usage: { $ref: '#/components/schemas/Usage' }
+        stopReason:
+          type: [string, 'null']
+          enum:
+            - FINAL_ANSWER
+            - STEP_BUDGET
+            - TOOL_CALL_BUDGET
+            - TOKEN_BUDGET
+            - DEADLINE
+            - CANCELLED
+            - PROVIDER_ERROR
+            - INTERNAL_ERROR
+            - REFUSED
+            - null
+        detail: { type: [string, 'null'] }
+        cancelRequestedAt: { type: [string, 'null'], format: date-time }
+        cancelRequestedBy: { type: [string, 'null'], format: uuid }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+        deadlineAt: { type: string, format: date-time }
+        hypotheses:
+          type: array
+          items: { $ref: '#/components/schemas/Hypothesis' }
+        toolInvocations:
+          type: array
+          items: { $ref: '#/components/schemas/ToolInvocation' }
+        review:
+          oneOf:
+            - $ref: '#/components/schemas/Review'
+            - type: 'null'

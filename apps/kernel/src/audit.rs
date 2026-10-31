@@ -3,6 +3,48 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// The audit row for a business write that must not survive without it.
+///
+/// Callers that already hold a transaction use this so the business row and its audit
+/// row commit or roll back together; the pool-bound `record` below can only run after
+/// the business write has committed, which turns a failed audit into a 5xx over a row
+/// that exists.
+#[allow(clippy::too_many_arguments)]
+pub async fn record_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_type: &str,
+    actor_type: &str,
+    actor_id: &str,
+    subject_type: &str,
+    subject_id: &str,
+    action: &str,
+    result: &str,
+    details: Value,
+    request_id: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO kernel.audit_events
+          (id, event_type, actor_type, actor_id, subject_type, subject_id, action, result, details, request_id, occurred_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(event_type)
+    .bind(actor_type)
+    .bind(actor_id)
+    .bind(subject_type)
+    .bind(subject_id)
+    .bind(action)
+    .bind(result)
+    .bind(details)
+    .bind(request_id)
+    .bind(Utc::now())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn record(
     db: &PgPool,

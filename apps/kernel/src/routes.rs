@@ -6,6 +6,7 @@ use crate::diagnostics;
 use crate::error::AppError;
 use crate::gateway;
 use crate::incidents;
+use crate::investigations;
 use crate::jobs;
 use crate::logs;
 use crate::nodes;
@@ -290,6 +291,25 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/api/v1/incidents/{incident_id}/timeline",
             get(incidents::get_timeline),
+        )
+        // G12 E: the bounded read-only investigator. Every route below reaches the
+        // incident through the predicate above, none of them writes to the incident,
+        // and the review route concludes nothing about it (ADR-G12-004 section 2).
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations",
+            get(investigations::list_investigations).post(investigations::start_investigation),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations/{run_id}",
+            get(investigations::get_investigation),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations/{run_id}/cancel",
+            post(investigations::cancel_investigation),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations/{run_id}/review",
+            post(investigations::review_investigation),
         )
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(

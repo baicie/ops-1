@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { CopyButton, Field, KV, useToast } from '../components/Ui';
 import { EvidenceContentViewer } from '../components/evidence-viewer';
+import { InvestigationPanel } from '../components/investigation-panel';
 import { InvestigationLayout, useCompactLayout, type InvestigationPaneId } from '../components/app/investigation-layout';
 import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
@@ -338,6 +339,10 @@ export function IncidentDetailPage() {
                           ))}
                         </ol>
                       </section>
+                <InvestigationPanel
+                          incidentId={incident.id}
+                          canOperate={capabilities.canAddEvidence}
+                        />
                 <section className="panel" data-testid="incident-audit" data-audit-state={trail.state}>
                         <div className="panel-head">
                           <div>
