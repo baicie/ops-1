@@ -58,6 +58,12 @@ ADMIN_JAR="$WORK/admin.cookies"
 ADMIN_CSRF="$(login "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_JAR")"
 [ -n "$ADMIN_CSRF" ] || { echo "admin login failed for $ADMIN_EMAIL"; exit 2; }
 ADMIN_ID="$(curl -sS -b "$ADMIN_JAR" "$URL/api/v1/auth/me" | json "d['user']['id']")"
+# D5 section 3.4: on a fresh database the bootstrap administrator is a member of no business
+# workspace (migrations run before it exists), so the fixtures below need the one audited grant
+# before anything can be filed. Sourced per script rather than a shared pre-test hook, because a
+# hook would grant into whatever OPSWEAVE_URL points at - staging included.
+. "$(cd "$(dirname "$0")" && pwd)/lib/workspace_grant.sh"
+ow_grant_legacy_self "$ADMIN_JAR" "$ADMIN_CSRF" || { echo "the admin has no business workspace and could not be granted one"; exit 2; }
 
 # --- fixtures created through the public API, never inserted by hand ------------
 OPERATOR_EMAIL="g11-operator-$RUN@example.invalid"
@@ -75,6 +81,12 @@ OPERATOR_JAR="$WORK/operator.cookies"; VIEWER_JAR="$WORK/viewer.cookies"
 OPERATOR_CSRF="$(login "$OPERATOR_EMAIL" "$OPERATOR_PASSWORD" "$OPERATOR_JAR")"
 VIEWER_CSRF="$(login "$VIEWER_EMAIL" "$VIEWER_PASSWORD" "$VIEWER_JAR")"
 [ -n "$OPERATOR_CSRF" ] && [ -n "$VIEWER_CSRF" ] || { echo "role logins failed"; exit 2; }
+
+# Every account the admin API creates is a member of nothing (D5 section 3.4), so each one is
+# granted the legacy workspace before the script asks it to file or read a record.
+for jar in "$OPERATOR_JAR" "$VIEWER_JAR"; do
+  ow_grant_legacy "$ADMIN_JAR" "$ADMIN_CSRF" "$(ow_user_id "$jar")" || exit 2
+done
 
 NATIVE="acceptance-$RUN"
 CREATE_BODY="{\"title\":\"disk full on web-01\",\"severity\":\"MAJOR\",\"source\":\"API\",\"nativeId\":\"$NATIVE\",\"relatedEntity\":\"host:web-01\",\"startedAt\":\"2026-10-30T01:00:00Z\"}"

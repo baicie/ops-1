@@ -166,13 +166,45 @@ test('G12 C: an operator closes a concluded incident, hands another one over, an
   // change leaves the shell's navigation drawer open, and an open drawer is not a page width).
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/app/incidents/' + ready.id);
-  await expect(page.getByTestId('incident-closure-record')).toBeVisible();
-  const narrow = await page.evaluate(() => ({
+  const overflowAt = () => page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
   }));
-  expect(narrow.scrollWidth, 'no horizontal overflow at 390px: ' + JSON.stringify(narrow)).toBeLessThanOrEqual(narrow.clientWidth + 1);
+  // Why this is reached THROUGH the tab, and why BOTH widths are asserted rather than one.
+  //
+  // The property this spec bought at 390 was "the closure of record is readable after it is
+  // written". When the assertion was written (25ba0a7) the page had no tabs, and one assertion
+  // proved it. The page has three panes since 26ed53d and opens on 'analysis'
+  // (IncidentDetail.tsx, initialPane), while the closure of record lives in the 'detail' pane - so
+  // at 390 the record is in the DOM and out of sight, which is a fact about the layout and not
+  // about the write. Left as a bare toBeVisible, that assertion would have been measuring "the
+  // first pane happens to hold it".
+  //
+  // Neither width is relaxed: at 1440 the pane is a column and the record is visible with no
+  // interaction (asserted above, and again in the dark re-read below); at 390 the reader switches
+  // to the pane the record is in, and the switch is asserted in both directions - before the click
+  // the tab is not selected and the record is in the DOM but not visible, after it both flip. The
+  // pair is what makes this an assertion about the tab: without it, a page that drew the record in
+  // the first pane would satisfy the click path too.
+  const closureRecord = page.getByTestId('incident-closure-record');
+  const detailTab = page.getByTestId('investigation-tab-detail');
+  // The tablist exists only in the compact layout (max-width 1023), so its presence is what says
+  // this viewport really is the tabbed one and not a column layout squeezed narrow.
+  await expect(page.getByTestId('investigation-tabs')).toBeVisible();
+  await expect(detailTab).toHaveAttribute('aria-selected', 'false');
+  await expect(closureRecord).toHaveCount(1);
+  await expect(closureRecord).toBeHidden();
+  const narrow = await overflowAt();
+  expect(narrow.scrollWidth, 'no horizontal overflow at 390px (analysis pane): ' + JSON.stringify(narrow)).toBeLessThanOrEqual(narrow.clientWidth + 1);
   await page.screenshot({ path: SHOTS + '/operator-closed-390-light.png', fullPage: true });
+
+  await detailTab.click();
+  await expect(detailTab).toHaveAttribute('aria-selected', 'true');
+  await expect(closureRecord).toBeVisible();
+  await expect(closureRecord).toHaveAttribute('data-closed-at', /.+/);
+  const narrowDetail = await overflowAt();
+  expect(narrowDetail.scrollWidth, 'no horizontal overflow at 390px (detail pane, where the closure is): ' + JSON.stringify(narrowDetail)).toBeLessThanOrEqual(narrowDetail.clientWidth + 1);
+  await page.screenshot({ path: SHOTS + '/operator-closed-390-detail-light.png', fullPage: true });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.reload();

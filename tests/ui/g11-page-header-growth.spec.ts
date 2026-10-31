@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { adminSeed } from './support/accounts';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -74,12 +75,32 @@ const WIDTHS = [1440, 1024, 390];
 /** The media query that declares the 80px floor; below it the header is content-high on purpose. */
 const FLOOR_QUERY_MIN_WIDTH = 769;
 
+/**
+ * Signs the administrator in through the form, then performs the one business-workspace grant a
+ * fresh database needs before this host can show a single incident.
+ *
+ * The grant is not a convenience. Since D5 (migration 0022) a business row is readable for exactly
+ * one reason - the caller is a MEMBER of the workspace it lives in - and the kernel runs migrations
+ * before it creates the bootstrap account, so on a fresh database the migration's one-time grant
+ * does not cover it (ADR section 3.4: the administrator "can create workspaces and grant, but reads
+ * no business row until it grants itself once, which is an audited platform action"). Without it
+ * the list below is empty for a reason that has nothing to do with any header, and the detail-pages
+ * test silently reports its incident row as skipped instead of measuring it.
+ *
+ * Done here, per spec, rather than in a shared pre-test hook: a hook would grant against whatever
+ * OPSWEAVE_URL points at, and on a shared host that includes staging.
+ *
+ * The order is load-bearing. The form login must come FIRST: Login.tsx bounces a request that
+ * already carries a session away from /login, so a grant performed before it would leave the form
+ * fields unreachable and every test in this file would time out on the first fill.
+ */
 async function signIn(page: Page) {
   await page.goto('/login');
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid="login-submit"]');
   await expect(page).not.toHaveURL(new RegExp('/login'));
+  await adminSeed(page.request, ADMIN_EMAIL, ADMIN_PASSWORD);
 }
 
 /**
@@ -275,6 +296,7 @@ function expectPeerHeights(rows: Array<{ slug: string; headerH: number; shape: s
 }
 
 test.beforeAll(() => { fs.mkdirSync(OUT, { recursive: true }); });
+
 
 test('the three invariants are load-bearing: an undersized box breaks them, removing it restores them', async ({ page }) => {
   test.setTimeout(120_000);

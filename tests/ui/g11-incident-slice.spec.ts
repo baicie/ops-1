@@ -362,6 +362,17 @@ test('the loading state is a real pending read, and a real transport failure is 
   await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'recorded');
 
+  // The precondition this spec used to assume rather than state. The evidence table is a SECOND
+  // read with its own failure channel (evidencePanelState: no rows and no error is 'loading', no
+  // rows and an error is 'unavailable'), so "the record loaded" does not imply "the evidence rows
+  // landed" - the two reads finish in whichever order the transport gives them. Taking the
+  // transport away while that read is still in flight leaves the panel 'loading', and the
+  // assertion below then fails for a reason that has nothing to do with the rule it states.
+  // Waiting longer would leave the same race in place, only less often; stating the precondition
+  // is what turns the next step from a guess into a measurement.
+  await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'present');
+  await expect(page.locator('[data-evidence-row]').first()).toBeVisible();
+
   // A real transport failure: the transport is taken away and the page is asked to refresh. It
   // keeps the data it read before, marks itself stale, and names the read time - the alternative
   // (an empty panel, or silently showing old rows as current) is what this assertion forbids.
@@ -369,8 +380,11 @@ test('the loading state is a real pending read, and a real transport failure is 
   await page.getByTestId('incident-refresh').click();
   const stale = page.getByTestId('incident-freshness');
   await expect(stale).toHaveAttribute('data-stale', 'true');
-  // The rows it already had are still there: a failed refresh does not erase evidence.
+  // The rows it already had are still there: a failed refresh does not erase evidence. Asserted
+  // as the same pair the precondition above established, so "still there" means the same thing
+  // before and after the transport went away.
   await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'present');
+  await expect(page.locator('[data-evidence-row]').first()).toBeVisible();
   await page.screenshot({ path: SHOTS + '/11-offline-refresh-stale.png', fullPage: true });
   await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   await page.getByTestId('incident-refresh').click();
