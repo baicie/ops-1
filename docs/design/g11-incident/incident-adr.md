@@ -390,3 +390,111 @@ DELETE FROM _sqlx_migrations WHERE version = 16;
 **关于"截图证明"这条证据的边界（2026-11-01 订正）**：D3/D4 的浏览器截图全部留在本机 scratch 目录，未提交。理由不在"懒得提交"，而在预算与性质：tracked PNG 已到 379/379 文件位（68.03/68.24 MB），收一张就得从别的桶赶走一张已被文档引用的 before/after 基线；而这些截图是可重放的验证产物，重跑 `tests/ui/g11-incident-slice.spec.ts` 即可再得，与"未来 diff 拿它当对照物"的基线不是一回事。所以本 ADR 与其配套文档只引用**可重跑的断言与命令**（`data-*` 锚点、§6 输出），不引用只有作者机器上存在的路径。
 
 这条订正的触发是一次真实的 CI 红：文档引用了 `artifacts/g11-d3/` 下的 6 张未跟踪截图，本地绿、CI 红——守卫当时判断的是"磁盘上有没有这个文件"，而 checkout 里只有被跟踪的文件。`tests/ci/check-tracked-png-budget.mjs` 已改为按 `git ls-files` 判定，阈值未动。
+
+---
+
+## 11. G12 Phase A（P0 安全与状态一致性）
+
+本节记录 2026-10-31 的三处修正。它们都是对 §2.2 / §3 / §5 已有设计的**收紧**，不新增业务能力。
+
+### 11.1 A1 · 可信度是服务端结论，不是请求字段
+
+**缺陷**：`kernel.incident_evidence.trust` 由 `POST /incidents/{id}/evidence` 的请求体直接赋值，取值集合包含 `SOURCE_ATTESTED`。于是"客户端打了一个字"与"来源系统盖章"在库里、在 JSON 里、在徽章上完全等价。0016 的 `CHECK (trust IN (...))` 只约束取值，不约束来源。
+
+**修法**：两个概念，两个列，两个字段。
+
+| 列 | 回答什么 | 谁能写 |
+|---|---|---|
+| `claimed_trust` | 提交者对自己这行说了什么 | 请求体 `claimedTrust`（默认 `OPERATOR_ASSERTED`），闭集仅 `{OPERATOR_ASSERTED, UNVERIFIED}` |
+| `verified_trust` | Kernel 自己确立了什么 | 只有 `resolve_evidence_trust`：无证明时等于 claim；有**已验证签名**时才是 `SOURCE_ATTESTED` |
+
+配套列记录要求里的五件事：`verification_method`（`NONE` / `OPERATOR_IDENTITY` / `SOURCE_ADAPTER`）、`verified_at`、`verifier_identity`（适配器 id）、`submitted_by`（提交者）、`verification_note`（为什么是这个结论）。`source` 仍是"自报的生产者"。
+
+**唯一通往 `SOURCE_ATTESTED` 的路径**：请求携带 `attestation{adapterId, issuedAt, signature}`，签名是 HMAC-SHA256（密钥来自 `OPSWEAVE_EVIDENCE_ADAPTERS`，Kernel 持有、客户端不持有），覆盖**整个证据元组**而不只是适配器身份——所以一个真签名不能被挪到另一条证据上。`issuedAt` 限定 ±300s，捕获后不能无限重放。签名载荷是固定键序的 JSON（`incident-v1.yaml` 的 `Attestation` schema 写死了字节），见 §11.6 的一次真实跨语言事故。
+
+**拒绝而不是降级**：四种失败（`EVIDENCE_ATTESTATION_INVALID` / `EVIDENCE_ADAPTER_UNKNOWN` / `EVIDENCE_ATTESTATION_STALE` / `EVIDENCE_TRUST_NOT_SELF_ASSERTABLE`）全部不写行。把一次伪造尝试降级成 `UNVERIFIED` 存下来，等于把它埋进证据表里当成一条普通记录。
+
+**旧字段 `trust` 被拒绝而不是被重解释**：直到这次发布，该字段的值就是授予认证的东西；静默映射成 claim 会留下一条"看起来还能用"的旧客户端路径。
+
+**两道门**：handler 是第一道；数据库是第二道——`incident_evidence_attestation_requires_adapter` 约束禁止 `verified_trust='SOURCE_ATTESTED'` 而不带 `verification_method='SOURCE_ADAPTER'` 与非空 `verifier_identity`，所以手写 INSERT 也造不出来。数据库不能验签（那是 handler 的事），它约束的是**形状**；这一点必须说清，不能宣称"库里就不可能伪造"。
+
+**前端不是防护**：写表单不再提供 `SOURCE_ATTESTED` 选项，但表单里也写了这句话；同时浏览器直接 POST `trust: "SOURCE_ATTESTED"` 仍是 400（见 `tests/ui/g12-incident-route-identity.spec.ts` 的同名断言）。后端是唯一的门。
+
+### 11.2 A1 · 历史行的真实处理（迁移 `0017_g12_evidence_trust.sql`）
+
+**它们当初是怎么来的**：0017 之前每一条 `SOURCE_ATTESTED` 都来自请求体。没有任何适配器身份、签名或服务端检查曾为它背书。
+
+| 旧 `trust` | `claimed_trust` | `verified_trust` | `verification_method` | `verified_at` | `verification_note` |
+|---|---|---|---|---|---|
+| `SOURCE_ATTESTED` | 保留原值 | **`UNVERIFIED`** | `NONE` | `NULL` | `MIGRATION_0017_DOWNGRADE` 说明：迁移前的自报值，无适配器身份/签名/服务端检查，无法支撑 |
+| `OPERATOR_ASSERTED` | 保留原值 | `OPERATOR_ASSERTED` | `OPERATOR_IDENTITY` | `= created_at` | `NULL` |
+| `UNVERIFIED` | 保留原值 | `UNVERIFIED` | `NONE` | `NULL` | `NULL` |
+
+- `OPERATOR_ASSERTED` 保留，因为它是 Kernel 仍然能支撑的那句话：从 0016 起该端点就要求 operator 角色，所以"一个已认证且有写权限的操作员提交了它"当时就是被强制执行的。
+- `submitted_by` 从同事务写下的审计事件 `INCIDENT_EVIDENCE_ADDED` 里按 `details.evidenceId` 回填；审计里没有的保持 `NULL`——**没有依据就不编一个账号**。
+- 不破坏任何东西：`ALTER TABLE … RENAME COLUMN` 保留数据、主键、两个外键、索引和全部时间戳；新增列全部 `ADD COLUMN`。没有一行被删除，没有一个 id 变化，`incident_verdicts` 一行未动（除 §11.3 的新增列）。
+
+### 11.3 A3 · 结论实际考量了哪些证据
+
+`CONCLUDED` 之后仍可补证据（§3.1，**保留**）。缺的是"签署时到底看了什么"，于是补上的证据可以被事后读成签署依据。
+
+- 新表 `kernel.incident_verdict_evidence(incident_id, evidence_id, evidence_digest)`：签署事务里写入，之后只读。`evidence_digest` 是该行 `(kind, source, content_ref, verified_trust, id)` 的 sha256，所以事后改 `content_ref` 可被发现。
+- `incident_verdicts` 新增 `considered_evidence_count`、`considered_evidence_digest`（整集合按 evidence_id 排序后的 sha256）、`snapshot_kind`。
+- `Evidence.after_verdict` 在读取时派生，不存列：`snapshot_kind='RECORDED'` 时等于"不在快照里"；`PRE_MIGRATION_UNRECORDED` 时退化为 `created_at > decided_at`，且 verdict 自己报告用的是哪条规则。
+- **历史 verdict 一律 `PRE_MIGRATION_UNRECORDED`、count 0、digest NULL**。用时间戳重建一个集合并当成记录展示，就是这次要消灭的静默改写。
+
+### 11.4 A2 · 路由身份 vs 同 ID 刷新（前端规则）
+
+`apps/platform-web/src/incidents.ts` 的 `detailReducer` / `projectDetail` / `detailPhase`，纯函数、无浏览器依赖：
+
+- 路由 id 变化 → 快照清空（`emptyDetail`），且清空与路由切换同一任务内完成，不经过网络；
+- 每个响应带 `routeId`，与快照自己的 `routeId` 比较，不等就丢弃（乱序防护是**比较**，不是延时；产品里没有任何 sleep）；
+- 401/403/404 清视图；网络/5xx 保留已有记录并显示"最后读取时间"；
+- `projectDetail(state, routeId)` 在渲染前再挡一层：快照的 id 与 URL 不符时返回空快照；
+- 写操作永远作用于页面上显示的那个 `incident.id`（表单拿到的是投影后的对象，不是 URL 参数）。
+
+**能力边界（诚实说明）**：当前 UI 里两个故障之间只有列表这一道门，因此"参数变化而详情页未卸载"这一情形浏览器无法产生，`tests/ui/g12-incident-route-identity.spec.ts` 也无法覆盖它。该规则由 `src/incidents.test.ts` 的 `detailReducer` / `projectDetail` 用例证明，且已用"故意破坏实现"的方式验证过这些用例会失败（见 §11.5）。
+
+### 11.5 验证清单（可重跑）
+
+| 断言 | 位置 |
+|---|---|
+| 伪造 SOURCE_ATTESTED 被拒且不写行 | `a_body_trust_field_is_refused_and_writes_nothing`、`a_caller_cannot_claim_attested_trust` |
+| 四种签名失败被拒且不写行 | `forged_and_stale_attestations_are_refused_and_write_nothing` |
+| 重放不能升级已定稿的 trust | `a_replay_cannot_upgrade_a_settled_trust` |
+| 数据库自身拒绝手写 attested 行 | `the_database_refuses_a_hand_written_attested_row` |
+| 跨角色（viewer 403 / operator 201 / admin 201） | `viewer_is_refused_at_the_handler_and_operator_and_admin_are_not` |
+| A3 快照与 afterVerdict | `a_verdict_freezes_the_evidence_set_it_considered`、`a_pre_migration_verdict_reports_an_unknown_considered_set` |
+| 签名载荷的跨语言字节 | `attestation_payload_matches_the_published_golden_vector` + `tests/acceptance/g12_trusted_evidence.sh` |
+| 真实 HTTP 全流程（51 条断言） | `tests/acceptance/g12_trusted_evidence.sh` |
+| 浏览器（7 条） | `tests/ui/g12-incident-route-identity.spec.ts` |
+| 路由状态机（含故意破坏复验） | `src/incidents.test.ts` |
+
+### 11.6 一次真实的跨语言事故（留作证据）
+
+`AttestationClaims` 起初没有 `#[serde(rename_all = "camelCase")]`，于是签名载荷是 `adapter_id` / `collected_at_unix`，而契约文档写的是 camelCase。Rust 单测全绿——因为签名方与验签方调用同一个函数，两边错得一样。**只有跨语言的验收脚本**（`g12_trusted_evidence.sh` 用 Python 按契约独立实现签名）把它抓出来：`P3 a correctly signed attestation is accepted -> 401`。
+
+修正后补了 `attestation_payload_matches_the_published_golden_vector`，把字节钉死在单测里。这就是"进程内自测覆盖不了协议"的实例。
+
+### 11.7 逆向 DDL（人工执行，非自动；`0017` 专用）
+
+~~~sql
+ALTER TABLE kernel.incident_verdicts
+    DROP COLUMN snapshot_kind,
+    DROP COLUMN considered_evidence_digest,
+    DROP COLUMN considered_evidence_count;
+DROP TABLE IF EXISTS kernel.incident_verdict_evidence;
+ALTER TABLE kernel.incident_evidence
+    DROP CONSTRAINT IF EXISTS incident_evidence_attestation_requires_adapter,
+    DROP CONSTRAINT IF EXISTS incident_evidence_verification_check,
+    DROP COLUMN verification_note,
+    DROP COLUMN submitted_by,
+    DROP COLUMN verifier_identity,
+    DROP COLUMN verified_at,
+    DROP COLUMN verification_method,
+    DROP COLUMN verified_trust;
+ALTER TABLE kernel.incident_evidence RENAME COLUMN claimed_trust TO trust;
+DELETE FROM _sqlx_migrations WHERE version = 17;
+~~~
+
+**不可逆的部分必须说清**：`claimed_trust → trust` 保住的是**声明值**；`verified_trust` 与整张快照表会消失，无法从 claim 反推出"当时 Kernel 验到了什么"。被 0017 降级的历史 `SOURCE_ATTESTED` 行在执行逆向 DDL 后会**重新看起来是 `SOURCE_ATTESTED`**——这是这条回滚唯一的真实代价，也是它必须人工执行、且必须同时归档数据的原因。此 DDL 已在 scratch 库 `opsweave_g12_migprobe` 上执行过（`BEGIN … ROLLBACK` 与逐条执行均通过）。

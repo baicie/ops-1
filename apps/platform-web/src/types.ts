@@ -522,8 +522,29 @@ export interface IncidentVerdict {
   rationale: string;
   decidedBy: string;
   decidedAt: string;
+  /**
+   * G12 A3: how many evidence rows the signing transaction actually read. This is the number the
+   * verdict stands on. It is not, and must never be recomputed as, the number the incident holds
+   * now - evidence is still accepted after CONCLUDED.
+   */
+  consideredEvidenceCount: number;
+  /** sha256 (hex) over that set, or null when the kernel recorded no set. */
+  consideredEvidenceDigest: string | null;
+  /**
+   * RECORDED means the set above is a record. PRE_MIGRATION_UNRECORDED means the verdict was
+   * signed before the snapshot existed: the set was never stored, so it is unknown and the UI
+   * must say so rather than reconstruct it from timestamps.
+   */
+  snapshotKind: 'RECORDED' | 'PRE_MIGRATION_UNRECORDED' | string;
 }
 
+/**
+ * G12 A1: two fields, two questions.
+ *
+ * claimedTrust is what the submitter said about its own row. verifiedTrust is what the kernel
+ * established, and it is the only field that may be rendered as provenance. They can disagree,
+ * and when they do the disagreement is the interesting fact.
+ */
 export interface IncidentEvidence {
   id: string;
   incidentId: string;
@@ -532,7 +553,18 @@ export interface IncidentEvidence {
   collectedAt: string;
   /** An opaque locator (digest or storage key). The kernel never fetches it; neither may the UI. */
   contentRef: string;
-  trust: string;
+  claimedTrust: string;
+  verifiedTrust: string;
+  /** NONE | OPERATOR_IDENTITY | SOURCE_ADAPTER. */
+  verificationMethod: string;
+  verifiedAt: string | null;
+  /** The authenticated adapter that vouched, for SOURCE_ADAPTER rows. */
+  verifierIdentity: string | null;
+  submittedBy: string | null;
+  verificationNote: string | null;
+  createdAt: string;
+  /** G12 A3: true when the row was appended after the verdict was signed. */
+  afterVerdict: boolean;
 }
 
 export interface IncidentList {

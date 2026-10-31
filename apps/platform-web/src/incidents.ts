@@ -22,6 +22,10 @@ import type { IncidentEvidence, IncidentVerdict, IncidentView } from './types';
 export const INCIDENT_STATUS_CODES = ['OPEN', 'INVESTIGATING', 'CONCLUDED', 'CLOSED'] as const;
 export const INCIDENT_SEVERITY_CODES = ['CRITICAL', 'MAJOR', 'MINOR', 'WARNING'] as const;
 export const EVIDENCE_KIND_CODES = ['METRIC_SNAPSHOT', 'LOG_EXCERPT', 'QUERY_RESULT', 'OPERATOR_NOTE'] as const;
+/**
+ * The read-side closed set: what a stored row may carry in verifiedTrust.
+ * The write side is narrower (CLAIMABLE_TRUST_CODES); the difference is the fix.
+ */
 export const EVIDENCE_TRUST_CODES = ['SOURCE_ATTESTED', 'OPERATOR_ASSERTED', 'UNVERIFIED'] as const;
 /** What this form offers. The API also accepts REFUTED; that value is not exposed here. */
 export const VERDICT_CHOICES = ['CONFIRMED', 'INCONCLUSIVE'] as const;
@@ -95,6 +99,13 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
   INCIDENT_STATE_CONFLICT: 'incidents.error.stateConflict',
   INCIDENT_VERDICT_NOT_FOUND: 'incidents.error.verdictMissing',
   INCIDENT_WRITE_CONFLICT: 'incidents.error.writeConflict',
+  // G12 A1. Four codes, because "the server said no" is not one situation: an
+  // unverifiable attestation and a stale one are different mistakes with different
+  // remedies, and collapsing them into one sentence would hide which happened.
+  EVIDENCE_TRUST_NOT_SELF_ASSERTABLE: 'incidents.error.notSelfAssertable',
+  EVIDENCE_ATTESTATION_INVALID: 'incidents.error.attestationInvalid',
+  EVIDENCE_ATTESTATION_STALE: 'incidents.error.attestationStale',
+  EVIDENCE_ADAPTER_UNKNOWN: 'incidents.error.adapterUnknown',
 };
 
 export function incidentFailureKey(code?: string | null): MessageKey | null {
@@ -249,4 +260,239 @@ export function incidentSourceKey(code?: string | null): MessageKey {
     case 'API': return 'incidents.source.api';
     default: return 'incidents.source.unknown';
   }
+}
+/* ── G12 A1: the claim and the verdict are two different fields ─────────────────────── */
+
+/**
+ * What a submitter may say about its own row.
+ *
+ * SOURCE_ATTESTED is absent on purpose, and its absence is not the defence: the kernel refuses
+ * the value in claimedTrust as well, and refuses a body "trust" field outright. Removing the
+ * option here only stops the form from offering something that would be a 400.
+ */
+export const CLAIMABLE_TRUST_CODES = ['OPERATOR_ASSERTED', 'UNVERIFIED'] as const;
+
+const VERIFICATION_METHOD_KEYS: Record<string, MessageKey> = {
+  NONE: 'incidents.verificationMethod.none',
+  OPERATOR_IDENTITY: 'incidents.verificationMethod.operatorIdentity',
+  SOURCE_ADAPTER: 'incidents.verificationMethod.sourceAdapter',
+};
+
+/** How the kernel reached its conclusion. A method with no entry prints the raw code. */
+export function verificationMethodKey(code?: string | null): MessageKey {
+  if (!code) return 'incidents.verificationMethod.none';
+  return VERIFICATION_METHOD_KEYS[code.toUpperCase()] ?? 'incidents.verificationMethod.unknown';
+}
+
+/**
+ * True when what the submitter claimed and what the kernel established differ.
+ *
+ * This is the honest way to render the split: not by hiding the claim, but by showing when the
+ * claim was not upheld. A row that claimed UNVERIFIED and was verified as OPERATOR_ASSERTED is
+ * also a mismatch, in the harmless direction - the kernel found more than the submitter claimed.
+ */
+export function trustMismatch(row: Pick<IncidentEvidence, 'claimedTrust' | 'verifiedTrust'>): boolean {
+  return (row.claimedTrust ?? '').toUpperCase() !== (row.verifiedTrust ?? '').toUpperCase();
+}
+
+/* ── G12 A2: route identity, refresh, and out-of-order answers ───────────────────────── */
+
+/** A failure reduced to the two facts that decide what the page may keep showing. */
+export interface IncidentFailure {
+  status: number | null;
+  code: string | null;
+}
+
+/**
+ * Reads status and code off whatever was thrown.
+ *
+ * Duck-typed instead of narrowing on ApiError so this module stays a pure function of wire
+ * payloads: the whole routing rule below is then testable without a browser, a router or a fetch.
+ */
+export function classifyFailure(cause: unknown): IncidentFailure {
+  const error = cause as { status?: unknown; code?: unknown } | null | undefined;
+  return {
+    status: typeof error?.status === 'number' ? error.status : null,
+    code: typeof error?.code === 'string' ? error.code : null,
+  };
+}
+
+/**
+ * The failures that take away the right to keep showing what is on screen.
+ *
+ * 401/403/404 are answers: the caller is not allowed, or the thing is not there for them. A 5xx
+ * or a network error is the absence of an answer, and an absence is not a reason to erase a record
+ * the user was already reading - that is the stale case, handled by keeping the data.
+ */
+export function clearsSensitiveView(failure: IncidentFailure | null | undefined): boolean {
+  if (!failure) return false;
+  return failure.status === 401 || failure.status === 403 || failure.status === 404;
+}
+
+export type DetailPhase = 'loading' | 'ready' | 'not-found' | 'denied' | 'failed';
+
+/**
+ * Everything the detail page knows, tagged with the route id it describes.
+ *
+ * The tag is the whole point: a snapshot answers "what do I know about incident X", and it is
+ * only ever rendered for X. Nothing here is keyed on a timer.
+ */
+export interface IncidentDetailSnapshot {
+  routeId: string;
+  incident: IncidentView | null;
+  evidence: IncidentEvidence[] | null;
+  /**
+   * The failure itself, not a summary of it: the notice prints the kernel's code and request id,
+   * so reducing it to {status, code} here would lose the half of it the user can quote.
+   */
+  incidentError: unknown;
+  evidenceError: unknown;
+  /** When the incident was last read successfully. The stale banner prints this, not "just now". */
+  observedAt: string | null;
+  /** A same-id refresh is in flight. Never used to hide data that is already known. */
+  refreshing: boolean;
+}
+
+export function emptyDetail(routeId: string): IncidentDetailSnapshot {
+  return {
+    routeId,
+    incident: null,
+    evidence: null,
+    incidentError: null,
+    evidenceError: null,
+    observedAt: null,
+    refreshing: true,
+  };
+}
+
+export type DetailAction =
+  | { type: 'route'; routeId: string }
+  | { type: 'refresh' }
+  | { type: 'incident'; routeId: string; incident: IncidentView; observedAt: string }
+  | { type: 'incident-failed'; routeId: string; cause: unknown }
+  | { type: 'evidence'; routeId: string; evidence: IncidentEvidence[] }
+  | { type: 'evidence-failed'; routeId: string; cause: unknown };
+
+/**
+ * The detail page's state machine.
+ *
+ * Two rules, and both are about what must NOT happen:
+ *
+ *   1. A route change clears. Arriving at /incidents/B must never render /incidents/A's title,
+ *      evidence or verdict for even one frame, so the reset happens here rather than after the
+ *      new request returns.
+ *   2. A response for another route is dropped. This is the out-of-order guard, and it is a
+ *      comparison - not a delay. A slow answer for A cannot land on B's snapshot because the
+ *      snapshot is tagged and the tag is compared.
+ *
+ * A same-id refresh (the Refresh button, or a write) keeps the data it has: the id did not change,
+ * so what is on screen still describes the right incident.
+ */
+export function detailReducer(
+  state: IncidentDetailSnapshot,
+  action: DetailAction,
+): IncidentDetailSnapshot {
+  switch (action.type) {
+    case 'route':
+      if (action.routeId === state.routeId) return state;
+      return emptyDetail(action.routeId);
+    case 'refresh':
+      return { ...state, refreshing: true };
+    case 'incident':
+      if (action.routeId !== state.routeId) return state;
+      return {
+        ...state,
+        incident: action.incident,
+        incidentError: null,
+        observedAt: action.observedAt,
+        refreshing: false,
+      };
+    case 'evidence':
+      if (action.routeId !== state.routeId) return state;
+      return { ...state, evidence: action.evidence, evidenceError: null };
+    case 'incident-failed': {
+      if (action.routeId !== state.routeId) return state;
+      if (clearsSensitiveView(classifyFailure(action.cause))) {
+        return { ...state, incident: null, evidence: null, incidentError: action.cause, evidenceError: null, observedAt: null, refreshing: false };
+      }
+      // A failed refresh on the same id: keep the record, say it is stale.
+      return { ...state, incidentError: action.cause, refreshing: false };
+    }
+    case 'evidence-failed': {
+      if (action.routeId !== state.routeId) return state;
+      if (clearsSensitiveView(classifyFailure(action.cause))) {
+        return { ...state, evidence: null, evidenceError: action.cause };
+      }
+      return { ...state, evidenceError: action.cause };
+    }
+    default:
+      return state;
+  }
+}
+
+/**
+ * What the page is allowed to render for the route it is currently on.
+ *
+ * The last line of defence, and the cheapest: if the snapshot describes a different id than the
+ * URL, the page gets an empty snapshot for the URL's id. A state update that slipped past the
+ * reducer cannot leak the previous incident through here.
+ */
+export function projectDetail(
+  state: IncidentDetailSnapshot,
+  routeId: string,
+): IncidentDetailSnapshot {
+  if (state.routeId === routeId) return state;
+  return emptyDetail(routeId);
+}
+
+export function detailPhase(state: IncidentDetailSnapshot): DetailPhase {
+  if (state.incident) return 'ready';
+  if (!state.incidentError) return 'loading';
+  const failure = classifyFailure(state.incidentError);
+  if (failure.status === 404) return 'not-found';
+  if (clearsSensitiveView(failure)) return 'denied';
+  return 'failed';
+}
+
+/* ── G12 A3: what the verdict considered, and what came after ───────────────────────── */
+
+export interface EvidencePartition {
+  /** Rows that existed when the verdict was signed. */
+  considered: IncidentEvidence[];
+  /** Rows appended after signing. They are evidence, but they are not what was signed. */
+  afterVerdict: IncidentEvidence[];
+}
+
+/**
+ * Splits the evidence list by the verdict, using the kernel's afterVerdict flag and nothing else.
+ *
+ * With no verdict every row is simply evidence; there is nothing it could have been considered
+ * against. With a verdict, the split is the difference between "the signer weighed this" and "a
+ * later addition", and the page must not render them as the same thing.
+ */
+export function partitionEvidence(
+  evidence: IncidentEvidence[],
+  verdict: IncidentVerdict | null,
+): EvidencePartition {
+  if (!verdict) return { considered: evidence, afterVerdict: [] };
+  const considered: IncidentEvidence[] = [];
+  const afterVerdict: IncidentEvidence[] = [];
+  for (const row of evidence) {
+    if (row.afterVerdict) afterVerdict.push(row);
+    else considered.push(row);
+  }
+  return { considered, afterVerdict };
+}
+
+export type VerdictSnapshotState = 'recorded' | 'unknown';
+
+/**
+ * Whether the verdict's considered set is a record or an unknown.
+ *
+ * PRE_MIGRATION_UNRECORDED is not an edge case to smooth over: those verdicts were signed before
+ * the set was stored, so the only truthful rendering is "the set is unknown". Deriving it from
+ * timestamps and presenting that as the record is exactly the silent rewrite this phase is about.
+ */
+export function verdictSnapshotState(verdict: Pick<IncidentVerdict, 'snapshotKind'>): VerdictSnapshotState {
+  return verdict.snapshotKind === 'RECORDED' ? 'recorded' : 'unknown';
 }
