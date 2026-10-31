@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -19,7 +20,13 @@ import { fileURLToPath } from 'node:url';
  *      is not simulated client-side;
  *   3. the sentence rendered is the message-catalog value for the active locale, it is not the
  *      English sentence, and it is not the raw kernel message - a hardcoded English string, an
- *      untranslated key or a locale that silently fell back all fail here.
+ *      untranslated key or a locale that silently fell back all fail here;
+ *   4. STATIC, no browser: the sentence appears in no component source, not even in a fragment.
+ *      (3) compares the rendered text against the catalog value, which a sentence pasted into the
+ *      component satisfies just as well - it is observational equivalence, not provenance. So the
+ *      provenance gets its own check, and that one reads files instead of a page.
+ *
+ * 1-3 need a real kernel; 4 needs nothing running at all.
  *
  * A failure in 1 or 2 means the page stopped honouring ADR-G11-001 section 4.5; a failure in 3
  * means the page and incidents.error.forbidden disagreed about who owns the copy. Both point at
@@ -150,4 +157,100 @@ test('a viewer keeps every write entry, and each one earns the catalog 403 in ' 
   await expect(verdictPanel, 'a refused verdict must leave the incident unconcluded').toHaveAttribute('data-verdict-state', 'open');
 
   await context.close();
+});
+
+/* ----------------------------------------------------------------------------------------------
+ * The static half of ADR-G11-001 section 4.5. No browser, no kernel, no database: it reads the
+ * sources as text, so it also fails on a machine where nothing is running.
+ * --------------------------------------------------------------------------------------------*/
+
+/** The two pages section 4.5 names as the places a viewer meets the 403. */
+const WRITE_ENTRY_PAGES = ['Incidents.tsx', 'IncidentDetail.tsx'] as const;
+const PAGE_DIR = fileURLToPath(new URL('../../apps/platform-web/src/pages/', import.meta.url));
+const SRC_DIR = fileURLToPath(new URL('../../apps/platform-web/src/', import.meta.url));
+
+/** The copy a component would have to paste in, taken from the catalog rather than retyped here. */
+const SENTENCES: { locale: string; sentence: string }[] = [
+  { locale: 'zh-CN', sentence: ZH[FORBIDDEN_KEY] },
+  { locale: 'en', sentence: EN[FORBIDDEN_KEY] },
+];
+
+/**
+ * The shortest run of the sentence that counts as a hardcode. Two or three shared characters are a
+ * coincidence of the Chinese comma / a word like "the"; twenty is the copy.
+ */
+const MIN_HARDCODED_RUN = 20;
+
+/** Whitespace-blind: a literal wrapped over two source lines is still one literal. */
+const flatten = (text: string): string => text.replace(/\s+/g, '');
+
+/** Every .ts/.tsx file under the app source. The .json message catalogs are not sources here. */
+function componentSources(directory: string = SRC_DIR): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...componentSources(full));
+    else if (/\.tsx?$/.test(entry.name)) found.push(full);
+  }
+  return found;
+}
+
+/**
+ * Fails when `source` carries the 403 copy instead of asking the catalog for it.
+ *
+ * Two shapes, because they fail differently: the whole sentence verbatim (the literal hardcode),
+ * and any MIN_HARDCODED_RUN-character run of it (half a sentence pasted in, or a literal that a
+ * formatter broke across lines). The run check subsumes the verbatim one; it is kept separate
+ * because "the whole sentence" is the clearer failure to read.
+ */
+function expectNoHardcodedCopy(source: string, where: string) {
+  const flatSource = flatten(source);
+  const windows = new Set<string>();
+  for (let at = 0; at + MIN_HARDCODED_RUN <= flatSource.length; at += 1) {
+    windows.add(flatSource.slice(at, at + MIN_HARDCODED_RUN));
+  }
+
+  for (const { locale, sentence } of SENTENCES) {
+    expect(
+      source.includes(sentence),
+      where + ': the ' + locale + ' 403 sentence appears here verbatim. ADR-G11-001 section 4.5 keeps that copy in the catalog key ' + FORBIDDEN_KEY + ' and nowhere else',
+    ).toBe(false);
+
+    const flatSentence = flatten(sentence);
+    const found: string[] = [];
+    for (let at = 0; at + MIN_HARDCODED_RUN <= flatSentence.length; at += 1) {
+      const run = flatSentence.slice(at, at + MIN_HARDCODED_RUN);
+      if (windows.has(run)) found.push(run);
+    }
+    expect(
+      found,
+      where + ': ' + MIN_HARDCODED_RUN + '+ characters of the ' + locale + ' 403 sentence appear here (' + found.join(' / ') + '). Half the sentence is still a hardcode: the copy belongs to the catalog key ' + FORBIDDEN_KEY,
+    ).toEqual([]);
+  }
+}
+
+test('the 403 sentence belongs to the catalog, and no component source carries a copy of it (ADR-G11-001 section 4.5)', () => {
+  // Belt first: if the key were renamed, SENTENCES would hold undefined and both sweeps below
+  // would pass against the empty string - green, and hunting nothing.
+  for (const [locale, dictionary] of [['en', EN], ['zh-CN', ZH]] as const) {
+    const value = dictionary[FORBIDDEN_KEY];
+    expect(typeof value, 'the ' + locale + ' catalog still owns ' + FORBIDDEN_KEY + ', the key ADR-G11-001 section 4.5 names').toBe('string');
+    expect(
+      value.length,
+      'the ' + locale + ' 403 sentence must be longer than ' + MIN_HARDCODED_RUN + ' characters, or a run of it means nothing',
+    ).toBeGreaterThan(MIN_HARDCODED_RUN * 1.5);
+  }
+
+  // 1. The two pages the ADR names.
+  for (const page of WRITE_ENTRY_PAGES) {
+    const source = readFileSync(PAGE_DIR + page, 'utf8');
+    expect(source.length, page + ': read as source text').toBeGreaterThan(2000);
+    expectNoHardcodedCopy(source, 'apps/platform-web/src/pages/' + page);
+  }
+
+  // 2. Every other component source, so relocating the sentence to a third file does not escape
+  //    the guard. Only the .json catalogs may hold it.
+  const others = componentSources().filter((file) => !WRITE_ENTRY_PAGES.some((page) => file === PAGE_DIR + page));
+  expect(others.length, 'the sweep reached the application source tree').toBeGreaterThan(20);
+  for (const file of others) expectNoHardcodedCopy(readFileSync(file, 'utf8'), file.slice(SRC_DIR.length));
 });
