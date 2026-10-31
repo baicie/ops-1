@@ -2055,6 +2055,15 @@ button.ow-summary-card:focus-visible,
   .panel-head > .panel-count,
   .panel-head > .text-link,
   .panel-head > .btn { flex: none; white-space: nowrap; }
+  /* The three children above keep the title line because each of them can be shrunk to nothing.
+     A head whose right-hand child is a GROUP of buttons cannot: the 390px investigation head
+     handed it the row's leftover 98.14px while the group's own content needs 146.53px, so the
+     "Start investigation" button kept its width, painted its right edge at 398.39 on a 390px
+     viewport, and the document scrolled 8px sideways on /app/incidents/{id} in both themes.
+     A group that cannot shrink gets a line of its own; the title keeps line one, and nothing is
+     clipped, hidden or scrolled inside a mask. */
+  .panel-head:has(> .inline-actions) { flex-wrap: wrap; }
+  .panel-head > .inline-actions { flex: 1 1 100%; }
   .stat-strip,
   .ow-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* An odd last cell spans the row instead of leaving a bare cell of empty grid. */

@@ -296,7 +296,7 @@ $ cd tests/ui && OPSWEAVE_URL=http://127.0.0.1:18199 \
   2 passed (5.8s)
 ```
 
-第 5 条与本决定无关，且**不是这次改动引入的**：拿 `ceb6c09` 原始 spec 跑同一条用例，同样在 `/app/incidents/{id}` 的 390/light 上得到 `overflow=8`（`Expected: <= 1, Received: 8`）。它是详情页在 390 宽度的横向溢出，属于待修缺陷，`docs/design/g12-scope/narrowed-reads.md` §7.4 已用同样的 HEAD 基线对照登记过；写在这里是因为它现在是一份真实的红，而不是被这条记录掩盖。
+第 5 条与本决定无关，且**不是这次改动引入的**：拿 `ceb6c09` 原始 spec 跑同一条用例，同样在 `/app/incidents/{id}` 的 390/light 上得到 `overflow=8`（`Expected: <= 1, Received: 8`）。它是详情页在 390 宽度的横向溢出，属于已于本次修好（8px = 可压缩的按钮组 + 不可压缩的按钮；最小断点内让组独占一行），`docs/design/g12-scope/narrowed-reads.md` §7.4 已用同样的 HEAD 基线对照登记过；写在这里是因为它现在是一份真实的红，而不是被这条记录掩盖。
 
 **代价与边界**：列表入口仍会让 viewer 点一次才拿到 403（一次点击，文案与 requestId 都在页面上）；详情页不再提供这个"点一次"的证据，证据改由测试直接从端点取。若将来要再改这条规则，改的应该是**第 1、2 条断言**——它们是规则；表单在不在不是。
 
