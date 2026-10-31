@@ -130,7 +130,13 @@ check 403 "$(call "$VIEWER_JAR" "$VIEWER_CSRF" POST /api/v1/incidents "$OPERATOR
 
 echo
 echo "== 4. evidence: operator-only, idempotent, and it moves OPEN -> INVESTIGATING"
-EVIDENCE_BODY='{"kind":"METRIC_SNAPSHOT","source":"prometheus","collectedAt":"2026-10-30T01:02:00Z","contentRef":"sha256:0000000000000000000000000000000000000000000000000000000000000001","trust":"SOURCE_ATTESTED"}'
+# The shape of this body is the current contract, not the one the script was written against.
+# A submitter states a CLAIM (claimedTrust, closed set {OPERATOR_ASSERTED, UNVERIFIED}) and never a
+# conclusion: SOURCE_ATTESTED is what an adapter signature produces, so a body asking for it is
+# refused with EVIDENCE_TRUST_NOT_SELF_ASSERTABLE before the row is written (Phase A1). The claim
+# here is UNVERIFIED because nothing verified this row - the old body claimed the opposite and had
+# been answering 400 ever since, which is why section 4 read as a shape failure.
+EVIDENCE_BODY='{"kind":"METRIC_SNAPSHOT","source":"prometheus","collectedAt":"2026-10-30T01:02:00Z","contentRef":"sha256:0000000000000000000000000000000000000000000000000000000000000001","claimedTrust":"UNVERIFIED"}'
 check 403 "$(call "$VIEWER_JAR" "$VIEWER_CSRF" POST "/api/v1/incidents/$INCIDENT_ID/evidence" "$EVIDENCE_BODY")" "viewer POST evidence"
 check 404 "$(call "$OPERATOR_JAR" "$OPERATOR_CSRF" POST "/api/v1/incidents/$INCIDENT_ID/evidence" "$EVIDENCE_BODY")" "operator POST evidence to another owner's incident"
 status="$(call "$ADMIN_JAR" "$ADMIN_CSRF" POST "/api/v1/incidents/$INCIDENT_ID/evidence" "$EVIDENCE_BODY")"
