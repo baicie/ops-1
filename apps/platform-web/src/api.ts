@@ -87,6 +87,40 @@ export const api = {
   put: <T>(path: string, body: unknown = {}, extraHeaders: Record<string, string> = {}) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body), headers: extraHeaders }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /**
+   * A read whose body is not JSON: evidence content.
+   *
+   * The bytes are returned as text and NEVER parsed into anything renderable - the caller puts
+   * them in a text node. The three headers travel with the body because they are the kernel's
+   * own statement about it: the digest it recomputed, the byte count it verified, and the stored
+   * type. An error answer is still the JSON envelope, so its code is read here rather than
+   * turned into a generic failure.
+   */
+  text: async (path: string): Promise<{ text: string; digest: string | null; contentType: string | null; bytes: number | null }> => {
+    const response = await fetch(path, { credentials: 'same-origin' });
+    if (!response.ok) {
+      const raw = await response.text();
+      let body: ErrorEnvelope | null = null;
+      try { body = raw ? JSON.parse(raw) : null; } catch { body = { message: raw }; }
+      if (response.status === 401) {
+        window.dispatchEvent(new CustomEvent('opsweave:unauthorized', { detail: unauthorizedDetail(authGeneration.ticket()) }));
+      }
+      throw new ApiError(
+        response.status,
+        body?.code || 'HTTP_ERROR',
+        body?.message || translate(resolveInitialLocale(), 'api.requestFailed', { status: response.status }),
+        body?.requestId,
+        Boolean(body?.retryable),
+      );
+    }
+    const headerBytes = response.headers.get('x-evidence-bytes');
+    return {
+      text: await response.text(),
+      digest: response.headers.get('x-evidence-digest'),
+      contentType: response.headers.get('x-evidence-content-type'),
+      bytes: headerBytes === null ? null : Number(headerBytes),
+    };
+  },
   uploadPackage: async (file: File): Promise<PackageResult> => {
     const response = await fetch('/api/v1/plugins/packages', {
       method: 'POST',

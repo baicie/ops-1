@@ -133,6 +133,15 @@ paths:
         adapter: an HMAC-SHA256 signature over the exact evidence tuple, keyed by
         a secret the Kernel holds and the client does not. The Kernel records the
         adapter id, the method, the instant and the submitter on the row.
+
+        Since G12 Phase B the request may carry the bytes themselves (content)
+        instead of only a reference. When it does, contentRef is derived by the
+        Kernel from the sha256 it computes over the exact bytes it stored, and a
+        supplied contentRef must be absent or exactly that value: a digest the
+        caller computed is not a check the Kernel performed
+        (EVIDENCE_CONTENT_REF_CONFLICT otherwise). A request with neither content
+        nor contentRef is refused. Everything limits and the read path are
+        specified in docs/design/g12-evidence/evidence-content-adr.md.
       parameters:
         - {$ref: '#/components/parameters/incidentId'}
       requestBody:
@@ -158,6 +167,12 @@ paths:
             EVIDENCE_TRUST_NOT_SELF_ASSERTABLE — the request tried to state
             verifiedTrust: either it carried the retired "trust" field, or it
             named SOURCE_ATTESTED as a claim. Nothing was written.
+            EVIDENCE_CONTENT_EMPTY — content.body was empty.
+            EVIDENCE_CONTENT_REF_CONFLICT — content was supplied together with a
+            contentRef that is not the server-derived digest of those bytes.
+            EVIDENCE_COLLECTED_AT_IN_FUTURE / EVIDENCE_COLLECTED_AT_TOO_OLD —
+            collectedAt is outside the clock window the Kernel accepts
+            (+300s / 400 days), so no row was recorded.
         '401':
           description: >
             UNAUTHENTICATED, or the attestation did not verify:
@@ -172,8 +187,21 @@ paths:
         '409':
           description: >
             INCIDENT_CLOSED — a closed incident accepts no new evidence.
+            INCIDENT_EVIDENCE_LIMIT — this incident already holds the maximum
+            number of evidence rows (200); the cap is what bounds total content.
             INCIDENT_WRITE_CONFLICT — a concurrent write changed the evidence set
             between the insert and the re-read; retry the request.
+        '413':
+          description: >
+            EVIDENCE_CONTENT_TOO_LARGE — content.body exceeds 65536 bytes. The
+            bound is in bytes, not characters, and content is refused rather than
+            truncated: a truncated excerpt is a different piece of evidence.
+        '415':
+          description: >
+            EVIDENCE_CONTENT_TYPE_UNSUPPORTED — contentType is not exactly
+            text/plain or application/json. The Kernel serves content back
+            verbatim and stores no type it cannot serve under its own security
+            headers.
         '500':
           description: >
             AUDIT_WRITE_FAILED — the audit row could not be stored, so the
@@ -181,16 +209,105 @@ paths:
             with it; retryable.
     get:
       summary: Evidence of one incident, newest collection first
+      description: >
+        Metadata only: content is never inlined here, so a caller that may read
+        the list still has to ask for one row's bytes through
+        /incidents/{incidentId}/evidence/{evidenceId}/content. contentStatus says
+        which rows have bytes (STORED) and which are a Legacy reference the
+        Kernel never held.
       parameters:
         - {$ref: '#/components/parameters/incidentId'}
+        - name: since
+          in: query
+          required: false
+          schema: {type: string, format: date-time}
+          description: >
+            Lower bound on collectedAt (RFC 3339, inclusive). Supply together with
+            until; a half-bounded window has no fixed width and is refused.
+        - name: until
+          in: query
+          required: false
+          schema: {type: string, format: date-time}
+          description: >
+            Upper bound on collectedAt (inclusive). The window may not exceed 90
+            days: an unbounded scan is a cost the caller would otherwise choose.
       responses:
         '200':
           description: Evidence list
           content:
             application/json:
               schema: {$ref: '#/components/schemas/EvidenceList'}
+        '400':
+          description: >
+            INCIDENT_EVIDENCE_WINDOW_INVALID — since/until are not RFC 3339, are
+            supplied one without the other, are inverted, or span more than 90
+            days.
         '401': {description: UNAUTHENTICATED}
         '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
+  /incidents/{incidentId}/evidence/{evidenceId}/content:
+    get:
+      summary: The stored bytes of one evidence row
+      description: >
+        G12 Phase B. Returns exactly the bytes the Kernel stored, with the digest
+        it recomputed over them in X-Evidence-Digest. The response is untrusted
+        content by definition (a log excerpt, a pasted note, a JSON document a
+        source produced) and is served with Content-Type text/plain or
+        application/json, X-Content-Type-Options nosniff, a
+        Content-Security-Policy of "default-src 'none'; sandbox" and
+        Cache-Control no-store, so a direct visit to this URL cannot execute
+        anything or leave a copy in the browser cache.
+
+        Four answers, deliberately distinct: the bytes (200), a Legacy reference
+        the Kernel holds no bytes for (404 EVIDENCE_CONTENT_NOT_STORED), content
+        past its 365-day retention horizon (410 EVIDENCE_CONTENT_EXPIRED), and
+        content whose bytes no longer match the recorded digest
+        (500 EVIDENCE_CONTENT_INTEGRITY_FAILED). The Kernel does not serve bytes
+        it cannot verify, and it does not repair a mismatch: rewriting the digest
+        would launder a tamper into a normal row.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+        - name: evidenceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The stored bytes
+          headers:
+            X-Evidence-Digest:
+              description: sha256 (lowercase hex) recomputed over the bytes in this response.
+              schema: {type: string}
+            X-Evidence-Bytes:
+              description: The verified length of the body.
+              schema: {type: integer}
+            X-Evidence-Content-Type:
+              description: The stored content type.
+              schema: {type: string}
+          content:
+            text/plain:
+              schema: {type: string}
+            application/json:
+              schema: {type: string}
+        '401': {description: UNAUTHENTICATED}
+        '404':
+          description: >
+            INCIDENT_NOT_FOUND — the incident is absent or outside the caller
+            scope (the same predicate the metadata list applies, so content is
+            never readable where its row is not).
+            EVIDENCE_NOT_FOUND — no evidence row with this id belongs to this
+            incident. EVIDENCE_CONTENT_NOT_STORED — the row exists as a Legacy
+            reference and the Kernel holds no content for it.
+        '410':
+          description: >
+            EVIDENCE_CONTENT_EXPIRED — the content passed its retention horizon
+            (capturedAt + 365 days) and is no longer served. The row and its
+            digest stay readable as metadata.
+        '500':
+          description: >
+            EVIDENCE_CONTENT_INTEGRITY_FAILED — the stored bytes no longer match
+            the digest and length recorded with them; the body is not returned and
+            the mismatch is logged. This is a statement about the database, not
+            about the caller.
   /incidents/{incidentId}/verdict:
     post:
       summary: Record the human verdict (operator or admin)
@@ -396,18 +513,33 @@ components:
     CreateEvidenceRequest:
       type: object
       additionalProperties: false
-      required: [kind, source, collectedAt, contentRef]
+      required: [kind, source, collectedAt]
       properties:
         kind: {$ref: '#/components/schemas/EvidenceKind'}
         source: {type: string, minLength: 2, maxLength: 200}
-        collectedAt: {type: string, format: date-time}
+        collectedAt:
+          type: string
+          format: date-time
+          description: >
+            When the source claims it collected this. Bounded by the Kernel clock:
+            more than 300s ahead is EVIDENCE_COLLECTED_AT_IN_FUTURE and more than
+            400 days old is EVIDENCE_COLLECTED_AT_TOO_OLD.
         contentRef:
           type: string
           minLength: 2
           maxLength: 1000
           description: >
-            Opaque locator (content digest or store key). Never inline payload:
-            the Kernel does not fetch it, so it also carries no SSRF surface.
+            Opaque locator (content digest, store key, anything) for a submission
+            that does NOT carry the bytes. The Kernel never fetches it, so it also
+            carries no SSRF surface - and it is rendered, stored and described as
+            a Legacy reference, never as verified content. Optional only since the
+            content field exists; one of contentRef / content is required.
+        content:
+          $ref: '#/components/schemas/EvidenceContent'
+          description: >
+            G12 Phase B: the bytes. When present the Kernel stores them, computes
+            sha256 over exactly what it stored, and derives contentRef from that
+            digest; a supplied contentRef must then be absent or identical.
         claimedTrust:
           allOf: [{$ref: '#/components/schemas/EvidenceTrustClaim'}]
           description: >
@@ -431,11 +563,32 @@ components:
             when present, whatever its value. It is listed so the refusal is
             discoverable: before this change the value in this field was what
             granted attestation.
+    EvidenceContent:
+      type: object
+      additionalProperties: false
+      required: [contentType, body]
+      properties:
+        contentType:
+          type: string
+          enum: [text/plain, application/json]
+          description: >
+            Exact match, no parameters: text/plain and application/json only. The
+            Kernel serves this type back verbatim, so it accepts no type it cannot
+            serve safely (EVIDENCE_CONTENT_TYPE_UNSUPPORTED otherwise).
+        body:
+          type: string
+          minLength: 1
+          description: >
+            The content itself. A JSON string is valid UTF-8 by construction; the
+            65536-byte bound is measured on the UTF-8 bytes and content is refused
+            rather than truncated.
     Evidence:
       type: object
       additionalProperties: false
       required:
         [id, incidentId, kind, source, collectedAt, contentRef,
+         contentStatus, contentType, contentBytes, contentSha256,
+         contentCapturedAt, contentRetentionExpiresAt,
          claimedTrust, verifiedTrust, verificationMethod, verifiedAt,
          verifierIdentity, submittedBy, verificationNote, createdAt, afterVerdict]
       properties:
@@ -444,7 +597,46 @@ components:
         kind: {$ref: '#/components/schemas/EvidenceKind'}
         source: {type: string}
         collectedAt: {type: string, format: date-time}
-        contentRef: {type: string}
+        contentRef:
+          type: string
+          description: >
+            For a STORED row this is the server-derived sha256:<hex> of the stored
+            bytes; for a LEGACY_REFERENCE row it is whatever the submitter typed.
+            contentStatus - never this field's shape - is what distinguishes them.
+        contentStatus:
+          type: string
+          enum: [STORED, LEGACY_REFERENCE]
+          description: >
+            G12 Phase B: STORED means the Kernel holds bytes for this row and the
+            content endpoint can serve them; LEGACY_REFERENCE means it holds a
+            locator only, so the reference is displayed as unverified. Derived from
+            the presence of a content row, never stored as a flag, so it cannot
+            claim content the Kernel does not have.
+        contentType:
+          type: [string, 'null']
+          enum: [text/plain, application/json, null]
+        contentBytes:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 65536
+        contentSha256:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: >
+            sha256 the Kernel computed over the bytes it stored. Never a value that
+            arrived in a request body.
+        contentCapturedAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            When the Kernel accepted the bytes (server clock) - the fact half of
+            the capture window whose claim half is collectedAt.
+        contentRetentionExpiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            capturedAt + 365 days. After this the content endpoint answers 410 and
+            the metadata stays readable.
         claimedTrust:
           $ref: '#/components/schemas/EvidenceTrust'
           # Validity note: historical rows may carry SOURCE_ATTESTED here, because

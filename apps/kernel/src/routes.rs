@@ -261,6 +261,13 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/incidents/{incident_id}/evidence",
             get(incidents::list_evidence).post(incidents::append_evidence),
         )
+        // G12 B: the bytes behind one evidence row. A separate route so the
+        // evidence list never carries content: a caller that may read metadata
+        // asks again, in one bounded request, for the single row it wants.
+        .route(
+            "/api/v1/incidents/{incident_id}/evidence/{evidence_id}/content",
+            get(incidents::read_evidence_content),
+        )
         .route(
             "/api/v1/incidents/{incident_id}/verdict",
             get(incidents::get_verdict).post(incidents::create_verdict),
@@ -366,12 +373,20 @@ async fn security_headers(request: Request, next: Next) -> Response {
         HeaderValue::from_static("no-referrer"),
     );
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-        ),
-    );
+    // A route that set its own policy keeps it. The blanket policy below is built
+    // for the application shell ('self' scripts, inline styles); a response that
+    // carries untrusted bytes must be tighter than that, and overwriting it here
+    // would silently downgrade the one route where the content is arbitrary text
+    // (GET /incidents/{id}/evidence/{evidenceId}/content sets
+    // "default-src 'none'; sandbox").
+    if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+            ),
+        );
+    }
     response
 }
 

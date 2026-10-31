@@ -8,6 +8,16 @@ import {
   detailPhase,
   detailReducer,
   emptyDetail,
+  evidenceContentStatusKey,
+  evidenceContentStatusTone,
+  contentPanelMode,
+  contentFailurePhase,
+  contentPhaseKeys,
+  sha256Hex,
+  digestVerdict,
+  digestVerdictKey,
+  digestVerdictTone,
+  evidenceExportFileName,
   evidenceKindKey,
   evidencePanelState,
   evidenceTrustKey,
@@ -86,6 +96,12 @@ function evidence(overrides: Partial<IncidentEvidence> = {}): IncidentEvidence {
     source: 'operator:admin@opsweave.local',
     collectedAt: '2026-10-30T22:16:00Z',
     contentRef: 'sha256:abc',
+    contentStatus: 'LEGACY_REFERENCE',
+    contentType: null,
+    contentBytes: null,
+    contentSha256: null,
+    contentCapturedAt: null,
+    contentRetentionExpiresAt: null,
     claimedTrust: 'OPERATOR_ASSERTED',
     verifiedTrust: 'OPERATOR_ASSERTED',
     verificationMethod: 'OPERATOR_IDENTITY',
@@ -431,5 +447,77 @@ describe('verdictSnapshotState', () => {
 
   it('does not treat an unrecognised kind as a record', () => {
     expect(verdictSnapshotState(verdict({ snapshotKind: 'SOMETHING_ELSE' }))).toBe('unknown');
+  });
+});
+
+describe('G12 B content helpers', () => {
+  it('says where the bytes are, and never paints stored bytes as trusted', () => {
+    expect(evidenceContentStatusKey('STORED')).toBe('incidents.content.status.stored');
+    expect(evidenceContentStatusKey('LEGACY_REFERENCE')).toBe('incidents.content.status.legacy');
+    // An unknown code degrades to the weaker claim, not the stronger one.
+    expect(evidenceContentStatusKey('SOMETHING_ELSE')).toBe('incidents.content.status.legacy');
+    // STORED is informative, never the success tone: holding bytes proves the content did not
+    // change, not that the source was honest (ADR-G12-002 §1.6).
+    expect(evidenceContentStatusTone('STORED')).toBe('info');
+    expect(evidenceContentStatusTone('LEGACY_REFERENCE')).toBe('warn');
+  });
+
+  it('decides whether there is anything to fetch', () => {
+    expect(contentPanelMode('STORED')).toBe('stored');
+    expect(contentPanelMode('LEGACY_REFERENCE')).toBe('legacy');
+    expect(contentPanelMode(null)).toBe('legacy');
+  });
+
+  it('keeps the four content failures apart', () => {
+    expect(contentFailurePhase({ status: 404, code: 'EVIDENCE_CONTENT_NOT_STORED' })).toBe('unavailable');
+    expect(contentFailurePhase({ status: 410, code: 'EVIDENCE_CONTENT_EXPIRED' })).toBe('expired');
+    expect(contentFailurePhase({ status: 500, code: 'EVIDENCE_CONTENT_INTEGRITY_FAILED' })).toBe('integrity');
+    expect(contentFailurePhase({ status: 404, code: 'INCIDENT_NOT_FOUND' })).toBe('denied');
+    expect(contentFailurePhase({ status: 401, code: 'UNAUTHENTICATED' })).toBe('denied');
+    expect(contentFailurePhase({ status: 403, code: 'FORBIDDEN' })).toBe('denied');
+    expect(contentFailurePhase({ status: 503, code: 'UNAVAILABLE' })).toBe('failed');
+    expect(contentFailurePhase(null)).toBeNull();
+    // Every terminal phase has copy. A phase without a key would render an empty panel.
+    for (const phase of ['expired', 'unavailable', 'integrity', 'denied', 'failed'] as const) {
+      expect(contentPhaseKeys(phase)).not.toBeNull();
+    }
+    expect(contentPhaseKeys('ready')).toBeNull();
+  });
+
+  it('recomputes sha256 over the text it is about to show', async () => {
+    // The golden vector is the empty-string digest plus a known string, so a wrong encoding
+    // (utf-16, latin1) or a wrong hash function fails here rather than in a browser.
+    expect(await sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    expect(await sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  });
+
+  it('compares digests without pretending to have checked one it could not compute', () => {
+    const digest = 'a'.repeat(64);
+    expect(digestVerdict(digest, digest.toUpperCase())).toBe('match');
+    expect(digestVerdict(digest, 'b'.repeat(64))).toBe('mismatch');
+    // No WebCrypto, or a kernel response with no digest header: not a pass.
+    expect(digestVerdict(null, digest)).toBe('unknown');
+    expect(digestVerdict(digest, null)).toBe('unknown');
+    expect(digestVerdictTone('match')).toBe('ok');
+    expect(digestVerdictTone('mismatch')).toBe('danger');
+    expect(digestVerdictTone('unknown')).toBe('warn');
+    expect(digestVerdictKey('mismatch')).toBe('incidents.content.digest.mismatch');
+  });
+
+  it('names an export after the row and its stored type', () => {
+    expect(evidenceExportFileName({ id: '33333333-3333-4333-8333-333333333333', contentType: 'text/plain' })).toBe('evidence-33333333.txt');
+    expect(evidenceExportFileName({ id: '33333333-3333-4333-8333-333333333333', contentType: 'application/json' })).toBe('evidence-33333333.json');
+    // A legacy row has no stored type, so the default is the safe one.
+    expect(evidenceExportFileName({ id: '33333333-3333-4333-8333-333333333333', contentType: null })).toBe('evidence-33333333.txt');
+  });
+
+  it('reads a stored row as stored and a legacy row as legacy', () => {
+    const legacy = evidence();
+    expect(legacy.contentStatus).toBe('LEGACY_REFERENCE');
+    const stored = evidence({ contentStatus: 'STORED', contentType: 'text/plain', contentBytes: 12, contentSha256: 'c'.repeat(64), contentCapturedAt: '2026-10-30T22:17:00Z', contentRetentionExpiresAt: '2027-10-30T22:17:00Z' });
+    expect(contentPanelMode(stored.contentStatus)).toBe('stored');
+    // The digest shown is the kernel's, and the retention horizon is a stored fact.
+    expect(stored.contentSha256).toBe('c'.repeat(64));
+    expect(stored.contentRetentionExpiresAt).toBe('2027-10-30T22:17:00Z');
   });
 });
