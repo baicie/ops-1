@@ -30,8 +30,11 @@ if (RATCHET !== null && !existsSync(RATCHET)) {
   process.exit(2);
 }
 if (RATCHET === null) {
-  console.error('check-ui-tokens: no --ratchet given, so every budget is zero and every rule will fail.');
-  console.error('This run cannot tell you anything about the code.');
+  console.error('check-ui-tokens: no --ratchet given.');
+  console.error('Every budget would be zero and every rule would fail, which says nothing about the code,');
+  console.error('and four separate reports have read that output as a regression. Pass the path instead:');
+  console.error('  node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json');
+  process.exit(2);
 }
 const SRC = join(ROOT, 'apps', 'platform-web', 'src');
 const cssPath = join(SRC, 'styles.css');
