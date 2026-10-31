@@ -225,3 +225,50 @@ E2E 第一次跑就撞上了：Playwright 反复报
 - `tests/ui/business-workspace.spec.ts`（改写 2 条断言 + 首页/能力清单断言）
 
 文档（1）：本文件
+
+---
+
+## 10. D3 评审后的修正与实测（2026-10-31）
+
+D3 评审点了六条，本次修前四条。后端两条（审计与业务写同事务、create 重放返回 409 而不是 404）的论证与实测在 ADR §4.4 / §5.1；本节只记与页面有关的一条**决定**和一条**订正**。
+
+运行环境与前文相同：scratch 库 `opsweave_g11_http`、Kernel `127.0.0.1:18199`（**非** 18181）、页面来自真实构建产物 `apps/platform-web/dist`、Chromium。
+
+### 10.1 viewer 看得见写入口：保留入口，让 403 当文案
+
+决定是 ADR §4.5 的 (b) 方案：入口对 viewer 照常渲染，点一次拿到服务端的高质量 403，而不是按角色禁用/隐藏。本次用真实浏览器复核了这条规则的每一格：
+
+| 观测量 | 实测值 |
+|---|---|
+| 列表页 `[data-testid=incident-create-open]`（Record an incident） | `visible=true`、`enabled=true` |
+| 点开 → 填标题 → 提交 | `[data-testid=incident-create-error]`，`data-error-code="FORBIDDEN"` |
+| 提交后读者看到的文案 | `Your role can read incidents but not write them. Creating, adding evidence and recording a verdict are refused by the server.` + `Request ID <uuid>` |
+| 详情页 `[data-testid=incident-evidence-form]` | `visible=true`、提交按钮 `enabled=true` |
+| 证据提交 | `[data-testid=incident-evidence-write-error]`，`data-error-code="FORBIDDEN"`，同一句文案 |
+
+也就是说 §3 里那条"页面上没有按角色隐藏按钮的授权逻辑"从"当时的做法"升级为**被明确选定、并写进 ADR 的产品规则**；它换来的代价（viewer 会看到两个永远失败的入口，每点一次重读一遍 403）与替代方案（禁用 + 解释）的比较见 ADR §4.5，不再悬着。
+
+### 10.2 订正：`808047b` 的波及面比提交信息写的更大
+
+`808047b`（"the page header was a fixed box"）的提交信息写"十二页数字不变，只有实例日志页变了"。**这句话不准确**：本次在自己的 scratch 实例上复测，`/app/home` 与 `/app/investigations` 两页的 header 高度和首块位置也变了。
+
+测量方法（可复现）：登录后逐页 `page.goto`，取 `document.querySelector('header.page-header')` 的 `getBoundingClientRect()` 作为高度，取它的 `nextElementSibling` 的 `top` 作为首块位置；宽度 1440/1024/390。
+
+| 页面 | 1440 en | 1440 zh-CN | 1024 en | 390 | header 内操作数 |
+|---|---|---|---|---|---|
+| `/app/home` | **80.7 / 161** | **83.2 / 163** | 80 / 184 | 157.5 / 250 | 0 |
+| `/app/investigations` | **80.7 / 161** | **83.2 / 163** | 80 / 184 | 94.5 / 187 | 0 |
+| 被抽样的十二页（`/admin/*` 11 个 + `/app/incidents`） | 80 / 160 | 80 / 160 | 80 / 184 | 各不相同（<769px 规则不适用） | 1–2 |
+
+单元格是 `header 高度 / 首块 y`（px）。评审报出的 83/163 就是 **zh-CN（产品默认语言）下的这两页**；同一页在 en 下是 80.7/161。**变的是同两个页面，差的只是行高**——这正是"只测了一门语言就宣布零回归"会漏掉的那一格。
+
+为什么会变：这两页用的是 `apps/platform-web/src/components/Ui.tsx` 里的 `PageHeader`，它的文案栈实测高 **80.7px（en）/ 83.2px（zh-CN）**（eyebrow 16.5/17.6 + margin 4 + h1 31.2 + margin 8 + 描述 21/22.4）。旧规则是固定 `height: 80px`，所以这两页**在修复前就已经比盒子高 0.7px（en）/ 3.2px（zh-CN）**，居中后上下各溢出约 0.35px / 1.6px——就是 §8 描述的那个缺陷，只是 808047b 的抽样没抽到它们。`min-height` 让盒子把内容装进去，像素数因此改变。
+
+**功能上是否无害：无害，而且这两页原本也站在缺陷那一侧。**
+
+1. 这两页的 header 里**没有任何操作**（`actions=0`），而缺陷唯一能被用户感知的形态是"按钮被下一个面板盖住、点不动"——这里没有按钮可盖。
+2. 首块只下移了溢出的那一点（160 → 161 / 163），既不与 header 重叠，也不产生横向位移。
+3. 十二个抽样页面在 en 与 zh-CN 下实测仍是 80/160，等于 808047b 自己记录的修复前基线（`artifacts/g11-d3/page-header-baseline.json` 里 `headerH` 与 `previousHeaderH` 都是 80、`firstBlockY` 与 `previousFirstBlockY` 都是 160）。所以 808047b 对那十二页的回归结论成立，错的只是**页数**：变的是三页，不是一页。
+
+历史提交按评审要求不改，口径以本节为准。
+

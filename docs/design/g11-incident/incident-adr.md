@@ -95,8 +95,10 @@
 
 任务书把 `evidence_refs` 和 `human_verdict` 列为 Incident 字段。回应如下，这是本 ADR 最容易被误读的地方：
 
-- `evidence_refs` **在响应里存在、在表里不存在**。它的值由 `SELECT evidence_id FROM kernel.incident_evidence WHERE incident_id=$1 ORDER BY collected_at` 在读取时拼装。落列的话就是同一事实的第二个权威，会在"删证据/加证据"时产生不一致，并且必须为它写一致性修复脚本。
+- `evidence_refs` **在响应里存在、在表里不存在**。它的值由一条子查询在读取时拼装（`incidents.rs` 的 `INCIDENT_SELECT`）：`SELECT evidence_id FROM kernel.incident_evidence WHERE incident_id = i.incident_id ORDER BY collected_at DESC, evidence_id DESC LIMIT 100`。**它是有上限的投影，不是全量**：契约 `evidenceRefs.maxItems: 100` 且描述写 `always the newest 100 ids`，列表页脚注也把这句话写给读者（`incidents.table.evidenceNote`），完整证据列表由详情页调用 `GET /incidents/{id}/evidence` 取得。落列的话就是同一事实的第二个权威，会在"删证据/加证据"时产生不一致，并且必须为它写一致性修复脚本。
 - `human_verdict` 同理，是 `kernel.incident_verdicts` 的读取投影（`verdict`/`rationale`/`decidedBy`/`decidedAt` 的聚合，无结论时为 `null`）。落列会让"结论存在性"出现第三种可能状态（列有值但表无行 / 表有行但列有值 / 两者不一致），而 §12.4 要求结论可审计、唯一。
+
+**实测口径（2026-10-31）**：同一个故障下写入 101 条证据后，`GET /api/v1/incidents/{id}` 的 `evidenceRefs` 长度 = **100**，返回的是最新 100 条（边界 `sha256:cap-101` … `sha256:cap-2`）；同一时刻 `GET /api/v1/incidents/{id}/evidence` 返回 **101** 条，最早那条 `sha256:cap-1` 只出现在这里。所以"上限 100"不是文档承诺，是这条 SQL 的行为，而"完整证据集"永远只在证据端点。
 
 这就是**自评里那个问题**的答案（见 §9），它同时也是本 ADR 里唯一一个"字段能回答的问题，已经被别的东西回答了"的例子。
 
@@ -200,11 +202,53 @@ WHERE ($1::boolean OR owner = $2)
 | operator | 仅 `owner = self` | `404 INCIDENT_NOT_FOUND` |
 | viewer | 任意 incident（只读） | — |
 
-**越权读为什么返回 404 而不是 403**：这是 `require_job_access` 已有的选择（`jobs.rs:1972`），保持一次会话内两种资源不泄露"另有一条你无权看的 ID 存在"。**越权写返回 403**：写端点先过 `require_operator()`，viewer 在这里就被拦下，不会走到范围判断；operator 写别人的 incident 则与读一样返回 404（不暴露存在性）。
+**越权读为什么返回 404 而不是 403**：这是 `require_job_access` 已有的选择（`jobs.rs:1972`），保持一次会话内两种资源不泄露"另有一条你无权看的 ID 存在"。**越权写返回 403**：写端点先过 `require_operator()`，viewer 在这里就被拦下，不会走到范围判断；operator 写别人的 incident 则与读一样返回 404（不暴露存在性）。**唯一的例外是 `POST /incidents` 的自然键冲突**：那里返回 `409 INCIDENT_NATIVE_ID_TAKEN` 而**不是** 404——读的入参是 id，create 的入参是调用者自己提交的自然键，回答"已被占用"不泄露它没提供的信息，而 404 会在同一句话里同时说"没有这条"和"不给你建这条"（详见 §5.1）。
 
-### 4.4 审计
+### 4.4 审计：与业务写同事务，失败即整体回滚
 
-每一次写（create / evidence / verdict）都写一条 `kernel.audit_events`：`actor_type='USER'`、`actor_id=<user_id>`、`subject_type='INCIDENT'`、`subject_id=<incident_id>`、`result='ACCEPTED'`。审计写失败**不静默**：与现有 `users::create_user` 一致，审计失败会让请求失败（否则"可审计"这句话就是假的）。
+每一次写（create / evidence / verdict）都在**同一个数据库事务**里写一条 `kernel.audit_events`：`actor_type='USER'`、`actor_id=<user_id>`、`subject_type='INCIDENT'`、`subject_id=<incident_id>`、`result='ACCEPTED'`。审计行与业务行一起提交，也一起回滚。
+
+**先写业务、后写审计是错的（D3 评审指出）**：原实现把 `audit::record` 放在 `tx.commit()` 之后，于是审计失败返回 5xx 而结论已经落库；客户端重试拿到 `409 INCIDENT_ALREADY_CONCLUDED`——**报没写成，其实写成了**。"审计失败不静默"于是字面成立、方向反了：调用者被告知失败，系统却已经接受。同一形状在 create 与 evidence 的 created 分支上也存在。
+
+**为什么选同事务，而不是另外两条路**：
+
+| 方案 | 结论 | 理由 |
+|---|---|---|
+| 审计与业务同事务（本实现） | **采用** | 只有一个提交点，不存在"一边成一边败"的中间态 |
+| 审计先写、业务后写 | 否决 | 仍是两个提交点，只是把残留换到另一边：业务写失败会留下一条"已接受"的审计 |
+| 写失败后标记需补偿 | 否决 | 需要补偿表 + 补偿任务 + 第三份"补到哪一步"的状态；D3 没有任何调度器能消费它，而同事务已经直接给出一致性 |
+
+同事务的代价写在明处：`audit_events` 写不进去的那一刻，这三个写端点**完全不可用**。这是可接受的方向——审计表是 Kernel 自己的表、同一个库同一个连接池，没有跨服务失败模式；它不可写时，业务写也没有可信的落地位置。
+
+**错误语义**（此前是裸 500 `INTERNAL`）：审计行写失败返回 `500 AUDIT_WRITE_FAILED`，消息直接说明"审计记录无法写入，因此本次写已回滚、未生效"，并带 `retryable: true`。这个 `retryable` 是诚实的：库里没有留下半条记录，重试是有意义的重试，而不是重复一次已经成功的写。
+
+**实测**（2026-10-31，scratch 库 + 本机 18199，真实 HTTP；自动化版本是同名单测）：
+
+1. 给 `kernel.audit_events` 加一条只针对某个 actor 的 `CHECK` 约束，让审计 INSERT 真的失败（不是 mock）；
+2. `POST /api/v1/incidents` → `HTTP 500` + `AUDIT_WRITE_FAILED`；`SELECT count(*) FROM kernel.incidents WHERE owner=<actor>` = **0**，该 actor 的 `audit_events` = **0**；
+3. `POST /api/v1/incidents/{id}/verdict`（同手法）→ `HTTP 500` + `AUDIT_WRITE_FAILED`；`incident_verdicts` = **0**，状态仍是 `INVESTIGATING`（`CONCLUDED` 的 CAS 与该事务一起回滚），`INCIDENT_VERDICT_RECORDED` 审计 = **0**；
+4. 删掉约束后重放同一请求 → `201`，业务行与审计行各 **1** 条。
+
+单测：`a_failed_audit_rolls_the_verdict_back`、`a_failed_audit_rolls_the_incident_back_and_frees_the_natural_key`、`a_failed_audit_rolls_the_evidence_and_the_state_change_back`。第二条还证明了一个副作用：回滚把自然键也还回来了——否则调用者会被 200 告知"这个键已经存在"，而那一次它明明失败了。
+
+### 4.5 viewer 看得见写入口：这是一条产品规则，不是遗漏
+
+D3 评审的第三条：列表的"录入故障"按钮与详情页的证据/结论表单对 viewer 照常渲染，提交后 403。二选一的决定是 **(b) 保留入口，让 viewer 点一次、拿到服务端的高质量 403 文案**；(a) "对 viewer 禁用并说明原因"被否决。
+
+理由：
+
+1. 权限是服务端事实，不是前端事实。AGENTS.md 明令不许"依赖 Prompt/CSS 隐藏来实现权限控制"；把按钮藏掉会让"我这个角色为什么看不到"重新变成只有代码能回答的问题，而 403 把答案直接写在页面上。
+2. 禁用态会同时销毁证据：一个禁用按钮无法区分"服务端会拒绝"和"前端以为服务端会拒绝"。一旦前后端角色判定漂移，界面会静默少一个入口且没有任何断言会红；403 路径则一定会红。
+3. 成本可控且被实测：一次点击 = 一次 403，文案来自码表 `incidents.error.FORBIDDEN`（en/zh-CN 各一条），不渲染 Kernel 的英文句子。
+
+文案（`i18n/catalogs/en.json:1327`、`zh-CN.json:1327`）：
+
+- en: `Your role can read incidents but not write them. Creating, adding evidence and recording a verdict are refused by the server.`
+- zh-CN: `当前角色可以读取故障，但不能写入：创建、追加证据和写入结论都会被服务端拒绝。`
+
+**实测**（scratch 库 + 18199 + Chromium，页面来自真实构建产物 `apps/platform-web/dist`）：viewer 登录 → 列表按钮 `Record an incident` 可见且 `enabled=true` → 填标题提交 → `[data-testid=incident-create-error]` 的 `data-error-code="FORBIDDEN"`，正文是上面那条 en 文案 + `Request ID`；详情页证据表单 `visible=true`、提交按钮 `enabled=true` → 提交 → `[data-testid=incident-evidence-write-error]` 同样 `FORBIDDEN`。
+
+**代价写在明处**：viewer 会看到两个永远失败的入口，每点一次重读一遍 403。若 D4 要做"角色化界面"，正确做法是**同时保留服务端拒绝**、把入口改成"申请操作权限"的只读说明——那是新交互，不是隐藏。
 
 ---
 
@@ -215,9 +259,12 @@ WHERE ($1::boolean OR owner = $2)
 | 请求 | 幂等键（数据库强制） | 重复时的响应 |
 |---|---|---|
 | `POST /incidents` | `UNIQUE (source, native_id) WHERE native_id IS NOT NULL` | `200` + **已存在**的那条 incident（不是 201，不新建第二条） |
+| `POST /incidents`（自然键已被别人占用） | 同一 `UNIQUE` 索引 | `409 INCIDENT_NATIVE_ID_TAKEN`（**不是 404**） |
 | `POST /incidents`（`native_id` 为空） | 无自然键 | 每次都 `201` 新建；手工录入两次就是两条，**这是正确行为**，system 无从判断是否重复 |
 | `POST .../evidence` | `UNIQUE (incident_id, kind, source, content_ref)` | `200` + 已存在的证据 |
 | `POST .../verdict` | `incident_id` 主键 | `409 INCIDENT_ALREADY_CONCLUDED` |
+
+**"键被占用"为什么必须是 409**：D3 评审实测过——operator B 拿 A 的 `(source, nativeId)` 重放 create，拿到 `404 INCIDENT_NOT_FOUND`，而契约当时只声明 200/201/400/401/403，也就是客户端收到了一个契约里根本不存在的结果；更糟的是这个 404 在同一次回答里说"没有这条"和"不给你建这条"。自然键是调用者自己提交的，回答"已被占用"不泄露它没提供的信息（范围外的**读取**仍返回 404，见 §4.3）。读范围覆盖该行时（admin）重放仍是 `200` + 已存在的那条：同一组状态码下，"能读到"与"能创建"被分开表达。
 
 实现方式统一：`INSERT ... ON CONFLICT DO NOTHING`（或 `DO UPDATE ... RETURNING`）后看返回行，**不做"先查再插"**——先查再插在并发下必然漏，而且会把唯一索引冲突变成 500。
 
@@ -305,6 +352,8 @@ DELETE FROM _sqlx_migrations WHERE version = 16;
 3. 列表分页用 `(started_at, incident_id)` keyset 游标；没有总数、没有跨页稳定性承诺之外的能力。
 4. Evidence `content_ref` 在 D1 **不被校验存在性**（没有对象存储适配器）→ 可能出现指向不存在的键。这是"不伪造"的代价：宁可让引用悬空且显式标注，也不做假的内容校验。
 5. Timeline 视图（§12.2 第 3 步）由 evidence `collected_at` + audit 事件拼装，D1 没有专门的 timeline 端点。
+6. `audit::record` 只接受 `&PgPool`，因此**本切片之外的写端点**（`users::create_user` 等）仍然只能在业务写之后写审计——与 §4.4 修掉的是同一个形状。本切片在 `incidents.rs` 里用 `audit_in_tx` 局部实现了"同事务"；正确做法是让 audit 模块接受任意 `Executor`/事务，一处改、全站受益，届时删除 `audit_in_tx`。
+7. 审计写失败会让这三个写端点直接 500（§4.4）。当前 `audit_events` 与业务表同库，这不是远程失败模式；一旦审计被拆到独立存储，这个选择必须重新评审（要么接受写端点随审计一起不可用，要么改成异步审计 + 显式的"未审计"状态）。
 
 ---
 
@@ -313,6 +362,8 @@ DELETE FROM _sqlx_migrations WHERE version = 16;
 **`evidence_refs`。** 它是唯一一个"它回答的问题，已经被另一个结构回答了"的字段：证据集合的权威是 `kernel.incident_evidence`，任何落列的数组都是该权威的缓存。
 
 处理方式不是删掉它（前端列表确实需要"有没有证据"），而是**把它降级为读取投影**：只在响应里派生，不入库、不可写、不可被客户端提交。同理 `human_verdict` 也是投影。若哪一天真的需要冗余列（例如为列表页性能做物化），必须同时给出"重建该列"的脚本，否则它就是第二个权威。
+
+**它有上限，这一点必须写进结论**：`evidence_refs` 是"最新 100 条"的投影，不是完整证据集（SQL 见 §2.4，契约 `maxItems: 100`，列表页脚注同样写"最新 100"）。所以它回答的是"有没有证据 / 最近的证据是什么"，不是"证据一共几条"；任何需要完整集合的读取都必须走 `GET /incidents/{id}/evidence`。把上限当成全量是这类派生字段最常见的误用，也是本 ADR 上一版的记错之处（曾写成"全投影"，而实现与契约一直是 100）。
 
 另外补一句任务书的口径差异：任务书说"这**七**个字段"，但 Incident 实际列了 **12** 个、Evidence 7 个、Verdict 5 个。本 ADR 按实际字段数逐个论证，不按"七个"凑数。
 
@@ -323,6 +374,7 @@ DELETE FROM _sqlx_migrations WHERE version = 16;
 | 验收项 | 证据位置 |
 |---|---|
 | 字段最小集理由 | 本文件 §2 |
+| `evidence_refs` 上限 100 的实测 | 本文件 §2.4（101 条证据的边界测量） |
 | 状态机 | §3 |
 | 权限 | §4 |
 | 并发与幂等 | §5 |
@@ -330,3 +382,6 @@ DELETE FROM _sqlx_migrations WHERE version = 16;
 | API 契约 | `contracts/openapi/incident-v1.yaml` |
 | 真实 curl 成功/失败输出 | `tests/acceptance/incident_slice_api.sh` 及执行日志 |
 | 单测 | `apps/kernel/src/incidents.rs` 的 `#[cfg(test)] mod tests` |
+| 审计与业务同事务（回滚实测） | §4.4 + `incidents::tests::a_failed_audit_rolls_*`（3 条） |
+| create 自然键被占 → 409 | §5.1 + 契约 `POST /incidents` 的 409 + `a_native_key_owned_by_another_operator_answers_409_not_404` |
+| viewer 写入口的产品规则与实测 | §4.5 + `docs/design/g11-incident/g11-d3-ui.md` §10 |
