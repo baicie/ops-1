@@ -44,7 +44,11 @@ describe('styles.css token contract', () => {
 
   it('names one card radius and uses it for every card primitive', () => {
     expect(css).toMatch(/--ow-radius-card: 10px;/);
-    for (const primitive of ['.panel {', '.ow-metric {', '.module-card {', '.ow-summary-card {', '.async-panel {', '.investigation-region {']) {
+    // G12 D removed the .investigation-region primitive: the investigation workspace is built
+    // from .panel cards now (the rail is a panel, and each pane is a column of them), so the
+    // card-radius contract for that surface is the .panel entry below. A selector that no longer
+    // exists cannot be held to a radius, and leaving it in this list would only make it rot.
+    for (const primitive of ['.panel {', '.ow-metric {', '.module-card {', '.ow-summary-card {', '.async-panel {']) {
       const start = cssNoComments.indexOf(primitive);
       expect(start, primitive + ' must exist').toBeGreaterThan(-1);
       const rule = cssNoComments.slice(start, cssNoComments.indexOf('}', start));

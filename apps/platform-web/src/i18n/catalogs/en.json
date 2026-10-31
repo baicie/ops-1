@@ -1473,5 +1473,20 @@
   "incidents.error.ownerUnknown": "That account does not exist.",
   "incidents.error.ownerDisabled": "That account is disabled.",
   "incidents.error.ownerRoleIneligible": "Only an operator or admin account can own an incident.",
-  "incidents.error.ownerUnchanged": "That account already owns this incident."
+  "incidents.error.ownerUnchanged": "That account already owns this incident.",
+  "incidents.workspace.aria": "Incident investigation workspace: {title}",
+  "incidents.pane.analysis": "Investigation",
+  "incidents.pane.detail": "Evidence",
+  "incidents.rail.title": "Incidents",
+  "incidents.rail.filterAria": "Filter the incident list by status",
+  "incidents.rail.all": "All",
+  "incidents.rail.count": "{shown} of {total}",
+  "incidents.rail.loading": "Loading the incident list…",
+  "incidents.rail.unavailable.title": "The incident list could not be read",
+  "incidents.rail.unavailable.description": "This pane lists the incidents this account may read. The incident on screen is unaffected.",
+  "incidents.rail.empty.title": "No incidents yet",
+  "incidents.rail.empty.description": "Nothing has been opened against this scope.",
+  "incidents.rail.emptyFiltered": "No incident with status {status}",
+  "incidents.detail.evidence.idle.title": "No evidence selected",
+  "incidents.detail.evidence.idle.description": "Choose a row in the evidence list to read its stored bytes here."
 }
