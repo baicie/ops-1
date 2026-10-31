@@ -357,6 +357,128 @@ paths:
               schema: {$ref: '#/components/schemas/Verdict'}
         '401': {description: UNAUTHENTICATED}
         '404': {description: INCIDENT_NOT_FOUND, or INCIDENT_VERDICT_NOT_FOUND when the incident has no verdict yet}
+  /incidents/{incidentId}/close:
+    post:
+      summary: Close a concluded incident (operator or admin; G12 C)
+      description: >
+        The only transition into CLOSED, and the only status a client may ask
+        for. Four gates, in this order: the caller may operate (403 for a
+        viewer), the incident is CONCLUDED (409 INCIDENT_CLOSE_REQUIRES_CONCLUDED
+        - there is deliberately no OPEN -> CLOSED path), a signed Human Verdict
+        exists (409 INCIDENT_CLOSE_REQUIRES_VERDICT), and expectedRevision still
+        matches (409 INCIDENT_VERSION_CONFLICT).
+
+        Idempotent per key, not per URL: a repeat carrying the same
+        idempotencyKey answers 200 with the closure that already happened, while a
+        second close without that key (or with a different one) is 409
+        INCIDENT_ALREADY_CLOSED. Concurrency: the row is locked and the UPDATE is a
+        compare-and-set on (status, revision), so of two simultaneous closes
+        exactly one commits.
+
+        A closure is final. No endpoint moves an incident out of CLOSED, and the
+        schema refuses it too (migration 0019 incidents_closure_guard), so
+        reopening by deleting or resetting the verdict is not a path that exists.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CloseIncidentRequest'}
+      responses:
+        '200':
+          description: Closed (or the closure this request replays)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Incident'}
+        '400': {description: INVALID_REQUEST — note out of bounds, or expectedRevision < 1}
+        '401': {description: UNAUTHENTICATED}
+        '403': {description: FORBIDDEN — viewer may not close}
+        '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
+        '409':
+          description: >
+            INCIDENT_CLOSE_REQUIRES_CONCLUDED, INCIDENT_CLOSE_REQUIRES_VERDICT,
+            INCIDENT_VERSION_CONFLICT, INCIDENT_ALREADY_CLOSED or
+            INCIDENT_STATE_CONFLICT. Each names a different obstacle, so a client
+            can tell 'not concludable' from 'stale version' from 'already closed'
+            without parsing prose.
+        '500':
+          description: >
+            AUDIT_WRITE_FAILED — the closure's audit row could not be stored, so
+            the status update rolled back with it; the incident is still
+            CONCLUDED and retryable.
+  /incidents/{incidentId}/owner:
+    post:
+      summary: Hand an incident to another operator (owner or admin; G12 C)
+      description: >
+        The minimal handover: current owner, target owner, reason, time, the
+        revision it was decided against, and an audit row. No groups, no tenancy
+        and no IAM: the authorization scope it moves is exactly the operator read
+        predicate (an operator reads what it owns), which is why the transferring
+        operator loses read access to the incident the moment this succeeds.
+
+        The answer is therefore the handover, not the incident: returning the
+        record would have to be built as if the caller still had access to it.
+        The target must be an existing, enabled account whose role can operate
+        (INCIDENT_OWNER_UNKNOWN / INCIDENT_OWNER_DISABLED /
+        INCIDENT_OWNER_ROLE_INELIGIBLE), and must differ from the current owner
+        (INCIDENT_OWNER_UNCHANGED). A CLOSED incident accepts no handover
+        (INCIDENT_CLOSED): ownership of a closed record is history.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TransferIncidentOwnerRequest'}
+      responses:
+        '200':
+          description: Handed over
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentOwnerTransfer'}
+        '400':
+          description: >
+            INVALID_REQUEST (reason out of bounds, expectedRevision < 1),
+            INCIDENT_OWNER_UNKNOWN, INCIDENT_OWNER_DISABLED or
+            INCIDENT_OWNER_ROLE_INELIGIBLE
+        '401': {description: UNAUTHENTICATED}
+        '403': {description: FORBIDDEN — viewer may not hand an incident over}
+        '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
+        '409':
+          description: >
+            INCIDENT_VERSION_CONFLICT, INCIDENT_OWNER_UNCHANGED, INCIDENT_CLOSED or
+            INCIDENT_STATE_CONFLICT
+        '500':
+          description: >
+            AUDIT_WRITE_FAILED — the handover's audit row could not be stored, so
+            the ownership change rolled back with it.
+  /incidents/{incidentId}/timeline:
+    get:
+      summary: The incident's own audit trail, in order
+      description: >
+        Scoped by the same predicate as the incident, so the trail of a record is
+        exactly as visible as the record. This is deliberately not a filter on
+        /api/v1/audit: that endpoint answers the platform-wide question and would
+        otherwise hand an operator the trail of an incident it cannot read.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 100}
+          description: >
+            How many of the NEWEST events to return. The page is chronological
+            either way; truncated=true says that older events were dropped rather
+            than that the trail is complete.
+      responses:
+        '200':
+          description: Timeline
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentTimeline'}
+        '401': {description: UNAUTHENTICATED}
+        '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
 components:
   securitySchemes:
     cookieSession:
@@ -475,7 +597,8 @@ components:
       additionalProperties: false
       required:
         [id, title, severity, status, source, nativeId, relatedEntity,
-         startedAt, updatedAt, owner, evidenceRefs, humanVerdict]
+         startedAt, updatedAt, owner, ownerAssignedAt, revision, closedAt,
+         closedBy, closureNote, evidenceRefs, humanVerdict]
       properties:
         id: {type: string, format: uuid}
         title: {type: string}
@@ -487,6 +610,42 @@ components:
         startedAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         owner: {type: string, format: uuid, description: Accountable user, set to the creator}
+        ownerAssignedAt:
+          type: string
+          format: date-time
+          description: >
+            When the current owner was assigned. Equal to createdAt for an
+            incident that has never been handed over. A handover (POST
+            /incidents/{id}/owner) moves owner and this instant together, so the
+            two can never be read as disagreeing.
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            G12 C: the version every lifecycle write arbitrates on. It moves with
+            a status transition, a closure and a handover. POST /close and POST
+            /owner take it as expectedRevision and answer 409
+            INCIDENT_VERSION_CONFLICT instead of overwriting a decision the caller
+            never saw.
+        closedAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            The closure of record: non-null if and only if status is CLOSED, which
+            the database enforces (migration 0019
+            incidents_closure_consistency_check). A CLOSED incident with a null
+            closedAt is not representable.
+        closedBy:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            The account that closed it - not necessarily the owner, because an
+            admin may close. Null if and only if closedAt is null.
+        closureNote:
+          type: [string, 'null']
+          maxLength: 1000
+          description: Why it was closed, in the closer's words.
         evidenceRefs:
           type: array
           maxItems: 100
@@ -726,4 +885,110 @@ components:
             the signer weighed. PRE_MIGRATION_UNRECORDED means the verdict was
             signed before the snapshot existed: the set was never stored, so it is
             unknown, and presenting a reconstruction as the record would be a
-            silent rewrite of what was signed.
+            silent rewrite of what was signed.    CloseIncidentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, note]
+      properties:
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            The revision the caller read. Required, with no force flag: closing
+            over someone else's change is not an option the contract offers.
+        note:
+          type: string
+          minLength: 4
+          maxLength: 1000
+          description: Why the incident is over, in the closer's words.
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+          description: >
+            The caller's own key for this close. Optional; the only way a retried
+            close is distinguishable from a second close.
+    TransferIncidentOwnerRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, toOwner, reason]
+      properties:
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+        toOwner:
+          type: string
+          format: uuid
+          description: >
+            Must be an existing, enabled account whose role can operate, and must
+            differ from the current owner.
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 1000
+          description: >
+            Why the incident is changing hands. It is the only place the
+            justification survives, and the next owner reads it.
+    IncidentOwnerTransfer:
+      type: object
+      additionalProperties: false
+      required:
+        [incidentId, previousOwner, owner, ownerAssignedAt, reason,
+         transferredBy, transferredAt, revision]
+      properties:
+        incidentId: {type: string, format: uuid}
+        previousOwner: {type: string, format: uuid}
+        owner: {type: string, format: uuid}
+        ownerAssignedAt: {type: string, format: date-time}
+        reason: {type: string}
+        transferredBy: {type: string, format: uuid}
+        transferredAt: {type: string, format: date-time}
+        revision:
+          type: integer
+          format: int64
+          minimum: 2
+          description: The revision the incident holds after the handover.
+    IncidentTimeline:
+      type: object
+      additionalProperties: false
+      required: [items, truncated]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TimelineEvent'}
+        truncated:
+          type: boolean
+          description: >
+            True when the incident holds more audit rows than were returned, in
+            which case items are the newest and the oldest were dropped.
+    TimelineEvent:
+      type: object
+      additionalProperties: false
+      required:
+        [id, eventType, actorType, actorId, subjectType, subjectId, action,
+         result, details, requestId, occurredAt]
+      properties:
+        id: {type: string, format: uuid}
+        eventType:
+          type: string
+          description: >
+            INCIDENT_CREATED, INCIDENT_EVIDENCE_ADDED, INCIDENT_VERDICT_RECORDED,
+            INCIDENT_OWNER_TRANSFERRED, INCIDENT_CLOSED. The set is open: a new
+            event type is an addition to the trail, not a breaking change.
+        actorType: {type: string, enum: [USER]}
+        actorId: {type: string, description: The account id, as text}
+        subjectType: {type: string, enum: [INCIDENT]}
+        subjectId: {type: string}
+        action: {type: string}
+        result: {type: string, enum: [ACCEPTED]}
+        details:
+          type: object
+          additionalProperties: true
+          description: >
+            The write's own facts (evidenceId, trusts, verdict, closureNote,
+            fromOwner/toOwner, revisionFrom/revisionTo). Free-form per event type,
+            and never redacted because it never carries a secret.
+        requestId: {type: [string, 'null']}
+        occurredAt: {type: string, format: date-time}

@@ -272,6 +272,25 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/incidents/{incident_id}/verdict",
             get(incidents::get_verdict).post(incidents::create_verdict),
         )
+        // G12 C: the two lifecycle operations and the trail they write. Closing is
+        // its own route rather than a status field on a PATCH, because a closure is a
+        // decision with a required verdict, a required revision and a required reason -
+        // not one assignable column among five.
+        .route(
+            "/api/v1/incidents/{incident_id}/close",
+            post(incidents::close_incident),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/owner",
+            post(incidents::transfer_owner),
+        )
+        // Scoped by the incident read predicate, so the trail of a record is exactly
+        // as visible as the record. /api/v1/audit answers the platform-wide question
+        // and is not a substitute for this one.
+        .route(
+            "/api/v1/incidents/{incident_id}/timeline",
+            get(incidents::get_timeline),
+        )
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(
             state.clone(),

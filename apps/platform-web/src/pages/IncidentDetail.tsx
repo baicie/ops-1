@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
-import type { IncidentEvidence, IncidentEvidenceList, IncidentView } from '../types';
+import type { IncidentEvidence, IncidentEvidenceList, IncidentOwnerTransfer, IncidentTimeline, IncidentTimelineEvent, IncidentView } from '../types';
 import { useAuth } from '../auth';
 import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
@@ -18,9 +18,11 @@ import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
 import { badgeVariantForTone } from '../components/status-tone';
 import {
+  CLOSURE_NOTE_MAX_CHARS,
   CLAIMABLE_TRUST_CODES,
   EVIDENCE_KIND_CODES,
   RATIONALE_MIN_CHARS,
+  TRANSFER_REASON_MAX_CHARS,
   VERDICT_CHOICES,
   classifyFailure,
   detailPhase,
@@ -32,6 +34,19 @@ import {
   evidencePanelState,
   evidenceTrustKey,
   evidenceTrustTone,
+  incidentCapabilities,
+  closureNoteError,
+  closurePanelState,
+  closeIncidentPayload,
+  isKernelVerified,
+  kernelVerifiedCount,
+  newIdempotencyKey,
+  losesAccessAfterHandover,
+  timelineEventFacts,
+  timelineEventKey,
+  timelineEventTone,
+  transferIncidentPayload,
+  transferReasonError,
   incidentFacts,
   incidentSourceKey,
   partitionEvidence,
@@ -79,6 +94,15 @@ export function IncidentDetailPage() {
   const seqRef = React.useRef(0);
   const [reload, setReload] = React.useState(0);
   const retry = React.useCallback(() => setReload((value) => value + 1), []);
+  // What this account submitted as a handover, not what the write answered with. A write is
+  // confirmed by a re-read (docs/design/ui-visual-v3/code-rules.md A5); the one case where a
+  // re-read is impossible is the operator who just handed the incident away - and there the
+  // account id and reason on this panel are the operator's own input to the form.
+  const [handover, setHandover] = React.useState<{ toOwner: string; reason: string; at: string } | null>(null);
+  React.useEffect(() => { setHandover(null); }, [incidentId]);
+  // The kernel's own audit trail for this incident. Read separately from the incident so a failed
+  // trail read degrades one panel instead of blanking the page.
+  const trail = useIncidentTrail(incidentId, reload);
   // Which evidence row's content is open. Null means "no panel", never "the previous incident's
   // row": the id is cleared whenever the route changes, so a panel cannot outlive its incident.
   const [openEvidenceId, setOpenEvidenceId] = React.useState<string | null>(null);
@@ -186,6 +210,30 @@ export function IncidentDetailPage() {
   // Stale, and honestly labelled: the record on screen was read at a known instant and the most
   // recent read failed. That is a different sentence from "this incident could not be loaded".
   const staleFailure = view.incidentError ?? view.evidenceError ?? null;
+  // Presentation only, and derived from the same three facts the kernel re-checks on every write:
+  // the role, the owner (the operator data scope) and the status. The 403/404/409 responses are
+  // still the authority; this exists so a viewer reads a sentence instead of a doomed form.
+  const capabilities = incidentCapabilities({ incident, userId: user?.id ?? null, role: user?.role ?? null });
+  const closureState = closurePanelState(incident);
+  const verifiedCount = kernelVerifiedCount(evidence);
+
+  // The handover succeeded and this account is no longer allowed to read the record. Saying that
+  // is the whole point: the alternative is a form that would 404 on the next keystroke.
+  if (handover && losesAccessAfterHandover(user?.role ?? null)) {
+    const newOwner = directory.names?.[handover.toOwner] ?? shortOwner(handover.toOwner);
+    return (
+      <div className="page-stack" data-testid="incident-detail" data-detail-state="handed-over">
+        <PageHeader eyebrow={t('incidents.eyebrow')} title={incident.title} actions={backLink} />
+        <section className="panel pad" data-testid="incident-handover-complete" data-new-owner={handover.toOwner}>
+          <h2>{t('incidents.transfer.done.title')}</h2>
+          <p>{t('incidents.transfer.done.description', { owner: newOwner })}</p>
+          <KV label={t('incidents.transfer.done.at')}>{ageMessage(locale, handover.at)}</KV>
+          <KV label={t('incidents.transfer.done.reason')}>{handover.reason}</KV>
+          <p className="muted small" data-testid="incident-handover-scope-lost">{t('incidents.transfer.done.scope')}</p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="page-stack" data-testid="incident-detail" data-incident-id={incident.id} data-route-id={incidentId}>
@@ -205,6 +253,16 @@ export function IncidentDetailPage() {
 
       {staleFailure ? <IncidentStale observedAt={view.observedAt} error={staleFailure} /> : null}
 
+      {/* Why the write controls below are absent, said before the reader looks for them. The
+          kernel refuses these writes regardless (403), so this is an explanation and not a gate. */}
+      {capabilities.readOnlyReason ? (
+        <section className="panel pad" data-testid="incident-readonly-notice" data-role={user?.role ?? ''}>
+          <h2>{t('incidents.permission.title')}</h2>
+          <p className="muted" data-testid="incident-readonly-reason">{t(capabilities.readOnlyReason)}</p>
+          <p className="muted small">{t('incidents.permission.askAdmin')}</p>
+        </section>
+      ) : null}
+
       <section className="summary-grid">
         <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><Status code={incident.status} /></strong></div>
         <div className="panel metric-card"><span className="metric-label">{t('table.severity')}</span><strong className="metric-value"><Status code={incident.severity} /></strong></div>
@@ -218,9 +276,60 @@ export function IncidentDetailPage() {
           <KV label={t('table.incident')} mono>{<LongId value={incident.id} label={t('table.copyIdentifier')} testId="incident-id" />}</KV>
           <KV label={t('table.started')}>{<span title={incident.startedAt}>{ageMessage(locale, incident.startedAt)}</span>}</KV>
           <KV label={t('table.owner')} mono>{<span title={incident.owner} data-testid="incident-detail-owner">{ownerLabel}</span>}</KV>
+          <KV label={t('incidents.owner.since')}>{<span title={incident.ownerAssignedAt} data-testid="incident-owner-since">{ageMessage(locale, incident.ownerAssignedAt)}</span>}</KV>
           <KV label={t('table.source')}>{t(incidentSourceKey(incident.source))}</KV>
           <KV label={t('table.relatedEntity')} mono>{incident.relatedEntity || t('common.none')}</KV>
+          <KV label={t('incidents.revision')} mono>{<span data-testid="incident-revision" data-revision={incident.revision}>{incident.revision}</span>}</KV>
+          {incident.closedAt ? <KV label={t('incidents.close.record.closedAt')}>{<span title={incident.closedAt}>{ageMessage(locale, incident.closedAt)}</span>}</KV> : null}
+          {incident.closedBy ? <KV label={t('incidents.close.record.closedBy')} mono>{directory.names?.[incident.closedBy] ?? shortOwner(incident.closedBy)}</KV> : null}
         </div>
+      </section>
+
+      {/* G12 C: the lifecycle. One panel, because closing and handing over are two decisions about
+          the same record and a reader should not have to find them in two places. */}
+      <section className="panel" data-testid="incident-lifecycle" data-lifecycle-state={closureState}>
+        <div className="panel-head">
+          <div>
+            <h2>{t('incidents.close.title')}</h2>
+            <p>{t('incidents.close.description')}</p>
+          </div>
+        </div>
+        {closureState === 'closed' ? (
+          <div className="pad" data-testid="incident-closure-record" data-closed-at={incident.closedAt ?? ''}>
+            <p><Status code="CLOSED" /> <span className="muted small" data-testid="incident-closure-note">{incident.closureNote ?? t('common.none')}</span></p>
+            <p className="muted small">{t('incidents.close.record.writeOnce')}</p>
+          </div>
+        ) : capabilities.canClose ? (
+          <CloseIncidentForm
+            incidentId={incident.id}
+            revision={incident.revision}
+            onClosed={() => {
+              toast.push({ tone: 'ok', title: t('incidents.close.success') });
+              retry();
+            }}
+          />
+        ) : (
+          <p className="muted small pad" data-testid="incident-close-blocked" data-blocked-reason={capabilities.closeBlockedReason ?? ''}>
+            {capabilities.closeBlockedReason ? t(capabilities.closeBlockedReason) : t('incidents.close.blocked.notConcluded')}
+          </p>
+        )}
+        {capabilities.canTransferOwner ? (
+          <OwnerTransferForm
+            incidentId={incident.id}
+            revision={incident.revision}
+            currentOwner={incident.owner}
+            onTransferred={(submitted) => {
+              toast.push({ tone: 'ok', title: t('incidents.transfer.success') });
+              // Reload when this account may still read the record: the owner it shows then comes
+              // from a fresh GET, not from the write's echo. When the handover ended this account's
+              // access there is nothing to re-read, so the submitted values are what the page says.
+              if (losesAccessAfterHandover(user?.role ?? null)) setHandover(submitted);
+              else retry();
+            }}
+          />
+        ) : capabilities.transferBlockedReason && capabilities.transferBlockedReason !== capabilities.closeBlockedReason ? (
+          <p className="muted small pad" data-testid="incident-transfer-blocked">{t(capabilities.transferBlockedReason)}</p>
+        ) : null}
       </section>
 
       <section className="panel" data-testid="incident-timeline">
@@ -262,6 +371,37 @@ export function IncidentDetailPage() {
         </ol>
       </section>
 
+      {/* The kernel's own record of what happened, as opposed to the timestamps above. Every row
+          here is one audited write, read from GET /incidents/{id}/timeline, which is scoped by the
+          same predicate as the incident. */}
+      <section className="panel" data-testid="incident-audit" data-audit-state={trail.state}>
+        <div className="panel-head">
+          <div>
+            <h2>{t('incidents.audit.title')}</h2>
+            <p>{t('incidents.audit.description')}</p>
+          </div>
+        </div>
+        {trail.state === 'loading' ? (
+          <p className="muted small pad" aria-busy="true" data-testid="incident-audit-loading">{t('aria.loading')}</p>
+        ) : trail.state === 'unavailable' ? (
+          <div className="pad" data-testid="incident-audit-unavailable">
+            <p className="muted small">{t('incidents.audit.unavailable')}</p>
+            <Button variant="secondary" onClick={retry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
+          </div>
+        ) : trail.events.length === 0 ? (
+          <p className="muted small pad" data-testid="incident-audit-empty">{t('incidents.audit.empty')}</p>
+        ) : (
+          <ol className="timeline pad" data-testid="incident-audit-list">
+            {trail.events.map((event) => (
+              <AuditRow key={event.id} event={event} directory={directory} />
+            ))}
+          </ol>
+        )}
+        {trail.truncated ? (
+          <p className="muted small pad" data-testid="incident-audit-truncated">{t('incidents.audit.truncated')}</p>
+        ) : null}
+      </section>
+
       <section className="panel" data-testid="incident-evidence" data-evidence-state={evidenceState}>
         <div className="panel-head">
           <div>
@@ -269,6 +409,11 @@ export function IncidentDetailPage() {
             <p>{t('incidents.detail.evidence.description')}</p>
           </div>
         </div>
+        {/* How much of this incident the Kernel can vouch for itself, counted rather than
+            implied. Zero is a fact worth printing: it says every row here is an operator's word. */}
+        <p className="muted small pad" data-testid="incident-evidence-trusted" data-kernel-verified-count={verifiedCount} data-evidence-count={evidence.length}>
+          {t('incidents.evidence.trustedSummary', { verified: verifiedCount, total: evidence.length })}
+        </p>
         {evidenceState === 'loading' ? (
           <p className="muted small pad" aria-busy="true" data-testid="incident-evidence-loading">{t('aria.loading')}</p>
         ) : evidenceState === 'unavailable' ? (
@@ -324,6 +469,18 @@ export function IncidentDetailPage() {
                           : t(verificationMethodKey(row.verificationMethod))}
                       </span>
                       {row.verificationNote ? <span className="muted small" data-testid="evidence-note">{row.verificationNote}</span> : null}
+                      {/* G12 C: the one marker a reader may treat as 'the Kernel verified this',
+                          because SOURCE_ATTESTED is the only value an adapter signature can
+                          produce. Everything else is labelled as what it is - asserted. */}
+                      {isKernelVerified(row) ? (
+                        <Badge variant={badgeVariantForTone('ok')} data-testid="evidence-kernel-verified" data-kernel-verified="true">
+                          {t('incidents.evidence.kernelVerified')}
+                        </Badge>
+                      ) : (
+                        <span className="muted small" data-testid="evidence-not-kernel-verified" data-kernel-verified="false">
+                          {t('incidents.evidence.notKernelVerified')}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="mono" title={row.source} data-evidence-source={row.source}>{row.source}</TableCell>
                     <TableCell><span title={row.collectedAt}>{row.collectedAt}</span></TableCell>
@@ -373,8 +530,15 @@ export function IncidentDetailPage() {
         {/* Evidence stays appendable AFTER a verdict: CONCLUDED accepts it (ADR-G11-001 §3.1),
             and only CLOSED refuses writes. Gating this on "no verdict yet" told the reader the
             opposite of what the kernel does. */}
-        {incident.status === 'CLOSED' ? (
+        {/* Why the form is absent, in the order that gives the most useful sentence: a viewer is
+            told about the role (the closure is not what stops them), an operator on a closed
+            incident is told about the closure, and anyone else out of scope is told about scope. */}
+        {capabilities.readOnlyReason ? (
+          <p className="muted small pad" data-testid="incident-evidence-readonly">{t('incidents.permission.writeBlocked')}</p>
+        ) : incident.status === 'CLOSED' ? (
           <p className="muted small pad" data-testid="incident-evidence-sealed">{t('incidents.error.closed')}</p>
+        ) : !capabilities.canAddEvidence ? (
+          <p className="muted small pad" data-testid="incident-evidence-readonly">{t('incidents.permission.writeBlocked')}</p>
         ) : (
           <AddEvidenceForm
             incidentId={incident.id}
@@ -423,8 +587,12 @@ export function IncidentDetailPage() {
               </p>
             ) : null}
           </div>
+        ) : capabilities.readOnlyReason ? (
+          <p className="muted small pad" data-testid="incident-verdict-readonly">{t('incidents.permission.writeBlocked')}</p>
         ) : verdictState === 'sealed' ? (
           <p className="muted small pad" data-testid="incident-verdict-sealed">{t('incidents.verdict.sealed')}</p>
+        ) : !capabilities.canRecordVerdict ? (
+          <p className="muted small pad" data-testid="incident-verdict-readonly">{t('incidents.permission.writeBlocked')}</p>
         ) : (
           <VerdictForm
             incidentId={incident.id}
@@ -639,6 +807,270 @@ function VerdictForm({ incidentId, hasEvidence, onRecorded }: { incidentId: stri
       <div>
         <Button onClick={() => void submit()} disabled={submitting} data-testid="incident-verdict-submit">
           {submitting ? t('incidents.verdict.submitting') : t('incidents.verdict.submit')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+/** The trail snapshot, keyed by the route it describes so a late answer cannot cross incidents. */
+interface TrailSnapshot {
+  routeId: string;
+  events: IncidentTimelineEvent[];
+  truncated: boolean;
+  loaded: boolean;
+  failed: boolean;
+}
+
+/**
+ * GET /incidents/{id}/timeline, for the audit panel.
+ *
+ * A separate read from the incident on purpose: a trail that cannot be read degrades one panel
+ * (and says so) instead of blanking a page whose record was read successfully. The route id is
+ * stored with the events and compared at render time, so a slow answer for the previous incident
+ * is never painted under the new one.
+ */
+function useIncidentTrail(incidentId: string, reload: number): {
+  state: 'loading' | 'ready' | 'unavailable';
+  events: IncidentTimelineEvent[];
+  truncated: boolean;
+} {
+  const [snapshot, setSnapshot] = React.useState<TrailSnapshot>({
+    routeId: incidentId,
+    events: [],
+    truncated: false,
+    loaded: false,
+    failed: false,
+  });
+  const seqRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const seq = ++seqRef.current;
+    const live = () => seq === seqRef.current;
+    setSnapshot((current) =>
+      current.routeId === incidentId
+        ? { ...current, failed: false }
+        : { routeId: incidentId, events: [], truncated: false, loaded: false, failed: false },
+    );
+    api
+      .get<IncidentTimeline>('/api/v1/incidents/' + encodeURIComponent(incidentId) + '/timeline')
+      .then((result) => {
+        if (!live()) return;
+        setSnapshot({ routeId: incidentId, events: result.items, truncated: result.truncated, loaded: true, failed: false });
+      })
+      .catch(() => {
+        if (!live()) return;
+        setSnapshot((current) => ({ ...current, routeId: incidentId, failed: true }));
+      });
+  }, [incidentId, reload]);
+
+  if (snapshot.routeId !== incidentId) return { state: 'loading', events: [], truncated: false };
+  if (!snapshot.loaded) return { state: snapshot.failed ? 'unavailable' : 'loading', events: [], truncated: false };
+  return { state: 'ready', events: snapshot.events, truncated: snapshot.truncated };
+}
+
+/** One audited write, rendered from the fields the trail carries for that event type. */
+function AuditRow({ event, directory }: { event: IncidentTimelineEvent; directory: { names: Record<string, string> | null } }) {
+  const t = useT();
+  const { locale } = useI18n();
+  const facts = timelineEventFacts(event);
+  const actorName = directory.names?.[event.actorId] ?? shortOwner(event.actorId);
+  const atValid = Number.isFinite(Date.parse(event.occurredAt));
+  const fromName = facts.fromOwner ? (directory.names?.[facts.fromOwner] ?? shortOwner(facts.fromOwner)) : '';
+  const toName = facts.toOwner ? (directory.names?.[facts.toOwner] ?? shortOwner(facts.toOwner)) : '';
+  return (
+    <li data-audit-event={event.eventType} data-audit-actor={event.actorId} data-audit-at={event.occurredAt}>
+      <span className="timeline-dot" />
+      <div>
+        <strong>
+          <Badge variant={badgeVariantForTone(timelineEventTone(event.eventType))} data-testid="audit-event-type">
+            {t(timelineEventKey(event.eventType))}
+          </Badge>
+        </strong>
+        <span className="tag mono" data-testid="audit-event-code">{event.eventType}</span>
+        <span className="muted small" data-testid="audit-actor">{t('incidents.audit.actor', { name: actorName })}</span>
+        <span className="muted small" data-testid="audit-time">
+          {atValid ? <span title={event.occurredAt}>{ageMessage(locale, event.occurredAt)}</span> : event.occurredAt}
+        </span>
+        {facts.evidenceKind ? <span className="tag">{t(evidenceKindKey(facts.evidenceKind))}</span> : null}
+        {facts.verifiedTrust ? <span className="muted small">{t(evidenceTrustKey(facts.verifiedTrust))}</span> : null}
+        {facts.verdict ? <Status code={facts.verdict} /> : null}
+        {facts.consideredEvidenceCount !== null ? (
+          <span className="muted small" data-testid="audit-considered">{t('incidents.audit.considered', { count: facts.consideredEvidenceCount })}</span>
+        ) : null}
+        {facts.fromOwner || facts.toOwner ? (
+          <span className="muted small" data-testid="audit-owner-change">
+            {t('incidents.audit.ownerChange', { from: fromName, to: toName })}
+          </span>
+        ) : null}
+        {facts.reason ? <span className="muted small" data-testid="audit-reason">{t('incidents.audit.reason', { reason: facts.reason })}</span> : null}
+        {facts.closureNote ? <span className="muted small" data-testid="audit-note">{t('incidents.audit.note', { note: facts.closureNote })}</span> : null}
+      </div>
+    </li>
+  );
+}
+
+/** G12 C: the closure and handover forms. */
+/**
+ * The closure form.
+ *
+ * Two things are stated before submission rather than discovered from a 409: the note is bounded,
+ * and the closure is decided against the revision on screen. The idempotency key is created once
+ * per form and reused by a retry, which is what makes 'the request timed out, try again' safe;
+ * a definitive refusal rotates it so the next attempt is a fresh decision, not a replay claim.
+ */
+function CloseIncidentForm({ incidentId, revision, onClosed }: { incidentId: string; revision: number; onClosed: () => void }) {
+  const t = useT();
+  const [note, setNote] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [failure, setFailure] = React.useState<unknown>(null);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+  const keyRef = React.useRef<string>(newIdempotencyKey());
+
+  const submit = async () => {
+    setFailure(null);
+    setFieldError(null);
+    const invalid = closureNoteError(note);
+    if (invalid) {
+      setFieldError(t(invalid));
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.post<IncidentView>(
+        '/api/v1/incidents/' + encodeURIComponent(incidentId) + '/close',
+        closeIncidentPayload(revision, note, keyRef.current),
+      );
+      setNote('');
+      onClosed();
+    } catch (cause) {
+      setFailure(cause);
+      if (cause instanceof ApiError && cause.status === 409) keyRef.current = newIdempotencyKey();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="form-stack pad" data-testid="incident-close-form" data-expected-revision={revision}>
+      <p className="muted small" data-testid="incident-close-requirements">{t('incidents.close.requirements', { revision })}</p>
+      <Field label={t('incidents.close.noteLabel')} hint={t('incidents.close.noteHint')} htmlFor="incident-close-note">
+        <textarea
+          id="incident-close-note"
+          data-testid="incident-close-note"
+          rows={3}
+          maxLength={CLOSURE_NOTE_MAX_CHARS}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </Field>
+      {fieldError ? <p className="inline-error" role="alert" data-testid="incident-close-field-error">{fieldError}</p> : null}
+      <IncidentFailureNotice error={failure} testId="incident-close-error" />
+      <div>
+        <Button onClick={() => void submit()} disabled={submitting} data-testid="incident-close-submit">
+          {submitting ? t('incidents.close.submitting') : t('incidents.close.submit')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+/**
+ * The handover form.
+ *
+ * The target list comes from the user directory, which is admin-only. An operator therefore types
+ * the account id - the honest consequence of a directory it may not read, rather than a picker
+ * that silently offers nothing. Either way the kernel validates the target and names the refusal.
+ */
+function OwnerTransferForm({
+  incidentId,
+  revision,
+  currentOwner,
+  onTransferred,
+}: {
+  incidentId: string;
+  revision: number;
+  currentOwner: string;
+  onTransferred: (submitted: { toOwner: string; reason: string; at: string }) => void;
+}) {
+  const t = useT();
+  const directory = useUserDirectory();
+  const [target, setTarget] = React.useState('');
+  const [reason, setReason] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [failure, setFailure] = React.useState<unknown>(null);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+  const candidates = directory.names
+    ? Object.entries(directory.names).filter(([id]) => id !== currentOwner)
+    : [];
+
+  const submit = async () => {
+    setFailure(null);
+    setFieldError(null);
+    const invalid = transferReasonError(reason);
+    if (invalid || !target.trim()) {
+      setFieldError(t(invalid ?? 'incidents.transfer.targetHint'));
+      return;
+    }
+    setSubmitting(true);
+    const submitted = { toOwner: target.trim(), reason: reason.trim(), at: new Date().toISOString() };
+    try {
+      await api.post<IncidentOwnerTransfer>(
+        '/api/v1/incidents/' + encodeURIComponent(incidentId) + '/owner',
+        transferIncidentPayload(revision, submitted.toOwner, submitted.reason),
+      );
+      setReason('');
+      onTransferred(submitted);
+    } catch (cause) {
+      setFailure(cause);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="form-stack pad" data-testid="incident-transfer-form" data-expected-revision={revision}>
+      <h3>{t('incidents.transfer.title')}</h3>
+      <p className="muted small">{t('incidents.transfer.description')}</p>
+      {candidates.length > 0 ? (
+        <Field label={t('incidents.transfer.targetLabel')} hint={t('incidents.transfer.targetHint')} htmlFor="incident-transfer-target">
+          <Select value={target} onValueChange={setTarget}>
+            <SelectTrigger id="incident-transfer-target" data-testid="incident-transfer-target" aria-label={t('incidents.transfer.targetLabel')}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {candidates.map(([id, name]) => (
+                <SelectItem key={id} value={id} data-testid={'incident-transfer-target-' + id}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : (
+        <Field
+          label={t('incidents.transfer.targetLabel')}
+          hint={directory.readable ? t('incidents.transfer.noTargets') : t('incidents.transfer.directoryUnavailable')}
+          htmlFor="incident-transfer-target"
+        >
+          <Input
+            id="incident-transfer-target"
+            data-testid="incident-transfer-target"
+            value={target}
+            placeholder="00000000-0000-0000-0000-000000000000"
+            onChange={(event) => setTarget(event.target.value)}
+          />
+        </Field>
+      )}
+      <Field label={t('incidents.transfer.reasonLabel')} hint={t('incidents.transfer.reasonHint')} htmlFor="incident-transfer-reason">
+        <textarea
+          id="incident-transfer-reason"
+          data-testid="incident-transfer-reason"
+          rows={3}
+          maxLength={TRANSFER_REASON_MAX_CHARS}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
+      </Field>
+      {fieldError ? <p className="inline-error" role="alert" data-testid="incident-transfer-field-error">{fieldError}</p> : null}
+      <IncidentFailureNotice error={failure} testId="incident-transfer-error" />
+      <div>
+        <Button onClick={() => void submit()} disabled={submitting} data-testid="incident-transfer-submit">
+          {submitting ? t('incidents.transfer.submitting') : t('incidents.transfer.submit')}
         </Button>
       </div>
     </div>

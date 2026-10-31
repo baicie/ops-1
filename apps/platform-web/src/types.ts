@@ -512,6 +512,21 @@ export interface IncidentView {
   startedAt: string;
   updatedAt: string;
   owner: string;
+  /** When the current owner was assigned; equal to createdAt for a row never handed over. */
+  ownerAssignedAt: string;
+  /**
+   * G12 C: the version the lifecycle writes arbitrate on. Every close and handover sends it as
+   * `expectedRevision`, so a decision taken against a record that has since changed is refused
+   * (409 INCIDENT_VERSION_CONFLICT) instead of overwriting what the caller never saw.
+   */
+  revision: number;
+  /**
+   * The closure of record. Non-null if and only if status is CLOSED - the database enforces it
+   * (migration 0019), so a UI can decide whether to render a closure from these three fields.
+   */
+  closedAt: string | null;
+  closedBy: string | null;
+  closureNote: string | null;
   evidenceRefs: string[];
   humanVerdict: IncidentVerdict | null;
 }
@@ -589,4 +604,46 @@ export interface IncidentList {
 
 export interface IncidentEvidenceList {
   items: IncidentEvidence[];
+}
+
+/**
+ * G12 C: one row of an incident's own audit trail (GET /incidents/{id}/timeline).
+ *
+ * The endpoint is scoped by the incident read predicate, so a trail exists exactly where its
+ * record does. `details` is the write's own facts and its shape depends on `eventType` - it is
+ * rendered field by field, never dumped.
+ */
+export interface IncidentTimelineEvent {
+  id: string;
+  eventType: string;
+  actorType: string;
+  actorId: string;
+  subjectType: string;
+  subjectId: string;
+  action: string;
+  result: string;
+  details: Record<string, unknown>;
+  requestId: string | null;
+  occurredAt: string;
+}
+
+export interface IncidentTimeline {
+  items: IncidentTimelineEvent[];
+  /** True when the incident holds more audit rows than this page: the OLDEST were dropped. */
+  truncated: boolean;
+}
+
+/**
+ * What a completed handover answers with. Deliberately not the incident: after a handover the
+ * transferring operator may no longer read it, so this is the handover itself.
+ */
+export interface IncidentOwnerTransfer {
+  incidentId: string;
+  previousOwner: string;
+  owner: string;
+  ownerAssignedAt: string;
+  reason: string;
+  transferredBy: string;
+  transferredAt: string;
+  revision: number;
 }

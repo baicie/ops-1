@@ -1,10 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import type { IncidentEvidence, IncidentVerdict, IncidentView } from './types';
+import type { IncidentEvidence, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
 import {
   CLAIMABLE_TRUST_CODES,
   EVIDENCE_TRUST_CODES,
+  CLOSURE_NOTE_MIN_CHARS,
+  TRANSFER_REASON_MIN_CHARS,
   classifyFailure,
   clearsSensitiveView,
+  closeIncidentPayload,
+  closureNoteError,
+  closurePanelState,
+  incidentCapabilities,
+  isKernelVerified,
+  kernelVerifiedCount,
+  newIdempotencyKey,
+  losesAccessAfterHandover,
+  timelineEventFacts,
+  timelineEventKey,
+  timelineEventTone,
+  transferIncidentPayload,
+  transferReasonError,
   detailPhase,
   detailReducer,
   emptyDetail,
@@ -60,6 +75,11 @@ function incident(overrides: Partial<IncidentView> = {}): IncidentView {
     startedAt: '2026-10-30T22:15:00Z',
     updatedAt: '2026-10-30T22:15:00Z',
     owner: '22222222-2222-4222-8222-222222222222',
+    ownerAssignedAt: '2026-10-30T22:15:00Z',
+    revision: 1,
+    closedAt: null,
+    closedBy: null,
+    closureNote: null,
     evidenceRefs: [],
     humanVerdict: null,
     ...overrides,
@@ -519,5 +539,198 @@ describe('G12 B content helpers', () => {
     // The digest shown is the kernel's, and the retention horizon is a stored fact.
     expect(stored.contentSha256).toBe('c'.repeat(64));
     expect(stored.contentRetentionExpiresAt).toBe('2027-10-30T22:17:00Z');
+  });
+});
+function incidentEvent(overrides: Partial<IncidentTimelineEvent> = {}): IncidentTimelineEvent {
+  return {
+    id: '44444444-4444-4444-8444-444444444444',
+    eventType: 'INCIDENT_CLOSED',
+    actorType: 'USER',
+    actorId: '22222222-2222-4222-8222-222222222222',
+    subjectType: 'INCIDENT',
+    subjectId: '11111111-1111-4111-8111-111111111111',
+    action: 'CLOSE',
+    result: 'ACCEPTED',
+    details: {},
+    requestId: null,
+    occurredAt: '2026-10-30T23:00:00Z',
+    ...overrides,
+  };
+}
+
+/**
+ * G12 C: the lifecycle rules the page derives from - and the ones it must never derive.
+ *
+ * The capability function is presentation; the kernel re-checks every one of these rules on the
+ * write itself. What these assertions protect is the sentence a reader sees BEFORE submitting: a
+ * viewer is told it is read-only, an operator is not offered a closure the kernel would refuse,
+ * and a handing-over operator is told that access to the incident ended with the handover.
+ */
+describe('G12 C lifecycle affordances', () => {
+  const viewer: Role = 'viewer';
+  const operator: Role = 'operator';
+  const admin: Role = 'admin';
+  const ownerId = '22222222-2222-4222-8222-222222222222';
+  const otherId = '33333333-3333-4333-8333-333333333333';
+
+  it('draws the closure panel from the status and nothing else', () => {
+    expect(closurePanelState({ status: 'OPEN' })).toBe('not-concludable');
+    expect(closurePanelState({ status: 'INVESTIGATING' })).toBe('not-concludable');
+    expect(closurePanelState({ status: 'CONCLUDED' })).toBe('ready');
+    expect(closurePanelState({ status: 'CLOSED' })).toBe('closed');
+  });
+
+  it('lets the owning operator close a concluded incident, and says why not when it cannot', () => {
+    const concluded = incident({ status: 'CONCLUDED', humanVerdict: verdict() });
+    const caps = incidentCapabilities({ incident: concluded, userId: ownerId, role: operator });
+    expect(caps.canClose).toBe(true);
+    expect(caps.closeBlockedReason).toBeNull();
+    expect(caps.canTransferOwner).toBe(true);
+    expect(caps.readOnlyReason).toBeNull();
+
+    // OPEN is not a closure anyone may open a form for, owner or not.
+    const open = incidentCapabilities({ incident: incident({ status: 'OPEN' }), userId: ownerId, role: operator });
+    expect(open.canClose).toBe(false);
+    expect(open.closeBlockedReason).toBe('incidents.close.blocked.notConcluded');
+
+    // A CONCLUDED row with no signed verdict is a state the schema refuses to close; the panel must
+    // not offer a form the kernel will refuse either.
+    const unsigned = incidentCapabilities({ incident: incident({ status: 'CONCLUDED', humanVerdict: null }), userId: ownerId, role: operator });
+    expect(unsigned.canClose).toBe(false);
+    expect(unsigned.closeBlockedReason).toBe('incidents.close.blocked.noVerdict');
+  });
+
+  it('tells a viewer it is read-only instead of offering a form that would 403', () => {
+    const caps = incidentCapabilities({ incident: incident({ status: 'CONCLUDED', humanVerdict: verdict() }), userId: otherId, role: viewer });
+    expect(caps.canClose).toBe(false);
+    expect(caps.canTransferOwner).toBe(false);
+    expect(caps.canAddEvidence).toBe(false);
+    expect(caps.canRecordVerdict).toBe(false);
+    expect(caps.readOnlyReason).toBe('incidents.permission.viewerReadOnly');
+    expect(caps.closeBlockedReason).toBe('incidents.permission.viewerClose');
+    expect(caps.transferBlockedReason).toBe('incidents.permission.viewerTransfer');
+  });
+
+  it('keeps a closed incident closed in the UI as well', () => {
+    const closed = incident({
+      status: 'CLOSED',
+      humanVerdict: verdict(),
+      closedAt: '2026-10-30T23:00:00Z',
+      closedBy: ownerId,
+      closureNote: 'fixed by warming the cache',
+      revision: 4,
+    });
+    const caps = incidentCapabilities({ incident: closed, userId: ownerId, role: operator });
+    expect(caps.canClose).toBe(false);
+    expect(caps.canAddEvidence).toBe(false);
+    expect(caps.canRecordVerdict).toBe(false);
+    expect(caps.canTransferOwner).toBe(false);
+    // The closure record itself is drawn by the panel, so 'why not' is null rather than a sentence
+    // about an operation nobody is offering.
+    expect(caps.closeBlockedReason).toBeNull();
+    expect(caps.transferBlockedReason).toBe('incidents.close.blocked.closedTransfer');
+  });
+
+  it('treats another operator as out of scope, because the record is not theirs to see', () => {
+    const caps = incidentCapabilities({ incident: incident({ status: 'CONCLUDED', humanVerdict: verdict() }), userId: otherId, role: operator });
+    expect(caps.canClose).toBe(false);
+    expect(caps.closeBlockedReason).toBe('incidents.permission.outOfScope');
+    expect(caps.readOnlyReason).toBeNull();
+
+    // An admin acts outside the owner column, which is what makes it the commander's role.
+    const commander = incidentCapabilities({ incident: incident({ status: 'CONCLUDED', humanVerdict: verdict() }), userId: otherId, role: admin });
+    expect(commander.canClose).toBe(true);
+  });
+
+  it('builds the two write bodies from the revision on screen, trimmed', () => {
+    expect(closeIncidentPayload(7, '  fixed by warming the cache  ', 'key-1')).toEqual({
+      expectedRevision: 7,
+      note: 'fixed by warming the cache',
+      idempotencyKey: 'key-1',
+    });
+    expect(transferIncidentPayload(7, otherId, '  night shift takes over  ')).toEqual({
+      expectedRevision: 7,
+      toOwner: otherId,
+      reason: 'night shift takes over',
+    });
+  });
+
+  it('reports the kernel bounds before the request leaves', () => {
+    expect(closureNoteError('')).toBe('incidents.close.noteHint');
+    expect(closureNoteError('x'.repeat(CLOSURE_NOTE_MIN_CHARS - 1))).toBe('incidents.close.noteHint');
+    expect(closureNoteError('fixed')).toBeNull();
+    expect(transferReasonError('short')).toBe('incidents.transfer.reasonHint');
+    expect(transferReasonError('x'.repeat(TRANSFER_REASON_MIN_CHARS))).toBeNull();
+  });
+
+  it('generates a distinct idempotency key per attempt', () => {
+    const first = newIdempotencyKey();
+    const second = newIdempotencyKey();
+    expect(first.length).toBeGreaterThanOrEqual(8);
+    expect(first).not.toEqual(second);
+  });
+
+  it('knows which role loses access when an incident changes hands', () => {
+    // Derived from the role and the kernel's owner scope, not from the write's response: an
+    // operator reads only what it owns, so handing one away ends its access; the roles that see
+    // every incident keep it.
+    expect(losesAccessAfterHandover(operator)).toBe(true);
+    expect(losesAccessAfterHandover(admin)).toBe(false);
+    expect(losesAccessAfterHandover(viewer)).toBe(false);
+    expect(losesAccessAfterHandover(null)).toBe(false);
+  });
+});
+
+describe('G12 C evidence trust and the audit trail', () => {
+  it('calls a row kernel-verified only when the kernel established it', () => {
+    const attested = evidence({ verifiedTrust: 'SOURCE_ATTESTED' });
+    const asserted = evidence({ verifiedTrust: 'OPERATOR_ASSERTED' });
+    const unverified = evidence({ verifiedTrust: 'UNVERIFIED' });
+    expect(isKernelVerified(attested)).toBe(true);
+    expect(isKernelVerified(asserted)).toBe(false);
+    expect(isKernelVerified(unverified)).toBe(false);
+    expect(kernelVerifiedCount([attested, asserted, unverified])).toBe(1);
+  });
+
+  it('translates the event types it knows and names the rest as other', () => {
+    expect(timelineEventKey('INCIDENT_CREATED')).toBe('incidents.timeline.event.created');
+    expect(timelineEventKey('INCIDENT_CLOSED')).toBe('incidents.timeline.event.closed');
+    expect(timelineEventKey('INCIDENT_OWNER_TRANSFERRED')).toBe('incidents.timeline.event.transferred');
+    // An event type this build has never heard of must still be listed: hiding it would be a
+    // shorter history than the one the kernel holds.
+    expect(timelineEventKey('INCIDENT_SOMETHING_NEW')).toBe('incidents.timeline.event.other');
+    expect(timelineEventKey(null)).toBe('incidents.timeline.event.other');
+    expect(timelineEventTone('INCIDENT_CLOSED')).toBe('neutral');
+    expect(timelineEventTone('INCIDENT_OWNER_TRANSFERRED')).toBe('info');
+    expect(timelineEventTone(undefined)).toBe('neutral');
+  });
+
+  it('reads an event details object without trusting its shape', () => {
+    const closed = timelineEventFacts(incidentEvent({
+      details: { closureNote: 'root cause was log rotation', idempotencyKey: 'k-1', revisionFrom: 3 },
+    }));
+    expect(closed.closureNote).toBe('root cause was log rotation');
+    expect(closed.fromOwner).toBeNull();
+    expect(closed.consideredEvidenceCount).toBeNull();
+
+    const transferred = timelineEventFacts(incidentEvent({
+      eventType: 'INCIDENT_OWNER_TRANSFERRED',
+      details: { fromOwner: 'a', toOwner: 'b', reason: 'night shift', revisionTo: 5 },
+    }));
+    expect(transferred.fromOwner).toBe('a');
+    expect(transferred.toOwner).toBe('b');
+    expect(transferred.reason).toBe('night shift');
+
+    const verdictEvent = timelineEventFacts(incidentEvent({
+      eventType: 'INCIDENT_VERDICT_RECORDED',
+      details: { verdict: 'CONFIRMED', consideredEvidenceCount: 2, consideredEvidenceDigest: 'd'.repeat(64) },
+    }));
+    expect(verdictEvent.verdict).toBe('CONFIRMED');
+    expect(verdictEvent.consideredEvidenceCount).toBe(2);
+
+    // Junk in a free-form details object becomes absence, never a rendered lie.
+    const junk = timelineEventFacts(incidentEvent({ details: { closureNote: 42, consideredEvidenceCount: 'two' } }));
+    expect(junk.closureNote).toBeNull();
+    expect(junk.consideredEvidenceCount).toBeNull();
   });
 });
