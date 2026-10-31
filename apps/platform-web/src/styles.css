@@ -1076,10 +1076,12 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .palette-item small { font-size: var(--ow-type-label); }
 .studio-canvas { height: 100%; min-height: 0; border-radius: var(--ow-radius-card); overflow: hidden; position: relative; background-color: var(--ow-canvas-bg); background-image: radial-gradient(var(--ow-border) 1px, transparent 1px); background-size: 20px 20px; }
 /* A node is only visible once @xyflow/react has measured it: the wrapper carries an inline
-   visibility:hidden until then, and that measurement is a ResizeObserver delivery. So the
-   container must never present a zero-sized box to it. The draft flow (?draft=) remounts this
-   subtree; a remount inside a collapsed row would measure every node at 0 and leave them
-   painted-invisible for the life of the page. A floor says the canvas is a workspace. */
+   visibility:hidden until then, and that measurement is a ResizeObserver delivery. A floor under
+   the container is still right - the draft flow (?draft=) remounts this subtree and a remount in a
+   collapsed row would measure every node at 0 - but the floor is not the whole answer: a measured
+   box is only one of the ways to arrive at "measured", and until the delivery lands the card is
+   inside a hidden wrapper no matter how big the container is. The card states its own visibility
+   below for exactly that reason. */
 .studio-rf-wrap { height: 100%; min-height: 320px; width: 100%; }
 .studio-note { left: 12px; bottom: 8px; right: 190px; font-size: var(--ow-type-label); pointer-events: none; background: color-mix(in srgb, var(--ow-canvas-bg) 82%, transparent); padding: 4px 4px; border-radius: 4px; }
 .studio-error { bottom: 34px; }
@@ -1090,6 +1092,13 @@ details.panel.advanced > summary { padding: 12px 16px; }
   border-radius: 9px; background: var(--ow-surface); box-shadow: 0 1px 2px rgba(18,26,40,.05), 0 6px 16px rgba(18,26,40,.035);
   overflow: hidden; transition: border-color var(--ow-motion-fast), box-shadow var(--ow-motion-fast);
 }
+/* The card is a CSS-sized box (.studio-rf-node sets its own width and its content sets the
+   height), so drawing it never depended on the measurement @xyflow/react gates it behind. Leaving
+   that gate on made the card exist, occupy its box, and still be invisible - which is also
+   unclickable, unfocusable and unscreenshottable - for as long as a ResizeObserver delivery was
+   outstanding. Visibility is inherited, so the card says it itself; the wrapper still measures, and
+   the edges still use the measured handle bounds. */
+.react-flow__node > .studio-rf-node { visibility: visible; }
 .studio-rf-node:hover { border-color: var(--ow-text-tertiary); box-shadow: 0 2px 4px rgba(18,26,40,.08), 0 10px 22px rgba(18,26,40,.06); }
 .studio-rf-node.selected { border-color: var(--ow-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ow-accent) 22%, transparent); }
 .studio-rf-node-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px; border-bottom: 1px solid var(--ow-border); }

@@ -198,8 +198,18 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   // Save draft renders only when the editor holds a draft, so this is the proof that the second
   // tab attached to the same draft rather than to the published, read-only definition.
   await expect(saveB).toBeVisible();
-  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
-  await pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  // The node is selected by clicking its card on the canvas, and a card that is not visible cannot
+  // be clicked: the click waits for it, and a click that waits is invisible in the report - it is
+  // reported as "Test timeout of 60000ms exceeded" with no assertion name at all, which is how this
+  // case failed on 8f52c61 while every named step in it passed. The visibility is therefore stated
+  // here, one line per tab, so the same state costs 10s and names the locator. Both tabs state it:
+  // the second tab loads the draft URL on its own, so neither tab's canvas is the other's evidence.
+  const nodeCardA = page.locator('.studio-rf-node').filter({ hasText: 'source' }).first();
+  const nodeCardB = pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first();
+  await expect(nodeCardA).toBeVisible();
+  await expect(nodeCardB).toBeVisible();
+  await nodeCardA.click();
+  await nodeCardB.click();
   const timeoutA = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
   const timeoutB = pageB.locator('.studio-inspector').getByLabel('timeoutSeconds');
   // A read-only inspector is the "no draft" state; filling it would wait instead of failing.
@@ -215,9 +225,14 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   const localTimeout = String(base + 2);
   await timeoutA.fill(savedTimeout);
   await timeoutB.fill(localTimeout);
+  // toBeEnabled answers "no disabled attribute", not "there and shown": a hidden element is still
+  // enabled, and the click that follows it would wait instead of failing. Every click in this case
+  // states the visibility of its target first, for that reason.
+  await expect(saveA).toBeVisible();
   await expect(saveA).toBeEnabled();
   await saveA.click();
   await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(saveB).toBeVisible();
   await expect(saveB).toBeEnabled();
   await saveB.click();
   await expect(pageB.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
@@ -237,6 +252,7 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await expect(overwrite).toBeVisible();
   await expect(overwrite).toHaveAttribute('data-confirm-state', 'idle');
   const confirmOverwrite = overwrite.locator('[data-confirm-submit]');
+  await expect(confirmOverwrite).toBeVisible();
   await expect(confirmOverwrite).toBeEnabled();
   await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict-confirm.png') });
   await confirmOverwrite.click();
