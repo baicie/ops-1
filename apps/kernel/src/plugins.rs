@@ -548,7 +548,7 @@ pub struct AttentionItem {
     pub link: String,
 }
 
-pub async fn overview(State(state): State<AppState>, _auth: AuthUser) -> AppResult<Json<Overview>> {
+pub async fn overview(State(state): State<AppState>, auth: AuthUser) -> AppResult<Json<Overview>> {
     let nodes: Vec<crate::nodes::NodeRow> =
         sqlx::query_as::<_, crate::nodes::NodeRow>("SELECT * FROM kernel.nodes ORDER BY name")
             .fetch_all(&state.db)
@@ -645,7 +645,16 @@ pub async fn overview(State(state): State<AppState>, _auth: AuthUser) -> AppResu
     } else {
         "ATTENTION"
     };
-    let recent_events = audit::list(&state.db, 8, None, None).await?;
+    // Any authenticated caller reaches this page, so the feed it shows is the caller's
+    // own slice of the ledger and not the platform's: the same scoped read /api/v1/audit uses.
+    let recent_events = audit::list_scoped(
+        &state.db,
+        audit::AuditScope::from_auth(&auth),
+        8,
+        None,
+        None,
+    )
+    .await?;
     Ok(Json(Overview {
         health: health.into(),
         nodes_total: nodes.len() as i64,

@@ -134,6 +134,11 @@ const TOOL_TIMELINE_MAX_EVENTS: i64 = 100;
 /// Characters of an evidence body one read_evidence call may return. Characters, not
 /// bytes, because the body is UTF-8 text and a byte cut can split a codepoint.
 const TOOL_CONTENT_MAX_CHARS: usize = 4_000;
+/// The largest payload recorded verbatim in the invocation ledger. 64 KiB is the phase's
+/// own bound for a piece of evidence content, so a payload that quotes content fits and a
+/// payload that has grown into an archive is recorded by length and digest only (G12 F,
+/// migration 0021 §3). Characters, not bytes: the ledger stores text.
+const RESULT_BODY_MAX_BYTES: usize = 65_536;
 /// Hypotheses one run may record.
 const TOOL_HYPOTHESIS_MAX: usize = 5;
 const TOOL_CITATION_MAX_PER_ROLE: usize = 8;
@@ -531,6 +536,12 @@ struct ToolOutcome {
     payload: Value,
     predicate: &'static str,
     evidence_refs: Vec<Uuid>,
+    /// The retention horizon of the bytes this payload quotes, when it quotes bytes.
+    /// read_evidence sets it from the content row it just read, so the copy the run keeps
+    /// in its invocation record carries the same horizon as the row it came from (G12 F,
+    /// migration 0021 §3). Everything else derives its payload from live rows and copies
+    /// nothing, so it leaves this None.
+    retention: Option<DateTime<Utc>>,
 }
 
 /// The run's authorized incident, as the tool layer sees it.
@@ -660,6 +671,7 @@ async fn execute_tool(
                 payload: incident_payload(&incident),
                 predicate: PREDICATE_INCIDENT_READ,
                 evidence_refs: incident.evidence_refs.clone(),
+                retention: None,
             })
         }
         TOOL_LIST_EVIDENCE => {
@@ -684,6 +696,7 @@ async fn execute_tool(
                 }),
                 predicate: PREDICATE_INCIDENT_READ,
                 evidence_refs: refs,
+                retention: None,
             })
         }
         TOOL_READ_EVIDENCE => {
@@ -702,7 +715,12 @@ async fn execute_tool(
                     "no evidence row with this id belongs to the incident this investigation may read",
                 ));
             };
-            let stored: Option<(String, String, i32, String, DateTime<Utc>)> = sqlx::query_as(
+            // G12 F (P1-1): the body column is bytea. Declaring it String made libpq
+            // raise "mismatched types; Rust type String" on every row that HAS content,
+            // so read_evidence failed 100% of the time for STORED evidence while the HTTP
+            // read of the same bytes worked. incidents::StoredContent is that read's own
+            // alias, so the two paths cannot disagree about the column types again.
+            let stored: Option<crate::incidents::StoredContent> = sqlx::query_as(
                 "SELECT c.content_type, c.body, c.content_bytes, c.sha256, c.retention_expires_at
                    FROM kernel.incident_evidence_content c
                   WHERE c.evidence_id=$1",
@@ -723,6 +741,7 @@ async fn execute_tool(
                     payload,
                     predicate: PREDICATE_EVIDENCE_CONTENT,
                     evidence_refs: vec![wanted],
+                    retention: None,
                 });
             };
             if retention_expires_at <= Utc::now() {
@@ -733,9 +752,22 @@ async fn execute_tool(
             }
             // Fixity, recomputed over the bytes in hand. The second predicate this read
             // stands on, and the reason a tampered row is refused rather than quoted.
-            let digest =
-                verify_stored_content(wanted, content_bytes, body.as_bytes(), &recorded_sha256)
-                    .map_err(|error| ToolFailure::from_predicate(&error))?;
+            let digest = verify_stored_content(wanted, content_bytes, &body, &recorded_sha256)
+                .map_err(|error| ToolFailure::from_predicate(&error))?;
+            // The bytes are UTF-8 by construction (the API stores the body of a JSON
+            // string), and the digest above just proved these are the bytes that were
+            // stored. A row that is not UTF-8 was hand-written into the column, so it is
+            // reported as a failed read rather than quoted lossily: a lossy body would not
+            // be the bytes the digest covers, and "the investigator read X" would be false.
+            let body = match String::from_utf8(body) {
+                Ok(body) => body,
+                Err(error) => {
+                    return Err(ToolFailure::error(
+                        "TOOL_READ_FAILED",
+                        format!("the stored bytes are not UTF-8 text: {error}"),
+                    ))
+                }
+            };
             let (text, truncated) = truncate_chars(&body, TOOL_CONTENT_MAX_CHARS);
             payload["content"] = json!({
                 "contentType": content_type,
@@ -748,6 +780,8 @@ async fn execute_tool(
                 payload,
                 predicate: PREDICATE_EVIDENCE_CONTENT,
                 evidence_refs: vec![wanted],
+                // The copy this run keeps inherits the horizon of the row it came from.
+                retention: Some(retention_expires_at),
             })
         }
         TOOL_GET_TIMELINE => {
@@ -764,6 +798,7 @@ async fn execute_tool(
                 }),
                 predicate: PREDICATE_INCIDENT_READ,
                 evidence_refs: Vec::new(),
+                retention: None,
             })
         }
         _ => related_context(db, authorized_sources, caller, scope, arguments).await,
@@ -845,6 +880,7 @@ async fn related_context(
             }),
             predicate: PREDICATE_INCIDENT_READ,
             evidence_refs: Vec::new(),
+            retention: None,
         });
     };
     let query = IncidentListQuery {
@@ -865,6 +901,7 @@ async fn related_context(
         }),
         predicate: PREDICATE_INCIDENT_READ,
         evidence_refs: Vec::new(),
+        retention: None,
     })
 }
 
@@ -1199,8 +1236,35 @@ fn fixture_hypothesis(transcript: &Transcript) -> ProposedHypothesis {
     if unverified > 0 {
         gap_codes.push("EVIDENCE_UNVERIFIED".to_string());
     }
+    // G12 F (P1-2). Both of these used to be reported only in the no-rows branch, so a run
+    // whose content read FAILED still said SUPPORTED / HIGH / gapCodes:[] and mentioned it
+    // nowhere - a conclusion that overstated the part of the record it actually read. A
+    // failed read is a hole in the record whether or not other reads returned rows.
     if transcript.refused {
         gap_codes.push("TOOL_REFUSED".to_string());
+    }
+    if transcript.failed {
+        gap_codes.push("TOOL_FAILED".to_string());
+    }
+    // Said in words as well as in codes: the codes are a vocabulary the UI localizes, and
+    // the model's own sentence is what a reader of the run sees first.
+    let mut caveats: Vec<String> = Vec::new();
+    if unverified > 0 {
+        caveats.push(format!(
+            "{unverified} of the cited row(s) carry no provenance the Kernel established, so their substance rests on whoever submitted them."
+        ));
+    }
+    if transcript.refused {
+        caveats.push(
+            "At least one read this investigation asked for was refused, so the conclusion stands on a smaller part of the record than it asked for."
+                .to_string(),
+        );
+    }
+    if transcript.failed {
+        caveats.push(
+            "At least one read this investigation asked for failed inside the Kernel rather than being refused, so what that read would have contributed is unknown and the conclusion stands on a smaller part of the record than it asked for."
+                .to_string(),
+        );
     }
     ProposedHypothesis {
         statement: format!(
@@ -1209,7 +1273,9 @@ fn fixture_hypothesis(transcript: &Transcript) -> ProposedHypothesis {
             kinds.into_iter().collect::<Vec<_>>().join(", ")
         ),
         stance: "SUPPORTED".to_string(),
-        confidence: if unverified == 0 && !transcript.refused {
+        // HIGH is reserved for a conclusion drawn over an unbroken record: no unverified
+        // row AND no read this run asked for that did not answer.
+        confidence: if unverified == 0 && !transcript.refused && !transcript.failed {
             "HIGH"
         } else {
             "MEDIUM"
@@ -1220,16 +1286,10 @@ fn fixture_hypothesis(transcript: &Transcript) -> ProposedHypothesis {
             rows.len(),
             supporting.len()
         ),
-        uncertainty: if unverified > 0 {
-            Some(format!(
-                "{unverified} of the cited row(s) carry no provenance the Kernel established, so their substance rests on whoever submitted them."
-            ))
-        } else if transcript.refused {
-            Some(
-                "At least one read this investigation asked for was refused, so the conclusion stands on a smaller part of the record than it asked for.".to_string(),
-            )
-        } else {
+        uncertainty: if caveats.is_empty() {
             None
+        } else {
+            Some(caveats.join(" "))
         },
         gap_codes,
         supporting,
@@ -2502,8 +2562,20 @@ struct InvocationRecord<'a> {
     error_detail: Option<&'a str>,
     predicate: Option<&'a str>,
     scope_actor: Option<Uuid>,
+    /// The payload, so the digest beside it can be recomputed later. G12 F (P1-6): 0020
+    /// recorded result_digest and result_bytes and then dropped the payload, which made
+    /// the digest a claim nobody could check. It is the EXACT serialized text that was
+    /// hashed - text, not jsonb, because jsonb normalizes the bytes and the digest would
+    /// then be over something the row cannot reproduce. None when the payload is larger
+    /// than RESULT_BODY_MAX_BYTES; in that case the row still says how many bytes there
+    /// were and what they digested to, and says nothing it cannot support.
+    result_body: Option<&'a str>,
     result_bytes: Option<i32>,
     result_digest: Option<&'a str>,
+    /// The retention horizon of the content this payload quotes, copied from
+    /// kernel.incident_evidence_content so the copy carries the same limit as its source.
+    /// None when the payload quotes no retained bytes.
+    result_retention: Option<DateTime<Utc>>,
     evidence_refs: &'a [Uuid],
     started_at: DateTime<Utc>,
     finished_at: DateTime<Utc>,
@@ -2514,9 +2586,10 @@ async fn record_invocation(db: &PgPool, record: InvocationRecord<'_>) -> AppResu
     sqlx::query(
         "INSERT INTO kernel.investigation_tool_invocations
              (invocation_id, run_id, sequence, attempt, tool_name, arguments, outcome,
-              error_code, error_detail, authorization_predicate, scope_actor, result_bytes,
-              result_digest, evidence_refs, started_at, finished_at, duration_ms)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
+              error_code, error_detail, authorization_predicate, scope_actor, result_body,
+              result_bytes, result_digest, result_retention_expires_at, evidence_refs,
+              started_at, finished_at, duration_ms)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)",
     )
     .bind(Uuid::new_v4())
     .bind(record.run_id)
@@ -2529,8 +2602,10 @@ async fn record_invocation(db: &PgPool, record: InvocationRecord<'_>) -> AppResu
     .bind(record.error_detail)
     .bind(record.predicate)
     .bind(record.scope_actor)
+    .bind(record.result_body)
     .bind(record.result_bytes)
     .bind(record.result_digest)
+    .bind(record.result_retention)
     .bind(SqlJson(record.evidence_refs.to_vec()))
     .bind(record.started_at)
     .bind(record.finished_at)
@@ -2803,6 +2878,13 @@ async fn run_loop(context: RunContext<'_>) -> AppResult<()> {
                         Ok(result) => {
                             let body = result.payload.to_string();
                             let digest = sha256_hex(body.as_bytes());
+                            // The exact bytes, kept when they fit, so the digest next to
+                            // them can be recomputed instead of believed.
+                            let kept_body = if body.len() <= RESULT_BODY_MAX_BYTES {
+                                Some(body.as_str())
+                            } else {
+                                None
+                            };
                             record_invocation(
                                 db,
                                 InvocationRecord {
@@ -2816,8 +2898,10 @@ async fn run_loop(context: RunContext<'_>) -> AppResult<()> {
                                     error_detail: None,
                                     predicate: Some(result.predicate),
                                     scope_actor: Some(input.scope_user_id),
+                                    result_body: kept_body,
                                     result_bytes: Some(body.len().min(i32::MAX as usize) as i32),
                                     result_digest: Some(&digest),
+                                    result_retention: result.retention,
                                     evidence_refs: &result.evidence_refs,
                                     started_at,
                                     finished_at,
@@ -2855,8 +2939,10 @@ async fn run_loop(context: RunContext<'_>) -> AppResult<()> {
                                     error_detail: Some(failure.detail()),
                                     predicate: None,
                                     scope_actor: None,
+                                    result_body: None,
                                     result_bytes: None,
                                     result_digest: None,
+                                    result_retention: None,
                                     evidence_refs: &[],
                                     started_at,
                                     finished_at,
@@ -3779,6 +3865,56 @@ mod tests {
         cleanup(&pool, &[owner]).await;
     }
 
+    /// G12 F (P1-3): "no UPDATE path" was a statement about the handler, and 0020 wrote
+    /// it as if it were a statement about the table - an UPDATE ... SET decision changed
+    /// a human's review. Migration 0021 makes it a statement about the table.
+    #[tokio::test]
+    async fn a_human_review_cannot_be_rewritten_in_place() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let incident = seed_incident(&pool, owner, None, started).await;
+        let run = seed_run(&pool, incident, owner).await;
+        sqlx::query(
+            "INSERT INTO kernel.investigation_human_reviews (run_id, decision, note, reviewed_by)
+             VALUES ($1,'ACCEPTED','the reasoning is usable for triage',$2)",
+        )
+        .bind(run)
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .expect("a first review is recordable");
+
+        let rewrite = sqlx::query(
+            "UPDATE kernel.investigation_human_reviews SET decision='REJECTED' WHERE run_id=$1",
+        )
+        .bind(run)
+        .execute(&pool)
+        .await
+        .expect_err("a review is write-once: the database must refuse the rewrite");
+        let message = rewrite.to_string();
+        assert!(
+            message.contains("write-once") || message.contains("restrict"),
+            "expected the immutability trigger, got: {message}"
+        );
+
+        let decision: String = sqlx::query_scalar(
+            "SELECT decision FROM kernel.investigation_human_reviews WHERE run_id=$1",
+        )
+        .bind(run)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            decision, "ACCEPTED",
+            "the review that was written is the one that stands"
+        );
+
+        cleanup(&pool, &[owner]).await;
+    }
+
     #[tokio::test]
     async fn a_token_budget_overrun_is_recorded_as_a_measurement_not_clamped() {
         let Some(pool) = test_pool().await else {
@@ -3804,6 +3940,225 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(recorded, 240);
+        cleanup(&pool, &[owner]).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // G12 F (P1-1 / P1-7): a STORED evidence row is actually read, byte for byte.
+    //
+    // The defect these tests exist for was invisible to CI because nothing ever
+    // drove read_evidence at a row that had bytes: the tool declared the bytea
+    // column as String, so every such read failed with a libpq decode error while
+    // the HTTP read of the same bytes worked. A test that only counts invocations
+    // and outcomes cannot see the difference between "the tool ran" and "the tool
+    // returned the bytes that were submitted", so this one compares the bytes.
+    // -----------------------------------------------------------------------
+
+    /// The fixture the two P1-1 tests share: an incident owned by an operator, one
+    /// evidence row whose content is STORED, and the bytes the caller submitted.
+    async fn stored_evidence(pool: &PgPool, body: &str) -> (Uuid, Uuid, Uuid) {
+        let owner = seed_user(pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let incident = seed_incident(pool, owner, None, started).await;
+        let evidence = seed_evidence(
+            pool,
+            incident,
+            started + ChronoDuration::minutes(5),
+            "LOG_EXCERPT",
+            "g12f-stored",
+            "OPERATOR_ASSERTED",
+        )
+        .await;
+        sqlx::query(
+            "INSERT INTO kernel.incident_evidence_content
+               (evidence_id,content_type,body,content_bytes,sha256)
+             VALUES ($1,'text/plain',$2,$3,$4)",
+        )
+        .bind(evidence)
+        .bind(body.as_bytes())
+        .bind(body.len() as i32)
+        .bind(sha256_hex(body.as_bytes()))
+        .execute(pool)
+        .await
+        .unwrap();
+        (owner, incident, evidence)
+    }
+
+    #[tokio::test]
+    async fn read_evidence_returns_the_bytes_that_were_submitted() {
+        const BODY: &str = "node-7 kernel: oom_kill process=cadvisor-x memory=1.9Gi";
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let (owner, incident, evidence) = stored_evidence(&pool, BODY).await;
+        let scope = ToolScope {
+            incident_id: incident,
+            scope_user_id: owner,
+        };
+
+        let outcome = execute_tool(
+            &pool,
+            &[],
+            scope,
+            TOOL_READ_EVIDENCE,
+            &json!({ "incidentId": incident, "evidenceId": evidence }),
+        )
+        .await
+        .expect("a read of the caller's own STORED content must not fail");
+
+        assert_eq!(outcome.predicate, PREDICATE_EVIDENCE_CONTENT);
+        assert_eq!(
+            outcome.payload["content"]["body"],
+            serde_json::json!(BODY),
+            "the bytes the tool returns must be the bytes that were submitted"
+        );
+        assert_eq!(
+            outcome.payload["content"]["bytes"],
+            serde_json::json!(BODY.len())
+        );
+        assert_eq!(
+            outcome.payload["content"]["sha256"],
+            serde_json::json!(sha256_hex(BODY.as_bytes())),
+            "the digest in the payload is recomputed over the bytes in hand"
+        );
+        assert_eq!(
+            outcome.payload["content"]["truncated"],
+            serde_json::json!(false)
+        );
+
+        cleanup(&pool, &[owner]).await;
+    }
+
+    /// The second half of P1-7: a read that FAILS has to reach the hypothesis. The
+    /// fixture's own statement of the record must not claim more than it read.
+    #[test]
+    fn a_failed_read_with_rows_cited_is_named_in_gaps_and_lowers_confidence() {
+        let started = Utc::now();
+        let row = Uuid::new_v4();
+        let mut transcript = transcript_with(
+            started,
+            &[(row, started + ChronoDuration::minutes(1), "SOURCE_ATTESTED")],
+        );
+        transcript.failed = true;
+        let hypothesis = fixture_hypothesis(&transcript);
+        assert!(
+            hypothesis.gap_codes.contains(&"TOOL_FAILED".to_string()),
+            "a failed read must appear in gapCodes even when other reads returned rows, got {:?}",
+            hypothesis.gap_codes
+        );
+        assert_ne!(
+            hypothesis.confidence, "HIGH",
+            "a conclusion over a record with a failed read is not a high-confidence one"
+        );
+        let uncertainty = hypothesis
+            .uncertainty
+            .as_deref()
+            .expect("a run with a failed read must state an uncertainty");
+        assert!(
+            uncertainty.contains("failed inside the Kernel"),
+            "the uncertainty must say a read failed, got: {uncertainty}"
+        );
+    }
+
+    /// A refusal and a failure can both happen in one run, and both have to survive: the
+    /// old code reported one or the other, never both.
+    #[test]
+    fn a_refused_and_a_failed_read_are_both_reported() {
+        let started = Utc::now();
+        let row = Uuid::new_v4();
+        let mut transcript = transcript_with(started, &[(row, started, "OPERATOR_ASSERTED")]);
+        transcript.refused = true;
+        transcript.failed = true;
+        let hypothesis = fixture_hypothesis(&transcript);
+        assert!(hypothesis.gap_codes.contains(&"TOOL_REFUSED".to_string()));
+        assert!(hypothesis.gap_codes.contains(&"TOOL_FAILED".to_string()));
+    }
+
+    /// G12 F (P1-6): the payload is kept as the exact bytes the digest covers, so a later
+    /// reader can recompute the digest instead of believing it. This is the property 0020
+    /// only appeared to have.
+    #[tokio::test]
+    async fn a_recorded_payload_makes_its_digest_recomputable() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let incident = seed_incident(&pool, owner, None, started).await;
+        let run = seed_run(&pool, incident, owner).await;
+        let payload = r#"{"content":{"body":"disk full on node-7","bytes":19},"evidenceId":"00000000-0000-0000-0000-000000000001"}"#;
+        let digest = sha256_hex(payload.as_bytes());
+        let horizon = Utc::now() + ChronoDuration::days(7);
+        let started_at = Utc::now();
+        record_invocation(
+            &pool,
+            InvocationRecord {
+                run_id: run,
+                sequence: 1,
+                attempt: 1,
+                tool: TOOL_READ_EVIDENCE,
+                arguments: &json!({}),
+                outcome: "OK",
+                error_code: None,
+                error_detail: None,
+                predicate: Some(PREDICATE_EVIDENCE_CONTENT),
+                scope_actor: Some(owner),
+                result_body: Some(payload),
+                result_bytes: Some(payload.len() as i32),
+                result_digest: Some(&digest),
+                result_retention: Some(horizon),
+                evidence_refs: &[],
+                started_at,
+                finished_at: started_at,
+                duration_ms: 1,
+            },
+        )
+        .await
+        .expect("a recorded payload is storable");
+
+        let (stored, stored_digest, stored_horizon): (String, String, Option<DateTime<Utc>>) =
+            sqlx::query_as(
+                "SELECT result_body, result_digest, result_retention_expires_at
+                   FROM kernel.investigation_tool_invocations WHERE run_id=$1",
+            )
+            .bind(run)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            sha256_hex(stored.as_bytes()),
+            stored_digest,
+            "the digest must be recomputable from what was stored"
+        );
+        assert_eq!(
+            stored, payload,
+            "the stored text is the exact bytes that were hashed"
+        );
+        assert_eq!(
+            stored_horizon.map(|value| value.timestamp()),
+            Some(horizon.timestamp()),
+            "the copy carries the horizon of the content it quotes"
+        );
+
+        // And a body without the digest and length that describe it is not a record.
+        let orphan = sqlx::query(
+            "INSERT INTO kernel.investigation_tool_invocations
+               (invocation_id, run_id, sequence, attempt, tool_name, arguments, outcome,
+                error_code, authorization_predicate, scope_actor, result_body,
+                evidence_refs, started_at, finished_at, duration_ms)
+             VALUES ($1,$2,2,1,'read_evidence','{}'::jsonb,'OK',NULL,'P',NULL,'{}','[]'::jsonb,now(),now(),1)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(run)
+        .execute(&pool)
+        .await
+        .expect_err("a retained payload must carry its digest and length");
+        assert!(
+            orphan.to_string().contains("result_body_check")
+                || orphan.to_string().contains("check constraint"),
+            "expected the pairing constraint, got: {orphan}"
+        );
+
         cleanup(&pool, &[owner]).await;
     }
 }

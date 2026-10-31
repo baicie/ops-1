@@ -58,7 +58,10 @@ const ATTESTATION_MAX_SKEW_SECONDS: i64 = 300;
 const ATTESTATION_VERSION: &str = "opsweave-evidence-attestation-v1";
 /// What the content read path selects out of kernel.incident_evidence_content:
 /// (content type, body, verified byte length, recorded digest, retention horizon).
-type StoredContent = (String, Vec<u8>, i32, String, DateTime<Utc>);
+/// pub(crate) so the investigator's read_evidence selects through the same alias: the
+/// G12 F defect was that path declaring the body as String, which fails to decode a
+/// bytea column on every row that has one. One alias, one decode.
+pub(crate) type StoredContent = (String, Vec<u8>, i32, String, DateTime<Utc>);
 /// The evidence list's query window, as (since, until). Both are None or both are
 /// Some; evidence_window enforces that before any SQL runs.
 pub(crate) type EvidenceWindow = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
@@ -5010,11 +5013,16 @@ mod tests {
         cleanup(&pool, &[owner, viewer]).await;
     }
 
-    /// Second gate: even a hand-written INSERT cannot mint attestation. The
-    /// handler is the first gate, this constraint is the one that survives a bug
-    /// in the handler.
+    /// One half of the schema's guarantee, stated as what it actually is.
+    ///
+    /// G12 F: this test used to be called "the database refuses a hand-written
+    /// attested row", which claimed far more than it measured. It omits
+    /// verification_method and verifier_identity, so what it proves is that a row
+    /// cannot CLAIM SOURCE_ATTESTED while saying nothing about how it got there - a
+    /// completeness check on the shape of the row. It proves nothing about a writer
+    /// who states both, which is the next test.
     #[tokio::test]
-    async fn the_database_refuses_a_hand_written_attested_row() {
+    async fn an_attested_row_must_also_state_how_it_was_verified() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -5050,6 +5058,66 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(rows, 0);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// The other half, and the one migration 0017 got wrong.
+    ///
+    /// A hand-written INSERT that states the method AND an adapter identity succeeds.
+    /// The schema checks the shape of the claim; it cannot check that the writer ever
+    /// held that adapter's secret, because a CHECK cannot see a signature. Migration
+    /// 0021 corrects the comment on the constraint and this test is the regression lock
+    /// for that correction: if a later change makes the schema refuse this, the comment
+    /// must be corrected in the same change instead of the guarantee being reassumed.
+    #[tokio::test]
+    async fn the_schema_cannot_prove_possession_so_a_named_adapter_is_enough() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("db shape", None))
+                .await
+                .unwrap();
+
+        let evidence = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.incident_evidence
+               (evidence_id,incident_id,kind,source,collected_at,content_ref,
+                claimed_trust,verified_trust,verification_method,verified_at,verifier_identity)
+             VALUES ($1,$2,'LOG_EXCERPT','syslog',now(),'sha256:forged',
+                     'SOURCE_ATTESTED','SOURCE_ATTESTED','SOURCE_ADAPTER',now(),'made-up-adapter')",
+        )
+        .bind(evidence)
+        .bind(incident.id)
+        .execute(&pool)
+        .await
+        .expect("the schema checks the shape of an attestation, not the possession of a secret");
+
+        let (method, identity): (String, String) = sqlx::query_as(
+            "SELECT verification_method, verifier_identity FROM kernel.incident_evidence
+              WHERE evidence_id=$1",
+        )
+        .bind(evidence)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(method, "SOURCE_ADAPTER");
+        assert_eq!(identity, "made-up-adapter");
+        // What the schema DOES guarantee about this row: it now says exactly what it is.
+        let note: String = sqlx::query_scalar(
+            "SELECT coalesce(obj_description(
+                (SELECT oid FROM pg_constraint
+                  WHERE conname='incident_evidence_attestation_requires_adapter'),'pg_constraint'),'')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            note.contains("SHAPE ONLY"),
+            "the constraint must carry the corrected statement of what it guarantees, got: {note}"
+        );
 
         cleanup(&pool, &[user]).await;
     }

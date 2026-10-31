@@ -67,6 +67,8 @@ last() { json "d$1" < "$WORK/body"; }
 count() { json "$1" < "$WORK/body"; }
 code() { json "d['code']" < "$WORK/body"; }
 sql() { psql "$DB" -tAc "$1" 2>&1 | tr -d ' '; }
+# sqlraw keeps the text intact: a JSON payload cannot survive tr -d ' '.
+sqlraw() { psql "$DB" -tAc "$1" 2>&1; }
 
 login() {
   local email="$1" password="$2" jar="$3" body
@@ -413,6 +415,58 @@ if [ "$RELATED_ON" = "1" ]; then
 else
   echo "SKIP  S8 (restart the kernel with OPSWEAVE_INVESTIGATION_RELATED_SOURCES=incident_index OPSWEAVE_INVESTIGATION_RELATED_ENABLED=1)" >&2
 fi
+
+# ===========================================================================
+step "S9  E4 (P1-7): read_evidence returns the STORED bytes, and they are the bytes submitted"
+# Why this step exists. S4 proved that read_evidence is REFUSED when it must be, and
+# nothing else: with no row that carries content, a tool that could never read one still
+# passed CI. G12 F found read_evidence failing on 100% of STORED rows (the body column is
+# bytea and was decoded as String), which no invocation count could see. So this step
+# builds a row whose content is STORED, drives read_evidence at it, and compares the bytes
+# the run recorded against the bytes that were submitted.
+BODY9="g12f-stored-body-$RUN-no-spaces"
+I9="$(incident_make "$A_JAR" "$A_CSRF" "g12e stored content $RUN" "$(ts -3600)")"
+call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I9/evidence" \
+  "{\"kind\":\"LOG_EXCERPT\",\"source\":\"agent-stored\",\"collectedAt\":\"$(ts -1200)\",\"content\":{\"contentType\":\"text/plain\",\"body\":\"$BODY9\"}}" >/dev/null
+E9="$(last "['id']")"
+S9_CONTENT="$(call "$A_JAR" "$A_CSRF" GET "/api/v1/incidents/$I9/evidence/$E9/content")"
+check 200 "$S9_CONTENT" "S9 the control: the HTTP content read serves the STORED bytes"
+check 1 "$(sql "SELECT count(*) FROM kernel.incident_evidence_content WHERE evidence_id='$E9'")" "S9 (schema) the bytes are STORED, not a reference"
+S9="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I9/investigations" \
+  "{\"idempotencyKey\":\"s9-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I9\",\"probeEvidenceId\":\"$E9\",\"maxToolCalls\":8}")"
+check 201 "$S9" "S9 a probe run against the caller's OWN incident started"
+RUN9="$(last "['runId']")"
+check 5 "$(json "len(d['toolInvocations'])" < "$WORK/body")" "S9 all five tools ran on an incident the caller owns"
+check "OK" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['outcome']" < "$WORK/body")" \
+  "S9 read_evidence succeeded on a row that HAS content, instead of failing to decode it"
+check "OK" "$(sql "SELECT outcome FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9' AND tool_name='read_evidence'")" \
+  "S9 and the success is in the ledger, not only in the response"
+# get_related_context answers SOURCE_UNAVAILABLE when the deployment authorises no related
+# source: that is a refusal of configuration, not a failed read.
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9' AND outcome<>'OK' AND tool_name<>'get_related_context'")" \
+  "S9 no read in this run failed"
+check "$BODY9" "$(sqlraw "SELECT (result_body::jsonb)->'content'->>'body' FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9' AND tool_name='read_evidence'")" \
+  "S9 the bytes read_evidence returned are exactly the bytes that were submitted"
+check "$(printf '%s' "$BODY9" | wc -c | tr -d ' ')" "$(sqlraw "SELECT (result_body::jsonb)->'content'->>'bytes' FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9' AND tool_name='read_evidence'")" \
+  "S9 and the byte count it reports is the submitted length"
+# P1-6: the digest is recomputable, because the bytes it covers were kept.
+check "true" "$(sql "SELECT (result_digest = encode(sha256(convert_to(result_body,'UTF8')),'hex'))::text FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9' AND tool_name='read_evidence'")" \
+  "S9 the recorded result_digest is recomputable from the recorded result_body"
+check "true" "$(sql "SELECT ((result_body::jsonb)->'content'->>'sha256' = (SELECT sha256 FROM kernel.incident_evidence_content WHERE evidence_id='$E9'))::text FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9' AND tool_name='read_evidence'")" \
+  "S9 the digest the tool reported is the digest of the bytes it was served"
+check "true" "$(sql "SELECT (result_retention_expires_at = (SELECT retention_expires_at FROM kernel.incident_evidence_content WHERE evidence_id='$E9'))::text FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9' AND tool_name='read_evidence'")" \
+  "S9 the copy carries the same retention horizon as the content row it quotes"
+# The negative half: a row that is a REFERENCE says so instead of pretending it read bytes.
+I9R="$(incident_make "$A_JAR" "$A_CSRF" "g12e reference only $RUN" "$(ts -3600)")"
+E9R="$(evidence_make "$A_JAR" "$A_CSRF" "$I9R" LOG_EXCERPT "$(ts -1200)" agent-reference)"
+S9R="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I9R/investigations" \
+  "{\"idempotencyKey\":\"s9r-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I9R\",\"probeEvidenceId\":\"$E9R\",\"maxToolCalls\":8}")"
+check 201 "$S9R" "S9 a probe run against a reference-only row started"
+RUN9R="$(last "['runId']")"
+check "OK" "$(sql "SELECT outcome FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9R' AND tool_name='read_evidence'")" \
+  "S9 reading a reference row also succeeds"
+check "true" "$(sql "SELECT (((result_body::jsonb)->'content') = 'null'::jsonb AND ((result_body::jsonb)->>'contentNote') IS NOT NULL)::text FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9R' AND tool_name='read_evidence'")" \
+  "S9 and it states that no bytes exist rather than fabricating a body"
 
 echo
 echo "==================== SUMMARY ===================="

@@ -64,7 +64,17 @@ pub async fn diagnostics(State(state): State<AppState>, auth: AuthUser) -> AppRe
     )
     .fetch_one(&state.db)
     .await?;
-    let recent_failures = audit::list(&state.db, 20, None, None).await?;
+    // This page is admin-only (require_admin above), and the scope says so rather than
+    // relying on the gate having run: the ledger read is the same call the public route
+    // makes, with the scope that route would need to be allowed to see everything.
+    let recent_failures = audit::list_scoped(
+        &state.db,
+        audit::AuditScope::from_auth(&auth),
+        20,
+        None,
+        None,
+    )
+    .await?;
     Ok(Json(serde_json::json!({
         "kernel": {
             "version": env!("CARGO_PKG_VERSION"),
@@ -117,12 +127,16 @@ pub async fn audit_events(
     auth: AuthUser,
     Query(query): Query<AuditQuery>,
 ) -> AppResult<Json<Vec<audit::AuditEventView>>> {
-    if auth.role == opsweave_contracts::Role::Viewer {
-        // viewers may read audit summaries but not target secrets; details are
-        // already redacted at write time.
-    }
-    let events = audit::list(
+    // G12 F (P0-1). This handler used to hold an empty `if auth.role == Viewer { }`
+    // whose comment said viewers read summaries but not secrets. It checked nothing and
+    // the query below had no scope predicate at all, so the lowest-privileged role read
+    // every actor's rows over the whole platform - including the closure notes G12 made
+    // part of an incident event. The gate is now the read itself: audit::list_scoped
+    // decides per row whether this caller may read the subject the event is about, and
+    // it is the only ledger read the codebase has.
+    let events = audit::list_scoped(
         &state.db,
+        audit::AuditScope::from_auth(&auth),
         query.limit.unwrap_or(100),
         query.subject_type.as_deref(),
         query.subject_id.as_deref(),

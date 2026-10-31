@@ -862,6 +862,12 @@ input::placeholder { color: var(--ow-text-muted); }
 .timeline { list-style: none; margin: 0; padding: 0 16px 8px; display: flex; flex-direction: column; }
 .timeline li { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--ow-border); align-items: start; }
 .timeline li:last-child { border-bottom: 0; }
+/* OWNERSHIP. .timeline is a CHRONOLOGICAL TRAIL and nothing else: every `li` must start
+   with its .timeline-dot, because the marker is the grid's first 12px column. Three panels
+   (journals, jobs, incident facts) own that component. Anything else that needs a list of
+   records uses .record-list below - G12 F found the investigation panel reusing .timeline
+   for three plain lists, which put each row's real content into the 12px marker column and
+   rendered every statement as a 12px-wide vertical strip. */
 .timeline-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--ow-surface); border: 2px solid var(--ow-accent); }
 .timeline li[data-fact-kind="started"] .timeline-dot { border-color: var(--ow-text-muted); }
 .timeline li[data-fact-kind="verdict"] .timeline-dot { border-color: var(--ow-ok); background: var(--ow-ok); }
@@ -873,6 +879,21 @@ input::placeholder { color: var(--ow-text-muted); }
 @media (max-width: 768px) {
   .timeline li > div > [data-testid="fact-time"] { margin-left: 0; }
 }
+/* A list of records: one row per record, the row is a COLUMN whose first line is a wrap-able
+   meta line. No marker column, no fixed grid track, and min-width:0 at every level so a long
+   id or a log line wraps inside the row instead of setting the panel's width. */
+.record-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.record-list > li { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--ow-border); }
+.record-list > li:last-child { border-bottom: 0; }
+.record-list > li > .record-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.record-list > li > p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.record-list .link-button, .record-list .mono { min-width: 0; overflow-wrap: anywhere; text-align: start; }
+/* The panel quotes log lines, and a log line has no spaces in it. Nothing inside the panel
+   may make the panel wider than the panel, at any width or in either theme. */
+[data-testid="incident-investigations"] { min-width: 0; }
+[data-testid="incident-investigations"] .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+[data-testid="incident-investigations"] pre,
+[data-testid="incident-investigations"] .evidence-body { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; }
 .studio-conflict { align-items: flex-start; }
 .studio-conflict > div:nth-child(2) { display: flex; flex-direction: column; gap: 4px; }
 .studio-conflict pre { max-height: 90px; overflow: auto; margin: 4px 0 0; font-size: var(--ow-type-label); }

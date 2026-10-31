@@ -226,7 +226,10 @@ export function InvestigationPanel({ incidentId, canOperate }: { incidentId: str
       {runs.length > 0 ? (
         <div className="pad" data-testid="investigation-history">
           <h3>{t('investigations.history.title')}</h3>
-          <ol className="timeline" data-testid="investigation-history-list">
+          {/* A record list, not a timeline. The .timeline component is a chronological
+              trail whose first cell is a marker; reusing it as a generic list put every
+              row's real content into a 12px column (G12 F, P1-4). */}
+          <ul className="record-list" data-testid="investigation-history-list">
             {runs.map((run) => (
               <li key={run.runId} data-run-id={run.runId} data-run-status={run.status}>
                 <button
@@ -242,7 +245,7 @@ export function InvestigationPanel({ incidentId, canOperate }: { incidentId: str
                 </button>
               </li>
             ))}
-          </ol>
+          </ul>
         </div>
       ) : null}
 
@@ -282,16 +285,18 @@ export function InvestigationPanel({ incidentId, canOperate }: { incidentId: str
           {current.toolInvocations.length === 0 ? (
             <p className="muted small" data-testid="investigation-tools-empty">{t('investigations.tools.empty')}</p>
           ) : (
-            <ol className="timeline" data-testid="investigation-tools">
+            <ul className="record-list" data-testid="investigation-tools">
               {current.toolInvocations.map((invocation) => (
                 <li key={invocation.invocationId} data-tool={invocation.tool} data-outcome={invocation.outcome}>
-                  <Badge variant={variantFor(outcomeTone(invocation.outcome))}>{t(outcomeKey(invocation.outcome))}</Badge>
-                  <strong> {t(toolKey(invocation.tool))}</strong>
-                  <span className="muted small"> · {String(invocation.durationMs)} ms</span>
-                  <span className="muted small"> · {t('investigations.tools.attempt', { attempt: invocation.attempt })}</span>
-                  {invocation.authorizationPredicate ? (
-                    <span className="mono small" data-testid="investigation-predicate"> · {invocation.authorizationPredicate}</span>
-                  ) : null}
+                  <div className="record-line">
+                    <Badge variant={variantFor(outcomeTone(invocation.outcome))}>{t(outcomeKey(invocation.outcome))}</Badge>
+                    <strong>{t(toolKey(invocation.tool))}</strong>
+                    <span className="muted small">· {String(invocation.durationMs)} ms</span>
+                    <span className="muted small">· {t('investigations.tools.attempt', { attempt: invocation.attempt })}</span>
+                    {invocation.authorizationPredicate ? (
+                      <span className="mono small" data-testid="investigation-predicate">· {invocation.authorizationPredicate}</span>
+                    ) : null}
+                  </div>
                   {invocation.errorCode ? (
                     <div className="muted small" data-testid="investigation-tool-error">
                       {t(invocationErrorKey(invocation.errorCode))}
@@ -299,22 +304,24 @@ export function InvestigationPanel({ incidentId, canOperate }: { incidentId: str
                   ) : null}
                 </li>
               ))}
-            </ol>
+            </ul>
           )}
 
           <h3>{t('investigations.hypotheses.title')}</h3>
           {current.hypotheses.length === 0 ? (
             <p className="muted small" data-testid="investigation-hypotheses-empty">{t('investigations.hypotheses.empty')}</p>
           ) : (
-            <ol className="timeline" data-testid="investigation-hypotheses">
+            <ul className="record-list" data-testid="investigation-hypotheses">
               {current.hypotheses.map((hypothesis) => (
                 <li key={hypothesis.hypothesisId} data-stance={hypothesis.stance}>
-                  <Badge variant={variantFor(stanceTone(hypothesis.stance))} data-testid="investigation-stance">
-                    {t(stanceKey(hypothesis.stance))}
-                  </Badge>
-                  <span className="muted small" data-testid="investigation-confidence">
-                    {' '}{t(confidenceKey(hypothesis.confidence))}
-                  </span>
+                  <div className="record-line">
+                    <Badge variant={variantFor(stanceTone(hypothesis.stance))} data-testid="investigation-stance">
+                      {t(stanceKey(hypothesis.stance))}
+                    </Badge>
+                    <span className="muted small" data-testid="investigation-confidence">
+                      {t(confidenceKey(hypothesis.confidence))}
+                    </span>
+                  </div>
                   <p data-testid="investigation-statement">{hypothesis.statement}</p>
                   <p className="muted small" data-testid="investigation-reasoning">{hypothesis.reasoning}</p>
                   {hypothesis.uncertainty ? (
@@ -341,7 +348,7 @@ export function InvestigationPanel({ incidentId, canOperate }: { incidentId: str
                   />
                 </li>
               ))}
-            </ol>
+            </ul>
           )}
 
           {citationBody ? (

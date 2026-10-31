@@ -149,7 +149,10 @@ The operator, through the paths that already existed before this phase:
 - **The review of an investigation**: `POST .../investigations/{runId}/review`, operator
   role, write-once per run, `ACCEPTED | REJECTED`, recorded in
   `investigation_human_reviews`. It says "I find this reasoning usable for triage". It says
-  nothing about the incident.
+  nothing about the incident. Write-once is enforced by the `investigation_review_immutable`
+  trigger added in migration 0021, not only by the absence of an update handler: the Phase F
+  review showed `UPDATE ... SET decision='REJECTED'` succeeded, so the sentence above was a
+  statement about the API that read like a statement about the table.
 
 Who *ran* the investigation is recorded too: `requestedBy` is the operator whose session
 started it, and `scopeUserId` is the account whose authority every read was performed under.
