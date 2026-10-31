@@ -894,6 +894,82 @@ input::placeholder { color: var(--ow-text-muted); }
 [data-testid="incident-investigations"] .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 [data-testid="incident-investigations"] pre,
 [data-testid="incident-investigations"] .evidence-body { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; }
+
+/* G12 R2 - the run chooser. Five full-width bordered buttons read as five equally important
+   actions and buried the run that was actually open; the selected run now carries the accent
+   and the others are quiet rows. Nothing here is decorative: the row is the control, and its
+   selected state is what tells a reader which run the pane below is describing. */
+/* The run chooser keeps .record-list (it is a list of records, and the repo test asserts the
+   class), and the two rules that made a record list a stack of rows are undone here: a chooser
+   is a column of controls, not five bordered records. */
+[data-testid="investigation-history-list"] { margin-top: 8px; gap: 2px; }
+[data-testid="investigation-history-list"] > li { padding: 2px 0; border-bottom: 0; }
+[data-testid="investigation-history-list"] > li:last-child { border-bottom: 0; }
+.investigation-run-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; min-width: 0; min-height: var(--ow-control-md); padding: 6px 10px;
+  border: 1px solid transparent; border-radius: var(--ow-radius-control);
+  background: transparent; color: var(--ow-text-secondary); font-size: var(--ow-type-sm);
+  text-align: start; cursor: pointer;
+}
+.investigation-run-row:hover { background: var(--ow-surface-2); color: var(--ow-text); }
+.investigation-run-row[data-selected="true"] {
+  background: var(--ow-surface-2); border-color: var(--ow-border-strong); color: var(--ow-text);
+  font-weight: 600; box-shadow: inset 3px 0 0 var(--ow-accent);
+}
+.investigation-run-row:focus-visible { outline: 2px solid var(--ow-focus); outline-offset: 1px; }
+.investigation-run-state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.investigation-run-when { white-space: nowrap; }
+
+/* One line of identity for the open run: the status, what answered, why it stopped, and the
+   cancel control, instead of a badge row and a button separated by the budget tiles. */
+.investigation-run-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* The numbers a reader needs before the conclusion, at one weight, without four nested cards
+   inside this panel (the old strip reused .panel .metric-card, which drew a border inside a
+   border and made the panel look like a dashboard inside a dashboard). */
+.investigation-meta {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px 16px;
+  margin: 12px 0 4px; padding: 10px 0;
+  border-top: 1px solid var(--ow-border); border-bottom: 1px solid var(--ow-border);
+}
+.investigation-meta > div { min-width: 0; }
+.investigation-meta dt { margin: 0 0 2px; color: var(--ow-text-muted); font-size: var(--ow-type-label); font-weight: 600; }
+.investigation-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ow-text); font-size: var(--ow-type-sm); }
+
+/* A hypothesis is one block: what was inferred, what it is unsure of, and the reads it cites.
+   The statement is set at reading size; reasoning and caveats are subordinate to it instead of
+   being three paragraphs of equal weight. */
+[data-testid="investigation-hypotheses"] > li { gap: 8px; padding: 14px 0; }
+/* A gap code is a sentence, not a word: the shared Badge is nowrap (right for a status pill),
+   which made "{n} evidence rows have no provenance" 29px wider than a 390 viewport. Inside this
+   panel a badge may wrap, so the pane keeps its own width. */
+[data-testid="incident-investigations"] [data-testid="investigation-gaps"] > span,
+[data-testid="incident-investigations"] [data-testid="investigation-hypothesis-kind"],
+[data-testid="incident-investigations"] [data-testid="investigation-stance"] { white-space: normal; }
+[data-testid="incident-investigations"] [data-testid="investigation-uncertainty"],
+[data-testid="incident-investigations"] [data-testid="investigation-reasoning"] { max-width: var(--ow-readable); }
+.investigation-statement { margin: 0; max-width: var(--ow-readable); color: var(--ow-text); font-size: var(--ow-type-base); line-height: 1.6; }
+.investigation-caveat {
+  margin: 0; padding-left: 10px; max-width: var(--ow-readable);
+  border-left: 2px solid var(--ow-warning); color: var(--ow-text-secondary); font-size: var(--ow-type-sm);
+}
+.investigation-citations { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.investigation-citations > ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.investigation-citations > ul > li { min-width: 0; }
+.investigation-citations [data-testid="investigation-citation"] {
+  padding: 2px 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control);
+  background: var(--ow-surface-2); color: var(--ow-text-secondary);
+}
+.investigation-citations [data-testid="investigation-citation"][data-open="true"] {
+  border-color: var(--ow-border-strong); background: var(--ow-surface); color: var(--ow-text);
+}
+/* The bytes open under the citation that named them, and they scroll inside their own box:
+   twenty-four lines of a log are evidence, and they must not push the conclusion off screen. */
+.investigation-citation-body {
+  min-width: 0; padding: 4px 0 4px 10px; border-left: 2px solid var(--ow-border-strong);
+}
+.investigation-citation-body pre { max-height: 240px; overflow: auto; margin: 0; }
 .studio-conflict { align-items: flex-start; }
 .studio-conflict > div:nth-child(2) { display: flex; flex-direction: column; gap: 4px; }
 .studio-conflict pre { max-height: 90px; overflow: auto; margin: 4px 0 0; font-size: var(--ow-type-label); }
