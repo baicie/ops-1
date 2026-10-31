@@ -1,3 +1,5 @@
+import type { AuditScope } from './lib/audit-scope';
+
 export type Role = 'admin' | 'operator' | 'viewer';
 
 export interface User {
@@ -39,6 +41,12 @@ export interface Overview {
   activeDeployments: number;
   attention: AttentionItem[];
   recentEvents: AuditEvent[];
+  /**
+   * What the feed above was read under, as the kernel reports it. Absent when the body came
+   * from a fixture or a kernel older than the field, and the page then refuses to explain an
+   * empty feed as a permission (lib/audit-scope.ts: an unknown scope is not an empty scope).
+   */
+  scope?: AuditScope | null;
 }
 
 export interface PluginSummary {

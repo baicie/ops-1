@@ -933,6 +933,8 @@
   "overview.events.empty.description": "Install a signed plugin or join a node to begin.",
   "overview.events.empty.title": "No events yet",
   "overview.events.repeated": "{count} repeats in this batch",
+  "overview.events.restricted.description": "This feed carries the events you may read ({kinds}); every other subject in the ledger is administrator-only. An empty list is that permission boundary, not evidence that nothing happened.",
+  "overview.events.restricted.title": "Only some events can appear here",
   "overview.events.title": "Recent events",
   "overview.events.viewAll": "View all",
   "overview.health.allClearDetail": "Every enrolled node is reachable, every desired replica is ready and no activation is blocked.",

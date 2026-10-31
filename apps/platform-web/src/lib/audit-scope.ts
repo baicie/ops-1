@@ -76,9 +76,19 @@ export function auditEmptyKind(input: {
   scope: AuditScope | null;
   subjectType?: string | null;
   narrowed?: boolean;
+  /**
+   * The read named no subject type, so it asked the ledger for every kind at once and the
+   * kernel dropped every kind this caller cannot read. An empty answer then cannot be told
+   * apart from a refused one, and the reader is owed the boundary rather than "nothing
+   * happened". Ignored when a subject type is given: that read has one kind to judge.
+   */
+  spansSubjectTypes?: boolean;
 }): AuditEmptyKind {
-  const { scope, subjectType, narrowed = false } = input;
+  const { scope, subjectType, narrowed = false, spansSubjectTypes = false } = input;
   if (!scope) return 'none';
   if (subjectType && !canReadType(scope, subjectType)) return 'restricted';
+  // A boundary outranks a filter: clearing a filter cannot produce a row. Both outrank "none",
+  // the one claim that needs no evidence - and the one an empty permission slice must not make.
+  if (!subjectType && spansSubjectTypes && !scope.seesAll) return 'restricted';
   return narrowed ? 'filtered' : 'none';
 }

@@ -15,6 +15,7 @@ import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, indicatorStateForCode, type IndicatorState } from '../components/app/status-indicator';
 import { useStatusText } from '../components/app/status';
 import { statusForCode } from '../components/status-tone';
+import { auditEmptyKind } from '../lib/audit-scope';
 import { localizeAttentionDetail, localizeAttentionTitle } from '../lib/kernel-messages';
 import { isUnconfigured } from '../lib/platform-status';
 
@@ -191,6 +192,15 @@ export function OverviewPage() {
         ? localizeAttentionDetail(data.attention[0].detail, t).text
         : null;
   const days = data ? groupEventsByDay(data.recentEvents) : [];
+  /**
+   * Why the feed is empty, when it is. This read names no subject type, so the kernel drops
+   * every kind this caller cannot read and an empty answer is a boundary as often as it is an
+   * empty ledger; the panel used to say "install a signed plugin or join a node", which is a
+   * cause it had no evidence for. The kernel's scope decides here, never a role check.
+   * The panel keeps no filters of its own, so the helper cannot return `filtered` here.
+   */
+  const eventsScope = data?.scope ?? null;
+  const eventsEmptyKind = auditEmptyKind({ scope: eventsScope, spansSubjectTypes: true });
 
   return (
     <div className="page-stack">
@@ -391,7 +401,17 @@ export function OverviewPage() {
                   <Link className="text-link" to="/admin/activity">{t('overview.events.viewAll')} <Icon name="arrowRight" size={13} /></Link>
                 </div>
                 {data.recentEvents.length === 0 ? (
-                  <EmptyState icon="activity" title={t('overview.events.empty.title')} description={t('overview.events.empty.description')} />
+                  <div data-empty-state={eventsEmptyKind} data-testid="overview-events-empty">
+                    {eventsEmptyKind === 'restricted' ? (
+                      <EmptyState
+                        icon="access"
+                        title={t('overview.events.restricted.title')}
+                        description={t('overview.events.restricted.description', { kinds: (eventsScope?.readableSubjectTypes ?? []).join(', ') })}
+                      />
+                    ) : (
+                      <EmptyState icon="activity" title={t('overview.events.empty.title')} description={t('overview.events.empty.description')} />
+                    )}
+                  </div>
                 ) : (
                   <ol className="event-list">
                     {days.map((day) => (

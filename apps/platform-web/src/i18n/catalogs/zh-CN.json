@@ -933,6 +933,8 @@
   "overview.events.empty.description": "安装一个签名插件或接入一个节点即可开始。",
   "overview.events.empty.title": "暂无事件",
   "overview.events.repeated": "本批次重复 {count} 次",
+  "overview.events.restricted.description": "该列表只包含你有权读取的事件（{kinds}）；账本中其余主体类型仅管理员可读。空列表是这条权限边界，不能说明没有发生过任何事件。",
+  "overview.events.restricted.title": "这里只会出现你有权读取的事件",
   "overview.events.title": "最近事件",
   "overview.events.viewAll": "查看全部",
   "overview.health.allClearDetail": "所有已注册节点均可达，每个期望副本均已就绪，且没有激活被阻塞。",
