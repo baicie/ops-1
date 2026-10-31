@@ -19,10 +19,14 @@ paths:
       summary: Create an incident (operator or admin)
       description: >
         source=nativeId is the natural identity of a reported failure. A repeat
-        of the same (source, nativeId) returns 200 with the existing incident
-        instead of creating a duplicate; without nativeId every call creates a
-        new incident, because the Kernel cannot decide that two manual reports
-        are the same failure.
+        of the same (source, nativeId) by a caller that can read the existing row
+        returns 200 with that incident instead of creating a duplicate; when the
+        row exists but sits outside the caller read scope the answer is
+        409 INCIDENT_NATIVE_ID_TAKEN, never 404 — the caller supplied the key, so
+        "this key is taken" is information it already had, while "not found"
+        would deny the row and still refuse to create it. Without nativeId every
+        call creates a new incident, because the Kernel cannot decide that two
+        manual reports are the same failure.
       responses:
         '201':
           description: Created
@@ -30,13 +34,30 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Incident'}
         '200':
-          description: Idempotent replay; body is the incident that already existed
+          description: >
+            Idempotent replay: the caller owns the row, or its read scope covers
+            it (admin); body is the incident that already existed
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Incident'}
         '400': {description: INVALID_REQUEST — field shape/value rejected}
         '401': {description: UNAUTHENTICATED}
         '403': {description: FORBIDDEN — viewer may not create incidents}
+        '409':
+          description: >
+            INCIDENT_NATIVE_ID_TAKEN — the (source, nativeId) natural key already
+            belongs to an incident outside the caller read scope, so creating it
+            and replaying it are both impossible for this caller.
+            INCIDENT_WRITE_CONFLICT — a concurrent write changed the row between
+            the insert and the re-read; retry the request.
+            A POST create never answers 404: that status would report the failure
+            as nonexistent while refusing to create it.
+        '500':
+          description: >
+            AUDIT_WRITE_FAILED — the audit row for this write could not be
+            stored, so the whole transaction rolled back and nothing was created;
+            retryable, and no incident exists with this body's natural key unless
+            a later call succeeded.
       requestBody:
         required: true
         content:
@@ -124,7 +145,16 @@ paths:
         '401': {description: UNAUTHENTICATED}
         '403': {description: FORBIDDEN — viewer may not append evidence}
         '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
-        '409': {description: INCIDENT_CLOSED — a closed incident accepts no new evidence}
+        '409':
+          description: >
+            INCIDENT_CLOSED — a closed incident accepts no new evidence.
+            INCIDENT_WRITE_CONFLICT — a concurrent write changed the evidence set
+            between the insert and the re-read; retry the request.
+        '500':
+          description: >
+            AUDIT_WRITE_FAILED — the audit row could not be stored, so the
+            evidence row and the OPEN -> INVESTIGATING transition rolled back
+            with it; retryable.
     get:
       summary: Evidence of one incident, newest collection first
       parameters:
@@ -165,8 +195,15 @@ paths:
         '409':
           description: >
             INCIDENT_ALREADY_CONCLUDED (a verdict exists),
-            INCIDENT_EVIDENCE_REQUIRED (CONFIRMED/REFUTED without evidence), or
-            INCIDENT_CLOSED (a closed incident accepts no verdict)
+            INCIDENT_EVIDENCE_REQUIRED (CONFIRMED/REFUTED without evidence),
+            INCIDENT_CLOSED (a closed incident accepts no verdict), or
+            INCIDENT_STATE_CONFLICT (the status moved out of a concludable state
+            while the verdict was being recorded)
+        '500':
+          description: >
+            AUDIT_WRITE_FAILED — the verdict's audit row could not be stored, so
+            the verdict insert and the CONCLUDED transition rolled back together;
+            retryable, and the incident still has no verdict.
     get:
       summary: The human verdict of one incident
       parameters:

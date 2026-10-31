@@ -10,7 +10,6 @@
 //! (jobs.rs:1883): admin and viewer read everything, an operator reads only what
 //! it owns.
 
-use crate::audit;
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -224,26 +223,9 @@ pub async fn create_incident(
     auth.require_operator()?;
     let payload: CreateIncidentRequest = parse_json(body)?;
     let caller = Caller::from_auth(&auth);
+    // No audit call here: the audit row is written inside insert_incident's
+    // transaction, so a failed audit cannot leave a committed incident behind.
     let (created, incident) = insert_incident(&state.db, caller, payload).await?;
-    if created {
-        audit::record(
-            &state.db,
-            "INCIDENT_CREATED",
-            "USER",
-            &auth.user_id.to_string(),
-            "INCIDENT",
-            &incident.id.to_string(),
-            "CREATE",
-            "ACCEPTED",
-            serde_json::json!({
-                "severity": incident.severity,
-                "source": incident.source,
-                "nativeId": incident.native_id,
-            }),
-            None,
-        )
-        .await?;
-    }
     let status = if created {
         StatusCode::CREATED
     } else {
@@ -281,25 +263,6 @@ pub async fn append_evidence(
     let payload: CreateEvidenceRequest = parse_json(body)?;
     let caller = Caller::from_auth(&auth);
     let (created, evidence) = insert_evidence(&state.db, caller, incident_id, payload).await?;
-    if created {
-        audit::record(
-            &state.db,
-            "INCIDENT_EVIDENCE_ADDED",
-            "USER",
-            &auth.user_id.to_string(),
-            "INCIDENT",
-            &incident_id.to_string(),
-            "ADD_EVIDENCE",
-            "ACCEPTED",
-            serde_json::json!({
-                "evidenceId": evidence.evidence_id,
-                "kind": evidence.kind,
-                "trust": evidence.trust,
-            }),
-            None,
-        )
-        .await?;
-    }
     let status = if created {
         StatusCode::CREATED
     } else {
@@ -328,19 +291,6 @@ pub async fn create_verdict(
     let payload: CreateVerdictRequest = parse_json(body)?;
     let caller = Caller::from_auth(&auth);
     let verdict = insert_verdict(&state.db, caller, incident_id, payload).await?;
-    audit::record(
-        &state.db,
-        "INCIDENT_VERDICT_RECORDED",
-        "USER",
-        &auth.user_id.to_string(),
-        "INCIDENT",
-        &incident_id.to_string(),
-        "RECORD_VERDICT",
-        "ACCEPTED",
-        serde_json::json!({ "verdict": verdict.verdict }),
-        None,
-    )
-    .await?;
     Ok((StatusCode::CREATED, Json(verdict)))
 }
 
@@ -384,6 +334,10 @@ async fn insert_incident(
         };
 
     let incident_id = Uuid::new_v4();
+    // The row and the audit row that attests it share one transaction. Written
+    // after the commit instead, a failed audit insert turns into a 5xx over a
+    // committed incident: the client retries and is told the incident exists.
+    let mut tx = db.begin().await?;
     let created: Option<Uuid> = sqlx::query_scalar(
         r#"
         INSERT INTO kernel.incidents
@@ -402,31 +356,55 @@ async fn insert_incident(
     .bind(related_entity.as_deref())
     .bind(payload.started_at)
     .bind(caller.user_id)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
 
-    match created {
-        Some(id) => Ok((true, query_incident(db, caller, id).await?)),
-        None => {
-            // A conflicting insert can only mean the natural key already exists.
-            // Re-read it instead of telling the caller to retry: a replay must be
-            // answered, not rejected.
-            let existing: Option<Uuid> = sqlx::query_scalar(
-                "SELECT incident_id FROM kernel.incidents WHERE source=$1 AND native_id=$2",
-            )
-            .bind(&source)
-            .bind(native_id.as_deref())
-            .fetch_optional(db)
-            .await?;
-            let Some(existing) = existing else {
-                return Err(AppError::conflict(
-                    "INCIDENT_WRITE_CONFLICT",
-                    "a concurrent write changed this incident set; retry the request",
-                ));
-            };
-            Ok((false, query_incident(db, caller, existing).await?))
-        }
+    if let Some(id) = created {
+        audit_in_tx(
+            &mut tx,
+            "INCIDENT_CREATED",
+            caller.user_id,
+            id,
+            "CREATE",
+            serde_json::json!({
+                "severity": severity,
+                "source": source,
+                "nativeId": native_id,
+            }),
+        )
+        .await?;
+        tx.commit().await?;
+        return Ok((true, query_incident(db, caller, id).await?));
     }
+    tx.rollback().await?;
+
+    // A conflicting insert can only mean the natural key already exists.
+    // Re-read it instead of telling the caller to retry: a replay must be
+    // answered, not rejected.
+    let existing: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT incident_id, owner FROM kernel.incidents WHERE source=$1 AND native_id=$2",
+    )
+    .bind(&source)
+    .bind(native_id.as_deref())
+    .fetch_optional(db)
+    .await?;
+    let Some((existing, owner)) = existing else {
+        return Err(AppError::conflict(
+            "INCIDENT_WRITE_CONFLICT",
+            "a concurrent write changed this incident set; retry the request",
+        ));
+    };
+    // Taken, and outside the caller's read scope. A POST create has no 404 to
+    // give: that status would say the failure does not exist while refusing to
+    // create it. The natural key came from the caller, so telling it the key is
+    // taken reveals only what the caller already typed.
+    if !caller.sees_all && owner != caller.user_id {
+        return Err(AppError::conflict(
+            "INCIDENT_NATIVE_ID_TAKEN",
+            "another user already reported this source/nativeId failure; it cannot be re-created or taken over",
+        ));
+    }
+    Ok((false, query_incident(db, caller, existing).await?))
 }
 
 async fn query_incidents(
@@ -534,6 +512,10 @@ async fn insert_evidence(
     }
 
     let evidence_id = Uuid::new_v4();
+    // Evidence, the OPEN -> INVESTIGATING transition and the audit row commit
+    // together: rolled back after the transition, an audit failure would leave
+    // the incident investigating evidence that this endpoint never accepted.
+    let mut tx = db.begin().await?;
     let inserted = sqlx::query_as::<_, EvidenceView>(
         r#"
         INSERT INTO kernel.incident_evidence
@@ -550,10 +532,11 @@ async fn insert_evidence(
     .bind(payload.collected_at)
     .bind(&content_ref)
     .bind(&trust)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
 
     let Some(evidence) = inserted else {
+        tx.rollback().await?;
         let existing = sqlx::query_as::<_, EvidenceView>(
             r#"
             SELECT evidence_id,incident_id,kind,source,collected_at,content_ref,trust
@@ -584,8 +567,22 @@ async fn insert_evidence(
           WHERE incident_id=$1 AND status='OPEN'",
     )
     .bind(incident_id)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
+    audit_in_tx(
+        &mut tx,
+        "INCIDENT_EVIDENCE_ADDED",
+        caller.user_id,
+        incident_id,
+        "ADD_EVIDENCE",
+        serde_json::json!({
+            "evidenceId": evidence.evidence_id,
+            "kind": &evidence.kind,
+            "trust": &evidence.trust,
+        }),
+    )
+    .await?;
+    tx.commit().await?;
 
     Ok((true, evidence))
 }
@@ -696,6 +693,17 @@ async fn insert_verdict(
             "the incident changed state while the verdict was being recorded; reload before retrying",
         ));
     }
+    // Inside the transaction: a verdict that cannot be audited is a verdict that
+    // was never recorded, and the status CAS above rolls back with it.
+    audit_in_tx(
+        &mut tx,
+        "INCIDENT_VERDICT_RECORDED",
+        caller.user_id,
+        incident_id,
+        "RECORD_VERDICT",
+        serde_json::json!({ "verdict": &view.verdict }),
+    )
+    .await?;
     tx.commit().await?;
     Ok(view)
 }
@@ -757,6 +765,57 @@ LEFT JOIN kernel.incident_verdicts v ON v.incident_id = i.incident_id"#;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// The audit row that attests one incident write, inserted on the caller's
+/// transaction instead of the pool.
+///
+/// audit::record is pool-bound, so it can only run after the business write has
+/// already committed; that ordering is what turns a failed audit into a 5xx over
+/// a row that exists. This helper exists so create/evidence/verdict can write the
+/// row and its audit row in one transaction. If audit::record ever learns to take
+/// a transaction, delete this and call it.
+async fn audit_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_type: &str,
+    actor_id: Uuid,
+    incident_id: Uuid,
+    action: &str,
+    details: serde_json::Value,
+) -> AppResult<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO kernel.audit_events
+          (id, event_type, actor_type, actor_id, subject_type, subject_id, action, result, details, request_id, occurred_at)
+        VALUES ($1,$2,'USER',$3,'INCIDENT',$4,$5,'ACCEPTED',$6,NULL,$7)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(event_type)
+    .bind(actor_id.to_string())
+    .bind(incident_id.to_string())
+    .bind(action)
+    .bind(details)
+    .bind(Utc::now())
+    .execute(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, "incident audit write failed; rolling the write back");
+        audit_write_failed()
+    })?;
+    Ok(())
+}
+
+/// Says what actually happened: the write was rolled back, so retrying is
+/// meaningful and the client must not treat the call as half-applied.
+fn audit_write_failed() -> AppError {
+    let mut error = AppError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "AUDIT_WRITE_FAILED",
+        "the audit record for this write could not be stored, so the write was rolled back and did not take effect",
+    );
+    error.retryable = true;
+    error
+}
 
 /// Parses a request body into the contract type.
 ///
@@ -1489,5 +1548,275 @@ mod tests {
         assert_eq!(error.code, "INVALID_REQUEST");
 
         cleanup(&pool, &[user]).await;
+    }
+
+    // -- audit, transaction order and create replay ---------------------------
+
+    /// Makes kernel.audit_events reject one actor's rows of one event type, so the
+    /// rollback path is exercised by a real constraint failure rather than a mock.
+    /// Scoped to a freshly seeded user so concurrent tests keep their audits.
+    async fn refuse_audit(pool: &PgPool, event_type: &str, actor: Uuid) -> String {
+        let name = format!("g11_audit_probe_{}", Uuid::new_v4().simple());
+        sqlx::query(&format!(
+            "ALTER TABLE kernel.audit_events ADD CONSTRAINT {name} CHECK (
+               NOT (event_type='{event_type}' AND actor_id='{actor}'))"
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+        name
+    }
+
+    async fn allow_audit(pool: &PgPool, name: &str) {
+        sqlx::query(&format!(
+            "ALTER TABLE kernel.audit_events DROP CONSTRAINT {name}"
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn audit_rows(pool: &PgPool, incident_id: Uuid, event_type: &str) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.audit_events WHERE subject_id=$1 AND event_type=$2",
+        )
+        .bind(incident_id.to_string())
+        .bind(event_type)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// The defect this replaced: audit written after the commit, so a failed audit
+    /// answered 5xx over a verdict the database had already accepted.
+    #[tokio::test]
+    async fn a_failed_audit_rolls_the_verdict_back() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("oom kills", None))
+                .await
+                .unwrap();
+        insert_evidence(
+            &pool,
+            caller(user),
+            incident.id,
+            evidence_request("sha256:oom-log"),
+        )
+        .await
+        .unwrap();
+
+        let probe = refuse_audit(&pool, "INCIDENT_VERDICT_RECORDED", user).await;
+        let refused = insert_verdict(
+            &pool,
+            caller(user),
+            incident.id,
+            verdict_request("CONFIRMED"),
+        )
+        .await;
+        allow_audit(&pool, &probe).await;
+
+        let error = refused.unwrap_err();
+        assert_eq!(error.code, "AUDIT_WRITE_FAILED");
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            error.retryable,
+            "nothing was persisted, so telling the client to retry is honest"
+        );
+
+        let verdicts: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_verdicts WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            verdicts, 0,
+            "the verdict must not survive the audit that failed to describe it"
+        );
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM kernel.incidents WHERE incident_id=$1")
+                .bind(incident.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            status, "INVESTIGATING",
+            "the CONCLUDED transition commits with the audit row or not at all"
+        );
+
+        let verdict = insert_verdict(
+            &pool,
+            caller(user),
+            incident.id,
+            verdict_request("CONFIRMED"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(verdict.verdict, "CONFIRMED");
+        assert_eq!(
+            audit_rows(&pool, incident.id, "INCIDENT_VERDICT_RECORDED").await,
+            1
+        );
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_audit_rolls_the_incident_back_and_frees_the_natural_key() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let native_id = format!("native-audit-{}", Uuid::new_v4().simple());
+
+        let probe = refuse_audit(&pool, "INCIDENT_CREATED", user).await;
+        let refused = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("header flipped", Some(&native_id)),
+        )
+        .await;
+        allow_audit(&pool, &probe).await;
+
+        let error = refused.unwrap_err();
+        assert_eq!(error.code, "AUDIT_WRITE_FAILED");
+
+        let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM kernel.incidents WHERE owner=$1")
+            .bind(user)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, 0, "a rolled-back create leaves no incident behind");
+
+        // Rolled back means the natural key is free: had the row committed without
+        // its audit row, this retry would be answered as a replay of a write the
+        // caller was told had failed.
+        let (created, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("header flipped", Some(&native_id)),
+        )
+        .await
+        .unwrap();
+        assert!(created);
+        assert_eq!(audit_rows(&pool, incident.id, "INCIDENT_CREATED").await, 1);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_audit_rolls_the_evidence_and_the_state_change_back() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("first evidence", None),
+        )
+        .await
+        .unwrap();
+
+        let probe = refuse_audit(&pool, "INCIDENT_EVIDENCE_ADDED", user).await;
+        let refused = insert_evidence(
+            &pool,
+            caller(user),
+            incident.id,
+            evidence_request("sha256:first"),
+        )
+        .await;
+        allow_audit(&pool, &probe).await;
+
+        assert_eq!(refused.unwrap_err().code, "AUDIT_WRITE_FAILED");
+        let evidence: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(evidence, 0, "evidence and its audit row commit together");
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM kernel.incidents WHERE incident_id=$1")
+                .bind(incident.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            status, "OPEN",
+            "a rejected evidence write must not leave the incident INVESTIGATING"
+        );
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// A POST create answered 404 for a natural key another operator owns: the
+    /// status claimed the failure did not exist while refusing to create it.
+    #[tokio::test]
+    async fn a_native_key_owned_by_another_operator_answers_409_not_404() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let operator_a = seed_user(&pool, "operator").await;
+        let operator_b = seed_user(&pool, "operator").await;
+        let admin = seed_user(&pool, "admin").await;
+        let native_id = format!("native-taken-{}", Uuid::new_v4().simple());
+
+        let (_, first) = insert_incident(
+            &pool,
+            caller(operator_a),
+            incident_request("disk full on web-01", Some(&native_id)),
+        )
+        .await
+        .unwrap();
+
+        let error = insert_incident(
+            &pool,
+            caller(operator_b),
+            incident_request("disk full on web-01", Some(&native_id)),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_NATIVE_ID_TAKEN");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert!(
+            !error.message.contains(&first.id.to_string()),
+            "the refusal must not hand another operator's incident id to the caller"
+        );
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incidents WHERE source='API' AND native_id=$1",
+        )
+        .bind(&native_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, 1, "the refused create must not add a second row");
+        let owner: Uuid = sqlx::query_scalar(
+            "SELECT owner FROM kernel.incidents WHERE source='API' AND native_id=$1",
+        )
+        .bind(&native_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(owner, operator_a, "ownership must not move on a replay");
+
+        // An admin can read that row, so the same request stays a documented replay.
+        let (created, seen) = insert_incident(
+            &pool,
+            admin_caller(admin),
+            incident_request("disk full on web-01", Some(&native_id)),
+        )
+        .await
+        .unwrap();
+        assert!(!created);
+        assert_eq!(seen.id, first.id);
+
+        cleanup(&pool, &[operator_a, operator_b, admin]).await;
     }
 }
