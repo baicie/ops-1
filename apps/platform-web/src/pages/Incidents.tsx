@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../api';
-import type { IncidentList, IncidentView } from '../types';
+import type { IncidentView } from '../types';
 import { useAuth } from '../auth';
 import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
@@ -28,6 +28,8 @@ import {
   incidentFailureKey,
   incidentListQuery,
   incidentSourceKey,
+  incidentsEmptyKind,
+  type IncidentListPayload,
   ownerFilterValue,
   shortOwner,
   toIsoInstant,
@@ -155,7 +157,7 @@ export function IncidentsPage() {
   const [owner, setOwner] = React.useState(OWNER_ANY);
   const [cursor, setCursor] = React.useState<string | null>(null);
   const [reload, setReload] = React.useState(0);
-  const [data, setData] = React.useState<IncidentList | null>(null);
+  const [data, setData] = React.useState<IncidentListPayload | null>(null);
   const [error, setError] = React.useState<Error | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [observedAt, setObservedAt] = React.useState<string | null>(null);
@@ -173,7 +175,7 @@ export function IncidentsPage() {
       cursor,
       limit: 20,
     });
-    api.get<IncidentList>('/api/v1/incidents?' + query)
+    api.get<IncidentListPayload>('/api/v1/incidents?' + query)
       .then((result) => {
         if (cancelled) return;
         setData(result);
@@ -188,6 +190,20 @@ export function IncidentsPage() {
   const filtering = status !== FILTER_ANY || severity !== FILTER_ANY || owner !== OWNER_ANY;
   const clearFilters = () => { setStatus(FILTER_ANY); setSeverity(FILTER_ANY); setOwner(OWNER_ANY); setCursor(null); };
   const items = data?.items ?? [];
+  /**
+   * What the kernel said this list would show, carried by the same answer as the rows. The page
+   * never derives it from the signed-in role: it renders the scope it was sent, and a body with
+   * no scope explains nothing rather than guessing (the same rule as lib/audit-scope.ts).
+   */
+  const scope = data?.scope ?? null;
+  /**
+   * An empty list has three causes and an empty array cannot tell them apart. This page used to
+   * render all three as "nothing has been entered", which for an operator is false: it reads
+   * only the incidents it owns, so a platform with records can still send it an empty page.
+   * incidentsEmptyKind decides, and a filter outranks the scope here because clearing a filter
+   * can produce the operator's own rows (incidents.ts).
+   */
+  const emptyKind = incidentsEmptyKind({ scope, filtering });
   const titleCount = new Set(items.map((item) => item.title)).size;
   const ownerName = (ownerId: string) => directory.names?.[ownerId] ?? shortOwner(ownerId);
 
@@ -262,15 +278,28 @@ export function IncidentsPage() {
           <Button variant="secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
         </section>
       ) : items.length === 0 ? (
-        <div data-empty-state={filtering ? 'filtered' : 'none'} data-testid="incidents-empty">
-          <EmptyState
-            icon="alert"
-            title={filtering ? t('incidents.empty.filtered.title') : t('incidents.empty.none.title')}
-            description={filtering ? t('incidents.empty.filtered.description') : t('incidents.empty.none.description')}
-            action={filtering
-              ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button>
-              : <Button onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
-          />
+        // data-narrowed-to is the payload's own answer, printed so the assertion a test makes
+        // is the fact the kernel sent rather than a role the page looked up for itself.
+        <div data-empty-state={emptyKind} data-narrowed-to={scope?.narrowedTo ?? undefined} data-testid="incidents-empty">
+          {emptyKind === 'scoped' ? (
+            <EmptyState
+              icon="access"
+              title={t('incidents.empty.scoped.title')}
+              description={t('incidents.empty.scoped.description')}
+              // The next step an operator can actually take: a record it creates is owned by it,
+              // so the one action that puts a row in this list is the one already on the page.
+              action={<Button onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
+            />
+          ) : (
+            <EmptyState
+              icon="alert"
+              title={filtering ? t('incidents.empty.filtered.title') : t('incidents.empty.none.title')}
+              description={filtering ? t('incidents.empty.filtered.description') : t('incidents.empty.none.description')}
+              action={filtering
+                ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button>
+                : <Button onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
+            />
+          )}
         </div>
       ) : (
         <section className="panel table-panel">

@@ -8,6 +8,7 @@ import {
   classifyFailure,
   clearsSensitiveView,
   closeIncidentPayload,
+  incidentsEmptyKind,
   closureNoteError,
   closurePanelState,
   incidentCapabilities,
@@ -732,5 +733,31 @@ describe('G12 C evidence trust and the audit trail', () => {
     const junk = timelineEventFacts(incidentEvent({ details: { closureNote: 42, consideredEvidenceCount: 'two' } }));
     expect(junk.closureNote).toBeNull();
     expect(junk.consideredEvidenceCount).toBeNull();
+  });
+});
+
+describe('incidentsEmptyKind: an empty list says which of three things it is', () => {
+  const OPERATOR = { seesAll: false, narrowedTo: 'owner' as const };
+  const ADMIN = { seesAll: true, narrowedTo: null };
+
+  it('an operator who owns nothing reads a scope, not an empty ledger', () => {
+    // The measured case: two incidents exist, none owned by this operator, items is [].
+    expect(incidentsEmptyKind({ scope: OPERATOR, filtering: false })).toBe('scoped');
+  });
+
+  it('an unnarrowed caller with no rows reads the ledger claim, which it can support', () => {
+    expect(incidentsEmptyKind({ scope: ADMIN, filtering: false })).toBe('none');
+  });
+
+  it('an unreadable body is not an unnarrowed one', () => {
+    // A body without a scope licenses only the claim that needs no evidence.
+    expect(incidentsEmptyKind({ scope: null, filtering: false })).toBe('none');
+    expect(incidentsEmptyKind({ scope: null, filtering: true })).toBe('filtered');
+  });
+
+  it('the page filter outranks the scope, unlike the audit ledger', () => {
+    // Clearing a filter can show the operator its own rows, so the filter is the cause here.
+    expect(incidentsEmptyKind({ scope: OPERATOR, filtering: true })).toBe('filtered');
+    expect(incidentsEmptyKind({ scope: ADMIN, filtering: true })).toBe('filtered');
   });
 });

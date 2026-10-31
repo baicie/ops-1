@@ -135,6 +135,38 @@ impl Caller {
             sees_all: role.is_admin() || !role.can_operate(),
         }
     }
+
+    /// The narrowing this read carries, as the list route reports it beside the rows.
+    ///
+    /// It is derived from sees_all and from nothing else, because that boolean IS the
+    /// predicate: 'sees_all OR owner = caller', applied once in query_incidents. The value is
+    /// reported rather than left to be inferred from an empty array - a browser cannot tell
+    /// 'nothing has been recorded' from 'nothing recorded is yours' out of an empty items
+    /// field, and the copy that guesses wrong tells an operator the platform is empty while
+    /// its records are simply someone else's.
+    pub(crate) fn scope(&self) -> IncidentScopeView {
+        IncidentScopeView {
+            sees_all: self.sees_all,
+            narrowed_to: if self.sees_all { None } else { Some("owner") },
+        }
+    }
+}
+
+/// What the incident list will show this caller, sent beside the rows.
+///
+/// One field names the fact, the other names the field the fact is about. narrowed_to exists
+/// so the copy that says 'the incidents you own' is licensed by this payload instead of by
+/// the page's memory of what the predicate used to be: a second narrowing would have to
+/// change this value, and the sentence naming ownership would have to change with it rather
+/// than quietly keep claiming the whole list.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncidentScopeView {
+    /// The list is not narrowed for this caller: it holds every incident that exists.
+    pub sees_all: bool,
+    /// When sees_all is false: the field the read is narrowed on. 'owner' is the only value
+    /// this predicate produces.
+    pub narrowed_to: Option<&'static str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -337,6 +369,9 @@ pub struct TimelineQuery {
 pub struct IncidentList {
     pub items: Vec<IncidentView>,
     pub next_cursor: Option<String>,
+    /// The read these rows were produced under. Never optional: a response without it
+    /// puts the browser back where it started, deciding from items alone.
+    pub scope: IncidentScopeView,
 }
 
 #[derive(Debug, Serialize)]
@@ -562,7 +597,11 @@ pub async fn list_incidents(
 ) -> AppResult<Json<IncidentList>> {
     let caller = Caller::from_auth(&auth);
     let (items, next_cursor) = query_incidents(&state.db, caller, query).await?;
-    Ok(Json(IncidentList { items, next_cursor }))
+    Ok(Json(IncidentList {
+        items,
+        next_cursor,
+        scope: caller.scope(),
+    }))
 }
 
 pub async fn get_incident(
@@ -2937,6 +2976,89 @@ mod tests {
             .is_ok());
 
         cleanup(&pool, &[operator_a, operator_b, admin]).await;
+    }
+
+    /// The payload's scope has to be the predicate, not a second opinion about it.
+    ///
+    /// The stranger below reads no row while a row exists: that is the case the UI used to
+    /// render as "no incident has been recorded yet", because items alone cannot say whether a
+    /// list is empty or narrowed. Both callers here read what query_incidents already returned;
+    /// what this test pins is the scope that travels beside those rows.
+    #[tokio::test]
+    async fn the_reported_scope_agrees_with_the_predicate() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let stranger = seed_user(&pool, "operator").await;
+        let admin = seed_user(&pool, "admin").await;
+
+        let (_, theirs) =
+            insert_incident(&pool, caller(owner), incident_request("scope probe", None))
+                .await
+                .unwrap();
+
+        let (stranger_items, _) = query_incidents(
+            &pool,
+            caller(stranger),
+            IncidentListQuery {
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // The predicate hides the row...
+        assert!(!stranger_items.iter().any(|item| item.id == theirs.id));
+        // ...and the scope says why, without naming the row.
+        let narrowed = caller(stranger).scope();
+        assert!(!narrowed.sees_all);
+        assert_eq!(narrowed.narrowed_to, Some("owner"));
+        // The same boolean the query binds, so the two cannot become two definitions.
+        assert_eq!(narrowed.sees_all, caller(stranger).sees_all);
+
+        let (owner_items, _) = query_incidents(
+            &pool,
+            caller(owner),
+            IncidentListQuery {
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(owner_items.iter().any(|item| item.id == theirs.id));
+        // An owner who can read its own row is still narrowed: the scope describes the read,
+        // not the result, so it does not flip to sees_all because a row happened to appear.
+        assert!(!caller(owner).scope().sees_all);
+
+        let admin_scope = admin_caller(admin).scope();
+        assert!(admin_scope.sees_all);
+        assert_eq!(admin_scope.narrowed_to, None);
+
+        cleanup(&pool, &[owner, stranger, admin]).await;
+    }
+
+    /// The wire names the web client branches on: a rename here is a silent "no scope" in the
+    /// UI, which is the state this whole change removes.
+    #[test]
+    fn the_scope_view_names_its_two_fields_on_the_wire() {
+        let operator = Caller {
+            user_id: Uuid::new_v4(),
+            sees_all: false,
+        };
+        let admin = Caller {
+            user_id: Uuid::new_v4(),
+            sees_all: true,
+        };
+        assert_eq!(
+            serde_json::to_value(operator.scope()).unwrap(),
+            serde_json::json!({ "seesAll": false, "narrowedTo": "owner" })
+        );
+        assert_eq!(
+            serde_json::to_value(admin.scope()).unwrap(),
+            serde_json::json!({ "seesAll": true, "narrowedTo": null })
+        );
     }
 
     /// D3 added an `owner` list filter for the UI. The rule it must not break is the one the

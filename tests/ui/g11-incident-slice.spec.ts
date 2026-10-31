@@ -221,9 +221,13 @@ test('an operator cannot see a record owned by someone else, and can still close
   await signOut(page);
   await signIn(page, OPERATOR.email, OPERATOR.password);
 
-  // Scope: nothing is visible yet, and the page says "no incident", not "healthy".
+  // Scope: this operator owns nothing, and the page now names WHICH empty list this is. The
+  // kernel answers a narrowed caller and an unnarrowed one with the same items: [], so the
+  // scope travelling beside the rows is the only thing that can separate the two facts.
   await page.goto('/app/incidents');
-  await expect(page.getByTestId('incidents-empty')).toHaveAttribute('data-empty-state', 'none');
+  await expect(page.getByTestId('incidents-empty')).toHaveAttribute('data-empty-state', 'scoped');
+  await expect(page.getByTestId('incidents-empty')).toHaveAttribute('data-narrowed-to', 'owner');
+  await expect(page.getByTestId('incidents-empty')).not.toContainText('nothing has been entered');
   await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(0);
   await page.screenshot({ path: SHOTS + '/07-operator-empty-state.png', fullPage: true });
 

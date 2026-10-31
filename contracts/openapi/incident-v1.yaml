@@ -97,7 +97,8 @@ paths:
           description: Opaque keyset cursor from a previous nextCursor; rejects with 400 when malformed or expired
       responses:
         '200':
-          description: Bounded page, newest first
+          description: >
+            Bounded page, newest first, with the read scope it was produced under
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IncidentList'}
@@ -661,7 +662,7 @@ components:
     IncidentList:
       type: object
       additionalProperties: false
-      required: [items, nextCursor]
+      required: [items, nextCursor, scope]
       properties:
         items:
           type: array
@@ -669,6 +670,35 @@ components:
         nextCursor:
           type: [string, 'null']
           description: Opaque keyset cursor; null when the page is the last one
+        scope:
+          $ref: '#/components/schemas/IncidentScope'
+    IncidentScope:
+      type: object
+      additionalProperties: false
+      required: [seesAll, narrowedTo]
+      description: >
+        The read the page was produced under, sent beside the rows because an empty
+        items array cannot say whether the list is empty or narrowed: both cases are
+        the same bytes, and only the Kernel knows which one happened. A client that
+        derived this from the role would be restating 4.3 of the incident ADR from
+        memory, and the drift of that restatement is the bug this field removes.
+        Written reason: docs/design/g12-scope/narrowed-reads.md section 3.
+      properties:
+        seesAll:
+          type: boolean
+          description: >
+            The list is not narrowed for this caller: it holds every incident that
+            exists. True for an admin, and true for a viewer because the predicate
+            (Caller::from_role) answers yes for a role that cannot operate.
+        narrowedTo:
+          type: [string, 'null']
+          enum: ['owner', null]
+          description: >
+            When seesAll is false: the field the read is narrowed on. 'owner' is the
+            only value the predicate produces. It is a field name rather than a
+            boolean so that copy naming ownership is licensed by the payload, and a
+            second narrowing would have to change this value instead of silently
+            reusing the sentence about owners.
     CreateEvidenceRequest:
       type: object
       additionalProperties: false

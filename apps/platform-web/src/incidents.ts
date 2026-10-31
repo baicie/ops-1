@@ -1,6 +1,6 @@
 import type { MessageKey } from './i18n';
 import type { StatusTone } from './components/status-tone';
-import type { IncidentEvidence, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
+import type { IncidentEvidence, IncidentList, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
 
 /**
  * The incident slice's client-side facts, kept out of the two page components.
@@ -82,6 +82,67 @@ export function ownerFilterValue(ownerFilter: string, selfId: string | null): st
   if (!ownerFilter || ownerFilter === OWNER_ANY) return null;
   if (ownerFilter === OWNER_SELF) return selfId;
   return ownerFilter;
+}
+
+/**
+ * What the kernel says the incident list will show this caller, sent beside the rows.
+ * Mirrors `incidents::IncidentScopeView` in apps/kernel/src/incidents.rs.
+ *
+ * It lives here rather than in types.ts for the reason `AuditScope` lives in lib/audit-scope.ts:
+ * a scope only means something next to the helper that reads it, and the empty-list decision is
+ * that helper. A type declared in both places would be a second copy of the contract.
+ */
+export interface IncidentScope {
+  /** The list is not narrowed for this caller: it holds every incident that exists. */
+  seesAll: boolean;
+  /**
+   * When `seesAll` is false: the field the read is narrowed on. `owner` is the only value the
+   * predicate produces, carried rather than assumed because the copy naming ownership has to
+   * be licensed by the payload that named it.
+   */
+  narrowedTo: 'owner' | null;
+}
+
+/**
+ * GET /api/v1/incidents: the rows and the read they were produced under.
+ *
+ * `scope` is null when the body carried none (an older kernel, or a test fixture). Never
+ * assumed to be unnarrowed: an unknown scope is not an empty permission slice, and it is not
+ * an empty ledger either.
+ */
+export interface IncidentListPayload extends IncidentList {
+  scope: IncidentScope | null;
+}
+
+/** Why the incident list is empty: three different facts a reader must never see mixed up. */
+export type IncidentEmptyKind =
+  /** The page's own filters hid every row the kernel sent. Clearing them can show rows. */
+  | 'filtered'
+  /**
+   * The kernel sent no row because this caller reads only what it owns. Not a filter, and not
+   * evidence that the platform has recorded nothing - an operator owns none of it.
+   */
+  | 'scoped'
+  /** Nothing is there: the list is unnarrowed for this caller and it holds no row. */
+  | 'none';
+
+/**
+ * Which of the three an empty incident list is, from the kernel's scope and the page's filters.
+ *
+ * The precedence is the opposite of the audit ledger's, and deliberately so. There a refused
+ * kind outranks a filter, because clearing a filter cannot conjure a row of a kind the kernel
+ * never sends. Here narrowing does not refuse the rows the reader owns: it limits the list to
+ * them, so a filter that matches none of them is still the cause, and blaming the scope would
+ * send the reader to a boundary they cannot cross instead of to the button that helps.
+ *
+ * A missing scope ranks last: it licenses the one claim that needs no evidence. An unreadable
+ * body is not an unnarrowed one (lib/audit-scope.ts makes the same choice for the same reason).
+ */
+export function incidentsEmptyKind(input: { scope: IncidentScope | null; filtering: boolean }): IncidentEmptyKind {
+  const { scope, filtering } = input;
+  if (filtering) return 'filtered';
+  if (scope && !scope.seesAll) return 'scoped';
+  return 'none';
 }
 
 /**

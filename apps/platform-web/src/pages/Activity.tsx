@@ -119,7 +119,18 @@ export function ActivityPage() {
   const stale = isStale(observedAt, POLL_INTERVAL_MS) || Boolean(error && data);
   const observing = Boolean(data);
   const narrowed = Boolean(query || subjectType || eventType || actor || result || range !== 'all');
-  const emptyKind = auditEmptyKind({ scope, subjectType: subjectType || null, narrowed });
+  /**
+   * Whether this read named a subject type. With the filter clear it asked the ledger for every
+   * kind at once, and the kernel dropped each kind this caller cannot read - so an empty answer
+   * here cannot be told apart from a refused one, and the helper is told which read this is.
+   * Without this input the page reported the widest possible read and an operator with nothing
+   * readable got "No audit events", which is the one claim an empty permission slice must not
+   * make (measured: 8 events in the ledger, 0 readable by an operator, data-empty-state=none).
+   */
+  const spansSubjectTypes = !subjectType;
+  const emptyKind = auditEmptyKind({ scope, subjectType: subjectType || null, narrowed, spansSubjectTypes });
+  /** The kinds the kernel said can reach this caller, printed verbatim rather than summarised. */
+  const readableKinds = (scope?.readableSubjectTypes ?? []).join(', ');
   const clearFilters = () => { setQuery(''); setSubjectType(''); setEventType(''); setActor(''); setResult(''); setRange('all'); };
 
   // A filter that shrinks the result set must not leave the reader on a page that no longer
@@ -238,13 +249,28 @@ export function ActivityPage() {
             asking for this kind", because the clear-filters button cannot produce a row.
           */
           emptyKind === 'restricted' ? (
-            <div data-empty-state="restricted">
-              <EmptyState
-                icon="access"
-                title={t('audit.empty.restricted.title', { subject: subjectType })}
-                description={t('audit.empty.restricted.detail')}
-                action={<Button variant="secondary" onClick={() => setSubjectType('')}>{t('activity.filter.allSubjects')}</Button>}
-              />
+            // Two refusals, two sentences. A named kind is refused outright, so the exit is
+            // "stop asking for it". An unnamed read spans every kind: what it reports is a
+            // boundary, and offering "all subjects" there would be a button that changes
+            // nothing because the filter is already clear.
+            <div data-empty-state="restricted" data-restricted-ask={spansSubjectTypes ? 'every-kind' : 'one-kind'}>
+              {spansSubjectTypes ? (
+                <EmptyState
+                  icon="access"
+                  title={t('activity.empty.restricted.title')}
+                  description={t('activity.empty.restricted.description', { kinds: readableKinds })}
+                  action={narrowed
+                    ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button>
+                    : undefined}
+                />
+              ) : (
+                <EmptyState
+                  icon="access"
+                  title={t('audit.empty.restricted.title', { subject: subjectType })}
+                  description={t('audit.empty.restricted.detail')}
+                  action={<Button variant="secondary" onClick={() => setSubjectType('')}>{t('activity.filter.allSubjects')}</Button>}
+                />
+              )}
             </div>
           ) : emptyKind === 'filtered' ? (
             // A filter that matches nothing is not an empty audit log: say so and offer the exit.
