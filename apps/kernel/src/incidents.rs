@@ -13,9 +13,10 @@
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::Response;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
@@ -47,6 +48,33 @@ const VERDICT_VALUES: &[&str] = &["CONFIRMED", "REFUTED", "INCONCLUSIVE"];
 const ATTESTATION_MAX_SKEW_SECONDS: i64 = 300;
 /// The version tag inside every signed payload. Adding a field means a new tag.
 const ATTESTATION_VERSION: &str = "opsweave-evidence-attestation-v1";
+/// What the content read path selects out of kernel.incident_evidence_content:
+/// (content type, body, verified byte length, recorded digest, retention horizon).
+type StoredContent = (String, Vec<u8>, i32, String, DateTime<Utc>);
+/// The evidence list's query window, as (since, until). Both are None or both are
+/// Some; evidence_window enforces that before any SQL runs.
+type EvidenceWindow = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
+/// The two content types the Kernel stores and serves back verbatim. Exact match,
+/// no charset parameter and no text/html: a content type the Kernel cannot serve
+/// under its own security headers is a content type it does not accept
+/// (docs/design/g12-evidence/evidence-content-adr.md §3.2).
+const EVIDENCE_CONTENT_TYPES: &[&str] = &["text/plain", "application/json"];
+/// Per-content byte bound. Bytes, not characters: the stored size is what costs,
+/// and 64 KiB is a log excerpt or a JSON snapshot, not an archive.
+const EVIDENCE_CONTENT_MAX_BYTES: usize = 65_536;
+/// How many evidence rows one incident may hold. With the per-content bound this
+/// is the total-size bound of a single incident (200 x 64 KiB, ~12.5 MiB).
+const EVIDENCE_MAX_ROWS: i64 = 200;
+/// The widest evidence query window the list endpoint accepts.
+const EVIDENCE_QUERY_MAX_DAYS: i64 = 90;
+/// How far ahead of the Kernel clock a collectedAt may sit. A future timestamp
+/// makes "was this before or after the verdict" wrong forever, so it is refused
+/// rather than stored and explained.
+const COLLECTED_AT_FUTURE_SKEW_SECONDS: i64 = 300;
+/// How old a collectedAt may be. Deliberately the same order as the 365-day
+/// retention horizon: a claim older than that cannot correspond to content the
+/// Kernel still serves.
+const COLLECTED_AT_MAX_AGE_SECONDS: i64 = 400 * 86_400;
 
 /// Who is asking, reduced to the two facts the SQL layer needs.
 ///
@@ -88,7 +116,16 @@ pub struct CreateEvidenceRequest {
     pub kind: String,
     pub source: String,
     pub collected_at: DateTime<Utc>,
-    pub content_ref: String,
+    /// Where the content is claimed to live, for a submission that does not
+    /// carry the bytes. Optional since 0018: a caller that supplies `content`
+    /// gets a server-derived `sha256:<hex>` ref instead, and any value it sends
+    /// here must be absent or exactly that one.
+    #[serde(default)]
+    pub content_ref: Option<String>,
+    /// G12 B: the bytes themselves. Bounded, digested by the server over what it
+    /// actually stored, stored write-once.
+    #[serde(default)]
+    pub content: Option<EvidenceContentRequest>,
     /// The pre-0017 field, still parsed only so its rejection is a named 400
     /// with a stable code instead of a generic "unknown field" message. Its value
     /// is never read: no request body decides verifiedTrust (G12 A1).
@@ -103,6 +140,20 @@ pub struct CreateEvidenceRequest {
     /// SOURCE_ATTESTED, and only after the signature verifies.
     #[serde(default)]
     pub attestation: Option<AttestationRequest>,
+}
+
+/// The bytes of one evidence row, as submitted.
+///
+/// `body` is a JSON string, so it is valid UTF-8 by construction: this API stores
+/// text, and a caller with binary evidence keeps using `contentRef` (which is the
+/// Legacy reference semantics - the Kernel holds no bytes for it).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvidenceContentRequest {
+    /// text/plain or application/json, exact match.
+    pub content_type: String,
+    /// The content itself. Bounded by EVIDENCE_CONTENT_MAX_BYTES of UTF-8 bytes.
+    pub body: String,
 }
 
 /// What an adapter has to present to vouch for a row.
@@ -140,6 +191,20 @@ pub struct IncidentListQuery {
     pub owner: Option<String>,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
+}
+
+/// The evidence list's optional query window, on `collectedAt`.
+///
+/// There is no free-text search: this endpoint answers "which evidence rows of
+/// this incident fall inside this window", and a missing window means all of
+/// them (the pre-0018 behaviour). A window wider than
+/// EVIDENCE_QUERY_MAX_DAYS is refused rather than served, because an unbounded
+/// scan is a denial-of-service surface the caller chooses the cost of.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceListQuery {
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -208,7 +273,22 @@ pub struct EvidenceView {
     pub kind: String,
     pub source: String,
     pub collected_at: DateTime<Utc>,
+    /// For a row with content this is the server-derived `sha256:<hex>` of the
+    /// stored bytes; for a Legacy row it is whatever the submitter typed. The
+    /// `content_status` field is what tells the two apart, not this one.
     pub content_ref: String,
+    /// STORED | LEGACY_REFERENCE. Derived from the presence of a content row, so
+    /// it cannot claim content the Kernel does not hold.
+    pub content_status: String,
+    /// The stored content type, or NULL for a Legacy reference.
+    pub content_type: Option<String>,
+    pub content_bytes: Option<i32>,
+    /// sha256 the Kernel computed over the bytes it stored - never a client value.
+    pub content_sha256: Option<String>,
+    /// When the Kernel accepted the bytes (server clock).
+    pub content_captured_at: Option<DateTime<Utc>>,
+    /// capturedAt + 365 days. After this the content endpoint answers 410.
+    pub content_retention_expires_at: Option<DateTime<Utc>>,
     /// What the submitter said about its own row. Kept because it is a fact about
     /// the submission, and never because it decides anything.
     pub claimed_trust: String,
@@ -377,10 +457,129 @@ pub async fn list_evidence(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(incident_id): Path<Uuid>,
+    Query(query): Query<EvidenceListQuery>,
 ) -> AppResult<Json<EvidenceList>> {
     let caller = Caller::from_auth(&auth);
-    let items = query_evidence(&state.db, caller, incident_id).await?;
+    let window = evidence_window(&query)?;
+    let items = query_evidence(&state.db, caller, incident_id, window).await?;
     Ok(Json(EvidenceList { items }))
+}
+
+/// GET /incidents/{id}/evidence/{evidenceId}/content - the stored bytes.
+///
+/// Four answers, deliberately distinct, because the UI has four different things
+/// to say: the bytes (200), "this row is a reference and the Kernel holds no
+/// bytes for it" (404 EVIDENCE_CONTENT_NOT_STORED), "the bytes exist but are past
+/// their retention horizon" (410), and "the bytes no longer match the digest the
+/// Kernel recorded" (500 EVIDENCE_CONTENT_INTEGRITY_FAILED). Out of scope and
+/// nonexistent both answer 404 INCIDENT_NOT_FOUND from the shared predicate.
+pub async fn read_evidence_content(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path((incident_id, evidence_id)): Path<(Uuid, Uuid)>,
+) -> AppResult<Response> {
+    let caller = Caller::from_auth(&auth);
+    // The authorization gate, and the only one: the same predicate the metadata
+    // list applies, so nothing can be read as content where its row is invisible.
+    incident_status(&state.db, caller, incident_id).await?;
+
+    let stored: Option<StoredContent> = sqlx::query_as(
+        "SELECT c.content_type, c.body, c.content_bytes, c.sha256, c.retention_expires_at
+         FROM kernel.incident_evidence_content c
+         JOIN kernel.incident_evidence e ON e.evidence_id = c.evidence_id
+         WHERE c.evidence_id=$1 AND e.incident_id=$2",
+    )
+    .bind(evidence_id)
+    .bind(incident_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let Some((content_type, body, content_bytes, recorded_sha256, retention_expires_at)) = stored
+    else {
+        // Whether the row exists at all decides which absence this is. Answering
+        // "not stored" for an id from another incident would confirm nothing, but
+        // it would also be untrue about this one.
+        let row_exists: Option<Uuid> = sqlx::query_scalar(
+            "SELECT evidence_id FROM kernel.incident_evidence
+              WHERE evidence_id=$1 AND incident_id=$2",
+        )
+        .bind(evidence_id)
+        .bind(incident_id)
+        .fetch_optional(&state.db)
+        .await?;
+        return Err(if row_exists.is_some() {
+            AppError::new(
+                StatusCode::NOT_FOUND,
+                "EVIDENCE_CONTENT_NOT_STORED",
+                "this evidence row is a Legacy reference: the Kernel stored a locator and holds no content for it, so there is nothing it could serve",
+            )
+        } else {
+            AppError::new(
+                StatusCode::NOT_FOUND,
+                "EVIDENCE_NOT_FOUND",
+                "no evidence row with this id belongs to this incident",
+            )
+        });
+    };
+
+    if retention_expires_at <= Utc::now() {
+        return Err(AppError::new(
+            StatusCode::GONE,
+            "EVIDENCE_CONTENT_EXPIRED",
+            format!(
+                "this content reached its retention horizon at {} and is no longer served",
+                retention_expires_at.to_rfc3339()
+            ),
+        ));
+    }
+
+    // Fixity, recomputed over the bytes in hand - never read back from the column
+    // that says what they should be. A mismatch is not repaired and not served.
+    let actual = verify_stored_content(evidence_id, content_bytes, &body, &recorded_sha256)?;
+
+    let mut response = Response::new(Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        if content_type == "application/json" {
+            HeaderValue::from_static("application/json; charset=utf-8")
+        } else {
+            HeaderValue::from_static("text/plain; charset=utf-8")
+        },
+    );
+    // The content is untrusted by definition (a log excerpt, a pasted note, a
+    // JSON blob a source produced). These three headers are what make a direct
+    // visit to this URL harmless: no sniffing, no script, no subresource, and no
+    // copy left behind after the row expires or the caller loses access.
+    headers.insert(
+        header::HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; sandbox"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    for (name, value) in [
+        ("x-evidence-digest", actual.as_str()),
+        ("x-evidence-content-type", content_type.as_str()),
+    ] {
+        if let Ok(value) = HeaderValue::from_str(value) {
+            headers.insert(header::HeaderName::from_static(name), value);
+        }
+    }
+    headers.insert(
+        header::HeaderName::from_static("x-evidence-bytes"),
+        HeaderValue::from_str(&body_len_string(content_bytes))
+            .unwrap_or_else(|_| HeaderValue::from_static("0")),
+    );
+    Ok(response)
+}
+
+/// The `X-Evidence-Bytes` value: the verified length, formatted once so the
+/// header cannot carry a value the fixity check did not agree with.
+fn body_len_string(content_bytes: i32) -> String {
+    content_bytes.to_string()
 }
 
 pub async fn create_verdict(
@@ -603,7 +802,30 @@ async fn insert_evidence(
 ) -> AppResult<(bool, EvidenceView)> {
     let kind = closed_set(&payload.kind, EVIDENCE_KINDS, "kind")?;
     let source = bounded(&payload.source, "source", 2, 200)?;
-    let content_ref = bounded(&payload.content_ref, "contentRef", 2, 1000)?;
+    check_collected_at(payload.collected_at)?;
+    // G12 B: the bytes are checked and digested before any SQL runs, so the
+    // digest stored beside them is a statement about exactly what will be written
+    // (docs/design/g12-evidence/evidence-content-adr.md §1.5).
+    let content = match payload.content.as_ref() {
+        Some(content) => Some(prepare_content(content)?),
+        None => None,
+    };
+    // Either the caller's Legacy locator, or the one the Kernel derived from the
+    // bytes. A supplied ref that disagrees is refused, never silently replaced.
+    let content_ref = match (content.as_ref(), payload.content_ref.as_deref()) {
+        (Some(prepared), supplied) => match supplied.map(str::trim).filter(|value| !value.is_empty())
+        {
+            None => prepared.content_ref.clone(),
+            Some(supplied) if supplied == prepared.content_ref => prepared.content_ref.clone(),
+            Some(_) => return Err(content_ref_conflict(&prepared.content_ref)),
+        },
+        (None, Some(supplied)) => bounded(supplied, "contentRef", 2, 1000)?,
+        (None, None) => {
+            return Err(AppError::bad_request(
+                "contentRef is required when content is absent: a Legacy reference is the only thing that can stand in for bytes the Kernel does not hold",
+            ))
+        }
+    };
     // G12 A1: the trust of this row is decided here, before any SQL runs, and
     // nothing in the request body can set verified_trust except a signature the
     // Kernel can check. The pre-0017 body field is refused, not migrated.
@@ -629,6 +851,25 @@ async fn insert_evidence(
     // together: rolled back after the transition, an audit failure would leave
     // the incident investigating evidence that this endpoint never accepted.
     let mut tx = db.begin().await?;
+    // The per-incident row cap, checked inside the transaction. Two concurrent
+    // writers can still land one row each past the cap - a cross-row maximum
+    // cannot be expressed as a row-level constraint - so the bound is "200 plus
+    // at most the number of concurrent writers", stated in the ADR rather than
+    // pretended away with a distributed lock.
+    let existing_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1")
+            .bind(incident_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    if existing_rows >= EVIDENCE_MAX_ROWS {
+        tx.rollback().await?;
+        return Err(AppError::conflict(
+            "INCIDENT_EVIDENCE_LIMIT",
+            format!(
+                "this incident already holds {existing_rows} evidence rows and the cap is {EVIDENCE_MAX_ROWS}; a verdict has to be concluded from the evidence that exists rather than from an unbounded append log"
+            ),
+        ));
+    }
     let inserted: Option<Uuid> = sqlx::query_scalar(
         r#"
         INSERT INTO kernel.incident_evidence
@@ -679,6 +920,27 @@ async fn insert_evidence(
         return Ok((false, existing));
     };
 
+    // The bytes, in the same transaction as the row that points at them. A
+    // content row without its evidence row would be unreachable, and an evidence
+    // row whose content insert failed would be a reference to bytes that were
+    // never written - the exact defect this phase exists to remove.
+    // retention_expires_at is left to its column default so the horizon lives in
+    // one place (the migration) instead of in a second Rust constant that drifts.
+    if let Some(prepared) = &content {
+        sqlx::query(
+            "INSERT INTO kernel.incident_evidence_content
+               (evidence_id,content_type,body,content_bytes,sha256)
+             VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(stored_id)
+        .bind(&prepared.content_type)
+        .bind(prepared.body.as_slice())
+        .bind(prepared.body.len() as i32)
+        .bind(&prepared.sha256)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     // T2: an incident becomes INVESTIGATING when the first evidence lands. A
     // conditional UPDATE keeps this a compare-and-set: a concurrent verdict that
     // already moved the incident to CONCLUDED is never silently reopened.
@@ -704,6 +966,10 @@ async fn insert_evidence(
             "verifiedTrust": &trust.verified,
             "verificationMethod": trust.method,
             "verifierIdentity": trust.verifier_identity,
+            // G12 B: whether this write brought bytes, and which bytes. The
+            // digest is the server's, so the trail records a checkable fact.
+            "contentStatus": content.as_ref().map_or("LEGACY_REFERENCE", |_| "STORED"),
+            "contentSha256": content.as_ref().map(|prepared| prepared.sha256.clone()),
         }),
     )
     .await?;
@@ -717,13 +983,18 @@ async fn query_evidence(
     db: &PgPool,
     caller: Caller,
     incident_id: Uuid,
+    window: EvidenceWindow,
 ) -> AppResult<Vec<EvidenceView>> {
     incident_status(db, caller, incident_id).await?;
     Ok(sqlx::query_as::<_, EvidenceView>(&format!(
         "{EVIDENCE_SELECT} WHERE e.incident_id=$1
+           AND ($2::timestamptz IS NULL OR e.collected_at >= $2)
+           AND ($3::timestamptz IS NULL OR e.collected_at <= $3)
          ORDER BY e.collected_at DESC, e.evidence_id DESC"
     ))
     .bind(incident_id)
+    .bind(window.0)
+    .bind(window.1)
     .fetch_all(db)
     .await?)
 }
@@ -1106,6 +1377,193 @@ fn trust_not_self_assertable() -> AppError {
 }
 
 // ---------------------------------------------------------------------------
+// G12 B · Evidence content: bounded bytes, a digest the Kernel computed over what
+// it stored, and a read path that fails loudly instead of serving doubt.
+// ---------------------------------------------------------------------------
+
+/// A content payload that passed every check, ready to be stored in the same
+/// transaction as the evidence row it belongs to.
+struct PreparedContent {
+    content_type: String,
+    body: Vec<u8>,
+    /// sha256 (lowercase hex) over `body` - computed here, over the bytes that are
+    /// about to be written, and stored beside them.
+    sha256: String,
+    /// The locator the Kernel derives: `sha256:<hex>`. Since it is the digest of
+    /// the stored bytes, the Phase A verdict snapshot (which binds contentRef)
+    /// commits to the content transitively.
+    content_ref: String,
+}
+
+/// sha256 (lowercase hex) over bytes in hand.
+///
+/// One implementation for both the write side (the bytes about to be stored) and
+/// the read side (the bytes just read back), because two implementations of "the
+/// digest" is exactly how a fixity check starts passing on corrupt data.
+fn digest_of(body: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(body);
+    hex::encode(hasher.finalize())
+}
+
+/// The fixity check, in one place so the read path and the tests agree on what
+/// "the content is intact" means.
+///
+/// Returns the digest computed over `body` (the value that goes into the response
+/// header), or an error naming both digests and both lengths. It never repairs
+/// anything: a stored digest that no longer matches its bytes is a fact about the
+/// database, and rewriting the digest would launder the tamper into a normal row.
+fn verify_stored_content(
+    evidence_id: Uuid,
+    content_bytes: i32,
+    body: &[u8],
+    recorded_sha256: &str,
+) -> AppResult<String> {
+    let actual = digest_of(body);
+    if actual == recorded_sha256 && body.len() == content_bytes.max(0) as usize {
+        return Ok(actual);
+    }
+    tracing::error!(
+        evidence_id = %evidence_id,
+        recorded_sha256 = %recorded_sha256,
+        actual_sha256 = %actual,
+        recorded_bytes = content_bytes,
+        actual_bytes = body.len(),
+        "evidence content integrity check failed; refusing to serve the bytes"
+    );
+    Err(AppError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "EVIDENCE_CONTENT_INTEGRITY_FAILED",
+        format!(
+            "the stored bytes no longer match the digest recorded with them (recorded {recorded_sha256} over {content_bytes} bytes, computed {actual} over {} bytes); the Kernel does not serve content it cannot verify",
+            body.len()
+        ),
+    ))
+}
+
+fn prepare_content(content: &EvidenceContentRequest) -> AppResult<PreparedContent> {
+    let content_type = content.content_type.trim().to_ascii_lowercase();
+    if !EVIDENCE_CONTENT_TYPES.contains(&content_type.as_str()) {
+        return Err(AppError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "EVIDENCE_CONTENT_TYPE_UNSUPPORTED",
+            format!(
+                "contentType must be exactly one of {}; the Kernel serves content back verbatim and stores no type it cannot serve safely",
+                EVIDENCE_CONTENT_TYPES.join(", ")
+            ),
+        ));
+    }
+    let body = content.body.as_bytes();
+    if body.is_empty() {
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "EVIDENCE_CONTENT_EMPTY",
+            "content.body is empty; an evidence row with no bytes is a Legacy reference, so omit content and send contentRef instead",
+        ));
+    }
+    // Bytes, not characters: the stored size is what is bounded.
+    if body.len() > EVIDENCE_CONTENT_MAX_BYTES {
+        return Err(AppError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "EVIDENCE_CONTENT_TOO_LARGE",
+            format!(
+                "content.body is {} bytes and the Kernel stores at most {EVIDENCE_CONTENT_MAX_BYTES} bytes per evidence row; content is refused rather than truncated, because a truncated excerpt is a different piece of evidence",
+                body.len()
+            ),
+        ));
+    }
+    let sha256 = digest_of(body);
+    Ok(PreparedContent {
+        content_type,
+        content_ref: format!("sha256:{sha256}"),
+        body: body.to_vec(),
+        sha256,
+    })
+}
+
+/// Refuses a supplied contentRef that disagrees with the bytes being stored.
+fn content_ref_conflict(derived: &str) -> AppError {
+    AppError::new(
+        StatusCode::BAD_REQUEST,
+        "EVIDENCE_CONTENT_REF_CONFLICT",
+        format!(
+            "content was supplied, so the Kernel derives contentRef from the bytes it stored ({derived}); a supplied contentRef must be absent or exactly that value - a digest the caller computed is not evidence the Kernel checked anything"
+        ),
+    )
+}
+
+/// The capture window's claim half: collectedAt is the submitter's statement
+/// about when the source saw this, and a claim the clock cannot coexist with is
+/// refused rather than stored and explained later.
+fn check_collected_at(collected_at: DateTime<Utc>) -> AppResult<()> {
+    let now = Utc::now();
+    let ahead = (collected_at - now).num_seconds();
+    if ahead > COLLECTED_AT_FUTURE_SKEW_SECONDS {
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "EVIDENCE_COLLECTED_AT_IN_FUTURE",
+            format!(
+                "collectedAt is {ahead}s ahead of the Kernel clock (at most {COLLECTED_AT_FUTURE_SKEW_SECONDS}s of skew is accepted); a future timestamp makes every before/after comparison against a verdict wrong"
+            ),
+        ));
+    }
+    let age = (now - collected_at).num_seconds();
+    if age > COLLECTED_AT_MAX_AGE_SECONDS {
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "EVIDENCE_COLLECTED_AT_TOO_OLD",
+            format!(
+                "collectedAt is {age}s in the past, which is older than the {COLLECTED_AT_MAX_AGE_SECONDS}s horizon this Kernel accepts: content that old is past its retention and cannot be verified"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// The evidence list's query window, validated before any SQL runs.
+///
+/// Both ends or neither: a half-bounded window would make the scan bound depend
+/// on the Kernel clock at read time, which is a cheaper rule to explain and to
+/// test than "the open end is bounded by now".
+fn evidence_window(query: &EvidenceListQuery) -> AppResult<EvidenceWindow> {
+    let parse = |raw: Option<&str>, field: &str| -> AppResult<Option<DateTime<Utc>>> {
+        let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(None);
+        };
+        DateTime::parse_from_rfc3339(raw)
+            .map(|value| Some(value.with_timezone(&Utc)))
+            .map_err(|_| window_invalid(&format!("{field} is not an RFC 3339 instant")))
+    };
+    let since = parse(query.since.as_deref(), "since")?;
+    let until = parse(query.until.as_deref(), "until")?;
+    match (since, until) {
+        (None, None) => Ok((None, None)),
+        (Some(since), Some(until)) => {
+            if since > until {
+                return Err(window_invalid("since is after until"));
+            }
+            if (until - since).num_days() > EVIDENCE_QUERY_MAX_DAYS {
+                return Err(window_invalid(&format!(
+                    "the window is wider than the {EVIDENCE_QUERY_MAX_DAYS}-day maximum"
+                )));
+            }
+            Ok((Some(since), Some(until)))
+        }
+        _ => Err(window_invalid(
+            "since and until must be supplied together: a half-bounded window has no fixed width",
+        )),
+    }
+}
+
+fn window_invalid(detail: &str) -> AppError {
+    AppError::new(
+        StatusCode::BAD_REQUEST,
+        "INCIDENT_EVIDENCE_WINDOW_INVALID",
+        format!("{detail}; supply since and until as RFC 3339 UTC instants within {EVIDENCE_QUERY_MAX_DAYS} days of each other"),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // G12 A3 · The set a verdict stands on
 // ---------------------------------------------------------------------------
 
@@ -1181,6 +1639,11 @@ const EVIDENCE_SELECT: &str = r#"
 SELECT e.evidence_id, e.incident_id, e.kind, e.source, e.collected_at, e.content_ref,
        e.claimed_trust, e.verified_trust, e.verification_method, e.verified_at,
        e.verifier_identity, e.submitted_by, e.verification_note, e.created_at,
+       CASE WHEN c.evidence_id IS NULL THEN 'LEGACY_REFERENCE' ELSE 'STORED' END
+         AS content_status,
+       c.content_type, c.content_bytes, c.sha256 AS content_sha256,
+       c.captured_at AS content_captured_at,
+       c.retention_expires_at AS content_retention_expires_at,
        CASE
          WHEN v.incident_id IS NULL THEN false
          WHEN v.snapshot_kind = 'RECORDED' THEN NOT EXISTS (
@@ -1190,7 +1653,8 @@ SELECT e.evidence_id, e.incident_id, e.kind, e.source, e.collected_at, e.content
          ELSE e.created_at > v.decided_at
        END AS after_verdict
 FROM kernel.incident_evidence e
-LEFT JOIN kernel.incident_verdicts v ON v.incident_id = e.incident_id"#;
+LEFT JOIN kernel.incident_verdicts v ON v.incident_id = e.incident_id
+LEFT JOIN kernel.incident_evidence_content c ON c.evidence_id = e.evidence_id"#;
 
 /// The verdict projection, in one place for the same reason.
 const VERDICT_COLUMNS: &str = "incident_id,verdict,rationale,decided_by,decided_at,
@@ -1408,6 +1872,11 @@ mod tests {
     async fn cleanup(pool: &PgPool, users: &[Uuid]) {
         for user in users {
             let incidents = "SELECT incident_id FROM kernel.incidents WHERE owner=$1";
+            // G12 B: content rows cannot be deleted on their own (the write-once
+            // trigger refuses), and they are not left behind either: the foreign
+            // key cascades from the evidence row, which is the one delete the
+            // trigger allows. So this cleanup deletes evidence and the bytes follow
+            // - no test has to switch a lock off to clean up after itself.
             let sql =
                 format!("DELETE FROM kernel.incident_verdicts WHERE incident_id IN ({incidents})");
             sqlx::query(&sql).bind(user).execute(pool).await.unwrap();
@@ -1465,7 +1934,8 @@ mod tests {
             kind: "METRIC_SNAPSHOT".to_string(),
             source: "prometheus".to_string(),
             collected_at: Utc::now(),
-            content_ref: content_ref.to_string(),
+            content_ref: Some(content_ref.to_string()),
+            content: None,
             trust: None,
             claimed_trust: None,
             attestation: None,
@@ -1522,7 +1992,8 @@ mod tests {
             kind: bound.kind.to_string(),
             source: bound.source.to_string(),
             collected_at: bound.collected_at,
-            content_ref: bound.content_ref.to_string(),
+            content_ref: Some(bound.content_ref.to_string()),
+            content: None,
             trust: None,
             claimed_trust: None,
             attestation: Some(AttestationRequest {
@@ -1882,7 +2353,7 @@ mod tests {
         assert_eq!(after.status, "INVESTIGATING");
         assert_eq!(after.evidence_refs, vec![first.evidence_id]);
         assert_eq!(
-            query_evidence(&pool, caller(user), incident.id)
+            query_evidence(&pool, caller(user), incident.id, (None, None))
                 .await
                 .unwrap()
                 .len(),
@@ -2617,7 +3088,7 @@ mod tests {
         // (c) a genuine signature over a different tuple, replayed onto this one:
         // the signature binds contentRef, so moving it invalidates the proof.
         let mut moved = build("sha256:original-ref", ADAPTER_ID, ADAPTER_SECRET, issued_at);
-        moved.content_ref = "sha256:moved-ref".to_string();
+        moved.content_ref = Some("sha256:moved-ref".to_string());
         let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, moved)
             .await
             .unwrap_err();
@@ -2923,7 +3394,7 @@ mod tests {
             .await
             .unwrap();
         }
-        let before = query_evidence(&pool, caller(user), incident.id)
+        let before = query_evidence(&pool, caller(user), incident.id, (None, None))
             .await
             .unwrap();
         assert!(before.iter().all(|row| !row.after_verdict));
@@ -2961,7 +3432,7 @@ mod tests {
             "evidence added after signing was never before the signer"
         );
 
-        let rows = query_evidence(&pool, caller(user), incident.id)
+        let rows = query_evidence(&pool, caller(user), incident.id, (None, None))
             .await
             .unwrap();
         let late_rows: Vec<_> = rows.iter().filter(|row| row.after_verdict).collect();
@@ -3089,7 +3560,7 @@ mod tests {
         .await
         .unwrap();
 
-        let rows = query_evidence(&pool, caller(user), incident.id)
+        let rows = query_evidence(&pool, caller(user), incident.id, (None, None))
             .await
             .unwrap();
         assert_eq!(rows.len(), 2);
@@ -3100,6 +3571,491 @@ mod tests {
         assert!(
             rows.iter().any(|row| !row.after_verdict),
             "the row the signer could see is not flagged"
+        );
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    // -- G12 B: evidence content ---------------------------------------------
+    //
+    // What these tests can and cannot prove is worth stating. They run against a
+    // real PostgreSQL and a real schema, so the triggers, CHECK constraints and
+    // digest arithmetic are real. They call the data layer, not the HTTP surface,
+    // so the wire-level proof (headers, status codes, a browser) lives in
+    // tests/acceptance/g12_evidence_content.sh and
+    // tests/ui/g12-evidence-content.spec.ts. Neither replaces the other: a unit
+    // test cannot see a response header, and an HTTP test cannot corrupt a row
+    // through the trigger.
+
+    /// A submission that carries its bytes instead of a reference.
+    fn content_request(content_type: &str, body: &str) -> CreateEvidenceRequest {
+        let mut payload = evidence_request("sha256:placeholder");
+        payload.content_ref = None;
+        payload.content = Some(EvidenceContentRequest {
+            content_type: content_type.to_string(),
+            body: body.to_string(),
+        });
+        payload
+    }
+
+    /// The positive path: the digest beside the bytes is the Kernel's own, computed
+    /// over exactly what it stored, and the locator is derived from it.
+    #[tokio::test]
+    async fn content_is_digested_by_the_server_over_the_bytes_it_stored() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("content digest", None),
+        )
+        .await
+        .unwrap();
+
+        // Multi-byte on purpose: the digest is over bytes, and a character-count
+        // implementation would still produce a "correct looking" row.
+        let body = "2026-10-31T05:00:00Z ERROR upstream=db-1 msg=\"连接被重置\"";
+        let (created, row) = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("text/plain", body),
+        )
+        .await
+        .unwrap();
+        assert!(created);
+        assert_eq!(row.content_status, "STORED");
+        assert_eq!(row.content_type.as_deref(), Some("text/plain"));
+        assert_eq!(row.content_bytes, Some(body.len() as i32));
+        assert_eq!(
+            row.content_sha256.as_deref(),
+            Some(digest_of(body.as_bytes()).as_str())
+        );
+        // The caller chose nothing here: the locator is the server's digest.
+        assert_eq!(
+            row.content_ref,
+            format!("sha256:{}", digest_of(body.as_bytes()))
+        );
+
+        let captured = row.content_captured_at.expect("content rows are dated");
+        let expires = row
+            .content_retention_expires_at
+            .expect("the retention horizon is stored, not recomputed per reader");
+        assert_eq!((expires - captured).num_days(), 365);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// A digest the caller computed is not a check the Kernel performed. It is
+    /// refused, and nothing is stored.
+    #[tokio::test]
+    async fn a_client_computed_digest_is_refused_rather_than_believed() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("digest claim", None))
+                .await
+                .unwrap();
+
+        let mut payload = content_request("text/plain", "the real bytes");
+        payload.content_ref = Some(format!("sha256:{}", "0".repeat(64)));
+        let error = insert_evidence(&pool, &no_adapters(), caller(user), incident.id, payload)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_REF_CONFLICT");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+
+        let evidence_rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let content_rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence_content c
+               JOIN kernel.incident_evidence e ON e.evidence_id = c.evidence_id
+              WHERE e.incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(evidence_rows, 0, "a refused write stores no evidence row");
+        assert_eq!(content_rows, 0, "a refused write stores no content row");
+
+        // The same request with the digest the server would derive is accepted: the
+        // rule is "must agree with the stored bytes", not "must not be sent".
+        let mut agreed = content_request("text/plain", "the real bytes");
+        agreed.content_ref = Some(format!("sha256:{}", digest_of(b"the real bytes")));
+        let (_, row) = insert_evidence(&pool, &no_adapters(), caller(user), incident.id, agreed)
+            .await
+            .unwrap();
+        assert_eq!(row.content_status, "STORED");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// Size, encoding and content type are refused before any SQL runs, and the
+    /// bound is in bytes so 30k CJK characters are over it.
+    #[tokio::test]
+    async fn content_limits_are_refused_before_anything_is_stored() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("content limits", None),
+        )
+        .await
+        .unwrap();
+
+        let empty = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("text/plain", ""),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(empty.code, "EVIDENCE_CONTENT_EMPTY");
+
+        // HTML is refused by type, which is the first of the two defences; the
+        // second is that nothing is ever rendered as markup.
+        let html = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("text/html", "<script>alert(1)</script>"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(html.code, "EVIDENCE_CONTENT_TYPE_UNSUPPORTED");
+        assert_eq!(html.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // A charset parameter is not the same value: the Kernel stores what it can
+        // serve, and it serves a fixed charset.
+        let charset = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("text/plain; charset=utf-16", "hello"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(charset.code, "EVIDENCE_CONTENT_TYPE_UNSUPPORTED");
+
+        let too_big = "x".repeat(EVIDENCE_CONTENT_MAX_BYTES + 1);
+        let error = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("text/plain", &too_big),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_TOO_LARGE");
+        assert_eq!(error.status, StatusCode::PAYLOAD_TOO_LARGE);
+
+        // 30k characters, 90k bytes: a character-based bound would accept this.
+        let wide = "景".repeat(30_000);
+        let error = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("text/plain", &wide),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_TOO_LARGE");
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, 0, "every refusal left the incident empty");
+
+        // Exactly at the bound is accepted, because the bound is the bound.
+        let exact = "y".repeat(EVIDENCE_CONTENT_MAX_BYTES);
+        let (_, row) = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("application/json", &exact),
+        )
+        .await
+        .unwrap();
+        assert_eq!(row.content_bytes, Some(EVIDENCE_CONTENT_MAX_BYTES as i32));
+        assert_eq!(row.content_type.as_deref(), Some("application/json"));
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// A row without bytes keeps working, and says what it is.
+    #[tokio::test]
+    async fn a_reference_without_bytes_reads_as_a_legacy_reference() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("legacy ref", None))
+                .await
+                .unwrap();
+
+        let (_, row) = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            evidence_request("s3://bucket/2026/10/31/excerpt.log"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(row.content_status, "LEGACY_REFERENCE");
+        assert_eq!(row.content_ref, "s3://bucket/2026/10/31/excerpt.log");
+        assert_eq!(row.content_type, None);
+        assert_eq!(row.content_bytes, None);
+        assert_eq!(row.content_sha256, None);
+        assert_eq!(row.content_captured_at, None);
+        assert_eq!(row.content_retention_expires_at, None);
+
+        // Neither bytes nor a reference: there is nothing to record, and the
+        // refusal says so instead of inventing an empty string.
+        let mut neither = evidence_request("sha256:unused");
+        neither.content_ref = None;
+        let error = insert_evidence(&pool, &no_adapters(), caller(user), incident.id, neither)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "INVALID_REQUEST");
+        assert!(error.message.contains("contentRef is required"));
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// Fixity is a comparison against bytes in hand, and the recorded length is a
+    /// second witness so rewriting the digest does not launder a shorter body.
+    #[test]
+    fn stored_content_is_verified_against_the_bytes_in_hand() {
+        let id = Uuid::new_v4();
+        let body = b"2026-10-31T05:00:00Z INFO heartbeat ok";
+        let digest = digest_of(body);
+        assert_eq!(
+            verify_stored_content(id, body.len() as i32, body, &digest).unwrap(),
+            digest
+        );
+
+        let mut tampered = body.to_vec();
+        tampered[0] = b'9';
+        let error = verify_stored_content(id, body.len() as i32, &tampered, &digest).unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_INTEGRITY_FAILED");
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(error.message.contains(&digest));
+        assert!(error.message.contains(&digest_of(&tampered)));
+
+        // Truncated, digest untouched.
+        let error = verify_stored_content(id, body.len() as i32, &body[..4], &digest).unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_INTEGRITY_FAILED");
+
+        // Digest rewritten to match the tampered bytes: the recorded length is the
+        // witness that catches it.
+        let error = verify_stored_content(
+            id,
+            body.len() as i32,
+            &tampered[..body.len() - 1],
+            &digest_of(&tampered[..body.len() - 1]),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_INTEGRITY_FAILED");
+
+        // Length rewritten too: nothing left to compare, and that is fine - the
+        // stored row cannot be rewritten at all (see the trigger test below).
+        assert!(verify_stored_content(id, body.len() as i32, body, &digest).is_ok());
+    }
+
+    /// The capture window's claim half is bounded by the Kernel clock.
+    #[test]
+    fn collected_at_outside_the_clock_window_is_refused() {
+        assert!(check_collected_at(Utc::now()).is_ok());
+        assert!(check_collected_at(
+            Utc::now() + chrono::Duration::seconds(COLLECTED_AT_FUTURE_SKEW_SECONDS)
+        )
+        .is_ok());
+
+        let error = check_collected_at(
+            Utc::now() + chrono::Duration::seconds(COLLECTED_AT_FUTURE_SKEW_SECONDS + 60),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_COLLECTED_AT_IN_FUTURE");
+
+        let error = check_collected_at(
+            Utc::now() - chrono::Duration::seconds(COLLECTED_AT_MAX_AGE_SECONDS + 60),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_COLLECTED_AT_TOO_OLD");
+    }
+
+    /// The list's query window: both ends, in order, and no wider than the bound.
+    #[test]
+    fn the_evidence_query_window_is_whole_and_bounded() {
+        let open = evidence_window(&EvidenceListQuery::default()).unwrap();
+        assert_eq!(open, (None, None), "no window means every row, as before");
+
+        let window = evidence_window(&EvidenceListQuery {
+            since: Some("2026-10-01T00:00:00Z".to_string()),
+            until: Some("2026-10-15T00:00:00Z".to_string()),
+        })
+        .unwrap();
+        assert!(window.0.is_some() && window.1.is_some());
+
+        for (since, until, why) in [
+            (Some("2026-10-01T00:00:00Z"), None, "half bounded"),
+            (None, Some("2026-10-01T00:00:00Z"), "half bounded"),
+            (
+                Some("2026-10-15T00:00:00Z"),
+                Some("2026-10-01T00:00:00Z"),
+                "inverted",
+            ),
+            (
+                Some("2026-01-01T00:00:00Z"),
+                Some("2026-10-01T00:00:00Z"),
+                "too wide",
+            ),
+            (Some("yesterday"), Some("today"), "unparseable"),
+        ] {
+            let error = evidence_window(&EvidenceListQuery {
+                since: since.map(str::to_string),
+                until: until.map(str::to_string),
+            })
+            .unwrap_err();
+            assert_eq!(error.code, "INCIDENT_EVIDENCE_WINDOW_INVALID", "{why}");
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        }
+    }
+
+    /// The per-incident cap, which is what bounds the total stored content.
+    #[tokio::test]
+    async fn an_incident_refuses_more_evidence_than_its_cap() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(&pool, caller(user), incident_request("row cap", None))
+            .await
+            .unwrap();
+        // The cap counts rows, not writes: filling it in one statement is the same
+        // situation as 200 separate submissions.
+        sqlx::query(
+            "INSERT INTO kernel.incident_evidence
+               (evidence_id,incident_id,kind,source,collected_at,content_ref,claimed_trust)
+             SELECT gen_random_uuid(), $1, 'OPERATOR_NOTE', 'MANUAL', now(),
+                    'bulk-'||g, 'UNVERIFIED'
+               FROM generate_series(1,$2) g",
+        )
+        .bind(incident.id)
+        .bind(EVIDENCE_MAX_ROWS)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let error = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            evidence_request("sha256:one-too-many"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_EVIDENCE_LIMIT");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, EVIDENCE_MAX_ROWS, "the refused row was not stored");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// Write-once is a property of the data, not of the handlers: a direct UPDATE
+    /// or DELETE is refused by the database, and the row survives both attempts.
+    #[tokio::test]
+    async fn stored_content_cannot_be_rewritten_even_with_sql() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("write once", None))
+                .await
+                .unwrap();
+        let body = "original bytes";
+        let (_, row) = insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            content_request("text/plain", body),
+        )
+        .await
+        .unwrap();
+
+        let update = sqlx::query(
+            "UPDATE kernel.incident_evidence_content SET body='rewritten'::bytea
+              WHERE evidence_id=$1",
+        )
+        .bind(row.evidence_id)
+        .execute(&pool)
+        .await;
+        let error = update.expect_err("the write-once trigger must refuse an UPDATE");
+        assert!(
+            error.to_string().contains("write-once"),
+            "the refusal names the rule: {error}"
+        );
+
+        let delete =
+            sqlx::query("DELETE FROM kernel.incident_evidence_content WHERE evidence_id=$1")
+                .bind(row.evidence_id)
+                .execute(&pool)
+                .await;
+        let error = delete.expect_err("the write-once trigger must refuse a DELETE");
+        assert!(error.to_string().contains("write-once"));
+
+        // And the bytes are exactly what they were.
+        let stored: (Vec<u8>, String, i32) = sqlx::query_as(
+            "SELECT body, sha256, content_bytes FROM kernel.incident_evidence_content
+              WHERE evidence_id=$1",
+        )
+        .bind(row.evidence_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored.0, body.as_bytes());
+        assert_eq!(stored.1, digest_of(body.as_bytes()));
+        assert_eq!(
+            verify_stored_content(row.evidence_id, stored.2, &stored.0, &stored.1).unwrap(),
+            stored.1
         );
 
         cleanup(&pool, &[user]).await;

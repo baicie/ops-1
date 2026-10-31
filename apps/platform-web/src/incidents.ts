@@ -496,3 +496,137 @@ export type VerdictSnapshotState = 'recorded' | 'unknown';
 export function verdictSnapshotState(verdict: Pick<IncidentVerdict, 'snapshotKind'>): VerdictSnapshotState {
   return verdict.snapshotKind === 'RECORDED' ? 'recorded' : 'unknown';
 }
+
+/* ── G12 B: the bytes behind an evidence row ────────────────────────────────────────── */
+
+/**
+ * The read-side closed set for where a row's content is.
+ *
+ * STORED means the kernel holds bytes for this row and a separate request can serve them.
+ * LEGACY_REFERENCE means it holds a locator and nothing else - the row is not weaker evidence,
+ * it is evidence whose bytes this kernel cannot show, and the page must say that instead of
+ * printing the locator as if it were the payload (ADR-G12-002 §1.2).
+ */
+export const EVIDENCE_CONTENT_STATUS_CODES = ['STORED', 'LEGACY_REFERENCE'] as const;
+
+const CONTENT_STATUS_KEYS: Record<string, MessageKey> = {
+  STORED: 'incidents.content.status.stored',
+  LEGACY_REFERENCE: 'incidents.content.status.legacy',
+};
+
+export function evidenceContentStatusKey(code?: string | null): MessageKey {
+  if (!code) return 'incidents.content.status.legacy';
+  return CONTENT_STATUS_KEYS[code.toUpperCase()] ?? 'incidents.content.status.legacy';
+}
+
+/**
+ * A tone, not a verdict about the evidence.
+ *
+ * STORED is deliberately 'info' and never 'ok': holding the bytes proves the content did not
+ * change, it does not prove the source told the truth. Painting it green would merge the two
+ * axes this whole phase exists to separate (ADR-G12-002 §1.6).
+ */
+export function evidenceContentStatusTone(code?: string | null): StatusTone {
+  switch ((code ?? '').toUpperCase()) {
+    case 'STORED': return 'info';
+    case 'LEGACY_REFERENCE': return 'warn';
+    default: return 'unknown';
+  }
+}
+
+/** Whether the viewer should fetch bytes at all. A legacy row has none to fetch. */
+export function contentPanelMode(status?: string | null): 'stored' | 'legacy' {
+  return (status ?? '').toUpperCase() === 'STORED' ? 'stored' : 'legacy';
+}
+
+/**
+ * What the content request returned, as one state.
+ *
+ * Four failures stay four states because they are four different facts: the kernel holds no
+ * bytes (unavailable), it holds bytes it will not serve any more (expired), it holds bytes that
+ * no longer match their digest (integrity), and it will not answer this caller at all (denied).
+ * Collapsing them into "failed" would tell the reader to retry a tamper.
+ */
+export type ContentReadPhase = 'loading' | 'ready' | 'expired' | 'unavailable' | 'integrity' | 'denied' | 'failed';
+
+export function contentFailurePhase(failure: unknown): ContentReadPhase | null {
+  if (!failure) return null;
+  const { status, code } = classifyFailure(failure);
+  switch (code) {
+    case 'EVIDENCE_CONTENT_EXPIRED': return 'expired';
+    case 'EVIDENCE_CONTENT_NOT_STORED': return 'unavailable';
+    case 'EVIDENCE_NOT_FOUND': return 'unavailable';
+    case 'EVIDENCE_CONTENT_INTEGRITY_FAILED': return 'integrity';
+    default: break;
+  }
+  if (status === 401 || status === 403) return 'denied';
+  // INCIDENT_NOT_FOUND covers both "absent" and "outside the caller scope", and for content the
+  // honest reading of either is the same: this caller does not get these bytes.
+  if (code === 'INCIDENT_NOT_FOUND') return 'denied';
+  return 'failed';
+}
+
+/** Copy for every terminal phase. loading/ready draw their own thing. */
+const CONTENT_PHASE_KEYS: Record<string, { title: MessageKey; description: MessageKey }> = {
+  expired: { title: 'incidents.content.phase.expired.title', description: 'incidents.content.phase.expired.description' },
+  unavailable: { title: 'incidents.content.phase.unavailable.title', description: 'incidents.content.phase.unavailable.description' },
+  integrity: { title: 'incidents.content.phase.integrity.title', description: 'incidents.content.phase.integrity.description' },
+  denied: { title: 'incidents.content.phase.denied.title', description: 'incidents.content.phase.denied.description' },
+  failed: { title: 'incidents.content.phase.failed.title', description: 'incidents.content.phase.failed.description' },
+};
+
+export function contentPhaseKeys(phase: ContentReadPhase): { title: MessageKey; description: MessageKey } | null {
+  return CONTENT_PHASE_KEYS[phase] ?? null;
+}
+
+/** A digest in lowercase hex. Null when the platform offers no WebCrypto (the state says so). */
+export async function sha256Hex(text: string): Promise<string | null> {
+  const subtle = typeof globalThis.crypto === 'undefined' ? undefined : globalThis.crypto.subtle;
+  if (!subtle) return null;
+  const bytes = new TextEncoder().encode(text);
+  const digest = await subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * The browser's own verdict on the bytes it received.
+ *
+ * This is the whole point of the viewer: the page does not take the kernel's digest header on
+ * faith, it recomputes sha256 over the text it is about to display and compares. 'unknown' is
+ * not a pass - it says this browser could not compute a digest, and it is rendered as such.
+ */
+export type DigestVerdict = 'match' | 'mismatch' | 'unknown';
+
+export function digestVerdict(computed: string | null, expected: string | null): DigestVerdict {
+  if (!computed || !expected) return 'unknown';
+  return computed.toLowerCase() === expected.toLowerCase() ? 'match' : 'mismatch';
+}
+
+const DIGEST_KEYS: Record<DigestVerdict, MessageKey> = {
+  match: 'incidents.content.digest.match',
+  mismatch: 'incidents.content.digest.mismatch',
+  unknown: 'incidents.content.digest.unknown',
+};
+
+export function digestVerdictKey(verdict: DigestVerdict): MessageKey {
+  return DIGEST_KEYS[verdict];
+}
+
+export function digestVerdictTone(verdict: DigestVerdict): StatusTone {
+  if (verdict === 'match') return 'ok';
+  if (verdict === 'mismatch') return 'danger';
+  return 'warn';
+}
+
+/**
+ * The name an export writes.
+ *
+ * The export is the bytes the server just served, saved by the browser - there is no export
+ * endpoint, so a file can never contain content the read did not return.
+ */
+export function evidenceExportFileName(row: Pick<IncidentEvidence, 'id' | 'contentType'>): string {
+  const extension = (row.contentType ?? '') === 'application/json' ? 'json' : 'txt';
+  return 'evidence-' + row.id.slice(0, 8) + '.' + extension;
+}

@@ -551,8 +551,23 @@ export interface IncidentEvidence {
   kind: string;
   source: string;
   collectedAt: string;
-  /** An opaque locator (digest or storage key). The kernel never fetches it; neither may the UI. */
+  /**
+   * For a STORED row this is the kernel's own sha256:<hex> over the bytes it stored; for a
+   * LEGACY_REFERENCE row it is whatever the submitter typed. The kernel never fetches it, so
+   * neither may the UI - it is a string to display, never a link.
+   */
   contentRef: string;
+  /** G12 B: STORED when the kernel holds the bytes; LEGACY_REFERENCE when it holds only a locator. */
+  contentStatus: string;
+  /** text/plain or application/json; null for a legacy reference. */
+  contentType: string | null;
+  contentBytes: number | null;
+  /** sha256 the kernel computed over the bytes it stored - never a value that came from a client. */
+  contentSha256: string | null;
+  /** When the kernel accepted the bytes (server clock); the fact half of the capture window. */
+  contentCapturedAt: string | null;
+  /** capturedAt + 365 days. After this the content endpoint answers 410. */
+  contentRetentionExpiresAt: string | null;
   claimedTrust: string;
   verifiedTrust: string;
   /** NONE | OPERATOR_IDENTITY | SOURCE_ADAPTER. */

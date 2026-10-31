@@ -13,6 +13,7 @@ import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { CopyButton, Field, KV, useToast } from '../components/Ui';
+import { EvidenceContentViewer } from '../components/evidence-viewer';
 import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
 import { badgeVariantForTone } from '../components/status-tone';
@@ -23,6 +24,8 @@ import {
   VERDICT_CHOICES,
   classifyFailure,
   detailPhase,
+  evidenceContentStatusKey,
+  evidenceContentStatusTone,
   detailReducer,
   emptyDetail,
   evidenceKindKey,
@@ -76,6 +79,12 @@ export function IncidentDetailPage() {
   const seqRef = React.useRef(0);
   const [reload, setReload] = React.useState(0);
   const retry = React.useCallback(() => setReload((value) => value + 1), []);
+  // Which evidence row's content is open. Null means "no panel", never "the previous incident's
+  // row": the id is cleared whenever the route changes, so a panel cannot outlive its incident.
+  const [openEvidenceId, setOpenEvidenceId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setOpenEvidenceId(null);
+  }, [incidentId]);
 
   // The state that is actually rendered. It is only ever the state that describes this route.
   const view = projectDetail(store, incidentId);
@@ -167,6 +176,9 @@ export function IncidentDetailPage() {
   const facts = incidentFacts(incident, partition.considered);
   const evidenceState = evidencePanelState(view.evidence, Boolean(view.evidenceError));
   const verdictState = verdictPanelState(incident);
+  // Resolved against the rows this page actually holds, so an id from a previous read cannot
+  // resurrect a row that is no longer in the list.
+  const openRow = (openEvidenceId ? evidence.find((row) => row.id === openEvidenceId) : undefined) ?? null;
   const ownerLabel = directory.names?.[incident.owner] ?? shortOwner(incident.owner);
   const decidedByLabel = incident.humanVerdict
     ? (directory.names?.[incident.humanVerdict.decidedBy] ?? shortOwner(incident.humanVerdict.decidedBy))
@@ -316,10 +328,29 @@ export function IncidentDetailPage() {
                     <TableCell className="mono" title={row.source} data-evidence-source={row.source}>{row.source}</TableCell>
                     <TableCell><span title={row.collectedAt}>{row.collectedAt}</span></TableCell>
                     <TableCell>
+                      {/* G12 B: where this row's bytes are is a fact the table states, not
+                          something the reader has to discover by clicking. A LEGACY_REFERENCE
+                          row is labelled as one; the locator below is a string, never a link. */}
+                      <Badge
+                        variant={badgeVariantForTone(evidenceContentStatusTone(row.contentStatus))}
+                        data-testid="evidence-content-status"
+                        data-content-status={row.contentStatus}
+                      >
+                        {t(evidenceContentStatusKey(row.contentStatus))}
+                      </Badge>
                       <span className="ow-longid">
                         <span className="ow-longid-value" title={row.contentRef} data-testid="evidence-content-ref">{row.contentRef}</span>
                         <CopyButton value={row.contentRef} label={t('table.copyIdentifier')} />
                       </span>
+                      <Button
+                        variant="secondary"
+                        data-testid="evidence-open"
+                        data-evidence-id={row.id}
+                        aria-expanded={openEvidenceId === row.id}
+                        onClick={() => setOpenEvidenceId((current) => (current === row.id ? null : row.id))}
+                      >
+                        {t('incidents.content.action.open')}
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -328,6 +359,17 @@ export function IncidentDetailPage() {
             <p className="table-footnote" data-testid="incident-evidence-ref-note">{t('incidents.detail.evidence.refNote')}</p>
           </div>
         )}
+        {/* One viewer, for one row of this incident. It is keyed by the evidence id so switching
+            rows remounts it: a stale read for the previous row can never be rendered under the
+            new row's heading. */}
+        {openRow ? (
+          <EvidenceContentViewer
+            key={openRow.id}
+            incidentId={incident.id}
+            row={openRow}
+            onClose={() => setOpenEvidenceId(null)}
+          />
+        ) : null}
         {/* Evidence stays appendable AFTER a verdict: CONCLUDED accepts it (ADR-G11-001 §3.1),
             and only CLOSED refuses writes. Gating this on "no verdict yet" told the reader the
             opposite of what the kernel does. */}
@@ -430,6 +472,10 @@ function AddEvidenceForm({ incidentId, defaultSource, onAdded }: { incidentId: s
   const [source, setSource] = React.useState(defaultSource);
   const [collectedAt, setCollectedAt] = React.useState(() => toLocalInputValue(new Date()));
   const [contentRef, setContentRef] = React.useState('');
+  // G12 B: the bytes, when the submitter has them. Left empty, the row is recorded as a Legacy
+  // reference - which is a legitimate submission and is labelled as one wherever it is shown.
+  const [content, setContent] = React.useState('');
+  const [contentType, setContentType] = React.useState<string>('text/plain');
   const [claimedTrust, setClaimedTrust] = React.useState<string>('OPERATOR_ASSERTED');
   const [submitting, setSubmitting] = React.useState(false);
   const [failure, setFailure] = React.useState<unknown>(null);
@@ -441,20 +487,28 @@ function AddEvidenceForm({ incidentId, defaultSource, onAdded }: { incidentId: s
     const iso = toIsoInstant(collectedAt);
     const trimmedSource = source.trim();
     const trimmedRef = contentRef.trim();
-    if (!iso || trimmedSource.length < 2 || trimmedRef.length < 2) {
+    if (!iso || trimmedSource.length < 2 || (content.length === 0 && trimmedRef.length < 2)) {
       setFieldError(t('incidents.error.invalidRequest'));
       return;
     }
+    // Exactly one of the two travels: the kernel derives contentRef from the bytes when content
+    // is present, and refuses a supplied ref that disagrees with them.
+    const payload: Record<string, unknown> = {
+      kind,
+      source: trimmedSource,
+      collectedAt: iso,
+      claimedTrust,
+    };
+    if (content.length > 0) {
+      payload.content = { contentType, body: content };
+    } else {
+      payload.contentRef = trimmedRef;
+    }
     setSubmitting(true);
     try {
-      await api.post<IncidentEvidence>('/api/v1/incidents/' + encodeURIComponent(incidentId) + '/evidence', {
-        kind,
-        source: trimmedSource,
-        collectedAt: iso,
-        contentRef: trimmedRef,
-        claimedTrust,
-      });
+      await api.post<IncidentEvidence>('/api/v1/incidents/' + encodeURIComponent(incidentId) + '/evidence', payload);
       setContentRef('');
+      setContent('');
       setCollectedAt(toLocalInputValue(new Date()));
       onAdded();
     } catch (cause) {
@@ -494,6 +548,26 @@ function AddEvidenceForm({ incidentId, defaultSource, onAdded }: { incidentId: s
       </div>
       <Field label={t('table.contentRef')} hint={t('incidents.evidence.add.contentHint')} htmlFor="incident-evidence-content-ref">
         <Input id="incident-evidence-content-ref" data-testid="incident-evidence-content-ref" value={contentRef} maxLength={1000} onChange={(event) => setContentRef(event.target.value)} />
+      </Field>
+      <div className="form-grid">
+        <Field label={t('incidents.content.add.typeLabel')} htmlFor="incident-evidence-content-type">
+          <Select value={contentType} onValueChange={setContentType}>
+            <SelectTrigger id="incident-evidence-content-type" data-testid="incident-evidence-content-type" aria-label={t('incidents.content.add.typeLabel')}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="text/plain" data-testid="incident-evidence-content-type-text">text/plain</SelectItem>
+              <SelectItem value="application/json" data-testid="incident-evidence-content-type-json">application/json</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Field label={t('incidents.content.add.contentLabel')} hint={t('incidents.content.add.contentHint')} htmlFor="incident-evidence-content">
+        <textarea
+          id="incident-evidence-content"
+          data-testid="incident-evidence-content"
+          rows={5}
+          value={content}
+          onChange={(event) => setContent(event.target.value)}
+        />
       </Field>
       <p className="muted small" data-testid="incident-evidence-claim-notice">{t('incidents.evidence.add.claimedNotice')}</p>
       {fieldError ? <p className="inline-error" role="alert" data-testid="incident-evidence-field-error">{fieldError}</p> : null}
