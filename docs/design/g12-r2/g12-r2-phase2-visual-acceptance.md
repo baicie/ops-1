@@ -51,15 +51,15 @@ env DATABASE_URL=postgres://<user>@127.0.0.1:5432/opsweave_g12p2 OPSWEAVE_BIND=1
 |---|---|---|
 | Run 列表与选择 | `S1`：5 个 run 的 `data-run-status` 逐个核对；选中行 `aria-current`/唯一 `data-selected` | `state-<runId>.png` |
 | Run 状态与失败原因 | `S1`：状态徽章文本 + `stopReason` 文本（Answered / Stopped at a budget / Cancelled + 各自原因） | `state-8b26…`、`state-6726…` |
-| Tool Invocation | `S2b`：5 行、首行 `data-outcome=REFUSED`、错误码文本 | `state-partial-refused.png` |
-| Supporting / Contradicting Evidence | `S4b`：两个分组按标题断言，反证组恰好 2 条 | `sum-conflicted.png` |
-| Citation 内容展开 | `S2`：点开后 `data-evidence-id` 与被点 citation 一致，正文含真实日志行 `ERROR payment-webhook`；JSON 行含 `status_code`；Legacy 行说明"只有定位符没有内容" | `citation-content-stored/-legacy.png` |
-| Confidence 与 Uncertainty | `S4`：`medium confidence` + uncertainty 段可见 | `hypothesis-provenance.png` |
-| Gap Codes | `S4`/`S4b`：`EVIDENCE_UNVERIFIED` 文案、`NO_EVIDENCE_ROWS`、`EVIDENCE_PREDATES_INCIDENT` | 同上 + `sum-uncertain-no-evidence.png` |
-| Review 接受与拒绝 | `S5`：UI 提交后徽章 `data-decision` 变更，且回读 API 二次确认 `review.decision` | `review-accepted/-rejected.png` |
-| Cancel | `S5`：RUNNING→点按→toast→刷新→列表行 `data-run-status=CANCELLED` | `cancel-after.png` |
-| TEST_FIXTURE 标签 | `S3`：徽章文本 + `role="note"` + 高度>10（不是 title/tooltip） | `synthetic-adapter-notice.png` |
-| AI Hypothesis 与 Human Verdict 的区别 | `S4c`：面板侧 `AI hypothesis` 标签、判词侧 `Human verdict`；两段文本互不包含；面板内无任何 `data-verdict*` 节点 | `s4c-hypothesis-vs-verdict.png` |
+| Tool Invocation | `S2b`：5 行、首行 `data-outcome=REFUSED`、错误码文本 | `state-partial-refused (capture, not committed)` |
+| Supporting / Contradicting Evidence | `S4b`：两个分组按标题断言，反证组恰好 2 条 | `sum-conflicted (capture, not committed)` |
+| Citation 内容展开 | `S2`：点开后 `data-evidence-id` 与被点 citation 一致，正文含真实日志行 `ERROR payment-webhook`；JSON 行含 `status_code`；Legacy 行说明"只有定位符没有内容" | `citation-content-stored/-legacy (capture, not committed)` |
+| Confidence 与 Uncertainty | `S4`：`medium confidence` + uncertainty 段可见 | `hypothesis-provenance (capture, not committed)` |
+| Gap Codes | `S4`/`S4b`：`EVIDENCE_UNVERIFIED` 文案、`NO_EVIDENCE_ROWS`、`EVIDENCE_PREDATES_INCIDENT` | 同上 + `sum-uncertain-no-evidence (capture, not committed)` |
+| Review 接受与拒绝 | `S5`：UI 提交后徽章 `data-decision` 变更，且回读 API 二次确认 `review.decision` | `review-accepted/-rejected (capture, not committed)` |
+| Cancel | `S5`：RUNNING→点按→toast→刷新→列表行 `data-run-status=CANCELLED` | `cancel-after (capture, not committed)` |
+| TEST_FIXTURE 标签 | `S3`：徽章文本 + `role="note"` + 高度>10（不是 title/tooltip） | `synthetic-adapter-notice (capture, not committed)` |
+| AI Hypothesis 与 Human Verdict 的区别 | `S4c`：面板侧 `AI hypothesis` 标签、判词侧 `Human verdict`；两段文本互不包含；面板内无任何 `data-verdict*` 节点 | `s4c-hypothesis-vs-verdict (capture, not committed)` |
 
 ### 2.2 的核心判据：「UI 不会让用户误认为模型推测就是事实」
 
@@ -153,7 +153,7 @@ node -e 'console.log(require("./artifacts/g12-r2p2/matrix.json").length)'   # 28
 ## 5. 2.5 视觉质量：同页同状态的改善前后
 
 `artifacts/g12-r2p2/compare/` 里是同一 URL、同一 run（`completed`）、同一 citation 展开状态、同一视口的**面板元素截图**：
-`before-1440-light-en.png` vs `after-1440-light-en.png`，`before-390-light-zh.png` vs `after-390-light-zh.png`。
+`before-1440-light-en (capture, not committed)` vs `after-1440-light-en (capture, not committed)`，`before-390-light-zh (capture, not committed)` vs `after-390-light-zh (capture, not committed)`。
 
 | 观察点 | 改前 | 改后 | 是否只是"更整齐" |
 |---|---|---|---|
