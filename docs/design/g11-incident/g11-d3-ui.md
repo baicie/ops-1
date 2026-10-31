@@ -80,15 +80,30 @@
 
 | # | Golden path | 证据 |
 |---|---|---|
-| 1 | 页面上创建 incident（标为人工创建） | `artifacts/g11-d3/01-created-detail.png`；`data-source="MANUAL"` 断言；`data-status=OPEN` |
+| 1 | 页面上创建 incident（标为人工创建） | `data-source="MANUAL"` 断言；`data-status=OPEN`；截图核对：详情页徽标读作 Manual / Open，时间线首条是 Created（截图未入库，见 §4.1） |
 | 2 | 刷新后仍存在（真持久化） | `page.reload()` 后 `data-incident-id` 与 h1 仍在（同一行测试断言） |
-| 3 | 加一条 evidence，来源与内容可核验 | 提交后读回：`[data-evidence-content-ref]` == 输入值、`data-evidence-source` == `operator:<admin email>`、`data-evidence-kind=LOG_EXCERPT`；刷新后仍在；`artifacts/g11-d3/02-evidence-persisted.png` |
-| 4 | 页面上能查询与浏览 | 列表 status=INVESTIGATING 命中、severity=MINOR 显示 filtered 空态、severity=MAJOR 再次命中；`artifacts/g11-d3/03-list-filtered.png` |
-| 5 | 提交 Human Verdict 且真保存 | 提交 CONFIRMED → `data-verdict-state=recorded`、status 变 CONCLUDED；刷新后 `data-verdict-value` 仍为 CONFIRMED；列表 CONCLUDED 筛选命中、OPEN 筛选落空；`artifacts/g11-d3/04-verdict-persisted.png` |
-| 6 | 不同权限得到正确结果 | viewer 403 两处（`05-viewer-create-refused.png`、`06-viewer-verdict-refused.png`）；operator 空态/越权 404/自有闭环（`07/08/09`） |
+| 3 | 加一条 evidence，来源与内容可核验 | 提交后读回：`[data-evidence-content-ref]` == 输入值、`data-evidence-source` == `operator:<admin email>`、`data-evidence-kind=LOG_EXCERPT`；刷新后仍在；截图核对：证据表只出现一行 `LOG_EXCERPT`，来源列是 operator 邮箱，可信度列非空（截图未入库，见 §4.1） |
+| 4 | 页面上能查询与浏览 | 列表 status=INVESTIGATING 命中、severity=MINOR 显示 filtered 空态、severity=MAJOR 再次命中；截图核对：三态依次为 1 行命中 / filtered 空态 / 1 行命中（截图未入库，见 §4.1） |
+| 5 | 提交 Human Verdict 且真保存 | 提交 CONFIRMED → `data-verdict-state=recorded`、status 变 CONCLUDED；刷新后 `data-verdict-value` 仍为 CONFIRMED；列表 CONCLUDED 筛选命中、OPEN 筛选落空；截图核对：结论 chip 为 Confirmed 并带签名人与理由（截图未入库，见 §4.1） |
+| 6 | 不同权限得到正确结果 | viewer 创建与下结论各拿到一次 403，页面按码本地化成同一句并附 requestId；operator 空态 / 越权 404「对你不可见」/ 自有闭环（截图核对，均未入库，见 §4.1） |
 | 7 | 浏览器与后端 E2E 通过 | `5 passed (14.1s)`，命令与输出见 §6 |
 
 额外证明（ADR §3.1 enabled）：**结论之后仍可追加证据**，且追加不会把 CONCLUDED 打回原状（测试断言证据数 1→2、状态仍 CONCLUDED）。
+
+### 4.1 为什么这些截图不提交 Git
+
+上表每一行的"截图核对"都是真跑出来的图，放在本机 scratch 目录 `artifacts/g11-d3/` 下——那个目录有 29 个产物（25 张 PNG + 3 个 JSON + 1 个子目录），**一个都没进仓库**。所以本文件不再复述它们的路径：引用一个只有我这台机器上存在的路径，等于在文档里写一句假话，而读者无法分辨那是证据还是笔误。
+
+不提交的理由，按分量排序：
+
+1. **它们是可重放的验证产物，不是基线。** 基线是"未来的 diff 拿它当对照物"（`artifacts/ui/visual-v3/` 里的那些），不提交就永久失去。这里的截图只回答"某次运行页面长什么样"，重跑 `tests/ui/g11-incident-slice.spec.ts` 就能再得到一份——§6.2 的命令里 `OPSWEAVE_G11_SHOTS=$PWD/../../artifacts/g11-d3` 就是它的输出位置。可复制性在命令里，不在 git 里。
+2. **预算已满档，收它们必须拿基线去换。** 守卫的 ceiling 是 379 个文件 / 68.24 MB，当前正好 **379 个文件 / 68.03 MB**：字节余 0.21 MB，文件位数**零余量**。要收 6 张，就得从别的桶里赶走 6 张——而别的桶里被跟踪的每一张都被文档引用、且是成对的 before/after 基线。用一次性证据换可对比的基线是净损失，不是等价交换。
+3. **"只收被引用的那 6 张"是没法解释的挑选。** 同一目录 29 个产物地位完全相同（还有 `07`–`11`、`matrix-*` 12 格、两份 header 基线 JSON）。收 6 张等于判剩下 23 个"不重要"，而当时的唯一依据只是"这 6 张恰好被表格引用"。要么整目录收，要么都不收；整目录收必然超预算。
+4. **真正的证据本来就是可重跑的断言。** 上表的 `data-source` / `data-evidence-source` / `data-verdict-state` 这些锚点，加上 §6 的命令与原始输出，任何人 checkout 后都能自己验一遍。截图是这些断言的视觉注解：有帮助，但不是不可替代的那一半。
+
+**以后真要收视觉基线怎么办**：像 `artifacts/ui/visual-v3/` 那样先在 `tests/ci/tracked-png-budget.json` 里登记这个桶，同时**下调**别处的 `maxFiles` 腾出位置（只降不升），并在提交信息里写清拿掉了哪个基线、为什么它可弃。不要靠"反正我本地能过"。
+
+**这个 bug 的教训已经进守卫**：`tests/ci/check-tracked-png-budget.mjs` 的 E 类检查过去判断"这个文件在磁盘上存不存在"，而 CI 的 checkout 里只有被跟踪的文件，于是同一份代码本地绿、CI 红。现在它判断的是 **git 是否跟踪**（`git ls-files`），本地与 CI 给同一个答案；判定的对象仍是"文档有没有引用不存在的东西"，阈值一个没动。另外，"文件在磁盘上但没进 git"不再是静默通过，失败信息会直接指出这一点。
 
 ---
 
@@ -178,7 +193,7 @@ $ OPSWEAVE_TEST_DATABASE_URL=postgres://localhost/opsweave_g11_d3_test OPSWEAVE_
 - 详情：身份/来源/关联对象、真实时间线（开始 / 每条证据的 `collectedAt` / 结论签署时间）、完整证据表（含可信度与不透明内容引用）、追加证据、写入一次的人工结论。
 - 创建：标题、severity、开始时间、关联对象；`source=MANUAL` 显式发送并在表单里写明。
 - 三档权限下读出正确差异；失败一律按错误码本地化并附 code/requestId。
-- 明暗主题 + 1440/1024/390 三档宽度（截图见 `artifacts/g11-d3/matrix-*.png`）。
+- 明暗主题 + 1440/1024/390 三档宽度：2 主题 × 3 宽度 × 列表/详情共 12 格逐格核对过（截图未入库，理由见 §4.1）。
 
 **不支持（本切片没有，页面也不假装有）**
 - 关闭（CLOSED）、重开、删除、合并 incident；owner 转移/指派。
@@ -268,7 +283,7 @@ D3 评审点了六条，本次修前四条。后端两条（审计与业务写�
 
 1. 这两页的 header 里**没有任何操作**（`actions=0`），而缺陷唯一能被用户感知的形态是"按钮被下一个面板盖住、点不动"——这里没有按钮可盖。
 2. 首块只下移了溢出的那一点（160 → 161 / 163），既不与 header 重叠，也不产生横向位移。
-3. 十二个抽样页面在 en 与 zh-CN 下实测仍是 80/160，等于 808047b 自己记录的修复前基线（`artifacts/g11-d3/page-header-baseline.json` 里 `headerH` 与 `previousHeaderH` 都是 80、`firstBlockY` 与 `previousFirstBlockY` 都是 160）。所以 808047b 对那十二页的回归结论成立，错的只是**页数**：变的是三页，不是一页。
+3. 十二个抽样页面在 en 与 zh-CN 下实测仍是 80/160，等于 808047b 自己记录的修复前基线（本次 header 基线测量里 `headerH` 与 `previousHeaderH` 都是 80、`firstBlockY` 与 `previousFirstBlockY` 都是 160；这份基线同样是本机 scratch 产物，未入库，理由见 §4.1）。所以 808047b 对那十二页的回归结论成立，错的只是**页数**：变的是三页，不是一页。
 
 历史提交按评审要求不改，口径以本节为准。
 

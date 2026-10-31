@@ -385,3 +385,8 @@ DELETE FROM _sqlx_migrations WHERE version = 16;
 | 审计与业务同事务（回滚实测） | §4.4 + `incidents::tests::a_failed_audit_rolls_*`（3 条） |
 | create 自然键被占 → 409 | §5.1 + 契约 `POST /incidents` 的 409 + `a_native_key_owned_by_another_operator_answers_409_not_404` |
 | viewer 写入口的产品规则与实测 | §4.5 + `docs/design/g11-incident/g11-d3-ui.md` §10 |
+| 浏览器截图为什么不进仓库 | `docs/design/g11-incident/g11-d3-ui.md` §4.1 |
+
+**关于"截图证明"这条证据的边界（2026-11-01 订正）**：D3/D4 的浏览器截图全部留在本机 scratch 目录，未提交。理由不在"懒得提交"，而在预算与性质：tracked PNG 已到 379/379 文件位（68.03/68.24 MB），收一张就得从别的桶赶走一张已被文档引用的 before/after 基线；而这些截图是可重放的验证产物，重跑 `tests/ui/g11-incident-slice.spec.ts` 即可再得，与"未来 diff 拿它当对照物"的基线不是一回事。所以本 ADR 与其配套文档只引用**可重跑的断言与命令**（`data-*` 锚点、§6 输出），不引用只有作者机器上存在的路径。
+
+这条订正的触发是一次真实的 CI 红：文档引用了 `artifacts/g11-d3/` 下的 6 张未跟踪截图，本地绿、CI 红——守卫当时判断的是"磁盘上有没有这个文件"，而 checkout 里只有被跟踪的文件。`tests/ci/check-tracked-png-budget.mjs` 已改为按 `git ls-files` 判定，阈值未动。
