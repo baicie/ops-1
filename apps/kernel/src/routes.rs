@@ -5,6 +5,7 @@ use crate::deployments;
 use crate::diagnostics;
 use crate::error::AppError;
 use crate::gateway;
+use crate::incidents;
 use crate::jobs;
 use crate::logs;
 use crate::nodes;
@@ -244,6 +245,26 @@ pub fn build(state: AppState) -> Router {
             get(jobs::get_job_diagnostics),
         )
         .route("/api/v1/jobs/{job_id}/cancel", post(jobs::cancel_job))
+        // G11 business slice. Authority and the permission matrix live in
+        // docs/design/g11-incident/incident-adr.md; every write below is gated by
+        // AuthUser::require_operator inside the handler, and reads are scoped by
+        // the same predicate the job list uses.
+        .route(
+            "/api/v1/incidents",
+            get(incidents::list_incidents).post(incidents::create_incident),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}",
+            get(incidents::get_incident),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/evidence",
+            get(incidents::list_evidence).post(incidents::append_evidence),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/verdict",
+            get(incidents::get_verdict).post(incidents::create_verdict),
+        )
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(
             state.clone(),
