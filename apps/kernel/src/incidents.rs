@@ -92,6 +92,9 @@ pub struct CreateVerdictRequest {
 pub struct IncidentListQuery {
     pub status: Option<String>,
     pub severity: Option<String>,
+    /// D3: the list page filters by owner. This narrows the caller's data scope; it
+    /// can never widen it, because the sees_all/owner predicate is still applied.
+    pub owner: Option<String>,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
@@ -440,6 +443,18 @@ async fn query_incidents(
         Some(value) => Some(closed_set(value, SEVERITIES, "severity filter")?),
         None => None,
     };
+    let owner = match query
+        .owner
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => Some(
+            Uuid::parse_str(value)
+                .map_err(|_| AppError::bad_request("owner filter must be a user UUID"))?,
+        ),
+        None => None,
+    };
     let (cursor_time, cursor_id) = match query.cursor.as_deref() {
         Some(value) => {
             let (time, id) = decode_cursor(value)?;
@@ -453,6 +468,7 @@ async fn query_incidents(
            AND ($3::text IS NULL OR i.status=$3)
            AND ($4::text IS NULL OR i.severity=$4)
            AND ($5::timestamptz IS NULL OR (i.started_at,i.incident_id) < ($5,$6::uuid))
+           AND ($8::uuid IS NULL OR i.owner=$8)
          ORDER BY i.started_at DESC, i.incident_id DESC
          LIMIT $7"
     );
@@ -464,6 +480,7 @@ async fn query_incidents(
         .bind(cursor_time)
         .bind(cursor_id)
         .bind(limit + 1)
+        .bind(owner)
         .fetch_all(db)
         .await?;
     let has_more = rows.len() as i64 > limit;
@@ -1138,6 +1155,92 @@ mod tests {
             .is_ok());
 
         cleanup(&pool, &[operator_a, operator_b, admin]).await;
+    }
+
+    /// D3 added an `owner` list filter for the UI. The rule it must not break is the one the
+    /// role predicate already enforces: a filter narrows what the caller may read, it never
+    /// reaches past that scope. An operator asking for another owner's id gets an empty page,
+    /// not their rows; an admin asking for the same id gets them.
+    #[tokio::test]
+    async fn owner_filter_narrows_the_scope_and_never_widens_it() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let operator = seed_user(&pool, "operator").await;
+        let other = seed_user(&pool, "operator").await;
+        let admin = seed_user(&pool, "admin").await;
+
+        let (_, mine) = insert_incident(
+            &pool,
+            caller(operator),
+            incident_request("owner filter mine", None),
+        )
+        .await
+        .unwrap();
+        let (_, theirs) = insert_incident(
+            &pool,
+            caller(other),
+            incident_request("owner filter theirs", None),
+        )
+        .await
+        .unwrap();
+
+        let (own_rows, _) = query_incidents(
+            &pool,
+            caller(operator),
+            IncidentListQuery {
+                owner: Some(operator.to_string()),
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(own_rows.iter().any(|item| item.id == mine.id));
+        assert!(own_rows.iter().all(|item| item.owner == operator));
+
+        let (their_rows, _) = query_incidents(
+            &pool,
+            caller(operator),
+            IncidentListQuery {
+                owner: Some(other.to_string()),
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            their_rows.is_empty(),
+            "an operator must not read another owner's rows by filtering for them"
+        );
+
+        let (admin_rows, _) = query_incidents(
+            &pool,
+            admin_caller(admin),
+            IncidentListQuery {
+                owner: Some(other.to_string()),
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(admin_rows.iter().any(|item| item.id == theirs.id));
+
+        let error = query_incidents(
+            &pool,
+            caller(operator),
+            IncidentListQuery {
+                owner: Some("not-a-uuid".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INVALID_REQUEST");
+
+        cleanup(&pool, &[operator, other, admin]).await;
     }
 
     #[tokio::test]

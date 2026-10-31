@@ -56,6 +56,15 @@ paths:
           in: query
           required: false
           schema: {$ref: '#/components/schemas/IncidentSeverity'}
+        - name: owner
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+          description: >
+            Owner filter added for D3. It narrows the caller's scope and can never
+            widen it: the role predicate is still applied first, so an operator
+            asking for another user's owner receives an empty page rather than
+            their rows.
         - name: limit
           in: query
           required: false

@@ -88,24 +88,38 @@ test('the home task space names what is missing instead of rendering a zero', as
   for (const id of TASK_AREAS) {
     const area = page.getByTestId(id);
     await expect(area, id).toBeVisible();
-    // Unavailable because the interface does not exist - not because a query returned nothing.
-    await expect(area).toHaveAttribute('data-source-status', 'unavailable');
-    await expect(area.locator('[data-state="unavailable"]')).toHaveCount(1);
-    // The section names the capability it is waiting for, machine-readably.
-    expect(await area.getAttribute('data-missing-capability')).toBeTruthy();
-
-    // The red line: no number anywhere in a task area. "0" would be a claim, not a placeholder.
+    // The red line for every area: no number. "0" would be a claim, not a placeholder.
     const text = (await area.innerText()).replace(/\s+/g, ' ');
     expect(text.length, id + ' must explain itself').toBeGreaterThan(40);
     expect(text, id + ' must not contain a digit').not.toMatch(/[0-9]/);
   }
 
+  // G11: one of the four areas is no longer waiting - the incident slice answers. It says so, it
+  // opens the real page, and it stops naming a missing interface.
+  const shipped = page.getByTestId('home-awaiting');
+  await expect(shipped).toHaveAttribute('data-source-status', 'available');
+  await expect(shipped.locator('[data-state="ready"]')).toHaveCount(1);
+  await expect(shipped).not.toHaveAttribute('data-missing-capability', /.+/);
+  await expect(shipped.locator('a[href="/app/incidents"]')).toHaveCount(1);
+
+  // The three areas whose interface still does not exist keep the unavailable state and name it.
+  for (const id of ['home-investigations', 'home-services', 'home-evidence']) {
+    const area = page.getByTestId(id);
+    await expect(area, id).toHaveAttribute('data-source-status', 'unavailable');
+    await expect(area.locator('[data-state="unavailable"]')).toHaveCount(1);
+    expect(await area.getAttribute('data-missing-capability')).toBeTruthy();
+  }
+
   // No KPI wall: no metric card, no table, no count badge on the home page at all.
   await expect(page.locator('[data-testid="metric-card"], .metric-card, table')).toHaveCount(0);
 
-  // Every business destination is still declared as not shipped, one row each.
-  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(6);
+  // Five destinations are still declared as not shipped, one row each; incidents is shipped and
+  // says what it actually exposes instead of what it is waiting for.
+  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(5);
   await expect(page.getByTestId('workspace-home').locator('[data-surface-status="not-shipped"][data-capability="sources"]')).toHaveCount(1);
+  const shippedRow = page.locator('[data-surface-status="shipped"][data-capability="incidents"]');
+  await expect(shippedRow).toHaveCount(1);
+  await expect(shippedRow.locator('a[href="/app/incidents"]')).toHaveCount(1);
 });
 
 test('a viewer is never offered, or shown, a platform resource total', async ({ page }) => {
@@ -188,59 +202,52 @@ test('a half-loaded extension list renders as partial, and lists only what reall
   await expect(plugins.locator('a[data-entry-plugin]')).toHaveAttribute('href', PAGE_PATH);
 });
 
-test('/app/incidents shows the investigation layout as empty slots, never as events', async ({ page }) => {
+test('/app/incidents renders the real list and its boundary, never a sample or a conclusion', async ({ page }) => {
   await stubGrant(page, 'admin');
   await signIn(page);
   await page.goto('/app/incidents');
 
-  // The absence is stated before the layout is shown.
-  const notYet = page.getByTestId('surface-not-yet');
-  await expect(notYet).toBeVisible();
-  await expect(notYet).toHaveAttribute('data-surface-status', 'not-shipped');
-  await expect(notYet).toHaveAttribute('data-capability', 'incidents');
+  await expect(page.getByTestId('incidents-page')).toBeVisible();
 
-  // Three regions, in reading order, each an empty slot that says why it is empty.
-  const regions = page.locator('[data-region]');
-  await expect(regions).toHaveCount(3);
-  expect(await regions.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-region'))))
-    .toEqual(['timeline', 'analysis', 'detail']);
-  for (const id of ['timeline', 'analysis', 'detail']) {
-    const region = page.locator(`[data-region="${id}"]`);
-    await expect(region.locator('[data-slot-empty="true"]')).toHaveCount(1);
-    // The slot names the interface it waits for; it never renders a sample entry.
-    expect((await region.innerText()).length).toBeGreaterThan(30);
+  // The boundary is stated before any row is read: which sources exist, which collector does not,
+  // that there is no AI diagnosis, no close endpoint, no free-text search, and why owner names may
+  // be missing. A page that shows real records owes the reader that much.
+  const boundary = page.getByTestId('incidents-boundary');
+  await expect(boundary).toBeVisible();
+  expect((await boundary.innerText()).length).toBeGreaterThan(160);
+
+  // The three filters are the ones the list endpoint implements, and they are controls.
+  for (const id of ['incident-filter-status', 'incident-filter-severity', 'incident-filter-owner']) {
+    await expect(page.getByTestId(id), id).toBeVisible();
   }
 
-  // No fabricated content of any kind: no event, no timeline point, no hypothesis, no AI text.
-  await expect(page.locator('[data-testid="timeline-event"], [data-testid="hypothesis-item"], [data-testid="ai-conclusion"]')).toHaveCount(0);
-  await expect(page.locator('[data-region] li, [data-region] time, [data-region] table')).toHaveCount(0);
-  await expect(page.locator('table, [data-testid="metric-card"]')).toHaveCount(0);
+  // Exactly one of "rows" and "an empty state that says why" - never both, never neither.
+  await expect(page.locator('[data-incident-row], [data-testid="incidents-empty"]').first()).toBeVisible();
+  const rows = await page.locator('[data-incident-row]').count();
+  if (rows === 0) await expect(page.getByTestId('incidents-empty')).toBeVisible();
+  else await expect(page.getByTestId('incidents-empty')).toHaveCount(0);
+
+  // Nothing is fabricated: no model conclusion, no hypothesis, no placeholder chart.
+  await expect(page.locator('[data-testid="ai-conclusion"], [data-testid="hypothesis-item"], [data-testid="rca-card"], [data-testid="timeline-event"]')).toHaveCount(0);
 });
 
-test('the investigation layout is desktop-first and degrades without overflowing', async ({ page }) => {
+test('the incident list degrades to one column without scrolling sideways at 390', async ({ page }) => {
   await stubGrant(page, 'admin');
   await signIn(page);
 
-  // 1440: three regions side by side.
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/app/incidents');
-  // Measuring before the layout mounts yields an empty list, and an empty list satisfies "all
-  // three share one row" for the wrong reason. Wait for the three regions themselves.
-  await expect(page.locator('[data-region]')).toHaveCount(3);
-  const wide = await page.locator('[data-region]').evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
-  expect(new Set(wide).size, 'all three regions share one row at 1440').toBe(1);
+  await expect(page.getByTestId('incidents-page')).toBeVisible();
+  await expect(page.locator('[data-incident-row], [data-testid="incidents-empty"]').first()).toBeVisible();
 
-  // 1024: the detail region drops to its own row.
-  await page.setViewportSize({ width: 1024, height: 900 });
-  const medium = await page.locator('[data-region]').evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
-  expect(medium[2], 'detail stacks below the first two at 1024').toBeGreaterThan(medium[0]);
-
-  // 390: one column, and neither page scrolls sideways.
-  await page.setViewportSize({ width: 390, height: 844 });
-  for (const path of ['/app/incidents', '/app/home']) {
-    await page.goto(path);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    expect(overflow, path + ' must not scroll horizontally at 390').toBeLessThanOrEqual(1);
+  // 1024 and 390: no page scrolls sideways, and the list is still the list.
+  for (const width of [1024, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const path of ['/app/incidents', '/app/home']) {
+      await page.goto(path);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, path + ' must not scroll horizontally at ' + width).toBeLessThanOrEqual(1);
+    }
   }
 });
 

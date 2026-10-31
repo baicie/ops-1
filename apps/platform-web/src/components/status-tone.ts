@@ -83,6 +83,24 @@ export const STATUS_MAP: Record<string, StatusEntry> = {
   // arrives as data. It is the one extra state the Governance page actually renders; any
   // further plugin-defined code still degrades to the raw value in a dashed pill.
   PASSED: { tone: 'ok', state: 'ready', labelKey: 'status.passed' },
+  // G11 incident slice. Three closed sets, one table: an incident lifecycle, an impact scale, and
+  // a human verdict. No code appears in two sets, so one entry per code stays unambiguous.
+  // OPEN is 'attention' because nobody has started; INVESTIGATING is the counterpart of RUNNING.
+  OPEN: { tone: 'warn', state: 'attention', labelKey: 'status.open' },
+  INVESTIGATING: { tone: 'info', state: 'running', labelKey: 'status.investigating' },
+  // A concluded incident carries a signature, not a healthy system: green is reserved for the
+  // verdict itself, and the lifecycle chip stays neutral so "someone judged this" cannot read as
+  // "this is fine".
+  CONCLUDED: { tone: 'neutral', state: 'stopped', labelKey: 'status.concluded', glyph: 'check' },
+  CLOSED: { tone: 'neutral', state: 'stopped', labelKey: 'status.closed' },
+  CRITICAL: { tone: 'danger', state: 'attention', labelKey: 'status.critical' },
+  MAJOR: { tone: 'warn', state: 'attention', labelKey: 'status.major' },
+  MINOR: { tone: 'info', state: 'attention', labelKey: 'status.minor' },
+  WARNING: { tone: 'neutral', state: 'attention', labelKey: 'status.warning' },
+  REFUTED: { tone: 'danger', state: 'error', labelKey: 'status.refuted' },
+  // UNKNOWN is already taken by "we do not know"; an inconclusive verdict is a *decision* that
+  // the evidence did not settle the question, so it gets its own neutral chip and its own word.
+  INCONCLUSIVE: { tone: 'neutral', state: 'unknown', labelKey: 'status.inconclusive', glyph: 'rotate' },
   UNKNOWN: { tone: 'unknown', state: 'unknown', labelKey: 'status.unknown' },
 };
 
