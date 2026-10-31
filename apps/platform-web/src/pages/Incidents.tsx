@@ -197,10 +197,12 @@ export function IncidentsPage() {
         eyebrow={t('incidents.eyebrow')}
         title={t('page.workspaceIncidents')}
         description={t('incidents.list.description')}
-        // ONE action in the header, and a short description: at >=769px .page-header is exactly
-        // 80px tall (styles.css, page-template §2.1), so a header whose copy and actions do not fit
-        // on one row wraps its actions UNDER the next panel, which then paints over the button. The
-        // refresh control therefore lives in the toolbar with the filters, where it belongs anyway.
+        // ONE action in the header, and a short description. At >=769px .page-header is min-height
+        // 80px (styles.css, page-template §2.1): 80 when the copy and actions share one row, and as
+        // tall as its content when they do not - the box reserves what it needs instead of letting a
+        // wrapped action row fall under the next panel. This page keeps a single primary action for a
+        // product reason, not a geometric one: one primary CTA per page (page-header.tsx), and
+        // refresh acts on the list, so it belongs in the toolbar next to the filters.
         primary={<Button onClick={() => setCreateOpen(true)} data-testid="incident-create-open"><Icon name="plus" size={15} /> {t('incidents.action.create')}</Button>}
       />
 
