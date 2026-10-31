@@ -999,7 +999,12 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .palette-item strong { font-size: var(--ow-type-sm); }
 .palette-item small { font-size: var(--ow-type-label); }
 .studio-canvas { height: 100%; min-height: 0; border-radius: var(--ow-radius-card); overflow: hidden; position: relative; background-color: var(--ow-canvas-bg); background-image: radial-gradient(var(--ow-border) 1px, transparent 1px); background-size: 20px 20px; }
-.studio-rf-wrap { height: 100%; min-height: 0; width: 100%; }
+/* A node is only visible once @xyflow/react has measured it: the wrapper carries an inline
+   visibility:hidden until then, and that measurement is a ResizeObserver delivery. So the
+   container must never present a zero-sized box to it. The draft flow (?draft=) remounts this
+   subtree; a remount inside a collapsed row would measure every node at 0 and leave them
+   painted-invisible for the life of the page. A floor says the canvas is a workspace. */
+.studio-rf-wrap { height: 100%; min-height: 320px; width: 100%; }
 .studio-note { left: 12px; bottom: 8px; right: 190px; font-size: var(--ow-type-label); pointer-events: none; background: color-mix(in srgb, var(--ow-canvas-bg) 82%, transparent); padding: 4px 4px; border-radius: 4px; }
 .studio-error { bottom: 34px; }
 
