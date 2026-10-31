@@ -64,12 +64,28 @@ function walk(dir, out) {
 }
 
 // ---- collect ---------------------------------------------------------------------------------
-const files = []; // index entries that still have bytes on disk
-const indexOnly = []; // index entries whose working-tree file is gone (an uncommitted deletion)
+// Count what the repository holds, not what this working tree happens to have. A tracked file that
+// is absent here but present in the index would otherwise be dropped from the count locally and kept
+// in it by CI, which is the difference between a green run and a red one at a full ceiling.
+const indexSizes = new Map();
+try {
+  const raw = execFileSync('git', ['ls-tree', '-r', '-l', 'HEAD', '--'].concat(tracked), {
+    cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+  for (const line of raw.split('\n')) {
+    const m = /^\d+ blob [0-9a-f]+\s+(\d+)\t(.+)$/.exec(line);
+    if (m) indexSizes.set(m[2], Number(m[1]));
+  }
+} catch { /* fall through to disk sizes */ }
+
+const files = []; // every tracked entry, sized from the commit
+const indexOnly = []; // tracked, present in the commit, absent from this working tree
 for (const rel of tracked) {
   const abs = path.join(root, rel);
-  if (existsSync(abs)) files.push({ rel, size: statSync(abs).size });
-  else indexOnly.push(rel);
+  const onDisk = existsSync(abs);
+  if (!onDisk) indexOnly.push(rel);
+  const size = indexSizes.has(rel) ? indexSizes.get(rel) : (onDisk ? statSync(abs).size : 0);
+  files.push({ rel, size });
 }
 
 const violations = [];
