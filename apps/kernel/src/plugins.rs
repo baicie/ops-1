@@ -653,8 +653,8 @@ pub async fn overview(State(state): State<AppState>, auth: AuthUser) -> AppResul
     };
     // Any authenticated caller reaches this page, so the feed it shows is the caller's
     // own slice of the ledger and not the platform's: the same scoped read /api/v1/audit uses.
-    let scope = audit::AuditScope::from_auth(&auth);
-    let recent_events = audit::list_scoped(&state.db, scope, 8, None, None).await?;
+    let scope = audit::AuditScope::resolve(&state.db, &auth).await?;
+    let recent_events = audit::list_scoped(&state.db, scope.clone(), 8, None, None).await?;
     Ok(Json(Overview {
         health: health.into(),
         nodes_total: nodes.len() as i64,
@@ -710,10 +710,12 @@ mod tests {
     #[test]
     fn the_overview_body_carries_the_scope_its_feed_was_read_under() {
         let body = |sees_all: bool| {
-            let scope = crate::audit::AuditScope {
-                user_id: Uuid::nil(),
+            let scope = crate::audit::AuditScope::for_test(
+                Uuid::nil(),
                 sees_all,
-            };
+                Vec::new(),
+                crate::scope::RowRule::AllRows,
+            );
             serde_json::to_value(Overview {
                 health: "READY".into(),
                 nodes_total: 0,

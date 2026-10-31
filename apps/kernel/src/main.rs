@@ -19,10 +19,12 @@ mod plugins;
 mod publishers;
 mod receipts;
 mod routes;
+mod scope;
 mod state;
 mod static_site;
 mod storage;
 mod users;
+mod workspaces;
 
 use anyhow::Context;
 use std::sync::OnceLock;

@@ -1,3 +1,5 @@
+use crate::error::AppResult;
+use crate::scope::{self, RowRule};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -97,7 +99,7 @@ pub struct AuditEventView {
     pub occurred_at: DateTime<Utc>,
 }
 
-/// Who is asking the audit ledger, as the two facts the SQL needs.
+/// Who is asking the audit ledger, as the facts the SQL needs.
 ///
 /// The ledger is a cross-subject table: one row per event, whatever the event is about,
 /// so there is no single column that decides whether a caller may read a row. The rule
@@ -112,24 +114,61 @@ pub struct AuditEventView {
 ///                  becomes a leak. A subject type added later is INVISIBLE until it is
 ///                  classified here: default deny, never default allow.
 ///
-/// sees_all is Role::is_admin() and deliberately NOT incidents::Caller::sees_all, which
-/// also answers "yes" for a viewer. That is sound on a route a viewer is refused at the
-/// handler anyway; it is unsound here, where a viewer does reach the query. The property
-/// this buys is the one that matters: the audit scope is always a SUBSET of the subject
-/// predicate it mirrors, so tightening incidents' sees_all later cannot silently widen
-/// this route, and a caller that is refused the incident is refused its events too.
-#[derive(Debug, Clone, Copy)]
+/// Two different questions are answered by two different fields, and they used to be one:
+///
+///   * `sees_all` - does this caller read the PLATFORM-WIDE subject types (node,
+///     plugin, deployment, ...)? Only an admin does. Those subjects are platform
+///     administration, which is why the Admin Console is not a business workspace.
+///   * `workspaces` + `rows` - which INCIDENT rows can this caller read? The same
+///     membership and the same per-role row rule the incident route uses, taken from
+///     `crate::scope`, so the ledger and the incident endpoints cannot answer the same
+///     question differently. Before D5 they did: the ledger asked "do you own the
+///     subject", the incident list asked a different expression that happened to answer
+///     yes for a viewer, and a viewer therefore read every incident and no incident event.
+///
+/// The ledger is allowed to be narrower than a subject route; it must never be wider.
+/// Reusing `scope::predicate` makes the wider case impossible by construction instead of
+/// by two comments agreeing with each other.
+#[derive(Debug, Clone)]
 pub(crate) struct AuditScope {
     pub(crate) user_id: Uuid,
     pub(crate) sees_all: bool,
+    /// The business workspaces this caller may read, resolved at the instant of the
+    /// call. Empty means no business row's events are readable, whatever the role.
+    pub(crate) workspaces: Vec<Uuid>,
+    /// Which rows inside those workspaces the caller sees, from the role.
+    pub(crate) rows: RowRule,
 }
 
 impl AuditScope {
-    pub(crate) fn from_auth(auth: &crate::auth::AuthUser) -> Self {
-        Self {
-            user_id: auth.user_id,
+    pub(crate) async fn resolve(db: &PgPool, auth: &crate::auth::AuthUser) -> AppResult<Self> {
+        let scope = crate::scope::DataScope::resolve(db, auth).await?;
+        Ok(Self {
+            user_id: scope.user_id,
             sees_all: auth.role.is_admin(),
+            workspaces: scope.workspaces,
+            rows: RowRule::for_role(auth.role),
+        })
+    }
+
+    /// A scope for unit tests, built without a database round trip.
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        user_id: Uuid,
+        sees_all: bool,
+        workspaces: Vec<Uuid>,
+        rows: RowRule,
+    ) -> Self {
+        Self {
+            user_id,
+            sees_all,
+            workspaces,
+            rows,
         }
+    }
+
+    fn sees_every_row(&self) -> bool {
+        self.rows == RowRule::AllRows
     }
 
     /// What this scope will show, reported beside the rows instead of inferred from them.
@@ -140,6 +179,7 @@ impl AuditScope {
     pub(crate) fn view(&self, requested: Option<&str>) -> AuditScopeView {
         AuditScopeView {
             sees_all: self.sees_all,
+            workspace_count: self.workspaces.len(),
             readable_subject_types: if self.sees_all {
                 Vec::new()
             } else {
@@ -209,8 +249,15 @@ pub(crate) fn visibility_of(subject_type: &str) -> Visibility {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditScopeView {
-    /// The ledger is not narrowed for this caller at all.
+    /// Every platform-wide subject type is readable by this caller (admin). It does NOT say
+    /// the ledger is unbounded: business rows are further bounded by `workspaceCount`,
+    /// which is why the two fields travel together.
     pub sees_all: bool,
+    /// How many business workspaces bounded this read. Zero explains an empty page
+    /// completely - a caller that is a member of no workspace cannot be shown a business
+    /// row's events by any read, whatever its role - and it is a count of the bound this
+    /// read applied, not a count of what exists.
+    pub workspace_count: usize,
     /// When `sees_all` is false: every subject type some event of which can reach this
     /// caller. A type absent from this list reaches them never, which is a permission and
     /// not a filter. Empty when `sees_all`, where the set is "everything, classified here
@@ -246,16 +293,30 @@ pub struct AuditListResponse {
 /// a malformed subject_id in a historical row must make that row invisible, not make the
 /// whole request fail with a cast error. The incidents and jobs tables are small and the
 /// lookups are primary-key seeks, so the cast costs nothing that matters here.
-const VISIBILITY: &str = r#"
+fn visibility_sql(
+    platform_param: usize,
+    scope_param: usize,
+    all_rows_param: usize,
+    user_param: usize,
+) -> String {
+    // The INCIDENT clause is scope::predicate - the same text the incident endpoints apply,
+    // with the alias of this subquery's table. Writing it here by hand is how this clause
+    // and the incident route drifted apart in the first place.
+    let incident = scope::predicate("i", scope_param, all_rows_param, user_param);
+    let user_param_text = format!("${user_param}");
+    format!(
+        r#"
         (
-          $5::boolean
+          ${platform_param}::boolean
           OR (e.subject_type = 'INCIDENT' AND EXISTS (
                 SELECT 1 FROM kernel.incidents i
-                 WHERE i.incident_id::text = e.subject_id AND i.owner = $4))
+                 WHERE i.incident_id::text = e.subject_id AND {incident}))
           OR (e.subject_type = 'job' AND EXISTS (
                 SELECT 1 FROM kernel.pipeline_jobs j
-                 WHERE j.job_id::text = e.subject_id AND j.submitted_by = $4))
-        )"#;
+                 WHERE j.job_id::text = e.subject_id AND j.submitted_by = {user_param_text}))
+        )"#
+    )
+}
 
 /// The ledger read. There is no unscoped variant on purpose: the route that used to call
 /// one carried an empty \`if auth.role == Viewer { }\` that read like a guard and scoped
@@ -274,17 +335,23 @@ pub async fn list_scoped(
         FROM kernel.audit_events e
         WHERE ($1::text IS NULL OR e.subject_type = $1)
           AND ($2::text IS NULL OR e.subject_id = $2)
-          AND {VISIBILITY}
+          AND {}
         ORDER BY e.occurred_at DESC
         LIMIT $3
-        "#
+        "#,
+        visibility_sql(5, 6, 7, 4)
     );
     sqlx::query_as::<_, AuditEventView>(&sql)
         .bind(subject_type)
         .bind(subject_id)
         .bind(limit.clamp(1, 500))
         .bind(scope.user_id)
+        // $5 is the platform half (every subject type), $6 the row half inside the
+        // authorized workspaces. They were one bind before D5 and are two now: an admin
+        // reads every platform subject and only its own workspaces' incidents.
         .bind(scope.sees_all)
+        .bind(&scope.workspaces)
+        .bind(scope.sees_every_row())
         .fetch_all(db)
         .await
 }
@@ -313,6 +380,11 @@ mod tests {
     /// row counts: a count of zero is also what a broken query returns.
     const CLOSURE_NOTE_A: &str = "disk pressure on node-7 confirmed by the operator who owns it";
     const CLOSURE_NOTE_B: &str =
+        "second incident in the same workspace, readable by every member of it";
+    /// The note of an incident in a workspace the viewers in these tests are NOT members
+    /// of. This is the leak D5 is about: the row and its words must not cross the
+    /// workspace boundary, whatever the role.
+    const CLOSURE_NOTE_C: &str =
         "unrelated tenant failure, nobody outside that tenant may read this";
 
     fn database_required() -> bool {
@@ -360,6 +432,9 @@ mod tests {
         Some(pool)
     }
 
+    /// A user that is a MEMBER of the legacy business workspace, which is what makes it
+    /// able to read a business row at all since D5. Membership is data, so a fixture that
+    /// wants a readable incident has to write it too.
     async fn seed_user(pool: &PgPool, role: &str) -> Uuid {
         let id = Uuid::new_v4();
         sqlx::query(
@@ -373,19 +448,49 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+        join_workspace(pool, crate::scope::legacy_workspace(), id).await;
         id
     }
 
-    async fn seed_incident(pool: &PgPool, owner: Uuid, title: &str) -> Uuid {
+    async fn join_workspace(pool: &PgPool, workspace: Uuid, user: Uuid) {
+        sqlx::query(
+            "INSERT INTO kernel.business_workspace_members (workspace_id,user_id)
+             VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        )
+        .bind(workspace)
+        .bind(user)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// A second business workspace, which is what makes "outside my membership" a real
+    /// place in these tests rather than a hypothetical one.
+    async fn seed_workspace(pool: &PgPool) -> Uuid {
+        let workspace = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.business_workspaces (workspace_id,key,name)
+             VALUES ($1,$2,'audit scope second workspace')",
+        )
+        .bind(workspace)
+        .bind(format!("audit-scope-{workspace}"))
+        .execute(pool)
+        .await
+        .unwrap();
+        workspace
+    }
+
+    async fn seed_incident(pool: &PgPool, owner: Uuid, workspace: Uuid, title: &str) -> Uuid {
         let id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO kernel.incidents
-               (incident_id,title,severity,status,source,started_at,owner)
-             VALUES ($1,$2,'MAJOR','OPEN','MANUAL',now(),$3)",
+               (incident_id,title,severity,status,source,started_at,owner,workspace_id)
+             VALUES ($1,$2,'MAJOR','OPEN','MANUAL',now(),$3,$4)",
         )
         .bind(id)
         .bind(title)
         .bind(owner)
+        .bind(workspace)
         .execute(pool)
         .await
         .unwrap();
@@ -472,7 +577,7 @@ mod tests {
         }
     }
 
-    async fn cleanup(pool: &PgPool, users: &[Uuid]) {
+    async fn cleanup(pool: &PgPool, users: &[Uuid], workspaces: &[Uuid]) {
         for user in users {
             sqlx::query("DELETE FROM kernel.audit_events WHERE actor_id=$1")
                 .bind(user.to_string())
@@ -506,6 +611,16 @@ mod tests {
                 .await
                 .unwrap();
         }
+        // After the users, whose incidents are gone by now: the workspace FK is RESTRICT,
+        // so a workspace still holding a row refuses to disappear - which is the behaviour
+        // that makes the migration's ON DELETE RESTRICT meaningful.
+        for workspace in workspaces {
+            sqlx::query("DELETE FROM kernel.business_workspaces WHERE workspace_id=$1")
+                .bind(workspace)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
     }
 
     /// The fixture every test below reads: two operators with one incident each, one job
@@ -515,6 +630,13 @@ mod tests {
         owner_b: Uuid,
         incident_a: Uuid,
         incident_b: Uuid,
+        other_workspace: Uuid,
+        incident_c: Uuid,
+        /// The closure note each fixture incident carries, suffixed with its own id so a
+        /// leftover row from an interrupted run cannot satisfy or fail a "these words
+        /// crossed a boundary" assertion.
+        note_a: String,
+        note_c: String,
         job_a: Uuid,
         future_event: Uuid,
     }
@@ -522,15 +644,45 @@ mod tests {
     async fn seeded(pool: &PgPool) -> Seeded {
         let owner_a = seed_user(pool, "operator").await;
         let owner_b = seed_user(pool, "operator").await;
-        let incident_a = seed_incident(pool, owner_a, "audit scope incident A").await;
-        let incident_b = seed_incident(pool, owner_b, "audit scope incident B").await;
+        let incident_a = seed_incident(
+            pool,
+            owner_a,
+            crate::scope::legacy_workspace(),
+            "audit scope incident A",
+        )
+        .await;
+        let incident_b = seed_incident(
+            pool,
+            owner_b,
+            crate::scope::legacy_workspace(),
+            "audit scope incident B",
+        )
+        .await;
+        // C lives where the viewer is not a member. owner_b is, so it can still read its
+        // own record; the viewer's answer about C must be "no such event" and not "no
+        // permission".
+        let other_workspace = seed_workspace(pool).await;
+        join_workspace(pool, other_workspace, owner_b).await;
+        let incident_c =
+            seed_incident(pool, owner_b, other_workspace, "audit scope incident C").await;
+        let note_c = format!("{CLOSURE_NOTE_C} [{incident_c}]");
+        seed_event(
+            pool,
+            owner_b,
+            "INCIDENT_CLOSED",
+            "INCIDENT",
+            &incident_c.to_string(),
+            serde_json::json!({ "closureNote": note_c }),
+        )
+        .await;
+        let note_a = format!("{CLOSURE_NOTE_A} [{incident_a}]");
         seed_event(
             pool,
             owner_a,
             "INCIDENT_CLOSED",
             "INCIDENT",
             &incident_a.to_string(),
-            serde_json::json!({"closureNote": CLOSURE_NOTE_A}),
+            serde_json::json!({ "closureNote": note_a }),
         )
         .await;
         seed_event(
@@ -566,6 +718,10 @@ mod tests {
             owner_b,
             incident_a,
             incident_b,
+            other_workspace,
+            incident_c,
+            note_a,
+            note_c,
             job_a,
             future_event,
         }
@@ -587,25 +743,40 @@ mod tests {
             .find(|event| event.subject_type == "INCIDENT" && event.subject_id == subject)
     }
 
-    /// The P0 itself: the lowest-privileged role reads no other actor's incident event, and
-    /// in particular not the closure note it carries.
+    /// The P0 itself, in the shape D5 leaves it: the lowest-privileged role reads the
+    /// events of the records it MAY read - every row in a workspace it is a member of - and
+    /// nothing at all of a record in a workspace it is not a member of, closure note
+    /// included.
+    ///
+    /// The second half is what this test used to assert, and it is the half that matters:
+    /// the leak is business free text crossing a workspace boundary. The first half is the
+    /// change. Before D5 the ledger told a viewer it could read no incident event, while the
+    /// incident list handed the same viewer every incident on the platform; two faces, two
+    /// answers about one role. There is now one boundary, and this is it.
     #[tokio::test]
-    async fn a_viewer_reads_no_incident_event_of_an_incident_it_cannot_read() {
+    async fn a_viewer_reads_the_events_of_records_it_may_read_and_none_of_the_others() {
         let Some(pool) = test_pool().await else {
             return;
         };
         let fixture = seeded(&pool).await;
         let viewer = seed_user(&pool, "viewer").await;
-        let scope = AuditScope::from_auth(&auth(viewer, Role::Viewer));
+        let scope = AuditScope::resolve(&pool, &auth(viewer, Role::Viewer))
+            .await
+            .unwrap();
 
-        let events = list_scoped(&pool, scope, 500, None, None).await.unwrap();
+        let events = list_scoped(&pool, scope.clone(), 500, None, None)
+            .await
+            .unwrap();
+        // Same workspace: the ledger agrees with the incident route, which is the whole
+        // point of sharing one predicate.
         assert!(
-            incident_event_id(&events, fixture.incident_a).is_none(),
-            "a viewer must not see another operator's incident event"
+            incident_event_id(&events, fixture.incident_a).is_some(),
+            "the ledger must agree with the incident read: this row is in the viewer's workspace"
         );
+        // A workspace the viewer is not a member of: no event.
         assert!(
-            incident_event_id(&events, fixture.incident_b).is_none(),
-            "a viewer must not see another operator's incident event"
+            incident_event_id(&events, fixture.incident_c).is_none(),
+            "an incident outside the caller's workspaces leaked its event"
         );
         // Filtering by the subject must not be a way around the scope: the query is the
         // same query whether or not the caller names the incident it wants.
@@ -614,7 +785,7 @@ mod tests {
             scope,
             500,
             Some("INCIDENT"),
-            Some(&fixture.incident_b.to_string()),
+            Some(&fixture.incident_c.to_string()),
         )
         .await
         .unwrap();
@@ -624,10 +795,21 @@ mod tests {
         );
         // The words, not the count: the leak was business free text.
         let serialized = serde_json::to_string(&events).unwrap();
-        assert!(!serialized.contains(CLOSURE_NOTE_A));
-        assert!(!serialized.contains(CLOSURE_NOTE_B));
+        assert!(
+            serialized.contains(&fixture.note_a),
+            "the closure note of a record this caller may read must be readable"
+        );
+        assert!(
+            !serialized.contains(&fixture.note_c),
+            "a closure note from a workspace this caller is not in leaked into the ledger"
+        );
 
-        cleanup(&pool, &[fixture.owner_a, fixture.owner_b, viewer]).await;
+        cleanup(
+            &pool,
+            &[fixture.owner_a, fixture.owner_b, viewer],
+            &[fixture.other_workspace],
+        )
+        .await;
     }
 
     /// The middle identity: an operator reads its own incident's events and its own job's
@@ -638,14 +820,18 @@ mod tests {
             return;
         };
         let fixture = seeded(&pool).await;
-        let scope = AuditScope::from_auth(&auth(fixture.owner_a, Role::Operator));
+        let scope = AuditScope::resolve(&pool, &auth(fixture.owner_a, Role::Operator))
+            .await
+            .unwrap();
 
-        let events = list_scoped(&pool, scope, 500, None, None).await.unwrap();
+        let events = list_scoped(&pool, scope.clone(), 500, None, None)
+            .await
+            .unwrap();
         let own = incident_event_id(&events, fixture.incident_a)
             .expect("the owner must read its own incident's events");
         assert_eq!(
             own.details["closureNote"],
-            serde_json::json!(CLOSURE_NOTE_A)
+            serde_json::json!(fixture.note_a)
         );
         assert!(incident_event_id(&events, fixture.incident_b).is_none());
         assert!(
@@ -654,9 +840,14 @@ mod tests {
             "the submitter must read its own job's events"
         );
         let serialized = serde_json::to_string(&events).unwrap();
-        assert!(!serialized.contains(CLOSURE_NOTE_B));
+        assert!(!serialized.contains(&fixture.note_c));
 
-        cleanup(&pool, &[fixture.owner_a, fixture.owner_b]).await;
+        cleanup(
+            &pool,
+            &[fixture.owner_a, fixture.owner_b],
+            &[fixture.other_workspace],
+        )
+        .await;
     }
 
     /// The top identity, and the reason the route is still usable: an admin reads
@@ -668,14 +859,23 @@ mod tests {
         };
         let fixture = seeded(&pool).await;
         let admin = seed_user(&pool, "admin").await;
-        let scope = AuditScope::from_auth(&auth(admin, Role::Admin));
+        let scope = AuditScope::resolve(&pool, &auth(admin, Role::Admin))
+            .await
+            .unwrap();
 
-        let events = list_scoped(&pool, scope, 500, None, None).await.unwrap();
+        let events = list_scoped(&pool, scope.clone(), 500, None, None)
+            .await
+            .unwrap();
         assert!(incident_event_id(&events, fixture.incident_a).is_some());
         assert!(incident_event_id(&events, fixture.incident_b).is_some());
         assert!(events.iter().any(|event| event.id == fixture.future_event));
 
-        cleanup(&pool, &[fixture.owner_a, fixture.owner_b, admin]).await;
+        cleanup(
+            &pool,
+            &[fixture.owner_a, fixture.owner_b, admin],
+            &[fixture.other_workspace],
+        )
+        .await;
     }
 
     /// Default deny: a subject type this file does not classify is invisible to everyone
@@ -687,15 +887,24 @@ mod tests {
             return;
         };
         let fixture = seeded(&pool).await;
-        let scope = AuditScope::from_auth(&auth(fixture.owner_a, Role::Operator));
+        let scope = AuditScope::resolve(&pool, &auth(fixture.owner_a, Role::Operator))
+            .await
+            .unwrap();
 
-        let events = list_scoped(&pool, scope, 500, None, None).await.unwrap();
+        let events = list_scoped(&pool, scope.clone(), 500, None, None)
+            .await
+            .unwrap();
         assert!(
             events.iter().all(|event| event.id != fixture.future_event),
             "an event whose subject type is unclassified must not be visible to an operator"
         );
 
-        cleanup(&pool, &[fixture.owner_a, fixture.owner_b]).await;
+        cleanup(
+            &pool,
+            &[fixture.owner_a, fixture.owner_b],
+            &[fixture.other_workspace],
+        )
+        .await;
     }
 
     /// The property that makes the fix survive D4/D5: for every role, the set of incident
@@ -720,7 +929,7 @@ mod tests {
                 (fixture.owner_b, "operator b"),
                 (viewer, "viewer"),
             ] {
-                let scope = AuditScope::from_auth(&auth(user, role));
+                let scope = AuditScope::resolve(&pool, &auth(user, role)).await.unwrap();
                 let events = list_scoped(&pool, scope, 500, Some("INCIDENT"), None)
                     .await
                     .unwrap();
@@ -728,7 +937,11 @@ mod tests {
                     let via_ledger = incident_event_id(&events, incident).is_some();
                     let via_incident_read = crate::incidents::incident_status(
                         &pool,
-                        crate::incidents::Caller::from_role(user, role),
+                        crate::scope::DataScope::for_test(
+                            user,
+                            vec![crate::scope::legacy_workspace()],
+                            crate::scope::RowRule::for_role(role),
+                        ),
                         incident,
                     )
                     .await
@@ -744,7 +957,12 @@ mod tests {
             }
         }
 
-        cleanup(&pool, &[fixture.owner_a, fixture.owner_b, admin, viewer]).await;
+        cleanup(
+            &pool,
+            &[fixture.owner_a, fixture.owner_b, admin, viewer],
+            &[fixture.other_workspace],
+        )
+        .await;
     }
 
     /// The three identities, in the order the P0-1 acceptance states them, on one call
@@ -757,18 +975,38 @@ mod tests {
         let fixture = seeded(&pool).await;
         let admin = seed_user(&pool, "admin").await;
         let viewer = seed_user(&pool, "viewer").await;
+        // The admin reads both business workspaces in this test, and both memberships are
+        // written out here - not implied by the role. An admin that is a member of one
+        // workspace reads one workspace's rows, which is D5's ruling made visible.
+        join_workspace(&pool, fixture.other_workspace, admin).await;
 
-        let viewer_ids = ids_of(&pool, AuditScope::from_auth(&auth(viewer, Role::Viewer))).await;
-        let operator_ids = ids_of(
+        let viewer_ids = ids_of(
             &pool,
-            AuditScope::from_auth(&auth(fixture.owner_a, Role::Operator)),
+            AuditScope::resolve(&pool, &auth(viewer, Role::Viewer))
+                .await
+                .unwrap(),
         )
         .await;
-        let admin_ids = ids_of(&pool, AuditScope::from_auth(&auth(admin, Role::Admin))).await;
+        let operator_ids = ids_of(
+            &pool,
+            AuditScope::resolve(&pool, &auth(fixture.owner_a, Role::Operator))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let admin_ids = ids_of(
+            &pool,
+            AuditScope::resolve(&pool, &auth(admin, Role::Admin))
+                .await
+                .unwrap(),
+        )
+        .await;
 
         let incident_b_events = list_scoped(
             &pool,
-            AuditScope::from_auth(&auth(admin, Role::Admin)),
+            AuditScope::resolve(&pool, &auth(admin, Role::Admin))
+                .await
+                .unwrap(),
             500,
             Some("INCIDENT"),
             Some(&fixture.incident_b.to_string()),
@@ -779,15 +1017,24 @@ mod tests {
             .first()
             .expect("the admin reads B's event")
             .id;
+        // B is in the legacy workspace, which both the viewer and owner_a are members of.
+        // The viewer reads it because the incident route reads it; owner_a does not,
+        // because an operator sees the events of the rows it owns.
         assert!(
-            !viewer_ids.contains(&incident_b_event) && !operator_ids.contains(&incident_b_event),
-            "another operator's incident event reached a caller that may not read it"
+            !operator_ids.contains(&incident_b_event),
+            "another operator's incident event reached an operator that does not own it"
+        );
+        assert!(
+            viewer_ids.contains(&incident_b_event),
+            "a member of the workspace must read the event of a record it may read"
         );
         assert!(admin_ids.contains(&incident_b_event));
 
         let incident_a_events = list_scoped(
             &pool,
-            AuditScope::from_auth(&auth(admin, Role::Admin)),
+            AuditScope::resolve(&pool, &auth(admin, Role::Admin))
+                .await
+                .unwrap(),
             500,
             Some("INCIDENT"),
             Some(&fixture.incident_a.to_string()),
@@ -803,12 +1050,43 @@ mod tests {
             "the owner reads its own event"
         );
         assert!(
-            !viewer_ids.contains(&incident_a_event),
-            "a viewer read the owner's event"
+            viewer_ids.contains(&incident_a_event),
+            "a member of the workspace reads the event of a record it may read"
         );
         assert!(admin_ids.contains(&incident_a_event));
 
-        cleanup(&pool, &[fixture.owner_a, fixture.owner_b, admin, viewer]).await;
+        // The boundary, on the one workspace only the admin and owner_b were given.
+        let incident_c_events = list_scoped(
+            &pool,
+            AuditScope::resolve(&pool, &auth(admin, Role::Admin))
+                .await
+                .unwrap(),
+            500,
+            Some("INCIDENT"),
+            Some(&fixture.incident_c.to_string()),
+        )
+        .await
+        .unwrap();
+        let incident_c_event = incident_c_events
+            .first()
+            .expect("the admin, granted that workspace, reads C's event")
+            .id;
+        assert!(admin_ids.contains(&incident_c_event));
+        assert!(
+            !viewer_ids.contains(&incident_c_event),
+            "an event from a workspace the viewer is not in reached the viewer"
+        );
+        assert!(
+            !operator_ids.contains(&incident_c_event),
+            "an event from a workspace owner_a is not in reached owner_a"
+        );
+
+        cleanup(
+            &pool,
+            &[fixture.owner_a, fixture.owner_b, admin, viewer],
+            &[fixture.other_workspace],
+        )
+        .await;
     }
 
     /// The hint the UI renders, for the three identities, with no database in the way: this
@@ -816,9 +1094,27 @@ mod tests {
     #[test]
     fn the_reported_scope_names_the_kinds_each_identity_can_read() {
         let id = Uuid::new_v4();
-        let viewer = AuditScope::from_auth(&auth(id, Role::Viewer));
-        let operator = AuditScope::from_auth(&auth(id, Role::Operator));
-        let admin = AuditScope::from_auth(&auth(id, Role::Admin));
+        // No database: this is the hint's shape, and the hint is a function of the role
+        // plus the workspace count. The count is empty here on purpose - it does not
+        // change which subject TYPES are readable, only whether any row is.
+        let viewer = AuditScope::for_test(
+            id,
+            false,
+            Vec::new(),
+            crate::scope::RowRule::for_role(Role::Viewer),
+        );
+        let operator = AuditScope::for_test(
+            id,
+            false,
+            Vec::new(),
+            crate::scope::RowRule::for_role(Role::Operator),
+        );
+        let admin = AuditScope::for_test(
+            id,
+            true,
+            Vec::new(),
+            crate::scope::RowRule::for_role(Role::Admin),
+        );
         // The kinds the Activity page's own subject filter offers. Every one of them is a
         // subject with no per-caller read predicate, so every one of them is admin-only and
         // the page must say "refused", not "nothing here".
@@ -904,13 +1200,17 @@ mod tests {
             probes
         };
 
-        let operator_scope = AuditScope::from_auth(&auth(owner, Role::Operator));
-        let operator_events = list_scoped(&pool, operator_scope, 500, None, None)
+        let operator_scope = AuditScope::resolve(&pool, &auth(owner, Role::Operator))
+            .await
+            .unwrap();
+        let operator_events = list_scoped(&pool, operator_scope.clone(), 500, None, None)
             .await
             .unwrap();
         let admin_events = list_scoped(
             &pool,
-            AuditScope::from_auth(&auth(admin, Role::Admin)),
+            AuditScope::resolve(&pool, &auth(admin, Role::Admin))
+                .await
+                .unwrap(),
             500,
             None,
             None,
@@ -946,6 +1246,6 @@ mod tests {
             );
         }
 
-        cleanup(&pool, &[owner, admin]).await;
+        cleanup(&pool, &[owner, admin], &[]).await;
     }
 }

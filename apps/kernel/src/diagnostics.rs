@@ -69,7 +69,7 @@ pub async fn diagnostics(State(state): State<AppState>, auth: AuthUser) -> AppRe
     // makes, with the scope that route would need to be allowed to see everything.
     let recent_failures = audit::list_scoped(
         &state.db,
-        audit::AuditScope::from_auth(&auth),
+        audit::AuditScope::resolve(&state.db, &auth).await?,
         20,
         None,
         None,
@@ -139,10 +139,10 @@ pub async fn audit_events(
     // UI has to say which: the page that shows `[]` without a reason is the page the next
     // engineer reads as a broken predicate. Reporting the scope is not a widening - the
     // predicate above is unchanged - it is the refusal saying so.
-    let scope = audit::AuditScope::from_auth(&auth);
+    let scope = audit::AuditScope::resolve(&state.db, &auth).await?;
     let events = audit::list_scoped(
         &state.db,
-        scope,
+        scope.clone(),
         query.limit.unwrap_or(100),
         query.subject_type.as_deref(),
         query.subject_id.as_deref(),

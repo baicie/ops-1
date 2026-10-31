@@ -41,8 +41,9 @@ use crate::config::Config;
 use crate::error::{AppError, AppResult};
 use crate::incidents::{
     incident_status, query_evidence, query_incident, query_incidents, query_timeline,
-    verify_stored_content, Caller, EvidenceView, IncidentListQuery, IncidentTimeline, IncidentView,
+    verify_stored_content, EvidenceView, IncidentListQuery, IncidentTimeline, IncidentView,
 };
+use crate::scope::DataScope;
 use crate::state::AppState;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -559,7 +560,7 @@ struct ToolScope {
 /// Deliberately not cached from the run's start: a scope account demoted, disabled or
 /// deleted between two tool calls must stop being able to read on the next one, and the
 /// only way to guarantee that is to ask the database at the moment of the read.
-async fn scope_caller(db: &PgPool, scope_user_id: Uuid) -> Result<Caller, ToolFailure> {
+async fn scope_caller(db: &PgPool, scope_user_id: Uuid) -> Result<DataScope, ToolFailure> {
     let role: Option<String> = sqlx::query_scalar("SELECT role FROM kernel.users WHERE id=$1")
         .bind(scope_user_id)
         .fetch_optional(db)
@@ -577,7 +578,13 @@ async fn scope_caller(db: &PgPool, scope_user_id: Uuid) -> Result<Caller, ToolFa
             "the account this investigation runs as has a role this kernel cannot interpret, so its reads are refused",
         )
     })?;
-    Ok(Caller::from_role(scope_user_id, role))
+    // Membership is read here too, at the same instant and for the same reason: a
+    // workspace the account was removed from between two tool calls must stop answering
+    // on the next one. A run's stored scope_user_id names WHO acts; this line decides
+    // what that account may read right now.
+    DataScope::resolve_for(db, scope_user_id, role)
+        .await
+        .map_err(|error| ToolFailure::error("TOOL_SCOPE_UNAVAILABLE", error.to_string()))
 }
 
 /// Which incident a tool call is about. Absent means the run's own; anything present
@@ -664,7 +671,7 @@ async fn execute_tool(
     match tool {
         TOOL_GET_INCIDENT => {
             let target = target_incident(arguments, scope)?;
-            let incident = query_incident(db, caller, target)
+            let incident = query_incident(db, caller.clone(), target)
                 .await
                 .map_err(|error| ToolFailure::from_predicate(&error))?;
             Ok(ToolOutcome {
@@ -703,7 +710,7 @@ async fn execute_tool(
             let target = target_incident(arguments, scope)?;
             let wanted = required_uuid(arguments, "evidenceId")?;
             // The incident predicate first, exactly as GET .../evidence/{id}/content does.
-            incident_status(db, caller, target)
+            incident_status(db, caller.clone(), target)
                 .await
                 .map_err(|error| ToolFailure::from_predicate(&error))?;
             let rows = query_evidence(db, caller, target, (None, None))
@@ -810,7 +817,7 @@ async fn execute_tool(
 async fn related_context(
     db: &PgPool,
     authorized_sources: &[String],
-    caller: Caller,
+    caller: DataScope,
     scope: ToolScope,
     arguments: &Value,
 ) -> Result<ToolOutcome, ToolFailure> {
@@ -866,7 +873,7 @@ async fn related_context(
             "the declared authorization predicate of this source is not one this tool can apply",
         ));
     }
-    let incident = query_incident(db, caller, target)
+    let incident = query_incident(db, caller.clone(), target)
         .await
         .map_err(|error| ToolFailure::from_predicate(&error))?;
     let Some(entity) = incident.related_entity.clone() else {
@@ -1963,7 +1970,7 @@ pub async fn start_investigation(
     }
     // The incident predicate, before a single row is written: an investigation may only
     // exist for an incident its requester may read.
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     incident_status(&state.db, caller, incident_id).await?;
 
     let new_run_id = Uuid::new_v4();
@@ -2067,7 +2074,7 @@ pub async fn list_investigations(
     auth: AuthUser,
     Path(incident_id): Path<Uuid>,
 ) -> AppResult<Json<Vec<InvestigationRunView>>> {
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     incident_status(&state.db, caller, incident_id).await?;
     let ids: Vec<Uuid> = sqlx::query_scalar(
         "SELECT run_id FROM kernel.investigation_runs
@@ -2089,7 +2096,7 @@ pub async fn get_investigation(
     auth: AuthUser,
     Path((incident_id, run_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<InvestigationRunView>> {
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     incident_status(&state.db, caller, incident_id).await?;
     Ok(Json(load_run(&state.db, incident_id, run_id, false).await?))
 }
@@ -2105,7 +2112,7 @@ pub async fn cancel_investigation(
     Path((incident_id, run_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Json<InvestigationRunView>> {
     auth.require_operator()?;
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     incident_status(&state.db, caller, incident_id).await?;
     let mut tx = state.db.begin().await?;
     let updated = sqlx::query(
@@ -2194,7 +2201,7 @@ pub async fn review_investigation(
             ),
         ));
     }
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     incident_status(&state.db, caller, incident_id).await?;
     let status: Option<String> = sqlx::query_scalar(
         "SELECT status FROM kernel.investigation_runs WHERE run_id=$1 AND incident_id=$2",
@@ -3097,7 +3104,23 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+        // Since D5 an account reads a business row only through workspace membership, and
+        // a tool call re-reads that membership per call. A fixture without this row would
+        // be proving the tool refuses everything, which is not what these tests are about.
+        join_workspace(pool, crate::scope::legacy_workspace(), id).await;
         id
+    }
+
+    async fn join_workspace(pool: &PgPool, workspace: Uuid, user: Uuid) {
+        sqlx::query(
+            "INSERT INTO kernel.business_workspace_members (workspace_id,user_id)
+             VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        )
+        .bind(workspace)
+        .bind(user)
+        .execute(pool)
+        .await
+        .unwrap();
     }
 
     async fn seed_incident(
@@ -3109,14 +3132,16 @@ mod tests {
         let id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO kernel.incidents
-                 (incident_id,title,severity,status,source,related_entity,started_at,owner)
-             VALUES ($1,$2,'MAJOR','OPEN','MANUAL',$3,$4,$5)",
+                 (incident_id,title,severity,status,source,related_entity,started_at,owner,
+                  workspace_id)
+             VALUES ($1,$2,'MAJOR','OPEN','MANUAL',$3,$4,$5,$6)",
         )
         .bind(id)
         .bind(format!("investigation test incident {id}"))
         .bind(related_entity)
         .bind(started_at)
         .bind(owner)
+        .bind(crate::scope::legacy_workspace())
         .execute(pool)
         .await
         .unwrap();
@@ -3548,6 +3573,72 @@ mod tests {
         assert_eq!(failure.code, "INCIDENT_NOT_FOUND");
 
         cleanup(&pool, &[owner, successor]).await;
+    }
+
+    /// The D5 counterpart of the handover test above: membership, not ownership, is what
+    /// the next tool call answers with.
+    ///
+    /// A run's `scope_user_id` is fixed for its lifetime, but what that account may
+    /// READ is not: `scope_caller` re-resolves the workspace set from the database at
+    /// the instant of each call. So a membership revoked while a run is in flight takes the
+    /// next read away, and nothing about the run has to be reloaded or cancelled for that
+    /// to happen.
+    #[tokio::test]
+    async fn a_membership_revocation_mid_run_takes_the_next_read_away() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let incident = seed_incident(&pool, owner, None, started).await;
+        let scope = ToolScope {
+            incident_id: incident,
+            scope_user_id: owner,
+        };
+        execute_tool(&pool, &[], scope, TOOL_GET_INCIDENT, &json!({}))
+            .await
+            .expect("the first read must work");
+        // Exactly what DELETE /api/v1/business-workspaces/{id}/members/{user} writes.
+        sqlx::query("DELETE FROM kernel.business_workspace_members WHERE user_id=$1")
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let failure = execute_tool(&pool, &[], scope, TOOL_GET_INCIDENT, &json!({}))
+            .await
+            .expect_err("after the revocation the next read must be refused");
+        // The same 404 the HTTP route gives: "not yours" and "not there" are one answer.
+        assert_eq!(failure.code, "INCIDENT_NOT_FOUND");
+
+        cleanup(&pool, &[owner]).await;
+    }
+
+    /// An account that is a member of no workspace reads no business row through a tool,
+    /// whatever its role - the case a viewer without a grant is in, and the reason the
+    /// empty list is explained by a count rather than by silence.
+    #[tokio::test]
+    async fn a_tool_call_from_an_account_in_no_workspace_reads_nothing() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let incident = seed_incident(&pool, owner, None, started).await;
+        sqlx::query("DELETE FROM kernel.business_workspace_members WHERE user_id=$1")
+            .bind(owner)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let scope = ToolScope {
+            incident_id: incident,
+            scope_user_id: owner,
+        };
+        let failure = execute_tool(&pool, &[], scope, TOOL_GET_INCIDENT, &json!({}))
+            .await
+            .expect_err("no membership means no readable business row");
+        assert_eq!(failure.code, "INCIDENT_NOT_FOUND");
+
+        cleanup(&pool, &[owner]).await;
     }
 
     #[tokio::test]

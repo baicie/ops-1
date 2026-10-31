@@ -280,8 +280,18 @@ export function IncidentsPage() {
       ) : items.length === 0 ? (
         // data-narrowed-to is the payload's own answer, printed so the assertion a test makes
         // is the fact the kernel sent rather than a role the page looked up for itself.
-        <div data-empty-state={emptyKind} data-narrowed-to={scope?.narrowedTo ?? undefined} data-testid="incidents-empty">
-          {emptyKind === 'scoped' ? (
+        <div
+          data-empty-state={emptyKind}
+          data-narrowed-to={scope?.narrowedTo ?? undefined}
+          data-workspace-count={scope?.workspaceCount ?? undefined}
+          data-testid="incidents-empty"
+        >
+          {emptyKind === 'workspace' ? (
+            <EmptyState
+              title={t('incidents.empty.workspace.title')}
+              description={t('incidents.empty.workspace.description')}
+            />
+          ) : emptyKind === 'scoped' ? (
             <EmptyState
               icon="access"
               title={t('incidents.empty.scoped.title')}

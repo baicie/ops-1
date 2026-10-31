@@ -103,6 +103,14 @@ export interface IncidentScope {
    * was read as exactly that claim, which is why it is gone rather than renamed.
    */
   narrowedTo: 'owner' | null;
+  /**
+   * How many business workspaces bounded this read. Zero is the one value that explains an
+   * empty list completely and that no role explains: since D5 a caller reads a business row
+   * because it is a MEMBER of the workspace the row lives in, so a caller in no workspace
+   * cannot be shown a row by any read in the kernel. A count of the bound applied - never a
+   * count of what exists.
+   */
+  workspaceCount: number;
 }
 
 /**
@@ -127,6 +135,13 @@ export type IncidentEmptyKind =
    */
   | 'scoped'
   /**
+   * The caller is a member of no business workspace, so no read can return a row. This
+   * outranks both filters and the owner narrowing: clearing a filter cannot conjure a row
+   * that a zero-membership scope can never return, and telling a viewer "you own nothing"
+   * when the truth is "you were never granted anything" sends it to the wrong remedy.
+   */
+  | 'workspace'
+  /**
    * The kernel named no narrowing and sent no row: this read applied no owner restriction and
    * still returned nothing. That is a fact about the read. It is not a count of the platform,
    * and the copy for this state is not allowed to phrase it as one.
@@ -149,6 +164,7 @@ export type IncidentEmptyKind =
  */
 export function incidentsEmptyKind(input: { scope: IncidentScope | null; filtering: boolean }): IncidentEmptyKind {
   const { scope, filtering } = input;
+  if (scope?.workspaceCount === 0) return 'workspace';
   if (filtering) return 'filtered';
   if (scope?.narrowedTo === 'owner') return 'scoped';
   return 'none';
@@ -170,6 +186,12 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
   INCIDENT_STATE_CONFLICT: 'incidents.error.stateConflict',
   INCIDENT_VERDICT_NOT_FOUND: 'incidents.error.verdictMissing',
   INCIDENT_WRITE_CONFLICT: 'incidents.error.writeConflict',
+  // D5: an account that is a member of no business workspace has nowhere to file a record,
+  // and one that is a member of several must say which. Two codes, because one of them is
+  // fixable by the caller and the other needs an administrator.
+  INCIDENT_WORKSPACE_FORBIDDEN: 'incidents.error.workspaceForbidden',
+  INCIDENT_WORKSPACE_REQUIRED: 'incidents.error.workspaceRequired',
+  BUSINESS_WORKSPACE_NOT_FOUND: 'incidents.error.workspaceNotFound',
   // G12 A1. Four codes, because "the server said no" is not one situation: an
   // unverifiable attestation and a stale one are different mistakes with different
   // remedies, and collapsing them into one sentence would hide which happened.
@@ -288,6 +310,13 @@ export interface CapabilityInput {
  */
 export function incidentCapabilities({ incident, userId, role }: CapabilityInput): IncidentCapabilities {
   const canOperate = role === 'operator' || role === 'admin';
+  // D5 RESIDUE, recorded rather than hidden: this line still infers "can read it" from the
+  // role, and since D5 the readable set is membership, which the page does not have here.
+  // It only picks WHICH refusal sentence to show - the server already answered 404 for an
+  // incident this account may not read, so the component never receives one - and the two
+  // sentences are both refusals. Closing this properly means passing the scope into this
+  // function, which is a page-shape change and belongs with the workspace selector, not
+  // with the security model. docs/design/g12-scope/d5-business-workspace-adr.md section 10.
   const seesAll = role === 'admin' || role === 'viewer';
   const visible = Boolean(userId) && (seesAll || incident.owner === userId);
   const closed = incident.status === 'CLOSED';
