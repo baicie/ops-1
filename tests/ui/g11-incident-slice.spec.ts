@@ -182,7 +182,7 @@ test('the admin creates an incident, it survives a reload, evidence is verifiabl
   await expect(page.getByTestId('incident-evidence')).toHaveAttribute('data-evidence-state', 'missing');
 });
 
-test('a viewer reads every incident and is refused every write, with the refusal explained', async ({ page }) => {
+test('a viewer reads incidents it does not own and is refused every write, with the refusal explained', async ({ page }) => {
   await signOut(page);
   await signIn(page, VIEWER.email, VIEWER.password);
 
@@ -221,13 +221,21 @@ test('an operator cannot see a record owned by someone else, and can still close
   await signOut(page);
   await signIn(page, OPERATOR.email, OPERATOR.password);
 
-  // Scope: this operator owns nothing, and the page now names WHICH empty list this is. The
-  // kernel answers a narrowed caller and an unnarrowed one with the same items: [], so the
-  // scope travelling beside the rows is the only thing that can separate the two facts.
+  // Scope: this operator owns nothing, and the page names WHICH empty list this is. The kernel
+  // answers a narrowed caller and an unnarrowed one with the same items: [], so the narrowing
+  // travelling beside the rows is the only thing that can separate the two facts. What the
+  // kernel names is a field ('owner'), not a verdict about the platform: the page may say
+  // "this list carries only the incidents you own", and it may not say "nothing was recorded".
   await page.goto('/app/incidents');
   await expect(page.getByTestId('incidents-empty')).toHaveAttribute('data-empty-state', 'scoped');
   await expect(page.getByTestId('incidents-empty')).toHaveAttribute('data-narrowed-to', 'owner');
-  await expect(page.getByTestId('incidents-empty')).not.toContainText('nothing has been entered');
+  // Positive half: the copy that belongs to the narrowed read is the one on screen.
+  await expect(page.getByTestId('incidents-empty')).toContainText('incidents you own');
+  // Negative half. This assertion used to deny 'nothing has been entered'; when the unnarrowed
+  // copy stopped claiming the world that phrase was deleted, which would have left the
+  // assertion vacuously true. It is retargeted at the sentence that copy carries now, so its
+  // absence still proves this page rendered the narrowed state instead of the platform report.
+  await expect(page.getByTestId('incidents-empty')).not.toContainText('no owner narrowing');
   await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(0);
   await page.screenshot({ path: SHOTS + '/07-operator-empty-state.png', fullPage: true });
 

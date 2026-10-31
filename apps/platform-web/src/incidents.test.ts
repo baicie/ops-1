@@ -737,16 +737,19 @@ describe('G12 C evidence trust and the audit trail', () => {
 });
 
 describe('incidentsEmptyKind: an empty list says which of three things it is', () => {
-  const OPERATOR = { seesAll: false, narrowedTo: 'owner' as const };
-  const ADMIN = { seesAll: true, narrowedTo: null };
+  const NARROWED = { narrowedTo: 'owner' as const };
+  const UNNARROWED = { narrowedTo: null };
 
   it('an operator who owns nothing reads a scope, not an empty ledger', () => {
     // The measured case: two incidents exist, none owned by this operator, items is [].
-    expect(incidentsEmptyKind({ scope: OPERATOR, filtering: false })).toBe('scoped');
+    expect(incidentsEmptyKind({ scope: NARROWED, filtering: false })).toBe('scoped');
   });
 
-  it('an unnarrowed caller with no rows reads the ledger claim, which it can support', () => {
-    expect(incidentsEmptyKind({ scope: ADMIN, filtering: false })).toBe('none');
+  it('a read with no named narrowing and no rows claims nothing about the platform', () => {
+    // 'none' is still the state, but the payload it came from licensed only "this read applied
+    // no owner narrowing": the copy for it must not say the platform has recorded nothing, and
+    // this fixture is what a role would have to be to make that reading safe - no role is.
+    expect(incidentsEmptyKind({ scope: UNNARROWED, filtering: false })).toBe('none');
   });
 
   it('an unreadable body is not an unnarrowed one', () => {
@@ -757,7 +760,7 @@ describe('incidentsEmptyKind: an empty list says which of three things it is', (
 
   it('the page filter outranks the scope, unlike the audit ledger', () => {
     // Clearing a filter can show the operator its own rows, so the filter is the cause here.
-    expect(incidentsEmptyKind({ scope: OPERATOR, filtering: true })).toBe('filtered');
-    expect(incidentsEmptyKind({ scope: ADMIN, filtering: true })).toBe('filtered');
+    expect(incidentsEmptyKind({ scope: NARROWED, filtering: true })).toBe('filtered');
+    expect(incidentsEmptyKind({ scope: UNNARROWED, filtering: true })).toBe('filtered');
   });
 });

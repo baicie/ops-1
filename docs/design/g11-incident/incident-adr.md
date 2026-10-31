@@ -250,6 +250,47 @@ D3 评审的第三条：列表的"录入故障"按钮与详情页的证据/结�
 
 **代价写在明处**：viewer 会看到两个永远失败的入口，每点一次重读一遍 403。若 D4 要做"角色化界面"，正确做法是**同时保留服务端拒绝**、把入口改成"申请操作权限"的只读说明——那是新交互，不是隐藏。
 
+### 4.6 读取范围的报告字段：只说这次读做了什么（含 D5 待决）
+
+**决策**：`GET /api/v1/incidents` 的范围对象 `IncidentScope` 只保留一个字段 `narrowedTo: 'owner' | null`。上一版同时发 `seesAll: boolean`，本轮**删除**它。
+
+**为什么删**：`seesAll` 被契约描述、被页面、也被评审读成同一句话——「这份列表就是平台上全部的 incident」。那是一句关于世界的话，而响应能担保的只有「这条路由此刻施加了哪个谓词」。
+
+- 对 **admin** 它有背书：本文 §4.3 写下的选择就是 admin 读全部；
+- 对 **viewer** 它**没有**背书：`Caller::from_role` 是 `role.is_admin() || !role.can_operate()`（`apps/kernel/src/incidents.rs:145`），viewer 落进右边那一半。**那是一次偶然放宽，不是一个决定**；
+- 任何将来加到列表上的过滤（软删除、租户、归档、范围）都会让 `seesAll: true` 变假，而响应一个字节都不用改——**没有任何字段会在谓词变化时提醒读者它已经过时**。
+
+**语义边界（三处必须同时成立）**：
+
+1. `narrowedTo: null` ＝ **这次读没有被 owner 收窄**。不是「这次读拿到了全部」，也不是「平台上只有这些」；
+2. 客户端可以说「这次读没有按 owner 收窄」，**不可以说「这是平台上全部 incident」**。UI 文案照此写：`incidents.empty.none.*` 从 "nothing has been entered / 目前没有任何记录" 改成 "this read applied no owner narrowing … not a measurement of the platform / 这两句说的是这次读取，不是对整个平台的测量"；
+3. 契约里 `seesAll` 被删，而 `additionalProperties: false` 不变，所以**还在发 `seesAll` 的实现会被结构校验拒绝**——这是有意的：它不该被当作合规。
+
+**这不是措辞偏好**：一个字段名就是一条承诺，而 `seesAll` 承诺的东西这条路由没有能力兑现。
+
+#### D5（decision required）：viewer 的 `!can_operate()` 放宽
+
+**现象**（HEAD `7785ccb`，行号可核）：
+
+| # | 事实 | 位置 |
+|---|---|---|
+| 1 | viewer 的 `sees_all` 为 true，来自 `!can_operate()` 那一半 | `apps/kernel/src/incidents.rs:145` |
+| 2 | 于是 viewer 在 `GET /api/v1/incidents` 上绑定 `$1=true`，读全表 | `incidents.rs:1040`（SQL 在 `:1030`） |
+| 3 | 审计面故意不复用这个谓词，viewer 在账本上**不是** `sees_all` | `apps/kernel/src/audit.rs:131`，理由见 `audit.rs:115-122` |
+| 4 | 账本里 `INCIDENT` 是 `Owned`：只有 `i.owner = caller` 的事件可见 | `audit.rs:179`、`audit.rs:249` 起 |
+| 5 | viewer **不可能**成为 owner：创建要 `require_operator()`，交接把 viewer 目标拒掉 | `incidents.rs:603`、`incidents.rs:1665` |
+
+**两个面对 viewer 的矛盾表述**：
+
+- 故障列表对 viewer 说：「这次读**没有**按 owner 收窄」（实际读全表）；
+- 审计账本对 viewer 说：「本页只包含**主体归你所有**时的 INCIDENT、job 事件；其他类别仅管理员可读」（`activity.empty.restricted.description`）——而 viewer 在构造上没有主体，所以 INCIDENT 那一半**恒为空**。
+
+即：**一个全开，一个恒空**。这不是「一个面宽一点」，而是两个面在描述两个不同的角色。
+
+**需要决策**：viewer 应该读到什么？A 保持现状并对齐审计面；B 收窄成 admin-only（viewer 基本读不到故障）；C 给 viewer 一个真正的可见单位（新授权模型 + 迁移）。三者改的都是产品语义，不是文案。完整对比与代价见 `docs/design/g12-scope/narrowed-reads.md` §3.4。
+
+**本轮不动谓词**：`Caller::from_role`、`WHERE ($1::boolean OR i.owner=$2)`、404/403 语义一字未改；本轮只改「报告哪一个收窄」的字段形状，并把 D5 摆到决策层。在 D5 定案之前，`narrowedTo: null` 对 viewer 与对 admin 是同一个意思——这正好是收窄它换来的东西：**这句话现在对两个角色都成立**。
+
 ---
 
 ## 5. 并发与幂等

@@ -68,6 +68,12 @@ paths:
       description: >
         admin and viewer see every incident; operator sees only incidents it
         owns, mirroring the job list predicate at apps/kernel/src/jobs.rs:1883.
+        Read that as a statement about this route's predicate, not a policy that
+        viewers are meant to read everything: viewer reaches the unnarrowed
+        branch through Caller::from_role's !can_operate() half, which no decision
+        ever chose. D5 - decision required; the two faces that disagree about it
+        are recorded in docs/design/g12-scope/narrowed-reads.md section 3.4 and
+        ADR section 4.6. Nothing in the response below is allowed to state it.
       parameters:
         - name: status
           in: query
@@ -675,30 +681,35 @@ components:
     IncidentScope:
       type: object
       additionalProperties: false
-      required: [seesAll, narrowedTo]
+      required: [narrowedTo]
       description: >
         The read the page was produced under, sent beside the rows because an empty
         items array cannot say whether the list is empty or narrowed: both cases are
         the same bytes, and only the Kernel knows which one happened. A client that
         derived this from the role would be restating 4.3 of the incident ADR from
         memory, and the drift of that restatement is the bug this field removes.
-        Written reason: docs/design/g12-scope/narrowed-reads.md section 3.
+        SEMANTIC BOUNDARY: this object describes THIS READ and never the platform.
+        A client is licensed to say "this read applied no owner narrowing". It is not
+        licensed to say "this list is every incident on the platform": the payload
+        cannot know that (a later predicate narrows rows this object does not name),
+        and a sentence built on the stronger reading goes false without one byte of
+        the response changing. There is deliberately no boolean for "sees
+        everything" - the one that existed was consumed as exactly that claim, and
+        for a viewer it was true only through Caller::from_role's !can_operate()
+        half, which no decision chose. Written reason and the open D5 question:
+        docs/design/g12-scope/narrowed-reads.md section 3, ADR section 4.6.
       properties:
-        seesAll:
-          type: boolean
-          description: >
-            The list is not narrowed for this caller: it holds every incident that
-            exists. True for an admin, and true for a viewer because the predicate
-            (Caller::from_role) answers yes for a role that cannot operate.
         narrowedTo:
           type: [string, 'null']
           enum: ['owner', null]
           description: >
-            When seesAll is false: the field the read is narrowed on. 'owner' is the
-            only value the predicate produces. It is a field name rather than a
-            boolean so that copy naming ownership is licensed by the payload, and a
-            second narrowing would have to change this value instead of silently
-            reusing the sentence about owners.
+            The field this read was narrowed on, or null when it applied no owner
+            narrowing. 'owner' is the only value the current predicate produces, and
+            null is the absence of a restriction this field can name - it is not a
+            count of what exists, and it is not a claim that the page is complete.
+            It is a field name rather than a boolean so that copy naming ownership
+            is licensed by the payload, and a second narrowing would have to change
+            this value instead of silently reusing the sentence about owners.
     CreateEvidenceRequest:
       type: object
       additionalProperties: false

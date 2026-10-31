@@ -93,12 +93,14 @@ export function ownerFilterValue(ownerFilter: string, selfId: string | null): st
  * that helper. A type declared in both places would be a second copy of the contract.
  */
 export interface IncidentScope {
-  /** The list is not narrowed for this caller: it holds every incident that exists. */
-  seesAll: boolean;
   /**
-   * When `seesAll` is false: the field the read is narrowed on. `owner` is the only value the
-   * predicate produces, carried rather than assumed because the copy naming ownership has to
-   * be licensed by the payload that named it.
+   * The field this read was narrowed on; `null` when it applied no owner narrowing.
+   *
+   * `null` is the absence of a restriction this field can name. It is NOT the claim that the
+   * page holds every incident that exists - that would be a sentence about the world, and this
+   * payload only knows what this read did (ADR-G11-001 4.6,
+   * docs/design/g12-scope/narrowed-reads.md 3.4). The `seesAll` boolean this type used to carry
+   * was read as exactly that claim, which is why it is gone rather than renamed.
    */
   narrowedTo: 'owner' | null;
 }
@@ -119,11 +121,16 @@ export type IncidentEmptyKind =
   /** The page's own filters hid every row the kernel sent. Clearing them can show rows. */
   | 'filtered'
   /**
-   * The kernel sent no row because this caller reads only what it owns. Not a filter, and not
-   * evidence that the platform has recorded nothing - an operator owns none of it.
+   * The kernel sent no row because this read was narrowed to what the caller owns. Not a
+   * filter, and not evidence that the platform has recorded nothing - an operator owns none of
+   * it.
    */
   | 'scoped'
-  /** Nothing is there: the list is unnarrowed for this caller and it holds no row. */
+  /**
+   * The kernel named no narrowing and sent no row: this read applied no owner restriction and
+   * still returned nothing. That is a fact about the read. It is not a count of the platform,
+   * and the copy for this state is not allowed to phrase it as one.
+   */
   | 'none';
 
 /**
@@ -135,13 +142,15 @@ export type IncidentEmptyKind =
  * them, so a filter that matches none of them is still the cause, and blaming the scope would
  * send the reader to a boundary they cannot cross instead of to the button that helps.
  *
- * A missing scope ranks last: it licenses the one claim that needs no evidence. An unreadable
- * body is not an unnarrowed one (lib/audit-scope.ts makes the same choice for the same reason).
+ * A missing scope ranks last: it licenses only the claim that needs no evidence - this read
+ * returned nothing. An unreadable body is not an unnarrowed one (lib/audit-scope.ts makes the
+ * same choice for the same reason), but it is also no longer able to make the page say anything
+ * about the platform, because 'none' no longer says anything about it either.
  */
 export function incidentsEmptyKind(input: { scope: IncidentScope | null; filtering: boolean }): IncidentEmptyKind {
   const { scope, filtering } = input;
   if (filtering) return 'filtered';
-  if (scope && !scope.seesAll) return 'scoped';
+  if (scope?.narrowedTo === 'owner') return 'scoped';
   return 'none';
 }
 

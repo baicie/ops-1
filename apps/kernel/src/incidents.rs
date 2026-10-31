@@ -111,6 +111,11 @@ const TIMELINE_MAX_EVENTS: i64 = 200;
 /// sees_all is the verbatim job-list predicate, expressed once so the two
 /// resources cannot drift apart. This is data scoping, not a permission gate:
 /// every write endpoint still calls AuthUser::require_operator() first.
+///
+/// It is also not a statement about what this caller may read anywhere else. For a viewer it
+/// is true only because the predicate's right half is `!can_operate()` - a widening nobody
+/// decided, recorded as D5 in docs/design/g12-scope/narrowed-reads.md section 3.4. Nothing
+/// below may turn that boolean back into a claim about the world; see IncidentScopeView.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Caller {
     pub(crate) user_id: Uuid,
@@ -130,6 +135,11 @@ impl Caller {
     /// Sharing the constructor is what keeps the two callers from drifting into two
     /// different definitions of "sees all".
     pub(crate) fn from_role(user_id: Uuid, role: Role) -> Self {
+        // The right half is a widening, not a decision: `!can_operate()` is true for a viewer,
+        // so the predicate answers "see everything" for a role the product describes as
+        // read-only. docs/design/g12-scope/narrowed-reads.md section 3.4 records the two faces
+        // that disagree about it and the line numbers. It is D5 - decision required - so this
+        // comment cites it instead of ruling on it.
         Self {
             user_id,
             sees_all: role.is_admin() || !role.can_operate(),
@@ -144,9 +154,17 @@ impl Caller {
     /// 'nothing has been recorded' from 'nothing recorded is yours' out of an empty items
     /// field, and the copy that guesses wrong tells an operator the platform is empty while
     /// its records are simply someone else's.
+    ///
+    /// None means one thing and one thing only: this read applied no owner narrowing. It does
+    /// NOT mean the page holds every incident that exists - that is a claim about the world,
+    /// and this function can see one predicate. A response that made the stronger claim was
+    /// wrong twice over: a caller read `seesAll: true` as "the platform's whole incident
+    /// list", and for a viewer that answer came from the `!can_operate()` half of the
+    /// predicate rather than from any decision about viewers (section 3.4 of
+    /// docs/design/g12-scope/narrowed-reads.md, which also records the audit ledger telling the
+    /// same role a narrower story). Narrowing the field is the fix; widening the claim is not.
     pub(crate) fn scope(&self) -> IncidentScopeView {
         IncidentScopeView {
-            sees_all: self.sees_all,
             narrowed_to: if self.sees_all { None } else { Some("owner") },
         }
     }
@@ -154,18 +172,24 @@ impl Caller {
 
 /// What the incident list will show this caller, sent beside the rows.
 ///
-/// One field names the fact, the other names the field the fact is about. narrowed_to exists
-/// so the copy that says 'the incidents you own' is licensed by this payload instead of by
-/// the page's memory of what the predicate used to be: a second narrowing would have to
-/// change this value, and the sentence naming ownership would have to change with it rather
-/// than quietly keep claiming the whole list.
+/// One field, naming the field this read was narrowed on. It exists so the copy that says
+/// 'the incidents you own' is licensed by this payload instead of by the page's memory of
+/// what the predicate used to be: a second narrowing would have to change this value, and the
+/// sentence naming ownership would have to change with it rather than quietly keep claiming
+/// the whole list.
+///
+/// There is no `seesAll` here, and removing it is the point of this struct. That boolean
+/// answered "does this list hold everything?", which a read cannot answer: it is true only
+/// relative to the predicate this route happens to apply, so a later narrowing on any other
+/// column would leave it silently lying, and for a viewer it already did - `!can_operate()`
+/// made it true by accident (section 3.4). A field may only say what it knows, and what this
+/// read knows is which narrowing it applied.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IncidentScopeView {
-    /// The list is not narrowed for this caller: it holds every incident that exists.
-    pub sees_all: bool,
-    /// When sees_all is false: the field the read is narrowed on. 'owner' is the only value
-    /// this predicate produces.
+    /// The field this read was narrowed on. 'owner' is the only value the current predicate
+    /// produces; null means this read applied no owner narrowing, which is a statement about
+    /// the read rather than a count of what exists.
     pub narrowed_to: Option<&'static str>,
 }
 
@@ -3012,10 +3036,11 @@ mod tests {
         assert!(!stranger_items.iter().any(|item| item.id == theirs.id));
         // ...and the scope says why, without naming the row.
         let narrowed = caller(stranger).scope();
-        assert!(!narrowed.sees_all);
         assert_eq!(narrowed.narrowed_to, Some("owner"));
-        // The same boolean the query binds, so the two cannot become two definitions.
-        assert_eq!(narrowed.sees_all, caller(stranger).sees_all);
+        // The presence of a named narrowing is the same boolean the query binds, so the two
+        // cannot become two definitions. Since the payload stopped carrying `sees_all`, this
+        // round trip is the only thing keeping the field tied to the predicate.
+        assert_eq!(narrowed.narrowed_to.is_none(), caller(stranger).sees_all);
 
         let (owner_items, _) = query_incidents(
             &pool,
@@ -3029,36 +3054,49 @@ mod tests {
         .unwrap();
         assert!(owner_items.iter().any(|item| item.id == theirs.id));
         // An owner who can read its own row is still narrowed: the scope describes the read,
-        // not the result, so it does not flip to sees_all because a row happened to appear.
-        assert!(!caller(owner).scope().sees_all);
+        // not the result, so it does not flip to "unnarrowed" because a row happened to appear.
+        assert_eq!(caller(owner).scope().narrowed_to, Some("owner"));
 
-        let admin_scope = admin_caller(admin).scope();
-        assert!(admin_scope.sees_all);
-        assert_eq!(admin_scope.narrowed_to, None);
+        // The other end: an unnarrowed read says only that it applied no owner narrowing. It
+        // is not a count of the platform - the wire test below is where that reading is kept
+        // from coming back as a field.
+        assert_eq!(admin_caller(admin).scope().narrowed_to, None);
 
         cleanup(&pool, &[owner, stranger, admin]).await;
     }
 
-    /// The wire names the web client branches on: a rename here is a silent "no scope" in the
-    /// UI, which is the state this whole change removes.
+    /// The wire name the web client branches on, and the name that had to go.
+    ///
+    /// A rename here is a silent "no scope" in the UI, which is the state this change removes.
+    /// The role loop is the part worth keeping: the shape is the SAME for every role, so no
+    /// role's list can be read as "the platform's whole incident list" out of a differently
+    /// valued field. A role's narrowness now shows up only as the presence or absence of a
+    /// named field, and the strongest claim the payload can support is "this read applied no
+    /// owner narrowing".
+    ///
+    /// The viewer row is a recorded observation, not an endorsement: `narrowedTo: null` for a
+    /// viewer is D5 (docs/design/g12-scope/narrowed-reads.md section 3.4). When that decision
+    /// lands, this line is the diff, and the diff is the decision.
     #[test]
-    fn the_scope_view_names_its_two_fields_on_the_wire() {
-        let operator = Caller {
-            user_id: Uuid::new_v4(),
-            sees_all: false,
-        };
-        let admin = Caller {
-            user_id: Uuid::new_v4(),
-            sees_all: true,
-        };
-        assert_eq!(
-            serde_json::to_value(operator.scope()).unwrap(),
-            serde_json::json!({ "seesAll": false, "narrowedTo": "owner" })
-        );
-        assert_eq!(
-            serde_json::to_value(admin.scope()).unwrap(),
-            serde_json::json!({ "seesAll": true, "narrowedTo": null })
-        );
+    fn the_scope_view_names_its_one_field_for_every_role_on_the_wire() {
+        for (role, expected) in [
+            (Role::Admin, serde_json::json!({ "narrowedTo": null })),
+            (Role::Operator, serde_json::json!({ "narrowedTo": "owner" })),
+            (Role::Viewer, serde_json::json!({ "narrowedTo": null })),
+        ] {
+            let view =
+                serde_json::to_value(Caller::from_role(Uuid::new_v4(), role).scope()).unwrap();
+            assert_eq!(view, expected, "{role}");
+            assert_eq!(
+                view.as_object().unwrap().len(),
+                1,
+                "{role} names one thing: {view}"
+            );
+            assert!(
+                view.get("seesAll").is_none(),
+                "{role} must not claim the world: {view}"
+            );
+        }
     }
 
     /// D3 added an `owner` list filter for the UI. The rule it must not break is the one the
