@@ -231,24 +231,74 @@ WHERE ($1::boolean OR owner = $2)
 
 单测：`a_failed_audit_rolls_the_verdict_back`、`a_failed_audit_rolls_the_incident_back_and_frees_the_natural_key`、`a_failed_audit_rolls_the_evidence_and_the_state_change_back`。第二条还证明了一个副作用：回滚把自然键也还回来了——否则调用者会被 200 告知"这个键已经存在"，而那一次它明明失败了。
 
-### 4.5 viewer 看得见写入口：这是一条产品规则，不是遗漏
+### 4.5 viewer 看到只读说明，服务端仍是唯一权威（修订：原 (b) 方案被推翻）
 
-D3 评审的第三条：列表的"录入故障"按钮与详情页的证据/结论表单对 viewer 照常渲染，提交后 403。二选一的决定是 **(b) 保留入口，让 viewer 点一次、拿到服务端的高质量 403 文案**；(a) "对 viewer 禁用并说明原因"被否决。
+**现行决定**：详情页的证据与结论两处，viewer 得到一句只读说明（`[data-testid=incident-evidence-readonly]` / `[data-testid=incident-verdict-readonly]`，文案取码表 `incidents.permission.writeBlocked`），**两个表单都不渲染**；列表页的"录入故障"入口仍对 viewer 渲染，提交后由服务端回 403，页面按码表本地化并附 requestId。**无论前端渲染哪一种，写端点对 viewer 一律 `403 FORBIDDEN`**——这一条由测试直接在端点断言，不经过页面。
 
-理由：
+**这一节推翻的是它自己的旧决定，所以理由要写清**。原 §4.5（`c6cb34f`）选的是 (b)「保留写入口，让 viewer 点一次拿到 403」，并且在那一版代码上实测过：`c6cb34f` 的 `IncidentDetail.tsx` 里没有任何只读分支，两个表单确实对 viewer 渲染。`25ba0a7`（同日 14:46）加入只读分支后，行为变了而 §4.5 没跟着改；两条按 ADR 写的 spec 自那以后一直红着。**真正的毛病不是"谁忘了改文档"，而是 ADR 把一个机制写成了不变量**：它守的其实是"服务端拒绝不可被前端绕过"，写下的却是"表单必须在"。
 
-1. 权限是服务端事实，不是前端事实。AGENTS.md 明令不许"依赖 Prompt/CSS 隐藏来实现权限控制"；把按钮藏掉会让"我这个角色为什么看不到"重新变成只有代码能回答的问题，而 403 把答案直接写在页面上。
-2. 禁用态会同时销毁证据：一个禁用按钮无法区分"服务端会拒绝"和"前端以为服务端会拒绝"。一旦前后端角色判定漂移，界面会静默少一个入口且没有任何断言会红；403 路径则一定会红。
-3. 成本可控且被实测：一次点击 = 一次 403，文案来自码表 `incidents.error.forbidden`（en/zh-CN 各一条），不渲染 Kernel 的英文句子。
+**Phase C4 同时要求两件事**：(1) viewer 不该为了知道自己只读而必须先提交一个注定失败的表单；(2) 服务端的 403 必须继续被测试守护。**"表单必须存在"与 (1) 直接冲突，与 (2) 毫无关系**。裁定：组件是对的，specs 过度指定了机制——spec 改断言对象，ADR 改措辞，**服务端拒绝的断言一条不删、强度不降**。
 
-文案（`i18n/catalogs/en.json:1327`、`zh-CN.json:1327`）：
+**不变量（真正要守的东西）**，按强度排序：
 
-- en: `Your role can read incidents but not write them. Creating, adding evidence and recording a verdict are refused by the server.`
-- zh-CN: `当前角色可以读取故障，但不能写入：创建、追加证据和写入结论都会被服务端拒绝。`
+1. **服务端是唯一权威**。`POST /incidents`、`POST /incidents/{id}/evidence`、`POST /incidents/{id}/verdict` 先过 `AuthUser::require_operator()`（§4.1 / §4.2），viewer 拿 `403 FORBIDDEN`。测试**直接对端点**断言 403 + 码 `FORBIDDEN`（"任意错误"不算通过），**并紧接着用 operator 会话对同一条记录发同一份 body 断言 201**。没有那条对照，"接口坏了"或"这条记录不接受写"就能冒充"角色被拒"。
+2. **前端不是控制面**。页面决定"给这个角色看什么"（表单，或一句解释），但不决定"能不能写"。可执行判据：**把前端整个删掉，权限是否仍然成立**——成立，因为第 1 条的断言不经过 DOM；而"用 CSS 隐藏按钮当权限"会在同一条判据下失败（端点会放行）。这就是 AGENTS.md「不得依赖 Prompt/CSS 隐藏来实现权限控制」的落点：被禁的是**用隐藏当控制**，不是"按角色渲染不同界面"。
+3. **呈现也不许悄悄漂移**。只读说明与 403 通知都取码表，页面不硬编码；`g11-viewer-write-entries.spec.ts` 的后半段**不开浏览器、不连 Kernel**，直接扫 `apps/platform-web/src/**/*.ts(x)`，任何组件里出现这两句文案的连续片段都会红。
 
-**实测**（scratch 库 + 18199 + Chromium，页面来自真实构建产物 `apps/platform-web/dist`）：viewer 登录 → 列表按钮 `Record an incident` 可见且 `enabled=true` → 填标题提交 → `[data-testid=incident-create-error]` 的 `data-error-code="FORBIDDEN"`，正文是上面那条 en 文案 + `Request ID`；详情页证据表单 `visible=true`、提交按钮 `enabled=true` → 提交 → `[data-testid=incident-evidence-write-error]` 同样 `FORBIDDEN`。
+**为什么列表入口与详情页表单结论不同**：列表的"录入故障"是一次打开—提交—关闭的动作，403 文案就地显示，代价只有一次点击；详情页的两个表单是常驻面板，留着等于让 viewer 每次进详情页都面对一个永远失败的提交框。同一个原则落在两种交互上，结论可以不同——只要第 1、2 条成立。
 
-**代价写在明处**：viewer 会看到两个永远失败的入口，每点一次重读一遍 403。若 D4 要做"角色化界面"，正确做法是**同时保留服务端拒绝**、把入口改成"申请操作权限"的只读说明——那是新交互，不是隐藏。
+**文案**：
+
+- 403 通知：`incidents.error.forbidden`（`i18n/catalogs/en.json:393`、`zh-CN.json:393`）
+  - en: `Your role can read incidents but not write them. Creating, adding evidence and recording a verdict are refused by the server.`
+  - zh-CN: `当前角色可以读取故障，但不能写入：创建、追加证据和写入结论都会被服务端拒绝。`
+- 只读说明：`incidents.permission.writeBlocked`（`i18n/catalogs/en.json:449`、`zh-CN.json:449`）
+  - en: `This account may read this incident but not write to it.`
+  - zh-CN: `该账号可以读取这个 Incident，但不能写入。`
+
+**实测**（2026-10-31，scratch 库 `opsweave_g11_c4` + Kernel `127.0.0.1:18199` + HEAD `ceb6c09` 重新构建的 `apps/platform-web/dist` 与 `target/debug/opsweave-kernel`，Chromium/Playwright）：
+
+| 断言 | 结果 |
+|---|---|
+| viewer 在未结论记录上看到 `incident-verdict-readonly` | 通过 |
+| 同一页 `incident-verdict-form` 的元素数量 | **0**（断言 `toHaveCount(0)`，CSS 隐藏骗不过它） |
+| viewer 会话 `POST /api/v1/incidents/{id}/verdict` | **403**，正文码 `FORBIDDEN`；随后 `GET` 该记录 `humanVerdict=null` |
+| operator 会话对**同一条**记录发**同一份** body | **201**，`verdict=INCONCLUSIVE` |
+| viewer 会话 `POST /api/v1/incidents/{id}/evidence` | **403** `FORBIDDEN`；随后 `GET .../evidence` 的 `items` 长度 = **0**（拒绝没留行） |
+| operator 会话对同一条记录发同一份 evidence body | **201**；随后 `items` 长度 = **1**（接受的写只留一行） |
+| viewer 提交列表的"录入故障"入口 | 页面内 `[data-testid=incident-create-error]` = `data-error-code="FORBIDDEN"`，正文是上面那条 zh-CN 文案 + `Request ID` |
+
+命令与逐条输出：
+
+```
+$ DATABASE_URL=postgres://localhost/opsweave_g11_c4 OPSWEAVE_BIND=127.0.0.1:18199 \
+  OPSWEAVE_DATA_DIR=/tmp/opsweave-g11-c4/data OPSWEAVE_WEB_DIST=$PWD/apps/platform-web/dist \
+  OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=*** \
+  ./target/debug/opsweave-kernel
+... OpsWeave Kernel listening address=127.0.0.1:18199 ... web_dist=.../apps/platform-web/dist
+$ curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18199/livez
+200
+
+$ cd tests/ui && OPSWEAVE_URL=http://127.0.0.1:18199 \
+  npx playwright test g11-incident-slice.spec.ts g11-viewer-write-entries.spec.ts --reporter=list
+  ✓ 1 the admin creates an incident, it survives a reload, evidence is verifiable, the list queries it, and a verdict sticks (6.1s)
+  ✓ 2 a viewer reads incidents it does not own and is refused every write, with the refusal explained (3.1s)
+  ✓ 3 an operator cannot see a record owned by someone else, and can still close its own loop (2.6s)
+  ✓ 4 the loading state is a real pending read, and a real transport failure is reported as stale (1.9s)
+  ✘ 5 the list and the detail survive 1440/1024/390 in both themes, and the header action is reachable (2.8s)
+  ✓ 6 a viewer is told it cannot write, and the kernel still refuses the write it cannot send (4.6s)
+  ✓ 7 the sentences a viewer reads belong to the catalog, and no component source carries a copy (983ms)
+  6 passed, 1 failed (24.2s)
+
+  $ npx playwright test g11-viewer-write-entries.spec.ts --reporter=list   # 补上"拒绝没留行/接受的写只留一行"之后复跑
+  ✓ 1 a viewer is told it cannot write, and the kernel still refuses the write it cannot send (4.2s)
+  ✓ 2 the sentences a viewer reads belong to the catalog, and no component source carries a copy (578ms)
+  2 passed (5.8s)
+```
+
+第 5 条与本决定无关，且**不是这次改动引入的**：拿 `ceb6c09` 原始 spec 跑同一条用例，同样在 `/app/incidents/{id}` 的 390/light 上得到 `overflow=8`（`Expected: <= 1, Received: 8`）。它是详情页在 390 宽度的横向溢出，属于待修缺陷，`docs/design/g12-scope/narrowed-reads.md` §7.4 已用同样的 HEAD 基线对照登记过；写在这里是因为它现在是一份真实的红，而不是被这条记录掩盖。
+
+**代价与边界**：列表入口仍会让 viewer 点一次才拿到 403（一次点击，文案与 requestId 都在页面上）；详情页不再提供这个"点一次"的证据，证据改由测试直接从端点取。若将来要再改这条规则，改的应该是**第 1、2 条断言**——它们是规则；表单在不在不是。
 
 ### 4.6 读取范围的报告字段：只说这次读做了什么（含 D5 待决）
 
@@ -425,7 +475,7 @@ DELETE FROM _sqlx_migrations WHERE version = 16;
 | 单测 | `apps/kernel/src/incidents.rs` 的 `#[cfg(test)] mod tests` |
 | 审计与业务同事务（回滚实测） | §4.4 + `incidents::tests::a_failed_audit_rolls_*`（3 条） |
 | create 自然键被占 → 409 | §5.1 + 契约 `POST /incidents` 的 409 + `a_native_key_owned_by_another_operator_answers_409_not_404` |
-| viewer 写入口的产品规则与实测 | §4.5 + `docs/design/g11-incident/g11-d3-ui.md` §10 |
+| viewer 只读呈现 + 服务端拒绝的规则与实测 | §4.5（现行；`docs/design/g11-incident/g11-d3-ui.md` §10.1 的 (b) 方案已被它取代，该节顶部有标注） |
 | 浏览器截图为什么不进仓库 | `docs/design/g11-incident/g11-d3-ui.md` §4.1 |
 
 **关于"截图证明"这条证据的边界（2026-11-01 订正）**：D3/D4 的浏览器截图全部留在本机 scratch 目录，未提交。理由不在"懒得提交"，而在预算与性质：tracked PNG 已到 379/379 文件位（68.03/68.24 MB），收一张就得从别的桶赶走一张已被文档引用的 before/after 基线；而这些截图是可重放的验证产物，重跑 `tests/ui/g11-incident-slice.spec.ts` 即可再得，与"未来 diff 拿它当对照物"的基线不是一回事。所以本 ADR 与其配套文档只引用**可重跑的断言与命令**（`data-*` 锚点、§6 输出），不引用只有作者机器上存在的路径。

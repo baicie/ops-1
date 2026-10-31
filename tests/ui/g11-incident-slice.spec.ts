@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, request, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 
 /**
  * G11 D4 - the real golden path, in a real browser against a real kernel and a real database.
@@ -33,6 +33,14 @@ interface Account {
 }
 
 const OPERATOR: Account = { email: `g11-operator-${RUN}@example.invalid`, password: `operator-password-${RUN}`, displayName: `G11 operator ${RUN}`, role: 'operator' };
+/**
+ * A second operator, whose only job is to own the record the role-pair check writes to.
+ *
+ * It exists because the two roles have to meet on ONE record, and OPERATOR owns nothing: the
+ * scope test below proves that with an empty list. Reusing OPERATOR here would leave it owning a
+ * record and turn that scope assertion into a different question.
+ */
+const SECOND_OPERATOR: Account = { email: `g11-operator-b-${RUN}@example.invalid`, password: `operator-b-password-${RUN}`, displayName: `G11 second operator ${RUN}`, role: 'operator' };
 const VIEWER: Account = { email: `g11-viewer-${RUN}@example.invalid`, password: `viewer-password-${RUN}`, displayName: `G11 viewer ${RUN}`, role: 'viewer' };
 
 /** The three records this run keeps track of across serial tests. */
@@ -53,7 +61,7 @@ async function signOut(page: Page) {
   await page.context().clearCookies();
 }
 
-/** Creates the two non-admin accounts through the admin API, as an admin would. */
+/** Creates the non-admin accounts through the admin API, as an admin would. */
 async function createAccount(page: Page, account: Account) {
   const login = await page.request.post('/api/v1/auth/login', { data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } });
   expect(login.ok(), 'admin login for account setup').toBeTruthy();
@@ -63,6 +71,43 @@ async function createAccount(page: Page, account: Account) {
     data: { email: account.email, displayName: account.displayName, password: account.password, role: account.role },
   });
   expect([200, 201], 'create ' + account.role).toContain(created.status());
+}
+
+/** One API session: its own cookie jar, and the token a write needs. */
+interface ApiSession {
+  api: APIRequestContext;
+  csrfToken: string;
+}
+
+/**
+ * Signs an account in through the API, in a cookie jar of its own. A separate jar is the point:
+ * the browser is signed in as the viewer, and the operator call below must not borrow that
+ * session - if it did, both calls would be one role and the comparison would prove nothing.
+ */
+async function apiSignIn(origin: string, email: string, password: string): Promise<ApiSession> {
+  const api = await request.newContext({ baseURL: origin });
+  const login = await api.post('/api/v1/auth/login', { data: { email, password } });
+  expect(login.ok(), 'api sign-in for ' + email).toBeTruthy();
+  const { csrfToken } = await login.json();
+  return { api, csrfToken };
+}
+
+/** Creates an incident as the signed-in API session, so the session also owns the record. */
+async function apiCreateIncident(session: ApiSession, title: string): Promise<string> {
+  const created = await session.api.post('/api/v1/incidents', {
+    headers: { 'x-csrf-token': session.csrfToken },
+    data: { title, severity: 'MINOR', source: 'MANUAL', startedAt: new Date().toISOString(), relatedEntity: 'api-gateway' },
+  });
+  expect(created.status(), 'the record owner creates it').toBe(201);
+  return ((await created.json()) as { id: string }).id;
+}
+
+/** POST /verdict, with one body for every caller: the role is the only variable between calls. */
+async function apiRecordVerdict(session: ApiSession, incidentId: string): Promise<APIResponse> {
+  return session.api.post('/api/v1/incidents/' + incidentId + '/verdict', {
+    headers: { 'x-csrf-token': session.csrfToken },
+    data: { verdict: 'INCONCLUSIVE', rationale: 'the same call from two roles; only the role differs (' + RUN + ')' },
+  });
 }
 
 /** Reads the record id out of the detail route the page navigated to. */
@@ -90,6 +135,7 @@ test.describe.configure({ mode: 'serial' });
 test('the admin creates an incident, it survives a reload, evidence is verifiable, the list queries it, and a verdict sticks', async ({ page }) => {
   await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
   await createAccount(page, OPERATOR);
+  await createAccount(page, SECOND_OPERATOR);
   await createAccount(page, VIEWER);
 
   // 1. Create on the page, marked as a manual record.
@@ -205,16 +251,41 @@ test('a viewer reads incidents it does not own and is refused every write, with 
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(1);
 
-  // Write: a verdict is refused for the same reason, on a record that could otherwise accept one.
+  // Write: a verdict. The refusal itself has not moved, but WHERE the viewer meets it has
+  // (ADR-G11-001 section 4.5), so both halves are asserted instead of one being assumed.
+  //
+  // The page half: a viewer is told its role cannot write, and no form is rendered for it - a
+  // role that can never submit a verdict is not invited to try. The server half is unchanged and
+  // NOT weakened: the same POST is refused 403 FORBIDDEN for the viewer session, and the same
+  // call on the same record by an operator is accepted with 201. Without that second call a red
+  // here could not be told apart from a broken endpoint, a bad body or a record that refuses
+  // every verdict - with it, the role is the only variable left.
   await page.goto('/app/incidents/' + openId);
   await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'open');
-  await page.getByTestId('incident-verdict-rationale').fill('viewer attempts a verdict; the server must refuse it (' + RUN + ')');
-  await page.getByTestId('incident-verdict-submit').click();
-  const verdictError = page.getByTestId('incident-verdict-error');
-  await expect(verdictError).toBeVisible();
-  await expect(verdictError).toHaveAttribute('data-error-code', 'FORBIDDEN');
-  await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'open');
-  await page.screenshot({ path: SHOTS + '/06-viewer-verdict-refused.png', fullPage: true });
+  await expect(
+    page.getByTestId('incident-verdict-readonly'),
+    'a viewer is told its role cannot write, instead of being handed a form that can only fail',
+  ).toBeVisible();
+  await expect(page.getByTestId('incident-verdict-form'), 'no verdict form is rendered for a viewer').toHaveCount(0);
+  await page.screenshot({ path: SHOTS + '/06-viewer-verdict-readonly.png', fullPage: true });
+
+  const origin = new URL(page.url()).origin;
+  const viewerApi = await apiSignIn(origin, VIEWER.email, VIEWER.password);
+  const verdictOwner = await apiSignIn(origin, SECOND_OPERATOR.email, SECOND_OPERATOR.password);
+  const pairId = await apiCreateIncident(verdictOwner, 'G11 e2e verdict role pair ' + RUN);
+
+  const refused = await apiRecordVerdict(viewerApi, pairId);
+  expect(refused.status(), 'the kernel, not the page, refuses a viewer verdict').toBe(403);
+  expect(((await refused.json()) as { code?: string }).code, 'a refused viewer write carries FORBIDDEN, not just any error').toBe('FORBIDDEN');
+  const untouched = (await (await viewerApi.api.get('/api/v1/incidents/' + pairId)).json()) as { status?: string; humanVerdict?: unknown };
+  expect(untouched.status, 'a refused verdict leaves the record open').toBe('OPEN');
+  expect(untouched.humanVerdict ?? null, 'a refused verdict leaves no verdict behind').toBeNull();
+
+  const accepted = await apiRecordVerdict(verdictOwner, pairId);
+  expect(accepted.status(), 'the same call on the same record by an operator - so the 403 above is the role').toBe(201);
+  expect(((await accepted.json()) as { verdict?: string }).verdict, 'the accepted verdict is the one that was sent').toBe('INCONCLUSIVE');
+  await viewerApi.api.dispose();
+  await verdictOwner.api.dispose();
 });
 
 test('an operator cannot see a record owned by someone else, and can still close its own loop', async ({ page }) => {

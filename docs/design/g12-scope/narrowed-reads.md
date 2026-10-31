@@ -213,7 +213,7 @@ admin  同端点 = 2 条；viewer 同端点 = 2 条
 1. **Activity 的 `restricted` 仍然压在 `filtered` 之上**（helper 既有优先级，本轮沿用）。结果是：operator 在有搜索词时清空结果，看到的是「边界」而不是「筛选」。为此新文案**只说边界、不说数量**（「它并不说明什么都没有发生」），并且当 `narrowed` 为真时同时给出「清除筛选」。要彻底分开这两种空态，需要内核另发一个「未收窄计数」，本轮不做。
 2. **viewer 的可见范围是 D5，已上抬为独立决策项**：全量现象、行号、两个面的原文对照与三个候选选项写在 **§3.4**，本文件不再重复判断。此处只保留一条自我更正：上一版这条写的「viewer 只能被交接后成为 owner」**在当前 HEAD 上是错的**（交接拒绝 viewer，`incidents.rs:1665`），所以两个面不是「一宽一窄」而是「一个全开、一个恒空」。字段层面已经不存在 `seesAll`，因此这句话也不再经由任何字段传播。
 3. 空态文案没有、也无法声称「你读得到的东西都已列出」——它只能声称「内核这次没给你」。本轮之后它可以更准确地只说「这次读没有按 owner 收窄，而且它没返回行」。
-4. **viewer 的写入口存在三方分歧，本轮只记录不动**：ADR-G11-001 §4.5 说保留写入口、让 viewer 拿到 403；`pages/IncidentDetail.tsx:497,575` 说不给表单、只给角色说明句；两条 spec（`g11-incident-slice.spec.ts:211`、`g11-viewer-write-entries.spec.ts:154`）按 ADR 写。实测第 2 条 spec 因此失败，原文与行号见 §7.3。改任何一边都超出本轮授权：改产品＝改 §4.5 的产品规则，改 spec＝放宽测试。
+4. **viewer 的写入口三方分歧：已由决策者裁定结案（2026-10-31）**。裁定是「组件是对的，specs 过度指定了机制」：ADR-G11-001 §4.5 改写为「viewer 看到只读说明，服务端 403 仍被测试守护」，两条 spec（`g11-incident-slice.spec.ts`、`g11-viewer-write-entries.spec.ts`）改为断言只读说明存在 + 表单 `toHaveCount(0)` + **端点层** 403 `FORBIDDEN` + 同一份 body 由 operator 会话得到 201。原文与行号见 §7.3。
 
 ## 7. 复现
 
@@ -282,9 +282,11 @@ await expect(page.getByTestId('incidents-empty')).not.toContainText('no owner na
 
 根因：`apps/platform-web/src/pages/IncidentDetail.tsx:575` 先判 `capabilities.readOnlyReason`（viewer 恒真），于是渲染 `incident-verdict-readonly` 说明句而**不渲染** `VerdictForm`；证据表单同理（`:497`）。这是**故意的**，就地注释写着「Why the form is absent…: a viewer is told about the role」。
 
-但 ADR-G11-001 §4.5 写的是相反的选项 (b)：「保留写入口，让 viewer 点一次、拿到服务端的高质量 403」，而且**另有一条专门的 spec 在守它**——`tests/ui/g11-viewer-write-entries.spec.ts:154` 同样对 viewer 填 `incident-verdict-rationale`。也就是说 HEAD `7785ccb` 上存在**三方分歧**：ADR §4.5 说要表单；`IncidentDetail.tsx` 说不给表单；两条 spec 按 ADR 写。
+但当时的 ADR-G11-001 §4.5 写的是相反的选项 (b)：「保留写入口，让 viewer 点一次、拿到服务端的高质量 403」，而且**另有一条专门的 spec 在守它**——`tests/ui/g11-viewer-write-entries.spec.ts:154` 同样对 viewer 填 `incident-verdict-rationale`。也就是说 HEAD `7785ccb` 上存在**三方分歧**：ADR §4.5 说要表单；`IncidentDetail.tsx` 说不给表单；两条 spec 按 ADR 写。
 
-**本轮不改**：改 `IncidentDetail.tsx` 等于改 viewer 的写入口行为（第 10 个文件，且是产品规则），改 spec 等于放宽测试。两者都被本任务的硬约束挡住。**这条必须由决策者裁定：要么恢复 §4.5 的表单，要么正式废止 §4.5 并同步两条 spec。**（§6 已登记）
+**当时不改**：改 `IncidentDetail.tsx` 等于改 viewer 的写入口行为（第 10 个文件，且是产品规则），改 spec 等于放宽测试。两者都被当时任务的硬约束挡住，所以只登记、等裁定。
+
+**后续（2026-10-31）**：决策者裁定「组件是对的，specs 过度指定了机制」，ADR-G11-001 §4.5 已按实现改写，两条 spec 改为在**端点层**断言 403 `FORBIDDEN`，并由 operator 会话对同一条记录、同一份 body 得到 201。本节保留为分歧被发现时的原始记录，不追改。
 
 ### 7.4 第 5 条的失败：390 宽度详情页横向溢出 8px —— 已在 HEAD 基线复现
 
