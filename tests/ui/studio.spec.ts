@@ -75,7 +75,12 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.getByRole('status')).toContainText('Draft saved');
   await page.screenshot({ path: path.join(OUT, 'pipeline-draft-saved.png'), fullPage: true });
   await page.reload();
-  await page.locator('.studio-palette .palette-item').filter({ hasText: 'source' }).first().click();
+  // The reload is the reason this one states its precondition too: the palette row exists once the
+  // editor has finished loading, and a click that waits for it is reported as a test timeout
+  // instead of naming the row that never arrived.
+  const reloadedNode = page.locator('.studio-palette .palette-item').filter({ hasText: 'source' }).first();
+  await expect(reloadedNode).toBeVisible();
+  await reloadedNode.click();
   await expect(page.locator('.studio-inspector')).toContainText('http_json');
   await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue(String(nextTimeout));
   await page.getByRole('button', { name: 'Validate', exact: true }).click();
@@ -267,7 +272,11 @@ test('mobile studio node list opens inspector at 390', async ({ browser }) => {
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/editor`);
   await page.getByRole('button', { name: 'Nodes', exact: true }).click();
-  await page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first().click();
+  // The list is the proof that the toggle above switched the canvas to the node list, so it is
+  // stated rather than waited for inside the click.
+  const mobileNode = page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first();
+  await expect(mobileNode).toBeVisible();
+  await mobileNode.click();
   await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
