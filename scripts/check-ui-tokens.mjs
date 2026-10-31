@@ -19,6 +19,20 @@ const flag = (name, fallback) => {
 };
 const ROOT = resolve(flag('root', join(HERE, '..')));
 const RATCHET = flag('ratchet', null);
+// A ratchet path that does not resolve used to leave every budget at zero, so the script failed every
+// rule regardless of the code. Three separate runs in one week reported that as a real regression. A
+// gate that fails by default teaches people to ignore it, so an unresolvable path is now an error
+// about the path rather than a verdict about the code.
+if (RATCHET !== null && !existsSync(RATCHET)) {
+  console.error('check-ui-tokens: cannot read the ratchet file ' + RATCHET);
+  console.error('Without it every budget is zero and every rule fails, which says nothing about the code.');
+  console.error('Pass the path this repository uses: docs/design/ui-visual-v3/spec/ui-debt.json');
+  process.exit(2);
+}
+if (RATCHET === null) {
+  console.error('check-ui-tokens: no --ratchet given, so every budget is zero and every rule will fail.');
+  console.error('This run cannot tell you anything about the code.');
+}
 const SRC = join(ROOT, 'apps', 'platform-web', 'src');
 const cssPath = join(SRC, 'styles.css');
 if (!existsSync(cssPath)) {
