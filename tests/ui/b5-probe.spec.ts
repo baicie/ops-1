@@ -151,7 +151,11 @@ test('b5 probe', async ({ browser }) => {
       route: '/admin/pipelines/' + PIPELINE + '/editor',
       label: 'studio-header-actions',
       probes: [
-        { name: 'header', fn: 'rects', args: { sel: '.page-header', child: '.page-actions > *' } },
+        // The nine studio controls left .page-header for the toolbar row between header and
+        // content (page-template §2.1). Reading '.page-actions > *' here returned nothing at all,
+        // so the probe reported a page with no controls instead of a page whose controls moved.
+        { name: 'toolbar', fn: 'rects', args: { sel: '.studio-toolbar', child: '.studio-toolbar > *' } },
+        { name: 'header', fn: 'rects', args: { sel: '.page-header', child: '.page-header-meta > *' } },
         { name: 'drafts', fn: 'rects', args: { sel: '.studio-drafts', child: '.studio-drafts > strong, .draft-row > *' } },
         { name: 'draftRow', fn: 'rowFill', args: { rowSel: '.draft-row', childSel: '*' } },
         { name: 'description', fn: 'description' },

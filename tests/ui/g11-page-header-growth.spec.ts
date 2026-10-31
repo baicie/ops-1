@@ -72,7 +72,14 @@ async function measure(page: Page) {
     const header = document.querySelector('[data-testid=page-header]') as HTMLElement | null;
     if (!header) return null;
     const box = header.getBoundingClientRect();
-    const actions = Array.from(header.querySelectorAll('.page-actions > *')) as HTMLElement[];
+    // The studio page states its controls in the toolbar row that follows the header, not inside
+    // it, so reading only .page-actions made the one page this defect was found on measure zero
+    // controls - a vacuous pass for the property this function exists to measure.
+    const row = header.nextElementSibling as HTMLElement | null;
+    const actions = [
+      ...Array.from(header.querySelectorAll('.page-actions > *')),
+      ...Array.from(row && row.classList.contains('studio-toolbar') ? row.querySelectorAll('a, button') : []),
+    ] as HTMLElement[];
     const controls = actions
       .filter((el) => {
         const r = el.getBoundingClientRect();
