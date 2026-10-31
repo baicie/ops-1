@@ -1473,5 +1473,20 @@
   "incidents.error.ownerUnknown": "该账号不存在。",
   "incidents.error.ownerDisabled": "该账号已被禁用。",
   "incidents.error.ownerRoleIneligible": "只有 operator 或 admin 账号可以担任 Incident 负责人。",
-  "incidents.error.ownerUnchanged": "该账号已是这个 Incident 的负责人。"
+  "incidents.error.ownerUnchanged": "该账号已是这个 Incident 的负责人。",
+  "incidents.workspace.aria": "事件调查工作区：{title}",
+  "incidents.pane.analysis": "调查",
+  "incidents.pane.detail": "证据",
+  "incidents.rail.title": "事件",
+  "incidents.rail.filterAria": "按状态筛选事件列表",
+  "incidents.rail.all": "全部",
+  "incidents.rail.count": "{shown} / {total}",
+  "incidents.rail.loading": "正在加载事件列表…",
+  "incidents.rail.unavailable.title": "无法读取事件列表",
+  "incidents.rail.unavailable.description": "此面板列出本账号可读的事件；当前事件不受影响。",
+  "incidents.rail.empty.title": "暂无事件",
+  "incidents.rail.empty.description": "此范围内还没有创建事件。",
+  "incidents.rail.emptyFiltered": "没有状态为 {status} 的事件",
+  "incidents.detail.evidence.idle.title": "未选择证据",
+  "incidents.detail.evidence.idle.description": "在证据列表中选择一行，即可在此查看其存储内容。"
 }

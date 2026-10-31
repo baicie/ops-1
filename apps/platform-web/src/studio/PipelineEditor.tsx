@@ -275,6 +275,12 @@ export function PipelineEditorPage() {
       {/* Header only: the palette, canvas, inspector and preview keep their dedicated layouts
           (a workflow canvas is not a card), and the meta row states the pipeline facts instead of
           folding them into the description sentence. */}
+      {/* G12 D: the nine controls are the header's actions. They used to sit in a .studio-toolbar row
+          of their own because a declared 80px header could not hold them - that row was this page
+          routing around a header defect instead of the header owning the arrangement. The header
+          now keeps a 360px copy column and wraps its action rail onto its own line inside its own
+          box (see .page-header), so the controls are where every other page's controls are, and
+          nothing below the header has to know how many of them there are. */}
       <PageHeader
         eyebrow={t('studio.eyebrow')}
         title={definition.name}
@@ -285,15 +291,7 @@ export function PipelineEditorPage() {
           <span className="meta-chip">{draft ? t('studio.header.draftVersion', { version: draft.version }) : t('studio.header.publishedReadOnly')}</span>
           <StatusIndicator state={dirty ? 'attention' : 'ready'} label={dirty ? t('studio.header.unsavedChanges') : t('studio.header.saved')} />
         </>}
-      />
-      {/* The nine controls are the workspace's toolbar, not the title's company: measured at 1440
-          they are 842px wide against a 1328px column whose description needs 496, so a header that
-          also carried them either wrapped into a row §2.2's declared 80px does not reserve or was
-          clipped by a scroller ("Create draft" at 1523..1651, outside the viewport). page-template
-          §2.1 already has the region for this row - between the header and the page's primary
-          region - so the header stays 80px, the first block still lands at y=160, and every control
-          keeps its tier and its hit area. */}
-      <div className="studio-toolbar" role="group" aria-label={t('studio.toolbar.aria')}>
+        actions={<>
         <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
         <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
         <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</button>
@@ -306,10 +304,12 @@ export function PipelineEditorPage() {
           <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
           <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
         </>}
-        {!hasDraft
+        </>}
+        actionsLabel={t('studio.toolbar.aria')}
+        primary={!hasDraft
           ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button>
           : <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</button>}
-      </div>
+      />
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
         <Icon name="warning" size={14} />

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
-import type { IncidentEvidence, IncidentEvidenceList, IncidentOwnerTransfer, IncidentTimeline, IncidentTimelineEvent, IncidentView } from '../types';
+import type { IncidentEvidence, IncidentEvidenceList, IncidentList, IncidentOwnerTransfer, IncidentTimeline, IncidentTimelineEvent, IncidentView } from '../types';
 import { useAuth } from '../auth';
 import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
@@ -14,9 +14,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { CopyButton, Field, KV, useToast } from '../components/Ui';
 import { EvidenceContentViewer } from '../components/evidence-viewer';
+import { InvestigationLayout, useCompactLayout, type InvestigationPaneId } from '../components/app/investigation-layout';
 import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
-import { badgeVariantForTone } from '../components/status-tone';
+import { badgeVariantForTone, statusForCode } from '../components/status-tone';
 import {
   CLOSURE_NOTE_MAX_CHARS,
   CLAIMABLE_TRUST_CODES,
@@ -108,7 +109,15 @@ export function IncidentDetailPage() {
   const [openEvidenceId, setOpenEvidenceId] = React.useState<string | null>(null);
   React.useEffect(() => {
     setOpenEvidenceId(null);
+    // A route change is a new incident, so the workspace returns to the pane that shows it. Without
+    // this, switching incidents from the rail on a phone left the reader on the rail: the list
+    // updated and the incident did not, which reads as "the link did nothing".
+    setPane('analysis');
   }, [incidentId]);
+  // Which pane the workspace shows below 1024. The layout owns the fallback; the page owns the one
+  // transition the page can predict - opening a row moves to the pane the row opened into.
+  const [pane, setPane] = React.useState<InvestigationPaneId>('analysis');
+  const compact = useCompactLayout();
 
   // The state that is actually rendered. It is only ever the state that describes this route.
   const view = projectDetail(store, incidentId);
@@ -236,7 +245,7 @@ export function IncidentDetailPage() {
   }
 
   return (
-    <div className="page-stack" data-testid="incident-detail" data-incident-id={incident.id} data-route-id={incidentId}>
+    <div className="page-stack investigation-page" data-testid="incident-detail" data-incident-id={incident.id} data-route-id={incidentId}>
       <PageHeader
         eyebrow={t('incidents.eyebrow')}
         title={incident.title}
@@ -263,352 +272,496 @@ export function IncidentDetailPage() {
         </section>
       ) : null}
 
-      <section className="summary-grid">
-        <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><Status code={incident.status} /></strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('table.severity')}</span><strong className="metric-value"><Status code={incident.severity} /></strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('table.evidence')}</span><strong className="metric-value mono" data-testid="incident-detail-evidence-count">{view.evidence ? evidence.length : '—'}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('table.updated')}</span><strong className="metric-value"><span title={incident.updatedAt}>{ageMessage(locale, incident.updatedAt)}</span></strong></div>
-      </section>
-
-      <section className="panel" data-testid="incident-identity">
-        <div className="panel-head"><div><h2>{t('table.details')}</h2></div></div>
-        <div className="kv-grid">
-          <KV label={t('table.incident')} mono>{<LongId value={incident.id} label={t('table.copyIdentifier')} testId="incident-id" />}</KV>
-          <KV label={t('table.started')}>{<span title={incident.startedAt}>{ageMessage(locale, incident.startedAt)}</span>}</KV>
-          <KV label={t('table.owner')} mono>{<span title={incident.owner} data-testid="incident-detail-owner">{ownerLabel}</span>}</KV>
-          <KV label={t('incidents.owner.since')}>{<span title={incident.ownerAssignedAt} data-testid="incident-owner-since">{ageMessage(locale, incident.ownerAssignedAt)}</span>}</KV>
-          <KV label={t('table.source')}>{t(incidentSourceKey(incident.source))}</KV>
-          <KV label={t('table.relatedEntity')} mono>{incident.relatedEntity || t('common.none')}</KV>
-          <KV label={t('incidents.revision')} mono>{<span data-testid="incident-revision" data-revision={incident.revision}>{incident.revision}</span>}</KV>
-          {incident.closedAt ? <KV label={t('incidents.close.record.closedAt')}>{<span title={incident.closedAt}>{ageMessage(locale, incident.closedAt)}</span>}</KV> : null}
-          {incident.closedBy ? <KV label={t('incidents.close.record.closedBy')} mono>{directory.names?.[incident.closedBy] ?? shortOwner(incident.closedBy)}</KV> : null}
-        </div>
-      </section>
-
-      {/* G12 C: the lifecycle. One panel, because closing and handing over are two decisions about
-          the same record and a reader should not have to find them in two places. */}
-      <section className="panel" data-testid="incident-lifecycle" data-lifecycle-state={closureState}>
-        <div className="panel-head">
-          <div>
-            <h2>{t('incidents.close.title')}</h2>
-            <p>{t('incidents.close.description')}</p>
-          </div>
-        </div>
-        {closureState === 'closed' ? (
-          <div className="pad" data-testid="incident-closure-record" data-closed-at={incident.closedAt ?? ''}>
-            <p><Status code="CLOSED" /> <span className="muted small" data-testid="incident-closure-note">{incident.closureNote ?? t('common.none')}</span></p>
-            <p className="muted small">{t('incidents.close.record.writeOnce')}</p>
-          </div>
-        ) : capabilities.canClose ? (
-          <CloseIncidentForm
-            incidentId={incident.id}
-            revision={incident.revision}
-            onClosed={() => {
-              toast.push({ tone: 'ok', title: t('incidents.close.success') });
-              retry();
-            }}
-          />
-        ) : (
-          <p className="muted small pad" data-testid="incident-close-blocked" data-blocked-reason={capabilities.closeBlockedReason ?? ''}>
-            {capabilities.closeBlockedReason ? t(capabilities.closeBlockedReason) : t('incidents.close.blocked.notConcluded')}
-          </p>
-        )}
-        {capabilities.canTransferOwner ? (
-          <OwnerTransferForm
-            incidentId={incident.id}
-            revision={incident.revision}
-            currentOwner={incident.owner}
-            onTransferred={(submitted) => {
-              toast.push({ tone: 'ok', title: t('incidents.transfer.success') });
-              // Reload when this account may still read the record: the owner it shows then comes
-              // from a fresh GET, not from the write's echo. When the handover ended this account's
-              // access there is nothing to re-read, so the submitted values are what the page says.
-              if (losesAccessAfterHandover(user?.role ?? null)) setHandover(submitted);
-              else retry();
-            }}
-          />
-        ) : capabilities.transferBlockedReason && capabilities.transferBlockedReason !== capabilities.closeBlockedReason ? (
-          <p className="muted small pad" data-testid="incident-transfer-blocked">{t(capabilities.transferBlockedReason)}</p>
-        ) : null}
-      </section>
-
-      <section className="panel" data-testid="incident-timeline">
-        <div className="panel-head">
-          <div>
-            <h2>{t('incidents.timeline.title')}</h2>
-            <p>{t('incidents.timeline.description')}</p>
-          </div>
-        </div>
-        {facts.length <= 1 && !incident.humanVerdict ? (
-          <p className="muted small pad" data-testid="incident-timeline-empty">{t('incidents.timeline.empty')}</p>
-        ) : null}
-        <ol className="timeline pad" data-testid="incident-timeline-list">
-          {facts.map((fact) => (
-            <li key={fact.id} data-fact-kind={fact.kind} data-fact-at={fact.at}>
-              <span className="timeline-dot" />
-              <div>
-                <strong>
-                  {fact.kind === 'started' ? t('incidents.timeline.started') : fact.kind === 'evidence' ? t('incidents.timeline.evidence') : t('incidents.timeline.verdict')}
-                </strong>
-                {fact.kind === 'evidence' && fact.evidence ? (
-                  <>
-                    <span className="tag">{t(evidenceKindKey(fact.evidence.kind))}</span>
-                    <span className="muted small">{fact.evidence.source}</span>
-                  </>
+          {/* G12 D: the page is a three-pane workspace, not a column of cards. The DOM order is the
+        reading order at every width - rail, analysis, detail - and below 1024 those three panes
+        become tabs (components/app/investigation-layout.tsx). A row opened in the analysis pane
+        selects the evidence the detail pane shows; on a phone it also moves the tab there, so
+        opening a row never leaves the reader looking at a list that did not change. */}
+      <InvestigationLayout
+        label={t('incidents.workspace.aria', { title: incident.title })}
+        activePane={pane}
+        onPaneChange={setPane}
+        initialPane="analysis"
+        panes={[
+          {
+            id: 'rail',
+            label: t('incidents.rail.title'),
+            content: <IncidentRail currentId={incident.id} />,
+          },
+          {
+            id: 'analysis',
+            label: t('incidents.pane.analysis'),
+            count: view.evidence ? evidence.length : null,
+            content: (
+              <>
+                <section className="summary-grid">
+                        <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><Status code={incident.status} /></strong></div>
+                        <div className="panel metric-card"><span className="metric-label">{t('table.severity')}</span><strong className="metric-value"><Status code={incident.severity} /></strong></div>
+                        <div className="panel metric-card"><span className="metric-label">{t('table.evidence')}</span><strong className="metric-value mono" data-testid="incident-detail-evidence-count">{view.evidence ? evidence.length : '—'}</strong></div>
+                        <div className="panel metric-card"><span className="metric-label">{t('table.updated')}</span><strong className="metric-value"><span title={incident.updatedAt}>{ageMessage(locale, incident.updatedAt)}</span></strong></div>
+                      </section>
+                <section className="panel" data-testid="incident-timeline">
+                        <div className="panel-head">
+                          <div>
+                            <h2>{t('incidents.timeline.title')}</h2>
+                            <p>{t('incidents.timeline.description')}</p>
+                          </div>
+                        </div>
+                        {facts.length <= 1 && !incident.humanVerdict ? (
+                          <p className="muted small pad" data-testid="incident-timeline-empty">{t('incidents.timeline.empty')}</p>
+                        ) : null}
+                        <ol className="timeline pad" data-testid="incident-timeline-list">
+                          {facts.map((fact) => (
+                            <li key={fact.id} data-fact-kind={fact.kind} data-fact-at={fact.at}>
+                              <span className="timeline-dot" />
+                              <div>
+                                <strong>
+                                  {fact.kind === 'started' ? t('incidents.timeline.started') : fact.kind === 'evidence' ? t('incidents.timeline.evidence') : t('incidents.timeline.verdict')}
+                                </strong>
+                                {fact.kind === 'evidence' && fact.evidence ? (
+                                  <>
+                                    <span className="tag">{t(evidenceKindKey(fact.evidence.kind))}</span>
+                                    <span className="muted small">{fact.evidence.source}</span>
+                                  </>
+                                ) : null}
+                                {fact.kind === 'verdict' && fact.verdict ? (
+                                  <>
+                                    <Status code={fact.verdict.verdict} />
+                                    <span className="muted small">{decidedByLabel}</span>
+                                  </>
+                                ) : null}
+                                <span className="muted small" data-testid="fact-time">
+                                  {fact.atValid ? <span title={fact.at}>{ageMessage(locale, fact.at)}</span> : t('incidents.timeline.unparseable', { value: fact.at })}
+                                </span>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      </section>
+                <section className="panel" data-testid="incident-audit" data-audit-state={trail.state}>
+                        <div className="panel-head">
+                          <div>
+                            <h2>{t('incidents.audit.title')}</h2>
+                            <p>{t('incidents.audit.description')}</p>
+                          </div>
+                        </div>
+                        {trail.state === 'loading' ? (
+                          <p className="muted small pad" aria-busy="true" data-testid="incident-audit-loading">{t('aria.loading')}</p>
+                        ) : trail.state === 'unavailable' ? (
+                          <div className="pad" data-testid="incident-audit-unavailable">
+                            <p className="muted small">{t('incidents.audit.unavailable')}</p>
+                            <Button variant="secondary" onClick={retry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
+                          </div>
+                        ) : trail.events.length === 0 ? (
+                          <p className="muted small pad" data-testid="incident-audit-empty">{t('incidents.audit.empty')}</p>
+                        ) : (
+                          <ol className="timeline pad" data-testid="incident-audit-list">
+                            {trail.events.map((event) => (
+                              <AuditRow key={event.id} event={event} directory={directory} />
+                            ))}
+                          </ol>
+                        )}
+                        {trail.truncated ? (
+                          <p className="muted small pad" data-testid="incident-audit-truncated">{t('incidents.audit.truncated')}</p>
+                        ) : null}
+                      </section>
+                <section className="panel" data-testid="incident-evidence" data-evidence-state={evidenceState}>
+                        <div className="panel-head">
+                          <div>
+                            <h2>{t('table.evidence')}</h2>
+                            <p>{t('incidents.detail.evidence.description')}</p>
+                          </div>
+                        </div>
+                        {/* How much of this incident the Kernel can vouch for itself, counted rather than
+                            implied. Zero is a fact worth printing: it says every row here is an operator's word. */}
+                        <p className="muted small pad" data-testid="incident-evidence-trusted" data-kernel-verified-count={verifiedCount} data-evidence-count={evidence.length}>
+                          {t('incidents.evidence.trustedSummary', { verified: verifiedCount, total: evidence.length })}
+                        </p>
+                        {evidenceState === 'loading' ? (
+                          <p className="muted small pad" aria-busy="true" data-testid="incident-evidence-loading">{t('aria.loading')}</p>
+                        ) : evidenceState === 'unavailable' ? (
+                          <div className="pad" data-testid="incident-evidence-unavailable">
+                            <p><strong>{t('incidents.detail.evidence.unavailable.title')}</strong></p>
+                            <p className="muted small">{t('incidents.detail.evidence.unavailable.description')}</p>
+                            <IncidentFailureNotice error={view.evidenceError} testId="incident-evidence-error" />
+                            <Button variant="secondary" onClick={retry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
+                          </div>
+                        ) : evidenceState === 'missing' ? (
+                          <div className="pad" data-testid="incident-evidence-empty">
+                            <p><strong>{t('incidents.detail.evidence.empty.title')}</strong></p>
+                            <p className="muted small">{t('incidents.detail.evidence.empty.description')}</p>
+                          </div>
+                        ) : (
+                          <div className="table-panel">
+                            <Table>
+                              <TableHeader>
+                                <TableRow className="hover:bg-transparent">
+                                  <TableHead>{t('table.kind')}</TableHead>
+                                  <TableHead>{t('table.trust')}</TableHead>
+                                  <TableHead>{t('table.source')}</TableHead>
+                                  <TableHead>{t('table.collectedAt')}</TableHead>
+                                  <TableHead>{t('table.contentRef')}</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {evidence.map((row) => (
+                                  <TableRow key={row.id} data-evidence-row={row.id} data-after-verdict={row.afterVerdict ? 'true' : 'false'}>
+                                    <TableCell data-evidence-kind={row.kind}>
+                                      {t(evidenceKindKey(row.kind))}
+                                      {row.afterVerdict ? (
+                                        <Badge variant={badgeVariantForTone('warn')} data-testid="evidence-after-verdict">{t('incidents.evidence.afterVerdict')}</Badge>
+                                      ) : null}
+                                    </TableCell>
+                                    <TableCell>
+                                      {/* The kernel's conclusion is the badge. The claim is printed under it, and
+                                          when the two disagree the row says so instead of showing only one of them. */}
+                                      <Badge
+                                        variant={badgeVariantForTone(evidenceTrustTone(row.verifiedTrust))}
+                                        data-verified-trust={row.verifiedTrust}
+                                        data-claimed-trust={row.claimedTrust}
+                                        data-trust-mismatch={trustMismatch(row) ? 'true' : 'false'}
+                                      >
+                                        {t(evidenceTrustKey(row.verifiedTrust))}
+                                      </Badge>
+                                      <span className="muted small" data-testid="evidence-claimed" data-claimed-trust={row.claimedTrust}>
+                                        {t('incidents.evidence.claimed', { value: t(evidenceTrustKey(row.claimedTrust)) })}
+                                      </span>
+                                      <span className="muted small" data-testid="evidence-method" data-verification-method={row.verificationMethod} data-verifier={row.verifierIdentity ?? ''}>
+                                        {row.verifierIdentity
+                                          ? t('incidents.evidence.verifiedBy', { adapter: row.verifierIdentity })
+                                          : t(verificationMethodKey(row.verificationMethod))}
+                                      </span>
+                                      {row.verificationNote ? <span className="muted small" data-testid="evidence-note">{row.verificationNote}</span> : null}
+                                      {/* G12 C: the one marker a reader may treat as 'the Kernel verified this',
+                                          because SOURCE_ATTESTED is the only value an adapter signature can
+                                          produce. Everything else is labelled as what it is - asserted. */}
+                                      {isKernelVerified(row) ? (
+                                        <Badge variant={badgeVariantForTone('ok')} data-testid="evidence-kernel-verified" data-kernel-verified="true">
+                                          {t('incidents.evidence.kernelVerified')}
+                                        </Badge>
+                                      ) : (
+                                        <span className="muted small" data-testid="evidence-not-kernel-verified" data-kernel-verified="false">
+                                          {t('incidents.evidence.notKernelVerified')}
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="mono" title={row.source} data-evidence-source={row.source}>{row.source}</TableCell>
+                                    <TableCell><span title={row.collectedAt}>{row.collectedAt}</span></TableCell>
+                                    <TableCell>
+                                      {/* G12 B: where this row's bytes are is a fact the table states, not
+                                          something the reader has to discover by clicking. A LEGACY_REFERENCE
+                                          row is labelled as one; the locator below is a string, never a link. */}
+                                      <Badge
+                                        variant={badgeVariantForTone(evidenceContentStatusTone(row.contentStatus))}
+                                        data-testid="evidence-content-status"
+                                        data-content-status={row.contentStatus}
+                                      >
+                                        {t(evidenceContentStatusKey(row.contentStatus))}
+                                      </Badge>
+                                      <span className="ow-longid">
+                                        <span className="ow-longid-value" title={row.contentRef} data-testid="evidence-content-ref">{row.contentRef}</span>
+                                        <CopyButton value={row.contentRef} label={t('table.copyIdentifier')} />
+                                      </span>
+                                      <Button
+                                        variant="secondary"
+                                        data-testid="evidence-open"
+                                        data-evidence-id={row.id}
+                                        aria-expanded={openEvidenceId === row.id}
+                                        onClick={() => {
+                          const closing = openEvidenceId === row.id;
+                          setOpenEvidenceId(closing ? null : row.id);
+                          if (!closing && compact) setPane('detail');
+                        }}
+                                      >
+                                        {t('incidents.content.action.open')}
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                            <p className="table-footnote" data-testid="incident-evidence-ref-note">{t('incidents.detail.evidence.refNote')}</p>
+                          </div>
+                        )}
+                        {/* Evidence stays appendable AFTER a verdict: CONCLUDED accepts it (ADR-G11-001 §3.1),
+                            and only CLOSED refuses writes. Gating this on "no verdict yet" told the reader the
+                            opposite of what the kernel does. */}
+                        {/* Why the form is absent, in the order that gives the most useful sentence: a viewer is
+                            told about the role (the closure is not what stops them), an operator on a closed
+                            incident is told about the closure, and anyone else out of scope is told about scope. */}
+                        {capabilities.readOnlyReason ? (
+                          <p className="muted small pad" data-testid="incident-evidence-readonly">{t('incidents.permission.writeBlocked')}</p>
+                        ) : incident.status === 'CLOSED' ? (
+                          <p className="muted small pad" data-testid="incident-evidence-sealed">{t('incidents.error.closed')}</p>
+                        ) : !capabilities.canAddEvidence ? (
+                          <p className="muted small pad" data-testid="incident-evidence-readonly">{t('incidents.permission.writeBlocked')}</p>
+                        ) : (
+                          <AddEvidenceForm
+                            incidentId={incident.id}
+                            defaultSource={user ? 'operator:' + user.email : 'operator:'}
+                            onAdded={() => {
+                              toast.push({ tone: 'ok', title: t('incidents.evidence.add.success') });
+                              retry();
+                            }}
+                          />
+                        )}
+                      </section>
+              </>
+            ),
+          },
+          {
+            id: 'detail',
+            label: t('incidents.pane.detail'),
+            content: (
+              <>
+                {openRow ? (
+                  <EvidenceContentViewer
+                    key={openRow.id}
+                    incidentId={incident.id}
+                    row={openRow}
+                    onClose={() => setOpenEvidenceId(null)}
+                  />
+                ) : evidence.length > 0 ? (
+                  <section className="panel" data-testid="incident-evidence-idle">
+                    <div className="panel-head">
+                      <div>
+                        <h2>{t('incidents.detail.evidence.idle.title')}</h2>
+                        <p>{t('incidents.detail.evidence.idle.description')}</p>
+                      </div>
+                    </div>
+                  </section>
                 ) : null}
-                {fact.kind === 'verdict' && fact.verdict ? (
-                  <>
-                    <Status code={fact.verdict.verdict} />
-                    <span className="muted small">{decidedByLabel}</span>
-                  </>
-                ) : null}
-                <span className="muted small" data-testid="fact-time">
-                  {fact.atValid ? <span title={fact.at}>{ageMessage(locale, fact.at)}</span> : t('incidents.timeline.unparseable', { value: fact.at })}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+                <section className="panel" data-testid="incident-verdict" data-verdict-state={verdictState}>
+                        <div className="panel-head">
+                          <div>
+                            <h2>{t('incidents.verdict.title')}</h2>
+                            <p>{t('incidents.verdict.description')}</p>
+                          </div>
+                        </div>
+                        {verdictState === 'recorded' && incident.humanVerdict ? (
+                          <div className="pad" data-testid="incident-verdict-record" data-verdict-value={incident.humanVerdict.verdict}>
+                            <p><Status code={incident.humanVerdict.verdict} /> <span className="muted small" data-testid="incident-verdict-attribution">{t('incidents.verdict.decidedBy', { id: decidedByLabel ?? '' })}</span></p>
+                            <p className="muted small">{t('incidents.verdict.writeOnce')}</p>
+                            <KV label={t('table.rationale')}>{incident.humanVerdict.rationale}</KV>
+                            <p className="muted small"><span title={incident.humanVerdict.decidedAt}>{ageMessage(locale, incident.humanVerdict.decidedAt)}</span></p>
+                            {/* A3: what the signature stands on, separated from what the record holds now. */}
+                            <p
+                              className="muted small"
+                              data-testid="incident-verdict-considered"
+                              data-snapshot-kind={incident.humanVerdict.snapshotKind}
+                              data-considered-count={incident.humanVerdict.consideredEvidenceCount}
+                              data-after-count={partition.afterVerdict.length}
+                            >
+                              {verdictSnapshotState(incident.humanVerdict) === 'recorded'
+                                ? t('incidents.verdict.considered.recorded', { count: incident.humanVerdict.consideredEvidenceCount })
+                                : t('incidents.verdict.considered.unknown')}
+                            </p>
+                            {incident.humanVerdict.consideredEvidenceDigest ? (
+                              <p className="muted small" data-testid="incident-verdict-digest">
+                                {t('incidents.verdict.considered.digest')} <code>{incident.humanVerdict.consideredEvidenceDigest}</code>
+                              </p>
+                            ) : null}
+                            {partition.afterVerdict.length > 0 ? (
+                              <p className="notice-bar" data-testid="incident-verdict-after">
+                                {t('incidents.verdict.considered.after', { count: partition.afterVerdict.length })}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : capabilities.readOnlyReason ? (
+                          <p className="muted small pad" data-testid="incident-verdict-readonly">{t('incidents.permission.writeBlocked')}</p>
+                        ) : verdictState === 'sealed' ? (
+                          <p className="muted small pad" data-testid="incident-verdict-sealed">{t('incidents.verdict.sealed')}</p>
+                        ) : !capabilities.canRecordVerdict ? (
+                          <p className="muted small pad" data-testid="incident-verdict-readonly">{t('incidents.permission.writeBlocked')}</p>
+                        ) : (
+                          <VerdictForm
+                            incidentId={incident.id}
+                            hasEvidence={evidence.length > 0}
+                            onRecorded={() => {
+                              toast.push({ tone: 'ok', title: t('incidents.verdict.success') });
+                              retry();
+                            }}
+                          />
+                        )}
+                        {verdictState !== 'recorded' ? <p className="muted small pad">{t('incidents.verdict.onlyTwo')}</p> : null}
+                      </section>
+                <section className="panel" data-testid="incident-lifecycle" data-lifecycle-state={closureState}>
+                        <div className="panel-head">
+                          <div>
+                            <h2>{t('incidents.close.title')}</h2>
+                            <p>{t('incidents.close.description')}</p>
+                          </div>
+                        </div>
+                        {closureState === 'closed' ? (
+                          <div className="pad" data-testid="incident-closure-record" data-closed-at={incident.closedAt ?? ''}>
+                            <p><Status code="CLOSED" /> <span className="muted small" data-testid="incident-closure-note">{incident.closureNote ?? t('common.none')}</span></p>
+                            <p className="muted small">{t('incidents.close.record.writeOnce')}</p>
+                          </div>
+                        ) : capabilities.canClose ? (
+                          <CloseIncidentForm
+                            incidentId={incident.id}
+                            revision={incident.revision}
+                            onClosed={() => {
+                              toast.push({ tone: 'ok', title: t('incidents.close.success') });
+                              retry();
+                            }}
+                          />
+                        ) : (
+                          <p className="muted small pad" data-testid="incident-close-blocked" data-blocked-reason={capabilities.closeBlockedReason ?? ''}>
+                            {capabilities.closeBlockedReason ? t(capabilities.closeBlockedReason) : t('incidents.close.blocked.notConcluded')}
+                          </p>
+                        )}
+                        {capabilities.canTransferOwner ? (
+                          <OwnerTransferForm
+                            incidentId={incident.id}
+                            revision={incident.revision}
+                            currentOwner={incident.owner}
+                            onTransferred={(submitted) => {
+                              toast.push({ tone: 'ok', title: t('incidents.transfer.success') });
+                              // Reload when this account may still read the record: the owner it shows then comes
+                              // from a fresh GET, not from the write's echo. When the handover ended this account's
+                              // access there is nothing to re-read, so the submitted values are what the page says.
+                              if (losesAccessAfterHandover(user?.role ?? null)) setHandover(submitted);
+                              else retry();
+                            }}
+                          />
+                        ) : capabilities.transferBlockedReason && capabilities.transferBlockedReason !== capabilities.closeBlockedReason ? (
+                          <p className="muted small pad" data-testid="incident-transfer-blocked">{t(capabilities.transferBlockedReason)}</p>
+                        ) : null}
+                      </section>
+                <section className="panel" data-testid="incident-identity">
+                        <div className="panel-head"><div><h2>{t('table.details')}</h2></div></div>
+                        <div className="kv-grid">
+                          <KV label={t('table.incident')} mono>{<LongId value={incident.id} label={t('table.copyIdentifier')} testId="incident-id" />}</KV>
+                          <KV label={t('table.started')}>{<span title={incident.startedAt}>{ageMessage(locale, incident.startedAt)}</span>}</KV>
+                          <KV label={t('table.owner')} mono>{<span title={incident.owner} data-testid="incident-detail-owner">{ownerLabel}</span>}</KV>
+                          <KV label={t('incidents.owner.since')}>{<span title={incident.ownerAssignedAt} data-testid="incident-owner-since">{ageMessage(locale, incident.ownerAssignedAt)}</span>}</KV>
+                          <KV label={t('table.source')}>{t(incidentSourceKey(incident.source))}</KV>
+                          <KV label={t('table.relatedEntity')} mono>{incident.relatedEntity || t('common.none')}</KV>
+                          <KV label={t('incidents.revision')} mono>{<span data-testid="incident-revision" data-revision={incident.revision}>{incident.revision}</span>}</KV>
+                          {incident.closedAt ? <KV label={t('incidents.close.record.closedAt')}>{<span title={incident.closedAt}>{ageMessage(locale, incident.closedAt)}</span>}</KV> : null}
+                          {incident.closedBy ? <KV label={t('incidents.close.record.closedBy')} mono>{directory.names?.[incident.closedBy] ?? shortOwner(incident.closedBy)}</KV> : null}
+                        </div>
+                      </section>
+              </>
+            ),
+          },
+        ]}
+      />
 
-      {/* The kernel's own record of what happened, as opposed to the timestamps above. Every row
-          here is one audited write, read from GET /incidents/{id}/timeline, which is scoped by the
-          same predicate as the incident. */}
-      <section className="panel" data-testid="incident-audit" data-audit-state={trail.state}>
-        <div className="panel-head">
-          <div>
-            <h2>{t('incidents.audit.title')}</h2>
-            <p>{t('incidents.audit.description')}</p>
-          </div>
-        </div>
-        {trail.state === 'loading' ? (
-          <p className="muted small pad" aria-busy="true" data-testid="incident-audit-loading">{t('aria.loading')}</p>
-        ) : trail.state === 'unavailable' ? (
-          <div className="pad" data-testid="incident-audit-unavailable">
-            <p className="muted small">{t('incidents.audit.unavailable')}</p>
-            <Button variant="secondary" onClick={retry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
-          </div>
-        ) : trail.events.length === 0 ? (
-          <p className="muted small pad" data-testid="incident-audit-empty">{t('incidents.audit.empty')}</p>
-        ) : (
-          <ol className="timeline pad" data-testid="incident-audit-list">
-            {trail.events.map((event) => (
-              <AuditRow key={event.id} event={event} directory={directory} />
-            ))}
-          </ol>
-        )}
-        {trail.truncated ? (
-          <p className="muted small pad" data-testid="incident-audit-truncated">{t('incidents.audit.truncated')}</p>
-        ) : null}
-      </section>
-
-      <section className="panel" data-testid="incident-evidence" data-evidence-state={evidenceState}>
-        <div className="panel-head">
-          <div>
-            <h2>{t('table.evidence')}</h2>
-            <p>{t('incidents.detail.evidence.description')}</p>
-          </div>
-        </div>
-        {/* How much of this incident the Kernel can vouch for itself, counted rather than
-            implied. Zero is a fact worth printing: it says every row here is an operator's word. */}
-        <p className="muted small pad" data-testid="incident-evidence-trusted" data-kernel-verified-count={verifiedCount} data-evidence-count={evidence.length}>
-          {t('incidents.evidence.trustedSummary', { verified: verifiedCount, total: evidence.length })}
-        </p>
-        {evidenceState === 'loading' ? (
-          <p className="muted small pad" aria-busy="true" data-testid="incident-evidence-loading">{t('aria.loading')}</p>
-        ) : evidenceState === 'unavailable' ? (
-          <div className="pad" data-testid="incident-evidence-unavailable">
-            <p><strong>{t('incidents.detail.evidence.unavailable.title')}</strong></p>
-            <p className="muted small">{t('incidents.detail.evidence.unavailable.description')}</p>
-            <IncidentFailureNotice error={view.evidenceError} testId="incident-evidence-error" />
-            <Button variant="secondary" onClick={retry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
-          </div>
-        ) : evidenceState === 'missing' ? (
-          <div className="pad" data-testid="incident-evidence-empty">
-            <p><strong>{t('incidents.detail.evidence.empty.title')}</strong></p>
-            <p className="muted small">{t('incidents.detail.evidence.empty.description')}</p>
-          </div>
-        ) : (
-          <div className="table-panel">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>{t('table.kind')}</TableHead>
-                  <TableHead>{t('table.trust')}</TableHead>
-                  <TableHead>{t('table.source')}</TableHead>
-                  <TableHead>{t('table.collectedAt')}</TableHead>
-                  <TableHead>{t('table.contentRef')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {evidence.map((row) => (
-                  <TableRow key={row.id} data-evidence-row={row.id} data-after-verdict={row.afterVerdict ? 'true' : 'false'}>
-                    <TableCell data-evidence-kind={row.kind}>
-                      {t(evidenceKindKey(row.kind))}
-                      {row.afterVerdict ? (
-                        <Badge variant={badgeVariantForTone('warn')} data-testid="evidence-after-verdict">{t('incidents.evidence.afterVerdict')}</Badge>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      {/* The kernel's conclusion is the badge. The claim is printed under it, and
-                          when the two disagree the row says so instead of showing only one of them. */}
-                      <Badge
-                        variant={badgeVariantForTone(evidenceTrustTone(row.verifiedTrust))}
-                        data-verified-trust={row.verifiedTrust}
-                        data-claimed-trust={row.claimedTrust}
-                        data-trust-mismatch={trustMismatch(row) ? 'true' : 'false'}
-                      >
-                        {t(evidenceTrustKey(row.verifiedTrust))}
-                      </Badge>
-                      <span className="muted small" data-testid="evidence-claimed" data-claimed-trust={row.claimedTrust}>
-                        {t('incidents.evidence.claimed', { value: t(evidenceTrustKey(row.claimedTrust)) })}
-                      </span>
-                      <span className="muted small" data-testid="evidence-method" data-verification-method={row.verificationMethod} data-verifier={row.verifierIdentity ?? ''}>
-                        {row.verifierIdentity
-                          ? t('incidents.evidence.verifiedBy', { adapter: row.verifierIdentity })
-                          : t(verificationMethodKey(row.verificationMethod))}
-                      </span>
-                      {row.verificationNote ? <span className="muted small" data-testid="evidence-note">{row.verificationNote}</span> : null}
-                      {/* G12 C: the one marker a reader may treat as 'the Kernel verified this',
-                          because SOURCE_ATTESTED is the only value an adapter signature can
-                          produce. Everything else is labelled as what it is - asserted. */}
-                      {isKernelVerified(row) ? (
-                        <Badge variant={badgeVariantForTone('ok')} data-testid="evidence-kernel-verified" data-kernel-verified="true">
-                          {t('incidents.evidence.kernelVerified')}
-                        </Badge>
-                      ) : (
-                        <span className="muted small" data-testid="evidence-not-kernel-verified" data-kernel-verified="false">
-                          {t('incidents.evidence.notKernelVerified')}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="mono" title={row.source} data-evidence-source={row.source}>{row.source}</TableCell>
-                    <TableCell><span title={row.collectedAt}>{row.collectedAt}</span></TableCell>
-                    <TableCell>
-                      {/* G12 B: where this row's bytes are is a fact the table states, not
-                          something the reader has to discover by clicking. A LEGACY_REFERENCE
-                          row is labelled as one; the locator below is a string, never a link. */}
-                      <Badge
-                        variant={badgeVariantForTone(evidenceContentStatusTone(row.contentStatus))}
-                        data-testid="evidence-content-status"
-                        data-content-status={row.contentStatus}
-                      >
-                        {t(evidenceContentStatusKey(row.contentStatus))}
-                      </Badge>
-                      <span className="ow-longid">
-                        <span className="ow-longid-value" title={row.contentRef} data-testid="evidence-content-ref">{row.contentRef}</span>
-                        <CopyButton value={row.contentRef} label={t('table.copyIdentifier')} />
-                      </span>
-                      <Button
-                        variant="secondary"
-                        data-testid="evidence-open"
-                        data-evidence-id={row.id}
-                        aria-expanded={openEvidenceId === row.id}
-                        onClick={() => setOpenEvidenceId((current) => (current === row.id ? null : row.id))}
-                      >
-                        {t('incidents.content.action.open')}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <p className="table-footnote" data-testid="incident-evidence-ref-note">{t('incidents.detail.evidence.refNote')}</p>
-          </div>
-        )}
-        {/* One viewer, for one row of this incident. It is keyed by the evidence id so switching
-            rows remounts it: a stale read for the previous row can never be rendered under the
-            new row's heading. */}
-        {openRow ? (
-          <EvidenceContentViewer
-            key={openRow.id}
-            incidentId={incident.id}
-            row={openRow}
-            onClose={() => setOpenEvidenceId(null)}
-          />
-        ) : null}
-        {/* Evidence stays appendable AFTER a verdict: CONCLUDED accepts it (ADR-G11-001 §3.1),
-            and only CLOSED refuses writes. Gating this on "no verdict yet" told the reader the
-            opposite of what the kernel does. */}
-        {/* Why the form is absent, in the order that gives the most useful sentence: a viewer is
-            told about the role (the closure is not what stops them), an operator on a closed
-            incident is told about the closure, and anyone else out of scope is told about scope. */}
-        {capabilities.readOnlyReason ? (
-          <p className="muted small pad" data-testid="incident-evidence-readonly">{t('incidents.permission.writeBlocked')}</p>
-        ) : incident.status === 'CLOSED' ? (
-          <p className="muted small pad" data-testid="incident-evidence-sealed">{t('incidents.error.closed')}</p>
-        ) : !capabilities.canAddEvidence ? (
-          <p className="muted small pad" data-testid="incident-evidence-readonly">{t('incidents.permission.writeBlocked')}</p>
-        ) : (
-          <AddEvidenceForm
-            incidentId={incident.id}
-            defaultSource={user ? 'operator:' + user.email : 'operator:'}
-            onAdded={() => {
-              toast.push({ tone: 'ok', title: t('incidents.evidence.add.success') });
-              retry();
-            }}
-          />
-        )}
-      </section>
-
-      <section className="panel" data-testid="incident-verdict" data-verdict-state={verdictState}>
-        <div className="panel-head">
-          <div>
-            <h2>{t('incidents.verdict.title')}</h2>
-            <p>{t('incidents.verdict.description')}</p>
-          </div>
-        </div>
-        {verdictState === 'recorded' && incident.humanVerdict ? (
-          <div className="pad" data-testid="incident-verdict-record" data-verdict-value={incident.humanVerdict.verdict}>
-            <p><Status code={incident.humanVerdict.verdict} /> <span className="muted small" data-testid="incident-verdict-attribution">{t('incidents.verdict.decidedBy', { id: decidedByLabel ?? '' })}</span></p>
-            <p className="muted small">{t('incidents.verdict.writeOnce')}</p>
-            <KV label={t('table.rationale')}>{incident.humanVerdict.rationale}</KV>
-            <p className="muted small"><span title={incident.humanVerdict.decidedAt}>{ageMessage(locale, incident.humanVerdict.decidedAt)}</span></p>
-            {/* A3: what the signature stands on, separated from what the record holds now. */}
-            <p
-              className="muted small"
-              data-testid="incident-verdict-considered"
-              data-snapshot-kind={incident.humanVerdict.snapshotKind}
-              data-considered-count={incident.humanVerdict.consideredEvidenceCount}
-              data-after-count={partition.afterVerdict.length}
-            >
-              {verdictSnapshotState(incident.humanVerdict) === 'recorded'
-                ? t('incidents.verdict.considered.recorded', { count: incident.humanVerdict.consideredEvidenceCount })
-                : t('incidents.verdict.considered.unknown')}
-            </p>
-            {incident.humanVerdict.consideredEvidenceDigest ? (
-              <p className="muted small" data-testid="incident-verdict-digest">
-                {t('incidents.verdict.considered.digest')} <code>{incident.humanVerdict.consideredEvidenceDigest}</code>
-              </p>
-            ) : null}
-            {partition.afterVerdict.length > 0 ? (
-              <p className="notice-bar" data-testid="incident-verdict-after">
-                {t('incidents.verdict.considered.after', { count: partition.afterVerdict.length })}
-              </p>
-            ) : null}
-          </div>
-        ) : capabilities.readOnlyReason ? (
-          <p className="muted small pad" data-testid="incident-verdict-readonly">{t('incidents.permission.writeBlocked')}</p>
-        ) : verdictState === 'sealed' ? (
-          <p className="muted small pad" data-testid="incident-verdict-sealed">{t('incidents.verdict.sealed')}</p>
-        ) : !capabilities.canRecordVerdict ? (
-          <p className="muted small pad" data-testid="incident-verdict-readonly">{t('incidents.permission.writeBlocked')}</p>
-        ) : (
-          <VerdictForm
-            incidentId={incident.id}
-            hasEvidence={evidence.length > 0}
-            onRecorded={() => {
-              toast.push({ tone: 'ok', title: t('incidents.verdict.success') });
-              retry();
-            }}
-          />
-        )}
-        {verdictState !== 'recorded' ? <p className="muted small pad">{t('incidents.verdict.onlyTwo')}</p> : null}
-      </section>
     </div>
   );
 }
 
+/**
+ * The left pane: the incidents this account can read, as a list you triage from.
+ *
+ * It is not a second copy of /app/incidents. The list page is a place you arrive at; this pane is
+ * a place you stay - it answers "where am I in the queue" while the incident on screen is being
+ * read, so moving to the next one is one click rather than a route change, a reload and a lost
+ * scroll position.
+ *
+ * The filter set is derived from the rows the Kernel returned rather than from a hardcoded enum:
+ * a status that no incident carries gets no chip, so the rail cannot offer an empty result as a
+ * filter. `aria-pressed` carries the selection, and the count states how much of the list is
+ * visible.
+ */
+function IncidentRail({ currentId }: { currentId: string }) {
+  const t = useT();
+  const { locale } = useI18n();
+  const [items, setItems] = React.useState<IncidentView[] | null>(null);
+  const [error, setError] = React.useState<unknown>(null);
+  const [reload, setReload] = React.useState(0);
+  const [filter, setFilter] = React.useState<string>('ALL');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setError(null);
+    api.get<IncidentList>('/api/v1/incidents?limit=50')
+      .then((result) => { if (!cancelled) setItems(result.items); })
+      .catch((cause: unknown) => { if (!cancelled) setError(cause); });
+    return () => { cancelled = true; };
+  }, [reload]);
+
+  const statuses = React.useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const row of items ?? []) seen.set(row.status, (seen.get(row.status) ?? 0) + 1);
+    return Array.from(seen.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [items]);
+  const shown = filter === 'ALL' ? (items ?? []) : (items ?? []).filter((row) => row.status === filter);
+  const label = (code: string) => {
+    const entry = statusForCode(code);
+    return entry ? t(entry.labelKey) : code;
+  };
+
+  return (
+    <section className="panel investigation-rail" data-testid="investigation-rail" data-rail-state={error ? 'unavailable' : items ? 'ready' : 'loading'}>
+      <div className="panel-head">
+        <div>
+          <h2>{t('incidents.rail.title')}</h2>
+          <p>{t('incidents.rail.count', { shown: shown.length, total: items?.length ?? 0 })}</p>
+        </div>
+      </div>
+      {items && items.length > 0 ? (
+        <div className="investigation-rail-filter" role="group" aria-label={t('incidents.rail.filterAria')} data-testid="investigation-rail-filter">
+          {[{ code: 'ALL', count: items.length }, ...statuses.map(([code, count]) => ({ code, count }))].map((chip) => (
+            <button
+              key={chip.code}
+              type="button"
+              className={'chip' + (filter === chip.code ? ' chip-active' : '')}
+              aria-pressed={filter === chip.code}
+              data-filter-status={chip.code}
+              onClick={() => setFilter(chip.code)}
+            >
+              {chip.code === 'ALL' ? t('incidents.rail.all') : label(chip.code)}
+              <span className="investigation-tab-count" data-filter-count={chip.count}>{chip.count}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {error ? (
+        <div className="pad" data-testid="investigation-rail-unavailable">
+          <p><strong>{t('incidents.rail.unavailable.title')}</strong></p>
+          <p className="muted small">{t('incidents.rail.unavailable.description')}</p>
+          <Button variant="secondary" data-testid="investigation-rail-retry" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
+        </div>
+      ) : items === null ? (
+        <p className="muted small pad" aria-busy="true" data-testid="investigation-rail-loading">{t('incidents.rail.loading')}</p>
+      ) : items.length === 0 ? (
+        <div className="pad" data-testid="investigation-rail-empty">
+          <p><strong>{t('incidents.rail.empty.title')}</strong></p>
+          <p className="muted small">{t('incidents.rail.empty.description')}</p>
+        </div>
+      ) : shown.length === 0 ? (
+        <p className="muted small pad" data-testid="investigation-rail-empty-filter">{t('incidents.rail.emptyFiltered', { status: label(filter) })}</p>
+      ) : (
+        <ul className="investigation-rail-list" data-testid="investigation-rail-list">
+          {shown.map((row) => (
+            <li key={row.id}>
+              <Link
+                className="investigation-rail-item"
+                to={'/app/incidents/' + row.id}
+                aria-current={row.id === currentId ? 'page' : undefined}
+                data-rail-incident={row.id}
+                data-rail-status={row.status}
+              >
+                <span className="investigation-rail-head">
+                  <span className="investigation-rail-title">{row.title}</span>
+                </span>
+                <span className="investigation-rail-facts">
+                  <Status code={row.status} />
+                  <Status code={row.severity} />
+                  <span title={row.updatedAt}>{ageMessage(locale, row.updatedAt)}</span>
+                  <span className="mono" title={row.owner}>{shortOwner(row.owner)}</span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 /** The banner a page shows when it is still rendering rows from a read that has since failed. */
 function IncidentStale({ observedAt, error }: { observedAt: string | null; error: unknown }) {
   const t = useT();
