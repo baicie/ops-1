@@ -348,7 +348,11 @@ components:
           type: object
           description: |
             The arguments the MODEL produced, kept verbatim, so what was asked for is
-            auditable and not only what was allowed.
+            auditable and not only what was allowed. An incidentId is an argument, not a scope
+            selector: it may restate the run's own incident and nothing else. A run reads the
+            incident it is about (RUN_INCIDENT_SCOPE_PREDICATE); any other incident is refused
+            with INCIDENT_OUT_OF_SCOPE before a row is read, even when the account behind the
+            run could read that incident through the API.
         outcome: { type: string, enum: [OK, REFUSED, ERROR, TIMEOUT, BUDGET_EXHAUSTED] }
         errorCode: { type: [string, 'null'] }
         errorDetail:
@@ -356,7 +360,33 @@ components:
           description: The kernel's sentence for an auditor. The UI localizes errorCode instead.
         authorizationPredicate:
           type: [string, 'null']
-          description: Required for outcome OK, so a read always names the authority it ran under.
+          description: |
+            The authorization gate that DECIDED this invocation. Required for outcome OK and
+            recorded for refusals too, so the column answers "which layer" and not only
+            "which code". For a call a predicate allowed or refused it names that predicate;
+            for a call stopped before any predicate was consulted it names that earlier layer,
+            and so says "no rule ran, and here is why" instead of inventing one.
+
+            The vocabulary is closed by migration 0023, so no value outside this list can be
+            stored:
+
+              INCIDENT_READ_PREDICATE          the shared read predicate: role rule, workspace
+                                               boundary and row rule, deliberately one
+                                               predicate (a read any of them excludes answers
+                                               INCIDENT_NOT_FOUND, so the kernel never tells the
+                                               caller which of the three it was)
+              EVIDENCE_CONTENT_FIXITY_CHECK    the content read: fixity, retention, encoding
+              RUN_INCIDENT_SCOPE_PREDICATE     the run's own incident; a foreign incidentId is
+                                               refused here before any query runs
+              PRE_PREDICATE_TOOL_ALLOWLIST     refused before any predicate: not one of the five
+              PRE_PREDICATE_ARGUMENT           refused before any predicate: unreadable arguments
+              PRE_PREDICATE_SCOPE_IDENTITY     refused before any predicate: the account the run
+                                               reads as cannot be resolved
+              DEPLOYMENT_SOURCE_CONFIGURATION  decided by deployment configuration, not by the
+                                               caller's permission
+              UNREACHED_TOOL_INTERRUPTED       cut off inside the tool; no layer answered
+
+            NULL is possible only on a row written before 0023.
         scopeActor: { type: [string, 'null'], format: uuid }
         resultBytes: { type: [integer, 'null'] }
         evidenceRefs:

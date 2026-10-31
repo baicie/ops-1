@@ -91,11 +91,54 @@ const TOOL_NAMES: &[&str] = &[
     TOOL_GET_RELATED,
 ];
 
-/// The predicates a tool may claim to have been authorized by. A successful invocation
-/// cannot be stored without one (0020 CHECK constraint), so "the investigator read
-/// something" always answers "under which authority".
+/// Which authorization gate decided one tool invocation, as the invocation row records it.
+///
+/// One column, one meaning: *this is the layer that decided this call*. For a call that ran
+/// an authorization predicate and passed, it is the predicate that passed. For a call a layer
+/// refused, it is the layer that refused. For a call stopped before any predicate was
+/// consulted, it is that earlier gate - the column then says "no predicate ran, and here is
+/// why", which is the only honest answer available.
+///
+/// A successful invocation cannot be stored without one (0020 CHECK constraint), so "the
+/// investigator read something" always answers "under which authority"; 0023 additionally
+/// closes the vocabulary, so a value that is not one of the constants below cannot be
+/// written at all - the column cannot be filled with an invented predicate name.
+///
+/// Deliberately coarse, because the kernel is coarse here: role, workspace boundary and row
+/// rule are one predicate (scope::predicate), and a read that any of them excludes answers
+/// INCIDENT_NOT_FOUND - "not yours" and "not there" are one answer by design. This column
+/// therefore does not claim to say which of the three refused a read, because the kernel
+/// does not know and telling the caller would let it probe for rows it may not see.
 const PREDICATE_INCIDENT_READ: &str = "INCIDENT_READ_PREDICATE";
 const PREDICATE_EVIDENCE_CONTENT: &str = "EVIDENCE_CONTENT_FIXITY_CHECK";
+/// The run's own subject. A run is about one incident (investigation_runs.incident_id) and
+/// its tools read that incident; an argument that names another one never reaches a query.
+const PREDICATE_RUN_INCIDENT_SCOPE: &str = "RUN_INCIDENT_SCOPE_PREDICATE";
+/// Refused before any predicate was consulted: the tool is not one of the five.
+const GATE_PRE_TOOL_ALLOWLIST: &str = "PRE_PREDICATE_TOOL_ALLOWLIST";
+/// Refused before any predicate was consulted: the arguments could not be read as a request.
+const GATE_PRE_ARGUMENT: &str = "PRE_PREDICATE_ARGUMENT";
+/// Refused before any predicate was consulted: the account the run reads as is not resolvable.
+const GATE_PRE_SCOPE_IDENTITY: &str = "PRE_PREDICATE_SCOPE_IDENTITY";
+/// Decided by deployment configuration rather than by the caller's permission.
+const GATE_SOURCE_CONFIGURATION: &str = "DEPLOYMENT_SOURCE_CONFIGURATION";
+/// The tool was cut off inside its predicate (the per-tool timeout), so no layer answered.
+const GATE_TOOL_INTERRUPTED: &str = "UNREACHED_TOOL_INTERRUPTED";
+/// Every value the column may hold, kept here so the test that compares it against the
+/// migration 0023 CHECK constraint has one list to compare. Test-only on purpose: the copy
+/// the kernel enforces at run time is the database's, and a second production list would be
+/// a second source of truth for the same fact.
+#[cfg(test)]
+const GATE_VOCABULARY: &[&str] = &[
+    PREDICATE_INCIDENT_READ,
+    PREDICATE_EVIDENCE_CONTENT,
+    PREDICATE_RUN_INCIDENT_SCOPE,
+    GATE_PRE_TOOL_ALLOWLIST,
+    GATE_PRE_ARGUMENT,
+    GATE_PRE_SCOPE_IDENTITY,
+    GATE_SOURCE_CONFIGURATION,
+    GATE_TOOL_INTERRUPTED,
+];
 
 const STANCES: &[&str] = &["SUPPORTED", "CONTRADICTED", "UNCERTAIN", "CONFLICTED"];
 const CONFIDENCES: &[&str] = &["HIGH", "MEDIUM", "LOW"];
@@ -478,21 +521,29 @@ struct ToolFailure {
     /// TIMEOUT: the per-tool timeout fired.
     outcome: &'static str,
     code: &'static str,
+    /// The layer that decided this call, recorded on the invocation row (G12 H, P2).
+    ///
+    /// Required at every construction site rather than defaulted, because the value is a
+    /// claim about which layer answered and a default would be that claim made up. A site
+    /// that cannot name its layer has not decided what it is refusing.
+    gate: &'static str,
     message: String,
 }
 
 impl ToolFailure {
-    fn refused(code: &'static str, message: impl Into<String>) -> Self {
+    fn refused(gate: &'static str, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             outcome: "REFUSED",
+            gate,
             code,
             message: message.into(),
         }
     }
 
-    fn error(code: &'static str, message: impl Into<String>) -> Self {
+    fn error(gate: &'static str, code: &'static str, message: impl Into<String>) -> Self {
         Self {
             outcome: "ERROR",
+            gate,
             code,
             message: message.into(),
         }
@@ -501,13 +552,14 @@ impl ToolFailure {
     fn timeout() -> Self {
         Self {
             outcome: "TIMEOUT",
+            gate: GATE_TOOL_INTERRUPTED,
             code: "TOOL_TIMEOUT",
             message: "the read did not finish inside the per-tool timeout".to_string(),
         }
     }
 
     fn invalid_argument(message: impl Into<String>) -> Self {
-        Self::refused("TOOL_ARGUMENT_INVALID", message)
+        Self::refused(GATE_PRE_ARGUMENT, "TOOL_ARGUMENT_INVALID", message)
     }
 
     /// The sentence stored beside the code, bounded by the column.
@@ -523,11 +575,15 @@ impl ToolFailure {
 
     /// An AppError the shared predicate produced, kept with its own stable code so the
     /// investigator is told exactly what an HTTP caller would be told.
-    fn from_predicate(error: &AppError) -> Self {
+    ///
+    /// `gate` is the predicate this call stood on and that just answered. It is a parameter
+    /// rather than a constant because which predicate answered depends on the tool: a
+    /// content read fails on fixity, everything else on the incident read predicate.
+    fn from_predicate(gate: &'static str, error: &AppError) -> Self {
         if error.status == StatusCode::NOT_FOUND || error.status == StatusCode::FORBIDDEN {
-            Self::refused(error.code, error.message.clone())
+            Self::refused(gate, error.code, error.message.clone())
         } else {
-            Self::error(error.code, error.message.clone())
+            Self::error(gate, error.code, error.message.clone())
         }
     }
 }
@@ -565,16 +621,22 @@ async fn scope_caller(db: &PgPool, scope_user_id: Uuid) -> Result<DataScope, Too
         .bind(scope_user_id)
         .fetch_optional(db)
         .await
-        .map_err(|error| ToolFailure::error("TOOL_SCOPE_UNAVAILABLE", error.to_string()))?;
+        .map_err(|error| {
+            ToolFailure::error(
+                GATE_PRE_SCOPE_IDENTITY,
+                "TOOL_SCOPE_UNAVAILABLE",
+                error.to_string(),
+            )
+        })?;
     let Some(role) = role else {
         return Err(ToolFailure::refused(
+            GATE_PRE_SCOPE_IDENTITY,
             "SCOPE_IDENTITY_UNAVAILABLE",
             "the account this investigation runs as no longer exists, so its reads are refused",
         ));
     };
     let role = role.parse::<Role>().map_err(|_| {
-        ToolFailure::refused(
-            "SCOPE_IDENTITY_UNAVAILABLE",
+        ToolFailure::refused(GATE_PRE_SCOPE_IDENTITY, "SCOPE_IDENTITY_UNAVAILABLE",
             "the account this investigation runs as has a role this kernel cannot interpret, so its reads are refused",
         )
     })?;
@@ -584,20 +646,51 @@ async fn scope_caller(db: &PgPool, scope_user_id: Uuid) -> Result<DataScope, Too
     // what that account may read right now.
     DataScope::resolve_for(db, scope_user_id, role)
         .await
-        .map_err(|error| ToolFailure::error("TOOL_SCOPE_UNAVAILABLE", error.to_string()))
+        .map_err(|error| {
+            ToolFailure::error(
+                GATE_PRE_SCOPE_IDENTITY,
+                "TOOL_SCOPE_UNAVAILABLE",
+                error.to_string(),
+            )
+        })
 }
 
-/// Which incident a tool call is about. Absent means the run's own; anything present
-/// must be a UUID, and it is then still subject to the predicate.
+/// Which incident a tool call is about: the run's own, or the identical id restated.
+///
+/// G12 H (P1) narrowed this. It used to accept any id and leave the whole decision to the
+/// caller's read predicate, which meant a run about incident A could read incident C
+/// whenever the account behind the run could read C - an administrator could, so the
+/// investigator's transcript absorbed another incident's evidence and the citation guard
+/// then refused the conclusion, 500ing the request. The scope of an investigation is not a
+/// thing the model gets to choose: it is the run's own incident, stored on the run. So the
+/// argument may restate that id (the fixture and the acceptance script do) and may not name
+/// another one; naming another is refused before any query runs.
+///
+/// This refuses by comparison with an id the caller already holds, never by looking the
+/// target up, so it says nothing about whether the named incident exists: a foreign id and
+/// a nonexistent id are the same answer.
 fn target_incident(arguments: &Value, scope: ToolScope) -> Result<Uuid, ToolFailure> {
-    match arguments.get("incidentId") {
-        None | Some(Value::Null) => Ok(scope.incident_id),
+    let named = match arguments.get("incidentId") {
+        None | Some(Value::Null) => return Ok(scope.incident_id),
         Some(Value::String(raw)) => Uuid::parse_str(raw.trim())
-            .map_err(|_| ToolFailure::invalid_argument("incidentId must be a UUID")),
-        Some(_) => Err(ToolFailure::invalid_argument(
-            "incidentId must be a UUID string",
-        )),
+            .map_err(|_| ToolFailure::invalid_argument("incidentId must be a UUID"))?,
+        Some(_) => {
+            return Err(ToolFailure::invalid_argument(
+                "incidentId must be a UUID string",
+            ))
+        }
+    };
+    if named != scope.incident_id {
+        return Err(ToolFailure::refused(
+            PREDICATE_RUN_INCIDENT_SCOPE,
+            "INCIDENT_OUT_OF_SCOPE",
+            format!(
+                "this investigation is about incident {}; a tool reads that incident's record and no other, so incidentId {named} was refused before anything was read",
+                scope.incident_id
+            ),
+        ));
     }
+    Ok(named)
 }
 
 fn bounded_limit(arguments: &Value, default: i64, max: i64) -> Result<i64, ToolFailure> {
@@ -658,8 +751,7 @@ async fn execute_tool(
     arguments: &Value,
 ) -> Result<ToolOutcome, ToolFailure> {
     if !TOOL_NAMES.contains(&tool) {
-        return Err(ToolFailure::refused(
-            "TOOL_NOT_AVAILABLE",
+        return Err(ToolFailure::refused(GATE_PRE_TOOL_ALLOWLIST, "TOOL_NOT_AVAILABLE",
             format!(
                 "{tool} is not one of the five read tools this investigator has ({}); the investigator cannot invent one",
                 TOOL_NAMES.join(", ")
@@ -673,7 +765,7 @@ async fn execute_tool(
             let target = target_incident(arguments, scope)?;
             let incident = query_incident(db, caller.clone(), target)
                 .await
-                .map_err(|error| ToolFailure::from_predicate(&error))?;
+                .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
             Ok(ToolOutcome {
                 payload: incident_payload(&incident),
                 predicate: PREDICATE_INCIDENT_READ,
@@ -690,7 +782,7 @@ async fn execute_tool(
             )?;
             let rows = query_evidence(db, caller, target, (None, None))
                 .await
-                .map_err(|error| ToolFailure::from_predicate(&error))?;
+                .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
             let kept: Vec<&EvidenceView> = rows.iter().take(limit as usize).collect();
             let refs: Vec<Uuid> = kept.iter().map(|row| row.evidence_id).collect();
             Ok(ToolOutcome {
@@ -712,13 +804,12 @@ async fn execute_tool(
             // The incident predicate first, exactly as GET .../evidence/{id}/content does.
             incident_status(db, caller.clone(), target)
                 .await
-                .map_err(|error| ToolFailure::from_predicate(&error))?;
+                .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
             let rows = query_evidence(db, caller, target, (None, None))
                 .await
-                .map_err(|error| ToolFailure::from_predicate(&error))?;
+                .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
             let Some(row) = rows.iter().find(|row| row.evidence_id == wanted) else {
-                return Err(ToolFailure::refused(
-                    "EVIDENCE_NOT_FOUND",
+                return Err(ToolFailure::refused(PREDICATE_INCIDENT_READ, "EVIDENCE_NOT_FOUND",
                     "no evidence row with this id belongs to the incident this investigation may read",
                 ));
             };
@@ -735,7 +826,13 @@ async fn execute_tool(
             .bind(wanted)
             .fetch_optional(db)
             .await
-            .map_err(|error| ToolFailure::error("TOOL_READ_FAILED", error.to_string()))?;
+            .map_err(|error| {
+                ToolFailure::error(
+                    PREDICATE_EVIDENCE_CONTENT,
+                    "TOOL_READ_FAILED",
+                    error.to_string(),
+                )
+            })?;
             let mut payload = evidence_facts(row);
             let Some((content_type, body, content_bytes, recorded_sha256, retention_expires_at)) =
                 stored
@@ -753,6 +850,7 @@ async fn execute_tool(
             };
             if retention_expires_at <= Utc::now() {
                 return Err(ToolFailure::refused(
+                    PREDICATE_EVIDENCE_CONTENT,
                     "EVIDENCE_CONTENT_EXPIRED",
                     "this evidence content reached its retention horizon and is no longer served",
                 ));
@@ -760,7 +858,7 @@ async fn execute_tool(
             // Fixity, recomputed over the bytes in hand. The second predicate this read
             // stands on, and the reason a tampered row is refused rather than quoted.
             let digest = verify_stored_content(wanted, content_bytes, &body, &recorded_sha256)
-                .map_err(|error| ToolFailure::from_predicate(&error))?;
+                .map_err(|error| ToolFailure::from_predicate(PREDICATE_EVIDENCE_CONTENT, &error))?;
             // The bytes are UTF-8 by construction (the API stores the body of a JSON
             // string), and the digest above just proved these are the bytes that were
             // stored. A row that is not UTF-8 was hand-written into the column, so it is
@@ -770,6 +868,7 @@ async fn execute_tool(
                 Ok(body) => body,
                 Err(error) => {
                     return Err(ToolFailure::error(
+                        PREDICATE_EVIDENCE_CONTENT,
                         "TOOL_READ_FAILED",
                         format!("the stored bytes are not UTF-8 text: {error}"),
                     ))
@@ -796,7 +895,7 @@ async fn execute_tool(
             let limit = bounded_limit(arguments, 50, TOOL_TIMELINE_MAX_EVENTS)?;
             let timeline: IncidentTimeline = query_timeline(db, caller, target, limit)
                 .await
-                .map_err(|error| ToolFailure::from_predicate(&error))?;
+                .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
             Ok(ToolOutcome {
                 payload: json!({
                     "incidentId": target,
@@ -837,8 +936,7 @@ async fn related_context(
         .iter()
         .any(|allowed| allowed == &source_id)
     {
-        return Err(ToolFailure::refused(
-            "SOURCE_UNAVAILABLE",
+        return Err(ToolFailure::refused(GATE_SOURCE_CONFIGURATION, "SOURCE_UNAVAILABLE",
             format!(
                 "{source_id} is not an authorised related-context source on this deployment (OPSWEAVE_INVESTIGATION_RELATED_SOURCES); no data was read"
             ),
@@ -851,15 +949,26 @@ async fn related_context(
     .bind(&source_id)
     .fetch_optional(db)
     .await
-    .map_err(|error| ToolFailure::error("TOOL_READ_FAILED", error.to_string()))?;
+    .map_err(|error| {
+        // The deployment's source declaration, not an incident predicate: this layer is
+        // configuration, and saying so is the difference between "your read was refused"
+        // and "this deployment has no readable source table".
+        ToolFailure::error(
+            GATE_SOURCE_CONFIGURATION,
+            "TOOL_READ_FAILED",
+            error.to_string(),
+        )
+    })?;
     let Some((source_id, declared_predicate)) = declared else {
         return Err(ToolFailure::refused(
+            GATE_SOURCE_CONFIGURATION,
             "SOURCE_UNAVAILABLE",
             "this kernel has no such related-context source",
         ));
     };
     if source_id != "incident_index" {
         return Err(ToolFailure::refused(
+            GATE_SOURCE_CONFIGURATION,
             "SOURCE_UNAVAILABLE",
             "this kernel has no reader for that source",
         ));
@@ -869,13 +978,14 @@ async fn related_context(
     // narrow what the operator sees to one entity, never widen it.
     if declared_predicate != PREDICATE_INCIDENT_READ {
         return Err(ToolFailure::refused(
+            GATE_SOURCE_CONFIGURATION,
             "SOURCE_PREDICATE_UNKNOWN",
             "the declared authorization predicate of this source is not one this tool can apply",
         ));
     }
     let incident = query_incident(db, caller.clone(), target)
         .await
-        .map_err(|error| ToolFailure::from_predicate(&error))?;
+        .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
     let Some(entity) = incident.related_entity.clone() else {
         return Ok(ToolOutcome {
             payload: json!({
@@ -897,7 +1007,7 @@ async fn related_context(
     };
     let (items, _cursor) = query_incidents(db, caller, query)
         .await
-        .map_err(|error| ToolFailure::from_predicate(&error))?;
+        .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
     Ok(ToolOutcome {
         payload: json!({
             "sourceId": source_id,
@@ -2622,6 +2732,35 @@ async fn record_invocation(db: &PgPool, record: InvocationRecord<'_>) -> AppResu
     Ok(())
 }
 
+/// Why a hypothesis was not written.
+///
+/// The two cases are not the same failure and must not be reported as one. A citation the
+/// guard refused is a definite, stable refusal of a conclusion the run produced - the
+/// database is doing its job. Anything else is an internal fault. G12 H (P1) split them
+/// because they used to arrive as one `?`, which turned the guard's refusal into a 500 and
+/// left the run stuck in RUNNING with nobody to finish it.
+enum HypothesisRefusal {
+    /// The guard refused a citation: the hypothesis cited evidence from another incident.
+    CitationOutOfScope { evidence_id: Uuid },
+    /// Anything else that stopped it, as the AppError the kernel already reports.
+    Internal(AppError),
+}
+
+/// The guard's own sentinel, matched on the message as well as the SQLSTATE because
+/// restrict_violation (23001) is raised by more than one branch of it.
+fn is_citation_guard_violation(error: &sqlx::Error) -> Option<Uuid> {
+    let database = error.as_database_error()?;
+    if database.code().as_deref() != Some("23001") {
+        return None;
+    }
+    let message = database.message();
+    let marker = "cannot cite evidence ";
+    let at = message.find(marker)? + marker.len();
+    let rest = &message[at..];
+    let uuid_text: String = rest.chars().take(36).collect();
+    Uuid::parse_str(&uuid_text).ok()
+}
+
 /// Persist one hypothesis and its citations.
 ///
 /// A citation that does not belong to this incident is refused by the database (0020
@@ -2635,15 +2774,18 @@ async fn record_hypothesis(
     adapter_kind: &str,
     proposed: &ProposedHypothesis,
     invocation_by_evidence: &HashMap<Uuid, Uuid>,
-) -> AppResult<()> {
+) -> Result<(), HypothesisRefusal> {
     let hypothesis_id = Uuid::new_v4();
     let statement = proposed.statement.trim();
     if statement.chars().count() < 12 {
-        return Err(AppError::internal(
+        return Err(HypothesisRefusal::Internal(AppError::internal(
             "a hypothesis must state something; the investigator produced an empty one",
-        ));
+        )));
     }
-    let mut tx = db.begin().await?;
+    let mut tx = db
+        .begin()
+        .await
+        .map_err(|error| HypothesisRefusal::Internal(error.into()))?;
     sqlx::query(
         "INSERT INTO kernel.investigation_hypotheses
              (hypothesis_id, run_id, ordinal, statement, stance, confidence,
@@ -2661,7 +2803,8 @@ async fn record_hypothesis(
     .bind(SqlJson(proposed.gap_codes.clone()))
     .bind(adapter_kind)
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(|error| HypothesisRefusal::Internal(error.into()))?;
     for (role, ids) in [
         ("SUPPORTING", &proposed.supporting),
         ("CONTRADICTING", &proposed.contradicting),
@@ -2677,10 +2820,17 @@ async fn record_hypothesis(
             .bind(role)
             .bind(invocation_by_evidence.get(evidence_id).copied())
             .execute(&mut *tx)
-            .await?;
+            .await
+            .map_err(|error| {
+                is_citation_guard_violation(&error)
+                    .map(|evidence_id| HypothesisRefusal::CitationOutOfScope { evidence_id })
+                    .unwrap_or_else(|| HypothesisRefusal::Internal(error.into()))
+            })?;
         }
     }
-    tx.commit().await?;
+    tx.commit()
+        .await
+        .map_err(|error| HypothesisRefusal::Internal(error.into()))?;
     Ok(())
 }
 
@@ -2944,7 +3094,12 @@ async fn run_loop(context: RunContext<'_>) -> AppResult<()> {
                                     outcome: failure.outcome,
                                     error_code: Some(failure.code),
                                     error_detail: Some(failure.detail()),
-                                    predicate: None,
+                                    // G12 H (P2). This was None, so a refused call said
+                                    // only *that* it was refused and the panel could show
+                                    // nothing but the code. The gate names the layer that
+                                    // decided it: the predicate that said no, or the earlier
+                                    // gate that stopped it before any predicate was asked.
+                                    predicate: Some(failure.gate),
                                     scope_actor: None,
                                     result_body: None,
                                     result_bytes: None,
@@ -2973,16 +3128,44 @@ async fn run_loop(context: RunContext<'_>) -> AppResult<()> {
             ModelDecision::Final { hypotheses } => {
                 let adapter_kind = adapter.kind();
                 for proposed in hypotheses.iter().take(TOOL_HYPOTHESIS_MAX) {
-                    written_hypotheses += 1;
-                    record_hypothesis(
+                    match record_hypothesis(
                         db,
                         run_id,
-                        written_hypotheses as i32,
+                        written_hypotheses as i32 + 1,
                         adapter_kind,
                         proposed,
                         &invocation_by_evidence,
                     )
-                    .await?;
+                    .await
+                    {
+                        Ok(()) => written_hypotheses += 1,
+                        // The database refused the conclusion itself. That is a definite
+                        // refusal with a stable code, not a kernel fault: the run ends
+                        // REFUSED, says which code, and keeps every read it recorded. The
+                        // old `?` here turned this into 500 INTERNAL and left the run
+                        // RUNNING, which is the shape G12 H (P1) removed.
+                        Err(HypothesisRefusal::CitationOutOfScope { evidence_id }) => {
+                            spent.hypotheses = written_hypotheses;
+                            return finish_run(
+                                db,
+                                run_id,
+                                incident_id,
+                                input.requested_by,
+                                &RunOutcome {
+                                    status: "FAILED",
+                                    stop_reason: "REFUSED",
+                                    detail: Some(format!(
+                                        "CITATION_OUT_OF_SCOPE: hypothesis {} cited evidence {evidence_id}, which does not belong to incident {incident_id}; the conclusion was refused and not written, and the {} hypothesis(es) already written stand",
+                                        written_hypotheses + 1,
+                                        written_hypotheses
+                                    )),
+                                },
+                                spent,
+                            )
+                            .await;
+                        }
+                        Err(HypothesisRefusal::Internal(error)) => return Err(error),
+                    }
                 }
                 let any_failed: bool = sqlx::query_scalar(
                     "SELECT EXISTS (SELECT 1 FROM kernel.investigation_tool_invocations
@@ -3396,6 +3579,286 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // G12 H (P1): the scope of an investigation is the run's incident, not the caller's
+    // reach.
+    //
+    // The defect these close: the five tools authorized a foreign incidentId against the
+    // CALLER's read predicate, so an account that could read incident C could make a run
+    // about incident A read C. Nothing refused that until the citation guard did, and the
+    // guard's refusal arrived as 500 INTERNAL. One account that owns both incidents is the
+    // only shape that can tell the two rules apart: for that account the predicate below
+    // would allow every read, so only the run's own scope stands in the way.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn every_tool_refuses_an_incident_the_run_is_not_about() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "admin").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let mine = seed_incident(&pool, owner, Some("entity-mine"), started).await;
+        let other = seed_incident(&pool, owner, Some("entity-other"), started).await;
+        let other_evidence =
+            seed_evidence(&pool, other, started, "LOG_EXCERPT", "agent", "UNVERIFIED").await;
+        let scope = ToolScope {
+            incident_id: mine,
+            scope_user_id: owner,
+        };
+        let sources = vec!["incident_index".to_string()];
+
+        // Positive controls first: the run's own incident reads whether the id is omitted
+        // or restated, so the refusals below are about scope and not about a broken
+        // fixture or a blanket refusal of the argument.
+        for arguments in [json!({}), json!({ "incidentId": mine })] {
+            let own = execute_tool(&pool, &sources, scope, TOOL_GET_INCIDENT, &arguments)
+                .await
+                .expect("the run's own incident must read");
+            assert_eq!(own.predicate, PREDICATE_INCIDENT_READ);
+        }
+
+        let attempts: Vec<(&str, Value)> = vec![
+            (TOOL_GET_INCIDENT, json!({ "incidentId": other })),
+            (TOOL_LIST_EVIDENCE, json!({ "incidentId": other })),
+            (
+                TOOL_READ_EVIDENCE,
+                json!({ "incidentId": other, "evidenceId": other_evidence }),
+            ),
+            (TOOL_GET_TIMELINE, json!({ "incidentId": other })),
+            (
+                TOOL_GET_RELATED,
+                json!({ "incidentId": other, "sourceId": "incident_index" }),
+            ),
+        ];
+        assert_eq!(attempts.len(), 5, "all five tools must be covered");
+        for (tool, arguments) in attempts {
+            let failure = execute_tool(&pool, &sources, scope, tool, &arguments)
+                .await
+                .err()
+                .unwrap_or_else(|| {
+                    panic!("{tool} read an incident this investigation is not about")
+                });
+            assert_eq!(
+                failure.outcome, "REFUSED",
+                "{tool} must be refused, not broken"
+            );
+            // The stable code the HTTP path reports instead of a 500, and the layer that
+            // refused it. Both are asserted here so neither can drift alone.
+            assert_eq!(
+                failure.code, "INCIDENT_OUT_OF_SCOPE",
+                "{tool} must carry the stable scope code"
+            );
+            assert_eq!(
+                failure.gate, PREDICATE_RUN_INCIDENT_SCOPE,
+                "{tool} must name the layer that refused it"
+            );
+        }
+
+        cleanup(&pool, &[owner]).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // G12 H (P2): a refused invocation records the layer that refused it.
+    //
+    // The column was NULL for every non-OK row, so the panel could show the error code and
+    // never the layer. Each gate below is a place in this file that actually decided; none
+    // of them is invented, and the one layer that is genuinely a predicate answering is
+    // asserted through a read the caller is no longer allowed to do.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn every_refusal_names_the_layer_that_refused_it() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let successor = seed_user(&pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let mine = seed_incident(&pool, owner, None, started).await;
+        let other = seed_incident(&pool, owner, None, started).await;
+        let scope = ToolScope {
+            incident_id: mine,
+            scope_user_id: owner,
+        };
+
+        let cases: Vec<(&str, Value, &str, &str)> = vec![
+            (
+                "run_shell",
+                json!({}),
+                GATE_PRE_TOOL_ALLOWLIST,
+                "TOOL_NOT_AVAILABLE",
+            ),
+            (
+                TOOL_GET_INCIDENT,
+                json!({ "incidentId": "not-a-uuid" }),
+                GATE_PRE_ARGUMENT,
+                "TOOL_ARGUMENT_INVALID",
+            ),
+            (
+                TOOL_GET_INCIDENT,
+                json!({ "incidentId": other }),
+                PREDICATE_RUN_INCIDENT_SCOPE,
+                "INCIDENT_OUT_OF_SCOPE",
+            ),
+            (
+                TOOL_GET_RELATED,
+                json!({ "sourceId": "incident_index" }),
+                GATE_SOURCE_CONFIGURATION,
+                "SOURCE_UNAVAILABLE",
+            ),
+        ];
+        for (tool, arguments, gate, code) in cases {
+            let failure = execute_tool(&pool, &[], scope, tool, &arguments)
+                .await
+                .err()
+                .unwrap_or_else(|| panic!("{tool} must refuse {code}"));
+            assert_eq!(failure.code, code, "{tool} must keep its own stable code");
+            assert_eq!(failure.gate, gate, "{code} must name its own layer");
+        }
+
+        // The scope account itself cannot be resolved: refused before any predicate runs.
+        let unresolvable = ToolScope {
+            incident_id: mine,
+            scope_user_id: Uuid::new_v4(),
+        };
+        let failure = execute_tool(&pool, &[], unresolvable, TOOL_GET_INCIDENT, &json!({}))
+            .await
+            .expect_err("an account that does not exist must not read");
+        assert_eq!(failure.gate, GATE_PRE_SCOPE_IDENTITY);
+
+        // And the case that IS a predicate answering: the run's own incident handed to
+        // somebody else. The code is the HTTP read's own (not yours and not there are one
+        // answer) and the gate is the predicate that said so.
+        sqlx::query("UPDATE kernel.incidents SET owner=$2 WHERE incident_id=$1")
+            .bind(mine)
+            .bind(successor)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let failure = execute_tool(&pool, &[], scope, TOOL_GET_INCIDENT, &json!({}))
+            .await
+            .expect_err("a handed-over incident must not read");
+        assert_eq!(failure.code, "INCIDENT_NOT_FOUND");
+        assert_eq!(failure.gate, PREDICATE_INCIDENT_READ);
+
+        cleanup(&pool, &[owner, successor]).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // G12 H (P1), the residual half: the guard's refusal is a definite code, not a 500.
+    //
+    // The tool layer now makes this unreachable through a read, but a real model can name
+    // an evidence id it never read. That used to arrive as one '?', which the HTTP layer
+    // reported as 500 INTERNAL and which left the run RUNNING with nobody to finish it.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_citation_the_database_refuses_is_a_named_refusal_and_writes_nothing() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let incident = seed_incident(&pool, owner, None, started).await;
+        let foreign_incident = seed_incident(&pool, owner, None, started).await;
+        let foreign = seed_evidence(
+            &pool,
+            foreign_incident,
+            started,
+            "LOG_EXCERPT",
+            "agent",
+            "UNVERIFIED",
+        )
+        .await;
+        let run = seed_run(&pool, incident, owner).await;
+        let proposed = ProposedHypothesis {
+            statement: "a conclusion that cites a row from another incident".to_string(),
+            stance: "SUPPORTED".to_string(),
+            confidence: "LOW".to_string(),
+            reasoning: "the reasoning is not what is under test here".to_string(),
+            uncertainty: None,
+            gap_codes: Vec::new(),
+            supporting: vec![foreign],
+            contradicting: Vec::new(),
+        };
+        let refusal = record_hypothesis(&pool, run, 1, "TEST_FIXTURE", &proposed, &HashMap::new())
+            .await
+            .expect_err("the guard must refuse this citation");
+        match refusal {
+            HypothesisRefusal::CitationOutOfScope { evidence_id } => {
+                assert_eq!(
+                    evidence_id, foreign,
+                    "the refusal names the citation it refused"
+                )
+            }
+            HypothesisRefusal::Internal(error) => {
+                panic!("a guard refusal must not arrive as an internal error: {error:?}")
+            }
+        }
+        // The whole hypothesis rolled back with the citation: no half-written conclusion.
+        let written: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.investigation_hypotheses WHERE run_id=$1",
+        )
+        .bind(run)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(written, 0, "a refused hypothesis must leave no row behind");
+
+        cleanup(&pool, &[owner]).await;
+    }
+
+    // -----------------------------------------------------------------------
+    // The closed vocabulary is in the database, not only in this file, so a future caller
+    // cannot write a predicate string it made up (G12 H, P2: no invented predicates).
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn the_recorded_gate_vocabulary_matches_the_schema() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let definition: String = sqlx::query_scalar(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint
+              WHERE conname='investigation_invocation_predicate_vocabulary_check'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("migration 0023 must have created the vocabulary constraint");
+        for gate in GATE_VOCABULARY {
+            assert!(
+                definition.contains(gate),
+                "the schema must accept {gate}: {definition}"
+            );
+        }
+        // And a value outside the list is refused by the database itself.
+        let owner = seed_user(&pool, "operator").await;
+        let started = Utc::now() - ChronoDuration::hours(1);
+        let incident = seed_incident(&pool, owner, None, started).await;
+        let run = seed_run(&pool, incident, owner).await;
+        let error = sqlx::query(
+            "INSERT INTO kernel.investigation_tool_invocations
+                 (invocation_id, run_id, sequence, attempt, tool_name, arguments, outcome,
+                  error_code, authorization_predicate, started_at, finished_at, duration_ms)
+             VALUES ($1,$2,1,1,'get_incident','{}'::jsonb,'OK',NULL,'A_PREDICATE_I_INVENTED',
+                     now(), now(), 1)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(run)
+        .execute(&pool)
+        .await
+        .expect_err("an invented predicate name must be refused by the schema");
+        assert!(
+            error
+                .to_string()
+                .contains("investigation_invocation_predicate_vocabulary_check")
+                || error.to_string().contains("check constraint"),
+            "expected the vocabulary check, got: {error}"
+        );
+
+        cleanup(&pool, &[owner]).await;
+    }
+    // -----------------------------------------------------------------------
     // E3: the per-tool timeout fires instead of hanging.
     // -----------------------------------------------------------------------
 
@@ -3502,9 +3965,14 @@ mod tests {
                 failure.outcome, "REFUSED",
                 "{tool} must be refused, not broken"
             );
+            // G12 H (P1) moved this refusal EARLIER, not away: another operator's incident
+            // is, first of all, an incident this run is not about, so the run's own scope
+            // refuses it before the read predicate is asked. The specific refusal below is
+            // asserted in every_refusal_names_the_layer_that_refused_it; here the point is
+            // that no tool reaches the row.
             assert_eq!(
-                failure.code, "INCIDENT_NOT_FOUND",
-                "{tool} must refuse with the same code the HTTP read endpoint gives"
+                failure.code, "INCIDENT_OUT_OF_SCOPE",
+                "{tool} must refuse with the stable scope code, before any row is read"
             );
         }
 

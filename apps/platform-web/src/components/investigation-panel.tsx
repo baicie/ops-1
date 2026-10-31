@@ -13,6 +13,7 @@ import {
   cancelInvestigation,
   confidenceKey,
   gapCodeKey,
+  gateKey,
   invocationErrorKey,
   isSynthetic,
   listInvestigations,
@@ -421,7 +422,17 @@ export function InvestigationPanel({ incidentId, canOperate }: { incidentId: str
                     <span className="muted small">· {String(invocation.durationMs)} ms</span>
                     <span className="muted small">· {t('investigations.tools.attempt', { attempt: invocation.attempt })}</span>
                     {invocation.authorizationPredicate ? (
-                      <span className="mono small" data-testid="investigation-predicate">· {invocation.authorizationPredicate}</span>
+                      // G12 H (P2). The column now names the layer that decided the call for
+                      // refusals as well as for successes, so this row answers "which layer"
+                      // and not only "which code". The label is localized; the raw token stays
+                      // in data-gate so no test depends on the copy.
+                      <span
+                        className="mono small"
+                        data-testid="investigation-predicate"
+                        data-gate={invocation.authorizationPredicate}
+                      >
+                        · {t('investigations.gate.decidedBy', { gate: t(gateKey(invocation.authorizationPredicate)) })}
+                      </span>
                     ) : null}
                   </div>
                   {invocation.errorCode ? (

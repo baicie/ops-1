@@ -235,6 +235,7 @@ export function outcomeKey(outcome: string): MessageKey {
 export function invocationErrorKey(code: string | null): MessageKey {
   switch (code) {
     case 'INCIDENT_NOT_FOUND': return 'investigations.error.incidentNotFound';
+    case 'INCIDENT_OUT_OF_SCOPE': return 'investigations.error.incidentOutOfScope';
     case 'EVIDENCE_NOT_FOUND': return 'investigations.error.evidenceNotFound';
     case 'EVIDENCE_CONTENT_NOT_STORED': return 'investigations.error.evidenceContentNotStored';
     case 'EVIDENCE_CONTENT_EXPIRED': return 'investigations.error.evidenceContentExpired';
@@ -249,6 +250,30 @@ export function invocationErrorKey(code: string | null): MessageKey {
     case 'TOOL_READ_FAILED': return 'investigations.error.toolReadFailed';
     case null: return 'investigations.error.none';
     default: return 'investigations.error.unknown';
+  }
+}
+
+/**
+ * The authorization gate a tool invocation was decided by, as a message key (G12 H, P2).
+ *
+ * The kernel records this for refusals as well as for successes, so the panel can say which
+ * layer decided a call instead of only that it failed. The values are a closed vocabulary
+ * (migration 0023 refuses anything else), and each one is a fact rather than a label: the
+ * layers that stop a call before any rule runs are named as such, because claiming a rule
+ * refused a call that never reached one would be the invented predicate this column must
+ * not carry.
+ */
+export function gateKey(gate: string | null): MessageKey {
+  switch (gate) {
+    case 'INCIDENT_READ_PREDICATE': return 'investigations.gate.incidentReadPredicate';
+    case 'EVIDENCE_CONTENT_FIXITY_CHECK': return 'investigations.gate.evidenceContentFixity';
+    case 'RUN_INCIDENT_SCOPE_PREDICATE': return 'investigations.gate.runIncidentScope';
+    case 'PRE_PREDICATE_TOOL_ALLOWLIST': return 'investigations.gate.preToolAllowlist';
+    case 'PRE_PREDICATE_ARGUMENT': return 'investigations.gate.preArgument';
+    case 'PRE_PREDICATE_SCOPE_IDENTITY': return 'investigations.gate.preScopeIdentity';
+    case 'DEPLOYMENT_SOURCE_CONFIGURATION': return 'investigations.gate.sourceConfiguration';
+    case 'UNREACHED_TOOL_INTERRUPTED': return 'investigations.gate.toolInterrupted';
+    default: return 'investigations.gate.unknown';
   }
 }
 

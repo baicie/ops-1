@@ -413,3 +413,117 @@ abandoned instead of calling it running.
 Forward-only, as every migration here is. The reverse DDL is in the migration header and is
 **not** free: it destroys every run, every invocation, every hypothesis and every review. It may
 run only as an accepted loss of that record.
+
+---
+
+## 11. G12 H: the scope of a run, and the layer that decided a call
+
+Two defects found by the phase-2 acceptance work, both in the tool layer that §3 describes.
+
+### 11.1 The one that produced a 500
+
+Measured before any change, over real HTTP against a real PostgreSQL: an administrator opens an
+investigation on incident A with scenario CROSS_SCOPE_PROBE pointing at incident C, an incident
+the same administrator can read through the API (the control read of C returned 200).
+
+| Step | Before |
+|---|---|
+| four of the five tools | outcome OK, reading incident C's record |
+| read_evidence | OK, returning C's stored bytes |
+| the fixture's hypothesis | cited C's evidence id |
+| investigation_citation_guard | refused the insert: "that evidence does not belong to the incident this investigation is about" |
+| POST /investigations | **500 INTERNAL**, a requestId and nothing else; the run left RUNNING |
+
+The cause is in this section's own subject. target_incident() accepted any incidentId and left
+the whole decision to the caller's read predicate, so the scope of an investigation was decided
+by whoever happened to be behind the run rather than by the incident the run is about. An
+administrator can read everything, so for an administrator that predicate never refused.
+
+### 11.2 Two candidate fixes, and why the tool layer
+
+(a) **Enforce at the tool layer**: a run about A reads A; a tool naming another incident is
+refused with a stable code before any query runs.
+
+(b) **Allow the citation and record cross-incident provenance**: keep the reads, put the source
+incident into the citation, and change the guard to require provenance instead of forbidding
+foreign evidence.
+
+Chosen: (a). The argument, in the order that decided it:
+
+1. **The scope of a run is not the model's to choose.** It is a stored fact
+   (investigation_runs.incident_id) and the tool layer already holds it. An argument that may
+   restate it is redundant; an argument that may override it lets the model name its own
+   authority, which AGENTS.md forbids in as many words - a model must never supply the
+   tenant/subject/permissions that stand in for trusted identity.
+2. **(b) is a product decision, not a defect fix.** Once a conclusion may rest on two incidents,
+   the questions that follow have no answers in this ADR: whose retention horizon governs the
+   copy, who may read a conclusion built from an incident they cannot read, and what the verdict
+   surface means when a run is about two things. None of that is in this phase.
+3. **The invariant was already half-stated, and (a) makes it total.** E2 asserted that every
+   tool refuses an incident another operator owns - a conditional guarantee, true only when the
+   caller cannot read the target. (a) makes it unconditional, and that is exactly what makes the
+   citation guard unreachable through a read.
+4. **It removes an "it depends who is asking" from the audit record.** The old behaviour meant
+   the same model argument was legal for an admin and refused for an operator. (a) makes the
+   tool layer's answer a function of the run, not of the account's role.
+
+The refusal is INCIDENT_OUT_OF_SCOPE, decided by comparing two ids the caller already holds. It
+never looks the target up, so it reveals nothing about whether that incident exists: a foreign id
+and a nonexistent one are the same answer, which is the posture §3 already takes for "not yours"
+versus "not there".
+
+### 11.3 The residual case: a citation the guard refuses anyway
+
+The tool layer makes foreign evidence unreachable through a read, but a real model can still name
+an evidence id it was never given. That path used to leave the loop as one question mark, which
+the HTTP layer reported as 500 INTERNAL and which left the run RUNNING with nobody to finish it.
+It is now a named refusal: the run ends FAILED / REFUSED, the detail begins with the stable code
+CITATION_OUT_OF_SCOPE, the transaction leaves no half-written hypothesis, and every read the run
+made stays recorded. The guard remains a database invariant; what changed is that its refusal is
+reported instead of crashing.
+
+### 11.4 The layer that decided a call is now recorded (P2)
+
+authorization_predicate was required for a successful invocation and written NULL for every
+refusal, so the row an auditor wants most - this run asked for something it could not have -
+answered nothing. It is now recorded for refusals too.
+
+**It was not filled with an invented predicate name.** The column is a closed vocabulary,
+enforced by migration 0023, and each value is a layer that actually decided the call in
+apps/kernel/src/investigations.rs:
+
+| Value | What it is |
+|---|---|
+| INCIDENT_READ_PREDICATE | the shared read predicate passed, or refused |
+| EVIDENCE_CONTENT_FIXITY_CHECK | the content read: fixity, retention, encoding |
+| RUN_INCIDENT_SCOPE_PREDICATE | the run's own incident (§11.2) |
+| PRE_PREDICATE_TOOL_ALLOWLIST | no predicate ran: not one of the five tools |
+| PRE_PREDICATE_ARGUMENT | no predicate ran: the arguments were unreadable |
+| PRE_PREDICATE_SCOPE_IDENTITY | no predicate ran: the account the run reads as is unresolvable |
+| DEPLOYMENT_SOURCE_CONFIGURATION | decided by configuration, not by the caller |
+| UNREACHED_TOOL_INTERRUPTED | cut off inside the tool; no layer answered |
+
+Deliberately coarse in one place, and the reason is a constraint rather than a shortcut. The
+brief for this work named four layers - role gate, workspace boundary, row rule, tool allowlist -
+and the kernel does not have the first three as separate answers: role selects the row rule, and
+both are compiled into one SQL predicate (scope::predicate), so a read any of them excludes
+answers INCIDENT_NOT_FOUND. Naming which of the three refused a read would both invent a
+distinction the kernel does not make and tell a caller which rows exist behind a boundary it may
+not cross. INCIDENT_READ_PREDICATE is therefore the honest value, and the three PRE_PREDICATE
+gates are precisely the cases where no rule ran at all.
+
+The panel renders this column as localized prose in both catalogs, keeps the raw token in
+data-gate so no test depends on the copy, and has new prose for INCIDENT_OUT_OF_SCOPE. Before
+this change the row could only show an error code; now it says which layer decided.
+
+### 11.5 What this does not do
+
+No row-level filter was added to the evidence queries, and no column was added to
+investigation_hypothesis_evidence: the guard that refuses a foreign citation is unchanged and is
+still the last word. Cross-incident investigation remains unimplemented, and (b) above stays a
+design note for whoever wants it.
+
+Rollback for 0023 is a single DROP CONSTRAINT, spelled in the migration header: the column keeps
+its type and its NULLs, so dropping the vocabulary widens nothing and loses nothing that the
+migration added.
+

@@ -420,10 +420,12 @@ if [ "$RELATED_ON" = "1" ]; then
   EB8="$(evidence_make "$B_JAR" "$B_CSRF" "$IB8" LOG_EXCERPT "$(ts -1200)" agent-b-related)"
   S8="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I8/investigations" "{\"idempotencyKey\":\"s8-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$IB8\",\"probeEvidenceId\":\"$EB8\",\"maxToolCalls\":8}")"
   check 201 "$S8" "S8 the probe run started"
-  check "INCIDENT_NOT_FOUND" "$(json "[i for i in d['toolInvocations'] if i['tool']=='get_related_context'][0]['errorCode']" < "$WORK/body")" \
-    "S8 get_related_context refuses a cross-owner incident through the same predicate as the incident list"
+  check "INCIDENT_OUT_OF_SCOPE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='get_related_context'][0]['errorCode']" < "$WORK/body")" \
+    "S8 get_related_context refuses a cross-owner incident by the run's own scope, before any query runs"
   check 5 "$(json "len([i for i in d['toolInvocations'] if i['outcome']=='REFUSED'])" < "$WORK/body")" \
     "S8 with the source authorised, all five tools refuse on scope rather than on configuration"
+  check 5 "$(json "len([i for i in d['toolInvocations'] if i['authorizationPredicate']=='RUN_INCIDENT_SCOPE_PREDICATE'])" < "$WORK/body")" \
+    "S8 and every refusal records the layer that refused it instead of a NULL"
 else
   echo "SKIP  S8 (restart the kernel with OPSWEAVE_INVESTIGATION_RELATED_SOURCES=incident_index OPSWEAVE_INVESTIGATION_RELATED_ENABLED=1)" >&2
 fi
@@ -479,6 +481,34 @@ check "OK" "$(sql "SELECT outcome FROM kernel.investigation_tool_invocations WHE
   "S9 reading a reference row also succeeds"
 check "true" "$(sql "SELECT (((result_body::jsonb)->'content') = 'null'::jsonb AND ((result_body::jsonb)->>'contentNote') IS NOT NULL)::text FROM kernel.investigation_tool_invocations WHERE run_id='$RUN9R' AND tool_name='read_evidence'")" \
   "S9 and it states that no bytes exist rather than fabricating a body"
+
+# ===========================================================================
+step "S10 E2 (G12 H P1): a run reads the incident it is about, and only that one"
+# Why this step exists. Every scope check before it asked whether a caller may read SOMEBODY
+# ELSE's incident, and each was answered by the caller's own read predicate. None of them
+# asked the question that produced a 500: may a run about incident A read incident C when the
+# account behind the run can read C through the API? An administrator can read everything, so
+# the tools answered, the transcript absorbed C's evidence, the conclusion cited it, and the
+# citation guard's refusal arrived as 500 INTERNAL. The scope of an investigation is the run's
+# incident, so the answer is no - and it has to be a named refusal, not a 500.
+I10="$(incident_make "$A_JAR" "$A_CSRF" "g12h subject $RUN" "$(ts -3600)")"
+I10C="$(incident_make "$A_JAR" "$A_CSRF" "g12h readable but not the subject $RUN" "$(ts -3600)")"
+E10C="$(evidence_make "$A_JAR" "$A_CSRF" "$I10C" LOG_EXCERPT "$(ts -1200)" agent-g12h)"
+check 200 "$(call "$A_JAR" "$A_CSRF" GET "/api/v1/incidents/$I10C/evidence/$E10C/content")" \
+  "S10 control: the same account CAN read the other incident through the API"
+S10="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I10/investigations" \
+  "{\"idempotencyKey\":\"s10-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I10C\",\"probeEvidenceId\":\"$E10C\",\"maxToolCalls\":8}")"
+check 201 "$S10" "S10 the run started: a scope refusal is a recorded refusal, not an internal error"
+check "PARTIAL" "$(last "['status']")" "S10 and it finished PARTIAL, because every read was refused"
+check 5 "$(json "len([i for i in d['toolInvocations'] if i['outcome']=='REFUSED' and i['errorCode']=='INCIDENT_OUT_OF_SCOPE'])" < "$WORK/body")" \
+  "S10 all five tools refuse with the stable scope code"
+check 5 "$(json "len([i for i in d['toolInvocations'] if i['authorizationPredicate']=='RUN_INCIDENT_SCOPE_PREDICATE'])" < "$WORK/body")" \
+  "S10 and every one of them names the layer that refused it"
+RUN10="$(last "['runId']")"
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_hypothesis_evidence he JOIN kernel.investigation_hypotheses h ON h.hypothesis_id=he.hypothesis_id WHERE h.run_id='$RUN10'")" \
+  "S10 (schema) the run wrote no citation at all, so the citation guard was never asked"
+check 5 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN10' AND error_code='INCIDENT_OUT_OF_SCOPE'")" \
+  "S10 (schema) the refusals are in the ledger, not only in the response"
 
 echo
 echo "==================== SUMMARY ===================="
