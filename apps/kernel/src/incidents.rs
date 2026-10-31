@@ -9,7 +9,14 @@
 //! The visibility predicate deliberately copies the job list predicate
 //! (jobs.rs:1883): admin and viewer read everything, an operator reads only what
 //! it owns.
+//!
+//! G12 C adds the two operations the recorded lifecycle was missing - a controlled
+//! CONCLUDED -> CLOSED and an ownership handover - plus the audit timeline the UI
+//! reads. Both are argued in docs/design/g12-lifecycle/lifecycle-adr.md, and the
+//! permission posture they inherit (rather than invent) is written down with
+//! evidence in docs/design/g12-lifecycle/permission-model-decision.md.
 
+use crate::audit::AuditEventView;
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -75,6 +82,25 @@ const COLLECTED_AT_FUTURE_SKEW_SECONDS: i64 = 300;
 /// retention horizon: a claim older than that cannot correspond to content the
 /// Kernel still serves.
 const COLLECTED_AT_MAX_AGE_SECONDS: i64 = 400 * 86_400;
+/// How long a closure note may be. Lower bound 4 because "fix" and "ok" are not
+/// a reason; upper bound 1000 because this is a sentence, not a report.
+const CLOSURE_NOTE_MIN_CHARS: usize = 4;
+const CLOSURE_NOTE_MAX_CHARS: usize = 1000;
+/// A handover reason is longer than a closure note on purpose: it is the only
+/// place the transfer's justification survives, and the next owner has to be able
+/// to understand why the incident is theirs.
+const TRANSFER_REASON_MIN_CHARS: usize = 10;
+const TRANSFER_REASON_MAX_CHARS: usize = 1000;
+/// The client's idempotency key for a close. Bounded so a key is a key and not a
+/// place to park a payload; long enough that a UUID or a ULID fits.
+const CLOSURE_KEY_MIN_CHARS: usize = 8;
+const CLOSURE_KEY_MAX_CHARS: usize = 200;
+/// How many audit rows one timeline read may return. The page returns the NEWEST
+/// `limit` events in chronological order and reports `truncated`, so a long-lived
+/// incident loses its oldest events from the page rather than silently losing its
+/// newest.
+const TIMELINE_DEFAULT_EVENTS: i64 = 100;
+const TIMELINE_MAX_EVENTS: i64 = 200;
 
 /// Who is asking, reduced to the two facts the SQL layer needs.
 ///
@@ -180,6 +206,75 @@ pub struct CreateVerdictRequest {
     pub verdict: String,
     pub rationale: String,
 }
+/// The body of POST /incidents/{id}/close.
+///
+/// expectedRevision is required rather than optional: a closure is a decision about
+/// a record, and a decision taken about a record that has changed since it was read
+/// is not the decision the operator made. There is deliberately no "force" flag -
+/// a caller that wants to close over someone else's change has to re-read first.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloseIncidentRequest {
+    pub expected_revision: i64,
+    /// Why the incident is over, in the closer's words.
+    pub note: String,
+    /// The client's own key for this close. Optional, and the only way a retried
+    /// close is distinguishable from a second close: with a key, a replay of the
+    /// closure that already happened answers 200; without one, the second call is a
+    /// 409 and the operator is told the record is already closed.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+}
+
+/// The body of POST /incidents/{id}/owner.
+///
+/// The five facts the handover records: who had it, who gets it, why, when, and
+/// which version of the record this was decided against. Nothing about roles,
+/// groups or tenancy travels with it (ADR-G12-003 §4).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferOwnerRequest {
+    pub expected_revision: i64,
+    pub to_owner: Uuid,
+    pub reason: String,
+}
+
+/// What a completed handover answers with.
+///
+/// Deliberately NOT the incident: after a handover the transferring operator is, by
+/// design, no longer allowed to read it (the owner column IS the operator read
+/// scope). Answering with the incident would either leak a row the caller has just
+/// lost access to, or have to be built as if the caller still had access. So the
+/// answer is the handover itself.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnerTransferView {
+    pub incident_id: Uuid,
+    pub previous_owner: Uuid,
+    pub owner: Uuid,
+    pub owner_assigned_at: DateTime<Utc>,
+    pub reason: String,
+    pub transferred_by: Uuid,
+    pub transferred_at: DateTime<Utc>,
+    /// The revision the incident holds after the handover, so a client can act on
+    /// the new version without a round trip (and only for as long as it may read).
+    pub revision: i64,
+}
+
+/// GET /incidents/{id}/timeline - the incident's own audit trail.
+///
+/// Scoped by the incident read predicate and not by the generic /api/v1/audit
+/// filter: an operator must not be able to read the audit trail of an incident whose
+/// record they cannot read.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncidentTimeline {
+    pub items: Vec<AuditEventView>,
+    /// True when the incident holds more audit rows than were returned. The page is
+    /// then the newest `limit` events, oldest dropped, and it says so instead of
+    /// looking complete.
+    pub truncated: bool,
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -205,6 +300,14 @@ pub struct IncidentListQuery {
 pub struct EvidenceListQuery {
     pub since: Option<String>,
     pub until: Option<String>,
+}
+/// The timeline read's only parameter. No free-text filter and no cursor: the
+/// trail of one incident is bounded by the writes that endpoint set allows, so one
+/// clamped page plus a `truncated` flag is the whole answer.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineQuery {
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -233,6 +336,20 @@ pub struct IncidentView {
     pub started_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub owner: Uuid,
+    /// When the current owner was assigned. Equal to createdAt for a row that has
+    /// never been handed over.
+    pub owner_assigned_at: DateTime<Utc>,
+    /// G12 C: the version every lifecycle write arbitrates on. Bumped by a status
+    /// transition, a closure and a handover; a client that writes with a stale one is
+    /// told so (409) instead of overwriting a decision it never saw.
+    pub revision: i64,
+    /// When and by whom the incident was closed, and the closer's sentence. All three
+    /// are NULL/absent unless status is CLOSED, and the database enforces that (0019
+    /// incidents_closure_consistency_check) so a reader can treat them as the closure
+    /// record rather than as hints.
+    pub closed_at: Option<DateTime<Utc>>,
+    pub closed_by: Option<Uuid>,
+    pub closure_note: Option<String>,
     /// Derived at read time from kernel.incident_evidence; never a column, so it
     /// can never disagree with the evidence rows it names.
     pub evidence_refs: Vec<Uuid>,
@@ -325,6 +442,11 @@ struct IncidentRow {
     started_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     owner: Uuid,
+    owner_assigned_at: DateTime<Utc>,
+    revision: i64,
+    closed_at: Option<DateTime<Utc>>,
+    closed_by: Option<Uuid>,
+    closure_note: Option<String>,
     evidence_refs: sqlx::types::Json<Vec<Uuid>>,
     verdict_value: Option<String>,
     verdict_rationale: Option<String>,
@@ -377,6 +499,11 @@ impl IncidentRow {
             started_at: self.started_at,
             updated_at: self.updated_at,
             owner: self.owner,
+            owner_assigned_at: self.owner_assigned_at,
+            revision: self.revision,
+            closed_at: self.closed_at,
+            closed_by: self.closed_by,
+            closure_note: self.closure_note,
             evidence_refs: self.evidence_refs.0,
             human_verdict,
         }
@@ -602,6 +729,69 @@ pub async fn get_verdict(
 ) -> AppResult<Json<VerdictView>> {
     let caller = Caller::from_auth(&auth);
     Ok(Json(query_verdict(&state.db, caller, incident_id).await?))
+}
+/// POST /incidents/{id}/close - the only way an incident becomes CLOSED.
+///
+/// Four gates, in this order, and the order is the contract: the state gate comes
+/// before the version gate, because "this is not concludable" is the real obstacle
+/// and "your revision is stale" would misdescribe it.
+///
+///   1. the caller may operate at all (viewer: 403);
+///   2. the incident is visible to the caller and in status CONCLUDED (else 409
+///      INCIDENT_CLOSE_REQUIRES_CONCLUDED - there is no path from OPEN);
+///   3. a signed Human Verdict exists (else 409 INCIDENT_CLOSE_REQUIRES_VERDICT);
+///   4. expectedRevision still matches (else 409 INCIDENT_VERSION_CONFLICT).
+///
+/// Concurrency: the row is locked FOR UPDATE and the UPDATE itself is a
+/// compare-and-set on (status, revision), so of two simultaneous closes exactly one
+/// commits and one is told why it did not.
+pub async fn close_incident(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(incident_id): Path<Uuid>,
+    body: Bytes,
+) -> AppResult<Json<IncidentView>> {
+    auth.require_operator()?;
+    let payload: CloseIncidentRequest = parse_json(body)?;
+    let caller = Caller::from_auth(&auth);
+    Ok(Json(
+        close_incident_record(&state.db, caller, incident_id, payload).await?,
+    ))
+}
+
+/// POST /incidents/{id}/owner - hand one live incident to another operator.
+///
+/// Authorization: the current owner (an operator acting inside its own scope) or a
+/// role that sees all incidents (admin). A different operator gets 404, not 403: the
+/// incident is not theirs to read either, so naming the refusal would confirm a
+/// record they cannot see.
+pub async fn transfer_owner(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(incident_id): Path<Uuid>,
+    body: Bytes,
+) -> AppResult<Json<OwnerTransferView>> {
+    auth.require_operator()?;
+    let payload: TransferOwnerRequest = parse_json(body)?;
+    let caller = Caller::from_auth(&auth);
+    Ok(Json(
+        transfer_incident_owner(&state.db, caller, incident_id, payload).await?,
+    ))
+}
+
+/// GET /incidents/{id}/timeline - what happened to this incident, in order.
+pub async fn get_timeline(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(incident_id): Path<Uuid>,
+    Query(query): Query<TimelineQuery>,
+) -> AppResult<Json<IncidentTimeline>> {
+    let caller = Caller::from_auth(&auth);
+    let limit = i64::from(query.limit.unwrap_or(TIMELINE_DEFAULT_EVENTS as u32))
+        .clamp(1, TIMELINE_MAX_EVENTS);
+    Ok(Json(
+        query_timeline(&state.db, caller, incident_id, limit).await?,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -943,9 +1133,12 @@ async fn insert_evidence(
 
     // T2: an incident becomes INVESTIGATING when the first evidence lands. A
     // conditional UPDATE keeps this a compare-and-set: a concurrent verdict that
-    // already moved the incident to CONCLUDED is never silently reopened.
+    // already moved the incident to CONCLUDED is never silently reopened. The
+    // revision moves with the status, because a client holding the previous one is
+    // looking at a record that has changed (G12 C).
     sqlx::query(
-        "UPDATE kernel.incidents SET status='INVESTIGATING', updated_at=now()
+        "UPDATE kernel.incidents
+            SET status='INVESTIGATING', revision=revision+1, updated_at=now()
           WHERE incident_id=$1 AND status='OPEN'",
     )
     .bind(incident_id)
@@ -1104,7 +1297,8 @@ async fn insert_verdict(
     // concludable state, the verdict rolls back rather than being left attached
     // to an inconsistent status.
     let updated = sqlx::query(
-        "UPDATE kernel.incidents SET status='CONCLUDED', updated_at=now()
+        "UPDATE kernel.incidents
+            SET status='CONCLUDED', revision=revision+1, updated_at=now()
           WHERE incident_id=$1 AND status IN ('OPEN','INVESTIGATING')",
     )
     .bind(incident_id)
@@ -1133,6 +1327,331 @@ async fn insert_verdict(
     .await?;
     tx.commit().await?;
     Ok(view)
+}
+
+// ---------------------------------------------------------------------------
+// G12 C · The two lifecycle operations
+//
+// Both are one transaction that holds the incident row lock (FOR UPDATE) and then
+// writes through a compare-and-set on (status, revision). Neither writes its audit
+// row after the commit: audit_in_tx runs on the same transaction, so a closure that
+// cannot be described is a closure that did not happen.
+// ---------------------------------------------------------------------------
+
+async fn close_incident_record(
+    db: &PgPool,
+    caller: Caller,
+    incident_id: Uuid,
+    payload: CloseIncidentRequest,
+) -> AppResult<IncidentView> {
+    let note = bounded(
+        &payload.note,
+        "note",
+        CLOSURE_NOTE_MIN_CHARS,
+        CLOSURE_NOTE_MAX_CHARS,
+    )?;
+    if payload.expected_revision < 1 {
+        return Err(AppError::bad_request(
+            "expectedRevision must be the revision you read, which is 1 or greater",
+        ));
+    }
+    let key = match payload
+        .idempotency_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => Some(bounded(
+            value,
+            "idempotencyKey",
+            CLOSURE_KEY_MIN_CHARS,
+            CLOSURE_KEY_MAX_CHARS,
+        )?),
+        None => None,
+    };
+
+    let mut tx = db.begin().await?;
+    // The read that decides, under the row lock: two closers are serialized here, so
+    // the second one observes the first closure instead of overwriting it.
+    let current: Option<(String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT status, revision, closure_key FROM kernel.incidents
+          WHERE incident_id=$1 AND ($2::boolean OR owner=$3) FOR UPDATE",
+    )
+    .bind(incident_id)
+    .bind(caller.sees_all)
+    .bind(caller.user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((status, revision, stored_key)) = current else {
+        tx.rollback().await?;
+        return Err(incident_not_found());
+    };
+
+    if status == "CLOSED" {
+        // A replay of THIS closure answers with the closure that already happened: a
+        // client whose first attempt timed out has to be able to ask again without
+        // being told its own successful write is a conflict. Any other close of a
+        // closed incident is a second decision, and is refused.
+        if let (Some(key), Some(stored)) = (key.as_deref(), stored_key.as_deref()) {
+            if key == stored {
+                tx.rollback().await?;
+                return query_incident(db, caller, incident_id).await;
+            }
+        }
+        tx.rollback().await?;
+        return Err(already_closed());
+    }
+    // No shortcut: CLOSED is reachable only from CONCLUDED, and CONCLUDED is only
+    // reachable through a signed verdict. The schema enforces the same rule (0019
+    // trigger), so this is the explainable refusal in front of the durable one.
+    if status != "CONCLUDED" {
+        tx.rollback().await?;
+        return Err(close_requires_concluded(&status));
+    }
+    let signed: Option<Uuid> =
+        sqlx::query_scalar("SELECT incident_id FROM kernel.incident_verdicts WHERE incident_id=$1")
+            .bind(incident_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if signed.is_none() {
+        tx.rollback().await?;
+        return Err(close_requires_verdict());
+    }
+    if revision != payload.expected_revision {
+        tx.rollback().await?;
+        return Err(version_conflict(
+            "close",
+            revision,
+            payload.expected_revision,
+        ));
+    }
+
+    let closed_at: Option<DateTime<Utc>> = sqlx::query_scalar(
+        "UPDATE kernel.incidents
+            SET status='CLOSED', closed_at=now(), closed_by=$2, closure_note=$3,
+                closure_key=$4, revision=revision+1, updated_at=now()
+          WHERE incident_id=$1 AND status='CONCLUDED' AND revision=$5
+          RETURNING closed_at",
+    )
+    .bind(incident_id)
+    .bind(caller.user_id)
+    .bind(&note)
+    .bind(key.as_deref())
+    .bind(payload.expected_revision)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(closure_write_refusal)?;
+    let Some(closed_at) = closed_at else {
+        // The lock was held, so this is the compare-and-set doing its job rather than
+        // a race we can still see: report it as a state conflict, which is what it
+        // would be, and never as a closure that happened.
+        tx.rollback().await?;
+        return Err(AppError::conflict(
+            "INCIDENT_STATE_CONFLICT",
+            "the incident changed state while the closure was being recorded; reload before retrying",
+        ));
+    };
+    audit_in_tx(
+        &mut tx,
+        "INCIDENT_CLOSED",
+        caller.user_id,
+        incident_id,
+        "CLOSE",
+        serde_json::json!({
+            "closedAt": closed_at,
+            "closureNote": &note,
+            // The key is recorded so the trail itself explains why a repeated request
+            // was answered 200: this is the closure it replayed.
+            "idempotencyKey": key,
+            "revisionFrom": payload.expected_revision,
+            "revisionTo": payload.expected_revision + 1,
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    // Re-read inside the caller's own scope. The closer is the owner here (or a role
+    // that sees everything), so this cannot turn a successful close into a 404.
+    query_incident(db, caller, incident_id).await
+}
+
+async fn transfer_incident_owner(
+    db: &PgPool,
+    caller: Caller,
+    incident_id: Uuid,
+    payload: TransferOwnerRequest,
+) -> AppResult<OwnerTransferView> {
+    let reason = bounded(
+        &payload.reason,
+        "reason",
+        TRANSFER_REASON_MIN_CHARS,
+        TRANSFER_REASON_MAX_CHARS,
+    )?;
+    if payload.expected_revision < 1 {
+        return Err(AppError::bad_request(
+            "expectedRevision must be the revision you read, which is 1 or greater",
+        ));
+    }
+
+    let mut tx = db.begin().await?;
+    let current: Option<(String, i64, Uuid)> = sqlx::query_as(
+        "SELECT status, revision, owner FROM kernel.incidents
+          WHERE incident_id=$1 AND ($2::boolean OR owner=$3) FOR UPDATE",
+    )
+    .bind(incident_id)
+    .bind(caller.sees_all)
+    .bind(caller.user_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((status, revision, previous_owner)) = current else {
+        tx.rollback().await?;
+        return Err(incident_not_found());
+    };
+    // A closed record is final: no handover, no evidence, no verdict. Ownership of a
+    // closed incident is a historical fact, so reassigning it would rewrite history
+    // rather than hand over live work.
+    if status == "CLOSED" {
+        tx.rollback().await?;
+        return Err(closed_refuses_transfer());
+    }
+    if revision != payload.expected_revision {
+        tx.rollback().await?;
+        return Err(version_conflict(
+            "transfer",
+            revision,
+            payload.expected_revision,
+        ));
+    }
+    if payload.to_owner == previous_owner {
+        tx.rollback().await?;
+        return Err(AppError::conflict(
+            "INCIDENT_OWNER_UNCHANGED",
+            "that account already owns this incident; a handover must name a different owner",
+        ));
+    }
+    // The authorization scope of the new owner, which is exactly what the handover
+    // grants: the target must be a real, enabled account whose role can operate.
+    // Assigning to a viewer would hand an incident to a role that cannot act on it;
+    // assigning to a disabled account creates work nobody can pick up.
+    let target: Option<(String, bool)> =
+        sqlx::query_as("SELECT role, disabled FROM kernel.users WHERE id=$1")
+            .bind(payload.to_owner)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some((role, disabled)) = target else {
+        tx.rollback().await?;
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "INCIDENT_OWNER_UNKNOWN",
+            "the target owner is not an account the Kernel knows",
+        ));
+    };
+    if disabled {
+        tx.rollback().await?;
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "INCIDENT_OWNER_DISABLED",
+            "the target account is disabled and could not act on the incident",
+        ));
+    }
+    let eligible = role
+        .parse::<opsweave_contracts::Role>()
+        .map(|parsed| parsed.can_operate())
+        .unwrap_or(false);
+    if !eligible {
+        tx.rollback().await?;
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "INCIDENT_OWNER_ROLE_INELIGIBLE",
+            "only an operator or admin account can own an incident: a viewer could not act on it and would lose nothing by not being named",
+        ));
+    }
+
+    let updated: Option<(i64, DateTime<Utc>)> = sqlx::query_as(
+        "UPDATE kernel.incidents
+            SET owner=$2, owner_assigned_at=now(), revision=revision+1, updated_at=now()
+          WHERE incident_id=$1 AND revision=$3 AND status<>'CLOSED'
+          RETURNING revision, owner_assigned_at",
+    )
+    .bind(incident_id)
+    .bind(payload.to_owner)
+    .bind(payload.expected_revision)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((revision_to, transferred_at)) = updated else {
+        tx.rollback().await?;
+        return Err(AppError::conflict(
+            "INCIDENT_STATE_CONFLICT",
+            "the incident changed while the handover was being recorded; reload before retrying",
+        ));
+    };
+    audit_in_tx(
+        &mut tx,
+        "INCIDENT_OWNER_TRANSFERRED",
+        caller.user_id,
+        incident_id,
+        "TRANSFER_OWNER",
+        serde_json::json!({
+            "fromOwner": previous_owner,
+            "toOwner": payload.to_owner,
+            "reason": &reason,
+            "revisionFrom": payload.expected_revision,
+            "revisionTo": revision_to,
+        }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    Ok(OwnerTransferView {
+        incident_id,
+        previous_owner,
+        owner: payload.to_owner,
+        owner_assigned_at: transferred_at,
+        reason,
+        transferred_by: caller.user_id,
+        transferred_at,
+        revision: revision_to,
+    })
+}
+
+async fn query_timeline(
+    db: &PgPool,
+    caller: Caller,
+    incident_id: Uuid,
+    limit: i64,
+) -> AppResult<IncidentTimeline> {
+    // The authorization is the incident read predicate, not a filter on the audit
+    // table: an operator cannot reach the trail of an incident it cannot read, even
+    // though /api/v1/audit would happily answer with it.
+    incident_status(db, caller, incident_id).await?;
+    let subject = incident_id.to_string();
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM kernel.audit_events
+          WHERE subject_type='INCIDENT' AND subject_id=$1",
+    )
+    .bind(&subject)
+    .fetch_one(db)
+    .await?;
+    let mut items = sqlx::query_as::<_, AuditEventView>(
+        "SELECT id, event_type, actor_type, actor_id, subject_type, subject_id,
+                action, result, details, request_id, occurred_at
+           FROM kernel.audit_events
+          WHERE subject_type='INCIDENT' AND subject_id=$1
+          ORDER BY occurred_at DESC, id DESC
+          LIMIT $2",
+    )
+    .bind(&subject)
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+    // Newest-first is how the page is bounded; chronological is how a trail is read.
+    // The reverse happens here so the client never has to know which direction the
+    // LIMIT ran in.
+    items.reverse();
+    Ok(IncidentTimeline {
+        items,
+        truncated: total > limit,
+    })
 }
 
 async fn query_verdict(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppResult<VerdictView> {
@@ -1605,6 +2124,7 @@ fn considered_set_digest(snapshot: &[(Uuid, String)]) -> String {
 const INCIDENT_SELECT: &str = r#"
 SELECT i.incident_id, i.title, i.severity, i.status, i.source,
        i.native_id, i.related_entity, i.started_at, i.updated_at, i.owner,
+       i.owner_assigned_at, i.revision, i.closed_at, i.closed_by, i.closure_note,
        COALESCE((
          SELECT jsonb_agg(ref.evidence_id ORDER BY ref.collected_at DESC, ref.evidence_id DESC)
          FROM (
@@ -1732,6 +2252,77 @@ fn incident_not_found() -> AppError {
         "INCIDENT_NOT_FOUND",
         "incident not found",
     )
+}
+/// A closure of a record that is already closed, by a request that is not a replay
+/// of the closure that happened (no key, or a different one).
+fn already_closed() -> AppError {
+    AppError::conflict(
+        "INCIDENT_ALREADY_CLOSED",
+        "this incident is already closed; the closure on record stands",
+    )
+}
+
+/// Every write path's answer to a closed incident. One shared refusal so the four
+/// write endpoints (evidence, verdict, close, transfer) cannot describe the same
+/// state four different ways.
+fn closed_refuses_transfer() -> AppError {
+    AppError::conflict(
+        "INCIDENT_CLOSED",
+        "this incident is closed and accepts no handover: ownership of a closed record is history, not live work",
+    )
+}
+
+/// The no-shortcut refusal: CLOSED is reachable only from CONCLUDED.
+fn close_requires_concluded(status: &str) -> AppError {
+    AppError::conflict(
+        "INCIDENT_CLOSE_REQUIRES_CONCLUDED",
+        format!(
+            "this incident is {status}, so it cannot be closed; CLOSED is reachable only from CONCLUDED, and CONCLUDED is what recording a Human Verdict does"
+        ),
+    )
+}
+
+/// The verdict gate. Reached when the status says CONCLUDED but no signed verdict
+/// exists - a state the schema's trigger also refuses to close through.
+fn close_requires_verdict() -> AppError {
+    AppError::conflict(
+        "INCIDENT_CLOSE_REQUIRES_VERDICT",
+        "this incident has no Human Verdict, so closing it would record a conclusion nobody signed; record the verdict first",
+    )
+}
+
+/// A stale expectedRevision. The message names both versions because the client's
+/// only useful next action is to re-read and decide again.
+fn version_conflict(operation: &str, current: i64, expected: i64) -> AppError {
+    AppError::conflict(
+        "INCIDENT_VERSION_CONFLICT",
+        format!(
+            "this incident is at revision {current} and the {operation} was decided against revision {expected}; re-read it and repeat the decision"
+        ),
+    )
+}
+
+/// A closure refused by the schema rather than by this handler.
+///
+/// The handler checks the same two rules first, so reaching this means the durable
+/// guard is stricter than the code above it - exactly the case where a generic 500
+/// would hide an invariant. It is translated back into the 409 the client can act
+/// on, and anything else stays a 500.
+fn closure_write_refusal(error: sqlx::Error) -> AppError {
+    let text = error.to_string();
+    if text.contains("no human verdict") {
+        return close_requires_verdict();
+    }
+    if text.contains("cannot be closed from status") {
+        return close_requires_concluded("not CONCLUDED");
+    }
+    if text.contains("cannot return to") {
+        return AppError::conflict(
+            "INCIDENT_ALREADY_CLOSED",
+            "a closed incident cannot be reopened: a closure is final",
+        );
+    }
+    AppError::internal(error)
 }
 
 /// Trims and bounds a required text field. Length is counted in characters, the
@@ -1871,7 +2462,19 @@ mod tests {
 
     async fn cleanup(pool: &PgPool, users: &[Uuid]) {
         for user in users {
-            let incidents = "SELECT incident_id FROM kernel.incidents WHERE owner=$1";
+            // G12 C: incidents.closed_by, incident_evidence.submitted_by and
+            // incident_verdicts.decided_by are all foreign keys onto kernel.users, and a
+            // handover deliberately separates the account that acted from the account
+            // that owns the row. So the set deleted here is every incident one of these
+            // accounts touched - as owner, as the closer of record, as a submitter or as
+            // the signer - before the accounts themselves go.
+            let incidents = "
+                SELECT i.incident_id FROM kernel.incidents i
+                 WHERE i.owner=$1 OR i.closed_by=$1
+                    OR EXISTS (SELECT 1 FROM kernel.incident_evidence e
+                                WHERE e.incident_id=i.incident_id AND e.submitted_by=$1)
+                    OR EXISTS (SELECT 1 FROM kernel.incident_verdicts v
+                                WHERE v.incident_id=i.incident_id AND v.decided_by=$1)";
             // G12 B: content rows cannot be deleted on their own (the write-once
             // trigger refuses), and they are not left behind either: the foreign
             // key cascades from the evidence row, which is the one delete the
@@ -2041,6 +2644,72 @@ mod tests {
             rationale: "cpu saturation matches the reported window".to_string(),
         }
     }
+    fn close_request(revision: i64, note: &str) -> CloseIncidentRequest {
+        CloseIncidentRequest {
+            expected_revision: revision,
+            note: note.to_string(),
+            idempotency_key: None,
+        }
+    }
+
+    fn keyed_close_request(revision: i64, note: &str, key: &str) -> CloseIncidentRequest {
+        CloseIncidentRequest {
+            expected_revision: revision,
+            note: note.to_string(),
+            idempotency_key: Some(key.to_string()),
+        }
+    }
+
+    fn transfer_request(revision: i64, to_owner: Uuid, reason: &str) -> TransferOwnerRequest {
+        TransferOwnerRequest {
+            expected_revision: revision,
+            to_owner,
+            reason: reason.to_string(),
+        }
+    }
+
+    /// An incident walked to CONCLUDED through the same data paths the endpoints
+    /// call: one evidence row, then a signed verdict. No test may reach CONCLUDED by
+    /// writing the status, because then it would be proving a state the product
+    /// cannot produce.
+    async fn concluded_incident(pool: &PgPool, user: Uuid, title: &str) -> IncidentView {
+        let (_, incident) = insert_incident(pool, caller(user), incident_request(title, None))
+            .await
+            .unwrap();
+        insert_evidence(
+            pool,
+            &no_adapters(),
+            caller(user),
+            incident.id,
+            evidence_request(&format!("sha256:{}", Uuid::new_v4().simple())),
+        )
+        .await
+        .unwrap();
+        insert_verdict(
+            pool,
+            caller(user),
+            incident.id,
+            verdict_request("CONFIRMED"),
+        )
+        .await
+        .unwrap();
+        query_incident(pool, caller(user), incident.id)
+            .await
+            .unwrap()
+    }
+
+    /// The same walk, one step further: the closure, through close_incident_record.
+    async fn closed_incident(pool: &PgPool, user: Uuid, title: &str) -> IncidentView {
+        let concluded = concluded_incident(pool, user, title).await;
+        close_incident_record(
+            pool,
+            caller(user),
+            concluded.id,
+            close_request(concluded.revision, "resolved: the node came back"),
+        )
+        .await
+        .unwrap()
+    }
 
     // -- pure validation -----------------------------------------------------
 
@@ -2095,6 +2764,11 @@ mod tests {
             started_at: Utc::now(),
             updated_at: Utc::now(),
             owner: Uuid::new_v4(),
+            owner_assigned_at: Utc::now(),
+            revision: 1,
+            closed_at: None,
+            closed_by: None,
+            closure_note: None,
             evidence_refs: sqlx::types::Json(Vec::new()),
             verdict_value: None,
             verdict_rationale: None,
@@ -2453,45 +3127,902 @@ mod tests {
         cleanup(&pool, &[user]).await;
     }
 
+    // -----------------------------------------------------------------------
+    // G12 C1 - the controlled CONCLUDED -> CLOSED.
+    //
+    // Every test here walks the incident through the real data paths (evidence,
+    // verdict, close) rather than writing status='CLOSED' by hand: a test that
+    // injects the state it is testing proves the guard around a state the product
+    // cannot produce.
+    // -----------------------------------------------------------------------
+
     #[tokio::test]
-    async fn closed_incident_accepts_no_evidence_and_no_verdict() {
+    async fn closing_a_concluded_incident_records_the_closure_and_its_audit() {
         let Some(pool) = test_pool().await else {
             return;
         };
         let user = seed_user(&pool, "operator").await;
-        let (_, incident) =
-            insert_incident(&pool, caller(user), incident_request("old noise", None))
+        let concluded = concluded_incident(&pool, user, "disk full on node-7").await;
+        assert_eq!(concluded.status, "CONCLUDED");
+        assert!(concluded.closed_at.is_none());
+        let revision_before = concluded.revision;
+
+        let closed = close_incident_record(
+            &pool,
+            caller(user),
+            concluded.id,
+            close_request(revision_before, "root cause was log rotation; fixed"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(closed.status, "CLOSED");
+        assert_eq!(closed.closed_by, Some(user));
+        assert_eq!(
+            closed.closure_note.as_deref(),
+            Some("root cause was log rotation; fixed")
+        );
+        assert!(closed.closed_at.is_some());
+        assert_eq!(
+            closed.revision,
+            revision_before + 1,
+            "a closure is a change to the record, so the version moves with it"
+        );
+        // The verdict is untouched by the closure: it is what the closure stands on,
+        // not a step that gets rewritten.
+        assert!(closed.human_verdict.is_some());
+        assert_eq!(audit_rows(&pool, concluded.id, "INCIDENT_CLOSED").await, 1);
+
+        cleanup(&pool, &[user]).await;
+    }
+    /// The direct jump the state machine must not have.
+    #[tokio::test]
+    async fn an_open_or_investigating_incident_cannot_jump_straight_to_closed() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, open) =
+            insert_incident(&pool, caller(user), incident_request("never triaged", None))
                 .await
                 .unwrap();
-        // No D2 endpoint produces CLOSED (ADR section 3.3); a D3 closure is
-        // simulated directly to prove the guard still holds.
-        sqlx::query("UPDATE kernel.incidents SET status='CLOSED' WHERE incident_id=$1")
+
+        // OPEN -> CLOSED, refused with the reason and the current status.
+        let error = close_incident_record(
+            &pool,
+            caller(user),
+            open.id,
+            close_request(open.revision, "closing without investigating"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.code, "INCIDENT_CLOSE_REQUIRES_CONCLUDED");
+        assert!(
+            error.message.contains("OPEN"),
+            "the refusal must say which status refused it: {}",
+            error.message
+        );
+
+        // INVESTIGATING -> CLOSED, same refusal: evidence is not a conclusion.
+        insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(user),
+            open.id,
+            evidence_request("sha256:first-look"),
+        )
+        .await
+        .unwrap();
+        let investigating = query_incident(&pool, caller(user), open.id).await.unwrap();
+        assert_eq!(investigating.status, "INVESTIGATING");
+        let error = close_incident_record(
+            &pool,
+            caller(user),
+            open.id,
+            close_request(investigating.revision, "still closing without a verdict"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_CLOSE_REQUIRES_CONCLUDED");
+
+        // Neither refusal wrote anything.
+        let after = query_incident(&pool, caller(user), open.id).await.unwrap();
+        assert_eq!(after.status, "INVESTIGATING");
+        assert!(after.closed_at.is_none());
+        assert_eq!(after.revision, investigating.revision);
+        assert_eq!(audit_rows(&pool, open.id, "INCIDENT_CLOSED").await, 0);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// A closure stands on a signed verdict, in the handler AND in the schema.
+    #[tokio::test]
+    async fn closing_without_a_signed_verdict_is_refused_twice_over() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("concluded by hand", None),
+        )
+        .await
+        .unwrap();
+        // The only way to be CONCLUDED without a verdict is a hand-written UPDATE.
+        sqlx::query("UPDATE kernel.incidents SET status='CONCLUDED' WHERE incident_id=$1")
             .bind(incident.id)
             .execute(&pool)
             .await
             .unwrap();
 
-        let error = insert_evidence(
+        let error = close_incident_record(
             &pool,
-            &no_adapters(),
             caller(user),
             incident.id,
-            evidence_request("sha256:late"),
+            close_request(1, "nothing was signed here"),
         )
         .await
         .unwrap_err();
-        assert_eq!(error.code, "INCIDENT_CLOSED");
-        let error = insert_verdict(
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.code, "INCIDENT_CLOSE_REQUIRES_VERDICT");
+
+        // And the schema refuses the same closure one layer down, so a bug in the
+        // handler cannot close an unsigned incident either.
+        let direct = sqlx::query(
+            "UPDATE kernel.incidents
+                SET status='CLOSED', closed_at=now(), closed_by=$2 WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .bind(user)
+        .execute(&pool)
+        .await;
+        let message = direct
+            .expect_err("the schema must refuse a closure with no signed verdict")
+            .to_string();
+        assert!(
+            message.contains("no human verdict"),
+            "unexpected database refusal: {message}"
+        );
+
+        cleanup(&pool, &[user]).await;
+    }
+    /// Two operators closing the same incident at the same instant.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn two_simultaneous_closes_produce_exactly_one_closure() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let concluded = concluded_incident(&pool, user, "flapping link").await;
+        let revision = concluded.revision;
+
+        let (first, second) = tokio::join!(
+            close_incident_record(
+                &pool,
+                caller(user),
+                concluded.id,
+                close_request(revision, "closed by the first caller"),
+            ),
+            close_incident_record(
+                &pool,
+                caller(user),
+                concluded.id,
+                close_request(revision, "closed by the second caller"),
+            ),
+        );
+
+        let succeeded = [&first, &second]
+            .iter()
+            .filter(|result| result.is_ok())
+            .count();
+        assert_eq!(
+            succeeded, 1,
+            "exactly one close may win: first={first:?} second={second:?}"
+        );
+        let loser = match (first, second) {
+            (Err(error), _) => error,
+            (_, Err(error)) => error,
+            _ => unreachable!("the assertion above already proved one close failed"),
+        };
+        assert_eq!(loser.status, StatusCode::CONFLICT);
+        assert!(
+            matches!(
+                loser.code,
+                "INCIDENT_ALREADY_CLOSED" | "INCIDENT_VERSION_CONFLICT" | "INCIDENT_STATE_CONFLICT"
+            ),
+            "the losing close must be told why, not handed a 500: {}",
+            loser.code
+        );
+
+        // One closure of record: one audit row, one closed_at.
+        assert_eq!(audit_rows(&pool, concluded.id, "INCIDENT_CLOSED").await, 1);
+        let row: (i64, i64) = sqlx::query_as(
+            "SELECT count(*), count(DISTINCT closed_at::text)::bigint FROM kernel.incidents
+              WHERE incident_id=$1 AND status='CLOSED'",
+        )
+        .bind(concluded.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row, (1, 1));
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// Idempotency: a retried close is the closure that happened; a second close is
+    /// a second decision and is refused.
+    #[tokio::test]
+    async fn a_retried_close_is_answered_with_the_closure_it_repeats() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let concluded = concluded_incident(&pool, user, "cache stampede").await;
+        let revision = concluded.revision;
+        let key = format!("close-{}", Uuid::new_v4().simple());
+
+        let first = close_incident_record(
             &pool,
             caller(user),
-            incident.id,
-            verdict_request("INCONCLUSIVE"),
+            concluded.id,
+            keyed_close_request(revision, "fixed by warming the cache", &key),
+        )
+        .await
+        .unwrap();
+        let replay = close_incident_record(
+            &pool,
+            caller(user),
+            concluded.id,
+            keyed_close_request(
+                revision,
+                "a second note that must not replace the first",
+                &key,
+            ),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(replay.status, "CLOSED");
+        assert_eq!(
+            replay.closed_at, first.closed_at,
+            "a replay must answer with the closure of record, not with a new one"
+        );
+        assert_eq!(
+            replay.closure_note, first.closure_note,
+            "the replay must not rewrite the reason the first close recorded"
+        );
+        assert_eq!(
+            replay.revision, first.revision,
+            "a replay changes nothing, so the version does not move either"
+        );
+        assert_eq!(audit_rows(&pool, concluded.id, "INCIDENT_CLOSED").await, 1);
+
+        // A different key is a second closure attempt, not a retry.
+        let error = close_incident_record(
+            &pool,
+            caller(user),
+            concluded.id,
+            keyed_close_request(
+                first.revision,
+                "closing it again on purpose",
+                "a-different-key",
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.code, "INCIDENT_ALREADY_CLOSED");
+
+        // And a caller with no key at all cannot claim a retry.
+        let error = close_incident_record(
+            &pool,
+            caller(user),
+            concluded.id,
+            close_request(first.revision, "closing it again with no key"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_ALREADY_CLOSED");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// The closure and the audit row that describes it are one transaction.
+    #[tokio::test]
+    async fn a_failed_audit_rolls_the_closure_back() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let concluded = concluded_incident(&pool, user, "io error burst").await;
+        let revision = concluded.revision;
+
+        let probe = refuse_audit(&pool, "INCIDENT_CLOSED", user).await;
+        let refused = close_incident_record(
+            &pool,
+            caller(user),
+            concluded.id,
+            close_request(revision, "closing while the audit table refuses"),
+        )
+        .await;
+        allow_audit(&pool, &probe).await;
+
+        let error = refused.unwrap_err();
+        assert_eq!(error.code, "AUDIT_WRITE_FAILED");
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            error.retryable,
+            "nothing was persisted, so telling the client to retry is honest"
+        );
+
+        let after = query_incident(&pool, caller(user), concluded.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            after.status, "CONCLUDED",
+            "a closure without its audit row must not exist"
+        );
+        assert!(after.closed_at.is_none());
+        assert_eq!(after.revision, revision);
+
+        // The same request succeeds once the audit can be written, which is what
+        // makes the previous 500 a rollback rather than a poisoned state.
+        let closed = close_incident_record(
+            &pool,
+            caller(user),
+            concluded.id,
+            close_request(revision, "retried after the audit table recovered"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(closed.status, "CLOSED");
+        assert_eq!(audit_rows(&pool, concluded.id, "INCIDENT_CLOSED").await, 1);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// After CLOSED: every write is refused, and there is no way back.
+    #[tokio::test]
+    async fn a_closed_incident_refuses_every_write_and_cannot_be_reopened() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let other = seed_user(&pool, "operator").await;
+        let closed = closed_incident(&pool, user, "old noise").await;
+        assert_eq!(closed.status, "CLOSED");
+
+        for (code, error) in [
+            (
+                "INCIDENT_CLOSED",
+                insert_evidence(
+                    &pool,
+                    &no_adapters(),
+                    caller(user),
+                    closed.id,
+                    evidence_request("sha256:late"),
+                )
+                .await
+                .unwrap_err(),
+            ),
+            (
+                "INCIDENT_CLOSED",
+                insert_verdict(
+                    &pool,
+                    caller(user),
+                    closed.id,
+                    verdict_request("INCONCLUSIVE"),
+                )
+                .await
+                .unwrap_err(),
+            ),
+            (
+                "INCIDENT_ALREADY_CLOSED",
+                close_incident_record(
+                    &pool,
+                    caller(user),
+                    closed.id,
+                    close_request(closed.revision, "closing it a second time"),
+                )
+                .await
+                .unwrap_err(),
+            ),
+        ] {
+            assert_eq!(error.code, code, "unexpected refusal: {}", error.message);
+        }
+
+        // A handover of a closed record is refused too: ownership of history is not
+        // live work, and reassigning it would rewrite who was accountable.
+        let error = transfer_incident_owner(
+            &pool,
+            caller(user),
+            closed.id,
+            transfer_request(closed.revision, other, "handing over a closed record"),
         )
         .await
         .unwrap_err();
         assert_eq!(error.code, "INCIDENT_CLOSED");
 
-        cleanup(&pool, &[user]).await;
+        // No reopening, not even by hand: the schema refuses the status move.
+        let reopened =
+            sqlx::query("UPDATE kernel.incidents SET status='INVESTIGATING' WHERE incident_id=$1")
+                .bind(closed.id)
+                .execute(&pool)
+                .await;
+        let message = reopened
+            .expect_err("a closed incident must not return to another status")
+            .to_string();
+        assert!(
+            message.contains("cannot return to"),
+            "unexpected database refusal: {message}"
+        );
+
+        // The worst case the rule names: delete the verdict, then try to reopen. The
+        // verdict is gone (no endpoint can do this; a table owner just did), and the
+        // incident is STILL closed.
+        sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id=$1")
+            .bind(closed.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let reopened =
+            sqlx::query("UPDATE kernel.incidents SET status='CONCLUDED' WHERE incident_id=$1")
+                .bind(closed.id)
+                .execute(&pool)
+                .await;
+        let message = reopened
+            .expect_err("deleting the verdict must not reopen a closed incident")
+            .to_string();
+        assert!(
+            message.contains("cannot return to"),
+            "unexpected database refusal: {message}"
+        );
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM kernel.incidents WHERE incident_id=$1")
+                .bind(closed.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "CLOSED");
+
+        cleanup(&pool, &[user, other]).await;
+    }
+    // -----------------------------------------------------------------------
+    // G12 C2 - the ownership handover.
+    //
+    // The owner column IS the operator read predicate (jobs.rs:1883), so a handover
+    // is not a bookkeeping change: it moves who can read and write the incident. Every
+    // test below therefore asserts the READ scope as well as the write scope, before
+    // and after, for both accounts.
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn a_handover_moves_the_read_and_write_scope_between_the_two_operators() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let old_owner = seed_user(&pool, "operator").await;
+        let new_owner = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(old_owner),
+            incident_request("shift change", None),
+        )
+        .await
+        .unwrap();
+        insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(old_owner),
+            incident.id,
+            evidence_request("sha256:old-owner-note"),
+        )
+        .await
+        .unwrap();
+
+        // --- before the handover -------------------------------------------
+        // Old owner: reads the record and its trail, and can write.
+        let before = query_incident(&pool, caller(old_owner), incident.id)
+            .await
+            .unwrap();
+        assert_eq!(before.owner, old_owner);
+        assert!(query_timeline(&pool, caller(old_owner), incident.id, 50)
+            .await
+            .is_ok());
+        // New owner: nothing. Not a 403 - a 404, because the record is not theirs to
+        // know about.
+        for error in [
+            query_incident(&pool, caller(new_owner), incident.id)
+                .await
+                .unwrap_err(),
+            query_timeline(&pool, caller(new_owner), incident.id, 50)
+                .await
+                .unwrap_err(),
+        ] {
+            assert_eq!(error.status, StatusCode::NOT_FOUND);
+            assert_eq!(error.code, "INCIDENT_NOT_FOUND");
+        }
+        // ... and their LIST does not contain it, which is the scope that matters when
+        // nobody asks for a specific id.
+        let listed = query_incidents(&pool, caller(new_owner), IncidentListQuery::default())
+            .await
+            .unwrap()
+            .0;
+        assert!(!listed.iter().any(|view| view.id == incident.id));
+
+        // --- the handover ---------------------------------------------------
+        let handover = transfer_incident_owner(
+            &pool,
+            caller(old_owner),
+            incident.id,
+            transfer_request(
+                before.revision,
+                new_owner,
+                "night shift takes over; the pager is with them",
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(handover.previous_owner, old_owner);
+        assert_eq!(handover.owner, new_owner);
+        assert_eq!(handover.transferred_by, old_owner);
+        assert_eq!(handover.transferred_at, handover.owner_assigned_at);
+        assert_eq!(
+            handover.revision,
+            before.revision + 1,
+            "a handover is a change to the record"
+        );
+        assert_eq!(
+            handover.reason,
+            "night shift takes over; the pager is with them"
+        );
+        assert_eq!(
+            audit_rows(&pool, incident.id, "INCIDENT_OWNER_TRANSFERRED").await,
+            1
+        );
+
+        // --- after the handover --------------------------------------------
+        // Old owner: loses both scopes, with the same 404 as any other stranger.
+        let error = query_incident(&pool, caller(old_owner), incident.id)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_NOT_FOUND");
+        assert_eq!(
+            insert_evidence(
+                &pool,
+                &no_adapters(),
+                caller(old_owner),
+                incident.id,
+                evidence_request("sha256:old-owner-after"),
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "INCIDENT_NOT_FOUND"
+        );
+        // New owner: reads it, reads the trail, can write, and is the accountable
+        // party from now on.
+        let after = query_incident(&pool, caller(new_owner), incident.id)
+            .await
+            .unwrap();
+        assert_eq!(after.owner, new_owner);
+        assert_eq!(after.owner_assigned_at, handover.owner_assigned_at);
+        assert!(
+            insert_evidence(
+                &pool,
+                &no_adapters(),
+                caller(new_owner),
+                incident.id,
+                evidence_request("sha256:new-owner-note"),
+            )
+            .await
+            .unwrap()
+            .0
+        );
+        let trail = query_timeline(&pool, caller(new_owner), incident.id, 50)
+            .await
+            .unwrap();
+        assert!(trail
+            .items
+            .iter()
+            .any(|event| event.event_type == "INCIDENT_OWNER_TRANSFERRED"));
+        let listed = query_incidents(&pool, caller(new_owner), IncidentListQuery::default())
+            .await
+            .unwrap()
+            .0;
+        assert!(listed.iter().any(|view| view.id == incident.id));
+
+        cleanup(&pool, &[old_owner, new_owner]).await;
+    }
+    #[tokio::test]
+    async fn a_handover_requires_the_current_revision() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let target = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(owner),
+            incident_request("stale handover", None),
+        )
+        .await
+        .unwrap();
+        // Something moved the record after the caller read it: the evidence append
+        // bumps the revision, exactly as a concurrent reader would see.
+        insert_evidence(
+            &pool,
+            &no_adapters(),
+            caller(owner),
+            incident.id,
+            evidence_request("sha256:moved"),
+        )
+        .await
+        .unwrap();
+
+        let error = transfer_incident_owner(
+            &pool,
+            caller(owner),
+            incident.id,
+            transfer_request(
+                incident.revision,
+                target,
+                "handing over on a version I no longer hold",
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.code, "INCIDENT_VERSION_CONFLICT");
+
+        // The owner did not move, and no handover was recorded.
+        let unchanged = query_incident(&pool, caller(owner), incident.id)
+            .await
+            .unwrap();
+        assert_eq!(unchanged.owner, owner);
+        assert_eq!(
+            audit_rows(&pool, incident.id, "INCIDENT_OWNER_TRANSFERRED").await,
+            0
+        );
+
+        // Re-reading fixes it: the retry with the current revision succeeds.
+        let handover = transfer_incident_owner(
+            &pool,
+            caller(owner),
+            incident.id,
+            transfer_request(
+                unchanged.revision,
+                target,
+                "retried against the revision I just read",
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(handover.owner, target);
+
+        cleanup(&pool, &[owner, target]).await;
+    }
+    #[tokio::test]
+    async fn a_handover_refuses_an_ineligible_target_and_a_no_op() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let viewer = seed_user(&pool, "viewer").await;
+        let retired = seed_user(&pool, "operator").await;
+        sqlx::query("UPDATE kernel.users SET disabled=true WHERE id=$1")
+            .bind(retired)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(owner),
+            incident_request("target checks", None),
+        )
+        .await
+        .unwrap();
+        let revision = incident.revision;
+
+        // A viewer reads every incident, so naming one as owner would give the handover
+        // no accountable party: nobody could act on the work.
+        let error = transfer_incident_owner(
+            &pool,
+            caller(owner),
+            incident.id,
+            transfer_request(revision, viewer, "handing it to someone who cannot act"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_OWNER_ROLE_INELIGIBLE");
+
+        // A disabled account cannot pick work up.
+        let error = transfer_incident_owner(
+            &pool,
+            caller(owner),
+            incident.id,
+            transfer_request(revision, retired, "handing it to a disabled account"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_OWNER_DISABLED");
+
+        // An id that is not an account.
+        let error = transfer_incident_owner(
+            &pool,
+            caller(owner),
+            incident.id,
+            transfer_request(revision, Uuid::new_v4(), "handing it to nobody at all"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_OWNER_UNKNOWN");
+
+        // A handover to the account that already owns it records nothing.
+        let error = transfer_incident_owner(
+            &pool,
+            caller(owner),
+            incident.id,
+            transfer_request(revision, owner, "handing it to the account that has it"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_OWNER_UNCHANGED");
+
+        // None of the four refusals changed the record.
+        let unchanged = query_incident(&pool, caller(owner), incident.id)
+            .await
+            .unwrap();
+        assert_eq!(unchanged.owner, owner);
+        assert_eq!(unchanged.revision, revision);
+        assert_eq!(
+            audit_rows(&pool, incident.id, "INCIDENT_OWNER_TRANSFERRED").await,
+            0
+        );
+
+        cleanup(&pool, &[owner, viewer, retired]).await;
+    }
+    /// Who may close or hand over: the current owner, or a role that sees every
+    /// incident. The stranger's refusal is a 404 and not a 403, because the record is
+    /// not theirs to know about.
+    #[tokio::test]
+    async fn only_the_owner_or_a_role_that_sees_everything_may_close_or_hand_over() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let stranger = seed_user(&pool, "operator").await;
+        let admin = seed_user(&pool, "admin").await;
+        let concluded = concluded_incident(&pool, owner, "scope of authority").await;
+
+        let error = close_incident_record(
+            &pool,
+            caller(stranger),
+            concluded.id,
+            close_request(concluded.revision, "closing someone else's incident"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+        assert_eq!(error.code, "INCIDENT_NOT_FOUND");
+
+        let error = transfer_incident_owner(
+            &pool,
+            caller(stranger),
+            concluded.id,
+            transfer_request(
+                concluded.revision,
+                stranger,
+                "taking an incident I cannot see",
+            ),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_NOT_FOUND");
+
+        // An admin may do both, because sees_all is the same predicate that lets it
+        // read the record in the first place.
+        let handover = transfer_incident_owner(
+            &pool,
+            admin_caller(admin),
+            concluded.id,
+            transfer_request(
+                concluded.revision,
+                stranger,
+                "reassigning to the operator who is actually on call",
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(handover.owner, stranger);
+        let moved = query_incident(&pool, caller(stranger), concluded.id)
+            .await
+            .unwrap();
+        let closed = close_incident_record(
+            &pool,
+            admin_caller(admin),
+            concluded.id,
+            close_request(moved.revision, "closed by the incident commander"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(closed.status, "CLOSED");
+        assert_eq!(
+            closed.closed_by,
+            Some(admin),
+            "the closer of record is the account that closed it, not the owner"
+        );
+        assert_eq!(closed.owner, stranger, "closing does not move ownership");
+
+        cleanup(&pool, &[owner, stranger, admin]).await;
+    }
+    /// The trail is the incident's, not the platform's.
+    #[tokio::test]
+    async fn the_timeline_is_scoped_like_the_incident_and_read_in_order() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let stranger = seed_user(&pool, "operator").await;
+        let closed = closed_incident(&pool, owner, "trail order").await;
+
+        let trail = query_timeline(&pool, caller(owner), closed.id, 50)
+            .await
+            .unwrap();
+        assert!(!trail.truncated);
+        let kinds: Vec<&str> = trail
+            .items
+            .iter()
+            .map(|event| event.event_type.as_str())
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "INCIDENT_CREATED",
+                "INCIDENT_EVIDENCE_ADDED",
+                "INCIDENT_VERDICT_RECORDED",
+                "INCIDENT_CLOSED",
+            ],
+            "the trail must be the writes that happened, in the order they happened"
+        );
+        assert!(trail
+            .items
+            .windows(2)
+            .all(|pair| pair[0].occurred_at <= pair[1].occurred_at));
+        // The closure event carries the reason, so the trail answers why and not only
+        // when.
+        let closure = trail.items.last().unwrap();
+        assert_eq!(
+            closure
+                .details
+                .get("closureNote")
+                .and_then(|value| value.as_str()),
+            Some("resolved: the node came back")
+        );
+        assert_eq!(
+            closure.actor_id,
+            owner.to_string(),
+            "the trail names the account that closed it"
+        );
+
+        // A bounded page is the NEWEST events, in order, and says it is truncated.
+        let page = query_timeline(&pool, caller(owner), closed.id, 2)
+            .await
+            .unwrap();
+        assert!(page.truncated);
+        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.items[1].event_type, "INCIDENT_CLOSED");
+        assert_eq!(page.items[0].event_type, "INCIDENT_VERDICT_RECORDED");
+
+        // Not visible to a stranger, exactly like the record itself.
+        let error = query_timeline(&pool, caller(stranger), closed.id, 50)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "INCIDENT_NOT_FOUND");
+
+        cleanup(&pool, &[owner, stranger]).await;
     }
 
     #[tokio::test]
@@ -3319,6 +4850,126 @@ mod tests {
         assert_eq!(attested, 0);
 
         cleanup(&pool, &[owner, viewer, admin]).await;
+    }
+    /// The server-side 403 the read-only UI note is NOT allowed to replace.
+    ///
+    /// The browser explains, before submission, that a viewer cannot close or hand
+    /// over; that explanation is presentation. This test drives the real axum
+    /// handlers with a real viewer AuthUser and proves the kernel refuses the write
+    /// whatever the form did or did not show.
+    #[tokio::test]
+    async fn viewer_is_refused_at_the_handler_for_close_and_handover() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use axum::routing::post;
+        use opsweave_contracts::Role;
+        use tower::ServiceExt;
+
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let viewer = seed_user(&pool, "viewer").await;
+        let concluded = concluded_incident(&pool, owner, "read only viewer").await;
+
+        let state = AppState::new(
+            crate::config::Config::from_env(),
+            pool.clone(),
+            vec![9_u8; 32],
+        )
+        .expect("test AppState");
+
+        let as_role = |role: Role, id: Uuid| AuthUser {
+            user_id: id,
+            email: format!("{id}@example.invalid"),
+            display_name: "role matrix c".to_string(),
+            role,
+            session_id: Uuid::new_v4(),
+            csrf_token: "csrf".to_string(),
+            via_cookie: true,
+        };
+
+        let send = |user: AuthUser, path: String, body: String| {
+            let state = state.clone();
+            async move {
+                use axum::middleware;
+                let router = axum::Router::new()
+                    .route(
+                        "/api/v1/incidents/{incident_id}/close",
+                        post(close_incident),
+                    )
+                    .route(
+                        "/api/v1/incidents/{incident_id}/owner",
+                        post(transfer_owner),
+                    )
+                    .layer(middleware::from_fn(
+                        move |mut request: axum::extract::Request, next: middleware::Next| {
+                            let user = user.clone();
+                            async move {
+                                request.extensions_mut().insert(user);
+                                next.run(request).await
+                            }
+                        },
+                    ))
+                    .with_state(state);
+                let response = router
+                    .oneshot(
+                        Request::builder()
+                            .method("POST")
+                            .uri(path)
+                            .header("content-type", "application/json")
+                            .body(Body::from(body))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+                    .await
+                    .unwrap();
+                (status, String::from_utf8_lossy(&bytes).to_string())
+            }
+        };
+
+        let close_body = serde_json::json!({
+            "expectedRevision": concluded.revision,
+            "note": "a viewer trying to close an incident",
+            "idempotencyKey": "viewer-close-1",
+        })
+        .to_string();
+        let (status, body) = send(
+            as_role(Role::Viewer, viewer),
+            format!("/api/v1/incidents/{}/close", concluded.id),
+            close_body.clone(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "body was {body}");
+        assert!(body.contains("FORBIDDEN"), "body was {body}");
+
+        let transfer_body = serde_json::json!({
+            "expectedRevision": concluded.revision,
+            "toOwner": viewer,
+            "reason": "a viewer trying to take an incident",
+        })
+        .to_string();
+        let (status, body) = send(
+            as_role(Role::Viewer, viewer),
+            format!("/api/v1/incidents/{}/owner", concluded.id),
+            transfer_body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "body was {body}");
+
+        // Neither refusal wrote anything: the incident is still CONCLUDED, still
+        // owned by the operator, and the viewer closed nothing.
+        let untouched = query_incident(&pool, caller(owner), concluded.id)
+            .await
+            .unwrap();
+        assert_eq!(untouched.status, "CONCLUDED");
+        assert_eq!(untouched.owner, owner);
+        assert_eq!(audit_rows(&pool, concluded.id, "INCIDENT_CLOSED").await, 0);
+
+        cleanup(&pool, &[owner, viewer]).await;
     }
 
     /// Second gate: even a hand-written INSERT cannot mint attestation. The

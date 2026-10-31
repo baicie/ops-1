@@ -1,6 +1,6 @@
 import type { MessageKey } from './i18n';
 import type { StatusTone } from './components/status-tone';
-import type { IncidentEvidence, IncidentVerdict, IncidentView } from './types';
+import type { IncidentEvidence, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
 
 /**
  * The incident slice's client-side facts, kept out of the two page components.
@@ -10,15 +10,16 @@ import type { IncidentEvidence, IncidentVerdict, IncidentView } from './types';
  * than 'unavailable', what a timeline entry may be made of - are testable without a browser and
  * cannot drift between the list and the detail page.
  *
- * Three deliberate omissions, all of them stated on the page rather than papered over:
+ * Two deliberate omissions, both of them stated on the page rather than papered over:
  *   * there is no free-text search: the list endpoint has no `q` parameter, and filtering the
  *     loaded page would silently ignore rows the cursor has not fetched yet;
- *   * there is no CLOSED transition: the kernel has no close endpoint in this slice, so the
- *     status filter carries the code for a value nothing can currently reach;
  *   * there is no AI conclusion anywhere: the payload has no field for one (ADR-G11-001 §7).
+ *
+ * G12 C removed the third one: the kernel now has a close endpoint, so CLOSED is a value this
+ * client can reach and the status filter is not carrying a code nothing produces.
  */
 
-/** The status closed set from the contract. CLOSED is reachable in the database, not in this slice. */
+/** The status closed set from the contract. Since G12 C every value has a reachable path. */
 export const INCIDENT_STATUS_CODES = ['OPEN', 'INVESTIGATING', 'CONCLUDED', 'CLOSED'] as const;
 export const INCIDENT_SEVERITY_CODES = ['CRITICAL', 'MAJOR', 'MINOR', 'WARNING'] as const;
 export const EVIDENCE_KIND_CODES = ['METRIC_SNAPSHOT', 'LOG_EXCERPT', 'QUERY_RESULT', 'OPERATOR_NOTE'] as const;
@@ -106,6 +107,20 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
   EVIDENCE_ATTESTATION_INVALID: 'incidents.error.attestationInvalid',
   EVIDENCE_ATTESTATION_STALE: 'incidents.error.attestationStale',
   EVIDENCE_ADAPTER_UNKNOWN: 'incidents.error.adapterUnknown',
+  // G12 C. Five refusals that a closure can produce, each a different obstacle and
+  // therefore a different sentence: 'not concludable', 'no verdict', 'someone else
+  // closed it', 'it already is closed', 'your version is stale'.
+  INCIDENT_CLOSE_REQUIRES_CONCLUDED: 'incidents.error.closeRequiresConcluded',
+  INCIDENT_CLOSE_REQUIRES_VERDICT: 'incidents.error.closeRequiresVerdict',
+  INCIDENT_ALREADY_CLOSED: 'incidents.error.alreadyClosed',
+  INCIDENT_VERSION_CONFLICT: 'incidents.error.versionConflict',
+  AUDIT_WRITE_FAILED: 'incidents.error.auditFailed',
+  // And four for a handover: the target is unknown, disabled, cannot operate, or is
+  // already the owner.
+  INCIDENT_OWNER_UNKNOWN: 'incidents.error.ownerUnknown',
+  INCIDENT_OWNER_DISABLED: 'incidents.error.ownerDisabled',
+  INCIDENT_OWNER_ROLE_INELIGIBLE: 'incidents.error.ownerRoleIneligible',
+  INCIDENT_OWNER_UNCHANGED: 'incidents.error.ownerUnchanged',
 };
 
 export function incidentFailureKey(code?: string | null): MessageKey | null {
@@ -141,6 +156,243 @@ export function verdictPanelState(incident: Pick<IncidentView, 'humanVerdict' | 
   if (incident.humanVerdict) return 'recorded';
   if (incident.status === 'CLOSED') return 'sealed';
   return 'open';
+}
+// ---------------------------------------------------------------------------
+// G12 C · the lifecycle: closure, handover, and what this account may do
+//
+// Everything below is presentation. The kernel is the authority for every one of
+// these answers - it re-checks the role, the data scope, the verdict and the
+// revision on every write (apps/kernel/src/incidents.rs close_incident_record /
+// transfer_incident_owner) - and the server-side 403/404/409 tests are the proof
+// that the UI is not what enforces them. What these functions buy is that a viewer
+// reads a sentence instead of submitting a form that is guaranteed to fail.
+// ---------------------------------------------------------------------------
+
+/** Kernel bounds from migration 0019 / incidents.rs; the forms validate against them. */
+export const CLOSURE_NOTE_MIN_CHARS = 4;
+export const CLOSURE_NOTE_MAX_CHARS = 1000;
+export const TRANSFER_REASON_MIN_CHARS = 10;
+export const TRANSFER_REASON_MAX_CHARS = 1000;
+
+/** Which operations can still act on an incident, and why not when they cannot. */
+export type ClosurePanelState = 'closed' | 'ready' | 'not-concludable';
+
+/**
+ * The closure panel's three answers.
+ *
+ * 'not-concludable' is not an error state: OPEN and INVESTIGATING simply have no way
+ * into CLOSED (the kernel refuses it with INCIDENT_CLOSE_REQUIRES_CONCLUDED), so the
+ * panel says what has to happen first instead of offering a disabled button.
+ */
+export function closurePanelState(incident: Pick<IncidentView, 'status'>): ClosurePanelState {
+  if (incident.status === 'CLOSED') return 'closed';
+  if (incident.status === 'CONCLUDED') return 'ready';
+  return 'not-concludable';
+}
+
+export interface IncidentCapabilities {
+  canAddEvidence: boolean;
+  canRecordVerdict: boolean;
+  canClose: boolean;
+  canTransferOwner: boolean;
+  /** Why writing is unavailable at all (a viewer), or null when the account may write. */
+  readOnlyReason: MessageKey | null;
+  /** Why the closure is not offered, or null when it is. */
+  closeBlockedReason: MessageKey | null;
+  /** Why the handover is not offered, or null when it is. */
+  transferBlockedReason: MessageKey | null;
+}
+
+export interface CapabilityInput {
+  incident: Pick<IncidentView, 'status' | 'owner' | 'humanVerdict'>;
+  userId: string | null;
+  role: Role | null;
+}
+
+/**
+ * What the page may offer this account for this incident.
+ *
+ * It mirrors, and does not replace, the kernel's rules: the operator data scope is
+ * `owner = caller` (admin and viewer see every incident), the write gate is the
+ * operator/admin role, and CLOSED accepts no write at all.
+ */
+export function incidentCapabilities({ incident, userId, role }: CapabilityInput): IncidentCapabilities {
+  const canOperate = role === 'operator' || role === 'admin';
+  const seesAll = role === 'admin' || role === 'viewer';
+  const visible = Boolean(userId) && (seesAll || incident.owner === userId);
+  const closed = incident.status === 'CLOSED';
+  const concludable = incident.status === 'CONCLUDED' && Boolean(incident.humanVerdict);
+
+  const mayWrite = canOperate && visible;
+  const readOnlyReason: MessageKey | null = visible && !canOperate ? 'incidents.permission.viewerReadOnly' : null;
+
+  const closeBlockedReason: MessageKey | null = !visible
+    ? 'incidents.permission.outOfScope'
+    : !canOperate
+      ? 'incidents.permission.viewerClose'
+      : closed
+        ? null
+        : incident.status !== 'CONCLUDED'
+          ? 'incidents.close.blocked.notConcluded'
+          : !incident.humanVerdict
+            ? 'incidents.close.blocked.noVerdict'
+            : null;
+
+  const transferBlockedReason: MessageKey | null = !visible
+    ? 'incidents.permission.outOfScope'
+    : !canOperate
+      ? 'incidents.permission.viewerTransfer'
+      : closed
+        ? 'incidents.close.blocked.closedTransfer'
+        : null;
+
+  return {
+    canAddEvidence: mayWrite && !closed,
+    canRecordVerdict: mayWrite && !closed && !incident.humanVerdict,
+    canClose: mayWrite && concludable,
+    canTransferOwner: mayWrite && !closed,
+    readOnlyReason,
+    closeBlockedReason,
+    transferBlockedReason,
+  };
+}
+
+/**
+ * Whether handing an incident over ends this account's access to it.
+ *
+ * The kernel's operator read scope IS the owner column, so an operator who transfers an
+ * incident away can no longer read it, while the roles that see every incident keep it. The
+ * answer is derived from the role and not from the write's response on purpose: a write's own
+ * echo is not evidence of what happened (docs/design/ui-visual-v3/code-rules.md A5), and the page
+ * must not need it to tell the operator the truth.
+ */
+export function losesAccessAfterHandover(role: Role | null): boolean {
+  return role === 'operator';
+}
+
+/** The body POST /incidents/{id}/close expects, built from the record on screen. */
+export interface CloseIncidentPayload {
+  expectedRevision: number;
+  note: string;
+  idempotencyKey: string;
+}
+
+export function closeIncidentPayload(revision: number, note: string, idempotencyKey: string): CloseIncidentPayload {
+  return { expectedRevision: revision, note: note.trim(), idempotencyKey };
+}
+
+/** The body POST /incidents/{id}/owner expects. */
+export interface TransferIncidentPayload {
+  expectedRevision: number;
+  toOwner: string;
+  reason: string;
+}
+
+export function transferIncidentPayload(revision: number, toOwner: string, reason: string): TransferIncidentPayload {
+  return { expectedRevision: revision, toOwner, reason: reason.trim() };
+}
+
+/**
+ * One key per close attempt, generated before the request leaves.
+ *
+ * The kernel answers a retry carrying the same key with the closure that happened, and a
+ * second close with no key as 409 - so the key must be created once per submission attempt
+ * and reused by its retries, never regenerated on a click that follows a timeout.
+ */
+export function newIdempotencyKey(): string {
+  const cryptoRef = globalThis.crypto;
+  if (cryptoRef && typeof cryptoRef.randomUUID === 'function') return cryptoRef.randomUUID();
+  // Fallback for a context without WebCrypto. Uniqueness per client is all this key needs.
+  return 'close-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+}
+
+/** Field-level validation the kernel would answer 400 for; the form says it first. */
+export function closureNoteError(note: string): MessageKey | null {
+  const length = note.trim().length;
+  if (length < CLOSURE_NOTE_MIN_CHARS || length > CLOSURE_NOTE_MAX_CHARS) return 'incidents.close.noteHint';
+  return null;
+}
+
+export function transferReasonError(reason: string): MessageKey | null {
+  const length = reason.trim().length;
+  if (length < TRANSFER_REASON_MIN_CHARS || length > TRANSFER_REASON_MAX_CHARS) return 'incidents.transfer.reasonHint';
+  return null;
+}
+
+/**
+ * A row the Kernel vouched for itself, as opposed to one an operator merely asserted.
+ *
+ * SOURCE_ATTESTED is the only trust value an adapter's signature can produce (G12 A1), so
+ * it is the only one this page is allowed to call 'verified'.
+ */
+export function isKernelVerified(row: Pick<IncidentEvidence, 'verifiedTrust'>): boolean {
+  return row.verifiedTrust === 'SOURCE_ATTESTED';
+}
+
+export function kernelVerifiedCount(rows: IncidentEvidence[]): number {
+  return rows.filter(isKernelVerified).length;
+}
+
+// -- the audit trail -------------------------------------------------------
+
+const TIMELINE_EVENT_KEYS: Record<string, MessageKey> = {
+  INCIDENT_CREATED: 'incidents.timeline.event.created',
+  INCIDENT_EVIDENCE_ADDED: 'incidents.timeline.event.evidence',
+  INCIDENT_VERDICT_RECORDED: 'incidents.timeline.event.verdict',
+  INCIDENT_OWNER_TRANSFERRED: 'incidents.timeline.event.transferred',
+  INCIDENT_CLOSED: 'incidents.timeline.event.closed',
+};
+
+/**
+ * The copy for one audit event type.
+ *
+ * The set is open by contract, so an event type this build has never heard of renders as
+ * 'other' next to its raw code - a trail that hides rows it does not recognise would be a
+ * shorter history than the one the kernel holds.
+ */
+export function timelineEventKey(eventType?: string | null): MessageKey {
+  if (eventType && TIMELINE_EVENT_KEYS[eventType]) return TIMELINE_EVENT_KEYS[eventType];
+  return 'incidents.timeline.event.other';
+}
+
+export function timelineEventTone(eventType?: string | null): StatusTone {
+  if (eventType === 'INCIDENT_CLOSED') return 'neutral';
+  if (eventType === 'INCIDENT_OWNER_TRANSFERRED') return 'info';
+  if (eventType === 'INCIDENT_VERDICT_RECORDED') return 'ok';
+  if (eventType === 'INCIDENT_EVIDENCE_ADDED') return 'info';
+  return 'neutral';
+}
+
+/** The typed projection of one event's `details`, which the contract leaves free-form. */
+export interface TimelineEventFacts {
+  evidenceKind: string | null;
+  verifiedTrust: string | null;
+  verdict: string | null;
+  consideredEvidenceCount: number | null;
+  fromOwner: string | null;
+  toOwner: string | null;
+  reason: string | null;
+  closureNote: string | null;
+}
+
+function textField(details: Record<string, unknown>, key: string): string | null {
+  const value = details[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+export function timelineEventFacts(event: Pick<IncidentTimelineEvent, 'details'>): TimelineEventFacts {
+  const details = event.details ?? {};
+  const count = details.consideredEvidenceCount;
+  return {
+    evidenceKind: textField(details, 'kind'),
+    verifiedTrust: textField(details, 'verifiedTrust'),
+    verdict: textField(details, 'verdict'),
+    consideredEvidenceCount: typeof count === 'number' && Number.isFinite(count) ? count : null,
+    fromOwner: textField(details, 'fromOwner'),
+    toOwner: textField(details, 'toOwner'),
+    reason: textField(details, 'reason'),
+    closureNote: textField(details, 'closureNote'),
+  };
 }
 
 export type IncidentFactKind = 'started' | 'evidence' | 'verdict';
