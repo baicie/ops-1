@@ -131,6 +131,113 @@ impl AuditScope {
             sees_all: auth.role.is_admin(),
         }
     }
+
+    /// What this scope will show, reported beside the rows instead of inferred from them.
+    ///
+    /// `requested` is the subject type the query named, if it named one. The answer is
+    /// "could a read of this kind ever return a row for this caller", which is exactly the
+    /// question an empty list raises and exactly the question a browser cannot answer.
+    pub(crate) fn view(&self, requested: Option<&str>) -> AuditScopeView {
+        AuditScopeView {
+            sees_all: self.sees_all,
+            readable_subject_types: if self.sees_all {
+                Vec::new()
+            } else {
+                SUBJECT_TYPES
+                    .iter()
+                    .filter(|entry| entry.1 != Visibility::AdminOnly)
+                    .map(|entry| entry.0)
+                    .collect()
+            },
+            requested: requested.map(|subject_type| RequestedSubject {
+                subject_type: subject_type.to_string(),
+                may_read: self.sees_all || visibility_of(subject_type) != Visibility::AdminOnly,
+            }),
+        }
+    }
+}
+
+/// What a subject type's events are worth to a caller who is not an admin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Visibility {
+    /// An event is visible to the caller that owns the subject it is about, and to nobody
+    /// else. The ownership clause lives in `VISIBILITY` below, one clause per type.
+    Owned,
+    /// The kernel has no per-caller read predicate for this subject, so only an admin can
+    /// read its events. This is what a type gets by being absent from the table.
+    AdminOnly,
+}
+
+/// The classification `VISIBILITY` implements, written as data as well as SQL.
+///
+/// The SQL cannot be generated from this table - each `Owned` type needs an ownership
+/// clause against its own table - so the two copies are held together by
+/// `the_reported_scope_agrees_with_the_predicate` rather than by construction. A subject
+/// type absent from here is `AdminOnly`, which is also what the SQL's `OR` chain does
+/// with it: default deny in both places, or the hint becomes a map of what to go around.
+pub(crate) const SUBJECT_TYPES: &[(&str, Visibility)] = &[
+    ("INCIDENT", Visibility::Owned),
+    ("job", Visibility::Owned),
+    ("capability", Visibility::AdminOnly),
+    ("deployment", Visibility::AdminOnly),
+    ("enrollment_token", Visibility::AdminOnly),
+    ("node", Visibility::AdminOnly),
+    ("pipeline", Visibility::AdminOnly),
+    ("plugin", Visibility::AdminOnly),
+    ("publisher", Visibility::AdminOnly),
+    ("user", Visibility::AdminOnly),
+];
+
+/// The classification's lookup. Exact match on purpose: it has to answer for the spelling
+/// the SQL compares against, not for one that merely looks like it.
+pub(crate) fn visibility_of(subject_type: &str) -> Visibility {
+    SUBJECT_TYPES
+        .iter()
+        .find(|entry| entry.0 == subject_type)
+        .map(|entry| entry.1)
+        .unwrap_or(Visibility::AdminOnly)
+}
+
+/// What the ledger will show this caller, as the route reports it beside the rows.
+///
+/// An empty list has three causes and the UI has to name the right one: nothing is
+/// recorded, nothing of this kind is readable by this caller, or the page's own filters hid
+/// what came back. The first two are facts only this side knows. A browser that derived
+/// them from the user's role would be restating a rule it cannot see, and the copy that
+/// drifts does so in the direction that lies to the reader - which is how the next person
+/// decides the predicate is broken and puts the leak back.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditScopeView {
+    /// The ledger is not narrowed for this caller at all.
+    pub sees_all: bool,
+    /// When `sees_all` is false: every subject type some event of which can reach this
+    /// caller. A type absent from this list reaches them never, which is a permission and
+    /// not a filter. Empty when `sees_all`, where the set is "everything, classified here
+    /// or not" and enumerating it would understate it.
+    pub readable_subject_types: Vec<&'static str>,
+    /// The subject type this request named, when it named one.
+    pub requested: Option<RequestedSubject>,
+}
+
+/// Whether naming a subject type can return rows at all for the caller that named it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestedSubject {
+    pub subject_type: String,
+    pub may_read: bool,
+}
+
+/// The body of GET /api/v1/audit: the rows and the scope they were read under.
+///
+/// It was a bare array until the scope had to travel with it. The UI cannot tell "nothing
+/// was recorded" from "you may not read this kind" out of `[]`, and the two answers leave
+/// the reader with different next steps: nothing, or ask an administrator.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditListResponse {
+    pub events: Vec<AuditEventView>,
+    pub scope: AuditScopeView,
 }
 
 /// The visibility predicate, spelled once so no read path can be written without it.
@@ -702,5 +809,143 @@ mod tests {
         assert!(admin_ids.contains(&incident_a_event));
 
         cleanup(&pool, &[fixture.owner_a, fixture.owner_b, admin, viewer]).await;
+    }
+
+    /// The hint the UI renders, for the three identities, with no database in the way: this
+    /// is the whole of what the frontend is allowed to know about who may read what.
+    #[test]
+    fn the_reported_scope_names_the_kinds_each_identity_can_read() {
+        let id = Uuid::new_v4();
+        let viewer = AuditScope::from_auth(&auth(id, Role::Viewer));
+        let operator = AuditScope::from_auth(&auth(id, Role::Operator));
+        let admin = AuditScope::from_auth(&auth(id, Role::Admin));
+        // The kinds the Activity page's own subject filter offers. Every one of them is a
+        // subject with no per-caller read predicate, so every one of them is admin-only and
+        // the page must say "refused", not "nothing here".
+        let offered = [
+            "plugin",
+            "node",
+            "deployment",
+            "publisher",
+            "enrollment_token",
+        ];
+
+        for scope in [viewer, operator] {
+            let view = scope.view(None);
+            assert!(!view.sees_all, "a non-admin reads a narrowed ledger");
+            assert_eq!(view.readable_subject_types, vec!["INCIDENT", "job"]);
+            assert!(view.requested.is_none(), "no subject type was named");
+            for subject_type in offered {
+                let requested = scope
+                    .view(Some(subject_type))
+                    .requested
+                    .expect("the request named a subject type");
+                assert_eq!(requested.subject_type, subject_type);
+                assert!(
+                    !requested.may_read,
+                    "{subject_type} events must be reported as unreadable to a non-admin"
+                );
+            }
+            // The kinds the ledger does scope are not refused as a permission: their empty
+            // result is about ownership, which is not something this route can explain.
+            for subject_type in ["INCIDENT", "job"] {
+                assert!(
+                    scope.view(Some(subject_type)).requested.unwrap().may_read,
+                    "{subject_type} events are readable where the caller owns the subject"
+                );
+            }
+            // Default deny, spelled out rather than implied by an absent entry.
+            assert!(
+                !scope
+                    .view(Some("subject_type_nobody_classified_yet"))
+                    .requested
+                    .unwrap()
+                    .may_read
+            );
+        }
+
+        let all = admin.view(Some("plugin"));
+        assert!(all.sees_all);
+        assert!(all.requested.unwrap().may_read);
+        assert!(
+            all.readable_subject_types.is_empty(),
+            "an admin's readable set is everything, classified here or not, so it is not enumerated"
+        );
+    }
+
+    /// The classification, held against the predicate that actually runs.
+    ///
+    /// One probe event per classified type, read by a caller who owns none of them: every
+    /// type the view reports as unreadable must be missing from the rows, and the admin must
+    /// read all of them. Without this, the two copies - the SQL's `OR` chain and
+    /// `SUBJECT_TYPES` - could disagree, and the disagreement would be a UI that explains an
+    /// empty list with a permission it does not have, or hides one it does.
+    #[tokio::test]
+    async fn the_reported_scope_agrees_with_the_predicate_it_describes() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let admin = seed_user(&pool, "admin").await;
+        let probes = {
+            let mut probes = Vec::new();
+            for entry in SUBJECT_TYPES {
+                let id = seed_event(
+                    &pool,
+                    owner,
+                    "scope.probe",
+                    entry.0,
+                    "scope-probe-subject-nobody-owns",
+                    serde_json::json!({}),
+                )
+                .await;
+                probes.push((entry.0, entry.1, id));
+            }
+            probes
+        };
+
+        let operator_scope = AuditScope::from_auth(&auth(owner, Role::Operator));
+        let operator_events = list_scoped(&pool, operator_scope, 500, None, None)
+            .await
+            .unwrap();
+        let admin_events = list_scoped(
+            &pool,
+            AuditScope::from_auth(&auth(admin, Role::Admin)),
+            500,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        for (subject_type, visibility, id) in &probes {
+            assert!(
+                admin_events.iter().any(|event| event.id == *id),
+                "the admin must read every recorded event, including {subject_type}"
+            );
+            let operator_reads = operator_events.iter().any(|event| event.id == *id);
+            let hint = operator_scope
+                .view(Some(subject_type))
+                .requested
+                .expect("the request named a subject type");
+            if *visibility == Visibility::AdminOnly {
+                assert!(
+                    !operator_reads,
+                    "{subject_type} is reported as administrator-only and the predicate returned it"
+                );
+                assert!(!hint.may_read);
+            }
+            // The `Owned` half cannot be proven by a probe nobody owns: it is proven by
+            // `an_operator_reads_its_own_events_and_the_other_operators_none` above, which
+            // holds a real incident and a real job. What must hold here is that the hint for
+            // a row-bearing type does not depend on whether this probe happened to match.
+            assert_eq!(
+                hint.may_read,
+                *visibility == Visibility::Owned,
+                "{subject_type} disagrees between the hint and the classification"
+            );
+        }
+
+        cleanup(&pool, &[owner, admin]).await;
     }
 }

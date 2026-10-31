@@ -110,7 +110,10 @@ describe('code rules: a write is verified by a re-read, not by its own response'
     const offenders: string[] = [];
     // §5 carve-out: an enrollment token is a one-time secret that exists only in the create
     // response - no GET returns it - so the body is the resource, not an echo of the request.
-    const oneTimeSecret = new Set(['pages/Nodes.tsx:153']);
+    // Keyed to the statement and not to its line number. The number moved the first time an
+    // import was added above it, and an exemption that detaches silently starts flagging the
+    // very code it was written for, in a file nobody edited.
+    const oneTimeSecret = /const result = await api\.post<\{ token: string; expiresAt: string \}>/;
     for (const [name, text] of sourceText()) {
       if (/\.test\./.test(name)) continue;
       // A5 states its scope as apps/platform-web/src/pages. The studio surface has its own two
@@ -122,7 +125,7 @@ describe('code rules: a write is verified by a re-read, not by its own response'
         const inline = line.match(/\bset[A-Z]\w*\(\s*await\s+api\.(post|put|patch|delete)\b/);
         if (inline) offenders.push(name + ':' + (index + 1) + ' renders a write response inline');
         const m = line.match(/\b(?:const|let)\s+(\w+)\s*=\s*await\s+api\.(post|put|patch|delete)\b/);
-        if (m && !oneTimeSecret.has(name + ':' + (index + 1))) bound.set(m[1], index + 1);
+        if (m && !oneTimeSecret.test(line)) bound.set(m[1], index + 1);
       });
       for (const [variable, line] of bound) {
         const rendered = new RegExp('\\bset[A-Z]\\w*\\(\\s*' + variable + '\\s*[,)]');

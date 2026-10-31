@@ -2,7 +2,7 @@ import React, { useEffect, useId, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
 import { usePolling } from '../hooks';
-import type { AuditEvent, DeploymentView, PluginDetail } from '../types';
+import type { DeploymentView, PluginDetail } from '../types';
 import { Icon } from '../components/Icons';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -18,6 +18,7 @@ import { NoData, StatusIndicator } from '../components/app/status-indicator';
 import { formatDate, formatBytes, shortDigest } from '../format';
 import { useI18n, useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
+import { auditEmptyKind, readAuditList, type AuditList } from '../lib/audit-scope';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { IdentityCell, StackCell, StatusPill, cardActionCell, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { InstallationStatus, useStatusText } from '../components/app/status';
@@ -57,7 +58,7 @@ export function PluginDetailPage() {
   const { id = '' } = useParams();
   const toast = useToast();
   const { data, error, loading, reload } = usePolling(() => api.get<PluginDetail>(`/api/v1/plugins/${encodeURIComponent(id)}`), 4000);
-  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [audit, setAudit] = useState<AuditList | null>(null);
   // The tab belongs in the URL. Two things already assumed it did: the legacy /plugins/:id
   // redirect forwards ?tab= by allowlist, and this page links to its own deployments view. Without
   // reading the parameter that link pointed at a route that does not exist, and the forwarded tab
@@ -93,8 +94,15 @@ export function PluginDetailPage() {
 
   useEffect(() => {
     if (!data) return;
-    api.get<AuditEvent[]>(`/api/v1/audit?subjectType=plugin&subjectId=${encodeURIComponent(id)}&limit=50`).then(setEvents).catch(() => setEvents([]));
+    // The scope arrives with the rows, so the panel below never has to guess whether an empty
+    // list means "no plugin event was ever written" or "the kernel refuses this caller this kind".
+    api.get<unknown>(`/api/v1/audit?subjectType=plugin&subjectId=${encodeURIComponent(id)}&limit=50`)
+      .then((body) => setAudit(readAuditList(body)))
+      .catch(() => setAudit(null));
   }, [id, data?.activeRevision?.generation, data?.state]);
+  const events = audit?.events ?? [];
+  /** This panel asks for one kind only, so a refusal is the whole of what an empty list can be. */
+  const emptyKind = auditEmptyKind({ scope: audit?.scope ?? null, subjectType: 'plugin' });
 
   const activeVersion = data?.activeVersion;
   const versions = data?.packageVersions || [];
@@ -385,7 +393,13 @@ export function PluginDetailPage() {
         <TabsContent value="events" className="mt-[18px]">
           <section className="panel table-panel">
             <div className="panel-head"><div><h2>{t('pluginDetail.events.title')}</h2><p>{t('pluginDetail.events.description')}</p></div><Link className="text-link" to="/admin/activity">{t('pluginDetail.events.global')} <Icon name="arrowRight" size={14} /></Link></div>
-            {events.length === 0 ? <EmptyState icon="activity" title={t('overview.events.empty.title')} /> : (
+            {events.length === 0 ? (
+              <div data-empty-state={emptyKind === 'restricted' ? 'restricted' : 'none'}>
+                {emptyKind === 'restricted'
+                  ? <EmptyState icon="access" title={t('audit.empty.restricted.title', { subject: 'plugin' })} description={t('audit.empty.restricted.detail')} />
+                  : <EmptyState icon="activity" title={t('overview.events.empty.title')} />}
+              </div>
+            ) : (
               <Table className={stackTable}>
                 <TableHeader className={stackHead}>
                   <TableRow className="hover:bg-transparent">

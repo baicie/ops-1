@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { usePolling } from '../hooks';
-import type { AuditEvent, NodeView } from '../types';
+import type { NodeView } from '../types';
 import { Icon } from '../components/Icons';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { CopyButton, EmptyState, ErrorState, KV, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { formatBytes, formatDate } from '../format';
 import { useI18n, useT } from '../i18n';
+import { auditEmptyKind, readAuditList } from '../lib/audit-scope';
 import { cn } from '../lib/utils';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeNodeState, nodeRevokedLanded } from '../lib/verified-writes';
@@ -416,7 +417,11 @@ export function NodeDetailPage() {
       .catch(() => { if (!cancelled) setHistory([]); });
     return () => { cancelled = true; };
   }, [id, historyWindow]);
-  const { data: events } = usePolling(() => api.get<AuditEvent[]>(`/api/v1/audit?subjectType=node&subjectId=${id}&limit=20`), 0);
+  // The panel asks for one kind, so the kernel's scope for it is the whole answer an empty
+  // list can be: nothing recorded, or a kind this caller cannot read at all.
+  const { data: audit } = usePolling(() => api.get<unknown>(`/api/v1/audit?subjectType=node&subjectId=${id}&limit=20`).then(readAuditList), 0);
+  const events = audit?.events ?? [];
+  const eventsEmptyKind = auditEmptyKind({ scope: audit?.scope ?? null, subjectType: 'node' });
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -574,7 +579,13 @@ export function NodeDetailPage() {
       </section>
       <section className="panel">
         <div className="panel-head"><div><h2>{t('nodeDetail.events.title')}</h2><p>{t('nodeDetail.events.description')}</p></div></div>
-        {!events?.length ? <EmptyState icon="activity" title={t('nodeDetail.events.empty.title')} /> : <ul className="event-list">{events.map((event) => <li key={event.id}><div className="event-marker"><Icon name={event.result === 'REJECTED' ? 'warning' : 'check'} size={13} /></div><div className="event-copy"><div className="event-title"><strong>{event.eventType}</strong><StatusPill status={event.result} /></div><p>{event.action}</p></div><TimeAgo value={event.occurredAt} /></li>)}</ul>}
+        {!events.length ? (
+          <div data-empty-state={eventsEmptyKind === 'restricted' ? 'restricted' : 'none'}>
+            {eventsEmptyKind === 'restricted'
+              ? <EmptyState icon="access" title={t('audit.empty.restricted.title', { subject: 'node' })} description={t('audit.empty.restricted.detail')} />
+              : <EmptyState icon="activity" title={t('nodeDetail.events.empty.title')} />}
+          </div>
+        ) : <ul className="event-list">{events.map((event) => <li key={event.id}><div className="event-marker"><Icon name={event.result === 'REJECTED' ? 'warning' : 'check'} size={13} /></div><div className="event-copy"><div className="event-title"><strong>{event.eventType}</strong><StatusPill status={event.result} /></div><p>{event.action}</p></div><TimeAgo value={event.occurredAt} /></li>)}</ul>}
       </section>
       <Dialog open={confirm} onOpenChange={setConfirm}>
         <DialogContent closeLabel={t('aria.closeDialog')} className="max-w-[480px]">

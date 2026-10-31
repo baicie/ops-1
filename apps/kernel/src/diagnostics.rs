@@ -126,7 +126,7 @@ pub async fn audit_events(
     State(state): State<AppState>,
     auth: AuthUser,
     Query(query): Query<AuditQuery>,
-) -> AppResult<Json<Vec<audit::AuditEventView>>> {
+) -> AppResult<Json<audit::AuditListResponse>> {
     // G12 F (P0-1). This handler used to hold an empty `if auth.role == Viewer { }`
     // whose comment said viewers read summaries but not secrets. It checked nothing and
     // the query below had no scope predicate at all, so the lowest-privileged role read
@@ -134,15 +134,24 @@ pub async fn audit_events(
     // part of an incident event. The gate is now the read itself: audit::list_scoped
     // decides per row whether this caller may read the subject the event is about, and
     // it is the only ledger read the codebase has.
+    // The rows and the scope travel together. A caller that receives an empty `events`
+    // array cannot tell "nothing was recorded" from "you may not read this kind", and the
+    // UI has to say which: the page that shows `[]` without a reason is the page the next
+    // engineer reads as a broken predicate. Reporting the scope is not a widening - the
+    // predicate above is unchanged - it is the refusal saying so.
+    let scope = audit::AuditScope::from_auth(&auth);
     let events = audit::list_scoped(
         &state.db,
-        audit::AuditScope::from_auth(&auth),
+        scope,
         query.limit.unwrap_or(100),
         query.subject_type.as_deref(),
         query.subject_id.as_deref(),
     )
     .await?;
-    Ok(Json(events))
+    Ok(Json(audit::AuditListResponse {
+        events,
+        scope: scope.view(query.subject_type.as_deref()),
+    }))
 }
 
 pub async fn settings_policies(
