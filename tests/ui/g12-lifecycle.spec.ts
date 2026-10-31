@@ -1,4 +1,5 @@
 import { expect, request, test, type APIRequestContext } from '@playwright/test';
+import { adminSeed, createAccount as createSeededAccount } from './support/accounts';
 
 /**
  * G12 Phase C - the incident lifecycle in a real browser against the real kernel.
@@ -54,20 +55,21 @@ async function makeUser(
   baseURL: string | undefined,
   prefix: string,
   displayName: string,
-  role: string,
+  role: 'operator' | 'viewer',
 ): Promise<Actor> {
   const { email, password } = credentials(prefix);
-  const response = await admin.ctx.post('/api/v1/users', {
-    headers: { 'x-csrf-token': admin.csrf },
-    data: { email, displayName, password, role },
-  });
-  // The kernel answers a created account with 200 and the row (users::create_user does not
-  // set 201), so the assertion is on the body's id rather than on a status code it never sends.
-  expect(response.ok(), await response.text()).toBeTruthy();
-  const created = await response.json();
+  // Creation and the business-workspace grant are one act here, because they are one act for the
+  // spec: an account created through the admin API belongs to no workspace, so opB could not be
+  // handed a record (the kernel refuses a handover to a target that could never read it) and the
+  // viewer could not read the one it is supposed to be told about. G12 D5, ADR section 3.4.
+  const created = await createSeededAccount(
+    admin.ctx,
+    { csrf: admin.csrf, userId: admin.id },
+    { email, password, displayName, role },
+  );
   const ctx = await request.newContext({ baseURL });
   const csrf = await signInApi(ctx, email, password);
-  return { ctx, csrf, email, password, id: created.id as string };
+  return { ctx, csrf, email, password, id: created.id };
 }
 
 async function signInPage(page: import('@playwright/test').Page, email: string, password: string) {
@@ -83,8 +85,11 @@ test('G12 C: an operator closes a concluded incident, hands another one over, an
 
   // ---- fixtures --------------------------------------------------------------
   const adminCtx = await request.newContext({ baseURL });
-  const adminCsrf = await signInApi(adminCtx, ADMIN_EMAIL, ADMIN_PASSWORD);
-  const admin: Actor = { ctx: adminCtx, csrf: adminCsrf, email: ADMIN_EMAIL, password: ADMIN_PASSWORD, id: '' };
+  // adminSeed signs in and performs the one grant a fresh database needs before the platform
+  // administrator can create a single incident: migrations run before the bootstrap account
+  // exists, so the migration's one-time membership grant does not cover it (ADR section 3.4).
+  const adminSession = await adminSeed(adminCtx, ADMIN_EMAIL, ADMIN_PASSWORD);
+  const admin: Actor = { ctx: adminCtx, csrf: adminSession.csrf, email: ADMIN_EMAIL, password: ADMIN_PASSWORD, id: adminSession.userId };
   const opA = await makeUser(admin, baseURL, 'op-a', 'G12C Op Alice', 'operator');
   const opB = await makeUser(admin, baseURL, 'op-b', 'G12C Op Bob', 'operator');
   await makeUser(admin, baseURL, 'viewer', 'G12C Vic Viewer', 'viewer');
@@ -161,13 +166,45 @@ test('G12 C: an operator closes a concluded incident, hands another one over, an
   // change leaves the shell's navigation drawer open, and an open drawer is not a page width).
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/app/incidents/' + ready.id);
-  await expect(page.getByTestId('incident-closure-record')).toBeVisible();
-  const narrow = await page.evaluate(() => ({
+  const overflowAt = () => page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
   }));
-  expect(narrow.scrollWidth, 'no horizontal overflow at 390px: ' + JSON.stringify(narrow)).toBeLessThanOrEqual(narrow.clientWidth + 1);
+  // Why this is reached THROUGH the tab, and why BOTH widths are asserted rather than one.
+  //
+  // The property this spec bought at 390 was "the closure of record is readable after it is
+  // written". When the assertion was written (25ba0a7) the page had no tabs, and one assertion
+  // proved it. The page has three panes since 26ed53d and opens on 'analysis'
+  // (IncidentDetail.tsx, initialPane), while the closure of record lives in the 'detail' pane - so
+  // at 390 the record is in the DOM and out of sight, which is a fact about the layout and not
+  // about the write. Left as a bare toBeVisible, that assertion would have been measuring "the
+  // first pane happens to hold it".
+  //
+  // Neither width is relaxed: at 1440 the pane is a column and the record is visible with no
+  // interaction (asserted above, and again in the dark re-read below); at 390 the reader switches
+  // to the pane the record is in, and the switch is asserted in both directions - before the click
+  // the tab is not selected and the record is in the DOM but not visible, after it both flip. The
+  // pair is what makes this an assertion about the tab: without it, a page that drew the record in
+  // the first pane would satisfy the click path too.
+  const closureRecord = page.getByTestId('incident-closure-record');
+  const detailTab = page.getByTestId('investigation-tab-detail');
+  // The tablist exists only in the compact layout (max-width 1023), so its presence is what says
+  // this viewport really is the tabbed one and not a column layout squeezed narrow.
+  await expect(page.getByTestId('investigation-tabs')).toBeVisible();
+  await expect(detailTab).toHaveAttribute('aria-selected', 'false');
+  await expect(closureRecord).toHaveCount(1);
+  await expect(closureRecord).toBeHidden();
+  const narrow = await overflowAt();
+  expect(narrow.scrollWidth, 'no horizontal overflow at 390px (analysis pane): ' + JSON.stringify(narrow)).toBeLessThanOrEqual(narrow.clientWidth + 1);
   await page.screenshot({ path: SHOTS + '/operator-closed-390-light.png', fullPage: true });
+
+  await detailTab.click();
+  await expect(detailTab).toHaveAttribute('aria-selected', 'true');
+  await expect(closureRecord).toBeVisible();
+  await expect(closureRecord).toHaveAttribute('data-closed-at', /.+/);
+  const narrowDetail = await overflowAt();
+  expect(narrowDetail.scrollWidth, 'no horizontal overflow at 390px (detail pane, where the closure is): ' + JSON.stringify(narrowDetail)).toBeLessThanOrEqual(narrowDetail.clientWidth + 1);
+  await page.screenshot({ path: SHOTS + '/operator-closed-390-detail-light.png', fullPage: true });
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.reload();

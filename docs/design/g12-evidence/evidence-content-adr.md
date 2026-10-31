@@ -256,7 +256,7 @@ XSS 实测在 `tests/ui/g12-evidence-content.spec.ts`（真实浏览器 + 真实
 
 - `tests/acceptance/g12_evidence_content.sh`：**84 条断言全部通过**（B3 八步 + 四类限制负向 + Legacy + SSRF 金丝雀 + XSS 载荷 + "Web 树里没有 HTML 注入通道"的 grep 断言）。摘要断言全部由 python3 对**响应体**重算后比较，从不读数据库里的 `sha256` 列来"验证"自己。
 - `tests/ui/g12-evidence-content.spec.ts`（真实 Chromium + 真实内核）：通过。它证明的是浏览器侧的三件事——载荷以文本逐字显示且未构造任何元素、`window.__xss` 未被写、内核下发的摘要被浏览器重算并标记为已验证；以及直接导航到内容 URL 时 `document.contentType` 为 `text/plain`。
-- 截图：`artifacts/g12b/r1440-light.png`、`r390-light.png`、`r1440-dark.png`。
+- 截图：the 1440 light capture (CI artifact; not committed)、the 390 light capture (CI artifact; not committed)、the 1440 dark capture (CI artifact; not committed)。
 - 门禁：`cargo test --workspace`（真库、`OPSWEAVE_REQUIRE_TEST_DATABASE=1`，无 skip）、`cargo fmt --check`、`cargo clippy --all-targets -D warnings`、`pnpm -r typecheck`、`vitest`、`check-i18n`、`validate_contracts.py` 全部通过。
 
 ---

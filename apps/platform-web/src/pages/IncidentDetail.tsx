@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { CopyButton, Field, KV, useToast } from '../components/Ui';
 import { EvidenceContentViewer } from '../components/evidence-viewer';
+import { InvestigationPanel } from '../components/investigation-panel';
 import { InvestigationLayout, useCompactLayout, type InvestigationPaneId } from '../components/app/investigation-layout';
 import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
@@ -115,9 +116,19 @@ export function IncidentDetailPage() {
     setPane('analysis');
   }, [incidentId]);
   // Which pane the workspace shows below 1024. The layout owns the fallback; the page owns the one
-  // transition the page can predict - opening a row moves to the pane the row opened into.
+  // transition the page can predict - content that is the active content moves to the pane that
+  // shows it.
   const [pane, setPane] = React.useState<InvestigationPaneId>('analysis');
   const compact = useCompactLayout();
+  // The rule is stated on the state that decides it, not on the click that usually produces it.
+  // Opening a row is not the only way content becomes active: a window narrowed onto a row that is
+  // already open puts the same content in a phone layout, and before this the pane stayed on
+  // 'analysis', so the reader watched the viewer disappear. The effect covers both entries with one
+  // rule, and at 1440 it cannot fire - there no pane is hidden, so the reader's selection is never
+  // touched.
+  React.useEffect(() => {
+    if (openEvidenceId && compact) setPane('detail');
+  }, [openEvidenceId, compact]);
 
   // The state that is actually rendered. It is only ever the state that describes this route.
   const view = projectDetail(store, incidentId);
@@ -338,6 +349,10 @@ export function IncidentDetailPage() {
                           ))}
                         </ol>
                       </section>
+                <InvestigationPanel
+                          incidentId={incident.id}
+                          canOperate={capabilities.canAddEvidence}
+                        />
                 <section className="panel" data-testid="incident-audit" data-audit-state={trail.state}>
                         <div className="panel-head">
                           <div>
@@ -468,9 +483,7 @@ export function IncidentDetailPage() {
                                         data-evidence-id={row.id}
                                         aria-expanded={openEvidenceId === row.id}
                                         onClick={() => {
-                          const closing = openEvidenceId === row.id;
-                          setOpenEvidenceId(closing ? null : row.id);
-                          if (!closing && compact) setPane('detail');
+                          setOpenEvidenceId(openEvidenceId === row.id ? null : row.id);
                         }}
                                       >
                                         {t('incidents.content.action.open')}

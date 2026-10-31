@@ -537,6 +537,12 @@ pub struct Overview {
     pub active_deployments: i64,
     pub attention: Vec<AttentionItem>,
     pub recent_events: Vec<AuditEventView>,
+    /// What the ledger will show this caller, in the same shape /api/v1/audit reports.
+    ///
+    /// For anyone who is not an admin the feed above is a permission slice, so an empty
+    /// one has two possible causes and the rows cannot say which. The page reports the
+    /// kernel answer rather than inferring it from a length of zero.
+    pub scope: audit::AuditScopeView,
 }
 
 #[derive(Debug, Serialize)]
@@ -548,7 +554,7 @@ pub struct AttentionItem {
     pub link: String,
 }
 
-pub async fn overview(State(state): State<AppState>, _auth: AuthUser) -> AppResult<Json<Overview>> {
+pub async fn overview(State(state): State<AppState>, auth: AuthUser) -> AppResult<Json<Overview>> {
     let nodes: Vec<crate::nodes::NodeRow> =
         sqlx::query_as::<_, crate::nodes::NodeRow>("SELECT * FROM kernel.nodes ORDER BY name")
             .fetch_all(&state.db)
@@ -645,7 +651,10 @@ pub async fn overview(State(state): State<AppState>, _auth: AuthUser) -> AppResu
     } else {
         "ATTENTION"
     };
-    let recent_events = audit::list(&state.db, 8, None, None).await?;
+    // Any authenticated caller reaches this page, so the feed it shows is the caller's
+    // own slice of the ledger and not the platform's: the same scoped read /api/v1/audit uses.
+    let scope = audit::AuditScope::resolve(&state.db, &auth).await?;
+    let recent_events = audit::list_scoped(&state.db, scope.clone(), 8, None, None).await?;
     Ok(Json(Overview {
         health: health.into(),
         nodes_total: nodes.len() as i64,
@@ -667,6 +676,7 @@ pub async fn overview(State(state): State<AppState>, _auth: AuthUser) -> AppResu
         active_deployments,
         attention,
         recent_events,
+        scope: scope.view(None),
     }))
 }
 
@@ -692,6 +702,45 @@ fn display_name(id: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The overview's feed is a permission slice for everyone who is not an admin, so the
+    /// scope travels beside the rows in the shape /api/v1/audit already reports. Without it
+    /// the panel had to explain "no rows" on its own, and it explained one as a platform with
+    /// nothing in it yet - which is what an operator with nothing readable was looking at.
+    #[test]
+    fn the_overview_body_carries_the_scope_its_feed_was_read_under() {
+        let body = |sees_all: bool| {
+            let scope = crate::audit::AuditScope::for_test(
+                Uuid::nil(),
+                sees_all,
+                Vec::new(),
+                crate::scope::RowRule::AllRows,
+            );
+            serde_json::to_value(Overview {
+                health: "READY".into(),
+                nodes_total: 0,
+                nodes_ready: 0,
+                plugins_installed: 0,
+                plugins_available: 0,
+                instances_ready: 0,
+                instances_total: 0,
+                active_deployments: 0,
+                attention: Vec::new(),
+                recent_events: Vec::new(),
+                scope: scope.view(None),
+            })
+            .expect("the overview body serialises")
+        };
+
+        assert_eq!(body(false)["scope"]["seesAll"], json!(false));
+        assert_eq!(
+            body(false)["scope"]["readableSubjectTypes"],
+            json!(["INCIDENT", "job"]),
+            "the refused kinds are named by omission, which is how the page reads a boundary"
+        );
+        assert_eq!(body(false)["scope"]["requested"], json!(null));
+        assert_eq!(body(true)["scope"]["seesAll"], json!(true));
+    }
 
     // The ids and paths below belong to this file only: they never exist in a database.
     const PLUGIN: &str = "opsweave.test-surface";

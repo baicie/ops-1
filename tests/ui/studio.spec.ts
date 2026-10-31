@@ -48,7 +48,18 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await page.goto(`/pipelines/${PIPELINE}/editor`);
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page.getByRole('status')).toContainText('Draft created');
-  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  // Select the node the way the page always offers it. The canvas card is React Flow's:
+  // @xyflow/react keeps .react-flow__node at visibility:hidden until its own ResizeObserver has
+  // measured the node, so a click on the card is a click on a measurement result, not on a
+  // control - when that delivery is late (Chromium reports "ResizeObserver loop completed with
+  // undelivered notifications" on this page) the card stays painted-invisible and the click can
+  // never land. The palette rows are plain DOM: the same nodes, the same onSelect, the same
+  // inspector, no measurement pass in between. Canvas clicking keeps its own coverage in
+  // "studio renders published nodes and inspector selection".
+  const paletteNode = page.locator('.studio-palette .palette-item').filter({ hasText: 'source' }).first();
+  await expect(paletteNode).toBeVisible();
+  await paletteNode.click();
+  await expect(page.locator('.studio-inspector')).toContainText('http_json');
   const timeout = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
   // The edit has to differ from the value that is live right now. A fixed number only differed on
   // the first run: this case publishes what it writes, so the second run found the published
@@ -64,7 +75,8 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.getByRole('status')).toContainText('Draft saved');
   await page.screenshot({ path: path.join(OUT, 'pipeline-draft-saved.png'), fullPage: true });
   await page.reload();
-  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  await page.locator('.studio-palette .palette-item').filter({ hasText: 'source' }).first().click();
+  await expect(page.locator('.studio-inspector')).toContainText('http_json');
   await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue(String(nextTimeout));
   await page.getByRole('button', { name: 'Validate', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Server validation passed');

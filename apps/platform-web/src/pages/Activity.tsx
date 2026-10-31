@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import type { AuditEvent } from '../types';
 import { Icon } from '../components/Icons';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -14,6 +13,7 @@ import { PageHeader } from '../components/app/page-header';
 import { formatDate } from '../format';
 import { useI18n, useT } from '../i18n';
 import { ageMessage, clockMessage } from '../lib/age';
+import { auditEmptyKind, readAuditList } from '../lib/audit-scope';
 import { cn } from '../lib/utils';
 import { actorName, detailFact, presentEvents, subjectName, type PresentedRow } from './activity-facts';
 import { IdentityCell, StackCell, StatusPill, cardActionCell, stackBody, stackHead, stackRow, stackTable } from './table-kit';
@@ -68,10 +68,18 @@ export function ActivityPage() {
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const { data, error, loading, reload, observedAt } = useObservedPolling(
-    () => api.get<AuditEvent[]>('/api/v1/audit?limit=' + WINDOW + (subjectType ? '&subjectType=' + encodeURIComponent(subjectType) : '')),
+    () => api
+      .get<unknown>('/api/v1/audit?limit=' + WINDOW + (subjectType ? '&subjectType=' + encodeURIComponent(subjectType) : ''))
+      .then(readAuditList),
     POLL_INTERVAL_MS,
   );
-  const loaded = useMemo(() => data || [], [data]);
+  /**
+   * The kernel's own account of what it will show this caller, carried by the same answer as the
+   * rows. Nothing below derives it from the user's role: the page renders the refusal the kernel
+   * reported, and an answer that carries no scope explains nothing rather than guessing.
+   */
+  const scope = data?.scope ?? null;
+  const loaded = useMemo(() => data?.events ?? [], [data]);
 
   /**
    * The four narrow filters, answered over the loaded window. Each one is a fact the reader can
@@ -111,7 +119,18 @@ export function ActivityPage() {
   const stale = isStale(observedAt, POLL_INTERVAL_MS) || Boolean(error && data);
   const observing = Boolean(data);
   const narrowed = Boolean(query || subjectType || eventType || actor || result || range !== 'all');
-  const noRowsFromSource = Boolean(data && data.length === 0);
+  /**
+   * Whether this read named a subject type. With the filter clear it asked the ledger for every
+   * kind at once, and the kernel dropped each kind this caller cannot read - so an empty answer
+   * here cannot be told apart from a refused one, and the helper is told which read this is.
+   * Without this input the page reported the widest possible read and an operator with nothing
+   * readable got "No audit events", which is the one claim an empty permission slice must not
+   * make (measured: 8 events in the ledger, 0 readable by an operator, data-empty-state=none).
+   */
+  const spansSubjectTypes = !subjectType;
+  const emptyKind = auditEmptyKind({ scope, subjectType: subjectType || null, narrowed, spansSubjectTypes });
+  /** The kinds the kernel said can reach this caller, printed verbatim rather than summarised. */
+  const readableKinds = (scope?.readableSubjectTypes ?? []).join(', ');
   const clearFilters = () => { setQuery(''); setSubjectType(''); setEventType(''); setActor(''); setResult(''); setRange('all'); };
 
   // A filter that shrinks the result set must not leave the reader on a page that no longer
@@ -191,6 +210,18 @@ export function ActivityPage() {
         {narrowed ? <Button variant="ghost" size="sm" onClick={clearFilters} data-testid="activity-clear"><Icon name="close" size={14} /> {t('ui.clearFilters')}</Button> : null}
       </section>
 
+      {/*
+        A narrowed ledger that is NOT empty explains itself too. An operator who sees two rows
+        and knows the platform is busier than that should not have to open an empty filter to
+        find out why: the answer is the same fact, printed once, from the kernel's scope.
+      */}
+      {scope && !scope.seesAll ? (
+        <div className="callout" data-testid="activity-scope" data-sees-all="false">
+          <Icon name="access" size={16} />
+          <p><strong>{t('audit.scope.title')}</strong> {t('audit.scope.detail', { types: scope.readableSubjectTypes.join(', ') })}</p>
+        </div>
+      ) : null}
+
       {stale ? (
         <div data-observed-at={observedAt ?? undefined}>
           <NoticeBar
@@ -212,7 +243,36 @@ export function ActivityPage() {
         onRetry={() => void reload()}
       >
         {rows.length === 0 ? (
-          narrowed ? (
+          /*
+            Three empty lists, three sentences, and only the kernel decides which one this is
+            (lib/audit-scope.ts). A refused kind outranks a filter: the exit offered is "stop
+            asking for this kind", because the clear-filters button cannot produce a row.
+          */
+          emptyKind === 'restricted' ? (
+            // Two refusals, two sentences. A named kind is refused outright, so the exit is
+            // "stop asking for it". An unnamed read spans every kind: what it reports is a
+            // boundary, and offering "all subjects" there would be a button that changes
+            // nothing because the filter is already clear.
+            <div data-empty-state="restricted" data-restricted-ask={spansSubjectTypes ? 'every-kind' : 'one-kind'}>
+              {spansSubjectTypes ? (
+                <EmptyState
+                  icon="access"
+                  title={t('activity.empty.restricted.title')}
+                  description={t('activity.empty.restricted.description', { kinds: readableKinds })}
+                  action={narrowed
+                    ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button>
+                    : undefined}
+                />
+              ) : (
+                <EmptyState
+                  icon="access"
+                  title={t('audit.empty.restricted.title', { subject: subjectType })}
+                  description={t('audit.empty.restricted.detail')}
+                  action={<Button variant="secondary" onClick={() => setSubjectType('')}>{t('activity.filter.allSubjects')}</Button>}
+                />
+              )}
+            </div>
+          ) : emptyKind === 'filtered' ? (
             // A filter that matches nothing is not an empty audit log: say so and offer the exit.
             <div data-empty-state="filtered">
               <EmptyState
@@ -223,7 +283,7 @@ export function ActivityPage() {
               />
             </div>
           ) : (
-            <div data-empty-state={noRowsFromSource ? 'none' : 'filtered'}>
+            <div data-empty-state="none">
               <EmptyState icon="activity" title={t('activity.empty.title')} description={t('activity.empty.description')} />
             </div>
           )

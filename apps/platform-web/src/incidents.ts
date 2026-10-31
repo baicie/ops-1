@@ -1,6 +1,6 @@
 import type { MessageKey } from './i18n';
 import type { StatusTone } from './components/status-tone';
-import type { IncidentEvidence, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
+import type { IncidentEvidence, IncidentList, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
 
 /**
  * The incident slice's client-side facts, kept out of the two page components.
@@ -85,6 +85,92 @@ export function ownerFilterValue(ownerFilter: string, selfId: string | null): st
 }
 
 /**
+ * What the kernel says the incident list will show this caller, sent beside the rows.
+ * Mirrors `incidents::IncidentScopeView` in apps/kernel/src/incidents.rs.
+ *
+ * It lives here rather than in types.ts for the reason `AuditScope` lives in lib/audit-scope.ts:
+ * a scope only means something next to the helper that reads it, and the empty-list decision is
+ * that helper. A type declared in both places would be a second copy of the contract.
+ */
+export interface IncidentScope {
+  /**
+   * The field this read was narrowed on; `null` when it applied no owner narrowing.
+   *
+   * `null` is the absence of a restriction this field can name. It is NOT the claim that the
+   * page holds every incident that exists - that would be a sentence about the world, and this
+   * payload only knows what this read did (ADR-G11-001 4.6,
+   * docs/design/g12-scope/narrowed-reads.md 3.4). The `seesAll` boolean this type used to carry
+   * was read as exactly that claim, which is why it is gone rather than renamed.
+   */
+  narrowedTo: 'owner' | null;
+  /**
+   * How many business workspaces bounded this read. Zero is the one value that explains an
+   * empty list completely and that no role explains: since D5 a caller reads a business row
+   * because it is a MEMBER of the workspace the row lives in, so a caller in no workspace
+   * cannot be shown a row by any read in the kernel. A count of the bound applied - never a
+   * count of what exists.
+   */
+  workspaceCount: number;
+}
+
+/**
+ * GET /api/v1/incidents: the rows and the read they were produced under.
+ *
+ * `scope` is null when the body carried none (an older kernel, or a test fixture). Never
+ * assumed to be unnarrowed: an unknown scope is not an empty permission slice, and it is not
+ * an empty ledger either.
+ */
+export interface IncidentListPayload extends IncidentList {
+  scope: IncidentScope | null;
+}
+
+/** Why the incident list is empty: three different facts a reader must never see mixed up. */
+export type IncidentEmptyKind =
+  /** The page's own filters hid every row the kernel sent. Clearing them can show rows. */
+  | 'filtered'
+  /**
+   * The kernel sent no row because this read was narrowed to what the caller owns. Not a
+   * filter, and not evidence that the platform has recorded nothing - an operator owns none of
+   * it.
+   */
+  | 'scoped'
+  /**
+   * The caller is a member of no business workspace, so no read can return a row. This
+   * outranks both filters and the owner narrowing: clearing a filter cannot conjure a row
+   * that a zero-membership scope can never return, and telling a viewer "you own nothing"
+   * when the truth is "you were never granted anything" sends it to the wrong remedy.
+   */
+  | 'workspace'
+  /**
+   * The kernel named no narrowing and sent no row: this read applied no owner restriction and
+   * still returned nothing. That is a fact about the read. It is not a count of the platform,
+   * and the copy for this state is not allowed to phrase it as one.
+   */
+  | 'none';
+
+/**
+ * Which of the three an empty incident list is, from the kernel's scope and the page's filters.
+ *
+ * The precedence is the opposite of the audit ledger's, and deliberately so. There a refused
+ * kind outranks a filter, because clearing a filter cannot conjure a row of a kind the kernel
+ * never sends. Here narrowing does not refuse the rows the reader owns: it limits the list to
+ * them, so a filter that matches none of them is still the cause, and blaming the scope would
+ * send the reader to a boundary they cannot cross instead of to the button that helps.
+ *
+ * A missing scope ranks last: it licenses only the claim that needs no evidence - this read
+ * returned nothing. An unreadable body is not an unnarrowed one (lib/audit-scope.ts makes the
+ * same choice for the same reason), but it is also no longer able to make the page say anything
+ * about the platform, because 'none' no longer says anything about it either.
+ */
+export function incidentsEmptyKind(input: { scope: IncidentScope | null; filtering: boolean }): IncidentEmptyKind {
+  const { scope, filtering } = input;
+  if (scope?.workspaceCount === 0) return 'workspace';
+  if (filtering) return 'filtered';
+  if (scope?.narrowedTo === 'owner') return 'scoped';
+  return 'none';
+}
+
+/**
  * Failure copy, by the stable error code the kernel sends. The code decides; the server's
  * English sentence is never rendered as copy (rules/06). A code with no entry is reported with
  * the code itself in a <code> element and a generic sentence around it.
@@ -100,6 +186,12 @@ const FAILURE_KEYS: Record<string, MessageKey> = {
   INCIDENT_STATE_CONFLICT: 'incidents.error.stateConflict',
   INCIDENT_VERDICT_NOT_FOUND: 'incidents.error.verdictMissing',
   INCIDENT_WRITE_CONFLICT: 'incidents.error.writeConflict',
+  // D5: an account that is a member of no business workspace has nowhere to file a record,
+  // and one that is a member of several must say which. Two codes, because one of them is
+  // fixable by the caller and the other needs an administrator.
+  INCIDENT_WORKSPACE_FORBIDDEN: 'incidents.error.workspaceForbidden',
+  INCIDENT_WORKSPACE_REQUIRED: 'incidents.error.workspaceRequired',
+  BUSINESS_WORKSPACE_NOT_FOUND: 'incidents.error.workspaceNotFound',
   // G12 A1. Four codes, because "the server said no" is not one situation: an
   // unverifiable attestation and a stale one are different mistakes with different
   // remedies, and collapsing them into one sentence would hide which happened.
@@ -218,6 +310,13 @@ export interface CapabilityInput {
  */
 export function incidentCapabilities({ incident, userId, role }: CapabilityInput): IncidentCapabilities {
   const canOperate = role === 'operator' || role === 'admin';
+  // D5 RESIDUE, recorded rather than hidden: this line still infers "can read it" from the
+  // role, and since D5 the readable set is membership, which the page does not have here.
+  // It only picks WHICH refusal sentence to show - the server already answered 404 for an
+  // incident this account may not read, so the component never receives one - and the two
+  // sentences are both refusals. Closing this properly means passing the scope into this
+  // function, which is a page-shape change and belongs with the workspace selector, not
+  // with the security model. docs/design/g12-scope/d5-business-workspace-adr.md section 10.
   const seesAll = role === 'admin' || role === 'viewer';
   const visible = Boolean(userId) && (seesAll || incident.owner === userId);
   const closed = incident.status === 'CLOSED';

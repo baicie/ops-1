@@ -14,6 +14,100 @@ servers:
 security:
   - cookieSession: []
 paths:
+  /business-workspaces:
+    get:
+      summary: The business workspaces this caller may read
+      description: >
+        The caller own memberships, because membership is what makes a business
+        record readable. An admin additionally receives every workspace METADATA (key
+        and name, never a record) so it has an id to grant against; the member field
+        says which of those it may actually read, and for an admin that has not been
+        granted one the answer is false - platform administration is not a data
+        grant.
+      responses:
+        '200':
+          description: The workspaces this caller can see, and which it is in
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/BusinessWorkspace'}
+        '401': {description: UNAUTHENTICATED}
+    post:
+      summary: Create a business workspace (admin)
+      description: >
+        Creating a workspace does NOT enter it: the response reports member=false and
+        no incident is readable through it until a membership is granted. That
+        separation is the D5 ruling, not an omission - the container is platform
+        administration, the records inside it are business data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateBusinessWorkspaceRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessWorkspace'}
+        '400': {description: INVALID_REQUEST - key or name shape}
+        '403': {description: FORBIDDEN - admin only}
+        '409': {description: BUSINESS_WORKSPACE_KEY_TAKEN}
+  /business-workspaces/{workspaceId}/members:
+    post:
+      summary: Grant a user membership of a business workspace (admin)
+      description: >
+        The grant is the only route into a workspace data, and the only audited one:
+        it writes a business_workspace_member event in the same transaction.
+        Idempotent - a replay answers 200 with the membership that already exists
+        instead of refusing the retry.
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GrantMembershipRequest'}
+      responses:
+        '201':
+          description: Membership granted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Membership'}
+        '200':
+          description: Already a member; the membership that exists
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Membership'}
+        '403': {description: FORBIDDEN - admin only}
+        '404':
+          description: >
+            BUSINESS_WORKSPACE_NOT_FOUND (no such workspace) or
+            BUSINESS_WORKSPACE_MEMBER_UNKNOWN (no such account)
+  /business-workspaces/{workspaceId}/members/{userId}:
+    delete:
+      summary: Revoke a user membership of a business workspace (admin)
+      description: >
+        Takes effect on the caller NEXT request and on the next tool call of an
+        investigation already in flight: the scope is resolved per request and per
+        tool call, never stored in a session or a run.
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '204': {description: Revoked}
+        '403': {description: FORBIDDEN - admin only}
+        '404': {description: BUSINESS_WORKSPACE_MEMBER_NOT_FOUND - not a member}
   /incidents:
     post:
       summary: Create an incident (operator or admin)
@@ -64,10 +158,18 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/CreateIncidentRequest'}
     get:
-      summary: Incident list, scoped by role
+      summary: Incident list, scoped to the caller business workspaces
       description: >
-        admin and viewer see every incident; operator sees only incidents it
-        owns, mirroring the job list predicate at apps/kernel/src/jobs.rs:1883.
+        D5, decided (docs/design/g12-scope/d5-business-workspace-adr.md): a row is
+        readable because the caller is a MEMBER of the business workspace it lives
+        in, and the role then decides which rows inside that workspace - admin and
+        viewer see the workspace rows, operator sees the rows it owns. Neither half
+        is sufficient and neither is a role attribute: membership is data an
+        administrator grants, it is re-read on every request, and a caller that is a
+        member of nothing reads nothing whatever its role. Platform administration is
+        NOT a data grant: an admin that was never made a member reads exactly what a
+        stranger reads. Out-of-scope and nonexistent share one answer (404), so this
+        route cannot be used to probe what exists elsewhere.
       parameters:
         - name: status
           in: query
@@ -97,7 +199,8 @@ paths:
           description: Opaque keyset cursor from a previous nextCursor; rejects with 400 when malformed or expired
       responses:
         '200':
-          description: Bounded page, newest first
+          description: >
+            Bounded page, newest first, with the read scope it was produced under
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IncidentList'}
@@ -571,6 +674,17 @@ components:
       additionalProperties: false
       required: [title, severity, startedAt]
       properties:
+        workspaceId:
+          type: string
+          format: uuid
+          description: >
+            The business workspace this incident is filed under. Optional only for a
+            caller that is a member of exactly one, where the kernel has exactly one
+            answer; a caller in two or more must name it (400
+            INCIDENT_WORKSPACE_REQUIRED), and a caller in none has nowhere to write
+            (403 INCIDENT_WORKSPACE_FORBIDDEN). A workspace the caller is not a member
+            of answers 404 BUSINESS_WORKSPACE_NOT_FOUND and creates nothing: a caller
+            cannot state its own scope.
         title: {type: string, minLength: 4, maxLength: 200}
         severity: {$ref: '#/components/schemas/IncidentSeverity'}
         source:
@@ -661,7 +775,7 @@ components:
     IncidentList:
       type: object
       additionalProperties: false
-      required: [items, nextCursor]
+      required: [items, nextCursor, scope]
       properties:
         items:
           type: array
@@ -669,6 +783,89 @@ components:
         nextCursor:
           type: [string, 'null']
           description: Opaque keyset cursor; null when the page is the last one
+        scope:
+          $ref: '#/components/schemas/IncidentScope'
+    IncidentScope:
+      type: object
+      additionalProperties: false
+      required: [narrowedTo, workspaceCount]
+      description: >
+        The read the page was produced under, sent beside the rows because an empty
+        items array cannot say whether the list is empty or narrowed: both cases are
+        the same bytes, and only the Kernel knows which one happened. A client that
+        derived this from the role would be restating 4.3 of the incident ADR from
+        memory, and the drift of that restatement is the bug this field removes.
+        SEMANTIC BOUNDARY: this object describes THIS READ and never the platform.
+        A client is licensed to say "this read applied no owner narrowing". It is not
+        licensed to say "this list is every incident on the platform": the payload
+        cannot know that (a later predicate narrows rows this object does not name),
+        and a sentence built on the stronger reading goes false without one byte of
+        the response changing. There is deliberately no boolean for "sees
+        everything" - the one that existed was consumed as exactly that claim, and
+        for a viewer it was true only through Caller::from_role's !can_operate()
+        half, which no decision chose. Written reason and the open D5 question:
+        docs/design/g12-scope/narrowed-reads.md section 3, ADR section 4.6.
+      properties:
+        narrowedTo:
+          type: [string, 'null']
+          enum: ['owner', null]
+          description: >
+            The field this read was narrowed on, or null when it applied no owner
+            narrowing. 'owner' is the only value the current predicate produces, and
+            null is the absence of a restriction this field can name - it is not a
+            count of what exists, and it is not a claim that the page is complete.
+            It is a field name rather than a boolean so that copy naming ownership
+            is licensed by the payload, and a second narrowing would have to change
+            this value instead of silently reusing the sentence about owners.
+        workspaceCount:
+          type: integer
+          minimum: 0
+          description: >
+            How many business workspaces bounded THIS read - the caller own
+            memberships, resolved when the request was served. Zero is the one value
+            that explains an empty items array completely and that no role explains:
+            a caller that is a member of no workspace cannot be shown a row by any
+            read in the kernel. It is a count of the bound applied, not a count of
+            what exists, and it changes when an administrator grants or revokes
+            membership.
+    BusinessWorkspace:
+      type: object
+      additionalProperties: false
+      required: [workspaceId, key, name, createdAt, member]
+      properties:
+        workspaceId: {type: string, format: uuid}
+        key: {type: string, description: Stable human handle, unique per platform}
+        name: {type: string}
+        createdAt: {type: string, format: date-time}
+        member:
+          type: boolean
+          description: >
+            Whether the CALLER is a member. This is the field that decides whether the
+            business records inside this workspace can reach it; an admin reading
+            workspace metadata it was never granted sees false here.
+    CreateBusinessWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [key, name]
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+        name: {type: string, minLength: 2, maxLength: 120}
+    GrantMembershipRequest:
+      type: object
+      additionalProperties: false
+      required: [userId]
+      properties:
+        userId: {type: string, format: uuid}
+    Membership:
+      type: object
+      additionalProperties: false
+      required: [workspaceId, userId, grantedAt]
+      properties:
+        workspaceId: {type: string, format: uuid}
+        userId: {type: string, format: uuid}
+        grantedAt: {type: string, format: date-time}
     CreateEvidenceRequest:
       type: object
       additionalProperties: false

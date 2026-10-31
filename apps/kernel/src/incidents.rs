@@ -5,10 +5,13 @@
 //! wire format is contracts/openapi/incident-v1.yaml. This module implements
 //! those two documents and nothing else.
 //!
-//! Permission gates reuse the existing AuthUser::require_operator primitive.
-//! The visibility predicate deliberately copies the job list predicate
-//! (jobs.rs:1883): admin and viewer read everything, an operator reads only what
-//! it owns.
+//! Permission gates reuse the existing AuthUser::require_operator primitive, and
+//! the verb they gate is decided separately from the rows it acts on: WHICH
+//! workspaces a caller may read is membership data resolved per call in
+//! crate::scope, and WHICH rows it sees inside them is a per-role rule. The
+//! pre-D5 sentence that stood here - "admin and viewer read everything, an
+//! operator reads only what it owns" - was one expression standing in for both
+//! questions, and it is the accident G12 D5 removed.
 //!
 //! G12 C adds the two operations the recorded lifecycle was missing - a controlled
 //! CONCLUDED -> CLOSED and an ownership handover - plus the audit timeline the UI
@@ -19,6 +22,7 @@
 use crate::audit::AuditEventView;
 use crate::auth::AuthUser;
 use crate::error::{AppError, AppResult};
+use crate::scope::{self, DataScope};
 use crate::state::AppState;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
@@ -57,10 +61,13 @@ const ATTESTATION_MAX_SKEW_SECONDS: i64 = 300;
 const ATTESTATION_VERSION: &str = "opsweave-evidence-attestation-v1";
 /// What the content read path selects out of kernel.incident_evidence_content:
 /// (content type, body, verified byte length, recorded digest, retention horizon).
-type StoredContent = (String, Vec<u8>, i32, String, DateTime<Utc>);
+/// pub(crate) so the investigator's read_evidence selects through the same alias: the
+/// G12 F defect was that path declaring the body as String, which fails to decode a
+/// bytea column on every row that has one. One alias, one decode.
+pub(crate) type StoredContent = (String, Vec<u8>, i32, String, DateTime<Utc>);
 /// The evidence list's query window, as (since, until). Both are None or both are
 /// Some; evidence_window enforces that before any SQL runs.
-type EvidenceWindow = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
+pub(crate) type EvidenceWindow = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
 /// The two content types the Kernel stores and serves back verbatim. Exact match,
 /// no charset parameter and no text/html: a content type the Kernel cannot serve
 /// under its own security headers is a content type it does not accept
@@ -102,24 +109,58 @@ const CLOSURE_KEY_MAX_CHARS: usize = 200;
 const TIMELINE_DEFAULT_EVENTS: i64 = 100;
 const TIMELINE_MAX_EVENTS: i64 = 200;
 
-/// Who is asking, reduced to the two facts the SQL layer needs.
+/// The read predicate has one definition, in crate::scope; this module no longer
+/// owns one.
 ///
-/// sees_all is the verbatim job-list predicate, expressed once so the two
-/// resources cannot drift apart. This is data scoping, not a permission gate:
-/// every write endpoint still calls AuthUser::require_operator() first.
-#[derive(Debug, Clone, Copy)]
-struct Caller {
-    user_id: Uuid,
-    sees_all: bool,
+/// G12 D5 (docs/design/g12-scope/d5-business-workspace-adr.md). The struct that
+/// stood here carried `sees_all`, computed as `is_admin() || !can_operate()`.
+/// That expression answered "which workspaces may this caller read" with an
+/// attribute of a role, so a viewer read every incident on the platform while the
+/// audit ledger - which asked its own question - told the same viewer that
+/// INCIDENT events are visible only where it owns the subject. Membership is what
+/// decides now, and it is resolved per call.
+///
+/// What remains in this module is the SHAPE of the report, because a field name is
+/// part of this module's contract and a scope is not.
+fn scope_view(scope: &DataScope) -> IncidentScopeView {
+    IncidentScopeView {
+        narrowed_to: if scope.sees_every_row() {
+            None
+        } else {
+            Some("owner")
+        },
+        workspace_count: scope.workspace_count(),
+    }
 }
 
-impl Caller {
-    fn from_auth(auth: &AuthUser) -> Self {
-        Self {
-            user_id: auth.user_id,
-            sees_all: auth.role.is_admin() || !auth.role.can_operate(),
-        }
-    }
+/// What the incident list will show this caller, sent beside the rows.
+///
+/// One field, naming the field this read was narrowed on. It exists so the copy that says
+/// 'the incidents you own' is licensed by this payload instead of by the page's memory of
+/// what the predicate used to be: a second narrowing would have to change this value, and the
+/// sentence naming ownership would have to change with it rather than quietly keep claiming
+/// the whole list.
+///
+/// There is no `seesAll` here, and removing it is the point of this struct. That boolean
+/// answered "does this list hold everything?", which a read cannot answer: it is true only
+/// relative to the predicate this route happens to apply, so a later narrowing on any other
+/// column would leave it silently lying, and for a viewer it already did - `!can_operate()`
+/// made it true by accident (section 3.4). A field may only say what it knows, and what this
+/// read knows is which narrowing it applied.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncidentScopeView {
+    /// The field this read was narrowed on. 'owner' is the only value the current predicate
+    /// produces; null means this read applied no owner narrowing, which is a statement about
+    /// the read rather than a count of what exists.
+    pub narrowed_to: Option<&'static str>,
+    /// How many business workspaces bounded this read. Zero is the one value that
+    /// explains an empty page completely: a caller that is a member of no workspace
+    /// cannot be shown a row by any read in the kernel, whatever its role. It is a
+    /// count of the bound this read applied - the caller's own grants - and not a
+    /// count of what exists, which is the distinction
+    /// docs/design/g12-scope/narrowed-reads.md section 3.0 draws.
+    pub workspace_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -133,6 +174,12 @@ pub struct CreateIncidentRequest {
     pub native_id: Option<String>,
     #[serde(default)]
     pub related_entity: Option<String>,
+    /// The business workspace this incident is filed under. Optional only for a
+    /// caller that is a member of exactly one, where the kernel has one answer and
+    /// guessing is not guessing. It is validated against membership: naming a
+    /// workspace you cannot enter is 404, not a grant.
+    #[serde(default)]
+    pub workspace_id: Option<Uuid>,
     pub started_at: DateTime<Utc>,
 }
 
@@ -284,6 +331,13 @@ pub struct IncidentListQuery {
     /// D3: the list page filters by owner. This narrows the caller's data scope; it
     /// can never widen it, because the sees_all/owner predicate is still applied.
     pub owner: Option<String>,
+    /// G12 E: exact-match filter on relatedEntity, added for get_related_context.
+    ///
+    /// It is a NARROWING filter and nothing else: the sees_all/owner predicate is still
+    /// applied on the same query, so a caller cannot reach an incident it could not
+    /// already list. It exists so the investigator's related-context tool reuses this
+    /// query instead of writing a second, unaudited one.
+    pub related_entity: Option<String>,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
 }
@@ -315,6 +369,9 @@ pub struct TimelineQuery {
 pub struct IncidentList {
     pub items: Vec<IncidentView>,
     pub next_cursor: Option<String>,
+    /// The read these rows were produced under. Never optional: a response without it
+    /// puts the browser back where it started, deciding from items alone.
+    pub scope: IncidentScopeView,
 }
 
 #[derive(Debug, Serialize)]
@@ -521,7 +578,7 @@ pub async fn create_incident(
 ) -> AppResult<(StatusCode, Json<IncidentView>)> {
     auth.require_operator()?;
     let payload: CreateIncidentRequest = parse_json(body)?;
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     // No audit call here: the audit row is written inside insert_incident's
     // transaction, so a failed audit cannot leave a committed incident behind.
     let (created, incident) = insert_incident(&state.db, caller, payload).await?;
@@ -538,9 +595,13 @@ pub async fn list_incidents(
     auth: AuthUser,
     Query(query): Query<IncidentListQuery>,
 ) -> AppResult<Json<IncidentList>> {
-    let caller = Caller::from_auth(&auth);
-    let (items, next_cursor) = query_incidents(&state.db, caller, query).await?;
-    Ok(Json(IncidentList { items, next_cursor }))
+    let caller = DataScope::resolve(&state.db, &auth).await?;
+    let (items, next_cursor) = query_incidents(&state.db, caller.clone(), query).await?;
+    Ok(Json(IncidentList {
+        items,
+        next_cursor,
+        scope: scope_view(&caller),
+    }))
 }
 
 pub async fn get_incident(
@@ -548,7 +609,7 @@ pub async fn get_incident(
     auth: AuthUser,
     Path(incident_id): Path<Uuid>,
 ) -> AppResult<Json<IncidentView>> {
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     Ok(Json(query_incident(&state.db, caller, incident_id).await?))
 }
 
@@ -560,7 +621,7 @@ pub async fn append_evidence(
 ) -> AppResult<(StatusCode, Json<EvidenceView>)> {
     auth.require_operator()?;
     let payload: CreateEvidenceRequest = parse_json(body)?;
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     // The adapter secret set travels with the call instead of being read from a
     // global, so a test can hand in its own adapters and prove a forged
     // attestation is refused without depending on the process environment.
@@ -586,7 +647,7 @@ pub async fn list_evidence(
     Path(incident_id): Path<Uuid>,
     Query(query): Query<EvidenceListQuery>,
 ) -> AppResult<Json<EvidenceList>> {
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     let window = evidence_window(&query)?;
     let items = query_evidence(&state.db, caller, incident_id, window).await?;
     Ok(Json(EvidenceList { items }))
@@ -605,7 +666,7 @@ pub async fn read_evidence_content(
     auth: AuthUser,
     Path((incident_id, evidence_id)): Path<(Uuid, Uuid)>,
 ) -> AppResult<Response> {
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     // The authorization gate, and the only one: the same predicate the metadata
     // list applies, so nothing can be read as content where its row is invisible.
     incident_status(&state.db, caller, incident_id).await?;
@@ -717,7 +778,7 @@ pub async fn create_verdict(
 ) -> AppResult<(StatusCode, Json<VerdictView>)> {
     auth.require_operator()?;
     let payload: CreateVerdictRequest = parse_json(body)?;
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     let verdict = insert_verdict(&state.db, caller, incident_id, payload).await?;
     Ok((StatusCode::CREATED, Json(verdict)))
 }
@@ -727,7 +788,7 @@ pub async fn get_verdict(
     auth: AuthUser,
     Path(incident_id): Path<Uuid>,
 ) -> AppResult<Json<VerdictView>> {
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     Ok(Json(query_verdict(&state.db, caller, incident_id).await?))
 }
 /// POST /incidents/{id}/close - the only way an incident becomes CLOSED.
@@ -753,7 +814,7 @@ pub async fn close_incident(
 ) -> AppResult<Json<IncidentView>> {
     auth.require_operator()?;
     let payload: CloseIncidentRequest = parse_json(body)?;
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     Ok(Json(
         close_incident_record(&state.db, caller, incident_id, payload).await?,
     ))
@@ -773,7 +834,7 @@ pub async fn transfer_owner(
 ) -> AppResult<Json<OwnerTransferView>> {
     auth.require_operator()?;
     let payload: TransferOwnerRequest = parse_json(body)?;
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     Ok(Json(
         transfer_incident_owner(&state.db, caller, incident_id, payload).await?,
     ))
@@ -786,7 +847,7 @@ pub async fn get_timeline(
     Path(incident_id): Path<Uuid>,
     Query(query): Query<TimelineQuery>,
 ) -> AppResult<Json<IncidentTimeline>> {
-    let caller = Caller::from_auth(&auth);
+    let caller = DataScope::resolve(&state.db, &auth).await?;
     let limit = i64::from(query.limit.unwrap_or(TIMELINE_DEFAULT_EVENTS as u32))
         .clamp(1, TIMELINE_MAX_EVENTS);
     Ok(Json(
@@ -804,7 +865,7 @@ pub async fn get_timeline(
 
 async fn insert_incident(
     db: &PgPool,
-    caller: Caller,
+    caller: DataScope,
     payload: CreateIncidentRequest,
 ) -> AppResult<(bool, IncidentView)> {
     let title = bounded(&payload.title, "title", 4, 200)?;
@@ -824,6 +885,32 @@ async fn insert_incident(
             other => other,
         };
 
+    // Which workspace the row is filed under is decided here and validated against
+    // the caller's own membership. A body naming a workspace the caller cannot
+    // enter is refused with 404, never accepted: a caller that could state its own
+    // scope would be granting itself one, which is the single thing this model must
+    // not allow.
+    let workspace_id = match payload.workspace_id {
+        Some(named) if caller.may_enter(named) => named,
+        Some(_) => return Err(workspace_not_found()),
+        None => match caller.workspaces.as_slice() {
+            [only] => *only,
+            [] => {
+                return Err(AppError::new(
+                    StatusCode::FORBIDDEN,
+                    "INCIDENT_WORKSPACE_FORBIDDEN",
+                    "this account is not a member of any business workspace, so it has nowhere to file an incident; an administrator grants membership",
+                ))
+            }
+            _ => {
+                return Err(AppError::new(
+                    StatusCode::BAD_REQUEST,
+                    "INCIDENT_WORKSPACE_REQUIRED",
+                    "name the workspaceId this incident belongs to: this account is a member of more than one business workspace and the kernel will not guess",
+                ))
+            }
+        },
+    };
     let incident_id = Uuid::new_v4();
     // The row and the audit row that attests it share one transaction. Written
     // after the commit instead, a failed audit insert turns into a 5xx over a
@@ -833,8 +920,8 @@ async fn insert_incident(
         r#"
         INSERT INTO kernel.incidents
           (incident_id,title,severity,status,source,native_id,related_entity,
-           started_at,owner)
-        VALUES ($1,$2,$3,'OPEN',$4,$5,$6,$7,$8)
+           started_at,owner,workspace_id)
+        VALUES ($1,$2,$3,'OPEN',$4,$5,$6,$7,$8,$9)
         ON CONFLICT DO NOTHING
         RETURNING incident_id
         "#,
@@ -847,6 +934,7 @@ async fn insert_incident(
     .bind(related_entity.as_deref())
     .bind(payload.started_at)
     .bind(caller.user_id)
+    .bind(workspace_id)
     .fetch_optional(&mut *tx)
     .await?;
 
@@ -872,14 +960,15 @@ async fn insert_incident(
     // A conflicting insert can only mean the natural key already exists.
     // Re-read it instead of telling the caller to retry: a replay must be
     // answered, not rejected.
-    let existing: Option<(Uuid, Uuid)> = sqlx::query_as(
-        "SELECT incident_id, owner FROM kernel.incidents WHERE source=$1 AND native_id=$2",
+    let existing: Option<(Uuid, Uuid, Uuid)> = sqlx::query_as(
+        "SELECT incident_id, owner, workspace_id
+           FROM kernel.incidents WHERE source=$1 AND native_id=$2",
     )
     .bind(&source)
     .bind(native_id.as_deref())
     .fetch_optional(db)
     .await?;
-    let Some((existing, owner)) = existing else {
+    let Some((existing, owner, existing_workspace)) = existing else {
         return Err(AppError::conflict(
             "INCIDENT_WRITE_CONFLICT",
             "a concurrent write changed this incident set; retry the request",
@@ -889,7 +978,7 @@ async fn insert_incident(
     // give: that status would say the failure does not exist while refusing to
     // create it. The natural key came from the caller, so telling it the key is
     // taken reveals only what the caller already typed.
-    if !caller.sees_all && owner != caller.user_id {
+    if !caller.covers(existing_workspace, owner) {
         return Err(AppError::conflict(
             "INCIDENT_NATIVE_ID_TAKEN",
             "another user already reported this source/nativeId failure; it cannot be re-created or taken over",
@@ -898,9 +987,9 @@ async fn insert_incident(
     Ok((false, query_incident(db, caller, existing).await?))
 }
 
-async fn query_incidents(
+pub(crate) async fn query_incidents(
     db: &PgPool,
-    caller: Caller,
+    caller: DataScope,
     query: IncidentListQuery,
 ) -> AppResult<(Vec<IncidentView>, Option<String>)> {
     let limit = i64::from(query.limit.unwrap_or(20).clamp(1, 100));
@@ -924,6 +1013,15 @@ async fn query_incidents(
         ),
         None => None,
     };
+    let related_entity = match query
+        .related_entity
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => Some(bounded(value, "relatedEntity filter", 3, 200)?),
+        None => None,
+    };
     let (cursor_time, cursor_id) = match query.cursor.as_deref() {
         Some(value) => {
             let (time, id) = decode_cursor(value)?;
@@ -933,23 +1031,27 @@ async fn query_incidents(
     };
     let sql = format!(
         "{INCIDENT_SELECT}
-         WHERE ($1::boolean OR i.owner=$2)
+         WHERE {}
            AND ($3::text IS NULL OR i.status=$3)
            AND ($4::text IS NULL OR i.severity=$4)
            AND ($5::timestamptz IS NULL OR (i.started_at,i.incident_id) < ($5,$6::uuid))
            AND ($8::uuid IS NULL OR i.owner=$8)
+           AND ($9::text IS NULL OR i.related_entity=$9)
          ORDER BY i.started_at DESC, i.incident_id DESC
-         LIMIT $7"
+         LIMIT $7",
+        scope::predicate("i", 1, 2, 10)
     );
     let rows = sqlx::query_as::<_, IncidentRow>(&sql)
-        .bind(caller.sees_all)
-        .bind(caller.user_id)
+        .bind(&caller.workspaces)
+        .bind(caller.sees_every_row())
         .bind(status.as_deref())
         .bind(severity.as_deref())
         .bind(cursor_time)
         .bind(cursor_id)
         .bind(limit + 1)
         .bind(owner)
+        .bind(related_entity.as_deref())
+        .bind(caller.user_id)
         .fetch_all(db)
         .await?;
     let has_more = rows.len() as i64 > limit;
@@ -971,12 +1073,20 @@ async fn query_incidents(
     Ok((items, next_cursor))
 }
 
-async fn query_incident(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppResult<IncidentView> {
-    let sql = format!("{INCIDENT_SELECT} WHERE i.incident_id=$3 AND ($1::boolean OR i.owner=$2)");
+pub(crate) async fn query_incident(
+    db: &PgPool,
+    caller: DataScope,
+    incident_id: Uuid,
+) -> AppResult<IncidentView> {
+    let sql = format!(
+        "{INCIDENT_SELECT} WHERE i.incident_id=$1 AND {}",
+        scope::predicate("i", 2, 3, 4)
+    );
     let row = sqlx::query_as::<_, IncidentRow>(&sql)
-        .bind(caller.sees_all)
-        .bind(caller.user_id)
         .bind(incident_id)
+        .bind(&caller.workspaces)
+        .bind(caller.sees_every_row())
+        .bind(caller.user_id)
         .fetch_optional(db)
         .await?;
     row.map(IncidentRow::into_view)
@@ -986,7 +1096,7 @@ async fn query_incident(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppRe
 async fn insert_evidence(
     db: &PgPool,
     adapters: &HashMap<String, String>,
-    caller: Caller,
+    caller: DataScope,
     incident_id: Uuid,
     payload: CreateEvidenceRequest,
 ) -> AppResult<(bool, EvidenceView)> {
@@ -1028,7 +1138,7 @@ async fn insert_evidence(
     };
     let trust = resolve_evidence_trust(adapters, &tuple, &payload)?;
 
-    let status = incident_status(db, caller, incident_id).await?;
+    let status = incident_status(db, caller.clone(), incident_id).await?;
     if status == "CLOSED" {
         return Err(AppError::conflict(
             "INCIDENT_CLOSED",
@@ -1172,9 +1282,9 @@ async fn insert_evidence(
     Ok((true, evidence))
 }
 
-async fn query_evidence(
+pub(crate) async fn query_evidence(
     db: &PgPool,
-    caller: Caller,
+    caller: DataScope,
     incident_id: Uuid,
     window: EvidenceWindow,
 ) -> AppResult<Vec<EvidenceView>> {
@@ -1194,7 +1304,7 @@ async fn query_evidence(
 
 async fn insert_verdict(
     db: &PgPool,
-    caller: Caller,
+    caller: DataScope,
     incident_id: Uuid,
     payload: CreateVerdictRequest,
 ) -> AppResult<VerdictView> {
@@ -1206,12 +1316,14 @@ async fn insert_verdict(
     // concluding at the same instant are serialized, so the second one sees the
     // first verdict and gets 409 instead of overwriting signed history.
     let mut tx = db.begin().await?;
-    let status: Option<String> = sqlx::query_scalar(
-        "SELECT status FROM kernel.incidents
-          WHERE incident_id=$1 AND ($2::boolean OR owner=$3) FOR UPDATE",
-    )
+    let status: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT status FROM kernel.incidents i
+          WHERE i.incident_id=$1 AND {} FOR UPDATE",
+        scope::predicate("i", 2, 3, 4)
+    ))
     .bind(incident_id)
-    .bind(caller.sees_all)
+    .bind(&caller.workspaces)
+    .bind(caller.sees_every_row())
     .bind(caller.user_id)
     .fetch_optional(&mut *tx)
     .await?;
@@ -1340,7 +1452,7 @@ async fn insert_verdict(
 
 async fn close_incident_record(
     db: &PgPool,
-    caller: Caller,
+    caller: DataScope,
     incident_id: Uuid,
     payload: CloseIncidentRequest,
 ) -> AppResult<IncidentView> {
@@ -1373,12 +1485,14 @@ async fn close_incident_record(
     let mut tx = db.begin().await?;
     // The read that decides, under the row lock: two closers are serialized here, so
     // the second one observes the first closure instead of overwriting it.
-    let current: Option<(String, i64, Option<String>)> = sqlx::query_as(
-        "SELECT status, revision, closure_key FROM kernel.incidents
-          WHERE incident_id=$1 AND ($2::boolean OR owner=$3) FOR UPDATE",
-    )
+    let current: Option<(String, i64, Option<String>)> = sqlx::query_as(&format!(
+        "SELECT status, revision, closure_key FROM kernel.incidents i
+          WHERE i.incident_id=$1 AND {} FOR UPDATE",
+        scope::predicate("i", 2, 3, 4)
+    ))
     .bind(incident_id)
-    .bind(caller.sees_all)
+    .bind(&caller.workspaces)
+    .bind(caller.sees_every_row())
     .bind(caller.user_id)
     .fetch_optional(&mut *tx)
     .await?;
@@ -1477,7 +1591,7 @@ async fn close_incident_record(
 
 async fn transfer_incident_owner(
     db: &PgPool,
-    caller: Caller,
+    caller: DataScope,
     incident_id: Uuid,
     payload: TransferOwnerRequest,
 ) -> AppResult<OwnerTransferView> {
@@ -1494,16 +1608,18 @@ async fn transfer_incident_owner(
     }
 
     let mut tx = db.begin().await?;
-    let current: Option<(String, i64, Uuid)> = sqlx::query_as(
-        "SELECT status, revision, owner FROM kernel.incidents
-          WHERE incident_id=$1 AND ($2::boolean OR owner=$3) FOR UPDATE",
-    )
+    let current: Option<(String, i64, Uuid, Uuid)> = sqlx::query_as(&format!(
+        "SELECT status, revision, owner, workspace_id FROM kernel.incidents i
+          WHERE i.incident_id=$1 AND {} FOR UPDATE",
+        scope::predicate("i", 2, 3, 4)
+    ))
     .bind(incident_id)
-    .bind(caller.sees_all)
+    .bind(&caller.workspaces)
+    .bind(caller.sees_every_row())
     .bind(caller.user_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some((status, revision, previous_owner)) = current else {
+    let Some((status, revision, previous_owner, workspace_id)) = current else {
         tx.rollback().await?;
         return Err(incident_not_found());
     };
@@ -1566,6 +1682,26 @@ async fn transfer_incident_owner(
             "only an operator or admin account can own an incident: a viewer could not act on it and would lose nothing by not being named",
         ));
     }
+    // An owner that cannot enter the incident's workspace could not read what it was given,
+    // and no write from it would ever reach the record: a handover that names such an
+    // account strands the row. Membership, not role, is the second condition - the same
+    // separation this phase makes everywhere else.
+    let target_is_member: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM kernel.business_workspace_members
+                         WHERE workspace_id=$1 AND user_id=$2)",
+    )
+    .bind(workspace_id)
+    .bind(payload.to_owner)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !target_is_member {
+        tx.rollback().await?;
+        return Err(AppError::new(
+            StatusCode::CONFLICT,
+            "INCIDENT_OWNER_NOT_IN_WORKSPACE",
+            "the target account is not a member of this incident's business workspace, so it could not read the record it would own",
+        ));
+    }
 
     let updated: Option<(i64, DateTime<Utc>)> = sqlx::query_as(
         "UPDATE kernel.incidents
@@ -1614,9 +1750,9 @@ async fn transfer_incident_owner(
     })
 }
 
-async fn query_timeline(
+pub(crate) async fn query_timeline(
     db: &PgPool,
-    caller: Caller,
+    caller: DataScope,
     incident_id: Uuid,
     limit: i64,
 ) -> AppResult<IncidentTimeline> {
@@ -1654,7 +1790,11 @@ async fn query_timeline(
     })
 }
 
-async fn query_verdict(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppResult<VerdictView> {
+async fn query_verdict(
+    db: &PgPool,
+    caller: DataScope,
+    incident_id: Uuid,
+) -> AppResult<VerdictView> {
     incident_status(db, caller, incident_id).await?;
     sqlx::query_as::<_, VerdictView>(&format!(
         "SELECT {VERDICT_COLUMNS} FROM kernel.incident_verdicts WHERE incident_id=$1"
@@ -1671,13 +1811,19 @@ async fn query_verdict(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppRes
     })
 }
 
-async fn incident_status(db: &PgPool, caller: Caller, incident_id: Uuid) -> AppResult<String> {
-    sqlx::query_scalar(
-        "SELECT status FROM kernel.incidents
-          WHERE incident_id=$1 AND ($2::boolean OR owner=$3)",
-    )
+pub(crate) async fn incident_status(
+    db: &PgPool,
+    caller: DataScope,
+    incident_id: Uuid,
+) -> AppResult<String> {
+    sqlx::query_scalar(&format!(
+        "SELECT status FROM kernel.incidents i
+          WHERE i.incident_id=$1 AND {}",
+        scope::predicate("i", 2, 3, 4)
+    ))
     .bind(incident_id)
-    .bind(caller.sees_all)
+    .bind(&caller.workspaces)
+    .bind(caller.sees_every_row())
     .bind(caller.user_id)
     .fetch_optional(db)
     .await?
@@ -1932,7 +2078,7 @@ fn digest_of(body: &[u8]) -> String {
 /// header), or an error naming both digests and both lengths. It never repairs
 /// anything: a stored digest that no longer matches its bytes is a fact about the
 /// database, and rewriting the digest would launder the tamper into a normal row.
-fn verify_stored_content(
+pub(crate) fn verify_stored_content(
     evidence_id: Uuid,
     content_bytes: i32,
     body: &[u8],
@@ -2253,6 +2399,17 @@ fn incident_not_found() -> AppError {
         "incident not found",
     )
 }
+/// A business workspace the caller named but cannot enter. 404 and not 403, for the
+/// same reason an out-of-scope incident answers 404: the two answers must not say
+/// which workspace ids exist, and a caller that is refused membership of a workspace
+/// it named already knows the id it typed.
+pub(crate) fn workspace_not_found() -> AppError {
+    AppError::new(
+        StatusCode::NOT_FOUND,
+        "BUSINESS_WORKSPACE_NOT_FOUND",
+        "business workspace not found",
+    )
+}
 /// A closure of a record that is already closed, by a request that is not a replay
 /// of the closure that happened (no key, or a different one).
 fn already_closed() -> AppError {
@@ -2391,6 +2548,7 @@ fn decode_cursor(cursor: &str) -> AppResult<(DateTime<Utc>, Uuid)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opsweave_contracts::Role;
     use sqlx::postgres::PgConnectOptions;
 
     // Same convention as jobs.rs: skipping is reserved for "no database
@@ -2457,6 +2615,18 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+        // Since D5 an account reads a business row only through workspace membership, and
+        // the handlers resolve that membership from this table. A fixture without the row
+        // would exercise the "member of nothing" case in every test by accident.
+        sqlx::query(
+            "INSERT INTO kernel.business_workspace_members (workspace_id,user_id)
+             VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        )
+        .bind(scope::legacy_workspace())
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
         id
     }
 
@@ -2504,18 +2674,25 @@ mod tests {
         }
     }
 
-    fn caller(user_id: Uuid) -> Caller {
-        Caller {
+    /// A test caller scoped to the legacy workspace the migration creates. Every
+    /// incident a test files through insert_incident lands there (a caller with
+    /// exactly one workspace does not have to name it), and every read these tests
+    /// perform is bounded by it - which is the point of the helper: a test cannot
+    /// accidentally read a row from a workspace it never granted itself.
+    fn caller(user_id: Uuid) -> DataScope {
+        DataScope::for_test(
             user_id,
-            sees_all: false,
-        }
+            vec![scope::legacy_workspace()],
+            crate::scope::RowRule::OwnedRows,
+        )
     }
 
-    fn admin_caller(user_id: Uuid) -> Caller {
-        Caller {
+    fn admin_caller(user_id: Uuid) -> DataScope {
+        DataScope::for_test(
             user_id,
-            sees_all: true,
-        }
+            vec![scope::legacy_workspace()],
+            crate::scope::RowRule::AllRows,
+        )
     }
 
     fn incident_request(title: &str, native_id: Option<&str>) -> CreateIncidentRequest {
@@ -2525,6 +2702,7 @@ mod tests {
             source: Some("API".to_string()),
             native_id: native_id.map(str::to_string),
             related_entity: Some("host:test-node".to_string()),
+            workspace_id: None,
             started_at: Utc::now(),
         }
     }
@@ -2801,7 +2979,7 @@ mod tests {
 
         let (created, first) = insert_incident(
             &pool,
-            me,
+            me.clone(),
             incident_request("disk full on web-01", Some("native-1")),
         )
         .await
@@ -2812,7 +2990,7 @@ mod tests {
 
         let (created_again, second) = insert_incident(
             &pool,
-            me,
+            me.clone(),
             incident_request("disk full on web-01", Some("native-1")),
         )
         .await
@@ -2896,6 +3074,130 @@ mod tests {
             .is_ok());
 
         cleanup(&pool, &[operator_a, operator_b, admin]).await;
+    }
+
+    /// The payload's scope has to be the predicate, not a second opinion about it.
+    ///
+    /// The stranger below reads no row while a row exists: that is the case the UI used to
+    /// render as "no incident has been recorded yet", because items alone cannot say whether a
+    /// list is empty or narrowed. Both callers here read what query_incidents already returned;
+    /// what this test pins is the scope that travels beside those rows.
+    #[tokio::test]
+    async fn the_reported_scope_agrees_with_the_predicate() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let owner = seed_user(&pool, "operator").await;
+        let stranger = seed_user(&pool, "operator").await;
+        let admin = seed_user(&pool, "admin").await;
+
+        let (_, theirs) =
+            insert_incident(&pool, caller(owner), incident_request("scope probe", None))
+                .await
+                .unwrap();
+
+        let (stranger_items, _) = query_incidents(
+            &pool,
+            caller(stranger),
+            IncidentListQuery {
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        // The predicate hides the row...
+        assert!(!stranger_items.iter().any(|item| item.id == theirs.id));
+        // ...and the scope says why, without naming the row.
+        let narrowed = scope_view(&caller(stranger));
+        assert_eq!(narrowed.narrowed_to, Some("owner"));
+        // The presence of a named narrowing is the same boolean the query binds, so the two
+        // cannot become two definitions. Since the payload stopped carrying `sees_all`, this
+        // round trip is the only thing keeping the field tied to the predicate.
+        assert_eq!(
+            narrowed.narrowed_to.is_none(),
+            caller(stranger).sees_every_row()
+        );
+
+        let (owner_items, _) = query_incidents(
+            &pool,
+            caller(owner),
+            IncidentListQuery {
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(owner_items.iter().any(|item| item.id == theirs.id));
+        // An owner who can read its own row is still narrowed: the scope describes the read,
+        // not the result, so it does not flip to "unnarrowed" because a row happened to appear.
+        assert_eq!(scope_view(&caller(owner)).narrowed_to, Some("owner"));
+
+        // The other end: an unnarrowed read says only that it applied no owner narrowing. It
+        // is not a count of the platform - the wire test below is where that reading is kept
+        // from coming back as a field.
+        assert_eq!(scope_view(&admin_caller(admin)).narrowed_to, None);
+
+        cleanup(&pool, &[owner, stranger, admin]).await;
+    }
+
+    /// The wire shape of the scope, for every role and for a caller with no membership.
+    ///
+    /// Two things are kept true at once. The shape is the SAME for every role, so no
+    /// role's list can be read as "the platform's whole incident list" out of a
+    /// differently valued field; `seesAll` must stay absent, and adding it back is a
+    /// failing assertion rather than a review comment. And `workspaceCount` is the
+    /// field that can explain an empty page no role explains: zero workspaces means no
+    /// read in the kernel can return a row for this caller, whatever its role is.
+    ///
+    /// The viewer row is a recorded observation, not an endorsement. Since D5 it can
+    /// only ever be reached through a workspace the viewer is a member of.
+    #[test]
+    fn the_scope_view_names_its_fields_for_every_role_on_the_wire() {
+        let workspaces = vec![scope::legacy_workspace()];
+        for (role, expected) in [
+            (
+                Role::Admin,
+                serde_json::json!({ "narrowedTo": null, "workspaceCount": 1 }),
+            ),
+            (
+                Role::Operator,
+                serde_json::json!({ "narrowedTo": "owner", "workspaceCount": 1 }),
+            ),
+            (
+                Role::Viewer,
+                serde_json::json!({ "narrowedTo": null, "workspaceCount": 1 }),
+            ),
+        ] {
+            let view = serde_json::to_value(scope_view(&DataScope::for_test(
+                Uuid::new_v4(),
+                workspaces.clone(),
+                crate::scope::RowRule::for_role(role),
+            )))
+            .unwrap();
+            assert_eq!(view, expected, "{role}");
+            assert_eq!(
+                view.as_object().unwrap().len(),
+                2,
+                "{role} names two things: {view}"
+            );
+            assert!(
+                view.get("seesAll").is_none(),
+                "{role} must not claim the world: {view}"
+            );
+        }
+        // A caller with no membership: the value that explains an empty page.
+        let starving = serde_json::to_value(scope_view(&DataScope::for_test(
+            Uuid::new_v4(),
+            Vec::new(),
+            crate::scope::RowRule::AllRows,
+        )))
+        .unwrap();
+        assert_eq!(
+            starving,
+            serde_json::json!({ "narrowedTo": null, "workspaceCount": 0 })
+        );
     }
 
     /// D3 added an `owner` list filter for the UI. The rule it must not break is the one the
@@ -4727,7 +5029,6 @@ mod tests {
         use axum::body::Body;
         use axum::http::Request;
         use axum::routing::post;
-        use opsweave_contracts::Role;
         use tower::ServiceExt;
 
         let Some(pool) = test_pool().await else {
@@ -4862,7 +5163,6 @@ mod tests {
         use axum::body::Body;
         use axum::http::Request;
         use axum::routing::post;
-        use opsweave_contracts::Role;
         use tower::ServiceExt;
 
         let Some(pool) = test_pool().await else {
@@ -4972,11 +5272,16 @@ mod tests {
         cleanup(&pool, &[owner, viewer]).await;
     }
 
-    /// Second gate: even a hand-written INSERT cannot mint attestation. The
-    /// handler is the first gate, this constraint is the one that survives a bug
-    /// in the handler.
+    /// One half of the schema's guarantee, stated as what it actually is.
+    ///
+    /// G12 F: this test used to be called "the database refuses a hand-written
+    /// attested row", which claimed far more than it measured. It omits
+    /// verification_method and verifier_identity, so what it proves is that a row
+    /// cannot CLAIM SOURCE_ATTESTED while saying nothing about how it got there - a
+    /// completeness check on the shape of the row. It proves nothing about a writer
+    /// who states both, which is the next test.
     #[tokio::test]
-    async fn the_database_refuses_a_hand_written_attested_row() {
+    async fn an_attested_row_must_also_state_how_it_was_verified() {
         let Some(pool) = test_pool().await else {
             return;
         };
@@ -5012,6 +5317,66 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(rows, 0);
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// The other half, and the one migration 0017 got wrong.
+    ///
+    /// A hand-written INSERT that states the method AND an adapter identity succeeds.
+    /// The schema checks the shape of the claim; it cannot check that the writer ever
+    /// held that adapter's secret, because a CHECK cannot see a signature. Migration
+    /// 0021 corrects the comment on the constraint and this test is the regression lock
+    /// for that correction: if a later change makes the schema refuse this, the comment
+    /// must be corrected in the same change instead of the guarantee being reassumed.
+    #[tokio::test]
+    async fn the_schema_cannot_prove_possession_so_a_named_adapter_is_enough() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("db shape", None))
+                .await
+                .unwrap();
+
+        let evidence = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.incident_evidence
+               (evidence_id,incident_id,kind,source,collected_at,content_ref,
+                claimed_trust,verified_trust,verification_method,verified_at,verifier_identity)
+             VALUES ($1,$2,'LOG_EXCERPT','syslog',now(),'sha256:forged',
+                     'SOURCE_ATTESTED','SOURCE_ATTESTED','SOURCE_ADAPTER',now(),'made-up-adapter')",
+        )
+        .bind(evidence)
+        .bind(incident.id)
+        .execute(&pool)
+        .await
+        .expect("the schema checks the shape of an attestation, not the possession of a secret");
+
+        let (method, identity): (String, String) = sqlx::query_as(
+            "SELECT verification_method, verifier_identity FROM kernel.incident_evidence
+              WHERE evidence_id=$1",
+        )
+        .bind(evidence)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(method, "SOURCE_ADAPTER");
+        assert_eq!(identity, "made-up-adapter");
+        // What the schema DOES guarantee about this row: it now says exactly what it is.
+        let note: String = sqlx::query_scalar(
+            "SELECT coalesce(obj_description(
+                (SELECT oid FROM pg_constraint
+                  WHERE conname='incident_evidence_attestation_requires_adapter'),'pg_constraint'),'')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            note.contains("SHAPE ONLY"),
+            "the constraint must carry the corrected statement of what it guarantees, got: {note}"
+        );
 
         cleanup(&pool, &[user]).await;
     }
@@ -5710,5 +6075,451 @@ mod tests {
         );
 
         cleanup(&pool, &[user]).await;
+    }
+
+    // -------------------------------------------------------------------------
+    // G12 D5 - the business workspace boundary, asserted one layer below the routes.
+    //
+    // tests/acceptance/d5_workspace_scope.sh drives the same nine claims through real
+    // HTTP; these are the same claims directly against the data operations, where a
+    // regression is a red assertion instead of a 404 somebody explains away. Every test
+    // here resolves its scope with the production `DataScope::resolve_for`, so what
+    // is asserted is the query the handlers run.
+    // -------------------------------------------------------------------------
+
+    async fn seed_workspace(pool: &PgPool, key: &str) -> Uuid {
+        let workspace = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.business_workspaces (workspace_id,key,name)
+             VALUES ($1,$2,$3)",
+        )
+        .bind(workspace)
+        .bind(format!("{key}-{workspace}"))
+        .bind(format!("d5 test workspace {key}"))
+        .execute(pool)
+        .await
+        .unwrap();
+        workspace
+    }
+
+    async fn grant(pool: &PgPool, workspace: Uuid, user: Uuid) {
+        sqlx::query(
+            "INSERT INTO kernel.business_workspace_members (workspace_id,user_id)
+             VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        )
+        .bind(workspace)
+        .bind(user)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn revoke(pool: &PgPool, workspace: Uuid, user: Uuid) {
+        sqlx::query(
+            "DELETE FROM kernel.business_workspace_members
+              WHERE workspace_id=$1 AND user_id=$2",
+        )
+        .bind(workspace)
+        .bind(user)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn drop_workspaces(pool: &PgPool, workspaces: &[Uuid]) {
+        for workspace in workspaces {
+            sqlx::query("DELETE FROM kernel.business_workspaces WHERE workspace_id=$1")
+                .bind(workspace)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+    }
+
+    fn request_in(mut request: CreateIncidentRequest, workspace: Uuid) -> CreateIncidentRequest {
+        request.workspace_id = Some(workspace);
+        request
+    }
+
+    fn list_query() -> IncidentListQuery {
+        IncidentListQuery {
+            limit: Some(100),
+            ..Default::default()
+        }
+    }
+
+    /// The first two rows of the acceptance matrix, at the layer that decides them: a
+    /// viewer reads the incidents of the workspaces it is a member of, and nothing of any
+    /// other - single row, list, evidence and timeline all at once.
+    #[tokio::test]
+    async fn a_viewer_reads_one_workspace_and_never_the_other() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let viewer = seed_user(&pool, "viewer").await;
+        let operator_a = seed_user(&pool, "operator").await;
+        let operator_b = seed_user(&pool, "operator").await;
+        let ws_a = seed_workspace(&pool, "d5-view-a").await;
+        let ws_b = seed_workspace(&pool, "d5-view-b").await;
+        grant(&pool, ws_a, operator_a).await;
+        grant(&pool, ws_b, operator_b).await;
+        grant(&pool, ws_a, viewer).await;
+
+        let (_, in_a) = insert_incident(
+            &pool,
+            DataScope::resolve_for(&pool, operator_a, Role::Operator)
+                .await
+                .unwrap(),
+            request_in(incident_request("incident inside workspace a", None), ws_a),
+        )
+        .await
+        .unwrap();
+        let (_, in_b) = insert_incident(
+            &pool,
+            DataScope::resolve_for(&pool, operator_b, Role::Operator)
+                .await
+                .unwrap(),
+            request_in(incident_request("incident inside workspace b", None), ws_b),
+        )
+        .await
+        .unwrap();
+        insert_evidence(
+            &pool,
+            &no_adapters(),
+            DataScope::resolve_for(&pool, operator_a, Role::Operator)
+                .await
+                .unwrap(),
+            in_a.id,
+            evidence_request("d5/view-a/evidence"),
+        )
+        .await
+        .unwrap();
+
+        // The viewer is a member of A only. Its scope names one workspace, and the report
+        // says so - which is what explains an empty page without blaming the platform.
+        let viewer_scope = DataScope::resolve_for(&pool, viewer, Role::Viewer)
+            .await
+            .unwrap();
+        assert!(viewer_scope.may_enter(ws_a));
+        assert!(!viewer_scope.may_enter(ws_b));
+
+        let (items, _) = query_incidents(&pool, viewer_scope.clone(), list_query())
+            .await
+            .unwrap();
+        assert!(items.iter().any(|item| item.id == in_a.id));
+        assert!(!items.iter().any(|item| item.id == in_b.id));
+
+        let read = query_incident(&pool, viewer_scope.clone(), in_a.id)
+            .await
+            .expect("a viewer reads the record of its own workspace");
+        assert_eq!(read.id, in_a.id);
+        let refused = query_incident(&pool, viewer_scope.clone(), in_b.id)
+            .await
+            .expect_err("a viewer must not read the other workspace");
+        assert_eq!(refused.status, StatusCode::NOT_FOUND);
+        assert_eq!(refused.code, "INCIDENT_NOT_FOUND");
+
+        // The same boundary on the two faces that used to disagree about it.
+        let evidence = query_evidence(&pool, viewer_scope.clone(), in_a.id, (None, None))
+            .await
+            .expect("evidence of a readable record is readable");
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(
+            query_evidence(&pool, viewer_scope.clone(), in_b.id, (None, None))
+                .await
+                .expect_err("evidence of an unreadable record is not")
+                .code,
+            "INCIDENT_NOT_FOUND"
+        );
+        assert!(query_timeline(&pool, viewer_scope.clone(), in_a.id, 50)
+            .await
+            .is_ok());
+        assert_eq!(
+            query_timeline(&pool, viewer_scope.clone(), in_b.id, 50)
+                .await
+                .expect_err("the trail of an unreadable record is not readable")
+                .code,
+            "INCIDENT_NOT_FOUND"
+        );
+
+        cleanup(&pool, &[operator_a, operator_b, viewer]).await;
+        drop_workspaces(&pool, &[ws_a, ws_b]).await;
+    }
+
+    /// The ruling itself: platform administration is not a business data grant. An admin
+    /// that was never made a member reads none of it - the same 404 a stranger gets.
+    #[tokio::test]
+    async fn an_admin_without_membership_reads_no_incident() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let admin = seed_user(&pool, "admin").await;
+        let operator = seed_user(&pool, "operator").await;
+        let workspace = seed_workspace(&pool, "d5-admin").await;
+        grant(&pool, workspace, operator).await;
+        let (_, incident) = insert_incident(
+            &pool,
+            DataScope::resolve_for(&pool, operator, Role::Operator)
+                .await
+                .unwrap(),
+            request_in(
+                incident_request("incident in a workspace the admin is not in", None),
+                workspace,
+            ),
+        )
+        .await
+        .unwrap();
+
+        // The admin is a member of the legacy workspace only, so it can read that one and
+        // not this one.
+        let admin_scope = DataScope::resolve_for(&pool, admin, Role::Admin)
+            .await
+            .unwrap();
+        assert!(!admin_scope.may_enter(workspace));
+        assert_eq!(
+            query_incident(&pool, admin_scope.clone(), incident.id)
+                .await
+                .expect_err("an admin without the membership reads nothing")
+                .code,
+            "INCIDENT_NOT_FOUND"
+        );
+        let (items, _) = query_incidents(&pool, admin_scope.clone(), list_query())
+            .await
+            .unwrap();
+        assert!(!items.iter().any(|item| item.id == incident.id));
+
+        // And the grant is what changes it - one row, not a role.
+        grant(&pool, workspace, admin).await;
+        let admin_scope = DataScope::resolve_for(&pool, admin, Role::Admin)
+            .await
+            .unwrap();
+        assert!(query_incident(&pool, admin_scope, incident.id)
+            .await
+            .is_ok());
+
+        cleanup(&pool, &[admin, operator]).await;
+        drop_workspaces(&pool, &[workspace]).await;
+    }
+
+    /// A caller cannot state its own scope: naming a workspace it is not a member of is
+    /// 404, and the row is not created anywhere.
+    #[tokio::test]
+    async fn a_create_naming_a_workspace_you_cannot_enter_is_not_found() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let operator = seed_user(&pool, "operator").await;
+        let stranger = seed_user(&pool, "operator").await;
+        let workspace = seed_workspace(&pool, "d5-create-foreign").await;
+        grant(&pool, workspace, stranger).await;
+
+        let caller = DataScope::resolve_for(&pool, operator, Role::Operator)
+            .await
+            .unwrap();
+        let refused = insert_incident(
+            &pool,
+            caller,
+            request_in(
+                incident_request("incident filed into another workspace", None),
+                workspace,
+            ),
+        )
+        .await
+        .expect_err("naming a workspace you cannot enter must be refused");
+        assert_eq!(refused.status, StatusCode::NOT_FOUND);
+        assert_eq!(refused.code, "BUSINESS_WORKSPACE_NOT_FOUND");
+
+        let created: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM kernel.incidents WHERE workspace_id=$1")
+                .bind(workspace)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(created, 0, "a refused create must not leave a row");
+
+        cleanup(&pool, &[operator, stranger]).await;
+        drop_workspaces(&pool, &[workspace]).await;
+    }
+
+    /// Two refusals that look alike and are not: an account with no membership at all has
+    /// nowhere to put a record (403), and an account in more than one workspace must say
+    /// which (400). Neither is a scope the caller declared for itself.
+    #[tokio::test]
+    async fn a_create_without_one_obvious_workspace_is_refused_by_code_not_by_guessing() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let homeless = seed_user(&pool, "operator").await;
+        revoke(&pool, scope::legacy_workspace(), homeless).await;
+        let homeless_scope = DataScope::resolve_for(&pool, homeless, Role::Operator)
+            .await
+            .unwrap();
+        assert!(homeless_scope.workspaces.is_empty());
+        let refused = insert_incident(
+            &pool,
+            homeless_scope,
+            incident_request("incident with no workspace to file it in", None),
+        )
+        .await
+        .expect_err("an account in no workspace cannot create business data");
+        assert_eq!(refused.status, StatusCode::FORBIDDEN);
+        assert_eq!(refused.code, "INCIDENT_WORKSPACE_FORBIDDEN");
+
+        let two = seed_user(&pool, "operator").await;
+        let second = seed_workspace(&pool, "d5-create-two").await;
+        grant(&pool, second, two).await;
+        let two_scope = DataScope::resolve_for(&pool, two, Role::Operator)
+            .await
+            .unwrap();
+        assert_eq!(two_scope.workspace_count(), 2);
+        let refused = insert_incident(
+            &pool,
+            two_scope,
+            incident_request("incident with two possible workspaces", None),
+        )
+        .await
+        .expect_err("the kernel will not choose a workspace for the caller");
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+        assert_eq!(refused.code, "INCIDENT_WORKSPACE_REQUIRED");
+
+        cleanup(&pool, &[homeless, two]).await;
+        drop_workspaces(&pool, &[second]).await;
+    }
+
+    /// The owner filter narrows and never opens: naming another account that lives in
+    /// another workspace returns nothing, whatever the filter says.
+    #[tokio::test]
+    async fn an_owner_filter_cannot_reach_across_a_workspace_boundary() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let operator_a = seed_user(&pool, "operator").await;
+        let operator_b = seed_user(&pool, "operator").await;
+        let ws_b = seed_workspace(&pool, "d5-owner-filter").await;
+        grant(&pool, ws_b, operator_b).await;
+        let (_, in_b) = insert_incident(
+            &pool,
+            DataScope::resolve_for(&pool, operator_b, Role::Operator)
+                .await
+                .unwrap(),
+            request_in(
+                incident_request("record in the other workspace", None),
+                ws_b,
+            ),
+        )
+        .await
+        .unwrap();
+
+        let scope_a = DataScope::resolve_for(&pool, operator_a, Role::Operator)
+            .await
+            .unwrap();
+        let (items, _) = query_incidents(
+            &pool,
+            scope_a.clone(),
+            IncidentListQuery {
+                owner: Some(operator_b.to_string()),
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            items.is_empty(),
+            "an owner filter naming an account in another workspace returned a row"
+        );
+        // An admin is not exempt either: platform administration is not a data grant.
+        let admin = seed_user(&pool, "admin").await;
+        let admin_scope = DataScope::resolve_for(&pool, admin, Role::Admin)
+            .await
+            .unwrap();
+        let (items, _) = query_incidents(
+            &pool,
+            admin_scope,
+            IncidentListQuery {
+                owner: Some(operator_b.to_string()),
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(items.is_empty());
+        assert_eq!(
+            query_incident(
+                &pool,
+                DataScope::resolve_for(&pool, operator_a, Role::Operator)
+                    .await
+                    .unwrap(),
+                in_b.id
+            )
+            .await
+            .expect_err("the row itself is out of scope too")
+            .code,
+            "INCIDENT_NOT_FOUND"
+        );
+
+        cleanup(&pool, &[operator_a, operator_b, admin]).await;
+        drop_workspaces(&pool, &[ws_b]).await;
+    }
+
+    /// A revocation is answered with on the next call, with no session, token or run
+    /// needing to be refreshed: nothing about the caller is cached across the write.
+    #[tokio::test]
+    async fn a_revocation_takes_effect_on_the_next_read() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let operator = seed_user(&pool, "operator").await;
+        let workspace = seed_workspace(&pool, "d5-revoke").await;
+        grant(&pool, workspace, operator).await;
+        let (_, incident) = insert_incident(
+            &pool,
+            DataScope::resolve_for(&pool, operator, Role::Operator)
+                .await
+                .unwrap(),
+            request_in(
+                incident_request("record whose scope will be revoked", None),
+                workspace,
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(query_incident(
+            &pool,
+            DataScope::resolve_for(&pool, operator, Role::Operator)
+                .await
+                .unwrap(),
+            incident.id
+        )
+        .await
+        .is_ok());
+
+        revoke(&pool, workspace, operator).await;
+        let after = DataScope::resolve_for(&pool, operator, Role::Operator)
+            .await
+            .unwrap();
+        assert!(!after.may_enter(workspace));
+        assert_eq!(
+            query_incident(&pool, after, incident.id)
+                .await
+                .expect_err("the revoked member reads nothing")
+                .code,
+            "INCIDENT_NOT_FOUND"
+        );
+
+        grant(&pool, workspace, operator).await;
+        assert!(query_incident(
+            &pool,
+            DataScope::resolve_for(&pool, operator, Role::Operator)
+                .await
+                .unwrap(),
+            incident.id
+        )
+        .await
+        .is_ok());
+
+        cleanup(&pool, &[operator]).await;
+        drop_workspaces(&pool, &[workspace]).await;
     }
 }

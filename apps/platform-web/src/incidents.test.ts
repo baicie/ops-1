@@ -8,6 +8,7 @@ import {
   classifyFailure,
   clearsSensitiveView,
   closeIncidentPayload,
+  incidentsEmptyKind,
   closureNoteError,
   closurePanelState,
   incidentCapabilities,
@@ -732,5 +733,43 @@ describe('G12 C evidence trust and the audit trail', () => {
     const junk = timelineEventFacts(incidentEvent({ details: { closureNote: 42, consideredEvidenceCount: 'two' } }));
     expect(junk.closureNote).toBeNull();
     expect(junk.consideredEvidenceCount).toBeNull();
+  });
+});
+
+describe('incidentsEmptyKind: an empty list says which of four things it is', () => {
+  const NARROWED = { narrowedTo: 'owner' as const, workspaceCount: 1 };
+  const UNNARROWED = { narrowedTo: null, workspaceCount: 1 };
+  const NO_MEMBERSHIP = { narrowedTo: null, workspaceCount: 0 };
+
+  it('an operator who owns nothing reads a scope, not an empty ledger', () => {
+    // The measured case: two incidents exist, none owned by this operator, items is [].
+    expect(incidentsEmptyKind({ scope: NARROWED, filtering: false })).toBe('scoped');
+  });
+
+  it('a read with no named narrowing and no rows claims nothing about the platform', () => {
+    // 'none' is still the state, but the payload it came from licensed only "this read applied
+    // no owner narrowing": the copy for it must not say the platform has recorded nothing, and
+    // this fixture is what a role would have to be to make that reading safe - no role is.
+    expect(incidentsEmptyKind({ scope: UNNARROWED, filtering: false })).toBe('none');
+  });
+
+  it('an unreadable body is not an unnarrowed one', () => {
+    // A body without a scope licenses only the claim that needs no evidence.
+    expect(incidentsEmptyKind({ scope: null, filtering: false })).toBe('none');
+    expect(incidentsEmptyKind({ scope: null, filtering: true })).toBe('filtered');
+  });
+
+  it('a caller in no business workspace is told that, ahead of any filter', () => {
+    // D5: a membership is what makes a row readable, so a zero-membership scope can never
+    // return one. Clearing a filter cannot help, and "you own nothing" would send a viewer
+    // to the wrong remedy - it does not need to record something, it needs a grant.
+    expect(incidentsEmptyKind({ scope: NO_MEMBERSHIP, filtering: false })).toBe('workspace');
+    expect(incidentsEmptyKind({ scope: NO_MEMBERSHIP, filtering: true })).toBe('workspace');
+  });
+
+  it('the page filter outranks the scope, unlike the audit ledger', () => {
+    // Clearing a filter can show the operator its own rows, so the filter is the cause here.
+    expect(incidentsEmptyKind({ scope: NARROWED, filtering: true })).toBe('filtered');
+    expect(incidentsEmptyKind({ scope: UNNARROWED, filtering: true })).toBe('filtered');
   });
 });

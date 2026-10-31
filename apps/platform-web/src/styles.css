@@ -862,6 +862,12 @@ input::placeholder { color: var(--ow-text-muted); }
 .timeline { list-style: none; margin: 0; padding: 0 16px 8px; display: flex; flex-direction: column; }
 .timeline li { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--ow-border); align-items: start; }
 .timeline li:last-child { border-bottom: 0; }
+/* OWNERSHIP. .timeline is a CHRONOLOGICAL TRAIL and nothing else: every `li` must start
+   with its .timeline-dot, because the marker is the grid's first 12px column. Three panels
+   (journals, jobs, incident facts) own that component. Anything else that needs a list of
+   records uses .record-list below - G12 F found the investigation panel reusing .timeline
+   for three plain lists, which put each row's real content into the 12px marker column and
+   rendered every statement as a 12px-wide vertical strip. */
 .timeline-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: 50%; background: var(--ow-surface); border: 2px solid var(--ow-accent); }
 .timeline li[data-fact-kind="started"] .timeline-dot { border-color: var(--ow-text-muted); }
 .timeline li[data-fact-kind="verdict"] .timeline-dot { border-color: var(--ow-ok); background: var(--ow-ok); }
@@ -873,6 +879,21 @@ input::placeholder { color: var(--ow-text-muted); }
 @media (max-width: 768px) {
   .timeline li > div > [data-testid="fact-time"] { margin-left: 0; }
 }
+/* A list of records: one row per record, the row is a COLUMN whose first line is a wrap-able
+   meta line. No marker column, no fixed grid track, and min-width:0 at every level so a long
+   id or a log line wraps inside the row instead of setting the panel's width. */
+.record-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.record-list > li { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--ow-border); }
+.record-list > li:last-child { border-bottom: 0; }
+.record-list > li > .record-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.record-list > li > p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.record-list .link-button, .record-list .mono { min-width: 0; overflow-wrap: anywhere; text-align: start; }
+/* The panel quotes log lines, and a log line has no spaces in it. Nothing inside the panel
+   may make the panel wider than the panel, at any width or in either theme. */
+[data-testid="incident-investigations"] { min-width: 0; }
+[data-testid="incident-investigations"] .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+[data-testid="incident-investigations"] pre,
+[data-testid="incident-investigations"] .evidence-body { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; }
 .studio-conflict { align-items: flex-start; }
 .studio-conflict > div:nth-child(2) { display: flex; flex-direction: column; gap: 4px; }
 .studio-conflict pre { max-height: 90px; overflow: auto; margin: 4px 0 0; font-size: var(--ow-type-label); }
@@ -978,7 +999,12 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .palette-item strong { font-size: var(--ow-type-sm); }
 .palette-item small { font-size: var(--ow-type-label); }
 .studio-canvas { height: 100%; min-height: 0; border-radius: var(--ow-radius-card); overflow: hidden; position: relative; background-color: var(--ow-canvas-bg); background-image: radial-gradient(var(--ow-border) 1px, transparent 1px); background-size: 20px 20px; }
-.studio-rf-wrap { height: 100%; min-height: 0; width: 100%; }
+/* A node is only visible once @xyflow/react has measured it: the wrapper carries an inline
+   visibility:hidden until then, and that measurement is a ResizeObserver delivery. So the
+   container must never present a zero-sized box to it. The draft flow (?draft=) remounts this
+   subtree; a remount inside a collapsed row would measure every node at 0 and leave them
+   painted-invisible for the life of the page. A floor says the canvas is a workspace. */
+.studio-rf-wrap { height: 100%; min-height: 320px; width: 100%; }
 .studio-note { left: 12px; bottom: 8px; right: 190px; font-size: var(--ow-type-label); pointer-events: none; background: color-mix(in srgb, var(--ow-canvas-bg) 82%, transparent); padding: 4px 4px; border-radius: 4px; }
 .studio-error { bottom: 34px; }
 
@@ -2034,6 +2060,15 @@ button.ow-summary-card:focus-visible,
   .panel-head > .panel-count,
   .panel-head > .text-link,
   .panel-head > .btn { flex: none; white-space: nowrap; }
+  /* The three children above keep the title line because each of them can be shrunk to nothing.
+     A head whose right-hand child is a GROUP of buttons cannot: the 390px investigation head
+     handed it the row's leftover 98.14px while the group's own content needs 146.53px, so the
+     "Start investigation" button kept its width, painted its right edge at 398.39 on a 390px
+     viewport, and the document scrolled 8px sideways on /app/incidents/{id} in both themes.
+     A group that cannot shrink gets a line of its own; the title keeps line one, and nothing is
+     clipped, hidden or scrolled inside a mask. */
+  .panel-head:has(> .inline-actions) { flex-wrap: wrap; }
+  .panel-head > .inline-actions { flex: 1 1 100%; }
   .stat-strip,
   .ow-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* An odd last cell spans the row instead of leaving a bare cell of empty grid. */

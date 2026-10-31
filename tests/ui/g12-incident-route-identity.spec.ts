@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { adminSeed } from './support/accounts';
 
 /**
  * G12 A2 - route identity in a real browser.
@@ -38,13 +39,24 @@ interface Incident {
   title: string;
 }
 
+/**
+ * Signs the administrator in for fixture setup AND performs the one business-workspace grant a
+ * fresh database needs before it can file a single incident.
+ *
+ * The second half is not a convenience. Since D5 (migration 0022) a business row is readable for
+ * exactly one reason - the caller is a MEMBER of the workspace it lives in - and the kernel runs
+ * migrations before it creates the bootstrap account, so on a fresh database the migration's
+ * one-time grant does not cover it (ADR section 3.4: the administrator "can create workspaces and
+ * grant, but reads no business row until it grants itself once, which is an audited platform
+ * action and not an automatic acquisition"). Without the grant every fixture POST below answers
+ * 403 INCIDENT_WORKSPACE_FORBIDDEN, and this spec fails on its own setup rather than on the rule
+ * it exists to prove.
+ *
+ * Done here, per spec, rather than in a shared pre-test hook: a hook would perform the grant
+ * against whatever OPSWEAVE_URL points at, and on a shared host that includes staging.
+ */
 async function adminToken(page: Page): Promise<string> {
-  const response = await page.request.post('/api/v1/auth/login', {
-    data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
-  });
-  expect(response.ok(), 'admin login for fixture setup').toBeTruthy();
-  const { csrfToken } = await response.json();
-  return csrfToken as string;
+  return (await adminSeed(page.request, ADMIN_EMAIL, ADMIN_PASSWORD)).csrf;
 }
 
 async function signIn(page: Page) {
