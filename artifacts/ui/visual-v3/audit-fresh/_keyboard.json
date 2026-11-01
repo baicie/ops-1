@@ -1,0 +1,68 @@
+{
+ "/admin/jobs": {
+  "rows": 14,
+  "rowLinks": 14,
+  "rowButtons": 14,
+  "deadStops": [],
+  "labelledHeads": 4,
+  "trailingHead": "Created",
+  "trailingHeadWidth": 160,
+  "tabs": 23,
+  "href": "/admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae",
+  "opened": "/admin/jobs/1285fbe8-9bb8-459f-b073-af245d32b3ae"
+ },
+ "/admin/nodes": {
+  "rows": 12,
+  "rowLinks": 24,
+  "rowButtons": 12,
+  "deadStops": [],
+  "labelledHeads": 4,
+  "trailingHead": "Resources",
+  "trailingHeadWidth": 498,
+  "tabs": 27,
+  "href": "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246",
+  "opened": "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246"
+ },
+ "/admin/plugins": {
+  "rows": 12,
+  "rowLinks": 36,
+  "rowButtons": 12,
+  "deadStops": [],
+  "labelledHeads": 5,
+  "trailingHead": "Digest / trust",
+  "trailingHeadWidth": 285,
+  "tabs": 27,
+  "href": "/admin/ops-center",
+  "opened": "/admin/ops-center"
+ },
+ "/admin/pipelines": {
+  "rows": 3,
+  "rowLinks": 6,
+  "rowButtons": 0,
+  "deadStops": [],
+  "labelledHeads": 4,
+  "trailingHead": "Updated",
+  "trailingHeadWidth": 235,
+  "tabs": 21,
+  "href": "/admin/pipelines/host-metrics",
+  "opened": "/admin/pipelines/host-metrics"
+ },
+ "/admin/activity": {
+  "rows": 17,
+  "rowLinks": 0,
+  "rowButtons": 17,
+  "deadStops": [],
+  "labelledHeads": 3,
+  "trailingHead": "Occurred",
+  "trailingHeadWidth": 259,
+  "tabs": 26,
+  "panels": 1
+ },
+ "hover": {
+  "before": "rgba(0, 0, 0, 0)",
+  "after": "rgb(240, 242, 245)",
+  "changed": true,
+  "resolved": "rgb(240, 242, 245)",
+  "contrastOnWhite": 1.12
+ }
+}

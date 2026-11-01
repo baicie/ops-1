@@ -1,12 +1,10 @@
 # Interaction state matrix — `/admin` V3 polish
 
 `AGENTS.md` clause 5 asks for this matrix **and** real browser screenshots at
-1440 / 1024 / 390 in both themes. The matrix is below. **The screenshots do not
-exist**: the sandbox blocks both halves of the instrument (Chrome cannot create
-its process-singleton socket; `127.0.0.1` cannot be bound; `cdn.playwright.dev`
-is denied). `BLOCKED-screenshots.md` in this directory records the exact commands
-and the exact errors. Nothing here is a visual claim — every row says what
-verified it, and "not verified" appears wherever that is the truth.
+1440 / 1024 / 390 in both themes. Both now exist. The 84 matrix images and the
+receipt for how they were captured are in `screenshots.md`; the earlier version
+of that file recorded a sandbox that could not launch a browser and has been
+rewritten, not deleted.
 
 Legend for **verified by**:
 - `src` — source-text assertion in `src/styles.tier-contract.test.ts` (12 assertions, each
@@ -16,7 +14,10 @@ Legend for **verified by**:
 - `unit` — `vitest run src` (226 passing).
 - `tsc` — `tsc --noEmit` (exit 0).
 - `gate` — `check-ui-tokens.mjs` counts.
-- **`eye` — NOT VERIFIED.** Needs a browser. No row below is marked `eye`-verified.
+- `browser` — measured in Chrome against a Kernel built from this tree, at the stated width.
+- `eye` — a human looked at the image. **Still only true where marked.**
+- **`browser` is not `eye`.** A number proving a row is 40px tall is not a person deciding it
+  looks right. Both appear below, and every remaining `eye` row is listed in §7.
 
 ---
 
@@ -41,7 +42,7 @@ Legend for **verified by**:
 | `≤767px`, icon button | 44×44 — **both** axes, not a 32×44 rectangle | `src` |
 | `≤767px`, decoration (dot, bar, brand mark, spinner) | untouched by the floor | `src` |
 | `size="lg"` on a Button | the size no longer exists; 44 is a floor, not a size a call site may ask for | `tsc` (union type), `gate` |
-| toolbar row | every control on the row is 40px — the measured defect was a 36px Input beside a 28px TabsTrigger | `src`-adjacent: the rule is scoped `.toolbar [role='tab']`, asserted present in `css`. **Row alignment itself is `eye`: NOT VERIFIED.** |
+| toolbar row | every control on the row is 40px — the measured defect was a 36px Input beside a 28px TabsTrigger | `browser`: `/admin/jobs`, `/admin/pipelines` and `/admin/plugins` at **both 1440 and 1024** report exactly ONE distinct control height per toolbar (`[40]`), and each bar is 40 tall (`barTop` 160/184 for jobs and pipelines; plugins differs because its page has a summary block above). One row, one height, measured rather than asserted. |
 | tab strip in a table row or panel head | keeps 32px — C1 is about context, not component | `css` (scoping is `.toolbar`-only) |
 
 ## 3. Machine language (`machine-language-rules` M1–M3)
@@ -96,14 +97,31 @@ Legend for **verified by**:
 | 2 | status encoded three ways, not colour alone | tone + glyph + text, `unit` green (§4) |
 | 3 | missing data prints `NO_DATA`, never `0` | **strengthened**: `formatBytes` no longer folds `0` into absence |
 | 4 | one primary action per page header | `PageHeader`'s `primary` prop untouched; 2 more pages now use it instead of the duplicate |
-| 5 | dark mode is pure token swap | no colour token added, removed or changed; `git diff` touches no `html[data-theme="dark"]` rule. **Dark rendering itself is `eye`: NOT VERIFIED.** |
+| 5 | dark mode is pure token swap | no colour token added, removed or changed; `git diff` touches no `html[data-theme="dark"]` rule. Dark images now exist at all three widths (§7), but **no person has compared them to the light pair.** |
+
+## 6b. The two 390 overflows the browser found (both were introduced here)
+
+This is the part of the matrix that is a record rather than a claim. The committed audit at
+`c6cb34f` reports `overflow: -15` on every page at 390 — no overflow anywhere. After the touch
+floor landed, a browser run reported **393 against 390 on all seven pages** and **442 on
+`/admin/jobs`**. Both are fixed; both were invisible to every static check.
+
+| where | measured | cause | fixed by |
+|---|---|---|---|
+| topbar, all 7 pages | 393 > 390 | the touch floor raised the two 32px squares to 44 for height — correct — and I also set `min-width`, to keep them square. +24px on a fixed row with 16px slack. R3 C2 constrains the height; the width was my addition. | floor raises `min-height` only |
+| `/admin/jobs` status strip | 442 > 390 | Radix `Tabs` root is a plain div that sized to content as a flex child (430 in a 375 box), so the scroller's `max-width: 100%` resolved against an inflated parent and its `overflow-x` never engaged | root states `min-width: 0` + bounded width |
+
+After: `documentElement.scrollWidth` is **375 = clientWidth 375 on all seven pages**, and the
+scroller reports `scrollWidth 430 > clientWidth 351` — it actually scrolls now, which is what the
+442 was hiding.
 
 ## 7. What a reviewer with a browser still has to look at
 
-In priority order, because these are the rows above that no static check can close:
+The images now exist; the reviewer does not. Everything below is a question a person has to
+answer, and none of it is closed by the measurements above.
 
-1. **390px:** `/admin/pipelines/:id` — is the stacked path readable, do the rotated arrows read as sequence?
-2. **390px:** `/admin/plugins/:id` and `/admin/jobs` — does the fade appear only when content is really hidden, is the active tab visible?
-3. **1440 + 1024:** every toolbar row — is the 40px baseline actually flat now?
-4. **Both themes:** nothing should have moved, but the radius change touched 105 declarations and only a screenshot pair can prove no corner looks wrong.
-5. **`zh-CN` at every width:** the micro-labels lost their letter-spacing. That is intended; it should be *checked*.
+1. **390px:** `/admin/pipelines/:id` — is the stacked path readable, do the rotated arrows read as sequence? (`browser` confirms it stacks at 390; whether it *reads* is `eye`.)
+2. **390px:** `/admin/plugins/:id` and `/admin/jobs` — the fade now appears only when content is hidden, and the strip scrolls. Both are measured. Whether the fade is legible against the toolbar is `eye`.
+3. ~~**1440 + 1024:** every toolbar row — is the 40px baseline actually flat now?~~ **Closed by measurement** — see §2. One distinct height per toolbar at both widths.
+4. **Both themes:** nothing should have moved, but the radius change touched 105 declarations and only a screenshot pair can prove no corner looks wrong. **All 84 pairs are captured; none is reviewed.**
+5. **`zh-CN` at every width:** the micro-labels lost their letter-spacing. That is intended; it should be *checked* by a reader of Chinese, not by me.
