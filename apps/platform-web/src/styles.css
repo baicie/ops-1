@@ -78,6 +78,11 @@
   --ow-radius-lg: 12px;
   --ow-radius-control: 6px;
   --ow-radius-card: 10px;
+  /* The pill: one spelling for the fully-rounded end cap. token-table §1.1 counted
+     999px / 50% / 9999px as three spellings of the same pixels on every box in this
+     product (max height 44px < 999); check-ui-tokens R1 accepts this token, so a new
+     pill reads it instead of adding a fourth literal. */
+  --ow-radius-pill: 9999px;
   --ow-space-1: 4px;
   --ow-space-2: 8px;
   --ow-space-3: 12px;
@@ -2792,6 +2797,21 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   .ow-table tbody tr.ow-card-2l > td.ow-card-after { display: flex; align-items: baseline; gap: 4px; }
   /* The same interpunct the qualifier already puts between its own facts, between it and them. */
   .ow-table tbody tr.ow-card-2l > td.ow-card-after::before { content: '·'; color: var(--ow-text-muted); }
+  /* A card's identity line is the card's heading, and §2.5 says the first line is the key: it may
+     end in an ellipsis after the name has used the whole line, but it may not shorten the name to
+     make room for a badge. In a 40px table row the opposite is true - the row must stay one line -
+     which is why the nowrap lives on the desktop rule and is undone here rather than removed. */
+  .ow-table tbody tr.ow-card-2l .ow-ident-name {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: break-word;
+  }
+  /* Same reason for the trust chip: at 390 a two-word level ("Operator asserted") in a nowrap
+     pill ellipsises to "Operator…", and the level is the entire content of the cell. Wrapping
+     costs one line on the card and keeps the word the reader is there to read. */
+  .ow-table tbody tr.ow-card-2l .ow-trust { white-space: normal; }
+  .ow-table tbody tr.ow-card-2l .ow-trust-word { overflow: visible; text-overflow: clip; }
   /* The stack label is a column heading, and line 1 is the phone's heading: on the identity and
      the status cells the WORD still gives way, the cell keeps data-label, and the desktop header
      keeps it at every width above this one. */
@@ -2845,3 +2865,168 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 .resource-history-plot > svg { flex: 1 1 auto; min-width: 0; }
 .resource-history-axis-time { display: flex; justify-content: space-between; gap: 16px; padding: 2px 16px 8px 0; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
 .resource-history-grid line { stroke: var(--ow-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   /app/incidents and /app/incidents/{id}
+
+   Every value below is a token. Three radii (--ow-radius-control / -card / -sm),
+   the four type tiers, and the two control heights: nothing here introduces an
+   eleventh corner or a twentieth font size (token-table R1-R3). Dark mode is a
+   pure token swap - there is not one colour literal in this block, so the theme
+   needs no override rules of its own.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* The trust chip. Deliberately NOT a .badge: the badge's `success` variant is this
+   product's green tick, and the evidence `trust` field is caller-declared input that
+   the kernel stores without checking (incident-trust.tsx explains at length). So the
+   chip gets its own shape vocabulary, and the day the field becomes verifiable the
+   green can be introduced here in one place.
+
+   Shape before colour (visual-audit): the border STYLE carries the level as well as
+   the tone, so the three survive greyscale and a colour deficiency -
+   solid = attributed to a source, solid-muted = asserted by a person,
+   dashed = no provenance claimed, dotted = a value outside the contract. */
+.ow-trust {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; max-width: 100%;
+  border: 1px solid var(--ow-border-strong);
+  border-radius: var(--ow-radius-pill);
+  font-size: var(--ow-type-label); line-height: 1.5; white-space: nowrap;
+  color: var(--ow-text-secondary); background: var(--ow-surface-2);
+}
+.ow-trust svg { flex: none; }
+.ow-trust-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* info = a claim attributed to a source. The strongest thing this build can say, and
+   it is still a claim: a blue-ink chip, never the green of a verified fact. */
+.ow-trust[data-trust-tone="info"] {
+  color: var(--ow-info); background: var(--ow-info-soft);
+  border-color: color-mix(in srgb, var(--ow-info) 40%, transparent);
+}
+/* neutral = a person asserting in their own name. Weaker, and not a warning. */
+.ow-trust[data-trust-tone="neutral"] {
+  color: var(--ow-text-secondary); background: var(--ow-surface-3);
+  border-color: var(--ow-border-strong);
+}
+/* warn = the writer claimed no provenance at all. */
+.ow-trust[data-trust-tone="warn"] {
+  color: var(--ow-warn); background: var(--ow-warn-soft);
+  border-color: color-mix(in srgb, var(--ow-warn) 40%, transparent);
+  border-style: dashed;
+}
+/* unknown = outside the closed set. Dotted, matching .value-token--unknown's
+   "unconfirmed" language, and never folded into a neighbouring level. */
+.ow-trust[data-trust-tone="unknown"] {
+  color: var(--ow-text-muted); background: var(--ow-surface-2);
+  border-color: var(--ow-edge); border-style: dotted;
+}
+
+/* The set summary: what the whole evidence set is worth, led by its weakest row. */
+.ow-trust-summary {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid var(--ow-border);
+  background: var(--ow-surface-2);
+}
+.ow-trust-summary-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ow-trust-summary-label { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
+
+/* The legend states, once per panel, what each level means and what the kernel does
+   not check. One sentence in one place instead of a tooltip the reader must hunt. */
+.ow-trust-legend { padding: 12px 16px; border-top: 1px solid var(--ow-border); }
+.ow-trust-legend > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: var(--ow-type-meta); color: var(--ow-text-secondary);
+  border-radius: var(--ow-radius-control);
+}
+.ow-trust-legend > summary:focus-visible { outline: 2px solid var(--ow-focus); outline-offset: 2px; }
+.ow-trust-legend-list {
+  list-style: none; margin: 12px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ow-trust-legend-row { display: flex; align-items: baseline; gap: 12px; }
+.ow-trust-legend-row > span:last-child { font-size: var(--ow-type-meta); color: var(--ow-text-muted); }
+
+/* A note the page states once: the baseline caveat, the demoted columns, the run rule.
+   M1's "carry the fact once" - a sentence under the table, not a token in every row. */
+.ow-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: var(--ow-type-meta); color: var(--ow-text-muted);
+}
+.ow-note svg { flex: none; margin-top: 2px; }
+.ow-table-notes {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--ow-border);
+}
+.ow-table-meta { font-size: var(--ow-type-meta); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+
+/* The boundary declaration, collapsed. It is the page's footnote about what the slice
+   cannot do; the audit measured 700px of a 900px page spent on exactly this kind of
+   statement, so it keeps every word and stops owning the viewport. */
+.ow-boundary { padding: 12px 16px; }
+.ow-boundary > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: var(--ow-type-meta); color: var(--ow-text-secondary);
+  border-radius: var(--ow-radius-control);
+}
+.ow-boundary > summary:focus-visible { outline: 2px solid var(--ow-focus); outline-offset: 2px; }
+.ow-boundary > summary svg { flex: none; }
+.ow-note--boundary { padding: 0 16px 12px; }
+
+/* §2.4: the collapsed run, stated on the row it collapsed into. */
+.ow-run-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--ow-type-label); color: var(--ow-text-secondary);
+}
+.ow-run-badge svg { flex: none; }
+
+/* The absolute clock beside a relative age: "2h ago" is one day of events collapsing
+   into one string, and the clock is the same fact at the precision that separates rows. */
+.ow-stamp { font-variant-numeric: tabular-nums; }
+
+/* ── the incident workspace ───────────────────────────────────────────────────
+   Three regions in the order a reader asks the questions: what happened, what it
+   rests on, what a human concluded. This is a LAYOUT over three panels, not three
+   cards inside a panel: one border depth, where the audit found three
+   (solid panel -> solid region -> dashed slot, visual-audit S3).
+
+   Narrative and evidence sit side by side because they are read together - a
+   timeline point is checked against the evidence row it refers to. The verdict
+   spans both because it rests on both, and because it is the one region that
+   carries a write. */
+.ow-incident-workspace {
+  display: grid; gap: 24px;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  align-items: start;
+}
+.ow-incident-narrative { grid-column: 1; }
+.ow-incident-record { grid-column: 2; }
+/* The evidence panel is a full-width sibling BELOW this grid, not a cell in it: a five-column
+   evidence table in a 5fr gutter would wrap its content reference on every row. It is not a
+   grid child, so it must not carry a grid-column - a declaration here reads as if it were. */
+
+/* The narrative's own dots: shape per kind, so the three entry types are not three
+   colours of the same circle. A start is hollow, evidence is filled, a verdict is
+   square - distinguishable in greyscale and at the 10px the dot actually occupies. */
+.ow-fact-dot { background: var(--ow-border-strong); }
+.ow-fact-dot--started { background: var(--ow-surface); border-color: var(--ow-accent); }
+.ow-fact-dot--evidence { background: var(--ow-info); border-color: var(--ow-surface); }
+/* The verdict marker is the one square dot: `--ow-radius-control` is the smallest radius the
+   token table declares (token-table R1 allows control/card/pill and nothing else), and at the
+   10px this dot occupies a 6px radius still reads as a square against two circles. */
+.ow-fact-dot--verdict { background: var(--ow-text); border-color: var(--ow-surface); border-radius: var(--ow-radius-control); }
+
+@media (max-width: 1023px) {
+  /* One column below 1024: side-by-side regions at 1023 gave the evidence table a
+     ~300px box, which is §2.6's horizontal-overflow generator. */
+  .ow-incident-workspace { grid-template-columns: minmax(0, 1fr); }
+  .ow-incident-narrative, .ow-incident-evidence, .ow-incident-record { grid-column: 1; }
+}
+
+@media (max-width: 767px) {
+  .ow-trust-summary, .ow-trust-legend, .ow-table-notes, .ow-boundary { padding: 12px; }
+  .ow-note--boundary { padding: 0 12px 12px; }
+  /* A details summary is a control at 390, so it gets the toolbar tier rather than a
+     hand-picked number: `--ow-control-md` is 40px, one of the two heights token-table R2
+     allows. The extra touch slack comes from padding (12px a side, above), which brings the
+     real target to 40 + the row's own padding without inventing a third control height. */
+  .ow-boundary > summary, .ow-trust-legend > summary { min-height: var(--ow-control-md); }
+}

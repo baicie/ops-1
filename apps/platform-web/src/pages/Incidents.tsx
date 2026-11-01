@@ -7,6 +7,7 @@ import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { ageMessage } from '../lib/age';
+import { cn } from '../lib/utils';
 import { Icon } from '../components/Icons';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -14,30 +15,40 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { EmptyState, Field, Modal, useToast } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
+import { MetricCard } from '../components/app/metric-card';
+import { StatusIndicator } from '../components/app/status-indicator';
 import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
 import { statusForCode } from '../components/status-tone';
 import {
   FILTER_ANY,
+  INCIDENT_COLUMN_LABEL_KEYS,
   INCIDENT_SEVERITY_CODES,
   INCIDENT_STATUS_CODES,
   OWNER_ANY,
   OWNER_SELF,
   TITLE_MAX_CHARS,
   TITLE_MIN_CHARS,
+  collapseIncidentRuns,
+  incidentColumnPlan,
+  incidentCountKnown,
   incidentFailureKey,
   incidentListQuery,
+  incidentListState,
   incidentSourceKey,
   ownerFilterValue,
   shortOwner,
   toIsoInstant,
   toLocalInputValue,
 } from '../incidents';
+import type { IncidentColumnId } from '../incidents';
 import {
   IdentityCell,
   RowActions,
   StackCell,
   cardActionCell,
+  cardLineAfter,
+  cardTwoLineRow,
   copyIdAction,
   formatIdentity,
   stackBody,
@@ -142,6 +153,23 @@ function codeLabelKey(code: string): MessageKey {
   return statusForCode(code)?.labelKey ?? 'status.unknown';
 }
 
+/**
+ * The viewport width, as a column cap input.
+ *
+ * §2.2's caps are 5 / 4 / 3-facts, so the plan has to know the width. A CSS media query cannot
+ * do this job: dropping a `<th>` and its `<td>`s is a DOM decision, and a column hidden by CSS
+ * is still in the accessibility tree and still measured by the §4.1 harness.
+ */
+function useViewportWidth(): number {
+  const [width, setWidth] = React.useState(() => (typeof window === 'undefined' ? 1440 : window.innerWidth));
+  React.useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width;
+}
+
 export function IncidentsPage() {
   const t = useT();
   const { locale } = useI18n();
@@ -160,8 +188,10 @@ export function IncidentsPage() {
   const [loading, setLoading] = React.useState(true);
   const [observedAt, setObservedAt] = React.useState<string | null>(null);
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [boundaryOpen, setBoundaryOpen] = React.useState(false);
 
   const directory = useUserDirectory();
+  const viewportWidth = useViewportWidth();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -191,6 +221,27 @@ export function IncidentsPage() {
   const titleCount = new Set(items.map((item) => item.title)).size;
   const ownerName = (ownerId: string) => directory.names?.[ownerId] ?? shortOwner(ownerId);
 
+  // One state, derived once, in a pure function the test file pins: eight renderings instead of
+  // "spinner or empty list". `rows` is null until a read answers, so a failed first read can
+  // never be drawn as "no incidents" (the audit's seven-codes-to-unknown defect, in its list form).
+  const listState = incidentListState({ rows: data ? items : null, error, loading, filtering });
+  // §2.4 collapse and §2.2 degradation are decided on the rows actually on screen, before render.
+  const runs = React.useMemo(() => collapseIncidentRuns(items), [items]);
+  const plan = React.useMemo(() => incidentColumnPlan(items, viewportWidth), [items, viewportWidth]);
+  const shows = (column: IncidentColumnId) => plan.visible.includes(column);
+  // A column the plan demoted held one value for all rows: it is stated once under the table
+  // (M1's "carry the fact once"), never repeated down a column that earns no width.
+  const demotedLabels = plan.demoted.map((column) => t(INCIDENT_COLUMN_LABEL_KEYS[column]));
+
+  // The KPI band answers "what needs me now", so it counts the two things an operator acts on.
+  // Both are counts of the rows ON THIS PAGE and say so - a page-scoped count presented as a
+  // total would be the same class of lie as a zero standing in for an unread source.
+  const openCount = items.filter((item) => item.status === 'OPEN').length;
+  const investigatingCount = items.filter((item) => item.status === 'INVESTIGATING').length;
+  const criticalCount = items.filter((item) => item.severity === 'CRITICAL').length;
+  const withoutEvidence = items.filter((item) => item.evidenceRefs.length === 0).length;
+  const hasRows = items.length > 0;
+
   return (
     <div className="page-stack" data-testid="incidents-page">
       <PageHeader
@@ -206,21 +257,43 @@ export function IncidentsPage() {
         primary={<Button onClick={() => setCreateOpen(true)} data-testid="incident-create-open"><Icon name="plus" size={15} /> {t('incidents.action.create')}</Button>}
       />
 
-      <section className="panel" data-testid="incidents-boundary">
-        <div className="panel-head">
-          <div>
-            <h2>{t('incidents.boundary.title')}</h2>
-          </div>
-        </div>
-        <ul className="detail-list pad">
-          <li><span>{t('incidents.boundary.sources')}</span></li>
-          <li><span>{t('incidents.boundary.collectors')}</span></li>
-          <li><span>{t('incidents.boundary.noAi')}</span></li>
-          <li><span>{t('incidents.boundary.closed')}</span></li>
-          <li><span>{t('incidents.boundary.search')}</span></li>
-          <li><span>{t('incidents.boundary.owner')}</span></li>
-        </ul>
-      </section>
+      {/* page-template §2.1: KPI band, 0 or 1, immediately after the header. `.metric-grid` is
+          4/2/1 columns and never 3. Every figure is a count of the rows on THIS page and the
+          detail line says so - a page-scoped number presented as a total is the same class of
+          claim as a zero standing in for an unread source. The band is drawn only when there
+          are rows to count: four zeros under a failed read would read as "all clear". */}
+      {hasRows ? (
+        <section className="metric-grid" data-testid="incidents-kpi" aria-label={t('incidents.table.panelTitle')}>
+          <MetricCard
+            metricId="incidents-open"
+            label={t('status.open')}
+            value={openCount}
+            detail={t('incidents.workspace.openCount', { count: openCount, total: items.length })}
+            showSampled={false}
+          />
+          <MetricCard
+            metricId="incidents-investigating"
+            label={t('status.investigating')}
+            value={investigatingCount}
+            detail={t('incidents.workspace.openCount', { count: investigatingCount, total: items.length })}
+            showSampled={false}
+          />
+          <MetricCard
+            metricId="incidents-critical"
+            label={t('status.critical')}
+            value={criticalCount}
+            detail={t('incidents.workspace.openCount', { count: criticalCount, total: items.length })}
+            showSampled={false}
+          />
+          <MetricCard
+            metricId="incidents-without-evidence"
+            label={t('incidents.kpi.withoutEvidence')}
+            value={withoutEvidence}
+            detail={t('incidents.kpi.withoutEvidenceDetail')}
+            showSampled={false}
+          />
+        </section>
+      ) : null}
 
       <section className="toolbar" data-testid="incident-filters">
         <Select value={status} onValueChange={(value) => { setStatus(value); setCursor(null); }}>
@@ -249,93 +322,232 @@ export function IncidentsPage() {
         </Select>
         <Button variant="secondary" data-testid="incident-refresh" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>
         {directory.readable ? null : <span className="muted small" data-testid="incident-owner-directory-unavailable">{t('incidents.filter.directoryUnavailable')}</span>}
-        <span className="toolbar-count" data-testid="incidents-count">{t('incidents.count', { shown: items.length })}</span>
+        {/* A count is a claim about how many rows exist. While the read is loading, refused,
+            conflicted or failed, no count is known - printing "0" there is the same lie as an
+            empty table, and it is the one the panel below was rewritten to stop telling. The
+            toolbar speaks only when the list has actually answered. */}
+        {incidentCountKnown(listState) ? (
+          <span className="toolbar-count" data-testid="incidents-count" data-count-known={items.length}>{t('incidents.count', { shown: items.length })}</span>
+        ) : null}
       </section>
 
-      {data && error ? <Freshness observedAt={observedAt} error={error} /> : null}
-
-      {loading && !data ? (
-        <AsyncBoundary loading hasData={false} error={null}>{null}</AsyncBoundary>
-      ) : error && !data ? (
-        <section className="panel pad" data-testid="incident-list-failed">
-          <IncidentFailureNotice error={error} testId="incident-list-error" />
-          <Button variant="secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
-        </section>
-      ) : items.length === 0 ? (
-        <div data-empty-state={filtering ? 'filtered' : 'none'} data-testid="incidents-empty">
-          <EmptyState
-            icon="alert"
-            title={filtering ? t('incidents.empty.filtered.title') : t('incidents.empty.none.title')}
-            description={filtering ? t('incidents.empty.filtered.description') : t('incidents.empty.none.description')}
-            action={filtering
-              ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button>
-              : <Button onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
-          />
+      {/* page-template §2.1: the primary table panel. Exactly one of the eight states below is
+          rendered, and each one is its own shape - the audit's finding was that a page which
+          collapses distinct machine answers into one rendering makes a success and a never-observed
+          read look identical. `data-list-state` carries the derived state for the harness. */}
+      <section
+        className={listState === 'ready' || listState === 'stale' ? 'panel table-panel' : 'panel'}
+        data-testid="incidents-table-panel"
+        data-list-state={listState}
+      >
+        <div className="panel-head">
+          <div>
+            <h2>{t('incidents.table.panelTitle')}</h2>
+            {/* STALE is a label on rows that are still true, not a replacement for them. */}
+            {listState === 'stale' ? <Freshness observedAt={observedAt} error={error} /> : null}
+          </div>
+          {hasRows ? (
+            <span className="ow-table-meta" data-testid="incidents-count">{t('incidents.count', { shown: items.length })}</span>
+          ) : null}
         </div>
-      ) : (
-        <section className="panel table-panel">
-          <Table className={stackTable}>
-            <TableHeader className={stackHead}>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>{t('table.incident')}</TableHead>
-                <TableHead>{t('table.severity')}</TableHead>
-                <TableHead>{t('table.status')}</TableHead>
-                <TableHead>{t('table.evidence')}</TableHead>
-                <TableHead>{t('table.started')}</TableHead>
-                <TableHead>{t('table.owner')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody className={stackBody}>
-              {items.map((incident) => {
-                const identity = formatIdentity({
-                  name: incident.title,
-                  id: incident.id,
-                  at: incident.startedAt,
-                  locale,
-                  nameIsUnique: titleCount === items.length,
-                  rowsOnPage: items.length,
-                });
-                const href = '/app/incidents/' + incident.id;
-                return (
-                  <TableRow key={incident.id} className={stackRow} data-incident-row={incident.id} onClick={() => navigate(href)}>
-                    <IdentityCell label={t('table.incident')} identity={identity} href={href}>
-                      <span className="ow-key" data-testid="incident-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
-                      {incident.relatedEntity ? <span className="ow-key" data-testid="incident-related">{incident.relatedEntity}</span> : null}
-                    </IdentityCell>
-                    <StackCell label={t('table.severity')}><Status code={incident.severity} /></StackCell>
-                    <StackCell label={t('table.status')}><Status code={incident.status} /></StackCell>
-                    <StackCell label={t('table.evidence')}>
-                      <span data-testid="incident-evidence-count" data-evidence-refs={incident.evidenceRefs.length}>{incident.evidenceRefs.length}</span>
-                    </StackCell>
-                    <StackCell label={t('table.started')}><span title={incident.startedAt}>{ageMessage(locale, incident.startedAt)}</span></StackCell>
-                    <StackCell label={t('table.owner')}>
-                      <span className="mono" title={incident.owner} data-testid="incident-owner">{ownerName(incident.owner)}</span>
-                    </StackCell>
-                    <StackCell label={t('table.actions')} className={cardActionCell}>
-                      <RowActions
-                        label={t('incidents.action.open')}
-                        actions={[
-                          copyIdAction(incident.id, t('table.copyIdentifier'), {
-                            onCopied: () => toast.push({ tone: 'ok', title: t('action.copy') }),
-                            onFailed: () => toast.push({ tone: 'danger', title: t('action.copy'), detail: t('incidents.error.network') }),
-                          }),
-                          { id: 'open', label: t('incidents.action.open'), icon: 'chevron', onSelect: () => navigate(href) },
-                        ]}
-                      />
-                    </StackCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-          <p className="table-footnote">{t('incidents.table.evidenceNote')}</p>
-        </section>
-      )}
 
-      <div className="pagination-row">
-        <Button variant="secondary" disabled={!cursor} onClick={() => setCursor(null)}>{t('pipelines.pagination.first')}</Button>
-        <Button variant="secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor ?? null)}>{t('pipelines.pagination.next')}</Button>
-      </div>
+        {listState === 'loading' ? (
+          <div className="pad" aria-busy="true" aria-label={t('incidents.state.loadingAria')} data-testid="incidents-loading">
+            <div className="skeleton-stack">
+              <div className="skeleton" style={{ width: '46%' }} />
+              <div className="skeleton" style={{ width: '72%' }} />
+              <div className="skeleton" style={{ width: '58%' }} />
+            </div>
+          </div>
+        ) : listState === 'forbidden' ? (
+          // 403 is a permission wall, not a failure and not an empty list. It names no resource.
+          <div className="async-panel" role="alert" data-panel-state="forbidden" data-testid="incidents-forbidden">
+            <StatusIndicator state="forbidden" label={t('ui.forbidden.title')} />
+            <p className="muted small">{t('incidents.state.forbidden')}</p>
+          </div>
+        ) : listState === 'conflict' ? (
+          <div className="async-panel" role="alert" data-panel-state="conflict" data-testid="incidents-conflict">
+            <StatusIndicator state="attention" label={t('ui.conflict.title')} />
+            <p className="muted small">{t('incidents.state.conflict')}</p>
+            <Button variant="secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
+          </div>
+        ) : listState === 'failed' ? (
+          <div className="pad" data-testid="incident-list-failed">
+            <IncidentFailureNotice error={error} testId="incident-list-error" />
+            <p className="muted small">{t('incidents.state.failed')}</p>
+            <Button variant="secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
+          </div>
+        ) : listState === 'empty' || listState === 'filtered' ? (
+          // M1: an answered zero is an EmptyState - no dashed token, no NO_DATA, no "0".
+          // The two zeros are different facts with different remedies, so they are different copy.
+          <div data-empty-state={listState === 'filtered' ? 'filtered' : 'none'} data-testid="incidents-empty">
+            <EmptyState
+              icon="inbox"
+              title={listState === 'filtered' ? t('incidents.empty.filtered.title') : t('incidents.empty.none.title')}
+              description={listState === 'filtered' ? t('incidents.empty.filtered.description') : t('incidents.empty.none.description')}
+              action={listState === 'filtered'
+                ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button>
+                // Secondary, not primary: the page header already carries the one primary CTA
+                // (page-template §2.2), and two "Record an incident" buttons stacked on an empty
+                // page is the same action drawn twice with two different weights. This is the
+                // in-context repeat of it, so it takes the lesser weight.
+                : <Button variant="secondary" onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
+            />
+          </div>
+        ) : (
+          <>
+            <Table className={stackTable} data-testid="incidents-table">
+              <TableHeader className={stackHead}>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>{t('table.incident')}</TableHead>
+                  {/* §2.2: only the columns the plan kept are rendered at all. A header for a
+                      column that holds one value on every row is a header that earns no width. */}
+                  {plan.visible.map((column) => <TableHead key={column}>{t(INCIDENT_COLUMN_LABEL_KEYS[column])}</TableHead>)}
+                  {/* The action cell is chrome, not a data column, so its heading carries no text
+                      node: the metrics harness counts a labelled `th` as a column, and a sixth
+                      one here would report this table over §2.2's cap of five while it renders
+                      exactly five facts. `aria-label` keeps the heading announced. */}
+                  <TableHead aria-label={t('table.actions')} />
+                </TableRow>
+              </TableHeader>
+              <TableBody className={stackBody}>
+                {runs.map((run) => {
+                  const incident = run.head;
+                  const repeated = run.rows.length > 1;
+                  const identity = formatIdentity({
+                    name: incident.title,
+                    id: incident.id,
+                    at: incident.startedAt,
+                    locale,
+                    nameIsUnique: titleCount === items.length,
+                    rowsOnPage: items.length,
+                  });
+                  const href = '/app/incidents/' + incident.id;
+                  // Both ends of the run, rendered once each so the render can tell whether the
+                  // range actually says anything. A range whose ends read alike is not a range.
+                  const firstAge = ageMessage(locale, run.firstAt) || run.firstAt;
+                  const lastAge = ageMessage(locale, run.lastAt) || run.lastAt;
+                  const runSpan = firstAge === lastAge
+                    ? ''
+                    : t('incidents.table.runSpan', { first: firstAge, last: lastAge });
+                  return (
+                    <TableRow
+                      key={incident.id}
+                      className={cn(stackRow, cardTwoLineRow)}
+                      data-incident-row={incident.id}
+                      data-row-key={run.key}
+                      data-run-size={run.rows.length}
+                      onClick={() => navigate(href)}
+                    >
+                      <IdentityCell label={t('table.incident')} identity={identity} href={href}>
+                        <span className="ow-key" data-testid="incident-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
+                        {incident.relatedEntity ? <span className="ow-key" data-testid="incident-related">{incident.relatedEntity}</span> : null}
+                        {/* §2.4: the run is stated on the row it collapsed into, with the span of
+                            the occurrences, so no occurrence is hidden and none is invented.
+                            A single occurrence has no span to state: when both ends render the
+                            same age ("from 12h ago to 12h ago") the span is dropped rather than
+                            drawn as a degenerate range, and the row keeps the count alone. */}
+                        {repeated ? (
+                          <span className="ow-run-badge" data-testid="incident-run" data-run-size={run.rows.length}>
+                            <Icon name="rotate" size={11} />
+                            {t('incidents.table.runLabel', { count: run.rows.length })}
+                            {runSpan ? (
+                              <span className="muted" data-testid="incident-run-span"> {runSpan}</span>
+                            ) : null}
+                          </span>
+                        ) : null}
+                      </IdentityCell>
+
+                      {shows('severity') ? (
+                        <StackCell label={t('table.severity')} className={cardLineAfter}><Status code={incident.severity} /></StackCell>
+                      ) : null}
+                      {shows('status') ? (
+                        <StackCell label={t('table.status')} className={cardLineAfter}><Status code={incident.status} /></StackCell>
+                      ) : null}
+                      {shows('evidence') ? (
+                        <StackCell label={t('table.evidence')} className={cardLineAfter}>
+                          {/* M1: zero evidence is an answered zero, so it reads as words, not as a
+                              dashed NO_DATA token and not as a bare "0" beside real counts. */}
+                          <span data-testid="incident-evidence-count" data-evidence-refs={incident.evidenceRefs.length}>
+                            {incident.evidenceRefs.length === 0
+                              ? <span className="muted">{t('incidents.table.evidenceNone')}</span>
+                              : t('incidents.table.evidenceRefs', { count: incident.evidenceRefs.length })}
+                          </span>
+                        </StackCell>
+                      ) : null}
+                      {shows('started') ? (
+                        <StackCell label={t('table.started')} className={cardLineAfter}>
+                          <span title={incident.startedAt}>{ageMessage(locale, incident.startedAt) || incident.startedAt}</span>
+                        </StackCell>
+                      ) : null}
+                      {shows('owner') ? (
+                        <StackCell label={t('table.owner')} className={cardLineAfter}>
+                          <span className="mono" title={incident.owner} data-testid="incident-owner">{ownerName(incident.owner)}</span>
+                        </StackCell>
+                      ) : null}
+
+                      <StackCell label={t('table.actions')} className={cardActionCell}>
+                        <RowActions
+                          label={t('incidents.table.rowActions', { name: incident.title })}
+                          actions={[
+                            copyIdAction(incident.id, t('table.copyIdentifier'), {
+                              onCopied: () => toast.push({ tone: 'ok', title: t('incidents.table.copied') }),
+                              onFailed: () => toast.push({ tone: 'danger', title: t('action.copy'), detail: t('incidents.table.copyFailed') }),
+                            }),
+                            { id: 'open', label: t('incidents.table.openAria', { name: incident.title }), icon: 'arrowRight', onSelect: () => navigate(href) },
+                          ]}
+                        />
+                      </StackCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            {/* The facts the table carries once instead of per row (M1), in reading order. */}
+            <div className="ow-table-notes">
+              {demotedLabels.length > 0 ? (
+                <p className="table-footnote" data-testid="incidents-demoted-note">
+                  {t('incidents.table.demotedNote', { columns: demotedLabels.join(' · ') })}
+                </p>
+              ) : null}
+              {runs.some((run) => run.rows.length > 1) ? (
+                <p className="table-footnote" data-testid="incidents-run-note">{t('incidents.table.runNote')}</p>
+              ) : null}
+              <p className="table-footnote">{t('incidents.table.evidenceNote')}</p>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* A cursor pager is only meaningful once rows exist; drawing two dead buttons under an
+          error panel invites a click that cannot change anything. */}
+      {hasRows ? (
+        <div className="pagination-row">
+          <Button variant="secondary" disabled={!cursor} onClick={() => setCursor(null)}>{t('pipelines.pagination.first')}</Button>
+          <Button variant="secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor ?? null)}>{t('pipelines.pagination.next')}</Button>
+        </div>
+      ) : null}
+
+      {/* page-template §2.1: the secondary panel, last and at most two. The boundary declaration
+          belongs here rather than above the table - it is the page's footnote about what the slice
+          cannot do, not the answer to "what needs me now". It stays verbatim (the task's point 2). */}
+      <section className="panel" data-testid="incidents-boundary">
+        <details className="ow-boundary">
+          <summary>
+            <Icon name="info" size={14} />
+            {t('incidents.boundary.summary')}
+            <span className="muted">{t('incidents.boundary.expand')}</span>
+          </summary>
+          <ul className="detail-list pad">
+            <li><span>{t('incidents.boundary.sources')}</span></li>
+            <li><span data-testid="incidents-boundary-collectors">{t('incidents.boundary.collectors')}</span></li>
+            <li><span>{t('incidents.boundary.noAi')}</span></li>
+            <li><span>{t('incidents.boundary.closed')}</span></li>
+            <li><span>{t('incidents.boundary.search')}</span></li>
+            <li><span>{t('incidents.boundary.owner')}</span></li>
+          </ul>
+        </details>
+      </section>
 
       <CreateIncidentDialog
         open={createOpen}
