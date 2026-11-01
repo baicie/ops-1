@@ -7,6 +7,7 @@ import '@xyflow/react/dist/style.css';
 import { useT, type MessageKey, type TranslateParams } from '../i18n';
 import type { PipelineNode } from '../types';
 import type { GraphEdge, GraphNode } from './ir/types';
+import { applyCanvasChanges, type CanvasChange } from './ir/canvas';
 import { Icon } from '../components/Icons';
 
 interface PipelineNodeData extends Record<string, unknown> {
@@ -115,6 +116,10 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
   }, [flow, nodes.length, layoutNonce, viewMode, direction]);
   const flowNodes: Array<Node<PipelineNodeData>> = nodes.map((node) => ({
     id: node.id, type: 'pipeline', position: node.position,
+    // `measured` round-trips: React Flow reports it through onNodesChange, this component stores
+    // it on the model, and it has to come back here or the node is rendered hidden again on the
+    // next render. See the handler below for why that matters.
+    measured: node.measured,
     data: { ir: node.data.ir, direction }, selected: node.id === selectedId,
   }));
   const flowEdges: Edge[] = edges.map((edge) => ({
@@ -122,22 +127,9 @@ export function GraphCanvas({ nodes, edges, selectedId, onNodesChange, onEdgesCh
     sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle,
     label: edge.label, animated: false,
   }));
-  const handleNodesChange = useCallback((changes: any[]) => {
-    const next = [...nodes];
-    let changed = false;
-    for (const change of changes) {
-      if (change.type === 'position' && change.position && !change.dragging) {
-        const index = next.findIndex((node) => node.id === change.id);
-        if (index >= 0) {
-          const current = next[index];
-          if (current.position.x !== change.position.x || current.position.y !== change.position.y) {
-            next[index] = { ...current, position: change.position };
-            changed = true;
-          }
-        }
-      }
-    }
-    if (changed) onNodesChange(next);
+  const handleNodesChange = useCallback((changes: CanvasChange[]) => {
+    const next = applyCanvasChanges(nodes, changes);
+    if (next) onNodesChange(next);
   }, [nodes, onNodesChange]);
   const connect = useCallback((connection: Connection) => {
     const result = onConnectAttempt(connection);

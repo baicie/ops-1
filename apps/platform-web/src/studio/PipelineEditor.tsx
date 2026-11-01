@@ -151,6 +151,18 @@ export function PipelineEditorPage() {
     setGraph(next);
     setServerValidation(null);
   };
+
+  /**
+   * A measurement is not an edit, so it does not belong in undo history.
+   *
+   * The canvas reports every node's rendered size through onNodesChange, and that report has to
+   * be stored on the model or React Flow keeps the node hidden (see GraphCanvas's handler). Routing
+   * it through `update` would push a history entry per measured node and wipe redo on every mount,
+   * so the reader's Undo would step through invisible no-ops before reaching their own last change.
+   * The dirty flag is derived from the definition, which `measured` never touches, so skipping the
+   * snapshot here cannot hide an unsaved edit.
+   */
+  const applyMeasurement = (next: EditorGraph) => setGraph(next);
   const undo = () => {
     const previous = history[history.length - 1];
     if (!previous) return;
@@ -385,7 +397,7 @@ export function PipelineEditorPage() {
             <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>{t('studio.canvas.viewNodes')}</button>
             <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>{t('studio.canvas.viewCanvas')}</button>
           </div>
-          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className={getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? 'flow-index' : 'flow-index flow-index-token'}>{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : <UnknownValue detail={t('ui.unknown.detail')} />}</span><span><strong>{nodeLabel(t, node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{t('studio.canvas.nodeOutCount', { count: node.outputs.length })}</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className={getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? 'flow-index' : 'flow-index flow-index-token'}>{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : <UnknownValue detail={t('ui.unknown.detail')} />}</span><span><strong>{nodeLabel(t, node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{t('studio.canvas.nodeOutCount', { count: node.outputs.length })}</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => applyMeasurement({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
           <p className="studio-note"><Icon name="alert" size={13} /> {t('studio.canvas.note')}</p>
         </section>
