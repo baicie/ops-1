@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { EmptyState, TimeAgo } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
+import { FilterScroller } from '../components/app/filter-scroller';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { useDocumentTitle } from '../hooks';
@@ -77,10 +78,18 @@ export function JobsPage() {
             {pipelines.map((pipeline) => <SelectItem key={pipeline} value={pipeline}>{pipeline}</SelectItem>)}
           </SelectContent>
         </Select>
+        {/* page-template 2.4: a toolbar is ONE row of ONE height. `flex-wrap` let this strip
+            open a second line inside the 40px band, which is the undeclared-height defect
+            2.1 exists to stop - and wrapping never revealed a chip that was not already
+            there. FilterScroller is the component that already solved this on /admin/plugins:
+            it scrolls, it keeps the SELECTED chip in view, and its fade only exists on an
+            edge that really hides content. */}
         <Tabs value={status} onValueChange={(value) => { setStatus(value); setCursor(null); }}>
-          <TabsList className="h-auto max-w-full flex-wrap justify-start">
-            {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : statusText(value)}</TabsTrigger>)}
-          </TabsList>
+          <FilterScroller activeKey={status} testId="jobs-status-filter">
+            <TabsList className="justify-start" aria-label={t('jobs.status.aria')}>
+              {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : statusText(value)}</TabsTrigger>)}
+            </TabsList>
+          </FilterScroller>
         </Tabs>
         <span className="toolbar-count">{t('jobs.count', { shown: visibleJobs.length, total: data?.items.length ?? 0 })}</span>
       </section>

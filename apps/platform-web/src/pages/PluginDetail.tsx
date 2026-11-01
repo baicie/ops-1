@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { CopyButton, EmptyState, ErrorState, KV, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { ConfirmAction } from '../components/app/confirm-action';
+import { FilterScroller } from '../components/app/filter-scroller';
 import { PageHeader } from '../components/app/page-header';
 import { Bytes, NoData, StatusIndicator } from '../components/app/status-indicator';
 import { formatDate, formatBytes, shortDigest } from '../format';
@@ -268,14 +269,26 @@ export function PluginDetailPage() {
           "deployments"; Radix owns role=tablist/tab, aria-selected, the roving tabindex and the
           arrow/Home/End keys, and unmounts the inactive panels exactly like the old `&&` blocks. */}
       <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
-        <TabsList className="h-auto w-full justify-start overflow-x-auto">
-          {tabs.map((item) => (
-            <TabsTrigger key={item.id} value={item.id}>
-              {item.label}
-              {item.count !== undefined ? <span className="ml-[5px] rounded-full border border-solid border-border bg-muted px-1.5 py-px text-[10px] text-muted-foreground">{item.count}</span> : null}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        {/* table-spec 2.6: the strip scrolled, and nothing said so. The audit measured three
+            triggers at right=472 against a 375px content box on /admin/plugins/{id} - 97px of
+            tabs outside the viewport, behind a bare `overflow-x-auto` with no edge hint, so the
+            page looked like it had four tabs instead of seven. FilterScroller is the fix that
+            already shipped on /admin/plugins: a fade that exists ONLY on an edge that really
+            hides content, and the active trigger scrolled into view when the selection changes
+            (a filter in force that the reader cannot see is not one they chose).
+
+            The count badge also sat at 10px, under the 11px floor token-table R2 derives from
+            the uppercase/CJK legibility floor; it reads the label tier now. */}
+        <FilterScroller activeKey={tab} testId="plugin-detail-tabs">
+          <TabsList className="h-auto w-full justify-start">
+            {tabs.map((item) => (
+              <TabsTrigger key={item.id} value={item.id}>
+                {item.label}
+                {item.count !== undefined ? <span className="ml-[5px] rounded-pill border border-solid border-border bg-muted px-1.5 py-px text-[length:var(--ow-type-label)] text-muted-foreground">{item.count}</span> : null}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </FilterScroller>
 
         <TabsContent value="overview" className="mt-[18px] flex flex-col gap-[18px]">
           <div className="summary-grid plugin-detail-grid">

@@ -502,6 +502,7 @@
   "jobs.runShortId": "Run {id}",
   "jobs.search.aria": "Search jobs",
   "jobs.search.placeholder": "Search job ID or pipeline",
+  "jobs.status.aria": "Filter runs by status",
   "jobs.submit.description": "{pipelineId} · choose a published revision",
   "jobs.submit.inputJson": "Input JSON",
   "jobs.submit.invalidJson": "Input must be valid JSON",

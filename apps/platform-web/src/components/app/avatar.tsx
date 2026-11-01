@@ -7,7 +7,9 @@ const FALLBACK = '?';
 export type AvatarSize = 'sm' | 'md' | 'lg';
 
 const sizeStyles: Record<AvatarSize, string> = {
-  sm: 'h-6 w-6 text-[10px]',
+  // token-table R2: 11px is the floor. 10px was the only size on the ladder
+  // below it, and an initial is already the densest glyph on the page.
+  sm: 'h-6 w-6 text-[length:var(--ow-type-label)]',
   md: 'h-7 w-7 text-[11px]',
   lg: 'h-10 w-10 text-sm',
 };

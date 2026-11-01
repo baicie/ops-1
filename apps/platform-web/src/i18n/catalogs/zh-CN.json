@@ -502,6 +502,7 @@
   "jobs.runShortId": "运行 {id}",
   "jobs.search.aria": "搜索任务",
   "jobs.search.placeholder": "搜索任务 ID 或流水线",
+  "jobs.status.aria": "按状态筛选运行",
   "jobs.submit.description": "{pipelineId} · 选择一个已发布的修订",
   "jobs.submit.inputJson": "输入 JSON",
   "jobs.submit.invalidJson": "输入必须是合法的 JSON",
