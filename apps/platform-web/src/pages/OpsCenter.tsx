@@ -7,7 +7,7 @@ import { Icon } from '../components/Icons';
 import { buttonVariants } from '../components/ui/button';
 import { EmptyState, ErrorState, Skeleton, TimeAgo } from '../components/Ui';
 import { PageHeader } from '../components/app/page-header';
-import { NoData } from '../components/app/status-indicator';
+import { BytesPair } from '../components/app/status-indicator';
 import { formatBytes } from '../format';
 import { useT } from '../i18n';
 import { StatusPill } from './table-kit';
@@ -32,8 +32,7 @@ export function OpsCenterPage() {
     const snapshot = node.resourceSnapshot;
     const used = snapshot?.memoryUsedBytes;
     const total = snapshot?.memoryTotalBytes;
-    if (typeof used !== 'number' || typeof total !== 'number') return <NoData detail={t('ui.noData.detail')} />;
-    return `${formatBytes(used)} / ${formatBytes(total)}`;
+    return <BytesPair used={formatBytes(used)} total={formatBytes(total)} detail={t('ui.noData.detail')} />;
   };
   return (
     <div className="page-stack">

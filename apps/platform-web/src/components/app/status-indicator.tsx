@@ -164,3 +164,26 @@ export function NoData({ detail, className }: { detail?: string; className?: str
 export function UnknownValue({ detail, className }: { detail?: string; className?: string }) {
   return <ValueToken token="UNKNOWN" detail={detail} className={className} />;
 }
+
+/**
+ * A byte reading, or the Missing token when there is none (machine-language-rules M1 + M3.4).
+ *
+ * `formatBytes` used to answer the English string `No data` in every locale, so the absence of a
+ * sample was spelled by the formatter instead of rendered by the page. It now returns `null`, and
+ * `null` in JSX renders NOTHING — an empty cell, which reads as "this value is blank" rather than
+ * "this source has not been sampled". This component is the one place that turns that `null` into
+ * the dashed token, so no call site has to remember to.
+ *
+ * `used` / `total` are a pair on purpose: a utilisation reading is "x of y", and if either half is
+ * missing the pair cannot be stated at all. One dashed token for the pair, never two side by side
+ * (M1 budgets one dashed token per region, and `NO_DATA / NO_DATA` says one thing twice).
+ */
+export function Bytes({ value, detail, className }: { value: string | null; detail?: string; className?: string }) {
+  if (value === null) return <NoData detail={detail} className={className} />;
+  return <>{value}</>;
+}
+
+export function BytesPair({ used, total, detail, className }: { used: string | null; total: string | null; detail?: string; className?: string }) {
+  if (used === null || total === null) return <NoData detail={detail} className={className} />;
+  return <>{used} / {total}</>;
+}

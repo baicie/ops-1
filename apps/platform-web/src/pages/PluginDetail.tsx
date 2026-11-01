@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { CopyButton, EmptyState, ErrorState, KV, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
-import { NoData, StatusIndicator } from '../components/app/status-indicator';
+import { Bytes, NoData, StatusIndicator } from '../components/app/status-indicator';
 import { formatDate, formatBytes, shortDigest } from '../format';
 import { useI18n, useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
@@ -541,7 +541,7 @@ function DeploymentCard({ deployment, active, onActivate, onRollback }: { deploy
         <KV label={t('table.generation')}>{deployment.generation}</KV>
         <KV label={t('status.ready')}>{deployment.readyInstances}/{deployment.desiredReplicas}</KV>
         <KV label={t('pluginDetail.deployment.cpuMemory')}>{deployment.resources
-          ? <span className="mono">{deployment.resources.cpuMillis} mCPU / {deployment.resources.memoryMiB > 0 ? formatBytes(deployment.resources.memoryMiB * 1024 * 1024) : <NoData detail={t('ui.noData.detail')} />}</span>
+          ? <span className="mono">{deployment.resources.cpuMillis} mCPU / <Bytes value={deployment.resources.memoryMiB > 0 ? formatBytes(deployment.resources.memoryMiB * 1024 * 1024) : null} detail={t('ui.noData.detail')} /></span>
           : <NoData detail={t('ui.noData.detail')} />}</KV>
         <KV label={t('table.created')}>{deployment.createdAt ? formatDate(deployment.createdAt) : <NoData detail={t('ui.noData.detail')} />}</KV>
         <KV label={t('pluginDetail.deployment.fieldReason')}>{reason?.title ?? <NoData detail={t('ui.noData.detail')} />}</KV>
