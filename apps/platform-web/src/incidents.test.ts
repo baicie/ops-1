@@ -3,6 +3,7 @@ import { ApiError } from './api';
 import type { IncidentEvidence, IncidentView } from './types';
 import {
   COLUMN_KEEP_RATIO,
+  EVIDENCE_TRUST_CLAIM_CODES,
   EVIDENCE_TRUST_CODES,
   INCIDENT_OPTIONAL_COLUMNS,
   RUN_COLLAPSE_THRESHOLD,
@@ -23,6 +24,7 @@ import {
   incidentListState,
   incidentRunKey,
   incidentSourceKey,
+  verificationMethodKey,
   isKnownEvidenceTrust,
   ownerFilterValue,
   shortOwner,
@@ -66,7 +68,15 @@ function evidence(overrides: Partial<IncidentEvidence> = {}): IncidentEvidence {
     source: 'operator:admin@opsweave.local',
     collectedAt: '2026-10-30T22:16:00Z',
     contentRef: 'sha256:abc',
-    trust: 'OPERATOR_ASSERTED',
+    claimedTrust: 'OPERATOR_ASSERTED',
+    verifiedTrust: 'OPERATOR_ASSERTED',
+    verificationMethod: 'OPERATOR_IDENTITY',
+    verifiedAt: '2026-10-30T22:16:01Z',
+    verifierIdentity: null,
+    submittedBy: null,
+    verificationNote: null,
+    createdAt: '2026-10-30T22:16:01Z',
+    afterVerdict: false,
     ...overrides,
   };
 }
@@ -213,17 +223,20 @@ describe('local vocabulary', () => {
     expect(incidentSourceKey('ZABBIX')).toBe('incidents.source.unknown');
   });
 
-  it('gives each trust level its own tone, and gives none of them the verified green', () => {
+  it('paints only the Kernel-verified level as confirmed', () => {
     // The three must stay distinguishable...
     const tones = EVIDENCE_TRUST_CODES.map((code) => evidenceTrustTone(code));
     expect(new Set(tones).size).toBe(EVIDENCE_TRUST_CODES.length);
     expect(evidenceTrustTone('NOPE')).toBe('unknown');
 
-    // ...and none of them may be 'ok'. 'ok' is the shell's green tick (status-tone.ts), and on
-    // this build `trust` is whatever the writer sent: insert_evidence validates the word against
-    // the closed set and stores it, with no signature check behind SOURCE_ATTESTED. A green tick
-    // would be the UI asserting a verification the kernel never performed.
+    // ...and exactly one of them may be 'ok'. 'ok' is the shell's green tick (status-tone.ts).
+    // Since G12 the column is the Kernel's verdict rather than the writer's word, so
+    // SOURCE_ATTESTED - which a request can no longer set, and which is produced only by an
+    // attestation that verified against a configured adapter - has earned it. The other two
+    // have not, and a green tick on either would be the UI asserting a check nobody ran.
+    expect(evidenceTrustTone('SOURCE_ATTESTED')).toBe('ok');
     for (const code of EVIDENCE_TRUST_CODES) {
+      if (code === 'SOURCE_ATTESTED') continue;
       expect(evidenceTrustTone(code), code + ' must not be painted as verified').not.toBe('ok');
     }
   });
@@ -244,6 +257,29 @@ describe('local vocabulary', () => {
     expect(evidenceTrustRank('NOPE')).toBeLessThan(evidenceTrustRank('UNVERIFIED'));
   });
 
+  it('offers the form only the claims a caller is allowed to make', () => {
+    // SOURCE_ATTESTED means "the Kernel checked", so a request that names it is refused with
+    // EVIDENCE_TRUST_NOT_SELF_ASSERTABLE rather than quietly lowered (contract, G12 A1). The
+    // form must not offer a value the server will always reject: that turns a valid form into
+    // a guaranteed 400 and teaches the operator that the field is decorative.
+    expect(EVIDENCE_TRUST_CLAIM_CODES).not.toContain('SOURCE_ATTESTED');
+    expect(EVIDENCE_TRUST_CLAIM_CODES).toEqual(['OPERATOR_ASSERTED', 'UNVERIFIED']);
+    // Every claimable value is also a value the column can display.
+    for (const code of EVIDENCE_TRUST_CLAIM_CODES) {
+      expect(EVIDENCE_TRUST_CODES).toContain(code);
+    }
+  });
+
+  it('names the verification method the Kernel recorded', () => {
+    expect(verificationMethodKey('SOURCE_ADAPTER')).toBe('incidents.verification.sourceAdapter');
+    expect(verificationMethodKey('OPERATOR_IDENTITY')).toBe('incidents.verification.operatorIdentity');
+    expect(verificationMethodKey('NONE')).toBe('incidents.verification.none');
+    // A method this build does not know is its own answer, not folded into "none": "the Kernel
+    // did something we cannot name" and "the Kernel did nothing" are different facts.
+    expect(verificationMethodKey('SOMETHING_NEW')).toBe('incidents.verification.unknown');
+    expect(verificationMethodKey(null)).toBe('incidents.verification.unknown');
+  });
+
   it('tells a code the contract defines from one it does not', () => {
     for (const code of EVIDENCE_TRUST_CODES) expect(isKnownEvidenceTrust(code)).toBe(true);
     expect(isKnownEvidenceTrust('SIGNED')).toBe(false);
@@ -252,8 +288,8 @@ describe('local vocabulary', () => {
 
   it('summarises an evidence set by its weakest row, and counts what the contract does not define', () => {
     const mixed = evidenceAssurance([
-      evidence({ id: 'a', trust: 'SOURCE_ATTESTED' }),
-      evidence({ id: 'b', trust: 'UNVERIFIED' }),
+      evidence({ id: 'a', verifiedTrust: 'SOURCE_ATTESTED' }),
+      evidence({ id: 'b', verifiedTrust: 'UNVERIFIED' }),
     ]);
     // The weakest row is what the set is worth: one unverified row means the set is not attested.
     expect(mixed.weakest).toBe('UNVERIFIED');
@@ -265,7 +301,7 @@ describe('local vocabulary', () => {
     // defect the audit found elsewhere in the product (seven status codes landing on one
     // branch, so a success and a never-observed run drew identically): the page must be able
     // to say "this build cannot rank that word" instead of guessing which level it resembles.
-    const unknown = evidenceAssurance([evidence({ trust: 'SIGNED_BY_ZABBIX' })]);
+    const unknown = evidenceAssurance([evidence({ verifiedTrust: 'SIGNED_BY_ZABBIX' })]);
     expect(unknown.hasUnknown).toBe(true);
     expect(unknown.byCode.SIGNED_BY_ZABBIX).toBe(1);
     // An unrankable code is the floor of the set: the page cannot rank what it cannot read.
@@ -285,9 +321,9 @@ describe('local vocabulary', () => {
 describe('evidenceAssurance', () => {
   it('counts the whole set without promoting any row to verified', () => {
     const summary = evidenceAssurance([
-      evidence({ id: 'a', trust: 'SOURCE_ATTESTED' }),
-      evidence({ id: 'b', trust: 'OPERATOR_ASSERTED' }),
-      evidence({ id: 'c', trust: 'UNVERIFIED' }),
+      evidence({ id: 'a', verifiedTrust: 'SOURCE_ATTESTED' }),
+      evidence({ id: 'b', verifiedTrust: 'OPERATOR_ASSERTED' }),
+      evidence({ id: 'c', verifiedTrust: 'UNVERIFIED' }),
     ]);
     expect(summary.total).toBe(3);
     // There is no "verified" bucket to report: on this build the kernel checks no signature,
@@ -298,9 +334,9 @@ describe('evidenceAssurance', () => {
 
   it('counts each declared level separately and flags an out-of-set value', () => {
     const summary = evidenceAssurance([
-      evidence({ id: 'a', trust: 'SOURCE_ATTESTED' }),
-      evidence({ id: 'b', trust: 'SOURCE_ATTESTED' }),
-      evidence({ id: 'c', trust: 'WHAT_IS_THIS' }),
+      evidence({ id: 'a', verifiedTrust: 'SOURCE_ATTESTED' }),
+      evidence({ id: 'b', verifiedTrust: 'SOURCE_ATTESTED' }),
+      evidence({ id: 'c', verifiedTrust: 'WHAT_IS_THIS' }),
     ]);
     expect(summary.byCode.SOURCE_ATTESTED).toBe(2);
     expect(summary.byCode.OPERATOR_ASSERTED).toBeUndefined();
@@ -312,10 +348,10 @@ describe('evidenceAssurance', () => {
 
   it('names the weakest level present, so the panel can lead with it', () => {
     expect(evidenceAssurance([
-      evidence({ id: 'a', trust: 'SOURCE_ATTESTED' }),
-      evidence({ id: 'b', trust: 'UNVERIFIED' }),
+      evidence({ id: 'a', verifiedTrust: 'SOURCE_ATTESTED' }),
+      evidence({ id: 'b', verifiedTrust: 'UNVERIFIED' }),
     ]).weakest).toBe('UNVERIFIED');
-    expect(evidenceAssurance([evidence({ trust: 'SOURCE_ATTESTED' })]).weakest).toBe('SOURCE_ATTESTED');
+    expect(evidenceAssurance([evidence({ verifiedTrust: 'SOURCE_ATTESTED' })]).weakest).toBe('SOURCE_ATTESTED');
     expect(evidenceAssurance([]).weakest).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { Icon } from '../components/Icons';
 import { useT } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { cn } from '../lib/utils';
+import type { IncidentEvidence } from '../types';
 import {
   EVIDENCE_TRUST_CODES,
   evidenceTrustGlyph,
@@ -13,31 +14,29 @@ import {
 } from '../incidents';
 
 /**
- * How this page renders the evidence `trust` field, and why it never says "verified".
+ * How this page renders evidence provenance, and what each word is allowed to mean.
  *
- * The field is the slice's anti-forgery column (ADR-G11-001 §2.2), and on this build it is
- * also *unverified input*: `insert_evidence` checks the word against the closed set and stores
- * it (apps/kernel/src/incidents.rs). Nothing recomputes a digest, nothing checks a signature -
- * that path is on an unmerged branch. So a caller that posts `SOURCE_ATTESTED` gets
- * `SOURCE_ATTESTED` back, and a UI that paints it with a green tick is making a claim the
- * server never checked.
+ * Since G12 the column is the Kernel's verdict, not the writer's claim (ADR-015). A request
+ * cannot set `verifiedTrust`; it may only state `claimedTrust`, and the Kernel records both.
+ * A row reaches `SOURCE_ATTESTED` only when it carried an HMAC-SHA256 attestation over this
+ * exact evidence tuple, verified against a configured source adapter whose secret the client
+ * never holds. `OPERATOR_ASSERTED` is an authenticated operator submitting in their own name.
+ * `UNVERIFIED` is what anything else gets, including every pre-0017 row that claimed to be
+ * attested — migration 0017 downgraded those and left a note saying so.
  *
  * Three rules follow, and all three are visible in this file rather than in a review comment:
  *
- *   1. **No level is painted as confirmed.** `evidenceTrustTone` gives `SOURCE_ATTESTED` the
- *      `info` tone, not `ok`; `ok` is this shell's green tick and it stays reserved for facts
- *      the kernel established. The three levels remain three distinct treatments, because a
- *      reader must still be able to tell a source claim from a hand-written note.
- *   2. **The wording describes who claimed it, not what was proven.** Every level's tooltip is
- *      a sentence about the writer ("the writer attributes this row to a source"), and the
- *      panel carries `incidents.trust.baselineNote` once, stating that this build does not
- *      check the field.
+ *   1. **Only a verified level is painted as confirmed.** `evidenceTrustTone` gives
+ *      `SOURCE_ATTESTED` the `ok` tone — the green this shell reserves for facts the server
+ *      established — and withholds it from the other two.
+ *   2. **The wording names the check that produced the level**, not who asked for it. The
+ *      tooltip says what the Kernel did, because that is now the thing the field measures.
  *   3. **Shape carries the level too.** Each level has its own glyph and its own border
  *      treatment, so the three survive greyscale, a colour deficiency and the dark theme.
  *
- * When the kernel starts verifying attestations, the change is local: `evidenceTrustTone`
- * returns `ok` for the verified level and `incidents.trust.baselineNote` is deleted. Until
- * then, both stay.
+ * The row also carries `verificationMethod` and, when the Kernel downgraded a claim, a
+ * `verificationNote`. `TrustDetail` renders that note: a reader who sees `UNVERIFIED` beside a
+ * claim of provenance deserves the sentence explaining the gap, and it is the row's own.
  */
 
 const DETAIL_KEYS: Record<string, MessageKey> = {
@@ -52,36 +51,62 @@ function detailKey(code?: string | null): MessageKey {
 }
 
 /**
- * One evidence row's trust level: glyph, word, and a tooltip naming who claimed it.
- *
- * Not a `Badge`: the shell's badge variants map `ok` to the same green used for "the box is
- * up", and this value has not earned it. The chip below is its own token-built shape, so the
- * day the field becomes verifiable the vocabulary can change without a page rewrite.
+ * One evidence row's provenance: glyph, word, and a tooltip naming the check behind it.
  *
  * `data-trust` carries the wire code for tests and tooling; what the reader sees is catalog
  * copy. A code outside the closed set is shown as sent, in the `unknown` treatment, and is
  * never folded into a neighbouring level - the audit's seven-status-codes-to-one-branch defect
  * is exactly that fold.
  */
-export function TrustChip({ code, className }: { code?: string | null; className?: string }) {
+export function TrustChip({ code, title: extra, className }: { code?: string | null; title?: string; className?: string }) {
   const t = useT();
   const known = isKnownEvidenceTrust(code);
   const tone = evidenceTrustTone(code);
   const raw = (code ?? '').trim().toUpperCase();
   // An unreadable value still has to be reportable, so the tooltip carries the code itself.
   const detail = known ? t(detailKey(code)) : t('incidents.trust.unknownDetail') + (raw ? ' (' + raw + ')' : '');
+  // `extra` is the row's own verification method (and adapter id when there is one). It is
+  // appended rather than replacing `detail`, because the level's meaning and this row's
+  // evidence for it are different facts and a reader needs both.
+  const title = extra ? detail + ' — ' + extra : detail;
   return (
     <span
       className={cn('ow-trust', className)}
       data-trust={raw || 'UNSET'}
       data-trust-tone={tone}
       data-trust-known={known ? 'true' : 'false'}
-      title={detail}
+      title={title}
     >
       <Icon name={evidenceTrustGlyph(code)} size={13} />
       <span className="ow-trust-word">{t(evidenceTrustKey(code))}</span>
-      <span className="sr-only"> {detail}</span>
+      <span className="sr-only"> {title}</span>
     </span>
+  );
+}
+
+/**
+ * The sentence a row needs when the Kernel's verdict and the submitter's claim disagree.
+ *
+ * G12 A1 made these two fields separate on purpose: a caller may claim anything in
+ * {OPERATOR_ASSERTED, UNVERIFIED}, the Kernel then decides, and the common case where they
+ * differ is a pre-0017 row that claimed SOURCE_ATTESTED and was downgraded by the migration.
+ * Showing only the verdict would silently discard the claim; showing both with no explanation
+ * would look like a contradiction, so the Kernel's own `verificationNote` supplies the reason
+ * and this component prints it verbatim when it exists.
+ *
+ * It renders nothing when the claim and the verdict agree, because then there is no gap to
+ * explain and a line saying "these agree" is noise on every row of the table.
+ */
+export function TrustGap({ row }: { row: IncidentEvidence }) {
+  const t = useT();
+  const claimed = (row.claimedTrust ?? '').trim().toUpperCase();
+  const verified = (row.verifiedTrust ?? '').trim().toUpperCase();
+  if (!claimed || claimed === verified) return null;
+  return (
+    <p className="ow-trust-gap" data-testid="incident-evidence-trust-gap" data-claimed={claimed} data-verified={verified}>
+      {t('incidents.trust.gap', { claimed: t(evidenceTrustKey(claimed)), verified: t(evidenceTrustKey(verified)) })}
+      {row.verificationNote ? ' ' + row.verificationNote : null}
+    </p>
   );
 }
 
@@ -89,7 +114,7 @@ export function TrustChip({ code, className }: { code?: string | null; className
  * What a whole evidence set is worth, led by its weakest row.
  *
  * A verdict rests on the set, not on its best member, so the summary a reader needs before
- * signing one is the floor. The breakdown beside it is per declared level, so "three rows" is
+ * signing one is the floor. The breakdown beside it is per verified level, so "three rows" is
  * never mistaken for "three attested rows", and a value outside the contract gets its own
  * sentence instead of disappearing into a total.
  */
@@ -113,7 +138,7 @@ export function TrustSummary({ assurance }: { assurance: EvidenceAssurance }) {
       ) : null}
       {/* Said once per panel, not once per row: M1's budget argument applies to sentences as
           much as to dashed boxes. This is the sentence the whole column depends on. */}
-      <p className="ow-note ow-note--boundary" data-testid="incident-trust-baseline">{t('incidents.trust.baselineNote')}</p>
+      <p className="ow-note ow-note--boundary" data-testid="incident-trust-baseline">{t('incidents.trust.columnNote')}</p>
     </div>
   );
 }
@@ -122,19 +147,21 @@ export function TrustSummary({ assurance }: { assurance: EvidenceAssurance }) {
  * What the three words mean, under the table that uses them.
  *
  * A closed set of three is small enough to state in full, and stating it is what stops the
- * column from being read as a quality score. The order is weakest-claim-last so the legend
- * reads as a descent from "attributed to a source" to "no provenance claimed", which is the
- * direction `evidenceTrustRank` orders them in.
+ * column from being read as a quality score. The order is weakest-verdict-last so the legend
+ * reads as a descent from "the Kernel verified an adapter's signature" to "nothing was
+ * verified", which is the direction `evidenceTrustRank` orders them in.
  *
  * It renders only once per page, below the evidence table: the per-row tooltip carries the same
  * sentence for the row the reader is actually pointing at, and repeating the legend per row is
  * the repetition M1 budgets against.
+ *
+ * The column-wide caveat is NOT repeated here: `TrustSummary` already states it once above the
+ * table, and rendering it again under the same panel is the duplication M1 exists to prevent.
  */
 export function TrustLegend() {
   const t = useT();
   return (
     <div className="ow-trust-legend" data-testid="incident-trust-legend">
-      <p className="ow-note">{t('incidents.trust.columnNote')}</p>
       <dl className="ow-trust-legend-list">
         {EVIDENCE_TRUST_CODES.map((code) => (
           <div key={code} className="ow-trust-legend-row">

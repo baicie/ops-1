@@ -22,7 +22,19 @@ import type { IncidentEvidence, IncidentVerdict, IncidentView } from './types';
 export const INCIDENT_STATUS_CODES = ['OPEN', 'INVESTIGATING', 'CONCLUDED', 'CLOSED'] as const;
 export const INCIDENT_SEVERITY_CODES = ['CRITICAL', 'MAJOR', 'MINOR', 'WARNING'] as const;
 export const EVIDENCE_KIND_CODES = ['METRIC_SNAPSHOT', 'LOG_EXCERPT', 'QUERY_RESULT', 'OPERATOR_NOTE'] as const;
+/**
+ * The closed set of values `verifiedTrust` may carry. This is a SERVER verdict (G12 A1): a
+ * reader may treat it as provenance, and no request can set it.
+ */
 export const EVIDENCE_TRUST_CODES = ['SOURCE_ATTESTED', 'OPERATOR_ASSERTED', 'UNVERIFIED'] as const;
+/**
+ * What a submitter is allowed to say about its own row (`claimedTrust`). Deliberately smaller
+ * than the set above: SOURCE_ATTESTED means "the Kernel checked", and a caller cannot perform
+ * that check on the Kernel's behalf by typing it. A request naming it is refused with
+ * EVIDENCE_TRUST_NOT_SELF_ASSERTABLE rather than quietly lowered, so this form does not offer
+ * it at all.
+ */
+export const EVIDENCE_TRUST_CLAIM_CODES = ['OPERATOR_ASSERTED', 'UNVERIFIED'] as const;
 /** What this form offers. The API also accepts REFUTED; that value is not exposed here. */
 export const VERDICT_CHOICES = ['CONFIRMED', 'INCONCLUSIVE'] as const;
 
@@ -233,39 +245,40 @@ const EVIDENCE_TRUST_KEYS: Record<string, MessageKey> = {
   UNVERIFIED: 'incidents.trust.unverified',
 };
 
-/**
- * Trust is the anti-forgery field (ADR-G11-001 §2.2): a hand-written note and a source-attested
- * metric snapshot must not look alike, which is a tone, not a sentence.
- */
+/** How `verifiedTrust` was reached. A method, not a level: it never re-ranks the row. */
+const VERIFICATION_METHOD_KEYS: Record<string, MessageKey> = {
+  NONE: 'incidents.verification.none',
+  OPERATOR_IDENTITY: 'incidents.verification.operatorIdentity',
+  SOURCE_ADAPTER: 'incidents.verification.sourceAdapter',
+};
+
+export function verificationMethodKey(code?: string | null): MessageKey {
+  if (!code) return 'incidents.verification.unknown';
+  return VERIFICATION_METHOD_KEYS[code.toUpperCase()] ?? 'incidents.verification.unknown';
+}
+
+/** A catalog key for every trust code the contract allows, and one for a code it does not. */
 export function evidenceTrustKey(code?: string | null): MessageKey {
   if (!code) return 'incidents.trust.unknown';
   return EVIDENCE_TRUST_KEYS[code.toUpperCase()] ?? 'incidents.trust.unknown';
 }
 
 /**
- * What the trust word is worth on THIS build, which is not what the word says.
+ * Trust is the anti-forgery field (ADR-G11-001 §2.2, ADR-015): a hand-written note and a
+ * source-attested metric snapshot must not look alike, which is a tone, not a sentence.
  *
- * `insert_evidence` validates `trust` against the closed set and stores whatever the caller
- * sent (apps/kernel/src/incidents.rs). There is no signature check behind `SOURCE_ATTESTED`
- * yet - the verifying path is on an unmerged branch - so the value is a *declaration by the
- * writer*, in all three cases, and the only thing that differs between the three is how much
- * the writer is claiming.
- *
- * That is why `SOURCE_ATTESTED` is not `ok` here. `ok` is the shell's green tick, and a green
- * tick on a self-reported field is the UI asserting something the server never checked. The
- * three levels stay three distinct tones - the reader must still be able to tell a signed-claim
- * from a hand-written note - but none of them is the colour this product uses for "verified".
- *
- * When the kernel starts verifying attestations, `SOURCE_ATTESTED` earns `ok` and
- * `incidents.trust.baselineNote` is the sentence that gets deleted. Until then both stay.
+ * Since G12 this column is the Kernel's verdict, not the writer's claim, so SOURCE_ATTESTED
+ * earns `ok` — the green this product reserves for a fact the server established. Before the
+ * attestation path existed the same value meant "the caller typed this", and painting it green
+ * would have been the UI asserting something nobody checked; that is no longer the case.
  */
 export function evidenceTrustTone(code?: string | null): StatusTone {
   switch ((code ?? '').toUpperCase()) {
-    // A claim the writer attributes to a source. Informative, never confirmed.
-    case 'SOURCE_ATTESTED': return 'info';
-    // A claim the writer makes in their own name. Weaker than the above, and not a warning.
+    // The Kernel verified a signature over this exact tuple against a configured adapter.
+    case 'SOURCE_ATTESTED': return 'ok';
+    // An authenticated operator submitted it in their own name. A real, narrower provenance.
     case 'OPERATOR_ASSERTED': return 'neutral';
-    // The writer declined to claim anything.
+    // Nothing was verified: the default for a row whose claim the Kernel could not check.
     case 'UNVERIFIED': return 'warn';
     default: return 'unknown';
   }
@@ -333,7 +346,7 @@ export function evidenceAssurance(rows: IncidentEvidence[]): EvidenceAssurance {
   let weakest: string | null = null;
   let hasUnknown = false;
   for (const row of rows) {
-    const code = (row.trust ?? '').toUpperCase() || 'UNSET';
+    const code = (row.verifiedTrust ?? '').toUpperCase() || 'UNSET';
     byCode[code] = (byCode[code] ?? 0) + 1;
     if (!isKnownEvidenceTrust(code)) hasUnknown = true;
     if (weakest === null) { weakest = code; continue; }

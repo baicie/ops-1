@@ -18,7 +18,7 @@ import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
 import {
   EVIDENCE_KIND_CODES,
-  EVIDENCE_TRUST_CODES,
+  EVIDENCE_TRUST_CLAIM_CODES,
   RATIONALE_MIN_CHARS,
   VERDICT_CHOICES,
   evidenceAssurance,
@@ -30,9 +30,10 @@ import {
   shortOwner,
   toIsoInstant,
   toLocalInputValue,
+  verificationMethodKey,
   verdictPanelState,
 } from '../incidents';
-import { TrustChip, TrustLegend, TrustSummary } from './incident-trust';
+import { TrustChip, TrustGap, TrustLegend, TrustSummary } from './incident-trust';
 import { IncidentFailureNotice, useUserDirectory } from './Incidents';
 import { IdentityCell, LongId, StackCell, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
@@ -254,7 +255,7 @@ export function IncidentDetailPage() {
                       {/* Provenance travels with the entry: a timeline that shows WHAT was
                           collected without showing how well attested it is invites the reader
                           to weigh a hand-written note like a signed snapshot. */}
-                      <TrustChip code={fact.evidence.trust} />
+                      <TrustChip code={fact.evidence.verifiedTrust} />
                       <span className="muted small mono" title={fact.evidence.source}>{fact.evidence.source}</span>
                     </>
                   ) : null}
@@ -338,7 +339,7 @@ export function IncidentDetailPage() {
               </TableHeader>
               <TableBody className={stackBody}>
                 {(evidence ?? []).map((row) => (
-                  <TableRow key={row.id} data-evidence-row={row.id} data-trust={row.trust} className={cn(stackRow, cardTwoLineRow)}>
+                  <TableRow key={row.id} data-evidence-row={row.id} data-trust={row.verifiedTrust} className={cn(stackRow, cardTwoLineRow)}>
                     {/* §2.5 at 390: a five-column table stacks into a card, and the kind - the
                         fact the card is about - becomes its identity line. Without this the row
                         kept its five columns in a 390px box and squeezed `prometheus` into
@@ -352,12 +353,28 @@ export function IncidentDetailPage() {
                       cardFact
                     >
                       <span className="mono">{row.source}</span>
+                      {/* The demoted content reference (§2.2): inline secondary on the card,
+                          still present and still copyable, no longer spending a fact slot. */}
+                      <span className="ow-longid ow-ident-tail min-[769px]:hidden" data-testid="evidence-content-ref-card">
+                        <span className="ow-longid-value" title={row.contentRef}>{row.contentRef}</span>
+                        <CopyButton value={row.contentRef} label={t('table.copyIdentifier')} />
+                      </span>
                     </IdentityCell>
                     {/* Trust is a first-class cell, not a colour on another one: glyph + word +
-                        tone, and the word never says "verified" on a build that does not verify
-                        (incidents.ts, evidenceTrustTone). */}
+                        tone, and the word names the check the Kernel actually ran
+                        (incidents.ts, evidenceTrustTone). The method rides in the chip's tooltip
+                        rather than on a second line: table-spec §2.3 fixes the row at 40px and
+                        this cell's neighbours are one line high, so a stacked second line was
+                        measured pushing the trust text over the Source column at 390 and
+                        wrapping at 1024. The gap sentence below it is conditional - it exists
+                        only when the claim and the verdict disagree, which is the one case a
+                        reader cannot resolve from the chip alone. */}
                     <StackCell label={t('table.trust')}>
-                      <TrustChip code={row.trust} />
+                      <TrustChip
+                        code={row.verifiedTrust}
+                        title={verificationTitle(t, row.verificationMethod, row.verifierIdentity)}
+                      />
+                      <TrustGap row={row} />
                     </StackCell>
                     <StackCell label={t('table.source')} className="mono max-[768px]:hidden" title={row.source} data-evidence-source={row.source}>{row.source}</StackCell>
                     {/* The age is what the eye scans; the wall clock is what separates two rows
@@ -373,7 +390,13 @@ export function IncidentDetailPage() {
                         })()}
                       </span>
                     </StackCell>
-                    <StackCell label={t('table.contentRef')}>
+                    {/* §2.2's <768 cap is three facts per card, and this table has four. The
+                        content reference is the one that gives way: it is an opaque locator the
+                        kernel never fetches (the note under the table says exactly that), so it
+                        moves onto the identity line's qualifier as inline secondary rather than
+                        occupying a card row the reader has to decode. It stays visible and
+                        copyable - demoted is not dropped. */}
+                    <StackCell label={t('table.contentRef')} className="max-[768px]:hidden">
                       <span className="ow-longid">
                         <span className="ow-longid-value" title={row.contentRef} data-testid="evidence-content-ref">{row.contentRef}</span>
                         <CopyButton value={row.contentRef} label={t('table.copyIdentifier')} />
@@ -461,13 +484,27 @@ function IncidentStale({ observedAt, error }: { observedAt: string | null; error
  * collected" from "when it was recorded" and a late paste of an earlier log is a normal case.
  * `contentRef` is described as what it is - an opaque locator, not inline text.
  */
+/**
+ * The chip's tooltip: how this row's level was reached, in words that stay true for `NONE`.
+ *
+ * "Verified by Nothing verified" is what a naive template produces, and it is nonsense on the
+ * one row where the absence of verification is the whole point. `NONE` therefore states that
+ * nothing was checked rather than naming a method, and the adapter id is appended only when an
+ * adapter is what did the checking.
+ */
+function verificationTitle(t: ReturnType<typeof useT>, method: string, adapter: string | null): string {
+  if ((method ?? '').toUpperCase() === 'NONE') return t('incidents.verification.notChecked');
+  const named = t(verificationMethodKey(method));
+  return t('incidents.trust.method', { method: adapter ? named + ' · ' + adapter : named });
+}
+
 function AddEvidenceForm({ incidentId, defaultSource, onAdded }: { incidentId: string; defaultSource: string; onAdded: () => void }) {
   const t = useT();
   const [kind, setKind] = React.useState<string>('LOG_EXCERPT');
   const [source, setSource] = React.useState(defaultSource);
   const [collectedAt, setCollectedAt] = React.useState(() => toLocalInputValue(new Date()));
   const [contentRef, setContentRef] = React.useState('');
-  const [trust, setTrust] = React.useState<string>('OPERATOR_ASSERTED');
+  const [claim, setClaim] = React.useState<string>('OPERATOR_ASSERTED');
   const [submitting, setSubmitting] = React.useState(false);
   const [failure, setFailure] = React.useState<unknown>(null);
   const [fieldError, setFieldError] = React.useState<string | null>(null);
@@ -489,7 +526,9 @@ function AddEvidenceForm({ incidentId, defaultSource, onAdded }: { incidentId: s
         source: trimmedSource,
         collectedAt: iso,
         contentRef: trimmedRef,
-        trust,
+        // The kernel decides verifiedTrust; this field is only what we claim. Sending the
+        // retired "trust" field, or claiming SOURCE_ATTESTED here, is a 400 that writes nothing.
+        claimedTrust: claim,
       });
       setContentRef('');
       setCollectedAt(toLocalInputValue(new Date()));
@@ -514,11 +553,11 @@ function AddEvidenceForm({ incidentId, defaultSource, onAdded }: { incidentId: s
             </SelectContent>
           </Select>
         </Field>
-        <Field label={t('table.trust')} htmlFor="incident-evidence-trust">
-          <Select value={trust} onValueChange={setTrust}>
-            <SelectTrigger id="incident-evidence-trust" data-testid="incident-evidence-trust" aria-label={t('table.trust')}><SelectValue /></SelectTrigger>
+        <Field label={t('incidents.evidence.add.claimLabel')} hint={t('incidents.evidence.add.claimHint')} htmlFor="incident-evidence-claim">
+          <Select value={claim} onValueChange={setClaim}>
+            <SelectTrigger id="incident-evidence-claim" data-testid="incident-evidence-claim" aria-label={t('incidents.evidence.add.claimLabel')}><SelectValue /></SelectTrigger>
             <SelectContent>
-              {EVIDENCE_TRUST_CODES.map((code) => <SelectItem key={code} value={code} data-testid={'incident-evidence-trust-option-' + code}>{t(evidenceTrustKey(code))}</SelectItem>)}
+              {EVIDENCE_TRUST_CLAIM_CODES.map((code) => <SelectItem key={code} value={code} data-testid={'incident-evidence-claim-option-' + code}>{t(evidenceTrustKey(code))}</SelectItem>)}
             </SelectContent>
           </Select>
         </Field>

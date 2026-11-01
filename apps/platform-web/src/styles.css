@@ -3249,16 +3249,18 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    needs no override rules of its own.
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* The trust chip. Deliberately NOT a .badge: the badge's `success` variant is this
-   product's green tick, and the evidence `trust` field is caller-declared input that
-   the kernel stores without checking (incident-trust.tsx explains at length). So the
-   chip gets its own shape vocabulary, and the day the field becomes verifiable the
-   green can be introduced here in one place.
+/* The trust chip. Deliberately NOT a .badge: it carries its own shape vocabulary so the
+   level reads in greyscale and under a colour deficiency, not only in colour.
+
+   Since G12 this field is the Kernel's verdict rather than caller-declared input
+   (incident-trust.tsx explains), so the green is now earned: `ok` is exactly what
+   SOURCE_ATTESTED means - a signature over this evidence tuple verified against a
+   configured adapter. The other two levels keep their old treatments.
 
    Shape before colour (visual-audit): the border STYLE carries the level as well as
-   the tone, so the three survive greyscale and a colour deficiency -
-   solid = attributed to a source, solid-muted = asserted by a person,
-   dashed = no provenance claimed, dotted = a value outside the contract. */
+   the tone - solid = the Kernel verified a source adapter, solid-muted = an operator
+   asserted it in their own name, dashed = nothing was verified, dotted = a value
+   outside the contract. */
 .ow-trust {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 1px 8px; max-width: 100%;
@@ -3269,18 +3271,19 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 }
 .ow-trust svg { flex: none; }
 .ow-trust-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* info = a claim attributed to a source. The strongest thing this build can say, and
-   it is still a claim: a blue-ink chip, never the green of a verified fact. */
-.ow-trust[data-trust-tone="info"] {
-  color: var(--ow-info); background: var(--ow-info-soft);
-  border-color: color-mix(in srgb, var(--ow-info) 40%, transparent);
+/* ok = the Kernel verified an attestation from a configured source adapter. This is the
+   one level that IS provenance, so it takes the green tick the product reserves for a
+   fact the server established. */
+.ow-trust[data-trust-tone="ok"] {
+  color: var(--ow-ok); background: var(--ow-ok-soft);
+  border-color: color-mix(in srgb, var(--ow-ok) 40%, transparent);
 }
 /* neutral = a person asserting in their own name. Weaker, and not a warning. */
 .ow-trust[data-trust-tone="neutral"] {
   color: var(--ow-text-secondary); background: var(--ow-surface-3);
   border-color: var(--ow-border-strong);
 }
-/* warn = the writer claimed no provenance at all. */
+/* warn = nothing was verified for this row. */
 .ow-trust[data-trust-tone="warn"] {
   color: var(--ow-warn); background: var(--ow-warn-soft);
   border-color: color-mix(in srgb, var(--ow-warn) 40%, transparent);
@@ -3301,6 +3304,25 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 }
 .ow-trust-summary-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ow-trust-summary-label { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
+
+/* The gap sentence: shown only when the submitter's claim and the Kernel's verdict differ,
+   so it is not part of the common row. It may wrap — it is prose inside a table cell, and the
+   row it lives in already has a second line by virtue of existing at all. */
+.ow-trust-gap {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--ow-type-label); line-height: 1.45; color: var(--ow-text-muted);
+  overflow-wrap: anywhere;
+}
+/* At 390 the cell is a two-track flex row (label left, value right) and the gap sentence is
+   prose, not a value: squeezed into the right-hand track it printed one word per line and
+   pushed the card past the viewport. It takes its own full-width line under the cell instead. */
+@media (max-width: 768px) {
+  .ow-table tbody td:has(> .ow-cell-body > .ow-trust-gap),
+  .ow-table tbody td:has(> .ow-trust-gap) { flex-wrap: wrap; }
+  .ow-table tbody td > .ow-cell-body > .ow-trust-gap,
+  .ow-table tbody td > .ow-trust-gap { flex: 1 0 100%; text-align: left; }
+}
 
 /* The legend states, once per panel, what each level means and what the kernel does
    not check. One sentence in one place instead of a tooltip the reader must hunt. */
