@@ -1953,6 +1953,15 @@ button.ow-summary-card:focus-visible,
   .ow-summary-card:last-child:nth-child(odd) { grid-column: span 2; }
 }
 .ow-filter-shell { position: relative; min-width: 0; max-width: 100%; }
+/* The shell is a block-level flex item, so it takes whatever width the row hands it and then
+   sizes to its content - and a max-content child (the tablist) therefore never overflows the
+   shell, which means the scroller inside never has anything to scroll. The strip only scrolled
+   below 1024, where a media rule set `flex: 1 1 auto` on the shell; above it the same clipped
+   row reported no overflow at all. Sizing the shell to `fit-content` makes the box as wide as
+   its content wants and no wider than its parent allows, so the child overflows the scroller
+   at every width. `width: fit-content` alone is overridden by the `flex` shorthand below it,
+   so the flex basis is stated here as well. */
+.ow-filter-shell { width: fit-content; flex: 0 1 auto; }
 .ow-filter-scroll { min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .ow-filter-scroll::-webkit-scrollbar { display: none; }
 @media (max-width: 1024px) {
@@ -1986,6 +1995,16 @@ button.ow-summary-card:focus-visible,
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
   mask-image: linear-gradient(to right, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
 }
+/* The scroller is only as good as the box that holds it. On /admin/jobs the markup is
+   `Tabs > FilterScroller > TabsList`, and Radix's `Tabs` root is a plain `<div>` with no
+   width of its own - so it sized to its content (430 against a 375 content box), and the
+   shell's `max-width: 100%` resolved against that inflated parent, which meant the inner
+   `overflow-x: auto` never had anything to scroll: the strip overflowed the page instead
+   of scrolling inside it. A box that can be wider than the row it sits in is not a
+   scroller's ancestor. Stating `min-width: 0` + a bounded width on the root makes the
+   chain real, and `align-self` keeps it from stretching to the row's cross size. */
+.toolbar > [data-orientation] > .ow-filter-shell { max-width: 100%; }
+.toolbar > [data-orientation] { min-width: 0; max-width: 100%; }
 .ow-filter-fade {
   position: absolute;
   top: 0;
@@ -2912,9 +2931,37 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   [role='menuitem'] {
     min-height: var(--ow-control-touch);
   }
-  /* An icon button is square: raising only its height would make it a 32x44
-     rectangle around a 16px glyph, so both axes move together. */
-  .icon-btn { min-height: var(--ow-control-touch); min-width: var(--ow-control-touch); }
+  /* R3 C2 constrains the control's HEIGHT and says nothing about its width. An
+     icon button is a 32px square at its own tier, so raising the height alone
+     makes it a 32-wide, floor-tall rectangle - I widened it to keep it square,
+     and that is what blew the phone topbar's width budget: two 32px squares
+     became two 44px-wide ones, +24px on a row with none to spare. The floor is
+     the touch TARGET on the axis a finger misses, which is the height; a narrow,
+     floor-tall target is the shape the rule actually describes. Width stays at
+     the tier. */
+  .icon-btn { min-height: var(--ow-control-touch); }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   The phone topbar is a width budget (390, measured)
+
+   At 390 the shell gives the topbar 375px of content box and 24px of padding, so
+   the row has 351px for: menu 44 + trail 56 (its `min-width`) + right group +
+   two 8px gaps. The right group is fixed-size by design - a command square, the
+   locale switcher, a theme square and the account button - so it cannot be the
+   item that gives way; the breadcrumb can, and already truncates.
+
+   Measured before: the group was 265 and the row summed to 381, putting the
+   account button 3px past the viewport on every admin page. The touch floor
+   above is what moved the two squares from 32 to 44, so the row has to pay for
+   its own floor rather than borrow it from a control that needs the width.
+
+   Measured after: rows sum to the content box, and the trail takes the slack.
+   This changes nothing above 767 - the rule is scoped to the phone topbar.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .topbar-right { flex: none; }
+  .topbar .breadcrumbs { flex: 1 1 auto; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
