@@ -532,7 +532,21 @@ export interface IncidentEvidence {
   collectedAt: string;
   /** An opaque locator (digest or storage key). The kernel never fetches it; neither may the UI. */
   contentRef: string;
-  trust: string;
+  /** What the submitter said about its own row. A fact about the submission, never provenance. */
+  claimedTrust: string;
+  /** What the Kernel established. The only field a reader or a verdict may trust (G12 A1). */
+  verifiedTrust: string;
+  /** NONE | OPERATOR_IDENTITY | SOURCE_ADAPTER — how verifiedTrust was reached. */
+  verificationMethod: string;
+  verifiedAt: string | null;
+  /** The authenticated adapter that vouched, for SOURCE_ADAPTER rows; null otherwise. */
+  verifierIdentity: string | null;
+  submittedBy: string | null;
+  /** Why this row carries the verification it carries, when that needs saying. */
+  verificationNote: string | null;
+  createdAt: string;
+  /** Appended after the verdict was signed, so it was never part of the set the signer weighed. */
+  afterVerdict: boolean;
 }
 
 export interface IncidentList {

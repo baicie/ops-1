@@ -114,6 +114,10 @@ def main() -> int:
         "plugin-storage.v1.schema.json": {
             "PluginStorage": "plugin-storage.json",
         },
+        "zabbix-source.v1.schema.json": {
+            "ZabbixSource": "zabbix-source.json",
+            "CollectionResult": "zabbix-collection.json",
+        },
     }
     for schema_name, examples in data_schema_specs.items():
         schema = schemas.get(schema_name)
@@ -169,6 +173,55 @@ def main() -> int:
         if jsonschema.Draft202012Validator(preview_schema).is_valid(bad_preview):
             FAILURES.append("integration accepted a writable preview")
 
+    # Zabbix telemetry source: the contract itself must refuse the two shapes
+    # that would let missing data masquerade as a measurement (rules/05), and
+    # must refuse a credential pasted in as a literal instead of a reference
+    # (rules/03). These are negative contract tests: they prove the schema
+    # discriminates, rather than asserting it in prose.
+    zabbix_schema = schemas.get("zabbix-source.v1.schema.json")
+    if zabbix_schema:
+        def zabbix_validator(definition: str) -> jsonschema.Draft202012Validator:
+            return jsonschema.Draft202012Validator(
+                {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$defs": zabbix_schema["$defs"],
+                    "$ref": f"#/$defs/{definition}",
+                }
+            )
+
+        sample_validator = zabbix_validator("MetricSample")
+        # A null reading with no reason is an unexplained hole.
+        if sample_validator.is_valid({"occurredAt": "2026-11-01T00:00:00Z", "value": None}):
+            FAILURES.append("zabbix accepted a null sample with no absenceReason")
+        # A real number carrying an absence reason is the "no data became 0" bug
+        # written down: 0 with reason NOT_RECORDED must not validate.
+        if sample_validator.is_valid(
+            {
+                "occurredAt": "2026-11-01T00:00:00Z",
+                "value": 0,
+                "absenceReason": "NOT_RECORDED",
+            }
+        ):
+            FAILURES.append("zabbix accepted a numeric sample carrying an absenceReason")
+        # The honest shapes must still pass, or the two checks above would be
+        # satisfied by a schema that rejects everything.
+        for ok_sample in (
+            {"occurredAt": "2026-11-01T00:00:00Z", "value": 12.5},
+            {
+                "occurredAt": "2026-11-01T00:00:00Z",
+                "value": None,
+                "absenceReason": "TRIMMED_BY_HOUSEKEEPING",
+            },
+        ):
+            for error in sample_validator.iter_errors(ok_sample):
+                FAILURES.append(f"zabbix rejected a well-formed sample: {error.message}")
+
+        source_validator = zabbix_validator("ZabbixSource")
+        literal_secret = load(CONTRACTS / "examples" / "zabbix-source.json")
+        literal_secret["credential"] = {"kind": "api-token", "ref": "4f8a2c1e-token"}
+        if source_validator.is_valid(literal_secret):
+            FAILURES.append("zabbix accepted a literal credential instead of a secretref")
+
     # OpenAPI contract presence and operation IDs are part of the executable
     # contract discovery test even without a full OpenAPI resolver.
     try:
@@ -193,6 +246,12 @@ def main() -> int:
                 "/sources", "/sources/{sourceId}/preview",
                 "/sources/{sourceId}/ingestion-specs",
                 "/ingestion-runs",
+            ],
+            "zabbix-source-v1.yaml": [
+                "/sources", "/sources/{sourceId}/probe",
+                "/sources/{sourceId}/hosts", "/sources/{sourceId}/items",
+                "/sources/{sourceId}/collect",
+                "/collections/{collectionId}/attestation",
             ],
         }
         for filename, required_paths in openapi_requirements.items():

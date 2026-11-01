@@ -1,0 +1,192 @@
+{
+ "route": "/app/incidents",
+ "viewport": 1440,
+ "natural": {
+  "headerH": 80,
+  "headerTop": 56,
+  "headerBottom": 136,
+  "firstBlockY": 160,
+  "gap": 24,
+  "lowestControl": 116,
+  "actionsInsideHeader": true,
+  "nextCoversActions": false,
+  "controls": [
+   {
+    "label": "Record an incident",
+    "top": 76,
+    "bottom": 116,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "inline-flex items-center justify-center gap-[7px] whitespace"
+   }
+  ],
+  "allReached": true,
+  "actions": 40,
+  "overflow": -15
+ },
+ "shipped": {
+  "headerH": 137,
+  "headerTop": 56,
+  "headerBottom": 193,
+  "firstBlockY": 217,
+  "gap": 24,
+  "lowestControl": 193,
+  "actionsInsideHeader": true,
+  "nextCoversActions": false,
+  "controls": [
+   {
+    "label": "Record an incident",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "inline-flex items-center justify-center gap-[7px] whitespace"
+   },
+   {
+    "label": "Export",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   },
+   {
+    "label": "Assign",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   },
+   {
+    "label": "Snooze",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   },
+   {
+    "label": "Link evidence",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   }
+  ],
+  "allReached": true,
+  "actions": 40,
+  "overflow": -15
+ },
+ "previous": {
+  "headerH": 80,
+  "headerTop": 56,
+  "headerBottom": 136,
+  "firstBlockY": 160,
+  "gap": 24,
+  "lowestControl": 193,
+  "actionsInsideHeader": false,
+  "nextCoversActions": true,
+  "controls": [
+   {
+    "label": "Record an incident",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": false,
+    "reachedBy": "H2"
+   },
+   {
+    "label": "Export",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": false,
+    "reachedBy": "H2"
+   },
+   {
+    "label": "Assign",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": false,
+    "reachedBy": "H2"
+   },
+   {
+    "label": "Snooze",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": false,
+    "reachedBy": "panel-head"
+   },
+   {
+    "label": "Link evidence",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": false,
+    "reachedBy": "panel-head"
+   }
+  ],
+  "allReached": false,
+  "actions": 40,
+  "overflow": -15
+ },
+ "restored": {
+  "headerH": 137,
+  "headerTop": 56,
+  "headerBottom": 193,
+  "firstBlockY": 217,
+  "gap": 24,
+  "lowestControl": 193,
+  "actionsInsideHeader": true,
+  "nextCoversActions": false,
+  "controls": [
+   {
+    "label": "Record an incident",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "inline-flex items-center justify-center gap-[7px] whitespace"
+   },
+   {
+    "label": "Export",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   },
+   {
+    "label": "Assign",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   },
+   {
+    "label": "Snooze",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   },
+   {
+    "label": "Link evidence",
+    "top": 153,
+    "bottom": 193,
+    "inViewport": true,
+    "reached": true,
+    "reachedBy": "btn"
+   }
+  ],
+  "allReached": true,
+  "actions": 40,
+  "overflow": -15
+ }
+}

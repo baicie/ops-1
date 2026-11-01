@@ -7,6 +7,7 @@
       "viewport": 1440,
       "theme": "light",
       "locale": "en",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -18,7 +19,7 @@
         "text": "Operate a plugin platform that can heal itself.",
         "fontSize": "44px",
         "height": 99,
-        "width": 620,
+        "width": 560,
         "lineHeight": 49.3,
         "lines": 2,
         "clipped": false
@@ -26,102 +27,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "26": 2,
         "44": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1440,
-      "theme": "light",
-      "locale": "en",
-      "scrollWidth": 1425,
-      "clientWidth": 1440,
-      "innerWidth": 1440,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1050,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 85
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "26px",
-        "height": 31,
-        "width": 718,
-        "lineHeight": 31.2,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 51,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "26": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        }
-      },
-      "tables": [
-        {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -131,66 +60,128 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1203,
+      "pageHeight": 951,
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 988
+          "h": 727
         }
       ],
       "heading": {
         "text": "Overview",
         "fontSize": "26px",
         "height": 31,
-        "width": 322,
+        "width": 112,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 70,
+        "11": 65,
+        "12": 9,
         "14": 27,
         "16": 5,
-        "26": 5
+        "21": 4,
+        "26": 1
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 168,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 535,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
+          "border": "rgb(22, 26, 32)"
         }
       },
       "tables": [],
@@ -205,6 +196,7 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -214,43 +206,97 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 395
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
+          "h": 276
         }
       ],
       "heading": {
         "text": "Plugins",
         "fontSize": "26px",
         "height": 31,
-        "width": 545,
+        "width": 87,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 31,
-        "12": 32,
-        "14": 28,
+        "11": 33,
+        "12": 7,
+        "13": 4,
+        "14": 18,
         "16": 1,
-        "26": 4
+        "21": 3,
+        "26": 1
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 96,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 92,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 392
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-summary-card": {
@@ -261,11 +307,11 @@
       },
       "tables": [
         {
-          "width": 1126,
-          "container": 1127,
+          "width": 1134,
+          "container": 1135,
           "scrollerOverflow": 0,
           "overflow": -1,
-          "rows": 3
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -281,6 +327,7 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -290,22 +337,18 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 339
-        },
-        {
-          "cls": "info-grid",
-          "h": 58
+          "h": 270
         }
       ],
       "heading": {
         "text": "Nodes",
         "fontSize": "26px",
         "height": 31,
-        "width": 515,
+        "width": 77,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
@@ -313,48 +356,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 48,
-        "14": 27,
-        "16": 1,
-        "26": 6
+        "12": 5,
+        "14": 15,
+        "16": 2,
+        "26": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 270,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -362,6 +399,7 @@
       "viewport": 1440,
       "theme": "light",
       "locale": "zh",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -373,7 +411,7 @@
         "text": "运营一个能自我愈合的插件平台。",
         "fontSize": "44px",
         "height": 99,
-        "width": 620,
+        "width": 560,
         "lineHeight": 49.3,
         "lines": 2,
         "clipped": false
@@ -381,102 +419,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "26": 2,
         "44": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1440,
-      "theme": "light",
-      "locale": "zh",
-      "scrollWidth": 1425,
-      "clientWidth": 1440,
-      "innerWidth": 1440,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1050,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 85
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "26px",
-        "height": 31,
-        "width": 718,
-        "lineHeight": 31.2,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 51,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "26": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        }
-      },
-      "tables": [
-        {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -486,66 +452,128 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1169,
+      "pageHeight": 978,
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 954
+          "h": 754
         }
       ],
       "heading": {
         "text": "总览",
         "fontSize": "26px",
         "height": 31,
-        "width": 248,
+        "width": 51,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 70,
+        "11": 65,
+        "12": 9,
         "14": 27,
         "16": 5,
-        "26": 5
+        "21": 4,
+        "26": 1
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 173,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 557,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
+          "border": "rgb(22, 26, 32)"
         }
       },
       "tables": [],
@@ -560,6 +588,7 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -569,43 +598,97 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 379
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
+          "h": 280
         }
       ],
       "heading": {
         "text": "插件",
         "fontSize": "26px",
         "height": 31,
-        "width": 322,
+        "width": 51,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 31,
-        "12": 32,
-        "14": 28,
+        "11": 33,
+        "12": 7,
+        "13": 4,
+        "14": 18,
         "16": 1,
-        "26": 4
+        "21": 3,
+        "26": 1
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 98,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 93,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 338
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-summary-card": {
@@ -616,11 +699,11 @@
       },
       "tables": [
         {
-          "width": 1126,
-          "container": 1127,
+          "width": 1134,
+          "container": 1135,
           "scrollerOverflow": 0,
           "overflow": -1,
-          "rows": 3
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -636,6 +719,7 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -645,22 +729,18 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 323
-        },
-        {
-          "cls": "info-grid",
-          "h": 58
+          "h": 274
         }
       ],
       "heading": {
         "text": "节点",
         "fontSize": "26px",
         "height": 31,
-        "width": 350,
+        "width": 51,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
@@ -668,48 +748,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 48,
-        "14": 27,
-        "16": 1,
-        "26": 6
+        "12": 5,
+        "14": 15,
+        "16": 2,
+        "26": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 274,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -717,6 +791,7 @@
       "viewport": 1440,
       "theme": "dark",
       "locale": "en",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -728,7 +803,7 @@
         "text": "Operate a plugin platform that can heal itself.",
         "fontSize": "44px",
         "height": 99,
-        "width": 620,
+        "width": 560,
         "lineHeight": 49.3,
         "lines": 2,
         "clipped": false
@@ -736,102 +811,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "26": 2,
         "44": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1440,
-      "theme": "dark",
-      "locale": "en",
-      "scrollWidth": 1425,
-      "clientWidth": 1440,
-      "innerWidth": 1440,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1050,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 85
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "26px",
-        "height": 31,
-        "width": 718,
-        "lineHeight": 31.2,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 51,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "26": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [
-        {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -841,66 +844,128 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1203,
+      "pageHeight": 951,
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 988
+          "h": 727
         }
       ],
       "heading": {
         "text": "Overview",
         "fontSize": "26px",
         "height": 31,
-        "width": 322,
+        "width": 112,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 70,
+        "11": 65,
+        "12": 9,
         "14": 27,
         "16": 5,
-        "26": 5
+        "21": 4,
+        "26": 1
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 168,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 535,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
+          "border": "rgb(231, 237, 244)"
         }
       },
       "tables": [],
@@ -915,6 +980,7 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -924,43 +990,97 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 395
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
+          "h": 276
         }
       ],
       "heading": {
         "text": "Plugins",
         "fontSize": "26px",
         "height": 31,
-        "width": 545,
+        "width": 87,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 31,
-        "12": 32,
-        "14": 28,
+        "11": 33,
+        "12": 7,
+        "13": 4,
+        "14": 18,
         "16": 1,
-        "26": 4
+        "21": 3,
+        "26": 1
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 96,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 92,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 392
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-summary-card": {
@@ -971,11 +1091,11 @@
       },
       "tables": [
         {
-          "width": 1126,
-          "container": 1127,
+          "width": 1134,
+          "container": 1135,
           "scrollerOverflow": 0,
           "overflow": -1,
-          "rows": 3
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -991,6 +1111,7 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -1000,22 +1121,18 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 339
-        },
-        {
-          "cls": "info-grid",
-          "h": 58
+          "h": 270
         }
       ],
       "heading": {
         "text": "Nodes",
         "fontSize": "26px",
         "height": 31,
-        "width": 515,
+        "width": 77,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
@@ -1023,48 +1140,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 48,
-        "14": 27,
-        "16": 1,
-        "26": 6
+        "12": 5,
+        "14": 15,
+        "16": 2,
+        "26": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 270,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -1072,6 +1183,7 @@
       "viewport": 1440,
       "theme": "dark",
       "locale": "zh",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -1083,7 +1195,7 @@
         "text": "运营一个能自我愈合的插件平台。",
         "fontSize": "44px",
         "height": 99,
-        "width": 620,
+        "width": 560,
         "lineHeight": 49.3,
         "lines": 2,
         "clipped": false
@@ -1091,102 +1203,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "26": 2,
         "44": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1440,
-      "theme": "dark",
-      "locale": "zh",
-      "scrollWidth": 1425,
-      "clientWidth": 1440,
-      "innerWidth": 1440,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1050,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 85
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "26px",
-        "height": 31,
-        "width": 718,
-        "lineHeight": 31.2,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 51,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "26": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [
-        {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -1196,66 +1236,128 @@
       "theme": "dark",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1169,
+      "pageHeight": 978,
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 954
+          "h": 754
         }
       ],
       "heading": {
         "text": "总览",
         "fontSize": "26px",
         "height": 31,
-        "width": 248,
+        "width": 51,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 70,
+        "11": 65,
+        "12": 9,
         "14": 27,
         "16": 5,
-        "26": 5
+        "21": 4,
+        "26": 1
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 173,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 557,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
+          "border": "rgb(231, 237, 244)"
         }
       },
       "tables": [],
@@ -1270,6 +1372,7 @@
       "theme": "dark",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -1279,43 +1382,97 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 382
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
+          "h": 280
         }
       ],
       "heading": {
         "text": "插件",
         "fontSize": "26px",
         "height": 31,
-        "width": 322,
+        "width": 51,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 29,
-        "12": 33,
-        "14": 29,
+        "11": 33,
+        "12": 7,
+        "13": 4,
+        "14": 18,
         "16": 1,
-        "26": 4
+        "21": 3,
+        "26": 1
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 98,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 93,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 338
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-summary-card": {
@@ -1326,11 +1483,11 @@
       },
       "tables": [
         {
-          "width": 1126,
-          "container": 1127,
+          "width": 1134,
+          "container": 1135,
           "scrollerOverflow": 0,
           "overflow": -1,
-          "rows": 3
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -1346,6 +1503,7 @@
       "theme": "dark",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1425,
       "clientWidth": 1440,
       "innerWidth": 1440,
@@ -1355,22 +1513,18 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 59
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 323
-        },
-        {
-          "cls": "info-grid",
-          "h": 58
+          "h": 274
         }
       ],
       "heading": {
         "text": "节点",
         "fontSize": "26px",
         "height": 31,
-        "width": 350,
+        "width": 51,
         "lineHeight": 31.2,
         "lines": 1,
         "clipped": false
@@ -1378,48 +1532,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 48,
-        "14": 27,
-        "16": 1,
-        "26": 6
+        "12": 5,
+        "14": 15,
+        "16": 2,
+        "26": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 1126,
-          "container": 1127,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 274,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -1427,6 +1575,7 @@
       "viewport": 1024,
       "theme": "light",
       "locale": "en",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -1446,102 +1595,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "41": 1,
         "21.5": 2
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1024,
-      "theme": "light",
-      "locale": "en",
-      "scrollWidth": 1009,
-      "clientWidth": 1024,
-      "innerWidth": 1024,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1033,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 79
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "21.504px",
-        "height": 26,
-        "width": 593,
-        "lineHeight": 25.8,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 49,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "21.5": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        }
-      },
-      "tables": [
-        {
-          "width": 962,
-          "container": 963,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -1551,66 +1628,128 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1539,
+      "pageHeight": 1494,
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1341
+          "h": 1262
         }
       ],
       "heading": {
         "text": "Overview",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 322,
+        "width": 92,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 68,
+        "11": 65,
+        "12": 8,
         "14": 27,
         "16": 5,
-        "21.5": 5
+        "21": 4,
+        "21.5": 1
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 310,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 928,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
+          "border": "rgb(22, 26, 32)"
         }
       },
       "tables": [],
@@ -1625,6 +1764,7 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -1634,43 +1774,97 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 412
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
+          "h": 356
         }
       ],
       "heading": {
         "text": "Plugins",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 545,
+        "width": 72,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 31,
-        "12": 29,
-        "14": 29,
+        "11": 33,
+        "12": 6,
+        "13": 4,
+        "14": 18,
         "16": 1,
-        "21.5": 4
+        "21": 3,
+        "21.5": 1
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 176,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 92,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 392
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-summary-card": {
@@ -1681,11 +1875,11 @@
       },
       "tables": [
         {
-          "width": 984,
-          "container": 963,
-          "scrollerOverflow": 22,
-          "overflow": 21,
-          "rows": 3
+          "width": 958,
+          "container": 959,
+          "scrollerOverflow": 0,
+          "overflow": -1,
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -1701,6 +1895,7 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -1710,22 +1905,18 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 420
-        },
-        {
-          "cls": "info-grid",
-          "h": 80
+          "h": 270
         }
       ],
       "heading": {
         "text": "Nodes",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 515,
+        "width": 63,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
@@ -1733,48 +1924,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 46,
-        "14": 27,
-        "16": 1,
-        "21.5": 6
+        "12": 4,
+        "14": 15,
+        "16": 2,
+        "21.5": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 982,
-          "container": 963,
-          "scrollerOverflow": 20,
-          "overflow": 19,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 270,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -1782,6 +1967,7 @@
       "viewport": 1024,
       "theme": "light",
       "locale": "zh",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -1801,102 +1987,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "41": 1,
         "21.5": 2
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1024,
-      "theme": "light",
-      "locale": "zh",
-      "scrollWidth": 1009,
-      "clientWidth": 1024,
-      "innerWidth": 1024,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1033,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 79
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "21.504px",
-        "height": 26,
-        "width": 593,
-        "lineHeight": 25.8,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 49,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "21.5": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        }
-      },
-      "tables": [
-        {
-          "width": 962,
-          "container": 963,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -1906,66 +2020,128 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1522,
+      "pageHeight": 1519,
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1325
+          "h": 1287
         }
       ],
       "heading": {
         "text": "总览",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 248,
+        "width": 42,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 68,
+        "11": 65,
+        "12": 8,
         "14": 27,
         "16": 5,
-        "21.5": 5
+        "21": 4,
+        "21.5": 1
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 298,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 965,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
+          "border": "rgb(22, 26, 32)"
         }
       },
       "tables": [],
@@ -1980,6 +2156,7 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -1989,43 +2166,97 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 432
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
+          "h": 360
         }
       ],
       "heading": {
         "text": "插件",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 322,
+        "width": 42,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 23,
-        "12": 34,
-        "14": 31,
+        "11": 33,
+        "12": 6,
+        "13": 4,
+        "14": 18,
         "16": 1,
-        "21.5": 4
+        "21": 3,
+        "21.5": 1
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 179,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 93,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 338
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-summary-card": {
@@ -2036,11 +2267,11 @@
       },
       "tables": [
         {
-          "width": 962,
-          "container": 963,
+          "width": 958,
+          "container": 959,
           "scrollerOverflow": 0,
           "overflow": -1,
-          "rows": 3
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -2056,6 +2287,7 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -2065,22 +2297,18 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 316
-        },
-        {
-          "cls": "info-grid",
-          "h": 80
+          "h": 274
         }
       ],
       "heading": {
         "text": "节点",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 350,
+        "width": 42,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
@@ -2088,48 +2316,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 46,
-        "14": 27,
-        "16": 1,
-        "21.5": 6
+        "12": 4,
+        "14": 15,
+        "16": 2,
+        "21.5": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 962,
-          "container": 963,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 274,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -2137,6 +2359,7 @@
       "viewport": 1024,
       "theme": "dark",
       "locale": "en",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -2156,102 +2379,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "41": 1,
         "21.5": 2
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1024,
-      "theme": "dark",
-      "locale": "en",
-      "scrollWidth": 1009,
-      "clientWidth": 1024,
-      "innerWidth": 1024,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1033,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 79
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "21.504px",
-        "height": 26,
-        "width": 593,
-        "lineHeight": 25.8,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 49,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "21.5": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [
-        {
-          "width": 962,
-          "container": 963,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -2261,66 +2412,128 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1539,
+      "pageHeight": 1494,
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1341
+          "h": 1262
         }
       ],
       "heading": {
         "text": "Overview",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 322,
+        "width": 92,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 68,
+        "11": 65,
+        "12": 8,
         "14": 27,
         "16": 5,
-        "21.5": 5
+        "21": 4,
+        "21.5": 1
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 310,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 928,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
+          "border": "rgb(231, 237, 244)"
         }
       },
       "tables": [],
@@ -2335,6 +2548,7 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -2344,43 +2558,97 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 448
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
+          "h": 356
         }
       ],
       "heading": {
         "text": "Plugins",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 545,
+        "width": 72,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 23,
-        "12": 34,
-        "14": 31,
+        "11": 33,
+        "12": 6,
+        "13": 4,
+        "14": 18,
         "16": 1,
-        "21.5": 4
+        "21": 3,
+        "21.5": 1
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 176,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 92,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 392
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-summary-card": {
@@ -2391,39 +2659,14 @@
       },
       "tables": [
         {
-          "width": 1019,
-          "container": 963,
-          "scrollerOverflow": 57,
-          "overflow": 56,
-          "rows": 3
+          "width": 958,
+          "container": 959,
+          "scrollerOverflow": 0,
+          "overflow": -1,
+          "rows": 1
         }
       ],
-      "overflowing": [
-        {
-          "cls": "w-full border-collapse caption-bottom text-base plugins-tabl",
-          "right": 1043
-        },
-        {
-          "cls": "border-b border-solid border-border max-[760px]:hidden",
-          "right": 1042
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors data-[",
-          "right": 1042
-        },
-        {
-          "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
-          "right": 1042
-        },
-        {
-          "cls": "[&_tr:last-child]:border-0 max-[760px]:block",
-          "right": 1042
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors hover:",
-          "right": 1042
-        }
-      ],
+      "overflowing": [],
       "panels": 1,
       "tabsOverflow": [
         0
@@ -2436,6 +2679,7 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -2445,22 +2689,18 @@
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 420
-        },
-        {
-          "cls": "info-grid",
-          "h": 80
+          "h": 270
         }
       ],
       "heading": {
         "text": "Nodes",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 515,
+        "width": 63,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
@@ -2468,48 +2708,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 46,
-        "14": 27,
-        "16": 1,
-        "21.5": 6
+        "12": 4,
+        "14": 15,
+        "16": 2,
+        "21.5": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 982,
-          "container": 963,
-          "scrollerOverflow": 20,
-          "overflow": 19,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 270,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -2517,6 +2751,7 @@
       "viewport": 1024,
       "theme": "dark",
       "locale": "zh",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
@@ -2536,102 +2771,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "41": 1,
         "21.5": 2
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 1024,
-      "theme": "dark",
-      "locale": "zh",
-      "scrollWidth": 1009,
-      "clientWidth": 1024,
-      "innerWidth": 1024,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1033,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 79
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 92
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 188
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 116
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "21.504px",
-        "height": 26,
-        "width": 593,
-        "lineHeight": 25.8,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 15,
-        "12": 49,
-        "14": 25,
-        "16": 1,
-        "21": 4,
-        "21.5": 2,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [
-        {
-          "width": 962,
-          "container": 963,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 1
-        }
-      ],
-      "overflowing": [],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -2641,181 +2804,295 @@
       "theme": "dark",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 1009,
       "clientWidth": 1024,
       "innerWidth": 1024,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1522,
+      "pageHeight": 1519,
       "regions": [
         {
           "cls": "page-header",
-          "h": 54
-        },
-        {
-          "cls": "DIV",
-          "h": 1325
-        }
-      ],
-      "heading": {
-        "text": "总览",
-        "fontSize": "21.504px",
-        "height": 26,
-        "width": 248,
-        "lineHeight": 25.8,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 17,
-        "12": 68,
-        "14": 27,
-        "16": 5,
-        "21.5": 5
-      },
-      "surfaces": {
-        ".panel": 3,
-        ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
-      },
-      "surfacesTotal": 12,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-metric": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".module-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [],
-      "overflowing": [],
-      "panels": 3,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/plugins",
-      "viewport": 1024,
-      "theme": "dark",
-      "locale": "zh",
-      "pageErrors": [],
-      "scrollWidth": 1009,
-      "clientWidth": 1024,
-      "innerWidth": 1024,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 768,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 54
-        },
-        {
-          "cls": "DIV",
-          "h": 432
-        },
-        {
-          "cls": "table-footnote",
-          "h": 18
-        }
-      ],
-      "heading": {
-        "text": "插件",
-        "fontSize": "21.504px",
-        "height": 26,
-        "width": 322,
-        "lineHeight": 25.8,
-        "lines": 1,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 23,
-        "12": 34,
-        "14": 31,
-        "16": 1,
-        "21.5": 4
-      },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 3
-      },
-      "surfacesTotal": 4,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [
-        {
-          "width": 962,
-          "container": 963,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 3
-        }
-      ],
-      "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
-    },
-    {
-      "mode": "before",
-      "route": "/admin/nodes",
-      "viewport": 1024,
-      "theme": "dark",
-      "locale": "zh",
-      "pageErrors": [],
-      "scrollWidth": 1009,
-      "clientWidth": 1024,
-      "innerWidth": 1024,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 768,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 54
-        },
-        {
-          "cls": "DIV",
-          "h": 316
-        },
-        {
-          "cls": "info-grid",
           "h": 80
+        },
+        {
+          "cls": "DIV",
+          "h": 1287
+        }
+      ],
+      "heading": {
+        "text": "总览",
+        "fontSize": "21.504px",
+        "height": 26,
+        "width": 42,
+        "lineHeight": 25.8,
+        "lines": 1,
+        "clipped": false
+      },
+      "minFont": 11,
+      "fonts": {
+        "11": 65,
+        "12": 8,
+        "14": 27,
+        "16": 5,
+        "21": 4,
+        "21.5": 1
+      },
+      "surfaces": {
+        ".panel": 3,
+        ".ow-metric": 4,
+        ".module-card": 4
+      },
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 298,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 965,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
+      "decorations": {
+        ".panel": {
+          "radius": "10px",
+          "shadow": "none",
+          "border": "rgb(41, 50, 62)"
+        },
+        ".ow-metric": {
+          "radius": "10px",
+          "shadow": "none",
+          "border": "rgb(41, 50, 62)"
+        },
+        ".module-card": {
+          "radius": "0px",
+          "shadow": "none",
+          "border": "rgb(231, 237, 244)"
+        }
+      },
+      "tables": [],
+      "overflowing": [],
+      "panels": 3,
+      "tabsOverflow": []
+    },
+    {
+      "mode": "before",
+      "route": "/admin/plugins",
+      "viewport": 1024,
+      "theme": "dark",
+      "locale": "zh",
+      "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
+      "scrollWidth": 1009,
+      "clientWidth": 1024,
+      "innerWidth": 1024,
+      "docOverflow": -15,
+      "bodyOverflow": -15,
+      "pageHeight": 768,
+      "regions": [
+        {
+          "cls": "page-header",
+          "h": 80
+        },
+        {
+          "cls": "DIV",
+          "h": 360
+        }
+      ],
+      "heading": {
+        "text": "插件",
+        "fontSize": "21.504px",
+        "height": 26,
+        "width": 42,
+        "lineHeight": 25.8,
+        "lines": 1,
+        "clipped": false
+      },
+      "minFont": 11,
+      "fonts": {
+        "11": 33,
+        "12": 6,
+        "13": 4,
+        "14": 18,
+        "16": 1,
+        "21": 3,
+        "21.5": 1
+      },
+      "surfaces": {
+        ".panel": 1,
+        ".ow-summary-card": 3
+      },
+      "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 179,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 40,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 93,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 338
+        }
+      ],
+      "decorations": {
+        ".panel": {
+          "radius": "10px",
+          "shadow": "none",
+          "border": "rgb(41, 50, 62)"
+        },
+        ".ow-summary-card": {
+          "radius": "10px",
+          "shadow": "none",
+          "border": "rgb(41, 50, 62)"
+        }
+      },
+      "tables": [
+        {
+          "width": 958,
+          "container": 959,
+          "scrollerOverflow": 0,
+          "overflow": -1,
+          "rows": 1
+        }
+      ],
+      "overflowing": [],
+      "panels": 1,
+      "tabsOverflow": [
+        0
+      ]
+    },
+    {
+      "mode": "before",
+      "route": "/admin/nodes",
+      "viewport": 1024,
+      "theme": "dark",
+      "locale": "zh",
+      "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
+      "scrollWidth": 1009,
+      "clientWidth": 1024,
+      "innerWidth": 1024,
+      "docOverflow": -15,
+      "bodyOverflow": -15,
+      "pageHeight": 768,
+      "regions": [
+        {
+          "cls": "page-header",
+          "h": 80
+        },
+        {
+          "cls": "DIV",
+          "h": 274
         }
       ],
       "heading": {
         "text": "节点",
         "fontSize": "21.504px",
         "height": 26,
-        "width": 350,
+        "width": 42,
         "lineHeight": 25.8,
         "lines": 1,
         "clipped": false
@@ -2823,48 +3100,42 @@
       "minFont": 11,
       "fonts": {
         "11": 18,
-        "12": 46,
-        "14": 27,
-        "16": 1,
-        "21.5": 6
+        "12": 4,
+        "14": 15,
+        "16": 2,
+        "21.5": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 962,
-          "container": 963,
-          "scrollerOverflow": 0,
-          "overflow": -1,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 274,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        0
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -2872,6 +3143,7 @@
       "viewport": 390,
       "theme": "light",
       "locale": "en",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
@@ -2891,127 +3163,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "20": 2,
         "30": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 390,
-      "theme": "light",
-      "locale": "en",
-      "scrollWidth": 375,
-      "clientWidth": 390,
-      "innerWidth": 390,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1429,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 152
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 364
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 206
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 164
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "20px",
-        "height": 48,
-        "width": 347,
-        "lineHeight": 24,
-        "lines": 2,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 17,
-        "12": 45,
-        "14": 25,
-        "16": 1,
-        "20": 2,
-        "21": 4,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        }
-      },
-      "tables": [
-        {
-          "width": 434,
-          "container": 345,
-          "scrollerOverflow": 91,
-          "overflow": 89,
-          "rows": 1
-        }
-      ],
-      "overflowing": [
-        {
-          "cls": "w-full border-collapse caption-bottom text-base",
-          "right": 451
-        },
-        {
-          "cls": "border-b border-solid border-border",
-          "right": 449
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors data-[",
-          "right": 449
-        },
-        {
-          "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
-          "right": 449
-        },
-        {
-          "cls": "[&_tr:last-child]:border-0",
-          "right": 449
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors hover:",
-          "right": 449
-        }
-      ],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -3021,66 +3196,128 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
-      "scrollWidth": 375,
+      "origin": "http://127.0.0.1:18181",
+      "scrollWidth": 386,
       "clientWidth": 390,
       "innerWidth": 390,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 2496,
+      "docOverflow": -4,
+      "bodyOverflow": -4,
+      "pageHeight": 1602,
       "regions": [
         {
           "cls": "page-header",
-          "h": 102
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 2264
+          "h": 1388
         }
       ],
       "heading": {
         "text": "Overview",
         "fontSize": "20px",
         "height": 24,
-        "width": 322,
+        "width": 86,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 66,
+        "11": 63,
+        "12": 7,
         "14": 27,
         "16": 5,
-        "20": 5
+        "20": 1,
+        "21": 4
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 374,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 989,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
+          "border": "rgb(22, 26, 32)"
         }
       },
       "tables": [],
@@ -3095,52 +3332,107 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1672,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 123
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1347
-        },
-        {
-          "cls": "table-footnote",
-          "h": 54
+          "h": 521
         }
       ],
       "heading": {
         "text": "Plugins",
         "fontSize": "20px",
         "height": 24,
-        "width": 347,
+        "width": 67,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 23,
-        "12": 32,
-        "14": 52,
+        "11": 37,
+        "12": 6,
+        "13": 4,
+        "14": 13,
         "16": 1,
-        "20": 4
+        "20": 1,
+        "21": 3
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 193,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 126,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 155,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 348
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-summary-card": {
@@ -3151,26 +3443,17 @@
       },
       "tables": [
         {
-          "width": 345,
-          "container": 345,
+          "width": 349,
+          "container": 349,
           "scrollerOverflow": 0,
           "overflow": 0,
-          "rows": 3
+          "rows": 1
         }
       ],
-      "overflowing": [
-        {
-          "cls": "inline-flex h-9 items-center justify-center gap-1 rounded-md",
-          "right": 406
-        },
-        {
-          "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
-          "right": 401
-        }
-      ],
+      "overflowing": [],
       "panels": 1,
       "tabsOverflow": [
-        45
+        0
       ]
     },
     {
@@ -3180,89 +3463,71 @@
       "theme": "light",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1647,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 123
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1224
-        },
-        {
-          "cls": "info-grid",
-          "h": 152
+          "h": 295
         }
       ],
       "heading": {
         "text": "Nodes",
         "fontSize": "20px",
         "height": 24,
-        "width": 347,
+        "width": 59,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 18,
-        "12": 44,
-        "14": 45,
-        "16": 1,
-        "20": 6
+        "11": 16,
+        "12": 3,
+        "14": 15,
+        "16": 2,
+        "20": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 345,
-          "container": 345,
-          "scrollerOverflow": 0,
-          "overflow": 0,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 295,
+          "boxed": false
         }
       ],
-      "overflowing": [
-        {
-          "cls": "inline-flex h-9 items-center justify-center gap-1 rounded-md",
-          "right": 401
-        },
-        {
-          "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
-          "right": 396
-        }
-      ],
-      "panels": 1,
-      "tabsOverflow": [
-        40
-      ]
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
+      "overflowing": [],
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -3270,6 +3535,7 @@
       "viewport": 390,
       "theme": "light",
       "locale": "zh",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
@@ -3289,127 +3555,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "20": 2,
         "30": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 390,
-      "theme": "light",
-      "locale": "zh",
-      "scrollWidth": 375,
-      "clientWidth": 390,
-      "innerWidth": 390,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1429,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 152
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 364
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 206
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 164
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "20px",
-        "height": 48,
-        "width": 347,
-        "lineHeight": 24,
-        "lines": 2,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 17,
-        "12": 45,
-        "14": 25,
-        "16": 1,
-        "20": 2,
-        "21": 4,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        }
-      },
-      "tables": [
-        {
-          "width": 391,
-          "container": 345,
-          "scrollerOverflow": 48,
-          "overflow": 46,
-          "rows": 1
-        }
-      ],
-      "overflowing": [
-        {
-          "cls": "w-full border-collapse caption-bottom text-base",
-          "right": 408
-        },
-        {
-          "cls": "border-b border-solid border-border",
-          "right": 406
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors data-[",
-          "right": 406
-        },
-        {
-          "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
-          "right": 406
-        },
-        {
-          "cls": "[&_tr:last-child]:border-0",
-          "right": 406
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors hover:",
-          "right": 406
-        }
-      ],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -3419,66 +3588,128 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 2406,
+      "pageHeight": 1601,
       "regions": [
         {
           "cls": "page-header",
-          "h": 102
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 2174
+          "h": 1387
         }
       ],
       "heading": {
         "text": "总览",
         "fontSize": "20px",
         "height": 24,
-        "width": 248,
+        "width": 39,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 66,
+        "11": 63,
+        "12": 7,
         "14": 27,
         "16": 5,
-        "20": 5
+        "20": 1,
+        "21": 4
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 348,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 1015,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
+          "border": "rgb(22, 26, 32)"
         }
       },
       "tables": [],
@@ -3493,52 +3724,107 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1583,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 102
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1297
-        },
-        {
-          "cls": "table-footnote",
-          "h": 36
+          "h": 473
         }
       ],
       "heading": {
         "text": "插件",
         "fontSize": "20px",
         "height": 24,
-        "width": 322,
+        "width": 39,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 23,
-        "12": 32,
-        "14": 52,
+        "11": 37,
+        "12": 6,
+        "13": 4,
+        "14": 13,
         "16": 1,
-        "20": 4
+        "20": 1,
+        "21": 3
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 179,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 127,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 119,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 299
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
+          "shadow": "none",
           "border": "rgb(224, 228, 234)"
         },
         ".ow-summary-card": {
@@ -3549,11 +3835,11 @@
       },
       "tables": [
         {
-          "width": 345,
-          "container": 345,
+          "width": 349,
+          "container": 349,
           "scrollerOverflow": 0,
           "overflow": 0,
-          "rows": 3
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -3569,80 +3855,71 @@
       "theme": "light",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1595,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 123
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1208
-        },
-        {
-          "cls": "info-grid",
-          "h": 116
+          "h": 301
         }
       ],
       "heading": {
         "text": "节点",
         "fontSize": "20px",
         "height": 24,
-        "width": 347,
+        "width": 39,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 18,
-        "12": 44,
-        "14": 45,
-        "16": 1,
-        "20": 6
+        "11": 16,
+        "12": 3,
+        "14": 15,
+        "16": 2,
+        "20": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(18, 26, 40, 0.05) 0px 1px 2px 0px, rgba(18,",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(224, 228, 234)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 345,
-          "container": 345,
-          "scrollerOverflow": 0,
-          "overflow": 0,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 301,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        5
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -3650,6 +3927,7 @@
       "viewport": 390,
       "theme": "dark",
       "locale": "en",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
@@ -3669,127 +3947,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "20": 2,
         "30": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 390,
-      "theme": "dark",
-      "locale": "en",
-      "scrollWidth": 375,
-      "clientWidth": 390,
-      "innerWidth": 390,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1429,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 152
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 364
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 206
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 164
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "20px",
-        "height": 48,
-        "width": 347,
-        "lineHeight": 24,
-        "lines": 2,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 17,
-        "12": 45,
-        "14": 25,
-        "16": 1,
-        "20": 2,
-        "21": 4,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [
-        {
-          "width": 434,
-          "container": 345,
-          "scrollerOverflow": 91,
-          "overflow": 89,
-          "rows": 1
-        }
-      ],
-      "overflowing": [
-        {
-          "cls": "w-full border-collapse caption-bottom text-base",
-          "right": 451
-        },
-        {
-          "cls": "border-b border-solid border-border",
-          "right": 449
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors data-[",
-          "right": 449
-        },
-        {
-          "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
-          "right": 449
-        },
-        {
-          "cls": "[&_tr:last-child]:border-0",
-          "right": 449
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors hover:",
-          "right": 449
-        }
-      ],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -3799,66 +3980,128 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
-      "scrollWidth": 375,
+      "origin": "http://127.0.0.1:18181",
+      "scrollWidth": 386,
       "clientWidth": 390,
       "innerWidth": 390,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 2496,
+      "docOverflow": -4,
+      "bodyOverflow": -4,
+      "pageHeight": 1602,
       "regions": [
         {
           "cls": "page-header",
-          "h": 102
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 2264
+          "h": 1388
         }
       ],
       "heading": {
         "text": "Overview",
         "fontSize": "20px",
         "height": 24,
-        "width": 322,
+        "width": 86,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 66,
+        "11": 63,
+        "12": 7,
         "14": 27,
         "16": 5,
-        "20": 5
+        "20": 1,
+        "21": 4
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 374,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 989,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
+          "border": "rgb(231, 237, 244)"
         }
       },
       "tables": [],
@@ -3873,52 +4116,107 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1607,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 123
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1282
-        },
-        {
-          "cls": "table-footnote",
-          "h": 54
+          "h": 521
         }
       ],
       "heading": {
         "text": "Plugins",
         "fontSize": "20px",
         "height": 24,
-        "width": 347,
+        "width": 67,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 31,
-        "12": 28,
-        "14": 49,
+        "11": 37,
+        "12": 6,
+        "13": 4,
+        "14": 13,
         "16": 1,
-        "20": 4
+        "20": 1,
+        "21": 3
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 193,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 126,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 155,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 348
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-summary-card": {
@@ -3929,26 +4227,17 @@
       },
       "tables": [
         {
-          "width": 345,
-          "container": 345,
+          "width": 349,
+          "container": 349,
           "scrollerOverflow": 0,
           "overflow": 0,
-          "rows": 3
+          "rows": 1
         }
       ],
-      "overflowing": [
-        {
-          "cls": "inline-flex h-9 items-center justify-center gap-1 rounded-md",
-          "right": 406
-        },
-        {
-          "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
-          "right": 401
-        }
-      ],
+      "overflowing": [],
       "panels": 1,
       "tabsOverflow": [
-        45
+        0
       ]
     },
     {
@@ -3958,89 +4247,71 @@
       "theme": "dark",
       "locale": "en",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1647,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 123
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1224
-        },
-        {
-          "cls": "info-grid",
-          "h": 152
+          "h": 295
         }
       ],
       "heading": {
         "text": "Nodes",
         "fontSize": "20px",
         "height": 24,
-        "width": 347,
+        "width": 59,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 18,
-        "12": 44,
-        "14": 45,
-        "16": 1,
-        "20": 6
+        "11": 16,
+        "12": 3,
+        "14": 15,
+        "16": 2,
+        "20": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 345,
-          "container": 345,
-          "scrollerOverflow": 0,
-          "overflow": 0,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 295,
+          "boxed": false
         }
       ],
-      "overflowing": [
-        {
-          "cls": "inline-flex h-9 items-center justify-center gap-1 rounded-md",
-          "right": 401
-        },
-        {
-          "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
-          "right": 396
-        }
-      ],
-      "panels": 1,
-      "tabsOverflow": [
-        40
-      ]
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
+      "overflowing": [],
+      "panels": 0,
+      "tabsOverflow": []
     },
     {
       "mode": "before",
@@ -4048,6 +4319,7 @@
       "viewport": 390,
       "theme": "dark",
       "locale": "zh",
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
@@ -4067,127 +4339,30 @@
       "minFont": 11,
       "fonts": {
         "11": 2,
-        "12": 5,
-        "14": 5,
+        "12": 4,
+        "14": 2,
         "20": 2,
         "30": 1
       },
       "surfaces": {},
       "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
+      },
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
+      },
+      "layers": [],
+      "unlistedBoxes": [],
       "decorations": {},
       "tables": [],
       "overflowing": [],
       "panels": 0,
-      "tabsOverflow": []
-    },
-    {
-      "mode": "before",
-      "route": "/admin/jobs/:id",
-      "viewport": 390,
-      "theme": "dark",
-      "locale": "zh",
-      "scrollWidth": 375,
-      "clientWidth": 390,
-      "innerWidth": 390,
-      "docOverflow": -15,
-      "bodyOverflow": -15,
-      "pageHeight": 1429,
-      "regions": [
-        {
-          "cls": "page-header",
-          "h": 152
-        },
-        {
-          "cls": "summary-grid job-stats",
-          "h": 364
-        },
-        {
-          "cls": "advanced panel",
-          "h": 47
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 206
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 84
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 164
-        },
-        {
-          "cls": "panel panel-pad",
-          "h": 193
-        }
-      ],
-      "heading": {
-        "text": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57",
-        "fontSize": "20px",
-        "height": 48,
-        "width": 347,
-        "lineHeight": 24,
-        "lines": 2,
-        "clipped": false
-      },
-      "minFont": 11,
-      "fonts": {
-        "11": 17,
-        "12": 45,
-        "14": 25,
-        "16": 1,
-        "20": 2,
-        "21": 4,
-        "13.2": 1
-      },
-      "surfaces": {
-        ".panel": 9
-      },
-      "surfacesTotal": 9,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        }
-      },
-      "tables": [
-        {
-          "width": 391,
-          "container": 345,
-          "scrollerOverflow": 48,
-          "overflow": 46,
-          "rows": 1
-        }
-      ],
-      "overflowing": [
-        {
-          "cls": "w-full border-collapse caption-bottom text-base",
-          "right": 408
-        },
-        {
-          "cls": "border-b border-solid border-border",
-          "right": 406
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors data-[",
-          "right": 406
-        },
-        {
-          "cls": "h-9 whitespace-nowrap border-b border-solid border-border bg",
-          "right": 406
-        },
-        {
-          "cls": "[&_tr:last-child]:border-0",
-          "right": 406
-        },
-        {
-          "cls": "border-b border-solid border-border transition-colors hover:",
-          "right": 406
-        }
-      ],
-      "panels": 9,
       "tabsOverflow": []
     },
     {
@@ -4197,66 +4372,128 @@
       "theme": "dark",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 2406,
+      "pageHeight": 1601,
       "regions": [
         {
           "cls": "page-header",
-          "h": 102
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 2174
+          "h": 1387
         }
       ],
       "heading": {
         "text": "总览",
         "fontSize": "20px",
         "height": 24,
-        "width": 248,
+        "width": 39,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 17,
-        "12": 66,
+        "11": 63,
+        "12": 7,
         "14": 27,
         "16": 5,
-        "20": 5
+        "20": 1,
+        "21": 4
       },
       "surfaces": {
         ".panel": 3,
         ".ow-metric": 4,
-        ".module-card": 4,
-        ".attention-banner": 1
+        ".module-card": 4
       },
-      "surfacesTotal": 12,
+      "surfacesTotal": 11,
+      "boxed": {
+        "total": 7,
+        "topLevel": 7,
+        "flattened": 4,
+        "byClass": {
+          ".panel": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          },
+          ".ow-metric": {
+            "matched": 4,
+            "boxed": 4,
+            "flat": 0
+          },
+          ".module-card": {
+            "matched": 4,
+            "boxed": 0,
+            "flat": 4
+          }
+        }
+      },
+      "flat": {
+        "total": 5,
+        "topLevel": 3,
+        "byClass": {
+          ".health-band": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".stat-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".console-grid": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".module-strip": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "status-summary",
+          "h": 348,
+          "boxed": false
+        },
+        {
+          "cls": "console-grid",
+          "h": 1015,
+          "boxed": false
+        }
+      ],
+      "unlistedBoxes": [],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-metric": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".module-card": {
-          "radius": "10px",
+          "radius": "0px",
           "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".attention-banner": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
+          "border": "rgb(231, 237, 244)"
         }
       },
       "tables": [],
@@ -4271,52 +4508,107 @@
       "theme": "dark",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1518,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 102
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1232
-        },
-        {
-          "cls": "table-footnote",
-          "h": 36
+          "h": 473
         }
       ],
       "heading": {
         "text": "插件",
         "fontSize": "20px",
         "height": 24,
-        "width": 322,
+        "width": 39,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 31,
-        "12": 28,
-        "14": 49,
+        "11": 37,
+        "12": 6,
+        "13": 4,
+        "14": 13,
         "16": 1,
-        "20": 4
+        "20": 1,
+        "21": 3
       },
       "surfaces": {
         ".panel": 1,
         ".ow-summary-card": 3
       },
       "surfacesTotal": 4,
+      "boxed": {
+        "total": 4,
+        "topLevel": 4,
+        "flattened": 0,
+        "byClass": {
+          ".panel": {
+            "matched": 1,
+            "boxed": 1,
+            "flat": 0
+          },
+          ".ow-summary-card": {
+            "matched": 3,
+            "boxed": 3,
+            "flat": 0
+          }
+        }
+      },
+      "flat": {
+        "total": 2,
+        "topLevel": 2,
+        "byClass": {
+          ".stat-block": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          },
+          ".toolbar": {
+            "matched": 1,
+            "boxed": 0,
+            "flat": 1
+          }
+        }
+      },
+      "layers": [
+        {
+          "cls": "stat-block",
+          "h": 179,
+          "boxed": false
+        },
+        {
+          "cls": "toolbar",
+          "h": 127,
+          "boxed": false
+        },
+        {
+          "cls": "panel table-panel",
+          "h": 119,
+          "boxed": true
+        }
+      ],
+      "unlistedBoxes": [
+        {
+          "cls": "inline-flex h-control-md items-center justify-ce",
+          "w": 299
+        }
+      ],
       "decorations": {
         ".panel": {
           "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
+          "shadow": "none",
           "border": "rgb(41, 50, 62)"
         },
         ".ow-summary-card": {
@@ -4327,11 +4619,11 @@
       },
       "tables": [
         {
-          "width": 345,
-          "container": 345,
+          "width": 349,
+          "container": 349,
           "scrollerOverflow": 0,
           "overflow": 0,
-          "rows": 3
+          "rows": 1
         }
       ],
       "overflowing": [],
@@ -4347,224 +4639,224 @@
       "theme": "dark",
       "locale": "zh",
       "pageErrors": [],
+      "origin": "http://127.0.0.1:18181",
       "scrollWidth": 375,
       "clientWidth": 390,
       "innerWidth": 390,
       "docOverflow": -15,
       "bodyOverflow": -15,
-      "pageHeight": 1595,
+      "pageHeight": 844,
       "regions": [
         {
           "cls": "page-header",
-          "h": 123
+          "h": 80
         },
         {
           "cls": "DIV",
-          "h": 1208
-        },
-        {
-          "cls": "info-grid",
-          "h": 116
+          "h": 301
         }
       ],
       "heading": {
         "text": "节点",
         "fontSize": "20px",
         "height": 24,
-        "width": 347,
+        "width": 39,
         "lineHeight": 24,
         "lines": 1,
         "clipped": false
       },
       "minFont": 11,
       "fonts": {
-        "11": 18,
-        "12": 44,
-        "14": 45,
-        "16": 1,
-        "20": 6
+        "11": 16,
+        "12": 3,
+        "14": 15,
+        "16": 2,
+        "20": 1
       },
-      "surfaces": {
-        ".panel": 1,
-        ".ow-summary-card": 5,
-        ".callout": 2
+      "surfaces": {},
+      "surfacesTotal": 0,
+      "boxed": {
+        "total": 0,
+        "topLevel": 0,
+        "flattened": 0,
+        "byClass": {}
       },
-      "surfacesTotal": 8,
-      "decorations": {
-        ".panel": {
-          "radius": "10px",
-          "shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, ",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".ow-summary-card": {
-          "radius": "10px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        },
-        ".callout": {
-          "radius": "5px",
-          "shadow": "none",
-          "border": "rgb(41, 50, 62)"
-        }
+      "flat": {
+        "total": 0,
+        "topLevel": 0,
+        "byClass": {}
       },
-      "tables": [
+      "layers": [
         {
-          "width": 345,
-          "container": 345,
-          "scrollerOverflow": 0,
-          "overflow": 0,
-          "rows": 2
+          "cls": "page-header",
+          "h": 80,
+          "boxed": false
+        },
+        {
+          "cls": "DIV",
+          "h": 301,
+          "boxed": false
         }
       ],
+      "unlistedBoxes": [],
+      "decorations": {},
+      "tables": [],
       "overflowing": [],
-      "panels": 1,
-      "tabsOverflow": [
-        5
-      ]
+      "panels": 0,
+      "tabsOverflow": []
     }
   ],
   "api": {
     "/api/v1/overview": {
       "status": 200,
       "body": {
-        "health": "DEGRADED",
-        "nodesTotal": 2,
-        "nodesReady": 2,
+        "health": "ATTENTION",
+        "nodesTotal": 0,
+        "nodesReady": 0,
         "pluginsInstalled": 0,
-        "pluginsAvailable": 2,
+        "pluginsAvailable": 0,
         "instancesReady": 0,
-        "instancesTotal": 1,
+        "instancesTotal": 0,
         "activeDeployments": 0,
         "attention": [
           {
-            "severity": "critical",
-            "title": "Deployment opsweave.data-catalog is DEGRADED",
-            "detail": "0/1 replicas READY; 1 failed",
-            "link": "/plugins/opsweave.data-catalog"
+            "severity": "info",
+            "title": "No nodes enrolled",
+            "detail": "Create an enrollment token and join a Linux node before deploying plugins.",
+            "link": "/nodes"
           }
         ],
         "recentEvents": [
           {
-            "id": "169bbfe5-b42e-4388-ab2a-bfc9d05aa5d1",
-            "eventType": "deployment.created",
+            "id": "9224705c-a519-4d20-a856-58c464f85e79",
+            "eventType": "INCIDENT_CREATED",
             "actorType": "USER",
-            "actorId": "aef0d530-640b-4c6f-8def-c60adb585932",
-            "subjectType": "deployment",
-            "subjectId": "ca28a614-f96a-4acd-986e-cc71a8bd7a11",
-            "action": "deployment.create",
+            "actorId": "24479a3b-01b2-4fb6-b5e9-6215acafc962",
+            "subjectType": "INCIDENT",
+            "subjectId": "d13665c3-84bc-42df-98d2-064a80dadce1",
+            "action": "CREATE",
             "result": "ACCEPTED",
             "details": {
-              "desiredReplicas": 1,
-              "imageRef": "127.0.0.1:15001/opsweave/data-catalog@sha256:179315c1ad71111ff475e870dc0f7098f178861934ad2d53c399a04256b7dd0e",
-              "pluginId": "opsweave.data-catalog",
-              "version": "0.0.1"
+              "nativeId": null,
+              "severity": "MAJOR",
+              "source": "MANUAL"
             },
             "requestId": null,
-            "occurredAt": "2026-10-28T16:24:00.737003Z"
+            "occurredAt": "2026-11-01T12:20:03.927574Z"
           },
           {
-            "id": "e3ec439f-7257-423a-9193-b7827e43b05e",
-            "eventType": "plugin.staged",
+            "id": "3643092a-f82e-4989-9175-efae78944914",
+            "eventType": "user.created",
             "actorType": "USER",
-            "actorId": "aef0d530-640b-4c6f-8def-c60adb585932",
-            "subjectType": "plugin",
-            "subjectId": "opsweave.data-integration",
-            "action": "plugin.stage",
+            "actorId": "24479a3b-01b2-4fb6-b5e9-6215acafc962",
+            "subjectType": "user",
+            "subjectId": "872260f2-9b8a-4b1b-8284-249742836d6f",
+            "action": "user.create",
             "result": "CONFIRMED",
             "details": {
-              "artifactDigest": "sha256:9160e832755801deeb94217bba802c1c69d424fb613dbb98211b8c2f4a8ad184",
-              "bundleDigest": "sha256:7f50210cdbc81ef7c757293c42c129afd91a6c0c671bef78f8740d8a4c9b73dc",
-              "imageRef": "127.0.0.1:15001/opsweave/data-integration@sha256:5a8b8a9e7493eac89997e58e9cd9e36894896a75247065f4933aaefe3ec3aa4c",
-              "publisher": "trusted-team",
-              "version": "0.0.1"
+              "email": "g11-guard-viewer-xssgd3@example.invalid",
+              "role": "viewer"
             },
             "requestId": null,
-            "occurredAt": "2026-10-28T16:24:00.684881Z"
+            "occurredAt": "2026-11-01T12:20:03.917731Z"
           },
           {
-            "id": "76ab0c62-e51f-4f7e-8a08-b705e5937a2d",
-            "eventType": "plugin.staged",
+            "id": "83f703a1-4b11-44de-848a-a4af4fd96263",
+            "eventType": "INCIDENT_VERDICT_RECORDED",
             "actorType": "USER",
-            "actorId": "aef0d530-640b-4c6f-8def-c60adb585932",
-            "subjectType": "plugin",
-            "subjectId": "opsweave.data-catalog",
-            "action": "plugin.stage",
-            "result": "CONFIRMED",
+            "actorId": "43dd72b3-66ec-47c7-a52c-22b181173038",
+            "subjectType": "INCIDENT",
+            "subjectId": "a22c799a-bac6-447b-9544-59d33ddf1f60",
+            "action": "RECORD_VERDICT",
+            "result": "ACCEPTED",
             "details": {
-              "artifactDigest": "sha256:183118699a682ae274f8d6788213a9c3346bf0ca4d81c5987cdedbb01d2e38ff",
-              "bundleDigest": "sha256:afd8a43f5cc94656e6b0497753c4e0087dd706255e8488f384fc55008e0ceaeb",
-              "imageRef": "127.0.0.1:15001/opsweave/data-catalog@sha256:179315c1ad71111ff475e870dc0f7098f178861934ad2d53c399a04256b7dd0e",
-              "publisher": "trusted-team",
-              "version": "0.0.1"
+              "verdict": "INCONCLUSIVE"
             },
             "requestId": null,
-            "occurredAt": "2026-10-28T16:24:00.627190Z"
+            "occurredAt": "2026-11-01T12:17:18.544146Z"
           },
           {
-            "id": "4e6e3422-f9b4-4845-9495-a1fc37aa6245",
-            "eventType": "node.enrolled",
-            "actorType": "NODE",
-            "actorId": "3fd25825-fb0a-4a0e-b5d0-e986693f2ca4",
-            "subjectType": "node",
-            "subjectId": "3fd25825-fb0a-4a0e-b5d0-e986693f2ca4",
-            "action": "node.enroll",
-            "result": "CONFIRMED",
-            "details": {
-              "arch": "aarch64",
-              "name": "node-b",
-              "os": "macos"
-            },
-            "requestId": null,
-            "occurredAt": "2026-10-28T16:23:59.048019Z"
-          },
-          {
-            "id": "7f23101a-ed2f-4f41-a1c5-b6885c8c0bbd",
-            "eventType": "node.enrolled",
-            "actorType": "NODE",
-            "actorId": "7561fee7-b9af-424c-9958-7de0d8988edc",
-            "subjectType": "node",
-            "subjectId": "7561fee7-b9af-424c-9958-7de0d8988edc",
-            "action": "node.enroll",
-            "result": "CONFIRMED",
-            "details": {
-              "arch": "aarch64",
-              "name": "node-a",
-              "os": "macos"
-            },
-            "requestId": null,
-            "occurredAt": "2026-10-28T16:23:59.047994Z"
-          },
-          {
-            "id": "a4645096-05a2-4001-8c5e-bf4a9cc79442",
-            "eventType": "node.enrollment_token.created",
+            "id": "7a503fba-9db8-45de-acab-05e235ca95e1",
+            "eventType": "INCIDENT_CREATED",
             "actorType": "USER",
-            "actorId": "aef0d530-640b-4c6f-8def-c60adb585932",
-            "subjectType": "enrollment_token",
-            "subjectId": "node-b",
-            "action": "node.enrollment_token.create",
-            "result": "CONFIRMED",
+            "actorId": "43dd72b3-66ec-47c7-a52c-22b181173038",
+            "subjectType": "INCIDENT",
+            "subjectId": "a22c799a-bac6-447b-9544-59d33ddf1f60",
+            "action": "CREATE",
+            "result": "ACCEPTED",
             "details": {
-              "expiresAt": "2026-10-28T16:53:58.631942Z",
-              "label": "node-b"
+              "nativeId": null,
+              "severity": "WARNING",
+              "source": "MANUAL"
             },
             "requestId": null,
-            "occurredAt": "2026-10-28T16:23:58.635713Z"
+            "occurredAt": "2026-11-01T12:17:18.443115Z"
           },
           {
-            "id": "dde95ded-ef17-4cee-916a-7d856fdbd3b8",
-            "eventType": "node.enrollment_token.created",
+            "id": "c6d07d79-db7e-45aa-b001-fbfaac7f1ed1",
+            "eventType": "INCIDENT_CREATED",
             "actorType": "USER",
-            "actorId": "aef0d530-640b-4c6f-8def-c60adb585932",
-            "subjectType": "enrollment_token",
-            "subjectId": "node-a",
-            "action": "node.enrollment_token.create",
-            "result": "CONFIRMED",
+            "actorId": "24479a3b-01b2-4fb6-b5e9-6215acafc962",
+            "subjectType": "INCIDENT",
+            "subjectId": "2e7e0b3a-6aed-49aa-8411-0591629375f7",
+            "action": "CREATE",
+            "result": "ACCEPTED",
             "details": {
-              "expiresAt": "2026-10-28T16:53:58.602754Z",
-              "label": "node-a"
+              "nativeId": null,
+              "severity": "MINOR",
+              "source": "MANUAL"
             },
             "requestId": null,
-            "occurredAt": "2026-10-28T16:23:58.609116Z"
+            "occurredAt": "2026-11-01T12:17:13.464909Z"
+          },
+          {
+            "id": "edb58b09-eea6-4321-8755-368d26a465c0",
+            "eventType": "INCIDENT_EVIDENCE_ADDED",
+            "actorType": "USER",
+            "actorId": "24479a3b-01b2-4fb6-b5e9-6215acafc962",
+            "subjectType": "INCIDENT",
+            "subjectId": "3380824f-8350-4731-974b-35c738e15b0d",
+            "action": "ADD_EVIDENCE",
+            "result": "ACCEPTED",
+            "details": {
+              "evidenceId": "616e44b3-6c53-49f3-8a5a-b2c5dc705dc1",
+              "kind": "LOG_EXCERPT",
+              "trust": "OPERATOR_ASSERTED"
+            },
+            "requestId": null,
+            "occurredAt": "2026-11-01T12:17:12.721185Z"
+          },
+          {
+            "id": "f90acb0a-a28b-4316-b7ee-13dc553d38ae",
+            "eventType": "INCIDENT_VERDICT_RECORDED",
+            "actorType": "USER",
+            "actorId": "24479a3b-01b2-4fb6-b5e9-6215acafc962",
+            "subjectType": "INCIDENT",
+            "subjectId": "3380824f-8350-4731-974b-35c738e15b0d",
+            "action": "RECORD_VERDICT",
+            "result": "ACCEPTED",
+            "details": {
+              "verdict": "CONFIRMED"
+            },
+            "requestId": null,
+            "occurredAt": "2026-11-01T12:17:12.185293Z"
+          },
+          {
+            "id": "c06f8948-110d-4980-ba3d-89056eb87962",
+            "eventType": "INCIDENT_EVIDENCE_ADDED",
+            "actorType": "USER",
+            "actorId": "24479a3b-01b2-4fb6-b5e9-6215acafc962",
+            "subjectType": "INCIDENT",
+            "subjectId": "3380824f-8350-4731-974b-35c738e15b0d",
+            "action": "ADD_EVIDENCE",
+            "result": "ACCEPTED",
+            "details": {
+              "evidenceId": "801a25c7-86d3-4f16-9672-a6a3dc88714e",
+              "kind": "LOG_EXCERPT",
+              "trust": "OPERATOR_ASSERTED"
+            },
+            "requestId": null,
+            "occurredAt": "2026-11-01T12:17:11.094233Z"
           }
         ]
       }
@@ -4572,40 +4864,6 @@
     "/api/v1/plugins": {
       "status": 200,
       "body": [
-        {
-          "id": "opsweave.data-catalog",
-          "name": "Data Catalog",
-          "publisher": "trusted-team",
-          "latestVersion": "0.0.1",
-          "activeVersion": null,
-          "state": "STAGED",
-          "signatureState": "VERIFIED",
-          "hasFrontend": true,
-          "hasBackend": true,
-          "imageRef": "127.0.0.1:15001/opsweave/data-catalog@sha256:179315c1ad71111ff475e870dc0f7098f178861934ad2d53c399a04256b7dd0e",
-          "desiredReplicas": 1,
-          "readyInstances": 0,
-          "totalInstances": 1,
-          "updatedAt": "2026-10-28T16:24:00.616463Z",
-          "isSystem": false
-        },
-        {
-          "id": "opsweave.data-integration",
-          "name": "Data Integration",
-          "publisher": "trusted-team",
-          "latestVersion": "0.0.1",
-          "activeVersion": null,
-          "state": "STAGED",
-          "signatureState": "VERIFIED",
-          "hasFrontend": true,
-          "hasBackend": true,
-          "imageRef": "127.0.0.1:15001/opsweave/data-integration@sha256:5a8b8a9e7493eac89997e58e9cd9e36894896a75247065f4933aaefe3ec3aa4c",
-          "desiredReplicas": 0,
-          "readyInstances": 0,
-          "totalInstances": 0,
-          "updatedAt": "2026-10-28T16:24:00.680025Z",
-          "isSystem": false
-        },
         {
           "id": "dev.opsweave.ops-center",
           "name": "Ops Center",
@@ -4627,103 +4885,12 @@
     },
     "/api/v1/nodes": {
       "status": 200,
-      "body": [
-        {
-          "id": "7561fee7-b9af-424c-9958-7de0d8988edc",
-          "name": "node-a",
-          "generation": 1,
-          "os": "macos",
-          "arch": "aarch64",
-          "labels": {
-            "role": "node",
-            "zone": "local"
-          },
-          "capabilities": [
-            "oci.docker.v1",
-            "macos",
-            "rootless-docker-reference",
-            "aarch64"
-          ],
-          "status": "READY",
-          "lastSeenAt": "2026-10-29T14:54:43.294300Z",
-          "dataEndpoint": "http://127.0.0.1:9101",
-          "runtimeAdapterVersion": "opsweave-node/0.0.1+docker-cli docker/29.7.2",
-          "resourceSnapshot": {
-            "cpuCores": 8,
-            "cpuUtilization": null,
-            "filesystemTotalBytes": 245107195904,
-            "filesystemUsedBytes": 11263393792,
-            "memoryTotalBytes": 8589934592,
-            "memoryUsedBytes": null,
-            "sampledAt": "2026-10-29T14:54:43.264926Z",
-            "selfCpuLimitCores": null,
-            "selfMemoryLimitBytes": null
-          },
-          "enrolledAt": "2026-10-28T16:23:59.047994Z",
-          "revokedAt": null,
-          "stale": false,
-          "instancesReady": 0,
-          "instancesTotal": 1
-        },
-        {
-          "id": "3fd25825-fb0a-4a0e-b5d0-e986693f2ca4",
-          "name": "node-b",
-          "generation": 1,
-          "os": "macos",
-          "arch": "aarch64",
-          "labels": {
-            "role": "node",
-            "zone": "local"
-          },
-          "capabilities": [
-            "oci.docker.v1",
-            "macos",
-            "rootless-docker-reference",
-            "aarch64"
-          ],
-          "status": "READY",
-          "lastSeenAt": "2026-10-29T14:54:42.504693Z",
-          "dataEndpoint": "http://127.0.0.1:9102",
-          "runtimeAdapterVersion": "opsweave-node/0.0.1+docker-cli docker/29.7.2",
-          "resourceSnapshot": {
-            "cpuCores": 8,
-            "cpuUtilization": null,
-            "filesystemTotalBytes": 245107195904,
-            "filesystemUsedBytes": 11263393792,
-            "memoryTotalBytes": 8589934592,
-            "memoryUsedBytes": null,
-            "sampledAt": "2026-10-29T14:54:42.502862Z",
-            "selfCpuLimitCores": null,
-            "selfMemoryLimitBytes": null
-          },
-          "enrolledAt": "2026-10-28T16:23:59.048019Z",
-          "revokedAt": null,
-          "stale": false,
-          "instancesReady": 0,
-          "instancesTotal": 0
-        }
-      ]
+      "body": []
     },
     "/api/v1/jobs": {
       "status": 200,
       "body": {
-        "items": [
-          {
-            "jobId": "24f2851a-5134-4039-8f8f-07ca0d27dd05",
-            "pipelineId": "test.terminalize.3e2f8d74-06ad-4771-ab39-7033c57f029b",
-            "pipelineRevision": 1,
-            "status": "FAILED",
-            "currentFence": 1,
-            "currentLeaseId": "8bfbe614-824c-4771-a4a4-2f766ad5c4b3",
-            "attempts": 1,
-            "maxAttempts": 3,
-            "lastErrorCode": "WORKER_FAILED",
-            "startedAt": null,
-            "finishedAt": "2026-10-29T01:47:15.919115Z",
-            "createdAt": "2026-10-29T01:47:15.913173Z",
-            "updatedAt": "2026-10-29T01:47:15.919115Z"
-          }
-        ],
+        "items": [],
         "nextCursor": null
       }
     }

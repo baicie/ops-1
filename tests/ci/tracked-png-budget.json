@@ -9,11 +9,12 @@
     "Ceilings were taken from `git ls-files '*.png'` immediately after the cleanup; regenerate the byte ceilings with",
     "the command in the $howToRegenerate line if a deliberate re-capture changes file sizes.",
     "Ceilings were lowered to the post-2026-10-31 curated count (569 -> 429 files, 70.05 -> 68.13 MB) when the duplicate table runs, the 30 undeclared audit captures and the superseded v6 matrix left the index. Only lower.",
-    "Ceilings lowered to the 2026-10-31 curated count (569 -> 428 files, 70.05 -> 68.24 MB) after the duplicate table runs, the 9 uncited audit captures, and the superseded pre-v8 console buckets (visual-v4, v5, ui-v7, ui-verbs-v6) left the index. Only lower: those four buckets are cited by no document and cover pages that visual-v3/audit now carries with the current console."
+    "Ceilings lowered to the 2026-10-31 curated count (569 -> 428 files, 70.05 -> 68.24 MB) after the duplicate table runs, the 9 uncited audit captures, and the superseded pre-v8 console buckets (visual-v4, v5, ui-v7, ui-verbs-v6) left the index. Only lower: those four buckets are cited by no document and cover pages that visual-v3/audit now carries with the current console.",
+    "2026-11-01: the observability-console-v4 branch landed having added 417 PNGs and reached 796 / 120.49 MB - two and a half times the ceiling. 389 of those additions were cited by no document, duplicated an existing matrix, were named by a commit SHA, or were a second capture of the same pages under .claude/artifacts; they left the index. What remains is 408 / 65.97 MB: 29 new files that a state matrix actually links (18 for /app/incidents, 11 for /app/sources), and the byte ceiling is UNCHANGED, so the branch is 2.3 MB lighter than the commit it forked from. maxFiles rises 379 -> 408 only because those two new surfaces had no bucket at all and main carried zero headroom; the file count still fell by 388 from what the branch was trying to merge."
   ],
   "$howToRegenerate": "node tests/ci/check-tracked-png-budget.mjs --print-manifest",
   "totals": {
-    "maxFiles": 379,
+    "maxFiles": 408,
     "maxBytes": 71554236
   },
   "directories": {
@@ -92,6 +93,16 @@
     "artifacts/ui/visual-v3/b3b4/after": {
       "maxFiles": 3,
       "maxBytes": 524506
+    },
+    "artifacts/ui/incidents-workspace": {
+      "maxFiles": 18,
+      "filename": "^(list-[0-9]+-(light|dark)-(en|zh-CN)|state-(conflict|empty|failed|forbidden|loading)-[0-9]+-light|focus-create-[0-9]+-light)\\.png$",
+      "note": "The 18 files artifacts/ui/incidents-workspace/STATE-MATRIX.md links: the list at 3 widths x 2 themes x 2 locales, five 1440-light state fixtures, and one focus capture. The other 8 captures taken alongside them (detail view in each combination) are cited nowhere and stayed out of the index."
+    },
+    "artifacts/ui/sources": {
+      "maxFiles": 11,
+      "filename": "^(r[0-9]+-(light|dark)-(en|zh(-CN)?)__[a-z-]+|state-[a-z-]+)\\.png$",
+      "note": "The 11 files artifacts/ui/sources/STATE-MATRIX.md links: two ready/refused captures and the nine state fixtures that matrix names by filename. The other 26 (three-viewport matrix, drawer) are cited nowhere and stayed out of the index."
     }
   },
   "knownMissingDocReferences": [

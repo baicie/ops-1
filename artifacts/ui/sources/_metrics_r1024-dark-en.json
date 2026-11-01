@@ -1,0 +1,78 @@
+{
+ "config": {
+  "label": "r1024-dark-en",
+  "theme": "dark",
+  "locale": "en",
+  "route": "/app/sources",
+  "baseURL": "http://127.0.0.1:5178",
+  "data": "fixture-api",
+  "template": {
+   "headerHeight": 127,
+   "firstBlockY": 231,
+   "kpiBands": 1,
+   "toolbars": 1
+  }
+ },
+ "pages": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1009,
+   "docClientW": 1024,
+   "docHeight": 1386,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "Connector",
+    "Status",
+    "Trust",
+    "Publisher"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1024,
+    "h": 820
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 127,
+    "firstBlockY": 231,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ }
+}

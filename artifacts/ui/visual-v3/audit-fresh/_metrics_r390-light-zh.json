@@ -1,0 +1,5708 @@
+{
+ "config": {
+  "label": "r390-light-zh",
+  "theme": "light",
+  "mode": "before",
+  "baseURL": "http://127.0.0.1:18181",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/admin/jobs": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1728,
+   "offenders": [],
+   "identityKey": [
+    "host-metrics · 1285",
+    "host-metrics · e273",
+    "host-metrics · 9c4a",
+    "host-metrics · 3f8b",
+    "host-metrics · a71d",
+    "host-metrics · 5b6e",
+    "host-metrics · c04f",
+    "host-metrics · 7d2e",
+    "host-metrics · f19a",
+    "host-metrics · 6e35",
+    "host-metrics · 2a8f",
+    "host-metrics · b53c",
+    "host-metrics · 8f47",
+    "host-metrics · 41e6"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 82.8,
+    "p95": 102.6,
+    "max": 102.6,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.36,
+    0.36,
+    1
+   ],
+   "columnLabels": [
+    "任务",
+    "状态",
+    "耗时",
+    "创建时间"
+   ],
+   "tableRowCounts": [
+    14
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "host-metrics · 1285",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 1285",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "18小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       412,
+       423,
+       426,
+       462
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 402.6,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 425.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 461.6,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 423.4,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 411.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 461.6,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · e273",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · e273",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "16小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       494,
+       506,
+       509,
+       544
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 485.4,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 508.6,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 544.4,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 506.2,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 494.4,
+       "h": 44
+      },
+      "duration": {
+       "top": 544.4,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 9c4a",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 9c4a",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "运行中",
+       "55014.4 s running",
+       "15小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       577,
+       589,
+       591,
+       627,
+       647
+      ],
+      "height": 102.6
+     },
+     "geometry": {
+      "row": {
+       "top": 568.2,
+       "h": 102.6
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 591.4,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 627.2,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 589,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 577.2,
+       "h": 44
+      },
+      "duration": {
+       "top": 627.2,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 3f8b",
+     "clipped": false,
+     "width": 221,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 3f8b",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "失败",
+       "1800.0 s",
+       "14小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       680,
+       692,
+       694,
+       730
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 670.8,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 694,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 729.8,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 691.6,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 679.8,
+       "h": 44
+      },
+      "duration": {
+       "top": 729.8,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · a71d",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · a71d",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "13小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       763,
+       774,
+       777,
+       813
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 753.6,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 776.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 812.6,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 774.4,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 762.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 812.6,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 5b6e",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 5b6e",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "排队中",
+       "Queued",
+       "12小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       845,
+       857,
+       860,
+       895
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 836.4,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 859.6,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 895.4,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 857.2,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 845.4,
+       "h": 44
+      },
+      "duration": {
+       "top": 895.4,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · c04f",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · c04f",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "11小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       928,
+       940,
+       942,
+       978
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 919.2,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 942.4,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 978.2,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 940,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 928.2,
+       "h": 44
+      },
+      "duration": {
+       "top": 978.2,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 7d2e",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 7d2e",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已取消",
+       "1800.0 s",
+       "10小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1011,
+       1023,
+       1025,
+       1061
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1002,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1025.2,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1061,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1022.8,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1011,
+       "h": 44
+      },
+      "duration": {
+       "top": 1061,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · f19a",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · f19a",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "运行中",
+       "30174.4 s running",
+       "8小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1094,
+       1106,
+       1108,
+       1144,
+       1164
+      ],
+      "height": 102.6
+     },
+     "geometry": {
+      "row": {
+       "top": 1084.8,
+       "h": 102.6
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1108,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1143.8,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1105.5,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1093.8,
+       "h": 44
+      },
+      "duration": {
+       "top": 1143.8,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 6e35",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 6e35",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "7小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1196,
+       1208,
+       1211,
+       1246
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1187.3,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1210.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1246.3,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1208.1,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1196.3,
+       "h": 44
+      },
+      "duration": {
+       "top": 1246.3,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 2a8f",
+     "clipped": false,
+     "width": 221,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 2a8f",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "失败",
+       "1800.0 s",
+       "6小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1279,
+       1291,
+       1293,
+       1329
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1270.1,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1293.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1329.1,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1290.9,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1279.1,
+       "h": 44
+      },
+      "duration": {
+       "top": 1329.1,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · b53c",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · b53c",
+      "qualifier": "r7尝试次数 3/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "5小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1362,
+       1374,
+       1376,
+       1412
+      ],
+      "height": 82.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1352.9,
+       "h": 82.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1376.1,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1411.9,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1373.7,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1361.9,
+       "h": 44
+      },
+      "duration": {
+       "top": 1411.9,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 8f47",
+     "clipped": false,
+     "width": 209,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 8f47",
+      "qualifier": "r7尝试次数 1/3",
+      "facts": [
+       "运行中",
+       "13614.4 s running",
+       "4小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1445,
+       1457,
+       1459,
+       1495,
+       1515
+      ],
+      "height": 102.6
+     },
+     "geometry": {
+      "row": {
+       "top": 1435.7,
+       "h": 102.6
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1458.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1494.7,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1456.5,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1444.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 1494.7,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "host-metrics · 41e6",
+     "clipped": false,
+     "width": 215,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "host-metrics · 41e6",
+      "qualifier": "r7尝试次数 2/3",
+      "facts": [
+       "已成功",
+       "1800.0 s",
+       "3小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       0,
+       1544,
+       1556,
+       1559,
+       1594
+      ],
+      "height": 78.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1538.3,
+       "h": 78.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1558.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1594.3,
+       "h": 16.8
+      },
+      "badge": {
+       "top": 1556.1,
+       "h": 20.4
+      },
+      "menu": {
+       "top": 1544.3,
+       "h": 44
+      },
+      "duration": {
+       "top": 1594.3,
+       "h": 16.8
+      }
+     },
+     "values": 5
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 14
+   },
+   "firstScreen": {
+    "full": 5,
+    "partial": 6,
+    "total": 14
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/activity": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2966,
+   "offenders": [],
+   "identityKey": [
+    "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-11-01T11:59:01",
+    "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-11-01T11:35:01",
+    "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-11-01T11:11:01",
+    "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-11-01T10:47:01",
+    "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-11-01T10:23:01",
+    "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-11-01T09:59:01",
+    "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-11-01T09:35:01",
+    "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-11-01T09:11:01",
+    "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-11-01T08:47:01 · +8@2026-11-01T05:11:01",
+    "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-11-01T05:11:01",
+    "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-11-01T04:47:01",
+    "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-11-01T04:23:01",
+    "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-11-01T03:59:01",
+    "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-11-01T03:35:01",
+    "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-11-01T03:11:01",
+    "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-11-01T02:47:01",
+    "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-11-01T02:23:01"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 142.4,
+    "p95": 157.8,
+    "max": 157.8,
+    "n": 17
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.94,
+    1
+   ],
+   "columnLabels": [
+    "事件",
+    "结果",
+    "发生时间"
+   ],
+   "tableRowCounts": [
+    17
+   ],
+   "duplicateRunMax": 1,
+   "rows": 17,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-11-01T11:59:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.created · f0fe",
+      "qualifier": "USER 82475274sequence 0",
+      "facts": [
+       "已接受deployment.create",
+       "4分钟前19:59:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       432,
+       438,
+       442,
+       472,
+       494,
+       539
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-11-01T11:35:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.enabled · 6b1c",
+      "qualifier": "USER 82475274sequence 1",
+      "facts": [
+       "已成功plugin.enable",
+       "28分钟前19:35:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       574,
+       580,
+       584,
+       614,
+       636,
+       681
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-11-01T11:11:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.enrolled · 22dd",
+      "qualifier": "USER 82475274sequence 2",
+      "facts": [
+       "未知node.enroll",
+       "52分钟前19:11:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       717,
+       723,
+       727,
+       756,
+       778,
+       823
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-11-01T10:47:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.disabled · d47a",
+      "qualifier": "USER 82475274sequence 3",
+      "facts": [
+       "已接受plugin.disable",
+       "1小时前18:47:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       859,
+       865,
+       869,
+       899,
+       921,
+       966
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-11-01T10:23:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "policy.updated · 19e4",
+      "qualifier": "USER 82475274sequence 4",
+      "facts": [
+       "已成功policy.update",
+       "1小时前18:23:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1001,
+       1007,
+       1011,
+       1041,
+       1063,
+       1108
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-11-01T09:59:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "enrollment_token.issued · f0fe",
+      "qualifier": "USER 82475274sequence 5",
+      "facts": [
+       "未知token.issue",
+       "2小时前17:59:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1144,
+       1150,
+       1154,
+       1183,
+       1206,
+       1251
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-11-01T09:35:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.failed · 6b1c",
+      "qualifier": "USER 82475274sequence 6",
+      "facts": [
+       "已接受deployment.deploy",
+       "2小时前17:35:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1286,
+       1292,
+       1296,
+       1326,
+       1348,
+       1393
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-11-01T09:11:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.unreachable · 22dd",
+      "qualifier": "USER 82475274sequence 7",
+      "facts": [
+       "已成功node.observe",
+       "2小时前17:11:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1428,
+       1434,
+       1438,
+       1468,
+       1490,
+       1535
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-11-01T08:47:01 · +8@2026-11-01T05:11:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 33.6,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.probed · 6b1c",
+      "qualifier": "USER 82475274sequence 8× 9 3小时前 → 6小时前",
+      "facts": [
+       "已接受plugin.probe",
+       "3小时前16:47:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1571,
+       1577,
+       1581,
+       1610,
+       1648,
+       1693
+      ],
+      "height": 157.8
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-11-01T05:11:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.enabled · 22dd",
+      "qualifier": "USER 82475274sequence 17",
+      "facts": [
+       "未知plugin.enable",
+       "6小时前13:11:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1729,
+       1735,
+       1739,
+       1768,
+       1790,
+       1835
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-11-01T04:47:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.enrolled · d47a",
+      "qualifier": "USER 82475274sequence 18",
+      "facts": [
+       "已接受node.enroll",
+       "7小时前12:47:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1871,
+       1877,
+       1881,
+       1911,
+       1933,
+       1978
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-11-01T04:23:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "plugin.disabled · 19e4",
+      "qualifier": "USER 82475274sequence 19",
+      "facts": [
+       "已成功plugin.disable",
+       "7小时前12:23:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2013,
+       2019,
+       2023,
+       2053,
+       2075,
+       2120
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-11-01T03:59:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "policy.updated · f0fe",
+      "qualifier": "USER 82475274sequence 20",
+      "facts": [
+       "未知policy.update",
+       "8小时前11:59:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2156,
+       2162,
+       2166,
+       2195,
+       2217,
+       2262
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-11-01T03:35:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "enrollment_token.issued · 6b1c",
+      "qualifier": "USER 82475274sequence 21",
+      "facts": [
+       "已接受token.issue",
+       "8小时前11:35:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2298,
+       2304,
+       2308,
+       2338,
+       2360,
+       2405
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-11-01T03:11:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.failed · 22dd",
+      "qualifier": "USER 82475274sequence 22",
+      "facts": [
+       "已成功deployment.deploy",
+       "8小时前11:11:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2440,
+       2446,
+       2450,
+       2480,
+       2502,
+       2547
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-11-01T02:47:01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "node.unreachable · d47a",
+      "qualifier": "USER 82475274sequence 23",
+      "facts": [
+       "未知node.observe",
+       "9小时前10:47:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2583,
+       2589,
+       2593,
+       2622,
+       2645,
+       2690
+      ],
+      "height": 142.4
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-11-01T02:23:01",
+     "clipped": false,
+     "width": 291,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 18.2,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": "normal",
+      "codeLineBoxes": 1
+     },
+     "slots": {
+      "identity": "deployment.created · 19e4",
+      "qualifier": "USER 82475274sequence 24",
+      "facts": [
+       "已接受deployment.create",
+       "9小时前10:23:01"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2722,
+       2728,
+       2732,
+       2762,
+       2784,
+       2829
+      ],
+      "height": 138.4
+     },
+     "geometry": null,
+     "values": 4
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 17
+   },
+   "firstScreen": {
+    "full": 2,
+    "partial": 3,
+    "total": 17
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1989,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 117.8,
+    "p95": 117.8,
+    "max": 117.8,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "实例",
+    "资源"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "macos/aarch64代次 1",
+      "facts": [
+       "就绪",
+       "1/4就绪",
+       "12% · 31%2.3 GiB / 7.5 GiB · 5分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       559,
+       569,
+       573,
+       609,
+       630
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 549.8,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 573,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 609.3,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 558.8,
+       "h": 44
+      },
+      "duration": {
+       "top": 608.8,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "linux/x86_64代次 2",
+      "facts": [
+       "就绪",
+       "2/4就绪",
+       "18% · 32%2.4 GiB / 7.5 GiB · 8分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       677,
+       687,
+       691,
+       727,
+       747
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 667.6,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 690.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 727.1,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 676.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 726.6,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "macos/aarch64代次 3",
+      "facts": [
+       "就绪",
+       "3/4就绪",
+       "24% · 34%2.5 GiB / 7.5 GiB · 11分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       794,
+       804,
+       809,
+       844,
+       845,
+       865
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 785.3,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 808.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 844.8,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 794.3,
+       "h": 44
+      },
+      "duration": {
+       "top": 844.3,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 216,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "linux/x86_64代次 1",
+      "facts": [
+       "不可达",
+       "1/4就绪",
+       "该节点在此时间窗没有上报资源快照。"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       912,
+       922,
+       926,
+       962,
+       963,
+       983
+      ],
+      "height": 104.6
+     },
+     "geometry": {
+      "row": {
+       "top": 903.1,
+       "h": 104.6
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 926.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 962.6,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 912.1,
+       "h": 44
+      },
+      "duration": {
+       "top": 962.1,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "macos/aarch64代次 2",
+      "facts": [
+       "就绪",
+       "2/4就绪",
+       "36% · 36%2.7 GiB / 7.5 GiB · 17分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1017,
+       1027,
+       1031,
+       1067,
+       1088
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1007.7,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1030.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1067.2,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1016.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 1066.7,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 205,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "linux/x86_64代次 3",
+      "facts": [
+       "观测陈旧",
+       "3/4就绪",
+       "42% · 37%2.7 GiB / 7.5 GiB · 20分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1135,
+       1145,
+       1149,
+       1185,
+       1205
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1125.5,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1148.7,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1185,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1134.5,
+       "h": 44
+      },
+      "duration": {
+       "top": 1184.5,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "macos/aarch64代次 1",
+      "facts": [
+       "就绪",
+       "1/4就绪",
+       "48% · 38%2.8 GiB / 7.5 GiB · 23分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1252,
+       1262,
+       1266,
+       1302,
+       1303,
+       1323
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1243.3,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1266.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1302.8,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1252.3,
+       "h": 44
+      },
+      "duration": {
+       "top": 1302.3,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "linux/x86_64代次 2",
+      "facts": [
+       "就绪",
+       "2/4就绪",
+       "54% · 39%2.9 GiB / 7.5 GiB · 26分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1370,
+       1380,
+       1384,
+       1420,
+       1421,
+       1441
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1361.1,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1384.3,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1420.6,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1370.1,
+       "h": 44
+      },
+      "duration": {
+       "top": 1420.1,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "macos/aarch64代次 3",
+      "facts": [
+       "就绪",
+       "3/4就绪",
+       "60% · 40%3.0 GiB / 7.5 GiB · 29分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1488,
+       1498,
+       1502,
+       1538,
+       1559
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1478.8,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1502,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1538.3,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1487.8,
+       "h": 44
+      },
+      "duration": {
+       "top": 1537.8,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 205,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "linux/x86_64代次 1",
+      "facts": [
+       "需要关注",
+       "1/4就绪",
+       "66% · 41%3.1 GiB / 7.5 GiB · 32分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1606,
+       1616,
+       1620,
+       1656,
+       1676
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1596.6,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1619.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1656.1,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1605.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 1655.6,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 227,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "macos/aarch64代次 2",
+      "facts": [
+       "就绪",
+       "2/4就绪",
+       "72% · 43%3.2 GiB / 7.5 GiB · 35分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1723,
+       1733,
+       1738,
+       1773,
+       1774,
+       1794
+      ],
+      "height": 117.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1714.4,
+       "h": 117.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1737.6,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1773.9,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1723.4,
+       "h": 44
+      },
+      "duration": {
+       "top": 1773.4,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 233,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 16.8,
+      "lines": 2,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "linux/x86_64代次 3",
+      "facts": [
+       "就绪",
+       "3/4就绪",
+       "78% · 44%3.3 GiB / 7.5 GiB · 38分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1838,
+       1848,
+       1852,
+       1888,
+       1889,
+       1909
+      ],
+      "height": 113.8
+     },
+     "geometry": {
+      "row": {
+       "top": 1832.2,
+       "h": 113.8
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1852.4,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1888.7,
+       "h": 16.8
+      },
+      "badge": null,
+      "menu": {
+       "top": 1838.2,
+       "h": 44
+      },
+      "duration": {
+       "top": 1888.2,
+       "h": 17.8
+      }
+     },
+     "values": 5
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 2,
+    "partial": 3,
+    "total": 12
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/nodes/9b426dab-27c4-45ce-9773-b51a3db4f246": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 5304,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 97.4,
+    "p95": 135.5,
+    "max": 135.5,
+    "n": 15
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    0.42,
+    1,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "观测时间",
+    "CPU",
+    "内存",
+    "文件系统",
+    "插件",
+    "版本",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    12,
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 15,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 15
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 15
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1720,
+   "offenders": [],
+   "identityKey": [
+    "Hello Ops",
+    "Host Metrics",
+    "Log Tail",
+    "Data Catalog",
+    "Policy Engine",
+    "Registry Mirror",
+    "Edge Probe",
+    "Edge Tunnel",
+    "Fault Lab",
+    "Replay Lab",
+    "Audit Sink",
+    "Console Bridge"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 97,
+    "p95": 97,
+    "max": 97,
+    "n": 12
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    1,
+    1,
+    0.25,
+    1
+   ],
+   "columnLabels": [
+    "插件",
+    "版本",
+    "部署状态",
+    "就绪 副本",
+    "摘要 / 信任"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "Hello Ops",
+     "clipped": false,
+     "width": 175,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Hello Ops",
+      "qualifier": "系统trusted-team",
+      "facts": [
+       "0.2.0",
+       "已安装5分钟前 · 代次 2",
+       "0/3",
+       "sha256:a100a10…a100a100已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       572,
+       574,
+       586,
+       622,
+       623
+      ],
+      "height": 85.7
+     },
+     "geometry": {
+      "row": {
+       "top": 562.7,
+       "h": 85.7
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 585.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 621.7,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 571.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 623.1,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 167,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Host Metrics",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1",
+       "已安装35分钟前 · 代次 3",
+       "1/3",
+       "sha256:a101a10…a101a101已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       657,
+       660,
+       672,
+       707,
+       709
+      ],
+      "height": 85.7
+     },
+     "geometry": {
+      "row": {
+       "top": 648.3,
+       "h": 85.7
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 671.5,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 707.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 657.3,
+       "h": 44
+      },
+      "duration": {
+       "top": 708.8,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Log Tail",
+     "clipped": false,
+     "width": 176,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Log Tail",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2",
+       "已禁用1小时前 · 代次 4",
+       "2/3",
+       "sha256:a102a10…a102a102已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       743,
+       745,
+       757,
+       758,
+       793,
+       794
+      ],
+      "height": 85.7
+     },
+     "geometry": {
+      "row": {
+       "top": 734,
+       "h": 85.7
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 757.2,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 793,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 743,
+       "h": 44
+      },
+      "duration": {
+       "top": 794.5,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Data Catalog",
+     "clipped": false,
+     "width": 176,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Data Catalog",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0有更新版本 0.2.3",
+       "已安装1小时前 · 代次 5",
+       "0/3",
+       "sha256:a103a10…a103a103已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       829,
+       831,
+       843,
+       879,
+       884,
+       886
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 819.7,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 842.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 884.4,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 828.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 878.7,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Policy Engine",
+     "clipped": false,
+     "width": 174,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Policy Engine",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1有更新版本 0.2.0",
+       "已暂存2小时前 · 代次 6",
+       "1/3",
+       "sha256:a104a10…a104a104已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       926,
+       928,
+       940,
+       976,
+       981,
+       983
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 916.7,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 939.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 981.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 925.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 975.7,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Registry Mirror",
+     "clipped": false,
+     "width": 175,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Registry Mirror",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2有更新版本 0.2.1",
+       "失败2小时前 · 代次 7",
+       "2/3",
+       "sha256:a105a10…a105a105已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1023,
+       1025,
+       1037,
+       1073,
+       1078,
+       1080
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 1013.7,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1036.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1078.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1022.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 1072.7,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Edge Probe",
+     "clipped": false,
+     "width": 174,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Edge Probe",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0有更新版本 0.2.2",
+       "已安装3小时前 · 代次 8",
+       "0/3",
+       "sha256:a106a10…a106a106已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1120,
+       1122,
+       1134,
+       1170,
+       1175,
+       1177
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 1110.7,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1133.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1175.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1119.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 1169.7,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Edge Tunnel",
+     "clipped": false,
+     "width": 174,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Edge Tunnel",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1有更新版本 0.2.3",
+       "已安装3小时前 · 代次 9",
+       "1/3",
+       "sha256:a107a10…a107a107已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1217,
+       1219,
+       1231,
+       1267,
+       1272,
+       1274
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 1207.7,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1230.9,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1272.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1216.7,
+       "h": 44
+      },
+      "duration": {
+       "top": 1266.7,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Fault Lab",
+     "clipped": false,
+     "width": 169,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Fault Lab",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.2有更新版本 0.2.0",
+       "已暂存4小时前 · 代次 10",
+       "2/3",
+       "sha256:a108a10…a108a108已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1314,
+       1316,
+       1328,
+       1364,
+       1369,
+       1371
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 1304.6,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1327.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1369.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1313.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 1363.6,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Replay Lab",
+     "clipped": false,
+     "width": 171,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Replay Lab",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.0有更新版本 0.2.1",
+       "已安装4小时前 · 代次 11",
+       "0/3",
+       "sha256:a109a10…a109a109已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1411,
+       1413,
+       1425,
+       1461,
+       1466,
+       1468
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 1401.6,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1424.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1466.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1410.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 1460.6,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Audit Sink",
+     "clipped": false,
+     "width": 169,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Audit Sink",
+      "qualifier": "trusted-team",
+      "facts": [
+       "0.2.1有更新版本 0.2.2",
+       "已安装5小时前 · 代次 12",
+       "1/3",
+       "sha256:a110a11…a110a110已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       0,
+       1508,
+       1510,
+       1522,
+       1558,
+       1563,
+       1565
+      ],
+      "height": 97
+     },
+     "geometry": {
+      "row": {
+       "top": 1498.6,
+       "h": 97
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1521.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1563.3,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1507.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 1557.6,
+       "h": 31
+      }
+     },
+     "values": 6
+    },
+    {
+     "key": "Console Bridge",
+     "clipped": false,
+     "width": 192,
+     "facts": 2,
+     "factValues": 3,
+     "qualifier": {
+      "height": 19.7,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Console Bridge",
+      "qualifier": "lab",
+      "facts": [
+       "0.2.3",
+       "已禁用5小时前",
+       "2/3",
+       "sha256:a111a11…a111a111已验证"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       0,
+       1602,
+       1604,
+       1616,
+       1652,
+       1653
+      ],
+      "height": 81.7
+     },
+     "geometry": {
+      "row": {
+       "top": 1595.6,
+       "h": 81.7
+      },
+      "padding": "6px 6px",
+      "rowGap": "3px",
+      "ident": {
+       "top": 1615.8,
+       "h": 15.6
+      },
+      "meta": {
+       "top": 1651.6,
+       "h": 19.7
+      },
+      "badge": null,
+      "menu": {
+       "top": 1601.6,
+       "h": 44
+      },
+      "duration": {
+       "top": 1653,
+       "h": 16.8
+      }
+     },
+     "values": 6
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 3,
+    "partial": 4,
+    "total": 12
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/governance": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3521,
+   "offenders": [],
+   "identityKey": [
+    "orders-raw",
+    "orders-curated",
+    "shipments",
+    "events-click",
+    "events-impression",
+    "inventory",
+    "invoice-lines",
+    "node-metrics",
+    "plugin-invocations",
+    "audit-ledger",
+    "risk-scores",
+    "stale-feed",
+    "orders-curated · 4f1c",
+    "inventory · b93d",
+    "orders-curated · 71ae",
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 82,
+    "p95": 102.4,
+    "max": 102.4,
+    "n": 27
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    null,
+    null,
+    1,
+    0.33,
+    0.25
+   ],
+   "columnLabels": [
+    "数据集",
+    "Schema",
+    "数据集",
+    "状态",
+    "节点",
+    "状态",
+    "代次"
+   ],
+   "tableRowCounts": [
+    12,
+    3,
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 27,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "orders-raw",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-raw",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       843,
+       847,
+       876,
+       880
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       920,
+       924,
+       954,
+       958
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "shipments",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "shipments",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       997,
+       1001,
+       1031,
+       1035
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "events-click",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "events-click",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1074,
+       1078,
+       1108,
+       1112
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "events-impression",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "events-impression",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1152,
+       1156,
+       1185,
+       1189
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "inventory",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "inventory",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1229,
+       1233,
+       1262,
+       1266
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "invoice-lines",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "invoice-lines",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1306,
+       1310,
+       1340,
+       1344
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "node-metrics",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "node-metrics",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1383,
+       1387,
+       1417,
+       1421
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "plugin-invocations",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "plugin-invocations",
+      "qualifier": "",
+      "facts": [
+       "r3"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1460,
+       1464,
+       1494,
+       1498
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "audit-ledger",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "audit-ledger",
+      "qualifier": "",
+      "facts": [
+       "r4"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1538,
+       1542,
+       1571,
+       1575
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "risk-scores",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "risk-scores",
+      "qualifier": "",
+      "facts": [
+       "r5"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1615,
+       1619,
+       1648,
+       1652
+      ],
+      "height": 77.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "stale-feed",
+     "clipped": false,
+     "width": 291,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "stale-feed",
+      "qualifier": "",
+      "facts": [
+       "r6"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1689,
+       1693,
+       1722,
+       1726
+      ],
+      "height": 73.2
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated · 4f1c",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated · 4f1c",
+      "qualifier": "",
+      "facts": [
+       "失败"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1857,
+       1861,
+       1890,
+       1894
+      ],
+      "height": 82
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "inventory · b93d",
+     "clipped": false,
+     "width": 285,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "inventory · b93d",
+      "qualifier": "",
+      "facts": [
+       "未知"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       1939,
+       1943,
+       1972,
+       1976
+      ],
+      "height": 82
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "orders-curated · 71ae",
+     "clipped": false,
+     "width": 291,
+     "facts": 1,
+     "factValues": 1,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "orders-curated · 71ae",
+      "qualifier": "",
+      "facts": [
+       "失败"
+      ]
+     },
+     "cardLines": {
+      "count": 4,
+      "tops": [
+       2018,
+       2022,
+       2051,
+       2055
+      ],
+      "height": 78
+     },
+     "geometry": null,
+     "values": 2
+    },
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2183,
+       2187,
+       2216,
+       2220,
+       2245
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2285,
+       2289,
+       2319,
+       2323,
+       2348
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2387,
+       2391,
+       2421,
+       2425,
+       2450
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "",
+      "facts": [
+       "不可达",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2490,
+       2494,
+       2523,
+       2527,
+       2552
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2592,
+       2596,
+       2626,
+       2630,
+       2655
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "",
+      "facts": [
+       "观测陈旧",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2694,
+       2698,
+       2728,
+       2732,
+       2757
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2797,
+       2801,
+       2830,
+       2834,
+       2860
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2899,
+       2903,
+       2933,
+       2937,
+       2962
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3002,
+       3006,
+       3035,
+       3039,
+       3064
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "",
+      "facts": [
+       "需要关注",
+       "1"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3104,
+       3108,
+       3138,
+       3142,
+       3167
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3206,
+       3210,
+       3240,
+       3244,
+       3269
+      ],
+      "height": 102.4
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 291,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "3"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       3306,
+       3310,
+       3339,
+       3343,
+       3368
+      ],
+      "height": 98.4
+     },
+     "geometry": null,
+     "values": 3
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 27
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 1,
+    "total": 27
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/access": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3493,
+   "offenders": [],
+   "identityKey": [
+    "Platform Admin",
+    "Dana Ops",
+    "Lee Chen",
+    "Sam Ito",
+    "Nia Park",
+    "Rui Costa",
+    "Aki Tan",
+    "Noa Berg",
+    "trusted-team",
+    "lab",
+    "partner-a",
+    "partner-b",
+    "community",
+    "vendor-x"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 175.4,
+    "p95": 175.4,
+    "max": 175.4,
+    "n": 14
+   },
+   "columns": 4,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "用户",
+    "角色",
+    "状态",
+    "操作",
+    "发布者",
+    "指纹",
+    "信任状态",
+    "备注"
+   ],
+   "tableRowCounts": [
+    8,
+    6
+   ],
+   "duplicateRunMax": 0,
+   "rows": 14,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 3,
+   "cards": [
+    {
+     "key": "Platform Admin",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Platform Admin",
+      "qualifier": "admin@opsweave.local",
+      "facts": [
+       "admin",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1021,
+       1025,
+       1054,
+       1074,
+       1100,
+       1128
+      ],
+      "height": 175.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Dana Ops",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Dana Ops",
+      "qualifier": "dana@opsweave.local",
+      "facts": [
+       "operator",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1196,
+       1200,
+       1230,
+       1249,
+       1275,
+       1304
+      ],
+      "height": 175.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Lee Chen",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Lee Chen",
+      "qualifier": "lee@opsweave.local",
+      "facts": [
+       "viewer",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1372,
+       1376,
+       1405,
+       1425,
+       1451,
+       1479
+      ],
+      "height": 175.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Sam Ito",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Sam Ito",
+      "qualifier": "sam@opsweave.local",
+      "facts": [
+       "operator",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1547,
+       1551,
+       1581,
+       1600,
+       1626,
+       1654
+      ],
+      "height": 175.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Nia Park",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Nia Park",
+      "qualifier": "nia@opsweave.local",
+      "facts": [
+       "viewer",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1722,
+       1726,
+       1756,
+       1775,
+       1801,
+       1830
+      ],
+      "height": 175.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Rui Costa",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Rui Costa",
+      "qualifier": "rui@opsweave.local",
+      "facts": [
+       "operator",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       1898,
+       1902,
+       1931,
+       1951,
+       1977,
+       2005
+      ],
+      "height": 175.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Aki Tan",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Aki Tan",
+      "qualifier": "aki@opsweave.local",
+      "facts": [
+       "auditor",
+       "活跃",
+       "禁用"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2073,
+       2077,
+       2107,
+       2126,
+       2152,
+       2180
+      ],
+      "height": 175.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "Noa Berg",
+     "clipped": false,
+     "width": 291,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "Noa Berg",
+      "qualifier": "noa@opsweave.local",
+      "facts": [
+       "viewer",
+       "已禁用",
+       "启动副本"
+      ]
+     },
+     "cardLines": {
+      "count": 6,
+      "tops": [
+       2245,
+       2249,
+       2279,
+       2298,
+       2324,
+       2353
+      ],
+      "height": 171.4
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "trusted-team",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "trusted-team",
+      "qualifier": "",
+      "facts": [
+       "sha256:1111111111111…11111111",
+       "未知",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2506,
+       2512,
+       2516,
+       2545,
+       2549,
+       2601,
+       2630
+      ],
+      "height": 157.6
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "lab",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab",
+      "qualifier": "",
+      "facts": [
+       "sha256:2222222222222…22222222",
+       "未知",
+       "无"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2663,
+       2669,
+       2673,
+       2703,
+       2707,
+       2759,
+       2787
+      ],
+      "height": 159.6
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "partner-a",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "partner-a",
+      "qualifier": "",
+      "facts": [
+       "sha256:3333333333333…33333333",
+       "待处理",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2823,
+       2829,
+       2833,
+       2862,
+       2866,
+       2918,
+       2947
+      ],
+      "height": 157.6
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "partner-b",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "partner-b",
+      "qualifier": "",
+      "facts": [
+       "sha256:4444444444444…44444444",
+       "未知",
+       "无"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       2980,
+       2986,
+       2990,
+       3020,
+       3024,
+       3076,
+       3104
+      ],
+      "height": 159.6
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "community",
+     "clipped": false,
+     "width": 285,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "community",
+      "qualifier": "",
+      "facts": [
+       "sha256:5555555555555…55555555",
+       "未知",
+       "Seeded for the table audit"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       3140,
+       3146,
+       3150,
+       3180,
+       3184,
+       3236,
+       3264
+      ],
+      "height": 157.6
+     },
+     "geometry": null,
+     "values": 4
+    },
+    {
+     "key": "vendor-x",
+     "clipped": false,
+     "width": 291,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "vendor-x",
+      "qualifier": "",
+      "facts": [
+       "sha256:6666666666666…66666666",
+       "待处理",
+       "无"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       3294,
+       3300,
+       3304,
+       3334,
+       3338,
+       3390,
+       3418
+      ],
+      "height": 155.6
+     },
+     "geometry": null,
+     "values": 4
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 14
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 14
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/settings/diagnostics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 3436,
+   "offenders": [],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3",
+    "edge-fra-1",
+    "edge-sin-2",
+    "edge-iad-4",
+    "batch-05",
+    "batch-06",
+    "gpu-01",
+    "gpu-02",
+    "spare-07",
+    "spare-08"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 105.6,
+    "p95": 105.6,
+    "max": 105.6,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.33,
+    0.75
+   ],
+   "columnLabels": [
+    "节点",
+    "状态",
+    "最近观测"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "5分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1328,
+       1332,
+       1361,
+       1365,
+       1394
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "47分钟前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1433,
+       1437,
+       1467,
+       1471,
+       1499
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "1小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1539,
+       1543,
+       1573,
+       1577,
+       1605
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-fra-1",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-fra-1",
+      "qualifier": "",
+      "facts": [
+       "不可达",
+       "2小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1645,
+       1649,
+       1678,
+       1682,
+       1711
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-sin-2",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-sin-2",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "2小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1750,
+       1754,
+       1784,
+       1788,
+       1816
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "edge-iad-4",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-iad-4",
+      "qualifier": "",
+      "facts": [
+       "未知",
+       "3小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1856,
+       1860,
+       1889,
+       1893,
+       1922
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-05",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-05",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "4小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       1961,
+       1965,
+       1995,
+       1999,
+       2027
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "batch-06",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "batch-06",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "4小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2067,
+       2071,
+       2101,
+       2105,
+       2133
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-01",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-01",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "5小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2173,
+       2177,
+       2206,
+       2210,
+       2238
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "gpu-02",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "gpu-02",
+      "qualifier": "",
+      "facts": [
+       "排空中",
+       "6小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2278,
+       2282,
+       2312,
+       2316,
+       2344
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-07",
+     "clipped": false,
+     "width": 285,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-07",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "7小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2384,
+       2388,
+       2417,
+       2421,
+       2450
+      ],
+      "height": 105.6
+     },
+     "geometry": null,
+     "values": 3
+    },
+    {
+     "key": "spare-08",
+     "clipped": false,
+     "width": 291,
+     "facts": 2,
+     "factValues": 2,
+     "qualifier": {
+      "height": 0,
+      "lines": 0,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "spare-08",
+      "qualifier": "",
+      "facts": [
+       "就绪",
+       "7小时前"
+      ]
+     },
+     "cardLines": {
+      "count": 5,
+      "tops": [
+       2486,
+       2490,
+       2520,
+       2524,
+       2552
+      ],
+      "height": 101.6
+     },
+     "geometry": null,
+     "values": 3
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 12
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 12
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": 349
+  },
+  "/admin/plugins/dev.opsweave.metrics": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1981,
+   "offenders": [
+    {
+     "tag": "div",
+     "cls": "inline-flex h-control-md items-center gap-1 rounded-control ",
+     "left": 12,
+     "right": 460
+    },
+    {
+     "tag": "button",
+     "cls": "inline-flex items-center justify-center whitespace-nowrap ro",
+     "left": 374,
+     "right": 455
+    },
+    {
+     "tag": "span",
+     "cls": "ml-[5px] rounded-pill border border-solid border-border bg-m",
+     "left": 414,
+     "right": 442
+    }
+   ],
+   "identityKey": [
+    "lab-node-1",
+    "lab-node-2",
+    "edge-ams-3"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 175.3,
+    "p95": 175.3,
+    "max": 175.3,
+    "n": 3
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "节点",
+    "槽位",
+    "状态",
+    "容器",
+    "日志"
+   ],
+   "tableRowCounts": [
+    3
+   ],
+   "duplicateRunMax": 0,
+   "rows": 3,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 3,
+   "cardLabelCount": 3,
+   "cards": [
+    {
+     "key": "lab-node-1",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-1",
+      "qualifier": "READY重启次数 0",
+      "facts": [
+       "#0",
+       "运行中",
+       "c0ffee0deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       1427,
+       1454,
+       1482,
+       1499,
+       1519,
+       1543,
+       1562
+      ],
+      "height": 175.3
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "lab-node-2",
+     "clipped": false,
+     "width": 307,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "lab-node-2",
+      "qualifier": "READY重启次数 1",
+      "facts": [
+       "#1",
+       "运行中",
+       "c0ffee1deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       1603,
+       1630,
+       1657,
+       1675,
+       1694,
+       1719,
+       1737
+      ],
+      "height": 175.3
+     },
+     "geometry": null,
+     "values": 5
+    },
+    {
+     "key": "edge-ams-3",
+     "clipped": false,
+     "width": 313,
+     "facts": 3,
+     "factValues": 3,
+     "qualifier": {
+      "height": 15.4,
+      "lines": 1,
+      "overflow": 0,
+      "codeWhiteSpace": null,
+      "codeLineBoxes": null
+     },
+     "slots": {
+      "identity": "edge-ams-3",
+      "qualifier": "READY重启次数 2",
+      "facts": [
+       "#2",
+       "未知exit code 137",
+       "c0ffee2deadb"
+      ]
+     },
+     "cardLines": {
+      "count": 7,
+      "tops": [
+       1775,
+       1802,
+       1830,
+       1847,
+       1867,
+       1891,
+       1910
+      ],
+      "height": 171.3
+     },
+     "geometry": null,
+     "values": 5
+    }
+   ],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 3
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 3
+   },
+   "tableWidth": 349,
+   "tablePanelWidth": null
+  },
+  "/admin/jobs/9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 1445,
+   "offenders": [],
+   "identityKey": [],
+   "identityUnique": null,
+   "rowHeight": {
+    "p50": 66,
+    "p95": 66,
+    "max": 66,
+    "n": 2
+   },
+   "columns": 5,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "尝试",
+    "状态",
+    "栅栏",
+    "节点",
+    "开始时间"
+   ],
+   "tableRowCounts": [
+    2
+   ],
+   "duplicateRunMax": 0,
+   "rows": 2,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "overlap": {
+    "px": 0,
+    "rows": 0,
+    "worst": 0,
+    "cellPairs": 0,
+    "cellRows": 0,
+    "measured": 2
+   },
+   "firstScreen": {
+    "full": 0,
+    "partial": 0,
+    "total": 2
+   },
+   "tableWidth": 375,
+   "tablePanelWidth": 349
+  }
+ }
+}

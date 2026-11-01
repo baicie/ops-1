@@ -1,0 +1,1078 @@
+{
+ "r1440-light-en": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1242,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "Connector",
+    "Status",
+    "Trust",
+    "Publisher"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "firstBlockY": 160,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r1440-light-zh": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1217,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "连接器",
+    "状态",
+    "信任状态",
+    "发布者"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "firstBlockY": 160,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r1440-dark-en": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1242,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "Connector",
+    "Status",
+    "Trust",
+    "Publisher"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "firstBlockY": 160,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r1440-dark-zh": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1217,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "连接器",
+    "状态",
+    "信任状态",
+    "发布者"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "firstBlockY": 160,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r1024-light-en": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1009,
+   "docClientW": 1024,
+   "docHeight": 1386,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "Connector",
+    "Status",
+    "Trust",
+    "Publisher"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1024,
+    "h": 820
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 127,
+    "firstBlockY": 231,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r1024-light-zh": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1009,
+   "docClientW": 1024,
+   "docHeight": 1337,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "连接器",
+    "状态",
+    "信任状态",
+    "发布者"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1024,
+    "h": 820
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "firstBlockY": 184,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r1024-dark-en": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1009,
+   "docClientW": 1024,
+   "docHeight": 1386,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "Connector",
+    "Status",
+    "Trust",
+    "Publisher"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1024,
+    "h": 820
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 127,
+    "firstBlockY": 231,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r1024-dark-zh": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 1009,
+   "docClientW": 1024,
+   "docHeight": 1337,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 4,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42,
+    0.67
+   ],
+   "columnLabels": [
+    "连接器",
+    "状态",
+    "信任状态",
+    "发布者"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1024,
+    "h": 820
+   },
+   "cardFactCount": null,
+   "cardLabelCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "firstBlockY": 184,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r390-light-en": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2322,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 93.2,
+    "p95": 93.2,
+    "max": 93.2,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42
+   ],
+   "columnLabels": [
+    "Connector",
+    "Status",
+    "Trust"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "CloudWatch",
+     "clipped": false,
+     "width": 136,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Data Integration",
+     "clipped": false,
+     "width": 136,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 133,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "IPMI Sensors",
+     "clipped": false,
+     "width": 107,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "JMX Probe",
+     "clipped": false,
+     "width": 107,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "NetFlow",
+     "clipped": false,
+     "width": 140,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "OTel Collector",
+     "clipped": false,
+     "width": 138,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Prometheus Scraper",
+     "clipped": false,
+     "width": 136,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "SNMP Poller",
+     "clipped": false,
+     "width": 118,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Syslog Receiver",
+     "clipped": false,
+     "width": 107,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acme.zabbix",
+     "clipped": false,
+     "width": 133,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acea",
+     "clipped": false,
+     "width": 142,
+     "facts": 2,
+     "factValues": 2
+    }
+   ],
+   "template": {
+    "headerHeight": 156,
+    "firstBlockY": 248,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r390-light-zh": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2197,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 89.2,
+    "p95": 93.2,
+    "max": 93.2,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42
+   ],
+   "columnLabels": [
+    "连接器",
+    "状态",
+    "信任状态"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "CloudWatch",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Data Integration",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 161,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "IPMI Sensors",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "JMX Probe",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "NetFlow",
+     "clipped": false,
+     "width": 163,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "OTel Collector",
+     "clipped": false,
+     "width": 161,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Prometheus Scraper",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "SNMP Poller",
+     "clipped": false,
+     "width": 163,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Syslog Receiver",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acme.zabbix",
+     "clipped": false,
+     "width": 162,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acea",
+     "clipped": false,
+     "width": 171,
+     "facts": 2,
+     "factValues": 2
+    }
+   ],
+   "template": {
+    "headerHeight": 138,
+    "firstBlockY": 230,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r390-dark-en": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2322,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 93.2,
+    "p95": 93.2,
+    "max": 93.2,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42
+   ],
+   "columnLabels": [
+    "Connector",
+    "Status",
+    "Trust"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "CloudWatch",
+     "clipped": false,
+     "width": 136,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Data Integration",
+     "clipped": false,
+     "width": 136,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 133,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "IPMI Sensors",
+     "clipped": false,
+     "width": 107,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "JMX Probe",
+     "clipped": false,
+     "width": 107,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "NetFlow",
+     "clipped": false,
+     "width": 140,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "OTel Collector",
+     "clipped": false,
+     "width": 138,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Prometheus Scraper",
+     "clipped": false,
+     "width": 136,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "SNMP Poller",
+     "clipped": false,
+     "width": 118,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Syslog Receiver",
+     "clipped": false,
+     "width": 107,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acme.zabbix",
+     "clipped": false,
+     "width": 133,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acea",
+     "clipped": false,
+     "width": 142,
+     "facts": 2,
+     "factValues": 2
+    }
+   ],
+   "template": {
+    "headerHeight": 156,
+    "firstBlockY": 248,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ },
+ "r390-dark-zh": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2197,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 89.2,
+    "p95": 93.2,
+    "max": 93.2,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42
+   ],
+   "columnLabels": [
+    "连接器",
+    "状态",
+    "信任状态"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "CloudWatch",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Data Integration",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 161,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "IPMI Sensors",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "JMX Probe",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "NetFlow",
+     "clipped": false,
+     "width": 163,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "OTel Collector",
+     "clipped": false,
+     "width": 161,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Prometheus Scraper",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "SNMP Poller",
+     "clipped": false,
+     "width": 163,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Syslog Receiver",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acme.zabbix",
+     "clipped": false,
+     "width": 162,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acea",
+     "clipped": false,
+     "width": 171,
+     "facts": 2,
+     "factValues": 2
+    }
+   ],
+   "template": {
+    "headerHeight": 138,
+    "firstBlockY": 230,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ }
+}

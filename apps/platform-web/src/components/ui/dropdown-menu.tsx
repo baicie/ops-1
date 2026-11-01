@@ -35,7 +35,7 @@ export const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'z-[110] min-w-[10rem] overflow-hidden rounded-md border border-solid border-border bg-popover p-1 text-popover-foreground shadow-card',
+        'z-[110] min-w-[10rem] overflow-hidden rounded-card border border-solid border-border bg-popover p-1 text-popover-foreground shadow-card',
         className,
       )}
       {...props}
@@ -45,7 +45,7 @@ export const DropdownMenuContent = React.forwardRef<
 DropdownMenuContent.displayName = 'DropdownMenuContent';
 
 const itemBase =
-  'relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base text-foreground outline-none transition-colors ' +
+  'relative flex cursor-default select-none items-center gap-2 rounded-control px-2 py-1.5 text-base text-foreground outline-none transition-colors ' +
   'data-[disabled]:pointer-events-none data-[disabled]:opacity-50 focus:bg-accent focus:text-accent-foreground';
 
 export const DropdownMenuItem = React.forwardRef<

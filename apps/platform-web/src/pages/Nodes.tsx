@@ -19,7 +19,7 @@ import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../
 import { describeNodeState, nodeRevokedLanded } from '../lib/verified-writes';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
-import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
+import { Bytes, BytesPair, NoData, StatusIndicator, UnknownValue, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
@@ -327,7 +327,7 @@ export function NodesPage() {
                             </span>
                             <span className="ow-cell-meta ow-tnum">
                               {snapshot.memoryTotalBytes ? (
-                                <span data-resource="capacity">{memory === null ? formatBytes(snapshot.memoryTotalBytes) : `${formatBytes(snapshot.memoryUsedBytes)} / ${formatBytes(snapshot.memoryTotalBytes)}`}</span>
+                                <span data-resource="capacity">{memory === null ? <Bytes value={formatBytes(snapshot.memoryTotalBytes)} detail={t('nodes.resource.missingSnapshot')} /> : <BytesPair used={formatBytes(snapshot.memoryUsedBytes)} total={formatBytes(snapshot.memoryTotalBytes)} detail={t('nodes.resource.missingSnapshot')} />}</span>
                               ) : null}
                               {snapshot.sampledAt ? (
                                 <>
@@ -470,8 +470,8 @@ export function NodeDetailPage() {
           {!snapshot ? <p className="text-muted-foreground p-4">{t('nodeDetail.resources.empty')}</p> : (
             <div className="resource-stack">
               <div><div className="resource-row"><span>{t('nodeDetail.resource.cpuUtilization')}</span><strong>{typeof snapshot.cpuUtilization === 'number' ? `${(snapshot.cpuUtilization * 100).toFixed(0)}%` : <NoData detail={t('nodes.resource.missingSnapshot')} />}</strong></div><ProgressBar percent={snapshot.cpuUtilization ?? null} /></div>
-              <div><div className="resource-row"><span>{t('table.memory')}</span><strong>{formatBytes(snapshot.memoryUsedBytes)} / {formatBytes(snapshot.memoryTotalBytes)}</strong></div><ProgressBar percent={memoryPercent} /></div>
-              <div><div className="resource-row"><span>{t('table.filesystem')}</span><strong>{formatBytes(snapshot.filesystemUsedBytes)} / {formatBytes(snapshot.filesystemTotalBytes)}</strong></div><ProgressBar percent={diskPercent} /></div>
+              <div><div className="resource-row"><span>{t('table.memory')}</span><strong><BytesPair used={formatBytes(snapshot.memoryUsedBytes)} total={formatBytes(snapshot.memoryTotalBytes)} detail={t('nodes.resource.missingSnapshot')} /></strong></div><ProgressBar percent={memoryPercent} /></div>
+              <div><div className="resource-row"><span>{t('table.filesystem')}</span><strong><BytesPair used={formatBytes(snapshot.filesystemUsedBytes)} total={formatBytes(snapshot.filesystemTotalBytes)} detail={t('nodes.resource.missingSnapshot')} /></strong></div><ProgressBar percent={diskPercent} /></div>
               <p className="text-sm text-muted-foreground">{t('nodeDetail.resources.sampledAt', { at: formatDate(snapshot.sampledAt) })}</p>
             </div>
           )}
@@ -528,8 +528,8 @@ export function NodeDetailPage() {
                   <TableRow key={sample.sampleId}>
                     <StackCell label={t('table.observed')}>{formatDate(sample.observedAt)}</StackCell>
                     <StackCell label={t('table.cpu')}>{typeof sample.cpuUtilization === 'number' ? `${(sample.cpuUtilization * 100).toFixed(0)}%` : <NoData detail={t('nodes.resource.missingSnapshot')} />}</StackCell>
-                    <StackCell label={t('table.memory')}>{formatBytes(sample.memoryUsedBytes)} / {formatBytes(sample.memoryTotalBytes)}</StackCell>
-                    <StackCell label={t('table.filesystem')}>{formatBytes(sample.filesystemUsedBytes)} / {formatBytes(sample.filesystemTotalBytes)}</StackCell>
+                    <StackCell label={t('table.memory')}><BytesPair used={formatBytes(sample.memoryUsedBytes)} total={formatBytes(sample.memoryTotalBytes)} detail={t('nodes.resource.missingSnapshot')} /></StackCell>
+                    <StackCell label={t('table.filesystem')}><BytesPair used={formatBytes(sample.filesystemUsedBytes)} total={formatBytes(sample.filesystemTotalBytes)} detail={t('nodes.resource.missingSnapshot')} /></StackCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -619,7 +619,7 @@ function historySegments(history: any[]) {
 function ProgressBar({ percent }: { percent: number | null }) {
   return (
     <div className="h-[5px] overflow-hidden rounded-full bg-surface-3" aria-hidden="true">
-      <div className="h-full rounded-[inherit] bg-primary" style={{ width: percent === null ? '0%' : `${Math.min(100, Math.max(0, percent * 100))}%` }} />
+      <div className="h-full rounded-pill bg-primary" style={{ width: percent === null ? '0%' : `${Math.min(100, Math.max(0, percent * 100))}%` }} />
     </div>
   );
 }

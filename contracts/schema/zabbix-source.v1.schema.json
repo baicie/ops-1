@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsweave.invalid/schema/zabbix-source.v1.schema.json",
+  "title": "OpsWeave Zabbix Source v1",
+  "description": "Telemetry source contract for the opsweave.zabbix-source plugin. The plugin owns its own schema and storage; the Kernel never gains Zabbix knowledge (ADR-006, rules/01). Credentials appear only as references (rules/03): a secret value never appears in this schema, in a URL, in a log line or in an error body. Every collection result carries an outcome that distinguishes EMPTY, NO_DATA, PARTIAL, UNKNOWN, UNAVAILABLE and TIMEOUT, and a missing sample is null with a reason - never 0 (rules/05).",
+  "$defs": {
+    "CredentialReference": {
+      "type": "object",
+      "description": "A pointer to a secret held by the plugin secret store, never the secret. `ref` is an opaque handle the plugin resolves at call time under a short-lived access grant; it is safe to log, store and return to the UI.",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["api-token", "basic"],
+          "description": "api-token: a Zabbix API token sent in the Authorization header. basic: a user/password pair exchanged for a session token at probe time."
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "pattern": "^secretref:[A-Za-z0-9._\\-/]{1,180}$",
+          "description": "Opaque secret handle. The prefix is fixed so a raw token pasted into this field fails validation instead of being stored as if it were a reference."
+        }
+      }
+    },
+    "ZabbixSource": {
+      "type": "object",
+      "description": "One configured Zabbix endpoint. `status` is what the plugin last verified, not what the operator hopes: a source is UNVERIFIED until a probe succeeds, and it never silently becomes READY.",
+      "additionalProperties": false,
+      "required": ["sourceId", "name", "endpoint", "credential", "status", "createdAt"],
+      "properties": {
+        "sourceId": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 500,
+          "description": "Base URL of the Zabbix JSON-RPC endpoint (https scheme in production). Never carries credentials: a userinfo component is rejected so a token cannot be smuggled into a URL that is later logged."
+        },
+        "credential": { "$ref": "#/$defs/CredentialReference" },
+        "verifyTls": {
+          "type": "boolean",
+          "default": true,
+          "description": "Only an explicit operator decision may turn this off, and the source is then reported DEGRADED rather than READY."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["UNVERIFIED", "READY", "DEGRADED", "UNAVAILABLE"],
+          "description": "UNVERIFIED: never probed. READY: last probe answered and TLS was verified. DEGRADED: reachable under a weakened setting, or the last probe was PARTIAL. UNAVAILABLE: the last probe could not reach the endpoint. Heartbeat silence alone never promotes or demotes a source (AGENTS.md MUST NOT)."
+        },
+        "lastProbe": { "$ref": "#/$defs/ProbeResult" },
+        "budget": { "$ref": "#/$defs/CollectionBudget" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CollectionBudget": {
+      "type": "object",
+      "description": "Hard ceilings on one collection, enforced by the plugin and reported back on every result (AGENTS.md: every collection cost has a budget, a ceiling and failure semantics). A request that asks for more is clamped, and the result says it was clamped rather than pretending the full window was covered.",
+      "additionalProperties": false,
+      "properties": {
+        "maxWindowSeconds": { "type": "integer", "minimum": 60, "maximum": 86400, "default": 3600 },
+        "maxItems": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
+        "maxSamplesPerItem": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 500 },
+        "requestTimeoutMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000 },
+        "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 8, "default": 2 }
+      }
+    },
+    "ProbeResult": {
+      "type": "object",
+      "description": "The outcome of one reachability check. A probe never writes telemetry and never falls back to a mock (AGENTS.md MUST NOT).",
+      "additionalProperties": false,
+      "required": ["outcome", "observedAt"],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["OK", "UNAUTHORIZED", "UNAVAILABLE", "TIMEOUT", "UNKNOWN"],
+          "description": "OK: the endpoint answered and the credential was accepted. UNAUTHORIZED: it answered and rejected the credential - reachable, so distinct from UNAVAILABLE. UNAVAILABLE: no answer (DNS, refused, TLS). TIMEOUT: the deadline passed with no answer. UNKNOWN: the transport failed after the request was sent, so whether Zabbix acted on it is not known."
+        },
+        "apiVersion": {
+          "type": ["string", "null"],
+          "maxLength": 40,
+          "description": "Reported by the server; null when the probe did not get far enough to learn it. Never guessed."
+        },
+        "latencyMs": { "type": ["integer", "null"], "minimum": 0 },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the plugin observed this, UTC ISO 8601. Distinct from a sample's occurredAt (AGENTS.md)."
+        },
+        "errorCode": {
+          "type": ["string", "null"],
+          "maxLength": 80,
+          "description": "Stable code for the UI to localize (rules/06). Never the raw upstream sentence, and never a secret."
+        }
+      }
+    },
+    "CollectionOutcome": {
+      "type": "string",
+      "enum": ["OK", "EMPTY", "NO_DATA", "PARTIAL", "UNKNOWN", "UNAVAILABLE", "TIMEOUT"],
+      "description": "Seven distinct facts, which rules/05 forbids collapsing. OK: the window was covered and samples were returned. EMPTY: the server answered authoritatively and the item recorded nothing in the window - the absence is established. NO_DATA: whether anything was recorded cannot be established (item unsupported or disabled, history trimmed by housekeeping below the window, item unknown to this source). PARTIAL: some requested items were answered and others were not, or the window was clamped by the budget. UNKNOWN: the outcome itself is not known (timeout mid-flight, transport failure after the request was sent). UNAVAILABLE: the endpoint was never reached, so nothing was requested. TIMEOUT: the deadline passed before an answer."
+    },
+    "MetricSample": {
+      "type": "object",
+      "description": "One observation. `value` is null whenever there is no observed number, and `absenceReason` says why. A null is never rendered or stored as 0 (rules/05). The two fields are bound by the if/then below, so a schema-valid sample can never be an unexplained null nor a number carrying an absence reason - the 'no data is not zero' rule is enforced by the contract, not only asserted in prose.",
+      "additionalProperties": false,
+      "required": ["occurredAt", "value"],
+      "properties": {
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the value was measured at the source (Zabbix clock), not when this plugin read it."
+        },
+        "value": { "type": ["number", "null"] },
+        "absenceReason": {
+          "type": ["string", "null"],
+          "enum": ["NOT_RECORDED", "UNSUPPORTED_ITEM", "TRIMMED_BY_HOUSEKEEPING", "CLAMPED_BY_BUDGET", null],
+          "description": "Non-null exactly when value is null, so an absent number always carries its reason."
+        }
+      },
+      "if": { "properties": { "value": { "type": "null" } }, "required": ["value"] },
+      "then": {
+        "required": ["absenceReason"],
+        "properties": { "absenceReason": { "type": "string" } }
+      },
+      "else": {
+        "properties": { "absenceReason": { "type": "null" } }
+      }
+    },
+    "ItemSeries": {
+      "type": "object",
+      "description": "The result for one requested item. Each item carries its own outcome, so one failing item downgrades the batch to PARTIAL instead of silently shrinking it.",
+      "additionalProperties": false,
+      "required": ["itemId", "outcome", "samples", "requestedWindow"],
+      "properties": {
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "hostId": { "type": ["string", "null"], "maxLength": 80 },
+        "key": { "type": ["string", "null"], "maxLength": 400 },
+        "unit": { "type": ["string", "null"], "maxLength": 40 },
+        "outcome": { "$ref": "#/$defs/CollectionOutcome" },
+        "errorCode": { "type": ["string", "null"], "maxLength": 80 },
+        "requestedWindow": { "$ref": "#/$defs/TimeWindow" },
+        "coveredWindow": {
+          "anyOf": [{ "$ref": "#/$defs/TimeWindow" }, { "type": "null" }],
+          "description": "The window actually covered. Smaller than requestedWindow when the budget clamped it; null when nothing was covered. A reader comparing the two can tell a complete answer from a clamped one."
+        },
+        "samples": { "type": "array", "items": { "$ref": "#/$defs/MetricSample" }, "maxItems": 5000 }
+      }
+    },
+    "TimeWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "string", "format": "date-time" },
+        "to": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CollectionResult": {
+      "type": "object",
+      "description": "One collection over one time window. Counts are reported with their unknown denominator (rules/05): requestedItems is what was asked for, answeredItems what came back, and the difference is visible rather than absorbed.",
+      "additionalProperties": false,
+      "required": ["collectionId", "sourceId", "outcome", "requestedItems", "answeredItems", "series", "budget", "observedAt", "contentRef"],
+      "properties": {
+        "collectionId": { "type": "string", "format": "uuid" },
+        "sourceId": { "type": "string", "format": "uuid" },
+        "outcome": { "$ref": "#/$defs/CollectionOutcome" },
+        "requestedItems": { "type": "integer", "minimum": 0 },
+        "answeredItems": { "type": "integer", "minimum": 0 },
+        "clamped": {
+          "type": "boolean",
+          "default": false,
+          "description": "True when a budget ceiling changed what was collected. A clamped collection is never reported as OK."
+        },
+        "series": { "type": "array", "items": { "$ref": "#/$defs/ItemSeries" }, "maxItems": 500 },
+        "budget": { "$ref": "#/$defs/CollectionBudget" },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "errorCode": { "type": ["string", "null"], "maxLength": 80 },
+        "contentRef": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Content digest of the canonical collection body. This is the locator the Kernel stores on an evidence row and the exact string the attestation signature covers; the payload itself never enters the Kernel database (incident-v1.yaml)."
+        }
+      }
+    },
+    "EvidenceAttestation": {
+      "type": "object",
+      "description": "What this plugin presents to the Kernel so a collection becomes SOURCE_ATTESTED evidence. The signed bytes are fixed by incident-v1.yaml (components.schemas.Attestation) and reproduced here field for field; a field this envelope does not cover cannot influence the trust the Kernel records (ADR-015).",
+      "additionalProperties": false,
+      "required": ["adapterId", "issuedAt", "signature"],
+      "properties": {
+        "adapterId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The adapter identity the Kernel was configured with. An id the Kernel does not know is refused with EVIDENCE_ADAPTER_UNKNOWN - never downgraded to UNVERIFIED."
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the adapter signed. The Kernel accepts 300s either side of its own clock, so a captured signature cannot be replayed indefinitely."
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "base64url, unpadded, HMAC-SHA256 over the canonical attestation payload: {\"v\":\"opsweave-evidence-attestation-v1\",\"adapterId\":...,\"incidentId\":...,\"kind\":...,\"source\":...,\"collectedAtUnix\":...,\"contentRef\":...,\"issuedAtUnix\":...} with exactly that key order."
+        }
+      }
+    }
+  }
+}

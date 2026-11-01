@@ -1,0 +1,53 @@
+{
+  "incident": "4445a357-a4ca-4db7-b62b-28c26a98caf6",
+  "shots": [
+    {
+      "label": "r1440-light-en",
+      "file": "r1440-light-en__incident-trust.png"
+    },
+    {
+      "label": "r1440-light-zh-CN",
+      "file": "r1440-light-zh-CN__incident-trust.png"
+    },
+    {
+      "label": "r1440-dark-en",
+      "file": "r1440-dark-en__incident-trust.png"
+    },
+    {
+      "label": "r1440-dark-zh-CN",
+      "file": "r1440-dark-zh-CN__incident-trust.png"
+    },
+    {
+      "label": "r1024-light-en",
+      "file": "r1024-light-en__incident-trust.png"
+    },
+    {
+      "label": "r1024-light-zh-CN",
+      "file": "r1024-light-zh-CN__incident-trust.png"
+    },
+    {
+      "label": "r1024-dark-en",
+      "file": "r1024-dark-en__incident-trust.png"
+    },
+    {
+      "label": "r1024-dark-zh-CN",
+      "file": "r1024-dark-zh-CN__incident-trust.png"
+    },
+    {
+      "label": "r390-light-en",
+      "file": "r390-light-en__incident-trust.png"
+    },
+    {
+      "label": "r390-light-zh-CN",
+      "file": "r390-light-zh-CN__incident-trust.png"
+    },
+    {
+      "label": "r390-dark-en",
+      "file": "r390-dark-en__incident-trust.png"
+    },
+    {
+      "label": "r390-dark-zh-CN",
+      "file": "r390-dark-zh-CN__incident-trust.png"
+    }
+  ]
+}

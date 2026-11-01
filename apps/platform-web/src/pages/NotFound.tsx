@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { EmptyState, PageHeader } from '../components/Ui';
+import { EmptyState } from '../components/Ui';
+import { PageHeader } from '../components/app/page-header';
 import { buttonVariants } from '../components/ui/button';
 import { useT } from '../i18n';
 

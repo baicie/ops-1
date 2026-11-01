@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, newIdempotencyKey } from '../api';
 import type { PipelineDetail, PipelineDraft, PipelinePreview, PipelineRevision, PipelineValidation } from '../types';
@@ -9,7 +9,8 @@ import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, UnknownValue } from '../components/app/status-indicator';
 import { useStatusText } from '../components/app/status';
 import { useDocumentTitle } from '../hooks';
-import { useT, type MessageKey, type TranslateParams } from '../i18n';
+import { useI18n, useT, type MessageKey, type TranslateParams } from '../i18n';
+import { ageMessage } from '../lib/age';
 import { GraphCanvas } from './GraphCanvas';
 import { toGraph, fromGraph } from './ir/adapter';
 import { definitionDiff } from './ir/diff';
@@ -48,6 +49,8 @@ export function PipelineEditorPage() {
   const [searchParams] = useSearchParams();
   const draftParam = searchParams.get('draft');
   const t = useT();
+  const { locale } = useI18n();
+  const draftPickerId = useId();
   const statusText = useStatusText();
   useDocumentTitle(t('studio.pageTitle'));
 
@@ -148,6 +151,18 @@ export function PipelineEditorPage() {
     setGraph(next);
     setServerValidation(null);
   };
+
+  /**
+   * A measurement is not an edit, so it does not belong in undo history.
+   *
+   * The canvas reports every node's rendered size through onNodesChange, and that report has to
+   * be stored on the model or React Flow keeps the node hidden (see GraphCanvas's handler). Routing
+   * it through `update` would push a history entry per measured node and wipe redo on every mount,
+   * so the reader's Undo would step through invisible no-ops before reaching their own last change.
+   * The dirty flag is derived from the definition, which `measured` never touches, so skipping the
+   * snapshot here cannot hide an unsaved edit.
+   */
+  const applyMeasurement = (next: EditorGraph) => setGraph(next);
   const undo = () => {
     const previous = history[history.length - 1];
     if (!previous) return;
@@ -333,7 +348,45 @@ export function PipelineEditorPage() {
           <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => setConfirmConflict('overwrite')}>{t('studio.action.useLocalRetry')}</button>
         </div>
       </div>}
-      {drafts.length > 0 && <section className="panel panel-pad studio-drafts"><strong>{t('studio.drafts.title')}</strong><div className="draft-row">{drafts.map((item) => <button key={item.draftId} className={`btn btn-secondary btn-small ${draft?.draftId === item.draftId ? 'active' : ''}`} onClick={() => navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${item.draftId}`)}>v{item.version} · {new Date(item.updatedAt).toLocaleString()}</button>)}</div></section>}
+      {/* page-template §2.4 + token-table R4: history is a CHOICE, not a wall of verbs.
+          This panel rendered one equal-weight button per saved draft - the audit measured 18 of
+          them, six to a row, 130px of the page directly under the header - so the loudest region
+          on the worst-scoring route was a list of timestamps, and the reader could not find the
+          next step among 26 identically weighted rectangles.
+
+          One control now carries the whole set: a select whose own label says how many there are
+          and which one is open. Selecting navigates, exactly as the buttons did; nothing is
+          deleted and no draft becomes unreachable. The region is a toolbar row at the dense tier
+          (§2.1's "one control height per row"), not a panel.
+
+          The timestamp also stopped bypassing i18n: `new Date().toLocaleString()` follows the
+          BROWSER, so a zh-CN console printed "10/29/2026, 7:09:01 PM" in the one place the page
+          spoke about time. It reads the shell's own age ladder now, which is what every other
+          row on the route uses. */}
+      {drafts.length > 0 && (
+        <div className="toolbar studio-draft-picker" data-region="studio-drafts">
+          <label className="field-label" htmlFor={draftPickerId}>{t('studio.drafts.title')}</label>
+          <div className="ow-filter-select">
+            <select
+              id={draftPickerId}
+              value={draft?.draftId || ''}
+              aria-label={t('studio.drafts.pickerLabel')}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next) navigate(`/admin/pipelines/${encodeURIComponent(pipelineId)}/editor?draft=${encodeURIComponent(next)}`);
+              }}
+            >
+              {!draft && <option value="">{t('studio.drafts.openPublished')}</option>}
+              {drafts.map((item) => (
+                <option key={item.draftId} value={item.draftId}>
+                  {t('studio.drafts.option', { version: item.version, age: ageMessage(locale, item.updatedAt) })}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span className="toolbar-count">{t('studio.drafts.count', { count: drafts.length })}</span>
+        </div>
+      )}
       <div className="studio-shell">
         <aside className="panel panel-pad studio-palette">
           <h2>{t('studio.palette.title')}</h2><p className="muted small">{t('studio.palette.description')}</p>
@@ -344,7 +397,7 @@ export function PipelineEditorPage() {
             <button className={mobileView === 'nodes' ? 'active' : ''} onClick={() => setMobileView('nodes')}>{t('studio.canvas.viewNodes')}</button>
             <button className={mobileView === 'canvas' ? 'active' : ''} onClick={() => setMobileView('canvas')}>{t('studio.canvas.viewCanvas')}</button>
           </div>
-          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className={getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? 'flow-index' : 'flow-index flow-index-token'}>{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : <UnknownValue detail={t('ui.unknown.detail')} />}</span><span><strong>{nodeLabel(t, node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{t('studio.canvas.nodeOutCount', { count: node.outputs.length })}</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => update({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
+          {mobileView === 'nodes' ? <div className="mobile-node-list">{getPipelineExecutionOrder(definition).orderedNodes.map((node, index) => <button key={node.nodeId} className={selectedId === node.nodeId ? 'active' : ''} onClick={() => setSelectedId(node.nodeId)}><span className={getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? 'flow-index' : 'flow-index flow-index-token'}>{getPipelineExecutionOrder(definition).topologyStatus === 'VALID' ? index + 1 : <UnknownValue detail={t('ui.unknown.detail')} />}</span><span><strong>{nodeLabel(t, node.type)}</strong><small>{node.nodeId}</small></span><span className="muted small">{t('studio.canvas.nodeOutCount', { count: node.outputs.length })}</span></button>)}</div> : <GraphCanvas direction={layoutDirection} layoutNonce={layoutNonce} viewMode={viewMode} nodes={graph.nodes} edges={graph.edges} selectedId={selectedId} onNodesChange={(nodes) => applyMeasurement({ ...graph, nodes })} onEdgesChange={(edges) => update({ ...graph, edges })} onConnectAttempt={connect} onSelect={setSelectedId} />}
           {connectionError && <div className="studio-error" role="alert"><Icon name="warning" size={14} /> {connectionError}</div>}
           <p className="studio-note"><Icon name="alert" size={13} /> {t('studio.canvas.note')}</p>
         </section>

@@ -1,0 +1,198 @@
+{
+  "config": {
+    "label": "incident-trust light-zh-CN"
+  },
+  "pages": {
+    "/app/incidents/{id}@1440": {
+      "overflow": -15,
+      "docScrollW": 1425,
+      "docClientW": 1440,
+      "offenders": [],
+      "identityKey": [
+        "指标快照",
+        "人工记录"
+      ],
+      "identityUnique": 1,
+      "rowHeight": {
+        "p50": 41,
+        "p95": 41,
+        "max": 41,
+        "n": 2
+      },
+      "columns": 5,
+      "distinctRatio": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "columnLabels": [
+        "类型",
+        "信任状态",
+        "来源",
+        "采集时间",
+        "内容引用"
+      ],
+      "duplicateRunMax": 1,
+      "rows": 2,
+      "noDataPerTable": 0,
+      "viewport": {
+        "w": 1440,
+        "h": 900
+      },
+      "cardFactCount": null,
+      "cardLabelCount": null,
+      "cards": [],
+      "evidence": {
+        "rows": 2,
+        "trusts": [
+          "SOURCE_ATTESTED",
+          "UNVERIFIED"
+        ],
+        "tones": [
+          "ok",
+          "warn"
+        ],
+        "gapRows": 1,
+        "legend": true
+      }
+    },
+    "/app/incidents/{id}@1024": {
+      "overflow": -15,
+      "docScrollW": 1009,
+      "docClientW": 1024,
+      "offenders": [],
+      "identityKey": [
+        "指标快照",
+        "人工记录"
+      ],
+      "identityUnique": 1,
+      "rowHeight": {
+        "p50": 41,
+        "p95": 41,
+        "max": 41,
+        "n": 2
+      },
+      "columns": 5,
+      "distinctRatio": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "columnLabels": [
+        "类型",
+        "信任状态",
+        "来源",
+        "采集时间",
+        "内容引用"
+      ],
+      "duplicateRunMax": 1,
+      "rows": 2,
+      "noDataPerTable": 0,
+      "viewport": {
+        "w": 1024,
+        "h": 800
+      },
+      "cardFactCount": null,
+      "cardLabelCount": null,
+      "cards": [],
+      "evidence": {
+        "rows": 2,
+        "trusts": [
+          "SOURCE_ATTESTED",
+          "UNVERIFIED"
+        ],
+        "tones": [
+          "ok",
+          "warn"
+        ],
+        "gapRows": 1,
+        "legend": true
+      }
+    },
+    "/app/incidents/{id}@390": {
+      "overflow": -15,
+      "docScrollW": 375,
+      "docClientW": 390,
+      "offenders": [
+        {
+          "tag": "td",
+          "cls": "px-3.5 py-2.5 align-middle text-base max-[768px]:flex max-[7",
+          "right": 401
+        },
+        {
+          "tag": "p",
+          "cls": "ow-trust-gap",
+          "right": 401
+        }
+      ],
+      "identityKey": [
+        "指标快照",
+        "人工记录"
+      ],
+      "identityUnique": 1,
+      "rowHeight": {
+        "p50": 172.4,
+        "p95": 172.4,
+        "max": 172.4,
+        "n": 2
+      },
+      "columns": 5,
+      "distinctRatio": [
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "columnLabels": [
+        "类型",
+        "信任状态",
+        "来源",
+        "采集时间",
+        "内容引用"
+      ],
+      "duplicateRunMax": 1,
+      "rows": 2,
+      "noDataPerTable": 0,
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "cardFactCount": 2,
+      "cardLabelCount": 2,
+      "cards": [
+        {
+          "key": "指标快照",
+          "clipped": false,
+          "width": null,
+          "facts": 2,
+          "factValues": 2
+        },
+        {
+          "key": "人工记录",
+          "clipped": false,
+          "width": null,
+          "facts": 2,
+          "factValues": 2
+        }
+      ],
+      "evidence": {
+        "rows": 2,
+        "trusts": [
+          "SOURCE_ATTESTED",
+          "UNVERIFIED"
+        ],
+        "tones": [
+          "ok",
+          "warn"
+        ],
+        "gapRows": 1,
+        "legend": true
+      }
+    }
+  }
+}
