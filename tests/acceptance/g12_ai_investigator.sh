@@ -184,7 +184,28 @@ EB="$(evidence_make "$B_JAR" "$B_CSRF" "$IB" LOG_EXCERPT "$(ts -1200)" agent-b-p
 [ -n "$IB" ] && [ -n "$EB" ] && ok "operator B holds an incident and evidence A must not reach" || bad "operator B setup failed"
 S4_CTL="$(call "$A_JAR" "$A_CSRF" GET "/api/v1/incidents/$IB")"
 check 404 "$S4_CTL" "S4 control: A cannot read B's incident over HTTP either"
+# The code, not only the status, because the two layers answer the same account differently and
+# that difference is the point: over HTTP the caller's own predicate answers INCIDENT_NOT_FOUND,
+# while a tool in this run answers INCIDENT_OUT_OF_SCOPE, because a run may read less than the
+# account behind it and never more. S4.1 then shows the same predicate still refusing inside a
+# tool, through the evidence row it can reach.
+check "INCIDENT_NOT_FOUND" "$(code)" "S4 control: and it is the caller's read predicate that refuses it over HTTP"
 
+# Which layer these six expectations are about, and why the code changed.
+# Every call below names B's incident, so the refusal it gets is the RUN'S OWN SCOPE, not the
+# caller's read predicate: target_incident() compares the argument with the incident the run
+# is about and refuses before any query runs (contracts/openapi/investigation-v1.yaml :352-355,
+# and the RUN_INCIDENT_SCOPE_PREDICATE entry in the closed vocabulary at :379-380). So the
+# code is INCIDENT_OUT_OF_SCOPE and the recorded gate is RUN_INCIDENT_SCOPE_PREDICATE.
+# These six said INCIDENT_NOT_FOUND until now, which was the pre-099df9f behaviour: dc8cdac
+# moved S8 onto the scope-first contract and left S4 behind, so S4 was asserting a code the
+# kernel no longer produces for a named foreign incident. That is a stale expectation, not a
+# loosened one: the assertion below is not "some refusal", it is "this refusal, from this
+# layer", checked in the response AND in the ledger.
+# What this costs, stated so it is not discovered later: with the scope gate first, no call
+# that NAMES a foreign incident can reach the caller's predicate any more. That layer did not
+# stop refusing, and it is still covered - by S4.1, which reaches it through an evidence row
+# instead of through an incident id.
 S4_STATUS="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I1/investigations" \
   "{\"idempotencyKey\":\"s4-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$IB\",\"probeEvidenceId\":\"$EB\",\"maxToolCalls\":8}")"
 check 201 "$S4_STATUS" "S4 the probe run started"
@@ -199,20 +220,17 @@ d=json.load(open(sys.argv[1]))
 names=[i["tool"] for i in d["toolInvocations"]]
 expected=["get_incident","list_evidence","read_evidence","get_incident_timeline","get_related_context"]
 print("TOOLS:", names)
-print("REFUSALS:", [(i["tool"],i["outcome"],i["errorCode"],i["attempt"]) for i in d["toolInvocations"]])
+print("REFUSALS:", [(i["tool"],i["outcome"],i["errorCode"],i["authorizationPredicate"],i["attempt"]) for i in d["toolInvocations"]])
 sys.exit(0 if names==expected else 1)' "$WORK/body"
 check 0 "$?" "S4 the five tools, in order, are exactly the documented set"
 for tool in get_incident list_evidence read_evidence get_incident_timeline get_related_context; do
   check "REFUSED" "$(json "[i for i in d['toolInvocations'] if i['tool']=='$tool'][0]['outcome']" < "$WORK/body")" "S4 $tool refused a cross-owner incident"
-  if [ "$tool" = "get_related_context" ]; then
-    if [ "$RELATED_ON" = "1" ]; then
-      check "INCIDENT_NOT_FOUND" "$(json "[i for i in d['toolInvocations'] if i['tool']=='$tool'][0]['errorCode']" < "$WORK/body")" "S4 $tool refused a cross-owner incident through the incident predicate (its source IS authorised here)"
-    else
-      check "SOURCE_UNAVAILABLE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='$tool'][0]['errorCode']" < "$WORK/body")" "S4 $tool refused before any read because this deployment authorises no related source"
-    fi
-  else
-    check "INCIDENT_NOT_FOUND" "$(json "[i for i in d['toolInvocations'] if i['tool']=='$tool'][0]['errorCode']" < "$WORK/body")" "S4 $tool refused with the same code the HTTP read gives"
-  fi
+  # get_related_context is in this loop rather than in a RELATED_ON branch: target_incident()
+  # runs before the source-configuration gate (investigations.rs :923 then :935), so a foreign
+  # incidentId is refused as out of scope whether or not this deployment authorises a source.
+  # The configuration gate is asserted in S4.1, on a run whose scope is valid.
+  check "INCIDENT_OUT_OF_SCOPE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='$tool'][0]['errorCode']" < "$WORK/body")" "S4 $tool refused by the run's own scope, before any row was read"
+  check "RUN_INCIDENT_SCOPE_PREDICATE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='$tool'][0]['authorizationPredicate']" < "$WORK/body")" "S4 $tool names the scope layer, not the caller's read predicate, as what refused it"
 done
 python3 -c '
 import json,sys
@@ -221,17 +239,104 @@ attempts=[i["attempt"] for i in d["toolInvocations"]]
 sys.exit(0 if all(a==1 for a in attempts) else 1)' "$WORK/body"
 check 0 "$?" "S4 a refused read is attempted once, never retried"
 check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN4' AND outcome='OK'")" "S4 none of the five claimed a successful read"
-if [ "$RELATED_ON" = "1" ]; then
-  check 5 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN4' AND error_code='INCIDENT_NOT_FOUND'")" "S4 all five were refused by the incident predicate itself"
-else
-  check 4 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN4' AND error_code='INCIDENT_NOT_FOUND'")" "S4 four of the five were refused by the incident predicate itself"
-fi
+check 5 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN4' AND error_code='INCIDENT_OUT_OF_SCOPE'")" "S4 all five were refused by the run's scope, in the database too"
+check 5 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN4' AND authorization_predicate='RUN_INCIDENT_SCOPE_PREDICATE'")" "S4 and all five record that layer, so a NULL or a different gate fails here"
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN4' AND authorization_predicate='INCIDENT_READ_PREDICATE'")" "S4 the caller's predicate was never consulted on this run - which is why S4.1 exists"
 check 5 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN4' AND outcome='REFUSED'")" "S4 all five refusals are in the database, not only in the response"
 
 S4_LIST="$(call "$A_JAR" "$A_CSRF" GET "/api/v1/incidents/$IB/investigations")"
 check 404 "$S4_LIST" "S4 A cannot list the investigations of B's incident"
 S4_STEAL="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$IB/investigations" "{\"idempotencyKey\":\"s4-steal-$RUN\"}")"
 check 404 "$S4_STEAL" "S4 A cannot start an investigation on B's incident"
+
+# ===========================================================================
+step "S4.1  E2: an evidence row outside the run's incident is refused by the caller's own predicate"
+# Why this step exists. S4 asks whether a run may read SOMEBODY ELSE'S INCIDENT, and at HEAD the
+# run-scope gate answers that before the caller's predicate is reached. The predicate itself -
+# INCIDENT_READ_PREDICATE, which the contract keeps as ONE predicate covering the role rule, the
+# workspace boundary and the row rule, precisely so the kernel never says which of the three
+# excluded a read (:373-377) - therefore lost its only direct coverage in this script. The
+# scope-first contract does not make that layer redundant: an id smuggled into a tool call still
+# has to be refused by the layer that owns the data.
+# How it is reached. The probe names the run's OWN incident (the restatement the contract
+# permits) and B's evidence row. No foreign incident id is named anywhere in the call, so the
+# scope gate has nothing to compare and does not fire; read_evidence then asks the caller's
+# predicate for the rows of that incident, cannot find B's row, and refuses with
+# EVIDENCE_NOT_FOUND naming INCIDENT_READ_PREDICATE. A foreign id and a nonexistent id give the
+# same answer, which is the point of the single predicate.
+# Naming only evidenceId would be the cleanest form of that probe, and it is not available: the
+# kernel requires probeIncidentId and probeEvidenceId together (investigations.rs :2043-2056) and
+# the fixture's read_evidence call always restates the run's incident (probe_calls(), :1165).
+# So the probe is built as above, and the two assertions that matter are made explicitly: the
+# refusal comes from the caller's predicate, and the scope gate did not fire at all.
+S41="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I1/investigations" \
+  "{\"idempotencyKey\":\"s4b-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I1\",\"probeEvidenceId\":\"$EB\",\"maxToolCalls\":8}")"
+check 201 "$S41" "S4.1 a probe that names no foreign incident started"
+RUN41="$(last "['runId']")"
+S41_CODE="$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['errorCode']" < "$WORK/body")"
+S41_GATE="$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['authorizationPredicate']" < "$WORK/body")"
+check 5 "$(json "len(d['toolInvocations'])" < "$WORK/body")" "S4.1 all five tools were attempted"
+check "REFUSED" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['outcome']" < "$WORK/body")" \
+  "S4.1 read_evidence refuses B's evidence row even though the call named the run's own incident"
+check "EVIDENCE_NOT_FOUND" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['errorCode']" < "$WORK/body")" \
+  "S4.1 and the code is the one that predicate gives, not a 500 and not a partial read"
+check "INCIDENT_READ_PREDICATE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['authorizationPredicate']" < "$WORK/body")" \
+  "S4.1 the refusal names the caller's read predicate: this is the layer S4 can no longer reach"
+check "PARTIAL" "$(last "['status']")" "S4.1 status PARTIAL, because one read of five was refused"
+check "TOOL_REFUSED" "$(count "d['hypotheses'][0]['gapCodes'][0]")" "S4.1 the hypothesis states that a read was refused"
+# Configuration-independent form of "the refusal is the row, not the run": exactly one read is
+# refused, and nothing else is refused except a source this deployment never authorised (which is
+# the configuration gate answering, not this read's predicate). Asserting "four succeed" would be
+# a statement about OPSWEAVE_INVESTIGATION_RELATED_SOURCES rather than about the predicate.
+check 1 "$(json "len([i for i in d['toolInvocations'] if i['outcome']=='REFUSED' and i['errorCode']=='EVIDENCE_NOT_FOUND'])" < "$WORK/body")" \
+  "S4.1 exactly one read in this run is refused, and it is the foreign evidence row"
+check 0 "$(json "len([i for i in d['toolInvocations'] if i['outcome'] not in ('OK','REFUSED') or (i['outcome']=='REFUSED' and i['errorCode'] not in ('EVIDENCE_NOT_FOUND','SOURCE_UNAVAILABLE'))])" < "$WORK/body")" \
+  "S4.1 and no other read was refused on scope, failed or timed out"
+if [ "$RELATED_ON" = "1" ]; then
+  check "OK" "$(json "[i for i in d['toolInvocations'] if i['tool']=='get_related_context'][0]['outcome']" < "$WORK/body")" \
+    "S4.1 with a source authorised, get_related_context is one of the four successful reads"
+else
+  check "SOURCE_UNAVAILABLE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='get_related_context'][0]['errorCode']" < "$WORK/body")" \
+    "S4.1 without an authorised source, get_related_context is refused by configuration - which is only visible once the scope gate is out of the way"
+fi
+check 1 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN41' AND tool_name='read_evidence' AND outcome='REFUSED' AND error_code='EVIDENCE_NOT_FOUND' AND authorization_predicate='INCIDENT_READ_PREDICATE'")" \
+  "S4.1 the refusal is in the ledger, with its code and the layer that gave it"
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN41' AND error_code='INCIDENT_OUT_OF_SCOPE'")" \
+  "S4.1 the scope gate never fired: nothing in this call named a foreign incident"
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN41' AND evidence_refs::text LIKE '%$EB%'")" \
+  "S4.1 no tool records B's evidence row as one it read"
+# The indistinguishability half. INCIDENT_READ_PREDICATE is ONE predicate covering the role rule,
+# the workspace boundary and the row rule precisely so that a read any of them excludes answers the
+# same thing (:373-377): if a foreign row and a row that exists nowhere answered differently, the
+# refusal would itself tell the caller that the row exists. This run differs from the one above by
+# a single argument - an id no row carries.
+S41_GHOST="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+S41X="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I1/investigations" \
+  "{\"idempotencyKey\":\"s4d-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I1\",\"probeEvidenceId\":\"$S41_GHOST\",\"maxToolCalls\":8}")"
+check 201 "$S41X" "S4.1 an id that exists nowhere was probed too"
+RUN41X="$(last "['runId']")"
+check "$S41_CODE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['errorCode']" < "$WORK/body")" \
+  "S4.1 the ghost id is refused with B's row's code, so the refusal never says the row exists"
+check "$S41_GATE" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['authorizationPredicate']" < "$WORK/body")" \
+  "S4.1 and by the same layer"
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN41X' AND tool_name='read_evidence' AND outcome='OK'")" \
+  "S4.1 and nothing was read for it"
+# The control that keeps the refusal above from being a blanket one: the same probe shape and
+# the same incident, naming an evidence row the caller DOES own, is served. Without it, "refused"
+# would also be satisfied by a fixture that read nothing, or by a predicate that refused every
+# row of this incident.
+S41OK="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I1/investigations" \
+  "{\"idempotencyKey\":\"s4c-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I1\",\"probeEvidenceId\":\"$E1A\",\"maxToolCalls\":8}")"
+check 201 "$S41OK" "S4.1 control: the same probe naming A's own evidence started"
+RUN41OK="$(last "['runId']")"
+check "OK" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['outcome']" < "$WORK/body")" \
+  "S4.1 control: read_evidence SERVES the caller's own row, so the refusal above is about the row"
+check "EVIDENCE_CONTENT_FIXITY_CHECK" "$(json "[i for i in d['toolInvocations'] if i['tool']=='read_evidence'][0]['authorizationPredicate']" < "$WORK/body")" \
+  "S4.1 control: the served read went through the content gate, so the row was found and read"
+check 0 "$(json "len([i for i in d['toolInvocations'] if i['errorCode'] in ('INCIDENT_OUT_OF_SCOPE','EVIDENCE_NOT_FOUND')])" < "$WORK/body")" \
+  "S4.1 control: and nothing in that run was refused on scope or on the row"
+check 1 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN41OK' AND tool_name='read_evidence' AND outcome='OK'")" \
+  "S4.1 control: the served read is in the ledger too"
 
 # ===========================================================================
 step "S5.1  E3: the step budget stops the run and says so"
@@ -491,11 +596,32 @@ step "S10 E2 (G12 H P1): a run reads the incident it is about, and only that one
 # the tools answered, the transcript absorbed C's evidence, the conclusion cited it, and the
 # citation guard's refusal arrived as 500 INTERNAL. The scope of an investigation is the run's
 # incident, so the answer is no - and it has to be a named refusal, not a 500.
+#
+# Two things here used to measure something other than that claim.
+# 1. The control asserted the CONTENT endpoint on C's evidence. C's row was a LEGACY_REFERENCE,
+#    for which that endpoint is 404 EVIDENCE_CONTENT_NOT_STORED by design - S9 is the step that
+#    proves it, and S9 owns that case. So the control failed on every build for a reason that
+#    had nothing to do with scope: it was measuring the content fixity path, not "can this
+#    account read C". It asserts the incident read now, which is the claim the rest of the step
+#    rests on, and C's evidence carries STORED bytes, so the second control shows the account
+#    could have read the very bytes the run must not absorb.
+# 2. Nothing asserted the negative half where a leak would actually land. "0 citations" only
+#    says the citation guard was never asked; it would also be true of a run that absorbed C's
+#    bytes and then dropped the citation it proposed. So C's marker bytes are searched for in
+#    every row this run wrote, and a positive control at the end proves the search finds them
+#    when they really are served.
+BODY10="g12h-out-of-scope-body-$RUN-no-spaces"
 I10="$(incident_make "$A_JAR" "$A_CSRF" "g12h subject $RUN" "$(ts -3600)")"
 I10C="$(incident_make "$A_JAR" "$A_CSRF" "g12h readable but not the subject $RUN" "$(ts -3600)")"
-E10C="$(evidence_make "$A_JAR" "$A_CSRF" "$I10C" LOG_EXCERPT "$(ts -1200)" agent-g12h)"
-check 200 "$(call "$A_JAR" "$A_CSRF" GET "/api/v1/incidents/$I10C/evidence/$E10C/content")" \
+call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I10C/evidence" \
+  "{\"kind\":\"LOG_EXCERPT\",\"source\":\"agent-g12h\",\"collectedAt\":\"$(ts -1200)\",\"content\":{\"contentType\":\"text/plain\",\"body\":\"$BODY10\"}}" >/dev/null
+E10C="$(last "['id']")"
+check 200 "$(call "$A_JAR" "$A_CSRF" GET "/api/v1/incidents/$I10C")" \
   "S10 control: the same account CAN read the other incident through the API"
+check 200 "$(call "$A_JAR" "$A_CSRF" GET "/api/v1/incidents/$I10C/evidence/$E10C/content")" \
+  "S10 control: and it can read C's stored bytes, so there are bytes it must not absorb"
+check 1 "$(sql "SELECT count(*) FROM kernel.incident_evidence_content WHERE evidence_id='$E10C'")" \
+  "S10 (schema) C's bytes are STORED, not a reference, so the marker the next checks search for exists"
 S10="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I10/investigations" \
   "{\"idempotencyKey\":\"s10-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I10C\",\"probeEvidenceId\":\"$E10C\",\"maxToolCalls\":8}")"
 check 201 "$S10" "S10 the run started: a scope refusal is a recorded refusal, not an internal error"
@@ -509,6 +635,24 @@ check 0 "$(sql "SELECT count(*) FROM kernel.investigation_hypothesis_evidence he
   "S10 (schema) the run wrote no citation at all, so the citation guard was never asked"
 check 5 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN10' AND error_code='INCIDENT_OUT_OF_SCOPE'")" \
   "S10 (schema) the refusals are in the ledger, not only in the response"
+# The leak assertions. The run's rows exist (five of them, asserted above), the bytes they could
+# have leaked exist (asserted above), and the marker must be in none of them: not in a result
+# body, not in an error detail, not in the arguments it asked with, not in the hypothesis it
+# stated, and not in any claimed evidence_refs.
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN10' AND (coalesce(result_body,'') LIKE '%$BODY10%' OR coalesce(error_detail,'') LIKE '%$BODY10%' OR arguments::text LIKE '%$BODY10%')")" \
+  "S10 (schema) C's marker bytes appear in no invocation row this run wrote"
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_hypotheses WHERE run_id='$RUN10' AND (statement LIKE '%$BODY10%' OR reasoning LIKE '%$BODY10%' OR coalesce(uncertainty,'') LIKE '%$BODY10%')")" \
+  "S10 (schema) and in no word of the hypothesis it stated either"
+check 0 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN10' AND evidence_refs::text LIKE '%$E10C%'")" \
+  "S10 (schema) and no invocation records C's evidence row among the rows it returned"
+# The positive control for that search: the same probe shape, run against C itself, must put the
+# marker in the ledger. Without it, the three checks above would also pass on a typo.
+S10P="$(call "$A_JAR" "$A_CSRF" POST "/api/v1/incidents/$I10C/investigations" \
+  "{\"idempotencyKey\":\"s10p-$RUN\",\"scenario\":\"CROSS_SCOPE_PROBE\",\"probeIncidentId\":\"$I10C\",\"probeEvidenceId\":\"$E10C\",\"maxToolCalls\":8}")"
+check 201 "$S10P" "S10 control: the same probe run against C itself started"
+RUN10P="$(last "['runId']")"
+check 1 "$(sql "SELECT count(*) FROM kernel.investigation_tool_invocations WHERE run_id='$RUN10P' AND tool_name='read_evidence' AND outcome='OK' AND coalesce(result_body,'') LIKE '%$BODY10%'")" \
+  "S10 control: when the subject IS C the marker IS in the ledger, so an empty result above means refused, not unsearched"
 
 echo
 echo "==================== SUMMARY ===================="

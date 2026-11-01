@@ -527,3 +527,131 @@ Rollback for 0023 is a single DROP CONSTRAINT, spelled in the migration header: 
 its type and its NULLs, so dropping the vocabulary widens nothing and loses nothing that the
 migration added.
 
+
+## 12. Two defects in the acceptance script itself, fixed on `feat/g12-ai-investigator` (099df9f)
+
+At HEAD the script reported 155 passed / 7 failed. All seven were the script measuring something
+other than the claim it names; the kernel behaved as `contracts/openapi/investigation-v1.yaml` says in
+each of them. After the fixes below the same script reports **199 passed / 0 failed** on a scratch
+kernel (`127.0.0.1:18199`, throw-away database, related source authorised).
+
+### 12.1 S4: six expectations `dc8cdac` left behind
+
+S4 drives all five tools at an incident another operator owns and expected `INCIDENT_NOT_FOUND` /
+the incident predicate - the pre-099df9f behaviour. The run-scope gate that landed in 099df9f
+answers first: `target_incident()` compares the argument with the incident the run is about and
+refuses before any query runs (contract :352-355; `RUN_INCIDENT_SCOPE_PREDICATE` in the closed
+vocabulary at :379-380). `dc8cdac` moved **S8** onto that contract and did not move S4, so S4
+asserted a code the kernel no longer produces for a named foreign incident.
+
+What changed is the expected code and the layer, not the strength:
+
+| Assertion | Before | After |
+| --- | --- | --- |
+| per tool, ×5 | `REFUSED` | `REFUSED` **and** `INCIDENT_OUT_OF_SCOPE` **and** `RUN_INCIDENT_SCOPE_PREDICATE` |
+| ledger | 5 rows with `INCIDENT_NOT_FOUND` | 5 rows with `INCIDENT_OUT_OF_SCOPE`, 5 naming the scope gate, **0** naming the caller's predicate |
+| `get_related_context` | branched on `RELATED_ON` | `INCIDENT_OUT_OF_SCOPE` in both configurations, because `target_incident()` runs before the source-configuration gate (`investigations.rs` :923 then :935) |
+
+The control that pairs with these now asserts the *code* too, and that is the clearest statement
+of the split: the same account asking over HTTP gets `INCIDENT_NOT_FOUND` from its own predicate,
+while a tool inside this run gets `INCIDENT_OUT_OF_SCOPE` from the run's scope, because a run may read
+less than the account behind it and never more. The old message ("refused with the same code the HTTP
+read gives") asserted a parity that the scope-first contract deliberately broke.
+
+The `SOURCE_UNAVAILABLE` assertion that the removed branch carried was not dropped: it moved into
+S4.1, where it is asserted on a run whose scope is valid, so configuration is the only thing that
+can refuse. That is the one place in the script that covers `DEPLOYMENT_SOURCE_CONFIGURATION`, and it
+is now reached in the configuration that is supposed to produce it.
+
+### 12.2 S10: a control that measured the content-fixity path
+
+The control asserted that the account could read C through
+`GET /api/v1/incidents/{C}/evidence/{id}/content`. C's row was a `LEGACY_REFERENCE`, and that
+endpoint answers 404 `EVIDENCE_CONTENT_NOT_STORED` **by design** - S9 is the step that proves it. So
+the control failed on every build for a reason unrelated to scope: it was asking the fixity path
+whether a caller may read an incident.
+
+It now asserts the incident read, and C's evidence carries STORED bytes, so a second control
+shows the account could have read the exact bytes the run must not absorb. The negative half was
+also empty: "0 citations" only says the citation guard was never asked, which would equally be
+true of a run that absorbed C's bytes and then dropped the citation. S10 now searches C's marker
+bytes in every row the run wrote - invocation results, error details, arguments, the hypothesis
+text, and the claimed `evidence_refs` - and carries a positive control at the end: the same run
+shape against C itself must put the marker in the ledger, so an empty search means refused and
+not unsearched.
+
+### 12.3 S4.1: the caller's predicate is reached through an evidence row
+
+Deleting S4's predicate expectations and calling S8 "the same thing now" would have removed a
+layer: S8 names a foreign incident too, so it is answered by the same scope gate. The predicate
+that lost direct coverage is `INCIDENT_READ_PREDICATE` - role rule, workspace boundary and row
+rule, deliberately one predicate (:373-377).
+
+S4.1 reaches it without naming a foreign incident. The probe names the run's **own** incident (the
+restatement the contract permits) and B's evidence row; the scope gate has nothing to compare and
+does not fire; `read_evidence` asks the caller's predicate for the rows of that incident, cannot
+find B's, and answers `EVIDENCE_NOT_FOUND` naming `INCIDENT_READ_PREDICATE`. Three controls keep
+that from being vacuous: exactly one read in the run is refused and no other read is refused on
+scope or fails (so the refusal is the row, not the run), the same probe naming the caller's own
+evidence row is served and goes through the content gate, and an id that exists nowhere gets the
+same code from the same layer, which is the indistinguishability the single predicate exists to
+guarantee.
+
+Two of those assertions were written the obvious way first and were wrong in the second
+configuration: "the other four tools succeed" and "the control run is SUCCEEDED" are statements
+about `OPSWEAVE_INVESTIGATION_RELATED_SOURCES`, not about the predicate, and they produced 190
+passed / 2 failed on a kernel started without it. They were replaced rather than branched, so one
+version of the step holds in both configurations, and the second configuration is now part of what
+this step is checked against (195 / 0 with S8 skipped).
+
+Naming only `evidenceId` would be the cleanest form and is not available: the kernel requires
+`probeIncidentId` and `probeEvidenceId` together (`investigations.rs` :2043-2056) and the fixture's
+`read_evidence` call always restates the run's incident (`probe_calls()` :1165). What the probe could
+control - which object is foreign - it does control: the evidence id, never the incident id.
+
+### 12.4 The two probes guard disjoint layers, shown by mutation
+
+Two scratch mutants of the fixed script, one line each, run against the same kernel:
+
+| Scenario | S4 (31 checks) | S4.1 (22 checks) | Overall |
+| --- | --- | --- | --- |
+| fixed script | all pass | all pass | 199 passed / 0 failed |
+| M1: S4's probe names its own incident, so the scope gate cannot fire | **19 fail** | all pass | 180 / 19 |
+| M2: S4.1's probe names a row the caller owns, so the predicate cannot fire | all pass | **9 fail** | 190 / 9 |
+
+M1 is also where the two layers can be seen answering the same call in sequence: with the scope
+gate unable to fire, `read_evidence` answers `EVIDENCE_NOT_FOUND` / `INCIDENT_READ_PREDICATE` - the
+refusal S4.1 asserts - and the other four tools return data. A new probe that went red under M1
+would be a copy of S4; the point of S4.1 is that it does not.
+
+### 12.5 Still open: S5.5 is timing-sensitive
+
+S5.5 asserts that every read in a run finished inside a 100 ms per-tool timeout. On a loaded host
+one read can take 108 ms and the step fails while nothing is wrong. Observed once in this session
+(`durations: [108, 37, 10]`, 191 passed / 1 failed, `artifacts/g12t-scratch/after.log`); the same
+script passed the same step on every neighbouring run. It is pre-existing, unrelated to S4/S10, and
+is not fixed here: making it robust means deciding whether the claim is "the cap is respected"
+(needs a load-independent probe) or "reads are fast" (a benchmark, not an acceptance check).
+Recorded as a test defect, not a product defect - the kernel recorded no TIMEOUT.
+
+### 12.6 Reproduction
+
+```bash
+psql -h 127.0.0.1 -U postgres -c 'create database opsweave_g12t'
+cargo build -p opsweave-kernel
+OPSWEAVE_BIND=127.0.0.1:18199 DATABASE_URL=postgres://postgres@127.0.0.1:5432/opsweave_g12t \
+  OPSWEAVE_DATA_DIR=/tmp/g12t/data OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
+  OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=... OPSWEAVE_ADMIN_SURFACE_ROLES=admin,operator,viewer \
+  OPSWEAVE_INVESTIGATION_RELATED_SOURCES=incident_index OPSWEAVE_INVESTIGATION_RELATED_ENABLED=1 \
+  ./target/debug/opsweave-kernel
+
+OPSWEAVE_URL=http://127.0.0.1:18199 \
+  OPSWEAVE_DATABASE_URL=postgres://postgres@127.0.0.1:5432/opsweave_g12t \
+  OPSWEAVE_ADMIN_EMAIL=admin@opsweave.local OPSWEAVE_ADMIN_PASSWORD=... \
+  OPSWEAVE_INVESTIGATION_RELATED_ENABLED=1 tests/acceptance/g12_ai_investigator.sh
+```
+
+Without `OPSWEAVE_INVESTIGATION_RELATED_ENABLED` (and a kernel started without
+`OPSWEAVE_INVESTIGATION_RELATED_SOURCES`) the same script reports 195 passed / 0 failed with S8
+skipped and S4.1 asserting `SOURCE_UNAVAILABLE` instead of a successful `get_related_context`.
+
