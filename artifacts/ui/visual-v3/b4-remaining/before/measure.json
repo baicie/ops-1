@@ -1,0 +1,912 @@
+{
+ "jobHref": null,
+ "plugin-detail@1440": {
+  "url": "/admin/plugins/dev.opsweave.hello",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "overflow": -15,
+  "readyNodes": [],
+  "readyCounts": {
+   "platformReady": 0,
+   "upperReady": 0,
+   "platformIsReady": 0,
+   "anyReady": 0
+  },
+  "instances": {
+   "panel": null,
+   "panelColumn": null,
+   "gridColumns": null,
+   "scrollerClientW": null,
+   "scrollerScrollW": null,
+   "needsHorizontalScroll": null,
+   "tableW": null,
+   "theadH": null,
+   "headFirstRowSqueeze": null,
+   "firstRowH": null,
+   "rows": 0,
+   "panels": [],
+   "rowHoles": []
+  },
+  "duplicate": {
+   "h1": "Plugin",
+   "h1TextCountOnPage": 3,
+   "h1Box": {
+    "top": 80,
+    "left": 264,
+    "width": 74,
+    "height": 31
+   },
+   "cardsWithH1Text": [],
+   "cardsWithH1TextOld": []
+  },
+  "jobCards": [],
+  "sidebar": {
+   "sidebarWidth": 240,
+   "block": {
+    "top": 774,
+    "left": 8,
+    "width": 223,
+    "height": 82
+   },
+   "rows": {
+    "top": 783,
+    "left": 8,
+    "width": 223,
+    "height": 73,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 0,
+    "left": 0,
+    "width": 0,
+    "height": 0,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "bodyText": "Skip to content OpsWeave default workspace PLATFORM Overview Plugins Nodes RUNTIME Pipelines Jobs Governance SECURITY & DIAGNOSTICS Access Activity Settings Ops Center Environment UNKNOWN Commit d031762 Status Attention Deployed At 2026-11-01 12:10 UTC Platform / Plugins / dev.opsweave.hello Search or jump to ⌘K Attention needed English 中文（简体） PA Platform Admin ADMIN Plugin Could not load this vie",
+  "headerDescription": null
+ },
+ "job-detail@1440": {
+  "url": "/admin/jobs",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "overflow": -15,
+  "readyNodes": [],
+  "readyCounts": {
+   "platformReady": 0,
+   "upperReady": 0,
+   "platformIsReady": 0,
+   "anyReady": 0
+  },
+  "instances": {
+   "panel": null,
+   "panelColumn": null,
+   "gridColumns": null,
+   "scrollerClientW": null,
+   "scrollerScrollW": null,
+   "needsHorizontalScroll": null,
+   "tableW": null,
+   "theadH": null,
+   "headFirstRowSqueeze": null,
+   "firstRowH": null,
+   "rows": 0,
+   "panels": [],
+   "rowHoles": []
+  },
+  "duplicate": {
+   "h1": "Jobs",
+   "h1TextCountOnPage": 3,
+   "h1Box": {
+    "top": 70,
+    "left": 264,
+    "width": 430,
+    "height": 31
+   },
+   "cardsWithH1Text": [],
+   "cardsWithH1TextOld": []
+  },
+  "jobCards": [],
+  "sidebar": {
+   "sidebarWidth": 240,
+   "block": {
+    "top": 774,
+    "left": 8,
+    "width": 223,
+    "height": 82
+   },
+   "rows": {
+    "top": 783,
+    "left": 8,
+    "width": 223,
+    "height": 73,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 0,
+    "left": 0,
+    "width": 0,
+    "height": 0,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "bodyText": "Skip to content OpsWeave default workspace PLATFORM Overview Plugins Nodes RUNTIME Pipelines Jobs Governance SECURITY & DIAGNOSTICS Access Activity Settings Ops Center Environment UNKNOWN Commit d031762 Status Attention Deployed At 2026-11-01 12:10 UTC Platform / Jobs Search or jump to ⌘K Attention needed English 中文（简体） PA Platform Admin ADMIN Jobs Durable typed-pipeline executions and their curre",
+  "headerDescription": "Durable typed-pipeline executions and their current lifecycle state."
+ },
+ "overview@1440": {
+  "url": "/admin/overview",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "overflow": -15,
+  "readyNodes": [
+   {
+    "text": "READY instances",
+    "rendered": "READY instances",
+    "tag": "span",
+    "cls": "ow-metric-label",
+    "transform": "none",
+    "section": "stat-block",
+    "testid": null,
+    "box": {
+     "top": 228,
+     "left": 854,
+     "width": 244,
+     "height": 17
+    }
+   },
+   {
+    "text": "Ready",
+    "rendered": "Ready",
+    "tag": "span",
+    "cls": "status-indicator-label",
+    "transform": "none",
+    "section": "panel",
+    "testid": "overview-modules",
+    "box": {
+     "top": 577,
+     "left": 1046,
+     "width": 34,
+     "height": 17
+    }
+   }
+  ],
+  "readyCounts": {
+   "platformReady": 0,
+   "upperReady": 1,
+   "platformIsReady": 0,
+   "anyReady": 2
+  },
+  "instances": {
+   "panel": null,
+   "panelColumn": null,
+   "gridColumns": null,
+   "scrollerClientW": null,
+   "scrollerScrollW": null,
+   "needsHorizontalScroll": null,
+   "tableW": null,
+   "theadH": null,
+   "headFirstRowSqueeze": null,
+   "firstRowH": null,
+   "rows": 0,
+   "panels": [],
+   "rowHoles": []
+  },
+  "duplicate": {
+   "h1": "Overview",
+   "h1TextCountOnPage": 3,
+   "h1Box": {
+    "top": 80,
+    "left": 264,
+    "width": 112,
+    "height": 31
+   },
+   "cardsWithH1Text": [],
+   "cardsWithH1TextOld": []
+  },
+  "jobCards": [],
+  "sidebar": {
+   "sidebarWidth": 240,
+   "block": {
+    "top": 774,
+    "left": 8,
+    "width": 223,
+    "height": 82
+   },
+   "rows": {
+    "top": 783,
+    "left": 8,
+    "width": 223,
+    "height": 73,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 0,
+    "left": 0,
+    "width": 0,
+    "height": 0,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "bodyText": "Skip to content OpsWeave default workspace PLATFORM Overview Plugins Nodes RUNTIME Pipelines Jobs Governance SECURITY & DIAGNOSTICS Access Activity Settings Ops Center Environment UNKNOWN Commit d031762 Status Attention Deployed At 2026-11-01 12:10 UTC Platform / Overview Search or jump to ⌘K Attention needed English 中文（简体） PA Platform Admin ADMIN Overview Refresh Install plugin Needs attention Pl",
+  "headerDescription": null
+ },
+ "studio@1440": {
+  "url": "/admin/pipelines/host-metrics-pipeline/editor",
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "overflow": -15,
+  "readyNodes": [],
+  "readyCounts": {
+   "platformReady": 0,
+   "upperReady": 0,
+   "platformIsReady": 0,
+   "anyReady": 0
+  },
+  "instances": {
+   "panel": null,
+   "panelColumn": null,
+   "gridColumns": null,
+   "scrollerClientW": null,
+   "scrollerScrollW": null,
+   "needsHorizontalScroll": null,
+   "tableW": null,
+   "theadH": null,
+   "headFirstRowSqueeze": null,
+   "firstRowH": null,
+   "rows": 0,
+   "panels": [],
+   "rowHoles": []
+  },
+  "duplicate": {
+   "h1": "host-metrics-pipeline",
+   "h1TextCountOnPage": 1,
+   "h1Box": {
+    "top": 96,
+    "left": 88,
+    "width": 496,
+    "height": 31
+   },
+   "cardsWithH1Text": [],
+   "cardsWithH1TextOld": []
+  },
+  "jobCards": [],
+  "sidebar": {
+   "sidebarWidth": 64,
+   "block": {
+    "top": 848,
+    "left": 8,
+    "width": 47,
+    "height": 40
+   },
+   "rows": {
+    "top": 801,
+    "left": 63,
+    "width": 232,
+    "height": 91,
+    "visibility": "hidden",
+    "opacity": "0",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 848,
+    "left": 8,
+    "width": 47,
+    "height": 40,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "bodyText": "Skip to content Platform / Pipelines / Pipeline detail / Pipeline Studio Search or jump to ⌘K Attention needed English 中文（简体） PA Platform Admin ADMIN STUDIO host-metrics-pipeline Compose the pipeline graph, validate it on the server, then publish a revision. Could not load this view pipeline not found Retry",
+  "headerDescription": "Compose the pipeline graph, validate it on the server, then publish a revision."
+ },
+ "studio@1440__rail": {
+  "triggerCount": 1,
+  "afterFocus": {
+   "sidebarWidth": 64,
+   "block": {
+    "top": 848,
+    "left": 8,
+    "width": 47,
+    "height": 40
+   },
+   "rows": {
+    "top": 797,
+    "left": 63,
+    "width": 232,
+    "height": 91,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 848,
+    "left": 8,
+    "width": 47,
+    "height": 40,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "afterEnter": {
+   "sidebarWidth": 64,
+   "block": {
+    "top": 848,
+    "left": 8,
+    "width": 47,
+    "height": 40
+   },
+   "rows": {
+    "top": 797,
+    "left": 63,
+    "width": 232,
+    "height": 91,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "true"
+   },
+   "trigger": {
+    "top": 848,
+    "left": 8,
+    "width": 47,
+    "height": 40,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "true",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": false,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "afterTab": {
+   "active": null,
+   "activeText": "Platform"
+  }
+ },
+ "studio@1024": {
+  "url": "/admin/pipelines/host-metrics-pipeline/editor",
+  "viewport": {
+   "w": 1024,
+   "h": 900
+  },
+  "overflow": -15,
+  "readyNodes": [],
+  "readyCounts": {
+   "platformReady": 0,
+   "upperReady": 0,
+   "platformIsReady": 0,
+   "anyReady": 0
+  },
+  "instances": {
+   "panel": null,
+   "panelColumn": null,
+   "gridColumns": null,
+   "scrollerClientW": null,
+   "scrollerScrollW": null,
+   "needsHorizontalScroll": null,
+   "tableW": null,
+   "theadH": null,
+   "headFirstRowSqueeze": null,
+   "firstRowH": null,
+   "rows": 0,
+   "panels": [],
+   "rowHoles": []
+  },
+  "duplicate": {
+   "h1": "host-metrics-pipeline",
+   "h1TextCountOnPage": 1,
+   "h1Box": {
+    "top": 95,
+    "left": 16,
+    "width": 496,
+    "height": 26
+   },
+   "cardsWithH1Text": [],
+   "cardsWithH1TextOld": []
+  },
+  "jobCards": [],
+  "sidebar": {
+   "sidebarWidth": 260,
+   "block": {
+    "top": 774,
+    "left": -252,
+    "width": 243,
+    "height": 82
+   },
+   "rows": {
+    "top": 783,
+    "left": -252,
+    "width": 243,
+    "height": 73,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 0,
+    "left": 0,
+    "width": 0,
+    "height": 0,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "bodyText": "Skip to content OpsWeave default workspace PLATFORM Overview Plugins Nodes RUNTIME Pipelines Jobs Governance SECURITY & DIAGNOSTICS Access Activity Settings Ops Center Environment UNKNOWN Commit d031762 Status Attention Deployed At 2026-11-01 12:10 UTC Platform / Pipelines / Pipeline detail / Pipeline Studio ⌘K Attention needed English 中文（简体） PA Platform Admin ADMIN STUDIO host-metrics-pipeline Co",
+  "headerDescription": "Compose the pipeline graph, validate it on the server, then publish a revision."
+ },
+ "studio@1024__rail": {
+  "triggerCount": 1,
+  "afterFocus": {
+   "sidebarWidth": 260,
+   "block": {
+    "top": 774,
+    "left": -252,
+    "width": 243,
+    "height": 82
+   },
+   "rows": {
+    "top": 783,
+    "left": -252,
+    "width": 243,
+    "height": 73,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 0,
+    "left": 0,
+    "width": 0,
+    "height": 0,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "afterEnter": {
+   "sidebarWidth": 260,
+   "block": {
+    "top": 774,
+    "left": -252,
+    "width": 243,
+    "height": 82
+   },
+   "rows": {
+    "top": 783,
+    "left": -252,
+    "width": 243,
+    "height": 73,
+    "visibility": "visible",
+    "opacity": "1",
+    "open": "false"
+   },
+   "trigger": {
+    "top": 0,
+    "left": 0,
+    "width": 0,
+    "height": 0,
+    "ariaLabel": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "title": "Deployment identity: environment UNKNOWN, commit d031762, deployed 2026-11-01 12:10 UTC, status Attention",
+    "ariaExpanded": "false",
+    "ariaControls": "sidebar-meta-panel",
+    "text": ""
+   },
+   "fields": [
+    {
+     "field": "environment",
+     "text": "EnvironmentUNKNOWN",
+     "valueText": "UNKNOWN",
+     "valueWidth": 64,
+     "valueScrollW": 64,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "commit",
+     "text": "Commitd031762",
+     "valueText": "d031762",
+     "valueWidth": 46,
+     "valueScrollW": 46,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "status",
+     "text": "StatusAttention",
+     "valueText": "Attention",
+     "valueWidth": 61,
+     "valueScrollW": 61,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    },
+    {
+     "field": "deployedAt",
+     "text": "Deployed At2026-11-01 12:10 UTC",
+     "valueText": "2026-11-01 12:10 UTC",
+     "valueWidth": 132,
+     "valueScrollW": 132,
+     "clipped": false,
+     "insideRail": true,
+     "outsideViewport": false
+    }
+   ]
+  },
+  "afterTab": {
+   "active": "skip-link",
+   "activeText": "Skip to content"
+  }
+ }
+}

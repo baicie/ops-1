@@ -33,10 +33,40 @@ module.exports = {
         ring: token('ow-focus'),
         surface: { DEFAULT: token('ow-surface'), 2: token('ow-surface-2'), 3: token('ow-surface-3') },
       },
+      // token-table R3: exactly two control heights, and the Tailwind scale names the TIER
+      // instead of a number. The copy-in primitives were written with shadcn's h-9 (36px),
+      // h-7 (28px) and h-11 (44px) — three heights that are none of the two tiers, which is
+      // how /admin/jobs put a 36px input, a 36px select and a 28px tab trigger on one line
+      // (an 8px baseline break inside a single row). `h-control-sm` and `h-control-md` read
+      // the same tokens as .btn and the global input rule, so a shadcn Button and a legacy
+      // .btn are now the same box.
+      height: {
+        "control-sm": token("ow-control-sm"),
+        "control-md": token("ow-control-md"),
+      },
+      width: {
+        "control-sm": token("ow-control-sm"),
+        "control-md": token("ow-control-md"),
+      },
+      minHeight: {
+        "control-sm": token("ow-control-sm"),
+        "control-md": token("ow-control-md"),
+      },
       borderRadius: {
-        sm: token('ow-radius-sm'),
-        md: token('ow-radius-md'),
-        lg: token('ow-radius-lg'),
+        // token-table R1: three tiers, named by the JOB they dress, not by a t-shirt size.
+        // The shadcn copy-ins arrived with rounded-md / rounded-sm / rounded-lg, which is a
+        // fourth radius vocabulary sitting on top of the three tokens: "md" says nothing about
+        // whether the box is a control or a card, so the next primitive guesses. These three
+        // names cannot be guessed wrong, and the gate can read them.
+        control: token("ow-radius-control"),
+        card: token("ow-radius-card"),
+        pill: "9999px",
+        // The size aliases stay, pointed at the same tiers, so any utility this repo has not
+        // migrated renders the tier instead of a fourth value.
+        sm: token("ow-radius-control"),
+        md: token("ow-radius-control"),
+        lg: token("ow-radius-card"),
+        full: "9999px",
       },
       boxShadow: { card: token('ow-shadow') },
       fontFamily: {

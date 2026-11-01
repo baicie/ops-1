@@ -31,7 +31,7 @@ export const DialogContent = React.forwardRef<
       aria-modal="true"
       className={cn(
         'fixed left-1/2 top-1/2 z-[100] flex max-h-[92vh] w-[calc(100%-40px)] max-w-[640px] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto',
-        'rounded-lg border border-solid border-border bg-card p-5 text-card-foreground shadow-[0_24px_70px_rgba(0,0,0,0.35)]',
+        'rounded-card border border-solid border-border bg-card p-5 text-card-foreground shadow-[0_24px_70px_rgba(0,0,0,0.35)]',
         'focus-visible:outline-none',
         className,
       )}
@@ -41,7 +41,7 @@ export const DialogContent = React.forwardRef<
       {closeLabel ? (
         <DialogPrimitive.Close
           className={cn(
-            'absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-sm',
+            'absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-control',
             // bg-transparent is load-bearing, not decoration: preflight is off, so a <button> that
             // declares no background paints the UA's ButtonFace - #6b6b6b in dark - which made the
             // close control a grey slab on the dialog surface and its icon 1.64:1 against it.
