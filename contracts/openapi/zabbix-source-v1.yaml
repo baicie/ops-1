@@ -1,0 +1,464 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Zabbix Source Capability v1
+  version: 0.1.0-draft
+  description: |
+    Provider contract for `telemetry.source.v1`, served by the
+    `opsweave.zabbix-source` plugin. Zabbix lives entirely in this plugin: the
+    Kernel holds no Zabbix knowledge, no Zabbix table and no Zabbix credential
+    (ADR-006, rules/01-architecture.md). A reader that wants metrics calls this
+    capability through the Gateway; nothing talks to a Zabbix endpoint directly
+    from the browser.
+
+    Four rules shape every response here.
+
+    1. Credentials are references, never values (rules/03-security.md). A
+       request carries `secretref:...`; the plugin resolves it at call time under
+       a short-lived grant. No endpoint accepts, returns, logs or echoes a token,
+       and `endpoint` rejects a URL with a userinfo component so a token cannot
+       be smuggled into a string that is later logged.
+
+    2. Absence is typed, never zero (rules/05-data.md). `EMPTY`, `NO_DATA`,
+       `PARTIAL`, `UNKNOWN`, `UNAVAILABLE` and `TIMEOUT` are six different
+       answers and this contract keeps them apart. A sample with no observed
+       number is `value: null` with an `absenceReason`; the schema binds the two
+       so an unexplained null is not contract-valid. A missing measurement is
+       never reported as 0.
+
+    3. Every collection is bounded (AGENTS.md: a collection cost has a budget, a
+       ceiling and failure semantics). Window length, item count, samples per
+       item, per-request timeout and outbound concurrency all have ceilings. A
+       request over a ceiling is clamped, not refused, and the response says what
+       was clamped so a reader never mistakes a truncated window for a quiet one.
+
+    4. Evidence is attested, not asserted. A collection can be filed as incident
+       evidence, and the plugin signs it with its configured adapter secret. The
+       Kernel verifies that signature before it records `SOURCE_ATTESTED`
+       (see incident-v1.yaml and ADR-015). This plugin cannot grant itself the
+       trust level; it can only present proof the Kernel then checks.
+
+    Outbound requests follow the same SSRF policy as data-integration: http/https
+    only, DNS-resolved address checks, no loopback/link-local/private/metadata
+    targets unless explicitly allowed for development, no redirect following, and
+    bounded request/response bytes and deadline.
+servers:
+  - url: /api/zabbix-source
+security:
+  - cookieSession: []
+  - workloadBearer: []
+paths:
+  /sources:
+    get:
+      operationId: listZabbixSources
+      summary: List configured Zabbix sources
+      description: |
+        Returns configured sources with the status each was last *verified* to
+        have. Never returns a credential value; `credential.ref` is an opaque
+        handle. A source that has never been probed is `UNVERIFIED` and is
+        reported as such rather than being assumed healthy.
+      responses:
+        '200':
+          description: Configured sources
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ZabbixSource'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createZabbixSource
+      summary: Register a Zabbix endpoint
+      description: |
+        Registers an endpoint and its credential *reference*. The call does not
+        contact Zabbix, so the new source is `UNVERIFIED` until
+        `probeZabbixSource` succeeds: registration is a statement of intent, not
+        evidence of reachability.
+
+        A request body containing anything that looks like a secret value rather
+        than a `secretref:` handle is a 400 with `ZBX_CREDENTIAL_NOT_A_REFERENCE`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, endpoint, credential]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                endpoint: { type: string, format: uri, maxLength: 500 }
+                credential:
+                  $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CredentialReference'
+                verifyTls: { type: boolean, default: true }
+                budget:
+                  $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionBudget'
+      responses:
+        '201':
+          description: Source registered, not yet verified
+          content:
+            application/json:
+              schema:
+                $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ZabbixSource'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /sources/{sourceId}/probe:
+    post:
+      operationId: probeZabbixSource
+      summary: Check whether the endpoint answers
+      description: |
+        Calls `apiinfo.version` under the source's timeout and records the
+        outcome. This is the only call that may change `status`, and it records
+        what it observed: `OK`, `UNAUTHORIZED`, `UNAVAILABLE`, `TIMEOUT` or
+        `UNKNOWN`. A probe that times out is `TIMEOUT`, never `UNAVAILABLE` -
+        the endpoint may be perfectly healthy and slow, and the two are different
+        operational facts.
+
+        A failed probe is a 200 carrying a failure outcome, not an HTTP error:
+        "the endpoint is unreachable" is a successful observation about Zabbix,
+        and a reader needs it as queryable evidence (rules/05 Gate).
+      responses:
+        '200':
+          description: Probe observation, successful or not
+          content:
+            application/json:
+              schema:
+                $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ProbeResult'
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    parameters:
+      - $ref: '#/components/parameters/SourceId'
+  /sources/{sourceId}/hosts:
+    get:
+      operationId: listZabbixHosts
+      summary: List hosts known to the source
+      description: |
+        Mirrors `host.get`. Bounded by the source's `maxItems`; when the
+        inventory is larger than the ceiling the response is `clamped: true` and
+        `truncated` says how many were not returned, so a short list is never
+        mistaken for a small Zabbix.
+      responses:
+        '200':
+          description: Hosts, possibly clamped
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [outcome, items, clamped]
+                properties:
+                  outcome:
+                    $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionOutcome'
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [hostId, name]
+                      properties:
+                        hostId: { type: string, maxLength: 64 }
+                        name: { type: string, maxLength: 200 }
+                        available:
+                          type: string
+                          enum: [AVAILABLE, UNAVAILABLE, UNKNOWN]
+                          description: |
+                            Zabbix's own availability view. UNKNOWN is preserved
+                            rather than folded into UNAVAILABLE: "never checked"
+                            and "checked and down" are different facts.
+                  clamped: { type: boolean }
+                  truncated:
+                    type: ['integer', 'null']
+                    minimum: 0
+                    description: |
+                      How many hosts were not returned because of the ceiling.
+                      null means the count is not knowable, which is not the
+                      same as 0.
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/SourceFailure' }
+        '504': { $ref: '#/components/responses/SourceTimeout' }
+    parameters:
+      - $ref: '#/components/parameters/SourceId'
+  /sources/{sourceId}/items:
+    get:
+      operationId: listZabbixItems
+      summary: List items for a host
+      description: |
+        Mirrors `item.get` for one host. Same clamping semantics as
+        `listZabbixHosts`.
+      parameters:
+        - name: hostId
+          in: query
+          required: true
+          schema: { type: string, maxLength: 64 }
+      responses:
+        '200':
+          description: Items, possibly clamped
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [outcome, items, clamped]
+                properties:
+                  outcome:
+                    $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionOutcome'
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [itemId, key]
+                      properties:
+                        itemId: { type: string, maxLength: 64 }
+                        key: { type: string, maxLength: 500 }
+                        name: { type: string, maxLength: 300 }
+                        unit: { type: ['string', 'null'], maxLength: 40 }
+                        valueType:
+                          type: string
+                          enum: [FLOAT, INTEGER, TEXT, UNSUPPORTED]
+                          description: |
+                            TEXT and UNSUPPORTED items are listed but cannot be
+                            collected as numbers; a collection naming one answers
+                            NO_DATA with UNSUPPORTED_ITEM rather than 0.
+                  clamped: { type: boolean }
+                  truncated: { type: ['integer', 'null'], minimum: 0 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/SourceFailure' }
+        '504': { $ref: '#/components/responses/SourceTimeout' }
+    parameters:
+      - $ref: '#/components/parameters/SourceId'
+  /sources/{sourceId}/collect:
+    post:
+      operationId: collectZabbixMetrics
+      summary: Collect a bounded time window of metrics
+      description: |
+        Reads `history.get` for the named items over the requested window and
+        returns one `ItemSeries` per requested item, including items that failed:
+        a reader is told about every item it asked for, so a silently dropped
+        item cannot look like an item with no data.
+
+        Per-item and overall outcomes are separate. One failed item among ten
+        answered makes the collection `PARTIAL` while that item's series carries
+        its own `NO_DATA` or `UNKNOWN`. A collection where the endpoint was never
+        reached is `UNAVAILABLE` with no series at all, which is different from a
+        collection where every item legitimately recorded nothing (`EMPTY`).
+
+        Budget ceilings are applied before any outbound call. An over-long window
+        or an over-long item list is clamped and reported in `clamped` and
+        `budget`, never silently honoured.
+
+        This endpoint performs no incident write. To file the result as evidence,
+        pass its `contentRef` to `attestCollection`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [itemIds, window]
+              properties:
+                itemIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, maxLength: 64 }
+                window:
+                  $ref: '../schema/zabbix-source.v1.schema.json#/$defs/TimeWindow'
+      responses:
+        '200':
+          description: |
+            A collection observation. Carries a failure outcome where the
+            collection failed: the observation itself succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/SourceFailure' }
+        '504': { $ref: '#/components/responses/SourceTimeout' }
+    parameters:
+      - $ref: '#/components/parameters/SourceId'
+  /collections/{collectionId}/attestation:
+    post:
+      operationId: attestCollection
+      summary: Sign a collection so the Kernel can verify it as evidence
+      description: |
+        Returns the attestation envelope for a collection this plugin performed,
+        bound to the incident and evidence tuple the caller intends to write.
+        The caller then posts that envelope to the Kernel's
+        `POST /incidents/{incidentId}/evidence`.
+
+        The signature covers the exact bytes defined in incident-v1.yaml
+        (`components.schemas.Attestation`): a fixed-key-order JSON document over
+        the version tag, adapter id, incident id, evidence kind, source, content
+        digest and both timestamps. It deliberately does not cover `claimedTrust`
+        or any other field a caller could vary, so no unsigned field can move the
+        trust level.
+
+        This plugin never decides its own trust level. It signs; the Kernel
+        verifies and records `SOURCE_ATTESTED` only if the signature checks out
+        under a secret the Kernel was configured with. An unknown adapter is
+        refused there with `EVIDENCE_ADAPTER_UNKNOWN`.
+
+        A collection whose own outcome is `UNAVAILABLE` or `UNKNOWN` cannot be
+        attested as a measurement: the plugin answers 409
+        `ZBX_COLLECTION_NOT_ATTESTABLE` rather than signing a statement about
+        data it never obtained.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [incidentId, kind]
+              properties:
+                incidentId: { type: string, format: uuid }
+                kind:
+                  type: string
+                  enum: [METRIC_SNAPSHOT, QUERY_RESULT]
+                  description: |
+                    Must match the kind sent to the Kernel. The signature covers
+                    it, so a mismatch fails verification rather than being
+                    accepted under the wrong kind.
+      responses:
+        '200':
+          description: Attestation envelope to forward to the Kernel
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [attestation, evidence]
+                properties:
+                  attestation:
+                    $ref: '../schema/zabbix-source.v1.schema.json#/$defs/EvidenceAttestation'
+                  evidence:
+                    type: object
+                    additionalProperties: false
+                    required: [kind, source, collectedAt, contentRef]
+                    properties:
+                      kind: { type: string }
+                      source: { type: string }
+                      collectedAt: { type: string, format: date-time }
+                      contentRef: { type: string }
+                    description: |
+                      The exact tuple the signature covers. Posting a different
+                      tuple to the Kernel fails verification there.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            The collection cannot carry an attestation (no adapter secret is
+            configured, or its outcome is UNAVAILABLE/UNKNOWN).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    parameters:
+      - name: collectionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: opsweave_session
+    workloadBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: OpsWeave-Workload-Token
+  parameters:
+    SourceId:
+      name: sourceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, retryable]
+      properties:
+        code:
+          type: string
+          description: |
+            Stable, localizable error code. The UI renders its own text per code
+            (AGENTS.md): the server's English sentence is for operators and logs,
+            never for end-user display. Codes used here:
+            ZBX_CREDENTIAL_NOT_A_REFERENCE, ZBX_ENDPOINT_REJECTED,
+            ZBX_SSRF_BLOCKED, ZBX_SOURCE_UNREACHABLE, ZBX_SOURCE_TIMEOUT,
+            ZBX_UNAUTHORIZED_AT_SOURCE, ZBX_BUDGET_EXCEEDED,
+            ZBX_COLLECTION_NOT_ATTESTABLE, ZBX_ADAPTER_NOT_CONFIGURED.
+        message:
+          type: string
+          description: |
+            Operator-facing detail. Never contains a credential, a resolved
+            secret, an Authorization header or a URL carrying either.
+        requestId: { type: string }
+        retryable:
+          type: boolean
+          description: |
+            Whether an identical retry could plausibly succeed. A timeout is
+            retryable; a rejected endpoint is not.
+        details:
+          type: object
+          additionalProperties: true
+  responses:
+    BadRequest:
+      description: Invalid source, window, item list or credential reference
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthenticated:
+      description: Missing or invalid identity
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: |
+        Authenticated but not permitted. Decided by the Gateway and this plugin
+        from the Kernel-issued identity, never from a tenant or subject the
+        request claims for itself (rules/03, rules/10).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Source or collection not found in this caller's scope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    SourceFailure:
+      description: |
+        The Zabbix endpoint could not be reached or answered unusably. No
+        fallback to sample or mock data is ever performed (AGENTS.md MUST NOT).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    SourceTimeout:
+      description: |
+        The deadline passed. For a read this means the outcome is UNKNOWN rather
+        than empty; the caller must not infer that no data exists.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

@@ -1,0 +1,67 @@
+{
+  "collectionId": "3c7b1a90-5d42-4e18-8f6a-1d9e0b2c4f55",
+  "sourceId": "9f1c4d2e-6b70-4a1f-9c33-2b8de4a51c07",
+  "outcome": "PARTIAL",
+  "requestedItems": 4,
+  "answeredItems": 3,
+  "clamped": true,
+  "budget": {
+    "maxWindowSeconds": 86400,
+    "maxItems": 200,
+    "maxSamplesPerItem": 5000,
+    "requestTimeoutMs": 10000,
+    "maxConcurrency": 4
+  },
+  "observedAt": "2026-11-01T03:00:00Z",
+  "contentRef": "sha256:9a3f1c0d2e4b6a8f1c3d5e7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b7c",
+  "series": [
+    {
+      "itemId": "10401",
+      "hostId": "10084",
+      "key": "system.cpu.util",
+      "unit": "%",
+      "outcome": "OK",
+      "requestedWindow": {"from": "2026-11-01T02:00:00Z", "to": "2026-11-01T03:00:00Z"},
+      "coveredWindow": {"from": "2026-11-01T02:00:00Z", "to": "2026-11-01T03:00:00Z"},
+      "samples": [
+        {"occurredAt": "2026-11-01T02:30:00Z", "value": 17.5},
+        {"occurredAt": "2026-11-01T02:31:00Z", "value": 18.25}
+      ]
+    },
+    {
+      "itemId": "10402",
+      "hostId": "10084",
+      "key": "vfs.fs.size[/,pfree]",
+      "unit": "%",
+      "outcome": "EMPTY",
+      "requestedWindow": {"from": "2026-11-01T02:00:00Z", "to": "2026-11-01T03:00:00Z"},
+      "coveredWindow": {"from": "2026-11-01T02:00:00Z", "to": "2026-11-01T03:00:00Z"},
+      "samples": []
+    },
+    {
+      "itemId": "10403",
+      "hostId": "10084",
+      "key": "vm.memory.utilization",
+      "unit": "%",
+      "outcome": "NO_DATA",
+      "requestedWindow": {"from": "2026-11-01T02:00:00Z", "to": "2026-11-01T03:00:00Z"},
+      "samples": [
+        {
+          "occurredAt": "2026-11-01T02:30:00Z",
+          "value": null,
+          "absenceReason": "TRIMMED_BY_HOUSEKEEPING"
+        }
+      ]
+    },
+    {
+      "itemId": "10404",
+      "hostId": "10091",
+      "key": "net.if.in[eth0]",
+      "unit": "bps",
+      "outcome": "TIMEOUT",
+      "errorCode": "ZBX_COLLECT_TIMEOUT",
+      "requestedWindow": {"from": "2026-11-01T02:00:00Z", "to": "2026-11-01T03:00:00Z"},
+      "samples": []
+    }
+  ]
+}

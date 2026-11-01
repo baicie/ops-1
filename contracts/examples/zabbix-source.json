@@ -1,0 +1,22 @@
+{
+  "sourceId": "9f1c4d2e-6b70-4a1f-9c33-2b8de4a51c07",
+  "name": "zabbix-main",
+  "endpoint": "https://zabbix.example.invalid/api_jsonrpc.php",
+  "credential": {"kind": "api-token", "ref": "secretref:zabbix/main/api-token"},
+  "verifyTls": true,
+  "status": "READY",
+  "lastProbe": {
+    "outcome": "OK",
+    "apiVersion": "7.0.0",
+    "latencyMs": 42,
+    "observedAt": "2026-11-01T02:15:00Z"
+  },
+  "budget": {
+    "maxWindowSeconds": 86400,
+    "maxItems": 200,
+    "maxSamplesPerItem": 5000,
+    "requestTimeoutMs": 10000,
+    "maxConcurrency": 4
+  },
+  "createdAt": "2026-10-28T09:00:00Z"
+}
