@@ -1,5 +1,6 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use opsweave_contracts::Role;
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 
@@ -29,6 +30,14 @@ pub struct Config {
     pub allow_insecure_node_transport: bool,
     pub allowed_node_data_hosts: Vec<String>,
     pub trusted_proxy_ips: Vec<String>,
+    /// The only identities that may produce SOURCE_ATTESTED evidence (G12 A1).
+    ///
+    /// adapter id -> HMAC secret. An empty map is the safe default: with no
+    /// adapter configured nothing can be attested, and the Kernel says so rather
+    /// than accepting a claim. The secrets are never logged, never returned by an
+    /// endpoint and never written to the database - only the adapter id is stored
+    /// on the evidence row it vouched for.
+    pub evidence_adapters: HashMap<String, String>,
     pub plugin_db_host: String,
     #[allow(dead_code)]
     #[allow(dead_code)]
@@ -91,6 +100,10 @@ impl Config {
                 "127.0.0.1,localhost,::1",
             ),
             trusted_proxy_ips: env_list("OPSWEAVE_TRUSTED_PROXY_IPS", ""),
+            evidence_adapters: parse_evidence_adapters(&env_string(
+                "OPSWEAVE_EVIDENCE_ADAPTERS",
+                "",
+            )),
             plugin_db_host: env_string("OPSWEAVE_PLUGIN_DB_HOST", "host.docker.internal"),
             plugin_kernel_url: env_string(
                 "OPSWEAVE_PLUGIN_KERNEL_URL",
@@ -220,6 +233,50 @@ pub fn parse_admin_surface_roles(raw: &str) -> Vec<Role> {
         );
     }
     roles
+}
+
+/// OPSWEAVE_EVIDENCE_ADAPTERS: comma-separated adapterId:secret pairs.
+///
+/// A malformed entry is dropped with a warning instead of failing the process,
+/// because the fail-safe direction here is "fewer adapters than configured",
+/// never "the Kernel refuses to start". Dropping an adapter can only lose an
+/// attestation capability; it can never grant one.
+pub fn parse_evidence_adapters(raw: &str) -> HashMap<String, String> {
+    let mut adapters = HashMap::new();
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let Some((id, secret)) = entry.split_once(':') else {
+            tracing::warn!("OPSWEAVE_EVIDENCE_ADAPTERS entry has no ':' separator; ignored");
+            continue;
+        };
+        let id = id.trim();
+        let secret = secret.trim();
+        if id.is_empty() || id.chars().count() > 100 || secret.is_empty() {
+            tracing::warn!(
+                "OPSWEAVE_EVIDENCE_ADAPTERS entry is malformed (id 1..100 chars, non-empty secret); ignored"
+            );
+            continue;
+        }
+        if adapters
+            .insert(id.to_string(), secret.to_string())
+            .is_some()
+        {
+            tracing::warn!(
+                adapter = id,
+                "OPSWEAVE_EVIDENCE_ADAPTERS declares this adapter twice; the last secret wins"
+            );
+        }
+    }
+    if !adapters.is_empty() {
+        tracing::info!(
+            adapters = ?adapters.keys().collect::<Vec<_>>(),
+            "source adapters configured to produce attested evidence"
+        );
+    }
+    adapters
 }
 
 fn env_string(key: &str, default: &str) -> String {
