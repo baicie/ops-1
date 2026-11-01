@@ -23,9 +23,9 @@
 | 凭据引用化 + 日志脱敏 | `IMPLEMENTED` | 同上 |
 | SSRF 防护（私网 / 回环 / 元数据 / userinfo / 重定向） | `IMPLEMENTED` | 同上 |
 | 插件 HTTP 服务可真实启动并服务全部端点 | `IMPLEMENTED`（真实 socket 验证，见 2.4） | `plugins/zabbix-source/backend/server.mjs` |
-| 插件签名产出证据（与 Kernel 字节一致） | `IMPLEMENTED`（载荷字节一致已双向验证；跨进程提交 `NOT_RUN`，见 N-8） | `signAttestation` / `attestationPayload` |
+| 插件签名产出证据（与 Kernel 字节一致） | `IMPLEMENTED`（跨进程提交已实测，见 N-8 关闭记录） | `signAttestation` / `attestationPayload` |
 | ADR-015 | `IMPLEMENTED` | `docs/adr/` |
-| 前端 | `NOT_STARTED`（本任务不碰 `apps/platform-web/`，manifest `frontend: null`） | — |
+| 前端 | `IMPLEMENTED`（`/app/incidents/{id}` 证据表读取 `verifiedTrust`/`verificationMethod`，表单只提交 `claimedTrust`；见「前端对齐」） | `apps/platform-web/src/pages/incident-trust.tsx` |
 | OCI 镜像构建与 digest 固定 | `NOT_RUN`（无 Docker daemon） | `plugins/zabbix-source/backend/Dockerfile` |
 
 ### 1.1 证据信任：复用来源
@@ -303,12 +303,41 @@ null 样本但缺 absenceReason   -> 被拒 (False)
 | N-4 | **OCI 镜像构建 / digest 固定 / 非 root 实测** | 无 Docker daemon。`rules/09` 要求以真实运行结果验收，不凭 Dockerfile 表面声明推断 | `docker build plugins/zabbix-source/backend` 后核对 digest 与 `USER` |
 | N-6 | **`tests/acceptance/g12_trusted_evidence.sh`** | 需运行中的 Kernel + 库。Kernel 已能在真实库上跑单测（2.2），但该脚本要求起完整 Kernel 进程 | 起 Kernel 后执行该脚本 |
 | N-7 | **多语言 conformance / OCI Release Review** | `AGENTS.md` 要求发布到真实两节点前通过；本任务未发布 | 见对应 SKILL.md |
-| N-8 | **`/collections/{id}/attestation` 与 `/runtime-info` 的真实 socket 调用** | 2.4 的假 Zabbix 会话未对这两个端点单独发请求。签名逻辑本身有单元测试 1/2/3 覆盖，Kernel 侧验签有 2.2 的 26 个真实库测试覆盖，但**「插件签出来的信封交给 Kernel 能否被接受」这条跨进程链路没有一次端到端实测** | 起 Kernel（配置 `OPSWEAVE_EVIDENCE_ADAPTERS=zabbix-main:<secret>`）与插件，取采集结果做 attestation 后 POST 到 Kernel 的证据接口 |
+| N-8 | ~~**`/collections/{id}/attestation` 与 `/runtime-info` 的真实 socket 调用**~~ | **已关闭（2026-11-01）**，见下方「N-8 实测记录」。仍未测的部分只剩：插件进程内的 `/collections/{id}/attestation` 与 `/runtime-info` 两个端点未被单独调用（签名与 `attestationPayload` 已在真实 Kernel 上被接受，见下） | — |
 | N-9 | **插件重启后 source/collection 丢失** | 见 R-11，属已知取舍而非遗漏 | 需要时按 `rules/05` 落插件自有 schema |
 
-**N-8 是当前最值得优先补的一项**：它是唯一同时跨越两个进程与两套语言实现的链路，而单元测试各自只验证了自己那一半。
+### N-8 实测记录（2026-11-01）
 
-**产品状态：未就绪。** 实现状态 `IMPLEMENTED`、测试状态 `PARTIAL`（26 个 Kernel 测试与 26 个插件测试全部真实通过，但无真实 Zabbix 实例、无镜像、无跨进程验签实测）、产品状态 `NOT_READY`。
+一次性数据库 `opsweave_g12_n8`（已删除），真实 Kernel 进程
+`OPSWEAVE_EVIDENCE_ADAPTERS=zabbix-main:<secret>`，真实 HTTP。用插件自己的
+`signAttestation()` 对一条证据元组签名，把该信封 POST 到 `/api/v1/incidents/{id}/evidence`：
+
+| # | 场景 | 结果 |
+|---|---|---|
+| A | 插件签名信封（正确密钥） | `201`，`verifiedTrust=SOURCE_ATTESTED`、`verificationMethod=SOURCE_ADAPTER`、`verifierIdentity=zabbix-main` |
+| B | 旧字段 `trust` | `400 EVIDENCE_TRUST_NOT_SELF_ASSERTABLE` |
+| C | `claimedTrust=SOURCE_ATTESTED` | `400 EVIDENCE_TRUST_NOT_SELF_ASSERTABLE` |
+| D | 错误密钥签名 | `400 EVIDENCE_ATTESTATION_INVALID` |
+| E | 未配置的 adapterId | `400 EVIDENCE_ADAPTER_UNKNOWN` |
+| F | 签名时间偏离 600s | `401 EVIDENCE_ATTESTATION_STALE` |
+
+A 是这条跨进程链路第一次被真正跑通：插件的字节 → HMAC → HTTP → Kernel 验签 → 落库字段。
+B–F 证明拒绝路径返回的是契约里的稳定错误码，而不是笼统的 `INVALID_REQUEST`。
+
+**仍未覆盖**：`/collections/{id}/attestation`、`/runtime-info` 这两个插件端点的独立调用；
+上面测的是同一份签名代码的产物，不是这两个 HTTP 端点本身。真实 Zabbix（N-2）、镜像（N-4）、
+`g12_trusted_evidence.sh`（N-6）仍未跑。
+
+### 前端对齐（2026-11-01）
+
+`/app/incidents/{id}` 原先按 G12 之前的契约渲染：读 `row.trust`（该字段已不存在），表单提供
+`SOURCE_ATTESTED`（现在必然 400）。现已改为读 `verifiedTrust` + `verificationMethod`，表单只提交
+`claimedTrust` 且仅提供两个可声明值；`SOURCE_ATTESTED` 现在拿 `ok` 绿色，因为它是内核判定的，
+不再是写入方自报。声明与判定不一致的行（0017 迁移降级的行）显示内核给出的 `verificationNote`。
+12 张真实浏览器截图（3 宽度 × 2 主题 × 2 语言）+ `check-ui-metrics` 通过，见
+`artifacts/ui/incident-trust/`。
+
+**产品状态：未就绪。** 实现状态 `IMPLEMENTED`、测试状态 `PARTIAL`（26 个 Kernel 测试、26 个插件测试、跨进程验签六条路径见 N-8 全部真实通过，但无真实 Zabbix 实例、无镜像、插件两个 HTTP 端点未独立实测）、产品状态 `NOT_READY`。
 
 ---
 
