@@ -48,19 +48,30 @@ g08 spec kept asserting one); and the attention copy differs from the string the
 
 ## What the full suite reported
 
-`playwright test --project=chromium --workers=1` over the whole directory: **103 passed, 29
-failed**. The failures are concentrated in specs that need a stack this database does not have:
+`playwright test --project=chromium --workers=1` over the whole directory, run to completion:
+
+```
+89 passed, 59 failed, 2 skipped, 40 did not run  (54.7m)
+```
+
+**This number is not clean, and it is not a defect count.** I restarted the Kernel partway through
+that run (to give it a `BUILD_SHA`), which severed the eight `permission-consistency` tests sitting
+in a shared fixture — they failed on `ECONNREFUSED 127.0.0.1:18181`, not on an assertion. Running
+the whole directory also produced failures that pass alone (`g11-page-header-growth.spec.ts:201`
+failed in the sweep and passed at 2.6m on its own), and at least one failure is a corrupted trace
+file written after its assertion had already passed (`i18n-locale.spec.ts:82`). Treat the sweep as
+an upper bound on environmental noise.
+
+The failures that survived that reading are concentrated in specs that need a stack this database
+does not have:
 
 | group | why |
 |---|---|
-| `data-foundation*`, `staging-smoke` | needs the Data Catalog/Integration plugin bundles, which are not built or deployed here |
-| `studio.spec.ts` (8) | needs published pipeline revisions; the studio's own flows need a worker |
-| `admin-pages` (nodes), `overview-partial`, `ui-verbs-v6`, `v5-*` | need rows, a node, or a specific attention fixture |
-| SHA-pinned specs | read their expected commit from `OPSWEAVE_COMMIT` / `V6_SHA`, defaulting to a stale hash; against the matching Kernel they pass (verified: `ui-verbs-v6.spec.ts:77` passes once both are set) |
-
-Running the whole directory at once also produced failures that pass when run alone
-(`g11-page-header-growth.spec.ts:201` failed in the sweep and passed at 2.6m on its own), so the
-sweep number is an upper bound on environmental noise, not a defect count.
+| `data-foundation*`, `staging-smoke`, `plugin-surfaces` | need the Data Catalog/Integration plugin bundles, which are not built or deployed here |
+| `studio.spec.ts` (7) | needs published pipeline revisions; the studio's own flows need a worker |
+| `b2-job-detail-longid` (2) | fails on its own fixture: *"the live Kernel served no jobs - nothing real to measure"* |
+| `admin-pages` (nodes), `overview-partial`, `ui-verbs-v6`, `v5-*`, `permission-consistency` | need rows, a node, a specific attention fixture, or a Kernel that stayed up through the sweep |
+| SHA-pinned specs | read their expected commit from `OPSWEAVE_COMMIT` / `V6_SHA`; against a matching Kernel they pass (verified: `ui-verbs-v6.spec.ts:77` passes once both are set) |
 
 ## What was not run
 

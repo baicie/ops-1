@@ -34,9 +34,11 @@ baseline.
 
 - **No human has looked at the 84 screenshots.** They exist; reviewing them is a separate act.
   `state-matrix.md` §7 lists what a reviewer should check.
-- **The full Playwright suite does not pass in this environment** — 103 passed, 29 failed. Four of
-  the failures I suspected were mine were re-run against a second checkout of the base commit and
-  fail identically there; `suite-results.md` records that comparison. The file this task is judged
-  on, `admin-polish.spec.ts`, goes from **10 passed / 1 failed** at base to **11 / 0** here.
+- **The full Playwright suite does not pass in this environment** — 89 passed, 59 failed, and that
+  count is contaminated by a Kernel restart I did mid-sweep plus concurrency noise;
+  `suite-results.md` says which failures survived that reading. Four of the ones I most suspected
+  were mine were re-run against a second checkout of the base commit and fail identically there.
+  The file this task is judged on, `admin-polish.spec.ts`, goes from **10 passed / 1 failed** at
+  base to **11 / 0** here.
 - **`type-tier` (6) and `one-header` (3) are not zero**, for reasons recorded in
   `ratchet-before-after.md`; both need a decision or a file this task may not edit.
