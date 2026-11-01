@@ -863,7 +863,13 @@ details.panel.advanced > summary { padding: 12px 16px; }
 /* Metric strips are four tiles wide. .summary-grid is deliberately absent: it is a panel
    grid, and letting the strip rule own it made every content panel 275px inside a 1137px
    canvas with 562px of dead space. */
-.pipeline-stats, .job-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+/* page-template 2.3: gap 16, not 12. The card's own horizontal padding is 16px, so a 12px
+   gap put more air inside a card than between two of them - proximity then groups the
+   label with its neighbour's value instead of with its own, and a four-card band reads as
+   a two-column list. 16 = the padding is the smallest gap at which the border, not the
+   whitespace, does the grouping. Columns stay 4 / 2 / 1: a band that can be 3 columns
+   cannot be scanned as a band. */
+.pipeline-stats, .job-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .metric-card {
   display: flex; flex-direction: column; gap: 8px;
   min-width: 0; min-height: 92px; padding: 12px 16px;
@@ -1205,7 +1211,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .value-token--unknown { border-style: dotted; }
 
 /* Metric cards: every card that names a destination is a real link. */
-.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .ow-metric {
   position: relative; display: flex; flex-direction: column; gap: 4px;
   min-width: 0; padding: 12px 16px; color: var(--ow-text);
@@ -2934,3 +2940,64 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 .studio-draft-picker { flex-wrap: wrap; }
 .studio-draft-picker .field-label { flex: none; }
 .studio-draft-picker .ow-filter-select { min-width: 0; max-width: 320px; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   page-template §2.1 + table-spec §2.6: the execution path reads top-to-bottom
+   on a phone.
+
+   `.pipeline-flow` is a horizontal strip with `overflow-x: auto`, and every
+   `.flow-step` sets `white-space: nowrap` on both of its lines. At 390 the audit
+   measured the strip 91px past the 375px content box (flow-index right=466,
+   flow-arrow right=429), so the LAST steps of the chain sat outside the viewport.
+
+   A chain that has to be scrolled sideways has stopped expressing order: the
+   reader can see step 1 or step 4, never the sequence. The fix is the axis, not
+   the width - below the record breakpoint the strip becomes a column, the arrow
+   turns a quarter turn, and the whole path is one vertical read with no scroller.
+   Above it, nothing changes: the horizontal strip is the right shape when the
+   width is there.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .pipeline-flow {
+    flex-direction: column;
+    align-items: stretch;
+    /* No scroller left to need: the column is as wide as its container. */
+    overflow-x: visible;
+    gap: 0;
+  }
+  /* min-width was sized for a side-by-side strip; in a column it would force
+     the panel wider than the phone. The step is now as wide as the panel. */
+  .flow-step { min-width: 0; }
+  /* The node id is the one unbreakable string in the step (a mono identifier).
+     In a column there is no horizontal scroller to absorb it, so it wraps. */
+  .flow-step small { white-space: normal; overflow-wrap: anywhere; }
+  /* The arrow pointed right between two columns; between two stacked rows it
+     points down. Rotating the glyph keeps one arrow in the markup and one
+     meaning on screen. */
+  .flow-arrow { align-self: center; transform: rotate(90deg); padding: 2px 0; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   page-template 2.3: inside a KPI BAND, the card height is declared.
+
+   The band had two card bodies with different height rules: .metric-card said
+   min-height 92px and .ow-metric derived its height from content, so one band
+   could render a 92 and a 68 side by side - the second card's value sat below
+   the first card's, and a ragged bottom edge reads as a card still loading.
+
+   92 = 12 + 16 (label 11x1.45) + 12 + 31 (value 26x1.2) + 8 + 19 (detail
+   13x1.45) + 12 - 8 slack. The interior distribution is free; the total is not.
+
+   Scoped to the band container on purpose. .stat-strip (the Overview console
+   strip) is a DIFFERENT region with its own deliberately dense 176px auto-fit
+   cards, and it re-skins .ow-metric for that; putting the floor on .ow-metric
+   itself would inflate every one of those rows. A rule the band needs belongs
+   to the band.
+   ───────────────────────────────────────────────────────────────────────────── */
+.metric-grid > .ow-metric,
+.metric-grid > .metric-card,
+.pipeline-stats > .metric-card,
+.job-stats > .metric-card {
+  min-height: 92px;
+  justify-content: space-between;
+}
