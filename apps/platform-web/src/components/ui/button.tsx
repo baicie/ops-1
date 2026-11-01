@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils';
 // shadcn/ui copy-in, adapted to this repo: variants are plain objects instead of cva
 // (cva is not an allowed dependency here) and every border is explicit because the
 // preflight layer is disabled — see tailwind.config.cjs.
-const base = 'inline-flex items-center justify-center gap-[7px] whitespace-nowrap rounded-md border border-solid font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50';
+const base = 'inline-flex items-center justify-center gap-[7px] whitespace-nowrap rounded-control border border-solid font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50';
 
 const variantStyles = {
   default: 'bg-primary text-primary-foreground hover:opacity-90',

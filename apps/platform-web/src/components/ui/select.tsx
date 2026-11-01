@@ -30,7 +30,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex h-9 w-full items-center justify-between gap-2 rounded-md border border-solid border-border-strong bg-card px-3 py-1 text-left text-base text-foreground',
+      'flex h-9 w-full items-center justify-between gap-2 rounded-control border border-solid border-border-strong bg-card px-3 py-1 text-left text-base text-foreground',
       'transition-colors hover:border-ring focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       // min-w-0 belongs here: a flex item will not shrink below its content without it, and
       // .truncate no longer smuggles it in (the stylesheet no longer redefines the utility).
@@ -50,7 +50,7 @@ SelectTrigger.displayName = 'SelectTrigger';
 // z-[110] sits above .modal-backdrop (100) so a Select inside a Dialog stays reachable,
 // and below the toast stack (120).
 const contentBase =
-  'relative z-[110] min-w-[8rem] overflow-hidden rounded-md border border-solid border-border bg-popover text-popover-foreground shadow-card';
+  'relative z-[110] min-w-[8rem] overflow-hidden rounded-card border border-solid border-border bg-popover text-popover-foreground shadow-card';
 
 export const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
@@ -106,7 +106,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex w-full cursor-default select-none items-center gap-2 rounded-sm py-1.5 pl-2 pr-8 text-base text-foreground outline-none',
+      'relative flex w-full cursor-default select-none items-center gap-2 rounded-control py-1.5 pl-2 pr-8 text-base text-foreground outline-none',
       'focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className,
     )}

@@ -619,7 +619,7 @@ function historySegments(history: any[]) {
 function ProgressBar({ percent }: { percent: number | null }) {
   return (
     <div className="h-[5px] overflow-hidden rounded-full bg-surface-3" aria-hidden="true">
-      <div className="h-full rounded-[inherit] bg-primary" style={{ width: percent === null ? '0%' : `${Math.min(100, Math.max(0, percent * 100))}%` }} />
+      <div className="h-full rounded-pill bg-primary" style={{ width: percent === null ? '0%' : `${Math.min(100, Math.max(0, percent * 100))}%` }} />
     </div>
   );
 }
