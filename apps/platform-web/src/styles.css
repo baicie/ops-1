@@ -2845,3 +2845,71 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 .resource-history-plot > svg { flex: 1 1 auto; min-width: 0; }
 .resource-history-axis-time { display: flex; justify-content: space-between; gap: 16px; padding: 2px 16px 8px 0; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
 .resource-history-grid line { stroke: var(--ow-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+/* ─── /app/sources: the connector management surface ─────────────────────────
+   Position comes from page-template.md (the fixed order: header -> KPI band ->
+   toolbar -> primary table -> secondary panels); values come from token-table.md.
+   Nothing below declares a radius, a font size or a control height that is not
+   already a token, so the page adds no debt to ui-debt.json.
+
+   The table itself reuses .panel/.table-panel and the shared .ow-table rules, so
+   row height (40px), the 32px header band and the 390 two-line card all come from
+   the kit rather than from a second implementation here. */
+
+/* The drawer body. A sheet is a dialog at every width (components/app/sheet.tsx),
+   so this only lays the content out; the overlay, focus trap and Escape handling
+   are the dialog primitive's. */
+.ow-source-detail { display: flex; flex-direction: column; gap: var(--ow-space-3); min-width: 0; overflow-y: auto; }
+.ow-source-detail .detail-list { margin: 0; }
+
+/* The plugin id, shown in full exactly once - in the drawer, beside a copy button.
+   The table never prints it (table-spec §2.1: the identity cell is a name, and the
+   full id lives in `title` and the row menu). `anywhere` because a reverse-DNS id
+   has no spaces and would otherwise push the drawer into horizontal overflow. */
+.ow-source-id { display: flex; align-items: center; gap: var(--ow-space-2); min-width: 0; }
+.ow-source-id > .mono { min-width: 0; overflow-wrap: anywhere; }
+/* The copy affordance is a flex item on a `justify-content: space-between` row, so without
+   this it shrinks below its own control box and paints past the drawer's right edge once the
+   id beside it is long (measured on `acme.cloudwatch`). table-spec §2.1 makes the copy button
+   the thing that carries the full id, so it is the one item on this row that may not shrink. */
+.ow-source-id > .icon-btn { flex: 0 0 auto; }
+
+/* A section heading inside the drawer. The label tier is the smallest the ladder
+   has, and the casing is guarded by :lang(en) because upper-casing does nothing to
+   Chinese characters: applied unguarded it shouts the Latin half of a mixed string
+   and leaves the rest flat (machine-language-rules §M2). */
+.ow-source-subhead { font-size: var(--ow-type-label); font-weight: 600; color: var(--ow-text-muted); letter-spacing: .04em; margin-top: var(--ow-space-2); }
+.ow-source-subhead:lang(en) { text-transform: uppercase; }
+
+/* A stated absence: the sentence that says which interface is missing. It is body
+   copy, not a dashed box - machine-language-rules §M1 budgets NO_DATA at one token
+   per region, and "there is no collection API in this build" is one sentence about
+   the whole panel rather than a token per row. */
+.ow-source-note { font-size: var(--ow-type-meta); color: var(--ow-text-muted); }
+
+.ow-source-actions { display: flex; flex-wrap: wrap; gap: var(--ow-space-2); margin-top: var(--ow-space-2); }
+
+/* The configuration form. One control tier per row (token-table R3/C1): every
+   control here is an Input/Select/Button at the shared height, so the row has no
+   baseline break. */
+.ow-source-form { display: flex; flex-direction: column; gap: var(--ow-space-3); min-width: 0; }
+.ow-source-field { display: flex; flex-direction: column; gap: var(--ow-space-1); min-width: 0; }
+.ow-source-field-hint { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
+
+/* A rejection, and never the rejected input: echoing what was typed would put a
+   pasted secret into the DOM, and from there into a screenshot or a log
+   (rules/03-security.md). Colour is not the only carrier - the message is text,
+   and the field is wired with aria-invalid + aria-describedby. */
+.ow-source-field-error { font-size: var(--ow-type-label); color: var(--ow-danger); }
+
+/* Exactly what the form would send, shown because it cannot be saved in this
+   build. A reference or an environment variable NAME is not secret material; a
+   value never reaches this box. */
+.ow-source-preview { background: var(--ow-surface-2); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); padding: var(--ow-space-3); font-size: var(--ow-type-meta); overflow-wrap: anywhere; }
+.ow-source-preview .mono { overflow-wrap: anywhere; }
+
+/* 390: the drawer takes the full width, because a 360px panel beside a 390px
+   viewport leaves 30px of dead canvas and a clipped identity line. */
+@media (max-width: 767px) {
+  .ow-source-detail { gap: var(--ow-space-2); }
+}
