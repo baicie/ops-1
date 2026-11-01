@@ -809,11 +809,11 @@ input::placeholder { color: var(--ow-text-muted); }
 .studio-banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--ow-ok); background: color-mix(in srgb, var(--ow-ok) 10%, var(--ow-surface)); border-radius: var(--ow-radius-card); font-size: var(--ow-type-sm); }
 .studio-banner-error { border-color: var(--ow-danger); background: color-mix(in srgb, var(--ow-danger) 10%, var(--ow-surface)); color: var(--ow-danger); }
 .studio-banner-error .btn { margin-left: auto; }
-.studio-drafts { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: var(--ow-type-sm); }
-/* One scrolling row instead of twenty-two stacked ones: at 390 the draft list measured 700px of a
-   1715px page, and the wrapping never made another chip reachable - they were all there already. */
-.draft-row { display: flex; gap: 4px; flex-wrap: wrap; }
-@media (max-width: 768px) { .draft-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; } }
+/* .studio-drafts / .draft-row are deleted with the button wall they dressed. The draft list is
+   one labelled select in a toolbar row now, so it needs no layout of its own: `.toolbar` and
+   `.ow-filter-select` already state the row's height, gap and control frame. A rule kept "just
+   in case" is the CSS half of the same defect - code-rules.test.ts fails on an unreachable
+   selector, which is how this pair was found. */
 .config-form { display: flex; flex-direction: column; gap: 8px; }
 .config-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
 .config-form input:not([type=checkbox]), .config-form textarea { width: 100%; padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); background: var(--ow-surface-2); color: var(--ow-text); font: inherit; }
@@ -2917,3 +2917,20 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
      rectangle around a 16px glyph, so both axes move together. */
   .icon-btn { min-height: var(--ow-control-touch); min-width: var(--ow-control-touch); }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Studio: the saved-draft picker (page-template §2.1, table-spec §2.2)
+
+   This region used to be a panel holding one button per draft - 18 of them on
+   the measured route, six to a row, three rows, 130px directly under the page
+   header. A draft list is HISTORY: it belongs at the weight of a filter, not at
+   the weight of the page's primary action, and 18 equal-weight rectangles above
+   the canvas is why the audit could not name a next step on this page.
+
+   One control carries the set now. `.toolbar` gives the row its height and its
+   gap; this rule only stops the label from stretching and caps the select so a
+   long "v12 · saved 3h ago" option cannot push the count off the row.
+   ───────────────────────────────────────────────────────────────────────────── */
+.studio-draft-picker { flex-wrap: wrap; }
+.studio-draft-picker .field-label { flex: none; }
+.studio-draft-picker .ow-filter-select { min-width: 0; max-width: 320px; }
