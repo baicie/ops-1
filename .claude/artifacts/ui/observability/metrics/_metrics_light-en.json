@@ -1,0 +1,492 @@
+{
+ "config": {
+  "label": "light-en",
+  "theme": "light",
+  "locale": "en",
+  "data": "fixtures"
+ },
+ "pages": {
+  "/app/observability @1440": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "offenders": [],
+   "identityKey": [
+    "ow-node-i",
+    "ow-node-j",
+    "ow-node-l",
+    "ow-node-g",
+    "ow-node-h",
+    "ow-node-k",
+    "ow-node-f",
+    "ow-node-a",
+    "ow-node-b",
+    "ow-node-c",
+    "ow-node-d",
+    "ow-node-e"
+   ],
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.42,
+    0.17
+   ],
+   "columnLabels": [
+    "Node",
+    "Status",
+    "Instances"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "headerTop": 56,
+    "firstBlockY": 160,
+    "stackGap": "24px",
+    "controlRow": [
+     {
+      "selector": ".toolbar",
+      "heights": [
+       40,
+       40,
+       18
+      ]
+     }
+    ]
+   }
+  },
+  "/app/observability/nodes/1285fbe8-9bb8-459f-b073-af245d32b3ae @1440": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "offenders": [],
+   "identityKey": [
+    "ow-node-a · 41e6",
+    "ow-node-a · d47a",
+    "node.observed",
+    "node.unreachable",
+    "instance.started",
+    "node.enrolled"
+   ],
+   "rowHeight": {
+    "p50": 41,
+    "p95": 42,
+    "max": 42,
+    "n": 6
+   },
+   "columns": 4,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "Instance",
+    "Status",
+    "restarts",
+    "Last observed",
+    "Event",
+    "Result",
+    "Occurred"
+   ],
+   "tableRowCounts": [
+    2,
+    4
+   ],
+   "duplicateRunMax": 0,
+   "rows": 6,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   },
+   "cardFactCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "headerTop": 56,
+    "firstBlockY": 160,
+    "stackGap": "24px",
+    "controlRow": []
+   }
+  },
+  "/app/observability @1024": {
+   "overflow": -15,
+   "docScrollW": 1009,
+   "docClientW": 1024,
+   "offenders": [],
+   "identityKey": [
+    "ow-node-i",
+    "ow-node-j",
+    "ow-node-l",
+    "ow-node-g",
+    "ow-node-h",
+    "ow-node-k",
+    "ow-node-f",
+    "ow-node-a",
+    "ow-node-b",
+    "ow-node-c",
+    "ow-node-d",
+    "ow-node-e"
+   ],
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.42,
+    0.17
+   ],
+   "columnLabels": [
+    "Node",
+    "Status",
+    "Instances"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1024,
+    "h": 768
+   },
+   "cardFactCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "headerTop": 80,
+    "firstBlockY": 184,
+    "stackGap": "24px",
+    "controlRow": [
+     {
+      "selector": ".toolbar",
+      "heights": [
+       40,
+       40,
+       18
+      ]
+     }
+    ]
+   }
+  },
+  "/app/observability/nodes/1285fbe8-9bb8-459f-b073-af245d32b3ae @1024": {
+   "overflow": -15,
+   "docScrollW": 1009,
+   "docClientW": 1024,
+   "offenders": [],
+   "identityKey": [
+    "ow-node-a · 41e6",
+    "ow-node-a · d47a",
+    "node.observed",
+    "node.unreachable",
+    "instance.started",
+    "node.enrolled"
+   ],
+   "rowHeight": {
+    "p50": 41,
+    "p95": 42,
+    "max": 42,
+    "n": 6
+   },
+   "columns": 4,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "Instance",
+    "Status",
+    "restarts",
+    "Last observed",
+    "Event",
+    "Result",
+    "Occurred"
+   ],
+   "tableRowCounts": [
+    2,
+    4
+   ],
+   "duplicateRunMax": 0,
+   "rows": 6,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1024,
+    "h": 768
+   },
+   "cardFactCount": null,
+   "cards": [],
+   "template": {
+    "headerHeight": 80,
+    "headerTop": 80,
+    "firstBlockY": 184,
+    "stackGap": "24px",
+    "controlRow": []
+   }
+  },
+  "/app/observability @390": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "offenders": [],
+   "identityKey": [
+    "ow-node-i",
+    "ow-node-j",
+    "ow-node-l",
+    "ow-node-g",
+    "ow-node-h",
+    "ow-node-k",
+    "ow-node-f",
+    "ow-node-a",
+    "ow-node-b",
+    "ow-node-c",
+    "ow-node-d",
+    "ow-node-e"
+   ],
+   "rowHeight": {
+    "p50": 70.8,
+    "p95": 73.8,
+    "max": 73.8,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.42,
+    0.17
+   ],
+   "columnLabels": [
+    "Node",
+    "Status",
+    "Instances"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 0,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cards": [
+    {
+     "key": "ow-node-i",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-j",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-l",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-g",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-h",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-k",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-f",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-a",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-b",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-c",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-d",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-e",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    }
+   ],
+   "template": {
+    "headerHeight": 135,
+    "headerTop": 68,
+    "firstBlockY": 227,
+    "stackGap": "24px",
+    "controlRow": [
+     {
+      "selector": ".toolbar",
+      "heights": [
+       40,
+       40,
+       18
+      ]
+     }
+    ]
+   }
+  },
+  "/app/observability/nodes/1285fbe8-9bb8-459f-b073-af245d32b3ae @390": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "offenders": [],
+   "identityKey": [
+    "ow-node-a · 41e6",
+    "ow-node-a · d47a",
+    "node.observed",
+    "node.unreachable",
+    "instance.started",
+    "node.enrolled"
+   ],
+   "rowHeight": {
+    "p50": 57,
+    "p95": 57,
+    "max": 57,
+    "n": 6
+   },
+   "columns": 4,
+   "distinctRatio": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "columnLabels": [
+    "Instance",
+    "Status",
+    "restarts",
+    "Last observed",
+    "Event",
+    "Result",
+    "Occurred"
+   ],
+   "tableRowCounts": [
+    2,
+    4
+   ],
+   "duplicateRunMax": 0,
+   "rows": 6,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cards": [
+    {
+     "key": "ow-node-a · 41e6",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "ow-node-a · d47a",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "node.observed",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "node.unreachable",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "instance.started",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    },
+    {
+     "key": "node.enrolled",
+     "clipped": false,
+     "width": 349,
+     "facts": 2
+    }
+   ],
+   "template": {
+    "headerHeight": 114,
+    "headerTop": 68,
+    "firstBlockY": 206,
+    "stackGap": "24px",
+    "controlRow": []
+   }
+  }
+ }
+}

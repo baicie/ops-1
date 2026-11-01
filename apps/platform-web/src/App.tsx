@@ -19,6 +19,8 @@ import { WorkspaceHomePage, SurfaceNotYetPage } from './pages/workspace';
 import { IncidentsPage } from './pages/Incidents';
 import { IncidentDetailPage } from './pages/IncidentDetail';
 import { SourcesPage } from './pages/Sources';
+import { ObservabilityPage } from './pages/Observability';
+import { ObservabilityEntityPage } from './pages/ObservabilityEntity';
 import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
 import { PluginsPage } from './pages/Plugins';
@@ -174,7 +176,12 @@ export function App() {
                       <Route path="incidents" element={<IncidentsPage />} />
                       <Route path="incidents/:incidentId" element={<IncidentDetailPage />} />
                       <Route path="investigations" element={<SurfaceNotYetPage capability="investigations" />} />
-                      <Route path="observability" element={<SurfaceNotYetPage capability="observability" />} />
+                      {/* The node resource series is the one telemetry this platform actually
+                          collects, so observability is served from it: a fleet list and one
+                          entity page. Both routes exist for the same reason the incident pair
+                          does - an entity needs a link that can be copied and reloaded. */}
+                      <Route path="observability" element={<ObservabilityPage />} />
+                      <Route path="observability/nodes/:nodeId" element={<ObservabilityEntityPage />} />
                       <Route path="resources" element={<SurfaceNotYetPage capability="resources" />} />
                       {/* The connector management surface. It reads the plugin and capability
                           routes rather than a sources API of its own: a telemetry connector is a

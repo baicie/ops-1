@@ -3156,3 +3156,66 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 @media (max-width: 767px) {
   .ow-source-detail { gap: var(--ow-space-2); }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   /app/observability — the fleet surface and one entity.
+
+   Every value here is a token read, not a literal: the gate (check-ui-tokens.mjs)
+   fails any border-radius outside the three tiers and any font-size that is not
+   one of the four --ow-type-* steps, and the ratchet in ui-debt.json may only go
+   down. The three state renderings (reading / NO_DATA / UNKNOWN) are carried by
+   border-style and glyph as well as colour, because colour alone is not a state
+   (rules/06-ui-ux.md MUST).
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* The identity cell's second line: os/arch and the generation that produced the
+   sample. §2.2 demotes both to inline secondary rather than spending a column. */
+.ow-entity-id { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
+.ow-entity-state { display: inline-flex; align-items: center; gap: 4px; }
+.ow-entity-fact { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+
+/* A reading the source could not give. Not a dashed box: §2.7 allows one dashed
+   token per table and a utilisation column would spend one per row, so the cell
+   says it in muted words and the single token is spent above the table. */
+.ow-obs-absent { color: var(--ow-text-muted); font-size: var(--ow-type-meta); font-variant-numeric: tabular-nums; }
+.ow-obs-sep { color: var(--ow-border-strong); padding: 0 2px; }
+
+/* The time series. Drawn here rather than by a chart library: a library joins
+   its points, and a line across a silence claims readings nobody took. */
+.ow-series-stack { display: flex; flex-direction: column; gap: 24px; padding: 12px 16px 16px; }
+.ow-series { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.ow-series-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ow-series-label { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
+.ow-series-peak { font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+.ow-series-plot { display: flex; align-items: stretch; gap: 8px; }
+.ow-series-axis { display: flex; flex-direction: column; justify-content: space-between; min-width: 2.75rem; text-align: right; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+.ow-series-plot > svg { flex: 1 1 auto; min-width: 0; height: 88px; background: var(--ow-surface-2); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); }
+.ow-series-grid line { stroke: var(--ow-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.ow-series-line { fill: none; stroke: var(--ow-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+/* A window holding one sample has no line to draw; the dot is that observation,
+   so a single reading is visible instead of reading as an empty plot. */
+.ow-series-dot { fill: var(--ow-accent); }
+.ow-series-time { display: flex; justify-content: space-between; gap: 16px; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+.ow-series-note { margin: 0; font-size: var(--ow-type-label); color: var(--ow-text-muted); }
+.ow-series-pending, .ow-series-failed { margin: 0; padding: 12px 16px; font-size: var(--ow-type-meta); color: var(--ow-text-muted); }
+.ow-series-now { font-weight: 600; }
+.ow-run-count { font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+
+/* What this surface can and cannot answer, stated once on the page instead of
+   implied by empty panels. The two lists are different claims, so they are
+   marked differently and not only coloured. */
+.ow-scope-list { list-style: none; margin: 0; padding: 12px 16px 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.ow-scope-list > li { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 2px solid var(--ow-border); font-size: var(--ow-type-meta); }
+.ow-scope-list > li > strong { font-size: var(--ow-type-meta); }
+.ow-scope-list > li > span { color: var(--ow-text-muted); font-size: var(--ow-type-label); }
+.ow-scope-have { border-left-color: var(--ow-ok); }
+.ow-scope-missing { border-left-style: dashed; border-left-color: var(--ow-border-strong); }
+
+@media (max-width: 1024px) {
+  .ow-scope-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
+  .ow-scope-list { grid-template-columns: minmax(0, 1fr); }
+  /* The plot keeps its height on a phone: a 44px chart is a texture, not a reading. */
+  .ow-series-stack { gap: 16px; }
+}
