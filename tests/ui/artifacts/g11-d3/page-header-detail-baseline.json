@@ -1,0 +1,78 @@
+[
+ {
+  "slug": "node-detail",
+  "skipped": "no record of this kind on this host"
+ },
+ {
+  "slug": "plugin-detail",
+  "route": "/admin/plugins/dev.opsweave.ops-center",
+  "width": 1440,
+  "headerH": 80,
+  "previousHeaderH": 80,
+  "firstBlockY": 160,
+  "previousFirstBlockY": 160,
+  "actionsInsideHeader": true,
+  "previousActionsInsideHeader": true,
+  "allReached": true,
+  "controls": 2,
+  "overflow": -15
+ },
+ {
+  "slug": "plugin-detail",
+  "route": "/admin/plugins/dev.opsweave.ops-center",
+  "width": 1024,
+  "headerH": 134,
+  "previousHeaderH": 80,
+  "firstBlockY": 238,
+  "previousFirstBlockY": 184,
+  "actionsInsideHeader": true,
+  "previousActionsInsideHeader": false,
+  "allReached": true,
+  "controls": 2,
+  "overflow": -15
+ },
+ {
+  "slug": "job-detail",
+  "skipped": "no record of this kind on this host"
+ },
+ {
+  "slug": "pipeline-detail",
+  "skipped": "no record of this kind on this host"
+ },
+ {
+  "slug": "studio-editor",
+  "skipped": "no record of this kind on this host"
+ },
+ {
+  "slug": "instance-logs",
+  "skipped": "no record of this kind on this host"
+ },
+ {
+  "slug": "incident-detail",
+  "route": "/app/incidents/a22c799a-bac6-447b-9544-59d33ddf1f60",
+  "width": 1440,
+  "headerH": 80,
+  "previousHeaderH": 80,
+  "firstBlockY": 160,
+  "previousFirstBlockY": 160,
+  "actionsInsideHeader": true,
+  "previousActionsInsideHeader": true,
+  "allReached": true,
+  "controls": 2,
+  "overflow": -15
+ },
+ {
+  "slug": "incident-detail",
+  "route": "/app/incidents/a22c799a-bac6-447b-9544-59d33ddf1f60",
+  "width": 1024,
+  "headerH": 80,
+  "previousHeaderH": 80,
+  "firstBlockY": 184,
+  "previousFirstBlockY": 184,
+  "actionsInsideHeader": true,
+  "previousActionsInsideHeader": true,
+  "allReached": true,
+  "controls": 2,
+  "overflow": -15
+ }
+]

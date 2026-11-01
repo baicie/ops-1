@@ -1,0 +1,2807 @@
+{
+ "overview@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "OpsWeave · OpsWeave",
+  "h1": "Overview",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": 196,
+  "boxed": {
+   "panel": 3,
+   "metricCard": 0,
+   "statStripItem": 4,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "Overview",
+   "Every enrolled node is reachable, every desired replica is ready and no activation is blocked.",
+   "Attention",
+   "Availability",
+   "Recent events"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready",
+   "Ready",
+   "Unknown",
+   "Confirmed",
+   "Confirmed"
+  ],
+  "repeatStatuses": [
+   "Ready x2",
+   "Confirmed x2"
+  ],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Observed Nov 01, 08:32:11 PM",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Healthy nodes",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "All enrolled nodes reachable",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Installed plugins",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "3 in the local store",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "READY instances",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Desired replicas",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Active deployments",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Activation revisions",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 40,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ]
+ },
+ "plugins@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Plugins · OpsWeave",
+  "h1": "Plugins",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": 344,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Plugins"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Verified",
+   "Verified",
+   "Verified"
+  ],
+  "repeatStatuses": [
+   "Verified x3"
+  ],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Installed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Upgrade available",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Needs attention",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Built-in system plugins are not counted ",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "The publisher is shown beside the plugin",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "Plugin",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Version",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Deployment",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "READY replicas",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Digest / trust",
+    "tag": "th"
+   }
+  ],
+  "smallTextCount": 24,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ]
+ },
+ "plugin-detail@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Plugins · OpsWeave",
+  "h1": "Hello Ops",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": 219,
+  "boxed": {
+   "panel": 3,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Hello Ops",
+   "Effective state",
+   "Artifact trust",
+   "Instances"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "trusted-team · trusted package",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "effective version",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Activated",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Node",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Slot",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "State",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Container",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Logs",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "READY",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Restarts 0",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 10,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   },
+   {
+    "selector": "#main-content .kv-label",
+    "ratio": 5.22,
+    "size": "12px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Disable",
+   "Versions"
+  ]
+ },
+ "nodes@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Nodes · OpsWeave",
+  "h1": "Nodes",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": 298,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Nodes"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Nodes",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "CPU, memory, capacity and the sample tim",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "Node",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Status",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Instances",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Resources",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "linux/x86_64",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "1.0 GiB / 3.6 GiB",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 11,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh",
+   "Join node"
+  ]
+ },
+ "node-detail@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Nodes · OpsWeave",
+  "h1": "staging-node",
+  "overflow": -15,
+  "docHeight": 2235,
+  "headerHeight": 80,
+  "firstBlockY": 208,
+  "boxed": {
+   "panel": 5,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 2
+  },
+  "headings": [
+   "staging-node",
+   "Control channel",
+   "Resource snapshot",
+   "Resource history",
+   "Plugin instances",
+   "Node events"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready",
+   "Ready",
+   "Ready",
+   "Ready",
+   "Ready",
+   "Ready"
+  ],
+  "repeatStatuses": [
+   "Ready x6"
+  ],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Node identity · control channel",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "100%",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "50%",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "0%",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Nov 01, 08:32:32 PM",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Nov 01, 08:24:17 PM",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Observed",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "CPU",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Memory",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Filesystem",
+    "tag": "th"
+   }
+  ],
+  "smallTextCount": 21,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   },
+   {
+    "selector": "#main-content .kv-label",
+    "ratio": 5.22,
+    "size": "12px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh",
+   "Revoke"
+  ]
+ },
+ "jobs@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Jobs · OpsWeave",
+  "h1": "Jobs",
+  "overflow": -15,
+  "docHeight": 970,
+  "headerHeight": 80,
+  "firstBlockY": 225,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Jobs"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Job",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Status",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Duration",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Created",
+    "tag": "th"
+   }
+  ],
+  "smallTextCount": 4,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ]
+ },
+ "job-detail@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Jobs · OpsWeave",
+  "h1": "Job detail",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": null,
+  "boxed": {
+   "panel": 0,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "Job detail",
+   "Could not load this view"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Error"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Run",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "kernel",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 2,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": []
+ },
+ "studio@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Pipeline Studio · OpsWeave",
+  "h1": "Host Metrics Pipeline",
+  "overflow": -15,
+  "docHeight": 1020,
+  "headerHeight": 80,
+  "firstBlockY": 216,
+  "boxed": {
+   "panel": 4,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "Host Metrics Pipeline",
+   "Node palette",
+   "Inspector",
+   "Validation 0"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "saved"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Studio",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "source",
+    "tag": "small"
+   },
+   {
+    "size": "11px",
+    "text": "parse",
+    "tag": "small"
+   },
+   {
+    "size": "11px",
+    "text": "map",
+    "tag": "small"
+   },
+   {
+    "size": "11px",
+    "text": "filter",
+    "tag": "small"
+   },
+   {
+    "size": "11px",
+    "text": "validate",
+    "tag": "small"
+   },
+   {
+    "size": "11px",
+    "text": "sink",
+    "tag": "small"
+   },
+   {
+    "size": "11px",
+    "text": "json",
+    "tag": "text"
+   },
+   {
+    "size": "11px",
+    "text": "json",
+    "tag": "text"
+   },
+   {
+    "size": "11px",
+    "text": "json",
+    "tag": "text"
+   }
+  ],
+  "smallTextCount": 45,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Undo",
+   "Redo",
+   "Auto layout",
+   "Vertical",
+   "Readable",
+   "Fit all",
+   "Preview",
+   "Detail",
+   "Create draft"
+  ]
+ },
+ "activity@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Activity · OpsWeave",
+  "h1": "Activity",
+  "overflow": -15,
+  "docHeight": 1474,
+  "headerHeight": 80,
+  "firstBlockY": 224,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Activity"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Event",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Outcome",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Occurred",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "USER 3233782f",
+    "tag": "span"
+   },
+   {
+    "size": "10.34px",
+    "text": "pipelineId",
+    "tag": "code"
+   },
+   {
+    "size": "11px",
+    "text": "create",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "07:02:34",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "USER 3233782f",
+    "tag": "span"
+   },
+   {
+    "size": "10.34px",
+    "text": "deploymentId",
+    "tag": "code"
+   },
+   {
+    "size": "11px",
+    "text": "plugin.activate",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 107,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ]
+ },
+ "governance@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Governance · OpsWeave",
+  "h1": "Governance",
+  "overflow": -15,
+  "docHeight": 1033,
+  "headerHeight": 80,
+  "firstBlockY": 160,
+  "boxed": {
+   "panel": 7,
+   "metricCard": 4,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 3
+  },
+  "headings": [
+   "Governance",
+   "Dataset quality status",
+   "Recent quality failures",
+   "Node health"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Datasets",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Quality passed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Lineage batches",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Nodes ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Dataset",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Schema",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Quality",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "ec55205d · 0 examined · 0 failed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "c50d3570 · 0 examined · 0 failed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "No runs",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 25,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   },
+   {
+    "selector": "#main-content .metric-label",
+    "ratio": 5.22,
+    "size": "11px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ]
+ },
+ "access@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Access · OpsWeave",
+  "h1": "Access & trust",
+  "overflow": -15,
+  "docHeight": 923,
+  "headerHeight": 80,
+  "firstBlockY": 160,
+  "boxed": {
+   "panel": 4,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 2
+  },
+  "headings": [
+   "Access & trust",
+   "User roles",
+   "Trust boundaries",
+   "Workspace users",
+   "Trusted publishers"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "User",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Role",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Status",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Actions",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "admin@opsweave.local",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "viewer@opsweave.local",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Publisher",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Fingerprint",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Trust",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Note",
+    "tag": "th"
+   }
+  ],
+  "smallTextCount": 10,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Add publisher"
+  ]
+ },
+ "workspace@1440-light": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "My workspace · OpsWeave",
+  "h1": "My workspace",
+  "overflow": -15,
+  "docHeight": 1673,
+  "headerHeight": null,
+  "firstBlockY": 237,
+  "boxed": {
+   "panel": 7,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 3,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "My workspace",
+   "Your task space",
+   "Waiting on me",
+   "Recent investigations",
+   "Related services",
+   "Evidence status",
+   "Available now",
+   "Business plugin entries",
+   "Platform version",
+   "Current surface",
+   "Current account",
+   "Capability status"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Readable",
+   "Unavailable",
+   "Unavailable",
+   "Unavailable",
+   "Empty"
+  ],
+  "repeatStatuses": [
+   "Unavailable x3"
+  ],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Business workspace",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "Shipped",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Not shipped",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Not shipped",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Not shipped",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Not shipped",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Not shipped",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 7,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   },
+   {
+    "selector": "#main-content .kv-label",
+    "ratio": 5.22,
+    "size": "12px"
+   }
+  ],
+  "primaryActions": []
+ },
+ "overview@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "OpsWeave · OpsWeave",
+  "h1": "Overview",
+  "overflow": -15,
+  "docHeight": 1449,
+  "headerHeight": 72,
+  "firstBlockY": 264,
+  "boxed": {
+   "panel": 3,
+   "metricCard": 0,
+   "statStripItem": 4,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "Overview",
+   "Every enrolled node is reachable, every desired replica is ready and no activation is blocked.",
+   "Attention",
+   "Availability",
+   "Recent events"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready",
+   "Ready",
+   "Unknown",
+   "Confirmed",
+   "Confirmed"
+  ],
+  "repeatStatuses": [
+   "Ready x2",
+   "Confirmed x2"
+  ],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Observed Nov 01, 08:33:57 PM",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Healthy nodes",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "All enrolled nodes reachable",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Installed plugins",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "3 in the local store",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "READY instances",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Desired replicas",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Active deployments",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Activation revisions",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 40,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ],
+  "cards": {
+   "rows": [],
+   "rowCount": 0,
+   "minGap": null,
+   "glued": [],
+   "gluedCount": 0,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "plugins@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "Plugins · OpsWeave",
+  "h1": "Plugins",
+  "overflow": -15,
+  "docHeight": 958,
+  "headerHeight": 72,
+  "firstBlockY": 523,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Plugins"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Installed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Upgrade available",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Needs attention",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Built-in system plugins are not counted ",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "All",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Installed",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Staged",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Disabled",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Available",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "The publisher is shown beside the plugin",
+    "tag": "p"
+   }
+  ],
+  "smallTextCount": 25,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ],
+  "cards": {
+   "rows": [
+    {
+     "label": "Version",
+     "value": "0.0.1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "1/1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Version",
+     "value": "0.0.2",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "1/1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Version",
+     "value": "0.0.2",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "1/1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Version",
+     "value": "0.0.1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "NO_DATANo data",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "rowCount": 8,
+   "minGap": 4,
+   "glued": [
+    {
+     "label": "Version",
+     "value": "0.0.1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "1/1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Version",
+     "value": "0.0.2",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "1/1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Version",
+     "value": "0.0.2",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "1/1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Version",
+     "value": "0.0.1",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "READY replicas",
+     "value": "NO_DATANo data",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "gluedCount": 8,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "nodes@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "Nodes · OpsWeave",
+  "h1": "Nodes",
+  "overflow": -15,
+  "docHeight": 844,
+  "headerHeight": 72,
+  "firstBlockY": 461,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Nodes"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Nodes",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "CPU, memory, capacity and the sample tim",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Instances",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Resources",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "1.0 GiB / 3.6 GiB",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "just now",
+    "tag": "time"
+   }
+  ],
+  "smallTextCount": 8,
+  "scrollers": [],
+  "contrast": [],
+  "primaryActions": [
+   "Refresh",
+   "Join node"
+  ],
+  "cards": {
+   "rows": [
+    {
+     "label": "Instances",
+     "value": "3/3Ready",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Resources",
+     "value": "4% · 29%1.0 GiB / 3.6 Gi",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "rowCount": 2,
+   "minGap": 4,
+   "glued": [
+    {
+     "label": "Instances",
+     "value": "3/3Ready",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Resources",
+     "value": "4% · 29%1.0 GiB / 3.6 Gi",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "gluedCount": 2,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "jobs@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "Jobs · OpsWeave",
+  "h1": "Jobs",
+  "overflow": -15,
+  "docHeight": 1521,
+  "headerHeight": 114,
+  "firstBlockY": 430,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Jobs"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "All",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Queued",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Running",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Succeeded",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Failed",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Cancelled",
+    "tag": "button"
+   },
+   {
+    "size": "11px",
+    "text": "Duration",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Created",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Duration",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Created",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 34,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ],
+  "cards": {
+   "rows": [
+    {
+     "label": "Duration",
+     "value": "64 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "2d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Duration",
+     "value": "70 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "2d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Duration",
+     "value": "73 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "3d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Duration",
+     "value": "77 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "3d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "rowCount": 28,
+   "minGap": 4,
+   "glued": [
+    {
+     "label": "Duration",
+     "value": "64 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "2d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Duration",
+     "value": "70 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "2d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Duration",
+     "value": "73 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "3d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Duration",
+     "value": "77 ms",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Created",
+     "value": "3d ago",
+     "gap": 4,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "gluedCount": 28,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "job-detail@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "Jobs · OpsWeave",
+  "h1": "Job detail",
+  "overflow": -15,
+  "docHeight": 844,
+  "headerHeight": 115,
+  "firstBlockY": null,
+  "boxed": {
+   "panel": 0,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "Job detail",
+   "Could not load this view"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Error"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Run",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "kernel",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 2,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [],
+  "cards": {
+   "rows": [],
+   "rowCount": 0,
+   "minGap": null,
+   "glued": [],
+   "gluedCount": 0,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "activity@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "Activity · OpsWeave",
+  "h1": "Activity",
+  "overflow": -15,
+  "docHeight": 4497,
+  "headerHeight": 114,
+  "firstBlockY": 396,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Activity"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "USER 3233782f",
+    "tag": "span"
+   },
+   {
+    "size": "10.34px",
+    "text": "pipelineId",
+    "tag": "code"
+   },
+   {
+    "size": "11px",
+    "text": "Outcome",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "create",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Occurred",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "07:02:34",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "USER 3233782f",
+    "tag": "span"
+   },
+   {
+    "size": "10.34px",
+    "text": "deploymentId",
+    "tag": "code"
+   },
+   {
+    "size": "11px",
+    "text": "Outcome",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "plugin.activate",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 154,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "13px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ],
+  "cards": {
+   "rows": [
+    {
+     "label": "Outcome",
+     "value": "Acceptedcreate",
+     "gap": 164.9,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Occurred",
+     "value": "1d ago07:02:34",
+     "gap": 158.9,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Outcome",
+     "value": "Confirmedplugin.activate",
+     "gap": 158.5,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Occurred",
+     "value": "2d ago17:39:10",
+     "gap": 157.2,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Outcome",
+     "value": "Acceptedplugin.enable",
+     "gap": 164.9,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Occurred",
+     "value": "2d ago16:41:02",
+     "gap": 157.2,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Outcome",
+     "value": "Acceptedplugin.enable",
+     "gap": 164.9,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Occurred",
+     "value": "2d ago16:32:09",
+     "gap": 157.2,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "rowCount": 50,
+   "minGap": 141.1,
+   "glued": [],
+   "gluedCount": 0,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "governance@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "Governance · OpsWeave",
+  "h1": "Governance",
+  "overflow": -15,
+  "docHeight": 2183,
+  "headerHeight": 135,
+  "firstBlockY": 227,
+  "boxed": {
+   "panel": 7,
+   "metricCard": 4,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 3
+  },
+  "headings": [
+   "Governance",
+   "Dataset quality status",
+   "Recent quality failures",
+   "Node health"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Datasets",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Quality passed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Lineage batches",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Nodes ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "ec55205d · 0 examined · 0 failed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Schema",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Quality",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "c50d3570 · 0 examined · 0 failed",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Schema",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Quality",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 35,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   },
+   {
+    "selector": "#main-content .metric-label",
+    "ratio": 5.22,
+    "size": "11px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "13px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ],
+  "cards": {
+   "rows": [
+    {
+     "label": "Quality",
+     "value": "Failed",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "Failed",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Status",
+     "value": "Failed",
+     "gap": 204.3,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "rowCount": 10,
+   "minGap": 0,
+   "glued": [
+    {
+     "label": "Quality",
+     "value": "Failed",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "Failed",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Quality",
+     "value": "No runs",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "gluedCount": 7,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "access@390-light": {
+  "viewport": {
+   "w": 390,
+   "h": 844
+  },
+  "title": "Access · OpsWeave",
+  "h1": "Access & trust",
+  "overflow": -15,
+  "docHeight": 1702,
+  "headerHeight": 114,
+  "firstBlockY": 206,
+  "boxed": {
+   "panel": 4,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 2
+  },
+  "headings": [
+   "Access & trust",
+   "User roles",
+   "Trust boundaries",
+   "Workspace users",
+   "Trusted publishers"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "admin@opsweave.local",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Role",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Status",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Actions",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "viewer@opsweave.local",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Role",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Status",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Actions",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Fingerprint",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Trust",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 11,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 6.93,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 17.46,
+    "size": "16px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 17.46,
+    "size": "13px"
+   }
+  ],
+  "primaryActions": [
+   "Add publisher"
+  ],
+  "cards": {
+   "rows": [
+    {
+     "label": "Role",
+     "value": "admin",
+     "gap": 247.3,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Status",
+     "value": "Active",
+     "gap": 202.4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Role",
+     "value": "viewer",
+     "gap": 250.7,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Status",
+     "value": "Active",
+     "gap": 208.4,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Actions",
+     "value": "Disable",
+     "gap": 213,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Fingerprint",
+     "value": "sha256:c5aa5963de290…05e",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Trust",
+     "value": "Unknown",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Note",
+     "value": "Seeded from environment ",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "rowCount": 8,
+   "minGap": 0,
+   "glued": [
+    {
+     "label": "Fingerprint",
+     "value": "sha256:c5aa5963de290…05e",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Trust",
+     "value": "Unknown",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    },
+    {
+     "label": "Note",
+     "value": "Seeded from environment ",
+     "gap": 0,
+     "labelAfterValue": false,
+     "overlap": false
+    }
+   ],
+   "gluedCount": 3,
+   "collisions": [],
+   "collisionCount": 0
+  }
+ },
+ "overview@1440-dark": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "OpsWeave · OpsWeave",
+  "h1": "Overview",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": 196,
+  "boxed": {
+   "panel": 3,
+   "metricCard": 0,
+   "statStripItem": 4,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "Overview",
+   "Every enrolled node is reachable, every desired replica is ready and no activation is blocked.",
+   "Attention",
+   "Availability",
+   "Recent events"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready",
+   "Ready",
+   "Unknown",
+   "Confirmed",
+   "Confirmed"
+  ],
+  "repeatStatuses": [
+   "Ready x2",
+   "Confirmed x2"
+  ],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Observed Nov 01, 08:34:23 PM",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Healthy nodes",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "All enrolled nodes reachable",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Installed plugins",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "3 in the local store",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "READY instances",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Desired replicas",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Active deployments",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Activation revisions",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 40,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .panel-head h2",
+    "ratio": 14.83,
+    "size": "16px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ]
+ },
+ "nodes@1440-dark": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Nodes · OpsWeave",
+  "h1": "Nodes",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": 298,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Nodes"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Ready"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Nodes",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "CPU, memory, capacity and the sample tim",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "Node",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Status",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Instances",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Resources",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "linux/x86_64",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "Ready",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "1.1 GiB / 3.6 GiB",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 11,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 14.83,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh",
+   "Join node"
+  ]
+ },
+ "job-detail@1440-dark": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Jobs · OpsWeave",
+  "h1": "Job detail",
+  "overflow": -15,
+  "docHeight": 900,
+  "headerHeight": 80,
+  "firstBlockY": null,
+  "boxed": {
+   "panel": 0,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 0
+  },
+  "headings": [
+   "Job detail",
+   "Could not load this view"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [
+   "Error"
+  ],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Run",
+    "tag": "p"
+   },
+   {
+    "size": "11px",
+    "text": "kernel",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 2,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 9.8,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": []
+ },
+ "activity@1440-dark": {
+  "viewport": {
+   "w": 1440,
+   "h": 900
+  },
+  "title": "Activity · OpsWeave",
+  "h1": "Activity",
+  "overflow": -15,
+  "docHeight": 1474,
+  "headerHeight": 80,
+  "firstBlockY": 224,
+  "boxed": {
+   "panel": 1,
+   "metricCard": 0,
+   "statStripItem": 0,
+   "businessCard": 0,
+   "investigation": 0,
+   "table": 1
+  },
+  "headings": [
+   "Activity"
+  ],
+  "repeatHeadings": [],
+  "repeatLabels": [],
+  "statuses": [],
+  "repeatStatuses": [],
+  "smallText": [
+   {
+    "size": "11px",
+    "text": "Event",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Outcome",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "Occurred",
+    "tag": "th"
+   },
+   {
+    "size": "11px",
+    "text": "USER 3233782f",
+    "tag": "span"
+   },
+   {
+    "size": "10.34px",
+    "text": "pipelineId",
+    "tag": "code"
+   },
+   {
+    "size": "11px",
+    "text": "create",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "07:02:34",
+    "tag": "span"
+   },
+   {
+    "size": "11px",
+    "text": "USER 3233782f",
+    "tag": "span"
+   },
+   {
+    "size": "10.34px",
+    "text": "deploymentId",
+    "tag": "code"
+   },
+   {
+    "size": "11px",
+    "text": "plugin.activate",
+    "tag": "span"
+   }
+  ],
+  "smallTextCount": 107,
+  "scrollers": [],
+  "contrast": [
+   {
+    "selector": "#main-content .page-description",
+    "ratio": 9.8,
+    "size": "14px"
+   },
+   {
+    "selector": "#main-content table tbody td",
+    "ratio": 14.83,
+    "size": "14px"
+   }
+  ],
+  "primaryActions": [
+   "Refresh"
+  ]
+ }
+}
