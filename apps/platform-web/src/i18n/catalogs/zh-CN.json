@@ -1428,7 +1428,7 @@
   "observabilityEntity.window.start": "{hours} 小时前",
   "observabilityEntity.window.now": "现在",
   "observabilityEntity.series.summary": "{plotted} 个点",
-  "observabilityEntity.series.peak": "峰值 {percent}",
+  "observabilityEntity.series.peak": "峰值 {percent}%",
   "observabilityEntity.series.newest": "最新 {at}",
   "observabilityEntity.series.gaps": "{count} 处断开",
   "observabilityEntity.series.missing": "{count} 次采样没有读数",

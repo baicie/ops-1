@@ -225,6 +225,16 @@ export interface EntityRow {
   node: NodeView;
   state: EntityState;
   readings: Record<MetricKey, Reading>;
+  /**
+   * The node's instance count, or `null` when this state cannot report one.
+   *
+   * `instances_ready` / `instances_total` are rows the kernel stores, not an observation of the
+   * node, so a node whose heartbeat expired still carries whatever the numbers were when it was
+   * last seen. Rendering `0/2 ready` for a node nobody can reach is the same claim as rendering
+   * `0%` CPU for it: "nothing is running" when the truth is "we are not looking". Gated by the
+   * same `stateCanReport` the readings use, so both faces of the row come from one rule.
+   */
+  instances: { ready: number; total: number } | null;
   /** The sample's own timestamp, never the time the page rendered. */
   observedAt: string | null;
   stale: boolean;
@@ -233,10 +243,14 @@ export interface EntityRow {
 export function entityRows(nodes: NodeView[], now = Date.now()): EntityRow[] {
   return nodes.map((node) => {
     const observedAt = node.resourceSnapshot?.sampledAt ?? null;
+    const state = entityState(node);
     return {
       node,
-      state: entityState(node),
+      state,
       readings: nodeReadings(node),
+      instances: stateCanReport(state)
+        ? { ready: node.instancesReady ?? 0, total: node.instancesTotal ?? 0 }
+        : null,
       observedAt,
       stale: sampleIsStale(observedAt, now),
     };

@@ -159,6 +159,39 @@ describe('nodeReadings', () => {
   });
 });
 
+describe('entityRows - the instance count is gated like every other reading', () => {
+  it('carries the stored count for a node that can report', () => {
+    const [row] = entityRows([node({ instancesReady: 2, instancesTotal: 3 })], NOW);
+    expect(row.instances).toEqual({ ready: 2, total: 3 });
+  });
+
+  it('drops the count for a node nobody can reach, instead of printing "0/2 ready"', () => {
+    // The count is a stored row, not an observation. An unreachable node still carries whatever
+    // it was last seen with; rendering it asserts a fact about NOW that we cannot have.
+    const [row] = entityRows([node({ status: 'UNREACHABLE', instancesReady: 0, instancesTotal: 2 })], NOW);
+    expect(row.state).toBe('unreachable');
+    expect(row.instances).toBeNull();
+  });
+
+  it('drops the count for a revoked node on the same rule', () => {
+    const [row] = entityRows([node({ revokedAt: ago(60_000), instancesReady: 1, instancesTotal: 1 })], NOW);
+    expect(row.instances).toBeNull();
+  });
+
+  it('keeps the count for a stale-but-answering node, because a stale count is still a count', () => {
+    const [row] = entityRows([node({
+      instancesReady: 1,
+      instancesTotal: 4,
+      // `stale` is the kernel's heartbeat flag (entityState reads it, not the sample age), and a
+      // stale node is still a node that answered - unlike unreachable, it may report.
+      stale: true,
+      resourceSnapshot: { sampledAt: ago(10 * 60_000), cpuUtilization: 0.42 },
+    })], NOW);
+    expect(row.state).toBe('stale');
+    expect(row.instances).toEqual({ ready: 1, total: 4 });
+  });
+});
+
 describe('sampleIsStale', () => {
   it('is false for a fresh sample and true past the window', () => {
     const now = Date.now();

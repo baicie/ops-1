@@ -1428,7 +1428,7 @@
   "observabilityEntity.window.start": "{hours}h ago",
   "observabilityEntity.window.now": "now",
   "observabilityEntity.series.summary": "{plotted} point(s)",
-  "observabilityEntity.series.peak": "peak {percent}",
+  "observabilityEntity.series.peak": "peak {percent}%",
   "observabilityEntity.series.newest": "newest {at}",
   "observabilityEntity.series.gaps": "{count} break(s)",
   "observabilityEntity.series.missing": "{count} sample(s) carried no reading",

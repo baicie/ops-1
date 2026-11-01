@@ -189,7 +189,10 @@ export function ObservabilityPage() {
   const cardFacts = React.useMemo(() => rankCardFacts({
     state: visible.map((row) => row.state),
     load: visible.map((row) => (row.readings.cpu.kind === 'reading' ? Math.round(row.readings.cpu.value * 100) : null)),
-    instances: visible.map((row) => `${row.node.instancesReady}/${row.node.instancesTotal}`),
+    // Unobservable rows contribute null, not "0/0": a null is what rankCardFacts reads as "this
+    // row has no value here", which is exactly true, and it keeps the column's distinct-ratio
+    // honest instead of counting every unreachable node as the same fabricated count.
+    instances: visible.map((row) => (row.instances ? `${row.instances.ready}/${row.instances.total}` : null)),
   }), [visible]);
 
   return (
@@ -267,7 +270,15 @@ export function ObservabilityPage() {
           />
         </div>
         <Select value={filter} onValueChange={(value: string) => setFilter(value as EntityFilter)}>
-          <SelectTrigger aria-label={t('observability.filter.aria')} className="w-[240px] max-w-full">
+          {/* page-template §2.4 rule C1: one control tier per toolbar row. The primitive's own
+              `h-9` resolves to 36 while the `Input` beside it takes the global 40px control
+              min-height, which is the 8px baseline break the v3 audit measured on four admin
+              toolbars. Reading --ow-control-md here keeps both controls on one tier without
+              editing the shared primitive (which other sessions are also touching). */}
+          <SelectTrigger
+            aria-label={t('observability.filter.aria')}
+            className="h-[var(--ow-control-md)] w-[240px] max-w-full"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -402,8 +413,17 @@ export function ObservabilityPage() {
                         label={t('table.instances')}
                         className={`${cardLineAfter} ${cardCellClass(cardFacts.includes('instances'))}`}
                       >
-                        <strong className="ow-tnum">{row.node.instancesReady}/{row.node.instancesTotal}</strong>
-                        <span className="ow-cell-meta ms-1">{t('status.ready')}</span>
+                        {/* A node that cannot report does not get to claim "0 of 3 ready": the
+                            counts are stored rows, and for an unreachable node they describe the
+                            last time it answered, not now. Same gate as the load cell. */}
+                        {row.instances ? (
+                          <>
+                            <strong className="ow-tnum">{row.instances.ready}/{row.instances.total}</strong>
+                            <span className="ow-cell-meta ms-1">{t('status.ready')}</span>
+                          </>
+                        ) : (
+                          <span className="ow-obs-absent" data-reading="unknown">{t('observability.reading.unreachable')}</span>
+                        )}
                       </StackCell>
                       <StackCell label="" className={cardActionCell} onClick={(event) => event.stopPropagation()}>
                         <RowActions

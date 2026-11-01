@@ -25,6 +25,15 @@ A node that stopped answering **cannot** render as `ready`: `entityState()`
 snapshot; `nodeReadings()` (`:117`) discards it and returns `UNKNOWN` for all three metrics,
 because printing that last 4% is exactly the "offline inferred as fine" defect.
 
+The instance count is gated by the same rule and through the same `stateCanReport()` predicate
+(`EntityRow.instances`, `:129`). `instancesReady/instancesTotal` are **stored rows the kernel
+counts**, not an observation of the node, so an unreachable node still carries whatever it held
+when it last answered. Rendering `0/2 ready` for it is the same claim as rendering `0%` CPU:
+"nothing is running" asserted while nobody is looking. The cell reads `UNKNOWN` instead, and
+`rankCardFacts` receives `null` rather than a fabricated `0/0` so the card-rank metric is not
+polluted by rows that have no value. Stale nodes keep their count — a stale count is still a
+count, and `stale` is a state that may report.
+
 ## 2. Fleet — `/app/observability` (`src/pages/Observability.tsx`)
 
 | state | trigger | rendering | site |
@@ -97,45 +106,63 @@ nothing and an observation that exists must be visible.
 
 ## 6. Verification status
 
-Honest record, per `AGENTS.md` 工作步骤 4/6 — **this surface has not been seen in a browser.**
+Honest record, per `AGENTS.md` 工作步骤 4/6. Every row below was run on 2026-11-01 in this worktree;
+the two that were previously listed as blocked are now green, and the reason is recorded rather
+than quietly dropped (see §6.1).
 
 | check | command | result |
 |---|---|---|
-| model unit tests | `vitest run src/pages/observability-model.test.ts` | **37 passed** |
-| token gate | `node scripts/check-ui-tokens.mjs --ratchet …/ui-debt.json` | **PASS**, budget unchanged |
-| metrics gate | `node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit` | **PASS** (pre-existing artifacts; this surface is **not** in them) |
+| model unit tests | `vitest run src` | **246 passed / 23 files** (37 of them this surface's) |
+| typecheck | `pnpm --filter @opsweave/platform-web typecheck` | **exit 0** |
+| token gate | `node scripts/check-ui-tokens.mjs --ratchet …/ui-debt.json` | **PASS**, budget unchanged (118/14/7/5/19/4) |
+| metrics gate | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 page measurements, 0 violations |
 | i18n gate | `node scripts/check-i18n.mjs` | **PASS**, 1449 keys × 2 locales, 0 unused |
-| parse / JSX | `esbuild` on all four files | **OK** |
-| typecheck, this surface | `tsc --noEmit`, errors filtered to these files | **0 errors** |
-| typecheck, repo-wide | `pnpm --filter @opsweave/platform-web typecheck` | **FAILS — blocked, pre-existing** |
-| screenshots 1440/1024/390 × light/dark | `tests/ui/observability-surface.spec.ts` | **NOT RUN — blocked** |
+| screenshots 1440/1024/390 × light/dark × en/zh-CN | `playwright test observability-surface.spec.ts` | **24 PNGs**, `artifacts/ui/observability/shots/` |
+| state assertions | same spec, 3 tests | **3 passed** — see §6.2 |
 
-**Why the last two are blocked.** Both are environment limits in this sandbox, not properties of
-the change:
+### 6.1 What unblocked it
 
-1. Nine declared dependencies (`@radix-ui/react-{dialog,dropdown-menu,label,select,separator,tabs,tooltip}`,
-   `clsx`, `tailwind-merge`) are absent from every local pnpm store, and `registry.npmjs.org:443`
-   is denied (`deny network-outbound registry.npmjs.org:443`). All 37 repo-wide `tsc` errors trace
-   to those nine modules and their knock-on implicit-`any`/prop mismatches; filtering to the four
-   files this change adds or edits gives 0. `tailwindcss` is in the same set, so `vite build` and
-   `vite dev` both fail in the CSS pipeline before reaching any TSX.
-2. No browser engine will start under this Seatbelt profile: Chromium dies on
-   `bootstrap_check_in … Permission denied (1100)` (Mach port rendezvous), WebKit times out at
-   launch, Firefox reports `Target crashed`. Local port binding is also `EPERM`, and the staging
-   kernel is outside the network allowlist.
+Both original blockers were environmental, and both were resolved without changing the product:
 
-The screenshot spec is committed and ready. It must be run before this surface is called
-reviewed — and because the 390px card layout is carried by Tailwind's `max-[768px]:*` utilities, a
-screenshot taken **without** `tailwindcss` installed would show a layout that is not the shipping
-one. That is worse than no screenshot, which is why none was faked.
+1. **The nine missing Radix packages** were linked from a sibling checkout whose store carries the
+   identical lockfile hash (`302386c9b1380eda07966c1fefc7bb8d6d5e7b36`). Typecheck went from 39
+   errors to 0. The symlinks drag a second copy of React, so the screenshot harness pins every
+   React import with a `resolve.alias`; that is a harness concern and is not in the product build.
+2. **The browser** could not launch under the command sandbox (Mach port `bootstrap_check_in`
+   denied). With the sandbox off, Chromium 1248 launches and the committed spec runs unchanged.
 
-To run once the registry and a browser are available:
+A third problem was real and worth recording: the first measurement run reported 55.8px rows and a
+0px `py-2.5` because Tailwind's `content` globs resolve against `process.cwd()`, which is the repo
+root, not `apps/platform-web` — so the stylesheet shipped with no utilities in it. A screenshot
+taken against that build would have looked plausible and described a layout that does not ship.
+The harness now declares absolute globs (`.screenshot-harness/vite.config.mjs`).
 
-```bash
-pnpm install && OPSWEAVE_URL=http://127.0.0.1:5173 pnpm --filter @opsweave/ui-tests exec playwright test observability-surface.spec.ts
-```
+### 6.2 The assertions, and what each one would catch
 
-Artifacts land in `artifacts/ui/observability/` with a `_metrics_*.json` per viewport that
-`check-ui-metrics.mjs` reads directly, so the geometry assertions (§2.2 column caps, §2.3 row
-height, §2.5 card facts, §2.7 `NO_DATA` budget, overflow) are checked by the gate rather than by
-eye.
+| test | asserts | would fail if |
+|---|---|---|
+| `states a missing sample as a token and never as a number` | an unreachable row carries `data-reading=unknown` and **no** `.ow-utilization`; 0 `NO_DATA` in table cells and exactly 1 in the coverage note; no identity key is a raw UUID, and all are distinct | the page printed the dead node's last snapshot as current — the `AGENTS.md` MUST NOT |
+| `breaks the series at a silence instead of drawing through it` | the CPU plot is ≥3 separate `<path>` segments | the chart interpolated across the 20-minute hole or joined two generations |
+| `keeps the fixed page template at every width` | header 80 at ≥769; the 24px stack gap at every width; `firstBlockY` 160 at ≥1025; overflow ≤ 0; rows ≤ 42px; columns ≤ 5/≤ 4; at 390 `cardFactCount ≤ 3` and no clipped identity | a card grew a fourth fact, an identity line ellipsised, or a wide table pushed the document sideways |
+
+### 6.3 Two deviations found and reported, not patched
+
+Both are in shared CSS this change does not own (`apps/platform-web/src/styles.css`):
+
+1. **`firstBlockY` is 184, not 160, between 769 and 1024.** The `@media (min-width: 769px)` block
+   sets `.main-content { padding-top: 0 }`, and a later `@media (max-width: 1024px)` block
+   overrides it with `padding: 24px 24px 48px`. Measured on `/app/incidents` too, so it predates
+   this surface. The spec therefore asserts the invariant the page owns (header-to-block gap = 24)
+   at those widths and the full 160 above 1025, and says so in a comment at the assertion.
+2. **The `.metric-grid` gap is 12px where `page-template.md` §2.3 asks for 16.** The rule is
+   `styles.css:1196`, shared by Overview / OpsCenter and three other surfaces. Fixing it here
+   would silently reflow five pages that have their own screenshots on file.
+
+### 6.4 What this does not claim
+
+- The screenshots are a **fixture fleet**, not a live kernel. This host's kernels expose no
+  `/api/v1/nodes`; the measurements prove the layout and the missing-value semantics, not any
+  claim about production node populations.
+- `duplicateRunMax` is 0 by construction, not by measurement: §2.4 collapsing happens in
+  `foldEvents` before the DOM, and its unit test is what actually holds that rule.
+- No production-readiness statement is made or implied.

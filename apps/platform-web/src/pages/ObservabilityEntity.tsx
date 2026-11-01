@@ -113,7 +113,10 @@ function SeriesPlot({ series, window: hours }: { series: Series; window: History
         <span className="ow-series-label" id={titleId}>{label}</span>
         <span className="ow-series-now ow-tnum">
           {newest ? `${Math.round(newest.value * 100)}%` : null}
-          {peak ? <span className="ow-series-peak">{t('observabilityEntity.series.peak', { percent: Math.round(peak.value * 100) })}</span> : null}
+          {/* The separator lives here, not in the catalog: "89%" + "peak 89%" with no gap read as
+              one token, and a leading space inside a translated string is the kind of thing
+              translators drop. */}
+          {peak ? <span className="ow-series-peak">{' · '}{t('observabilityEntity.series.peak', { percent: Math.round(peak.value * 100) })}</span> : null}
         </span>
       </div>
       <div className="ow-series-plot">
@@ -146,17 +149,22 @@ function SeriesPlot({ series, window: hours }: { series: Series; window: History
               vectorEffect="non-scaling-stroke"
             />
           ))}
-          {/* A segment of one point draws no line, so every point is also a dot: a window
-              holding a single lone sample must be visible as that sample. */}
-          {series.segments.map((segment, index) => segment.map((point, at) => (
-            <circle
-              key={`${index}-${at}`}
-              className="ow-series-dot"
-              cx={(point.x * PLOT_W).toFixed(2)}
-              cy={((1 - point.y) * PLOT_H).toFixed(2)}
-              r={segment.length === 1 ? 3 : 1.5}
-            />
-          )))}
+          {/* A segment of ONE point draws no line, so that point is drawn as a dot: a window
+              holding a single lone sample must be visible as that sample. Only those segments get
+              a marker - at r=1.5 every point of a dense series is a 2px dash 9px from the next,
+              which turns the line itself into a dotted rule and makes a readable trend look like
+              the chart's dashed "no data" vocabularies. The line already shows every point. */}
+          {series.segments.map((segment, index) => (segment.length === 1
+            ? (
+              <circle
+                key={`${index}-0`}
+                className="ow-series-dot"
+                cx={(segment[0].x * PLOT_W).toFixed(2)}
+                cy={((1 - segment[0].y) * PLOT_H).toFixed(2)}
+                r={3}
+              />
+            )
+            : null))}
         </svg>
       </div>
       <p className="ow-series-time ow-tnum" aria-hidden="true">

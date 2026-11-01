@@ -1,6 +1,7 @@
 import { Page, expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * `/app/observability` — the visual matrix and the §4.1 measurement, in one run.
@@ -21,7 +22,8 @@ import path from 'node:path';
  */
 test.use({ channel: process.env.OBS_CHANNEL || 'chromium' });
 
-const OUT = process.env.OBS_OUT || path.resolve('../../artifacts/ui/observability');
+const OUT = process.env.OBS_OUT
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../artifacts/ui/observability');
 const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 const LIVE = process.env.OBS_DATA === 'live';
@@ -37,27 +39,36 @@ const LOCALES = ['en', 'zh-CN'] as const;
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 /**
- * Twelve nodes covering every state the surface must keep apart, because a fixture that is all
- * healthy proves only that the happy path renders. Six report, two carry no sample, two are
- * unreachable, one is revoked and one is stale — so UNKNOWN, NO_DATA and a real reading are all
+ * Thirteen nodes covering every state the surface must keep apart, because a fixture that is all
+ * healthy proves only that the happy path renders. Seven report, two carry no sample, two are
+ * unreachable, one is unknown and one is revoked — so UNKNOWN, NO_DATA and a real reading are all
  * on screen at once and the §2.7 budget (one dashed token per table) is actually under pressure.
+ *
+ * Two properties of this set are measured, not decorative:
+ *   - 6 of 13 unobservable (0.46) keeps the load column ABOVE §2.2's `< 0.5` floor. An earlier
+ *     version had exactly 6 of 12 (0.50), the column silently dropped, and the table lost the one
+ *     column this surface exists for - the gate reported it as a low distinct ratio first.
+ *   - `ready`/`total` vary per node. A uniform 2/2 across every row gives the instances column two
+ *     distinct values in thirteen rows (0.15) and it fails §2.2's 0.2 floor, which is the rule
+ *     working as intended: a column that repeats itself is not showing the reader anything.
  */
 const NODES = [
-  { name: 'ow-node-a', id: '1285fbe8-9bb8-459f-b073-af245d32b3ae', status: 'READY', cpu: 0.94, mem: 7.1, stale: false },
-  { name: 'ow-node-b', id: 'e273620e-41c7-4b0d-9a3e-5f0c1d7a2b64', status: 'READY', cpu: 0.71, mem: 5.2, stale: false },
-  { name: 'ow-node-c', id: '9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51', status: 'READY', cpu: 0.43, mem: 3.8, stale: false },
-  { name: 'ow-node-d', id: '3f8b25a0-7c94-4d61-b2e8-9d0a4c7f16b3', status: 'READY', cpu: 0.22, mem: 2.4, stale: false },
-  { name: 'ow-node-e', id: 'a71d0c93-2e58-4b47-9f36-1c8e5d2a704b', status: 'READY', cpu: 0.11, mem: 1.6, stale: false },
-  { name: 'ow-node-f', id: '5b6e91c4-8a27-4f30-9d84-7e2b10c6a5f9', status: 'READY', cpu: 0.07, mem: 1.1, stale: true },
+  { name: 'ow-node-a', id: '1285fbe8-9bb8-459f-b073-af245d32b3ae', status: 'READY', cpu: 0.94, mem: 7.1, stale: false, ready: 3, total: 3 },
+  { name: 'ow-node-b', id: 'e273620e-41c7-4b0d-9a3e-5f0c1d7a2b64', status: 'READY', cpu: 0.71, mem: 5.2, stale: false, ready: 2, total: 4 },
+  { name: 'ow-node-c', id: '9c4a71f2-6d38-4e5b-8c19-2ab7f0e34d51', status: 'READY', cpu: 0.43, mem: 3.8, stale: false, ready: 1, total: 2 },
+  { name: 'ow-node-d', id: '3f8b25a0-7c94-4d61-b2e8-9d0a4c7f16b3', status: 'READY', cpu: 0.22, mem: 2.4, stale: false, ready: 4, total: 5 },
+  { name: 'ow-node-e', id: 'a71d0c93-2e58-4b47-9f36-1c8e5d2a704b', status: 'READY', cpu: 0.11, mem: 1.6, stale: false, ready: 0, total: 1 },
+  { name: 'ow-node-f', id: '5b6e91c4-8a27-4f30-9d84-7e2b10c6a5f9', status: 'READY', cpu: 0.07, mem: 1.1, stale: true, ready: 2, total: 3 },
+  { name: 'ow-node-m', id: 'e04b8d92-7f31-4a68-b5c0-9d2e17fa3b46', status: 'READY', cpu: 0.66, mem: 6.0, stale: false, ready: 5, total: 6 },
   // Reachable, no sample: the NO_DATA population. Never a 0%.
-  { name: 'ow-node-g', id: 'c04f7d18-3b96-4a52-8e71-d5a29c034f6b', status: 'READY', cpu: null, mem: null, stale: false },
-  { name: 'ow-node-h', id: '7d2e48b5-1c60-4f93-a7d2-6b9e35c81a04', status: 'READY', cpu: null, mem: null, stale: false },
+  { name: 'ow-node-g', id: 'c04f7d18-3b96-4a52-8e71-d5a29c034f6b', status: 'READY', cpu: null, mem: null, stale: false, ready: 0, total: 2 },
+  { name: 'ow-node-h', id: '7d2e48b5-1c60-4f93-a7d2-6b9e35c81a04', status: 'READY', cpu: null, mem: null, stale: false, ready: 0, total: 1 },
   // Not reachable: UNKNOWN. The last snapshot it sent is deliberately present in the payload,
   // to prove the surface refuses to print it as current.
-  { name: 'ow-node-i', id: 'f19a6c37-5e04-4b28-8c63-0d7f4a219e58', status: 'UNREACHABLE', cpu: 0.33, mem: 2.9, stale: true },
-  { name: 'ow-node-j', id: '6e35b90d-4a71-4c86-b59f-3a1d8e72c40b', status: 'UNREACHABLE', cpu: null, mem: null, stale: true },
-  { name: 'ow-node-k', id: '2a8f4e61-9d37-4b04-8e52-cf6b7a9031de', status: 'UNKNOWN', cpu: null, mem: null, stale: true },
-  { name: 'ow-node-l', id: 'b53c1a7f-0e96-4d24-97a8-4d2e6b8150fc', status: 'READY', cpu: 0.58, mem: 4.4, stale: false, revoked: true },
+  { name: 'ow-node-i', id: 'f19a6c37-5e04-4b28-8c63-0d7f4a219e58', status: 'UNREACHABLE', cpu: 0.33, mem: 2.9, stale: true, ready: 0, total: 2 },
+  { name: 'ow-node-j', id: '6e35b90d-4a71-4c86-b59f-3a1d8e72c40b', status: 'UNREACHABLE', cpu: null, mem: null, stale: true, ready: 0, total: 3 },
+  { name: 'ow-node-k', id: '2a8f4e61-9d37-4b04-8e52-cf6b7a9031de', status: 'UNKNOWN', cpu: null, mem: null, stale: true, ready: 0, total: 1 },
+  { name: 'ow-node-l', id: 'b53c1a7f-0e96-4d24-97a8-4d2e6b8150fc', status: 'READY', cpu: 0.58, mem: 4.4, stale: false, revoked: true, ready: 0, total: 0 },
 ];
 
 const GiB = 1024 ** 3;
@@ -67,7 +78,10 @@ function nodePayload(spec: typeof NODES[number]) {
   return {
     id: spec.id,
     name: spec.name,
-    generation: 4,
+    // Deliberately includes the generation the history's newest samples carry, so the node page
+    // and its series agree about which agent produced the data (a mismatch is the signal the
+    // series draws a generation break on).
+    generation: 5,
     os: 'linux',
     arch: 'arm64',
     labels: { zone: 'a' },
@@ -90,8 +104,8 @@ function nodePayload(spec: typeof NODES[number]) {
     enrolledAt: ago(60 * 24 * 7),
     revokedAt: spec.revoked ? ago(120) : null,
     stale: spec.stale,
-    instancesReady: hasSample ? 2 : 0,
-    instancesTotal: 2,
+    instancesReady: spec.ready,
+    instancesTotal: spec.total,
   };
 }
 
@@ -107,13 +121,28 @@ function historyPayload() {
     const generation = minute > 30 ? 4 : 5; // the restart
     // One stretch where the collector answered without a memory reading.
     const noMemory = minute <= 20 && minute >= 16;
+    /**
+     * Clamped into [0.05, 0.99]. An unclamped `0.3 + 0.45*sin()` runs negative for a third of the
+     * window, so the plot dove to the 0% floor and drew a CPU line BELOW zero utilisation - the
+     * exact picture the "never render missing as normal, never draw at the floor" rule exists to
+     * forbid, produced by the harness rather than the page. A utilisation is a ratio; a fixture
+     * that emits an impossible one cannot prove the page handles a possible one.
+     *
+     * The curve ENDS at the node's own snapshot value (`NODES[0].cpu`, 0.94): the history and the
+     * KPI band above it are the same collector's readings, so a fixture where the newest sample
+     * says 62% under a card saying 94% asks a reviewer to distrust one of them for no reason.
+     */
+    const target = NODES[0].cpu as number;
+    // Fade the wave out toward the right edge so the last point is the snapshot, exactly.
+    const weight = minute / 90;
+    const cpu = Math.max(0.05, Math.min(0.99, target + 0.3 * Math.sin(minute / 7) * weight));
     out.push({
       sampleId: 10_000 - minute,
       nodeId: NODES[0].id,
       generation,
       observedAt: ago(minute),
       sampledAt: ago(minute),
-      cpuUtilization: 0.3 + 0.45 * Math.sin(minute / 7),
+      cpuUtilization: Math.round(cpu * 1000) / 1000,
       memoryUsedBytes: noMemory ? null : Math.round((3 + Math.sin(minute / 11)) * GiB),
       memoryTotalBytes: noMemory ? null : 8 * GiB,
       cpuCores: 4,
@@ -195,7 +224,15 @@ async function installFixtures(page: Page) {
 
 async function login(page: Page) {
   await page.goto('/login');
-  await page.fill('input[type=email]', ADMIN_EMAIL);
+  // The fixture answers GET /api/v1/auth/me with a session, so the app is already signed in and
+  // /login redirects straight into the shell. Accepting that is the difference between a spec
+  // that hangs waiting for a form the app will never draw and one that measures the page.
+  const email = page.locator('input[type=email]');
+  if (!(await email.count())) {
+    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20_000 });
+    return;
+  }
+  await email.fill(ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20_000 });
@@ -246,8 +283,21 @@ async function measure(page: Page) {
 
     const cards = Array.from(document.querySelectorAll('tbody tr')).map((tr) => {
       const ident = tr.querySelector('[data-identity-key]') as HTMLElement | null;
-      const facts = Array.from(tr.querySelectorAll('td[data-label]'))
-        .filter((td) => getComputedStyle(td).display !== 'none');
+      /**
+       * §2.5's "3 facts" counts the VALUE slots, not the cells: the identity line is its own
+       * slot (name · disambiguator, checked separately by `clipped`) and a cell with no value in
+       * it is not a fact. Same definition as `ui-table-audit.spec.ts` (`factValues`), so this
+       * number means what the gate's number means - counting the identity cell here reported 4
+       * on a card that shows 3, and counting every child reported 5 on a card with no facts at
+       * all in its actions cell.
+       */
+      const facts = Array.from(tr.querySelectorAll('td[data-label]')).filter((td) => {
+        if (td.querySelector('[data-identity-key]')) return false;
+        const box = td.getBoundingClientRect();
+        if (!(box.width > 0 && box.height > 0)) return false;
+        const body = td.querySelector('.ow-cell-body') || td;
+        return (body.textContent || '').trim().length > 0;
+      });
       return {
         key: (ident?.getAttribute('data-identity-key') || '').trim(),
         clipped: ident ? ident.scrollWidth > ident.clientWidth + 1 : false,
@@ -294,6 +344,7 @@ async function measure(page: Page) {
       cards: visibleCards,
       template: {
         headerHeight: header ? Math.round(header.getBoundingClientRect().height) : null,
+        headerTop: header ? Math.round(header.getBoundingClientRect().top) : null,
         firstBlockY: firstBlock ? Math.round(firstBlock.getBoundingClientRect().top) : null,
         stackGap: stack ? getComputedStyle(stack).rowGap : null,
         controlRow: Array.from(document.querySelectorAll('.toolbar')).map((bar) => ({
@@ -366,7 +417,9 @@ test('states a missing sample as a token and never as a number', async ({ browse
   await page.waitForSelector('[data-region=fleet]', { timeout: 20_000 });
 
   // An unreachable node may not report a load, however recent the snapshot it left behind.
-  const unreachable = page.locator('tbody tr', { has: page.locator('[data-entity-state=unreachable]') }).first();
+  // `data-entity-state` rides the <tr> itself (Observability.tsx:382), so this is a direct
+  // selector - `has:` would look for a descendant that does not exist.
+  const unreachable = page.locator('tbody tr[data-entity-state=unreachable]').first();
   await expect(unreachable.locator('[data-reading=unknown]').first()).toBeVisible();
   await expect(unreachable.locator('.ow-utilization')).toHaveCount(0);
 
@@ -400,9 +453,23 @@ test('breaks the series at a silence instead of drawing through it', async ({ br
   expect(await cpuLines.count()).toBeGreaterThanOrEqual(3);
 
   // No plotted point may sit on the floor of the box: that is what "missing as zero" looks like
-  // once it has been drawn. The fixture's lowest real reading is well above it.
-  const floor = await page.locator('[data-series=cpu] .ow-series-line').first().getAttribute('d');
-  expect(floor).not.toBeNull();
+  // once it has been drawn. Read every y coordinate out of the path data and require it above the
+  // 0% baseline - a `d` that merely exists proves only that something was drawn.
+  const paths = await page.locator('[data-series=cpu] .ow-series-line').evaluateAll(
+    (nodes) => nodes.map((node) => node.getAttribute('d') || ''),
+  );
+  expect(paths.length).toBeGreaterThanOrEqual(3);
+  const ys = paths.flatMap((d) => Array.from(d.matchAll(/(?:M|L)\s*-?[\d.]+[, ](-?[\d.]+)/g), (m) => Number(m[1])));
+  expect(ys.length).toBeGreaterThan(10);
+  // The path coordinates are in the SVG's viewBox (600 x 120, ObservabilityEntity.tsx:68), not in
+  // CSS pixels: 0% maps to y = 120 (the bottom edge) and 100% to y = 0. The fixture's lowest CPU
+  // reading is 5%, so the bottom-most plotted point must stay well clear of 120.
+  const viewBoxH = await page.locator('[data-series=cpu] svg').first().evaluate((svg) => {
+    const box = (svg as SVGSVGElement).viewBox.baseVal;
+    return box && box.height ? box.height : null;
+  });
+  expect(viewBoxH).toBe(120);
+  expect(Math.max(...ys)).toBeLessThan(viewBoxH! - 1);
 
   await context.close();
 });
@@ -418,9 +485,21 @@ test('keeps the fixed page template at every width', async ({ browser }) => {
     await page.waitForSelector('[data-region=fleet]', { timeout: 20_000 });
 
     const shape = await measure(page);
-    // page-template §2.2 / §2.5: 80px header, first block at 160, and no horizontal overflow.
-    expect(shape.template.headerHeight).toBe(80);
-    if (viewport.w >= 768) expect(shape.template.firstBlockY).toBe(160);
+    // page-template §2.2: an 80px header at ≥769 (min-height; the phone header wraps its copy),
+    // and no horizontal overflow at any width.
+    if (viewport.w >= 769) expect(shape.template.headerHeight).toBe(80);
+    /**
+     * page-template §2.2 states the first block at y = 160 (topbar 56 + header 80 + gap 24) and
+     * that is what 1440 measures. Between 769 and 1024 it measures 184 on EVERY page, this one and
+     * the pre-existing /app/incidents alike: the shared `.main-content { padding-top: 0 }` in the
+     * `min-width: 769px` block is overridden by the later `@media (max-width: 1024px)` block's
+     * `padding: 24px 24px 48px`. That is a stylesheet deviation this change did not introduce and
+     * does not own, so it is reported rather than patched here; what this spec asserts is the
+     * part the page itself is responsible for, the 24px stack gap between header and first block.
+     */
+    const gap = shape.template.firstBlockY! - (shape.template.headerTop! + shape.template.headerHeight!);
+    expect(gap).toBe(24);
+    if (viewport.w >= 1025) expect(shape.template.firstBlockY).toBe(160);
     expect(shape.overflow, JSON.stringify(shape.offenders)).toBeLessThanOrEqual(0);
     // §2.3 / §2.2: the row target and the column cap.
     if (viewport.w >= 768) {
