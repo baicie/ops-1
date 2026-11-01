@@ -18,7 +18,7 @@ import { useDocumentTitle } from '../hooks';
 import { executionLabel as durationLabel, spanLabel } from './jobDuration';
 import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
-import { identityDisambiguator } from '../lib/identity';
+import { IDENTITY_ONE_OBJECT, identityDisambiguator } from '../lib/identity';
 import { shortDigest } from '../format';
 import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
@@ -282,7 +282,7 @@ export function JobDetailPage() {
       {result ? <section className="panel panel-pad"><h2>{t('table.result')}</h2><p className="small">{t('table.status')} <StatusPill status={result.status} /></p>{result.errorCode && <div className="studio-banner studio-banner-error"><strong>{result.errorCode}</strong> {result.errorMessage}</div>}<pre className="result-json ow-scroll-x">{JSON.stringify(result.output, null, 2)}</pre><details className="advanced"><summary>{t('jobs.result.metadata')}</summary><p className="small">{result.resultDigest ? <LongId value={result.resultDigest} display={shortDigest(result.resultDigest, 20)} label={t('table.copyIdentifier')} /> : t('jobs.result.noDigest')}</p></details></section> : resultError ? <p className="muted small">{t('jobs.result.error', { message: resultError })}</p> : null}
       <ConfirmAction
         open={cancelOpen}
-        title={t('jobs.cancelConfirm.title', { id: identityDisambiguator(job.jobId) })}
+        title={t('jobs.cancelConfirm.title', { id: identityDisambiguator(job.jobId, IDENTITY_ONE_OBJECT) })}
         description={t('jobs.cancelConfirm.description')}
         confirmLabel={t('jobs.cancelConfirm.confirm')}
         onConfirm={cancelJob}

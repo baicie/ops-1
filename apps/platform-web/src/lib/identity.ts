@@ -13,6 +13,13 @@
 /** Above this row count, 4 hex characters stop being enough; §2.1 derives 8. */
 export const IDENTITY_MANY_ROWS = 100;
 
+/**
+ * A confirming dialog names ONE object, so there is no row to disambiguate it against - and
+ * four characters were never enough for a reader to match what the dialog asks them to destroy
+ * against the id they arrived with. Pass this where the reader has to recognise the target.
+ */
+export const IDENTITY_ONE_OBJECT = IDENTITY_MANY_ROWS + 1;
+
 /** A slug tail is capped so it can never be the part that gets clipped at 390. */
 const SLUG_TAIL_MAX = 16;
 

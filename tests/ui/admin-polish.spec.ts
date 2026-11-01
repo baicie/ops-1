@@ -254,17 +254,28 @@ test('disabling a user confirms, blocks a second submit and offers a retry', asy
 test('cancelling a job asks first and disables the submit while it runs', async ({ page }) => {
   await login(page);
   let cancels = 0;
+  // The page does not stop at the 202: it re-reads the job and only closes the dialog when the
+  // read reports the cancellation landed (`verifyAfterWrite`). The route has to model that, or
+  // it is answering as a Kernel that ignores the very write the test is about - which is what
+  // this fixture did, so the dialog stayed open in its error state and the assertion could
+  // never pass on any tree. `cancelled` is the job's state after the accepted write.
+  let cancelled = false;
   await page.route('**/api/v1/jobs/' + JOB_ID + '**', async (route) => {
     const url = route.request().url();
     if (url.endsWith('/cancel')) {
       cancels += 1;
       await new Promise((resolve) => setTimeout(resolve, 1000));
+      cancelled = true;
       return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ accepted: true }) });
     }
     if (url.endsWith('/diagnostics')) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: JOB_ID, events: [], attempts: [], leases: [], checkpoints: [], truncated: false }) });
     }
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(JOB_VIEW) });
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(cancelled ? { ...JOB_VIEW, status: 'CANCELLED', finishedAt: new Date().toISOString() } : JOB_VIEW),
+    });
   });
   await page.goto('/admin/jobs/' + JOB_ID);
   await expect(page.getByTestId('page-header')).toBeVisible();
