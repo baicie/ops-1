@@ -717,15 +717,6 @@ input::placeholder { color: var(--ow-text-muted); }
   .summary-grid { gap: 12px; }
   .panel-head { padding: 12px 12px; }
   .kv-grid { padding: 4px 12px 8px; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-  .data-table thead { display: none; }
-  .data-table, .data-table tbody, .data-table tr, .data-table td { display: block; width: 100%; }
-  .data-table tr { padding: 8px 4px; border-bottom: 1px solid var(--ow-border); }
-  .data-table tr:last-child { border-bottom: 0; }
-  .data-table td { border: 0; padding: 4px 12px; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; text-align: right; }
-  .data-table td::before { content: attr(data-label); color: var(--ow-text-muted); font-size: var(--ow-type-sm); text-align: left; flex: none; }
-  .data-table td.row-action { display: none; }
-  .data-table .entity-cell { justify-content: flex-end; text-align: right; }
-  .data-table .entity-cell div { min-width: 0; }
   .expanded-row td { display: block; }
   .attention-banner { align-items: flex-start; flex-wrap: wrap; }
   .attention-banner .btn { width: 100%; }
@@ -856,7 +847,7 @@ h1, h2, h3 { letter-spacing: -.015em; }
 /* Tailwind owns .truncate and .block; the two rules that re-declared them here are gone
    (v3 audit §2.1.4). The one form that needs a block box - a truncating link inside a table
    cell, where an inline box cannot clip - says so on the app's own selector instead. */
-td a.truncate, .data-table a.truncate { display: block; min-width: 0; }
+td a.truncate { display: block; min-width: 0; }
 .advanced { border-top: 1px solid var(--ow-border); margin-top: 12px; padding-top: 8px; }
 .advanced > summary { cursor: pointer; color: var(--ow-text-muted); font-size: var(--ow-type-sm); padding: 4px 0; }
 details.panel.advanced { border-top: 0; margin-top: 0; padding: 0; }
@@ -1034,7 +1025,6 @@ details.panel.advanced > summary { padding: 12px 16px; }
   .pipeline-stats, .job-stats { grid-template-columns: 1fr; }
   .summary-grid { gap: 16px; }
   .page-actions { width: 100%; }
-  .data-table { min-width: 600px; }
   .timeline li > div { gap: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
