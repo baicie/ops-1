@@ -135,7 +135,7 @@ export function ActivityPage() {
       <PageHeader title={t('page.activity')} description={t('activity.description')} actions={<Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
 
       <section className="toolbar" data-testid="activity-filters">
-        <div className="relative flex min-w-[220px] max-w-[380px] flex-1 items-center">
+        <div className="toolbar-search relative flex items-center">
           <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('activity.search.placeholder')} aria-label={t('activity.search.aria')} className="pl-[33px]" />
         </div>

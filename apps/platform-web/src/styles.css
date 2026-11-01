@@ -3004,3 +3004,50 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   min-height: 92px;
   justify-content: space-between;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   page-template 2.4 / token-table R3 C1: one toolbar row, one control height.
+
+   The audit measured /admin/jobs's toolbar holding a 36px Input, a 36px Button,
+   a 36px Select and a 28px TabsTrigger on one line - an 8px baseline break inside
+   a single flex row, repeated on /admin/activity, /admin/plugins, /admin/nodes
+   and /admin/governance. The input tiers moved to 40px with R3, which left the
+   tab strips and the `size="sm"` buttons sitting 8px short of their neighbours.
+
+   C1's reading is that a dense tier is about CONTEXT, not about the component: a
+   tab strip inside a toolbar is not a dense context, it is a control standing
+   next to other controls, so in a toolbar it takes the toolbar's tier. The same
+   strip inside a table row or a panel head keeps the 32px tier, because there it
+   really is dense - which is why this is scoped to `.toolbar` and not written
+   onto the components.
+
+   Height, not min-height: a toolbar control that grows past the row's tier is
+   the defect being fixed, and the two tab primitives size themselves from the
+   trigger, so the strip has to be pinned as well as the trigger.
+   ───────────────────────────────────────────────────────────────────────────── */
+.toolbar [role='tablist'] { min-height: var(--ow-control-md); }
+.toolbar [role='tab'] { min-height: var(--ow-control-md); }
+.toolbar .btn-small,
+.toolbar button[class*='h-control-sm'],
+.toolbar a[class*='h-control-sm'] { min-height: var(--ow-control-md); }
+/* The icon button is square on whichever tier its row uses (R4): in a toolbar
+   that is the 40px tier, so both axes move together rather than leaving a
+   32x40 rectangle around a 16px glyph. */
+.toolbar .icon-btn { min-height: var(--ow-control-md); min-width: var(--ow-control-md); }
+
+/* 2.4: the search field is the only flexible child; everything else is content
+   sized. The three pages wrote this as Tailwind arbitrary values on a wrapper
+   div (min-w-[260px] max-w-[460px] flex-1), which is the same intent authored
+   three times in two syntaxes - and 220/380 on Activity, so the one flexible
+   child was a different width per page. One declaration, one pair of numbers. */
+.toolbar > .toolbar-search { flex: 1 1 260px; max-width: 460px; min-width: 0; }
+
+/* Above 768 a toolbar is ONE row: wrapping is what turned a declared 40px band
+   into an undeclared 80px one and pushed the first block off its ruler. Below
+   768 it wraps, and the touch floor above raises each control to 44px. */
+@media (min-width: 769px) {
+  .toolbar { flex-wrap: nowrap; min-height: var(--ow-control-md); }
+  /* A filter row that cannot fit stays scrollable instead of growing a second
+     line: the page keeps its ruler and the controls keep their hit areas. */
+  .toolbar > .ow-filter-shell { min-width: 0; }
+}

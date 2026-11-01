@@ -79,7 +79,7 @@ export function PipelinesPage() {
         actions={<Button variant="secondary" onClick={() => setReloadToken((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
       />
       <section className="toolbar">
-        <div className="relative flex min-w-[260px] max-w-[460px] flex-1 items-center">
+        <div className="toolbar-search relative flex items-center">
           <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
           <Input aria-label={t('pipelines.search.aria')} placeholder={t('pipelines.search.placeholder')} value={query} onChange={(event) => setQuery(event.target.value)} className="pl-[33px]" />
         </div>
