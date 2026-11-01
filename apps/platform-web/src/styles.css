@@ -683,7 +683,11 @@ input::placeholder { color: var(--ow-text-muted); }
 .login-form-head p:last-child { color: var(--ow-text-muted); margin-top: 4px; font-size: var(--ow-type-sm); }
 
 @media (max-width: 1280px) {
-  .health-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* page-template 2.3: 4 or 2, never 3. Six tiles in threes read as two groups of
+     three; in twos they read as one list of six. 2 is also the count that keeps the
+     label and its value on one line at this width. */
+
+  .health-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1024px) {
   :root { --ow-sidebar: 220px; }
@@ -710,7 +714,6 @@ input::placeholder { color: var(--ow-text-muted); }
   .page-header { gap: 12px; }
   .page-actions { width: 100%; }
   .page-actions .btn { flex: 1; }
-  .health-strip { grid-template-columns: 1fr 1fr; }
   .summary-grid { gap: 12px; }
   .panel-head { padding: 12px 12px; }
   .kv-grid { padding: 4px 12px 8px; grid-template-columns: 1fr 1fr; gap: 0 12px; }
