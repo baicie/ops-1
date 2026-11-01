@@ -73,3 +73,25 @@ the most literals that moved), `/admin/pipelines/:id` (the 390 flow-step overflo
 (toolbar control tiers), `/admin/governance`, `/admin/settings/diagnostics`. Each at 1440 / 1024
 / 390, light and dark, `en` and `zh-CN` — the `:lang(en)` casing rule must be checked in BOTH
 languages, since that is the pair it is about.
+
+---
+
+## What `check-ui-metrics` PASS does and does not prove (read this before quoting it)
+
+`node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit` exits 0 on this branch. That
+exit code is **not** evidence about my changes, and must not be reported as if it were.
+
+The script reads `_metrics_*.json` from disk. Those three files are tracked in git and were
+written by `c6cb34f` (the flagship commit, 2026-10-31):
+
+```
+$ git log --oneline -1 -- artifacts/ui/visual-v3/audit/_metrics_r390-light-en.json
+c6cb34f UI Visual Excellence V3: audit, design system, and three flagship pages (#15)
+```
+
+The only thing in the tree that writes them is `tests/ui/ui-table-audit.spec.ts`, which needs a
+browser and a dev server — both blocked above. So the gate is re-asserting October's geometry
+against October's numbers. It proves my commits did not *delete or corrupt* the artifact set; it
+proves nothing about the geometry of the pages after my CSS edits.
+
+Stated plainly: **the 30 page measurements behind that PASS predate every commit on this branch.**
