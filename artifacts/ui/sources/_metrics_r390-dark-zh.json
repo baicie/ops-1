@@ -1,0 +1,161 @@
+{
+ "config": {
+  "label": "r390-dark-zh",
+  "theme": "dark",
+  "locale": "zh-CN",
+  "route": "/app/sources",
+  "baseURL": "http://127.0.0.1:5178",
+  "data": "fixture-api",
+  "template": {
+   "headerHeight": 138,
+   "firstBlockY": 230,
+   "kpiBands": 1,
+   "toolbars": 1
+  }
+ },
+ "pages": {
+  "/app/sources": {
+   "overflow": -15,
+   "docScrollW": 375,
+   "docClientW": 390,
+   "docHeight": 2197,
+   "offenders": [],
+   "identityKey": [
+    "CloudWatch",
+    "Data Integration",
+    "Host Metrics",
+    "IPMI Sensors",
+    "JMX Probe",
+    "NetFlow",
+    "OTel Collector",
+    "Prometheus Scraper",
+    "SNMP Poller",
+    "Syslog Receiver",
+    "Zabbix · acme.zabbix",
+    "Zabbix · acea"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 89.2,
+    "p95": 93.2,
+    "max": 93.2,
+    "n": 12
+   },
+   "columns": 3,
+   "distinctRatio": [
+    1,
+    0.58,
+    0.42
+   ],
+   "columnLabels": [
+    "连接器",
+    "状态",
+    "信任状态"
+   ],
+   "tableRowCounts": [
+    12
+   ],
+   "duplicateRunMax": 1,
+   "rows": 12,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 390,
+    "h": 844
+   },
+   "cardFactCount": 2,
+   "cardLabelCount": 2,
+   "cards": [
+    {
+     "key": "CloudWatch",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Data Integration",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Host Metrics",
+     "clipped": false,
+     "width": 161,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "IPMI Sensors",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "JMX Probe",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "NetFlow",
+     "clipped": false,
+     "width": 163,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "OTel Collector",
+     "clipped": false,
+     "width": 161,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Prometheus Scraper",
+     "clipped": false,
+     "width": 165,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "SNMP Poller",
+     "clipped": false,
+     "width": 163,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Syslog Receiver",
+     "clipped": false,
+     "width": 172,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acme.zabbix",
+     "clipped": false,
+     "width": 162,
+     "facts": 2,
+     "factValues": 2
+    },
+    {
+     "key": "Zabbix · acea",
+     "clipped": false,
+     "width": 171,
+     "facts": 2,
+     "factValues": 2
+    }
+   ],
+   "template": {
+    "headerHeight": 138,
+    "firstBlockY": 230,
+    "kpiBands": 1,
+    "toolbars": 1
+   }
+  }
+ }
+}

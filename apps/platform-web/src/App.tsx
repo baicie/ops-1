@@ -18,6 +18,7 @@ import { ForbiddenPage } from './shells/surface/SurfaceChrome';
 import { WorkspaceHomePage, SurfaceNotYetPage } from './pages/workspace';
 import { IncidentsPage } from './pages/Incidents';
 import { IncidentDetailPage } from './pages/IncidentDetail';
+import { SourcesPage } from './pages/Sources';
 import { LoginPage } from './pages/Login';
 import { OverviewPage } from './pages/Overview';
 import { PluginsPage } from './pages/Plugins';
@@ -175,7 +176,11 @@ export function App() {
                       <Route path="investigations" element={<SurfaceNotYetPage capability="investigations" />} />
                       <Route path="observability" element={<SurfaceNotYetPage capability="observability" />} />
                       <Route path="resources" element={<SurfaceNotYetPage capability="resources" />} />
-                      <Route path="sources" element={<SurfaceNotYetPage capability="sources" />} />
+                      {/* The connector management surface. It reads the plugin and capability
+                          routes rather than a sources API of its own: a telemetry connector is a
+                          plugin that PROVIDES a source capability (rules/01-architecture.md), so
+                          any plugin that activates with one appears here without a code change. */}
+                      <Route path="sources" element={<SourcesPage />} />
                       <Route path="reports" element={<SurfaceNotYetPage capability="reports" />} />
                       {/* G06: plugins whose contribution declares surface "workspace" (guard already ran). */}
                       <Route path="ext/*" element={<ExtensionRoute surface="workspace" />} />
