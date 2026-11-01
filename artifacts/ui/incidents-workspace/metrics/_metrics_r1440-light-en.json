@@ -1,0 +1,62 @@
+{
+ "config": {
+  "label": "r1440-light-en",
+  "theme": "light",
+  "mode": "after",
+  "baseURL": "http://127.0.0.1:18291",
+  "data": "kernel"
+ },
+ "pages": {
+  "/app/incidents": {
+   "overflow": -15,
+   "docScrollW": 1425,
+   "docClientW": 1440,
+   "docHeight": 1161,
+   "offenders": [],
+   "identityKey": [
+    "IncidentDisk pressure on web-01 root volume · 6662APIhost:web-01Repeated 3 times from 13h ago to 12h ago",
+    "IncidentDisk pressure on web-01 root volume · 5895APIhost:web-01",
+    "IncidentCheckout latency above SLO on api-02 · 7e2bAPIservice:checkout",
+    "IncidentReplica lag exceeds 30s on pg-primary · d295Manual entryservice:postgres",
+    "IncidentCertificate expiring in 6 days for edge-gw · b66fAPIhost:edge-gw",
+    "IncidentError budget burn elevated on payments · 6b33Manual entryservice:payments",
+    "IncidentLog shipper restarted on node-03 · 39a3APIhost:node-03",
+    "IncidentQueue backlog above threshold on worker pool · 69aaAPIservice:queue",
+    "IncidentNTP drift on node-07 · ae61Manual entryhost:node-07",
+    "IncidentSnapshot job failed on backup-01 · e966APIhost:backup-01"
+   ],
+   "identityUnique": 1,
+   "rowHeight": {
+    "p50": 42,
+    "p95": 42,
+    "max": 42,
+    "n": 10
+   },
+   "columns": 5,
+   "distinctRatio": [
+    1,
+    0.4,
+    0.3,
+    0.4,
+    0.7
+   ],
+   "columnLabels": [
+    "Incident",
+    "Severity",
+    "Status",
+    "Evidence",
+    "Started"
+   ],
+   "tableRowCounts": [
+    10
+   ],
+   "duplicateRunMax": 1,
+   "rows": 10,
+   "noDataPerTable": 0,
+   "viewport": {
+    "w": 1440,
+    "h": 900
+   }
+  }
+ }
+}

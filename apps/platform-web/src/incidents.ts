@@ -102,21 +102,33 @@ export function incidentFailureKey(code?: string | null): MessageKey | null {
   return FAILURE_KEYS[code] ?? null;
 }
 
-export type EvidencePanelState = 'loading' | 'present' | 'missing' | 'unavailable';
+export type EvidencePanelState = 'loading' | 'present' | 'missing' | 'unavailable' | 'forbidden';
 
 /**
  * Which evidence panel to draw.
  *
- * Three answers, kept apart on purpose: `missing` is a fact the kernel asserted (it answered and
- * the list is empty), `unavailable` is the absence of an answer, and `loading` is neither - a
+ * Four answers, kept apart on purpose: `missing` is a fact the kernel asserted (it answered and
+ * the list is empty), `unavailable` is the absence of an answer, `forbidden` is a refusal (the
+ * request was answered, and the answer was "not for you"), and `loading` is none of them - a
  * panel that says "no evidence" before the request returns is the same lie as an empty list
  * standing in for a failure.
+ *
+ * A refusal is split out from `unavailable` because the two have different remedies: a refused
+ * read is fixed by a grant, a failed one by a retry. Drawing both as "could not be read" sends
+ * the reader to the wrong place.
  */
-export function evidencePanelState(rows: IncidentEvidence[] | null, failed: boolean): EvidencePanelState {
-  if (failed && !rows) return 'unavailable';
-  if (!rows) return 'loading';
-  if (rows.length === 0) return 'missing';
-  return 'present';
+export function evidencePanelState(
+  rows: IncidentEvidence[] | null,
+  failed: boolean,
+  status?: number | null,
+): EvidencePanelState {
+  if (rows) {
+    if (rows.length === 0) return 'missing';
+    return 'present';
+  }
+  if (failed && status === 403) return 'forbidden';
+  if (failed) return 'unavailable';
+  return 'loading';
 }
 
 export type VerdictPanelState = 'recorded' | 'open' | 'sealed';
@@ -230,13 +242,107 @@ export function evidenceTrustKey(code?: string | null): MessageKey {
   return EVIDENCE_TRUST_KEYS[code.toUpperCase()] ?? 'incidents.trust.unknown';
 }
 
+/**
+ * What the trust word is worth on THIS build, which is not what the word says.
+ *
+ * `insert_evidence` validates `trust` against the closed set and stores whatever the caller
+ * sent (apps/kernel/src/incidents.rs). There is no signature check behind `SOURCE_ATTESTED`
+ * yet - the verifying path is on an unmerged branch - so the value is a *declaration by the
+ * writer*, in all three cases, and the only thing that differs between the three is how much
+ * the writer is claiming.
+ *
+ * That is why `SOURCE_ATTESTED` is not `ok` here. `ok` is the shell's green tick, and a green
+ * tick on a self-reported field is the UI asserting something the server never checked. The
+ * three levels stay three distinct tones - the reader must still be able to tell a signed-claim
+ * from a hand-written note - but none of them is the colour this product uses for "verified".
+ *
+ * When the kernel starts verifying attestations, `SOURCE_ATTESTED` earns `ok` and
+ * `incidents.trust.baselineNote` is the sentence that gets deleted. Until then both stay.
+ */
 export function evidenceTrustTone(code?: string | null): StatusTone {
   switch ((code ?? '').toUpperCase()) {
-    case 'SOURCE_ATTESTED': return 'ok';
-    case 'OPERATOR_ASSERTED': return 'info';
+    // A claim the writer attributes to a source. Informative, never confirmed.
+    case 'SOURCE_ATTESTED': return 'info';
+    // A claim the writer makes in their own name. Weaker than the above, and not a warning.
+    case 'OPERATOR_ASSERTED': return 'neutral';
+    // The writer declined to claim anything.
     case 'UNVERIFIED': return 'warn';
     default: return 'unknown';
   }
+}
+
+/**
+ * A glyph per trust level, so the three are distinguishable without colour.
+ *
+ * The audit's requirement is shape before colour: a reader with a colour deficiency, a
+ * greyscale print and a dark-theme washout all have to resolve these three. Tone carries the
+ * same information a second time; neither is load-bearing alone.
+ */
+export function evidenceTrustGlyph(code?: string | null): string {
+  switch ((code ?? '').toUpperCase()) {
+    case 'SOURCE_ATTESTED': return 'shield';
+    case 'OPERATOR_ASSERTED': return 'users';
+    case 'UNVERIFIED': return 'circleDashed';
+    default: return 'unknown';
+  }
+}
+
+/**
+ * How much the writer claimed, as an order. Higher is a larger claim, never a larger proof.
+ *
+ * `-1` is reserved for a code outside the contract's closed set, which must never sort as if it
+ * were one of the three: an unknown trust word is the one case where the page knows nothing at
+ * all, and folding it into the weakest known level would be the same defect the audit found in
+ * the job list (seven codes collapsed onto one branch, so a success and a never-observed run
+ * drew identically).
+ */
+export function evidenceTrustRank(code?: string | null): number {
+  switch ((code ?? '').toUpperCase()) {
+    case 'SOURCE_ATTESTED': return 3;
+    case 'OPERATOR_ASSERTED': return 2;
+    case 'UNVERIFIED': return 1;
+    default: return -1;
+  }
+}
+
+/** Is this one of the three words the contract allows? Used to mark a row, never to recode it. */
+export function isKnownEvidenceTrust(code?: string | null): boolean {
+  return evidenceTrustRank(code) > 0;
+}
+
+export interface EvidenceAssurance {
+  /** How many rows the set holds. */
+  total: number;
+  /** Rows per trust code, including codes the contract does not define. */
+  byCode: Record<string, number>;
+  /** The weakest claim present, or null for an empty set. An unknown code is its own answer. */
+  weakest: string | null;
+  /** True when at least one row carries a code outside the closed set. */
+  hasUnknown: boolean;
+}
+
+/**
+ * What an evidence set is worth, as the set's weakest link rather than its best row.
+ *
+ * A verdict rests on the whole set, so the summary a reader needs before signing one is the
+ * floor, not the ceiling. An unknown code is the floor by definition: the page cannot rank
+ * something it cannot read.
+ */
+export function evidenceAssurance(rows: IncidentEvidence[]): EvidenceAssurance {
+  const byCode: Record<string, number> = {};
+  let weakest: string | null = null;
+  let hasUnknown = false;
+  for (const row of rows) {
+    const code = (row.trust ?? '').toUpperCase() || 'UNSET';
+    byCode[code] = (byCode[code] ?? 0) + 1;
+    if (!isKnownEvidenceTrust(code)) hasUnknown = true;
+    if (weakest === null) { weakest = code; continue; }
+    const rank = evidenceTrustRank(code);
+    const floor = evidenceTrustRank(weakest);
+    // An unrankable code (-1) is already the floor, so it wins any comparison it takes part in.
+    if (rank < floor) weakest = code;
+  }
+  return { total: rows.length, byCode, weakest, hasUnknown };
 }
 
 /**
@@ -249,4 +355,235 @@ export function incidentSourceKey(code?: string | null): MessageKey {
     case 'API': return 'incidents.source.api';
     default: return 'incidents.source.unknown';
   }
+}
+
+/* ── the list page's own rules: which body to draw, which columns earn width ─────────── */
+
+/**
+ * The one state machine behind the list body.
+ *
+ * `empty`, `forbidden` and `failed` are three different facts and the audit found them drawn
+ * as one empty list. They are separated here, by HTTP status rather than by message text, so
+ * neither page can regress to "no rows" for a refusal:
+ *
+ *   * `loading`    - no answer yet, and nothing older on screen;
+ *   * `forbidden`  - the kernel refused the read (403). There are no rows to speak of;
+ *   * `conflict`   - a 409 the read path can still answer with (cursor raced a write);
+ *   * `failed`     - the request did not answer, for any other reason;
+ *   * `empty`      - it answered, and the answer is no rows, with no filter narrowing it;
+ *   * `filtered`   - it answered zero *for these filters*, which is a different remedy;
+ *   * `stale`      - rows are on screen and a later read failed; the old rows stay, labelled;
+ *   * `ready`      - rows, fresh.
+ */
+export type IncidentListState =
+  | 'loading' | 'forbidden' | 'conflict' | 'failed' | 'empty' | 'filtered' | 'stale' | 'ready';
+
+/** The HTTP status decides a refusal; the message never does (rules/06). */
+function statusOf(error: unknown): number | null {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' ? status : null;
+}
+
+export function incidentListState(input: {
+  rows: IncidentView[] | null;
+  error: unknown;
+  loading: boolean;
+  filtering: boolean;
+}): IncidentListState {
+  const { rows, error, loading, filtering } = input;
+  // Rows already on screen survive a failed refresh: dropping them would turn a stale read
+  // into an empty page, which is the more alarming of the two lies.
+  if (rows && rows.length > 0) return error ? 'stale' : 'ready';
+  if (error && !rows) {
+    const status = statusOf(error);
+    if (status === 403) return 'forbidden';
+    if (status === 409) return 'conflict';
+    return 'failed';
+  }
+  if (!rows) return loading ? 'loading' : 'failed';
+  return filtering ? 'filtered' : 'empty';
+}
+
+/* ── the count the toolbar may print ──────────────────────────────────────────────── */
+
+/**
+ * Whether the list has actually answered yet, so a row count is a fact.
+ *
+ * `loading`, `forbidden`, `conflict` and `failed` all reach the renderer with zero rows in hand.
+ * Printing "0 on this page" beside them states something the kernel never said - and a reader
+ * cannot tell a refused read from a genuinely empty one, which is the confusion the eight states
+ * exist to prevent. The toolbar count therefore speaks only in the four answered states.
+ */
+export const COUNTED_LIST_STATES: readonly IncidentListState[] = ['ready', 'stale', 'empty', 'filtered'];
+
+export function incidentCountKnown(state: IncidentListState): boolean {
+  return COUNTED_LIST_STATES.includes(state);
+}
+
+/**
+ * §2.4: three consecutive rows that say the same thing are one fact.
+ *
+ * The run key is what a reader would call "the same incident again": same title, same severity,
+ * same status, same related entity. The id is deliberately not in the key - every row has a
+ * unique one, so including it would make the rule unreachable - and neither is the timestamp,
+ * for the reason table-kit's `Identity` records: a key containing a clock stops matching the
+ * moment the clock ticks.
+ *
+ * Only **consecutive** rows collapse. The list arrives newest-first from the kernel, so a run
+ * is a burst in time; two bursts a day apart stay two rows, because collapsing them would
+ * claim a span the data does not have.
+ */
+export interface IncidentRun {
+  /** The newest row of the run; its id keys the React element and opens the detail page. */
+  head: IncidentView;
+  /** Rows in the run, newest first. Length 1 is an ordinary row. */
+  rows: IncidentView[];
+  /** The run's own key, for the §4.1 `data-row-key` the metrics harness counts. */
+  key: string;
+  /** Oldest `startedAt` in the run - the far end of the span. */
+  firstAt: string;
+  /** Newest `startedAt` in the run. */
+  lastAt: string;
+}
+
+/** §2.4's threshold: a run of 1 or 2 renders as rows; 3 or more collapses. */
+export const RUN_COLLAPSE_THRESHOLD = 3;
+
+export function incidentRunKey(incident: IncidentView): string {
+  return [incident.title, incident.severity, incident.status, incident.relatedEntity ?? ''].join('\u0001');
+}
+
+export function collapseIncidentRuns(
+  rows: IncidentView[],
+  threshold = RUN_COLLAPSE_THRESHOLD,
+): IncidentRun[] {
+  const runs: IncidentRun[] = [];
+  let group: IncidentView[] = [];
+
+  const flush = () => {
+    if (group.length === 0) return;
+    const key = incidentRunKey(group[0]);
+    if (group.length >= threshold) {
+      const times = group.map((row) => row.startedAt).filter((at) => Number.isFinite(Date.parse(at)));
+      runs.push({
+        head: group[0],
+        rows: group,
+        key,
+        // With no readable timestamp in the whole run there is no span to print; the head's own
+        // value travels unchanged so the cell can say "unreadable" instead of inventing a date.
+        firstAt: times.length ? times[times.length - 1] : group[group.length - 1].startedAt,
+        lastAt: times.length ? times[0] : group[0].startedAt,
+      });
+    } else {
+      for (const row of group) {
+        runs.push({ head: row, rows: [row], key, firstAt: row.startedAt, lastAt: row.startedAt });
+      }
+    }
+    group = [];
+  };
+
+  for (const row of rows) {
+    if (group.length > 0 && incidentRunKey(group[0]) !== incidentRunKey(row)) flush();
+    group.push(row);
+  }
+  flush();
+  return runs;
+}
+
+/**
+ * §2.2: a column earns its width, or it is demoted into the identity cell.
+ *
+ * The ratio is distinct values over rows on screen. Below 0.2 a column is read once rather than
+ * scanned, so it costs a column's width to carry one line of information; at 0 it carries none.
+ * The rule only applies with at least 10 rows on screen - under that, a ratio is noise, and
+ * `null` says "not measurable" rather than guessing.
+ *
+ * `visible` is what the page should render as a column. The caller moves everything else into
+ * the identity cell's second line, where it keeps its value and loses only its column.
+ */
+export type IncidentColumnId = 'severity' | 'status' | 'evidence' | 'started' | 'owner';
+
+export const INCIDENT_OPTIONAL_COLUMNS: readonly IncidentColumnId[] =
+  ['severity', 'status', 'evidence', 'started', 'owner'] as const;
+
+/**
+ * The catalog key each column's heading reads from.
+ *
+ * It lives beside the plan rather than in the page so that a demoted column and a rendered
+ * column cannot be named by two different strings: the footnote that states "this column held
+ * one value" has to use the same word the heading would have used.
+ */
+export const INCIDENT_COLUMN_LABEL_KEYS: Record<IncidentColumnId, MessageKey> = {
+  severity: 'table.severity',
+  status: 'table.status',
+  evidence: 'table.evidence',
+  started: 'table.started',
+  owner: 'table.owner',
+};
+
+/** §2.2's floor, and the row count below which a ratio is not evidence. */
+export const COLUMN_KEEP_RATIO = 0.2;
+export const COLUMN_RATIO_MIN_ROWS = 10;
+
+/** ≥1024 keeps 5 columns, 768–1023 keeps 4, below that §2.5's card rules take over. */
+export function columnCapForWidth(width: number): number {
+  if (width >= 1024) return 5;
+  if (width >= 768) return 4;
+  return 3;
+}
+
+export interface IncidentColumnPlan {
+  visible: IncidentColumnId[];
+  demoted: IncidentColumnId[];
+  /** Per column, distinct/rows, or null when fewer than {@link COLUMN_RATIO_MIN_ROWS} rows. */
+  ratios: Record<IncidentColumnId, number | null>;
+}
+
+/** The value a column shows for one row, as the string the reader would compare. */
+function columnValue(column: IncidentColumnId, incident: IncidentView): string {
+  switch (column) {
+    case 'severity': return incident.severity;
+    case 'status': return incident.status;
+    // The count, not the ids: two rows with different evidence but the same count look alike to
+    // a reader scanning the column, and the ratio has to measure what the eye can use.
+    case 'evidence': return String(incident.evidenceRefs.length);
+    case 'started': return incident.startedAt;
+    case 'owner': return incident.owner;
+  }
+}
+
+export function incidentColumnPlan(rows: IncidentView[], viewportWidth: number): IncidentColumnPlan {
+  const ratios = {} as Record<IncidentColumnId, number | null>;
+  const measurable = rows.length >= COLUMN_RATIO_MIN_ROWS;
+  for (const column of INCIDENT_OPTIONAL_COLUMNS) {
+    if (!measurable) { ratios[column] = null; continue; }
+    const distinct = new Set(rows.map((row) => columnValue(column, row))).size;
+    ratios[column] = Math.round((distinct / rows.length) * 1000) / 1000;
+  }
+
+  // The identity column is never optional, so the cap spends one of its slots before ranking.
+  const slots = Math.max(0, columnCapForWidth(viewportWidth) - 1);
+  const ranked = [...INCIDENT_OPTIONAL_COLUMNS].sort((left, right) => {
+    const a = ratios[left];
+    const b = ratios[right];
+    // An unmeasured column keeps its declared order rather than sorting as if it scored 0.
+    if (a === null || b === null) return 0;
+    return b - a;
+  });
+
+  const visible: IncidentColumnId[] = [];
+  const demoted: IncidentColumnId[] = [];
+  for (const column of ranked) {
+    const ratio = ratios[column];
+    const earns = ratio === null || ratio >= COLUMN_KEEP_RATIO;
+    if (earns && visible.length < slots) visible.push(column);
+    else demoted.push(column);
+  }
+  // Rendering order is the declared one; the ranking above only decides *which* survive, because
+  // a table whose columns reorder as data changes cannot be learned.
+  return {
+    visible: INCIDENT_OPTIONAL_COLUMNS.filter((column) => visible.includes(column)),
+    demoted: INCIDENT_OPTIONAL_COLUMNS.filter((column) => demoted.includes(column)),
+    ratios,
+  };
 }
