@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils';
 // shadcn/ui copy-in, adapted to this repo: there is no variant axis and every border is explicit because preflight is off — the global
 // reset in src/styles.css does not normalise form controls or tables.
 const base =
-  'flex h-9 w-full rounded-control border border-solid border-border-strong bg-card px-3 py-1 text-base text-foreground transition-colors ' +
+  'flex h-control-md w-full rounded-control border border-solid border-border-strong bg-card px-3 py-1 text-base text-foreground transition-colors ' +
   'placeholder:text-muted-foreground ' +
   'focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ' +
   'disabled:cursor-not-allowed disabled:opacity-50';

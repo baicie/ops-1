@@ -105,12 +105,18 @@
   /* The one display step the strips use: a headline figure that is not a page title. */
   --ow-type-metric: 21px;
   --ow-type-hero: clamp(30px, 4vw, 44px);
-  --ow-control-sm: 28px;
+  --ow-control-sm: 32px;
   /* 40px, not 36: 36 measured 37px in the browser and no control on a phone met the 40px
      touch-target floor. One token raises every button and field together instead of each
      screen patching its own height. */
   --ow-control-md: 40px;
-  --ow-control-lg: 44px;
+  /* R3 C2: the mobile touch floor. NOT a third tier - it is a constraint applied over
+     whichever tier a control already uses, at one breakpoint, in one rule (see the end of
+     this file). It lives here because the spec requires that the value never be authored
+     per component: a 44px literal next to a component is how the 30/36/38/46px spread
+     started. 44px is the floor every touch guideline converges on; a 32px tier assumes a
+     cursor with one-pixel precision, and a finger has none. */
+  --ow-control-touch: 44px;
   --ow-sidebar: 240px;
   --ow-topbar: 56px;
   --ow-readable: 1480px;
@@ -396,7 +402,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .meta-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-sm); padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); background: var(--ow-surface); }
 .panel { background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); box-shadow: none; min-width: 0; }
-.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 12px 16px; border-bottom: 1px solid var(--ow-border); flex-wrap: wrap; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--ow-control-md); padding: 12px 16px; border-bottom: 1px solid var(--ow-border); flex-wrap: wrap; }
 .panel-head h2 { font-size: var(--ow-type-lg); font-weight: 600; letter-spacing: -.01em; }
 .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-sm); margin-top: 4px; }
 .table-panel { overflow: hidden; }
@@ -1072,7 +1078,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .mobile-view-toggle { display: none; }
 @media (max-width: 768px) {
   .mobile-view-toggle { display: flex; gap: 4px; padding: 8px 8px 0; }
-  .mobile-view-toggle button { flex: 1; min-height: 38px; border: 1px solid var(--ow-border); background: var(--ow-surface); border-radius: var(--ow-radius-control); }
+  .mobile-view-toggle button { flex: 1; min-height: var(--ow-control-md); border: 1px solid var(--ow-border); background: var(--ow-surface); border-radius: var(--ow-radius-control); }
   .mobile-view-toggle button.active { border-color: var(--ow-accent); color: var(--ow-accent); background: var(--ow-accent-soft); }
   .mobile-node-list { display: flex; flex-direction: column; gap: 8px; padding: 8px; height: 100%; overflow: auto; }
   .mobile-node-list button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 58px; padding: 8px; text-align: left; border: 1px solid var(--ow-border); background: var(--ow-surface); border-radius: var(--ow-radius-card); }
@@ -1117,7 +1123,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .breadcrumb-item { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .breadcrumb-item a, .breadcrumb-item span { overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
 .breadcrumb-item span[aria-current='page'] { color: var(--ow-text); font-weight: 500; }
-.topbar-command { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); background: var(--ow-surface-2); color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
+.topbar-command { display: inline-flex; align-items: center; gap: 8px; height: var(--ow-control-sm); padding: 0 8px 0 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); background: var(--ow-surface-2); color: var(--ow-text-muted); font-size: var(--ow-type-sm); }
 .topbar-command:hover { border-color: var(--ow-border-strong); background: var(--ow-surface); color: var(--ow-text); }
 .topbar-command svg { flex: none; }
 .topbar-command-text { white-space: nowrap; }
@@ -1660,8 +1666,8 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
 
 .lang-select {
   appearance: none;
-  height: 30px;
-  min-height: 30px;
+  height: var(--ow-control-sm);
+  min-height: var(--ow-control-sm);
   width: auto;
   padding: 0 24px 0 9px;
   border: 1px solid var(--ow-border);
@@ -1692,7 +1698,7 @@ html[data-theme="dark"] .lang-select {
 .ow-command { display: flex; flex-direction: column; gap: 0; min-height: 0; }
 .ow-command-input {
   width: 100%;
-  min-height: 46px;
+  min-height: var(--ow-control-md);
   padding: 10px 12px;
   border: 0;
   border-bottom: 1px solid var(--ow-border);
@@ -2052,7 +2058,7 @@ button.ow-summary-card:focus-visible,
 .setup-step-copy strong { display: block; font-size: var(--ow-type-base); font-weight: 600; }
 .setup-step-copy p { margin-top: 2px; font-size: var(--ow-type-sm); line-height: 16px; color: var(--ow-text-secondary); }
 .setup-actions { display: flex; }
-.setup-actions .btn { min-height: 36px; }
+.setup-actions .btn { min-height: var(--ow-control-md); }
 
 /* ── 9. Plugin detail: two columns, and the instances card across both ───────────────
  * The overview tab once left a 551x270 dead region beside two half-width panels; three equal
@@ -2881,3 +2887,33 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    one thing on screen, so it gets one tracking: .09em, the value the wide shell
    renders and the one the audit measured. */
 :where(.nav-section-label):lang(en) { text-transform: uppercase; letter-spacing: .09em; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   token-table R3 C2: the mobile floor is a constraint on the two tiers, not a
+   third tier.
+
+   The 32px tier is a POINTER target: it assumes a cursor, which has one-pixel
+   precision. A finger does not, and 44px is the floor every touch guideline
+   converges on. Authoring a third height per component is what produced the
+   30/36/38/46px spread this commit removed, so the floor is stated ONCE, here,
+   over whichever tier the control already uses.
+
+   `min-height` only: the 40px tier already clears the floor at its own size, so
+   this raises the dense tier and leaves the rest alone. Decoration (dots, bars,
+   icon rings) is not interactive and is not touched.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  button:not(.icon-btn):not([role='tab']),
+  .btn,
+  a.btn,
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea,
+  [role='tab'],
+  [role='menuitem'] {
+    min-height: var(--ow-control-touch);
+  }
+  /* An icon button is square: raising only its height would make it a 32x44
+     rectangle around a 16px glyph, so both axes move together. */
+  .icon-btn { min-height: var(--ow-control-touch); min-width: var(--ow-control-touch); }
+}

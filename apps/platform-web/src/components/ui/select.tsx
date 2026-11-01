@@ -30,7 +30,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex h-9 w-full items-center justify-between gap-2 rounded-control border border-solid border-border-strong bg-card px-3 py-1 text-left text-base text-foreground',
+      'flex h-control-md w-full items-center justify-between gap-2 rounded-control border border-solid border-border-strong bg-card px-3 py-1 text-left text-base text-foreground',
       'transition-colors hover:border-ring focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       // min-w-0 belongs here: a flex item will not shrink below its content without it, and
       // .truncate no longer smuggles it in (the stylesheet no longer redefines the utility).

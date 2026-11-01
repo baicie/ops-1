@@ -18,11 +18,17 @@ const variantStyles = {
   link: 'border-transparent text-primary underline-offset-4 hover:underline',
 } as const;
 
+// token-table R4: two sizes, one family. shadcn ships four sizes (28 / 36 / 44px plus a
+// square 36), none of which is one of this product's two control tiers - that is how one
+// toolbar came to hold a 36px button beside a 28px tab trigger. `default` is the 40px tier
+// (every form control), `sm` the 32px tier (in-row and dense controls); `icon` is square on
+// the 40px tier. The 44px size is deleted: 44 is the MOBILE FLOOR every control gets below
+// 768px (R3 C2), not a size a call site may ask for, and nothing in the tree asked for it.
 const sizeStyles = {
-  default: 'h-9 px-3 text-base',
-  sm: 'h-7 px-2 text-sm',
-  lg: 'h-11 px-5 text-lg',
-  icon: 'h-9 w-9 p-0',
+  default: 'h-control-md px-4 text-base',
+  sm: 'h-control-sm px-3 text-sm',
+  icon: 'h-control-md w-control-md p-0',
+  'icon-sm': 'h-control-sm w-control-sm p-0',
 } as const;
 
 export type ButtonVariant = keyof typeof variantStyles;
