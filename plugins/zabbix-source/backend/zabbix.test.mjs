@@ -1,12 +1,12 @@
 // Failure-semantics and attestation tests for the Zabbix source plugin.
 //
-// Run with: node --test plugins/zabbix-source/backend/
+// Run with: node --test plugins/zabbix-source/backend/zabbix.test.mjs
 //
 // No Zabbix instance is involved. Every test drives the collector through the
 // `transport` seam, so what is proven here is the plugin's own semantics: which
 // outcome it reaches for which kind of failure, and that an absent reading stays
 // absent. Collection against a real Zabbix server is a separate, NOT_RUN check
-// recorded in docs/status/zabbix-source-implementation-status.md.
+// recorded in docs/design/zabbix-source/IMPLEMENTATION-STATUS.md (N-2).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,6 +19,8 @@ import {
   collect,
   collectionOutcome,
   contentRef,
+  listHosts,
+  listItems,
   probe,
   redact,
   resolveBudget,
@@ -457,6 +459,119 @@ test('redact removes secret values and credential-shaped text', () => {
   // Text with nothing credential-shaped is left alone, so redaction cannot be
   // mistaken for a blanket wipe of every diagnostic message.
   assert.equal(redact('plain text no secret here'), 'plain text no secret here');
+});
+
+// ---------------------------------------------------------------------------
+// Inventory: host and item listing (the read side of the closed loop)
+// ---------------------------------------------------------------------------
+
+test('inventory keeps UNKNOWN availability distinct from UNAVAILABLE', async () => {
+  // Zabbix's "never checked" (0) and "checked and down" (2) are different
+  // operational facts. Folding the first into the second turns a monitoring gap
+  // into a fabricated outage, which rules/05 forbids.
+  const transport = async () => [
+    { hostid: '10084', name: 'web-01', available: '1' },
+    { hostid: '10085', name: 'db-01', available: '2' },
+    { hostid: '10086', name: 'new-01', available: '0' },
+    { hostid: '10087', name: 'odd-01', available: undefined },
+  ];
+  const result = await listHosts(SOURCE, { transport });
+  assert.equal(result.outcome, 'OK');
+  assert.deepEqual(
+    result.items.map((host) => host.available),
+    ['AVAILABLE', 'UNAVAILABLE', 'UNKNOWN', 'UNKNOWN'],
+  );
+});
+
+test('inventory asks for one more row than it returns, and says when it withheld one', async () => {
+  const budget = { ...BUDGET_CEILING, maxItems: 3 };
+  const rows = Array.from({ length: 4 }, (_, index) => ({ hostid: String(index + 1), name: `h${index}`, available: '1' }));
+  let askedLimit;
+  const transport = async ({ params }) => {
+    askedLimit = params.limit;
+    return rows;
+  };
+  const result = await listHosts(SOURCE, { budget, transport });
+  // The probe row is how a short list is prevented from being read as "this
+  // Zabbix only has three hosts".
+  assert.equal(askedLimit, 4, 'must probe past the ceiling to detect clamping');
+  assert.equal(result.outcome, 'PARTIAL', 'a clamped inventory is not a complete answer');
+  assert.equal(result.items.length, 3);
+  assert.equal(result.clamped, true);
+  assert.equal(result.truncated, null, 'the remainder is unknowable from one bounded call, so it is not 0');
+});
+
+test('inventory at exactly the ceiling is complete, not clamped', async () => {
+  const budget = { ...BUDGET_CEILING, maxItems: 3 };
+  const rows = Array.from({ length: 3 }, (_, index) => ({ hostid: String(index + 1), name: `h${index}`, available: '1' }));
+  const result = await listHosts(SOURCE, { budget, transport: async () => rows });
+  assert.equal(result.outcome, 'OK');
+  assert.equal(result.clamped, false);
+  assert.equal(result.truncated, 0);
+});
+
+test('an empty inventory is EMPTY and an unmappable one is NO_DATA', async () => {
+  const empty = await listHosts(SOURCE, { transport: async () => [] });
+  assert.equal(empty.outcome, 'EMPTY');
+  assert.deepEqual(empty.items, []);
+  // A non-array answer is not "zero hosts" - we failed to establish the count.
+  const unknown = await listHosts(SOURCE, { transport: async () => ({ error: 'weird' }) });
+  assert.equal(unknown.outcome, 'NO_DATA');
+  assert.equal(unknown.truncated, null);
+});
+
+test('an inventory failure reports the same failure vocabulary as collection', async () => {
+  const down = await listHosts(SOURCE, { transport: failWith('ZABBIX_UNREACHABLE') });
+  assert.equal(down.outcome, 'UNAVAILABLE', 'never connected is unavailable, not "no hosts"');
+  assert.equal(down.errorCode, 'ZABBIX_UNREACHABLE');
+  const slow = await listHosts(SOURCE, { transport: failWith('ZABBIX_TIMEOUT') });
+  assert.equal(slow.outcome, 'TIMEOUT', 'a slow server is not a server with no hosts');
+  // Unreachable/unavailable inventory must never be reported as an empty list.
+  for (const result of [down, slow]) {
+    assert.notEqual(result.outcome, 'EMPTY');
+    assert.deepEqual(result.items, []);
+  }
+});
+
+test('items are listed for one host and map Zabbix value types', async () => {
+  let seenParams;
+  const transport = async ({ method, params }) => {
+    seenParams = { method, params };
+    return [
+      { itemid: '10401', key_: 'system.cpu.load[avg1]', name: 'CPU load', units: '', value_type: '0' },
+      { itemid: '10402', key_: 'vfs.fs.size[/,free]', name: 'Free disk', units: 'B', value_type: '3' },
+      { itemid: '10403', key_: 'system.hostname', name: 'Hostname', units: undefined, value_type: '4' },
+      { itemid: '10404', key_: 'system.run[nope]', name: 'Unsupported', units: null, value_type: '7' },
+    ];
+  };
+  const result = await listItems(SOURCE, '10084', { transport });
+  assert.equal(seenParams.method, 'item.get');
+  assert.deepEqual(seenParams.params.hostids, ['10084']);
+  assert.equal(result.outcome, 'OK');
+  assert.deepEqual(
+    result.items.map((item) => item.itemId),
+    ['10401', '10402', '10403', '10404'],
+  );
+  assert.deepEqual(
+    result.items.map((item) => item.valueType),
+    ['FLOAT', 'INTEGER', 'TEXT', 'UNSUPPORTED'],
+  );
+  // An absent unit is null, not the empty string: "" would render as a real
+  // (empty) unit in a chart label.
+  assert.equal(result.items[2].unit, null);
+  assert.equal(result.items[3].unit, null);
+});
+
+test('listing items without a host is refused rather than silently listing every item', () => {
+  // listItems rejects before it is ever awaited, so this is assert.throws and
+  // not assert.rejects: the guard must fire without a round trip to Zabbix.
+  for (const hostId of [undefined, null, '', 0]) {
+    assert.throws(() => listItems(SOURCE, hostId, { transport: async () => [] }), (error) => {
+      assert.equal(error.code, 'ZABBIX_HOST_REQUIRED');
+      assert.equal(error.status, 400);
+      return true;
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

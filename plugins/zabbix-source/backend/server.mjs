@@ -13,14 +13,12 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import {
   BUDGET_CEILING,
-  attestationPayload,
-  clampBudget,
   collect,
-  collectionDigest,
   listHosts,
   listItems,
   probe,
   redact,
+  resolveBudget,
   signAttestation,
 } from './zabbix.mjs';
 
@@ -271,7 +269,7 @@ async function handle(req, res) {
       // A new source has not been probed, so it is UNVERIFIED. It does not
       // become READY because the operator supplied plausible settings.
       status: 'UNVERIFIED',
-      budget: clampBudget(body.budget).budget,
+      budget: resolveBudget(body.budget).budget,
       createdAt: new Date().toISOString(),
     };
     SOURCES.set(source.sourceId, source);
@@ -282,7 +280,11 @@ async function handle(req, res) {
   if (probeMatch && req.method === 'POST') {
     requireScope(who, 'telemetry.source.write');
     const source = sourceOr404(probeMatch[1]);
-    const result = await probe(source, { secret: resolveSecretQuietly(source) });
+    // The secret is attached to the source view for this one call. A probe that
+    // cannot resolve its secret still runs, so it reports UNAUTHORIZED rather
+    // than a local configuration error the operator cannot distinguish from a
+    // bad token.
+    const result = await probe({ ...source, secret: resolveSecretQuietly(source) });
     source.lastProbe = result;
     // Only a probe moves status, and it records what it saw. A TIMEOUT leaves
     // the source DEGRADED rather than UNAVAILABLE: a slow endpoint is not a
@@ -301,7 +303,7 @@ async function handle(req, res) {
   if (hostsMatch && req.method === 'GET') {
     requireScope(who, 'telemetry.source.read');
     const source = sourceOr404(hostsMatch[1]);
-    const result = await listHosts(source, { secret: resolveSecret(source.credential.ref) });
+    const result = await listHosts({ ...source, secret: resolveSecret(source.credential.ref) });
     return send(res, 200, result, id);
   }
 
@@ -309,9 +311,10 @@ async function handle(req, res) {
   if (itemsMatch && req.method === 'GET') {
     requireScope(who, 'telemetry.source.read');
     const source = sourceOr404(itemsMatch[1]);
-    const result = await listItems(source, url.searchParams.get('hostId'), {
-      secret: resolveSecret(source.credential.ref),
-    });
+    const result = await listItems(
+      { ...source, secret: resolveSecret(source.credential.ref) },
+      url.searchParams.get('hostId'),
+    );
     return send(res, 200, result, id);
   }
 
@@ -320,7 +323,15 @@ async function handle(req, res) {
     requireScope(who, 'telemetry.source.read');
     const source = sourceOr404(collectMatch[1]);
     const body = await readJson(req);
-    const result = await collect(source, body, { secret: resolveSecret(source.credential.ref) });
+    // The body is the contract's request shape: itemIds plus a window. Anything
+    // the caller did not send stays unset and is defaulted inside collect(),
+    // never invented here.
+    const result = await collect({
+      source: { ...source, secret: resolveSecret(source.credential.ref) },
+      itemIds: Array.isArray(body.itemIds) ? body.itemIds : [],
+      window: body.window,
+      budget: body.budget,
+    });
     retainCollection(result);
     return send(res, 200, result, id);
   }

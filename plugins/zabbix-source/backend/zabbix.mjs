@@ -428,6 +428,11 @@ export function statusFromProbe(probeResult, { verifyTls = true } = {}) {
  */
 export async function collect({ source, itemIds, window: requested, budget: requestedBudget, transport, now = () => new Date() }) {
   const { budget, clamped: budgetClamped } = resolveBudget(requestedBudget);
+  if (!requested || typeof requested !== 'object') {
+    // A missing window is a caller error with its own code, so the UI can say
+    // "pick a time range" instead of rendering a malformed-timestamp message.
+    throw badRequest('ZABBIX_WINDOW_REQUIRED', 'window is required: supply window.from and window.to');
+  }
   const { window, clamped: windowClamped } = resolveWindow(requested.from, requested.to, budget);
   const clamped = [...budgetClamped.map((field) => `budget.${field}`)];
   if (windowClamped) clamped.push('window');
@@ -618,6 +623,124 @@ export function collectionOutcome({ series, requestedItems, attemptedItems, clam
   // established; otherwise the honest answer is NO_DATA.
   if (noData > 0) return empty > 0 ? 'PARTIAL' : 'NO_DATA';
   return 'EMPTY';
+}
+
+// ---------------------------------------------------------------------------
+// Inventory: hosts and items
+// ---------------------------------------------------------------------------
+
+/**
+ * Zabbix's own availability flag, mapped to the contract's three values.
+ *
+ * Zabbix reports "0" for unknown, "1" for available and "2" for unavailable.
+ * UNKNOWN is preserved rather than folded into UNAVAILABLE: "never checked" and
+ * "checked and down" are different operational facts, and collapsing them is how
+ * a monitoring gap gets reported as an outage (rules/05).
+ */
+function availability(raw) {
+  const value = String(raw ?? '').trim();
+  if (value === '1') return 'AVAILABLE';
+  if (value === '2') return 'UNAVAILABLE';
+  return 'UNKNOWN';
+}
+
+/** Zabbix `value_type` -> the contract's four names. */
+function valueType(raw) {
+  switch (String(raw ?? '').trim()) {
+    case '0':
+      return 'FLOAT';
+    case '3':
+      return 'INTEGER';
+    case '4':
+      return 'TEXT';
+    default:
+      return 'UNSUPPORTED';
+  }
+}
+
+/**
+ * One bounded inventory call, shared by hosts and items.
+ *
+ * The ceiling is applied server-side (Zabbix's own `limit`) and the response says
+ * how many were withheld, because a short list must never be mistaken for a
+ * small Zabbix. `truncated` is null when the count cannot be known - which is
+ * different from 0.
+ */
+async function inventory({ source, method, params, budget, transport, project }) {
+  const limit = budget.maxItems;
+  try {
+    // Ask for one more than the ceiling: if it comes back, there is at least one
+    // row we are not returning, and the caller is told the list is incomplete.
+    const rows = await rpc({
+      endpoint: source.endpoint,
+      method,
+      params: { ...params, output: 'extend', limit: limit + 1 },
+      secret: source.secret,
+      timeoutMs: budget.requestTimeoutMs,
+      verifyTls: source.verifyTls !== false,
+      transport,
+    });
+    if (!Array.isArray(rows)) {
+      return { outcome: 'NO_DATA', items: [], clamped: false, truncated: null };
+    }
+    if (rows.length === 0) {
+      // The server answered authoritatively that there is nothing.
+      return { outcome: 'EMPTY', items: [], clamped: false, truncated: null };
+    }
+    const clamped = rows.length > limit;
+    const items = (clamped ? rows.slice(0, limit) : rows).map(project);
+    return {
+      outcome: clamped ? 'PARTIAL' : 'OK',
+      items,
+      clamped,
+      // At least one withheld, so the exact remainder is not knowable from this
+      // one call and is reported as such rather than invented.
+      truncated: clamped ? null : 0,
+    };
+  } catch (error) {
+    return {
+      outcome: itemOutcome(error.code),
+      items: [],
+      clamped: false,
+      truncated: null,
+      errorCode: error.code || 'ZABBIX_UNKNOWN',
+    };
+  }
+}
+
+export function listHosts(source, { budget, transport } = {}) {
+  return inventory({
+    source,
+    method: 'host.get',
+    params: {},
+    budget: budget || source.budget || BUDGET_DEFAULT,
+    transport,
+    project: (row) => ({
+      hostId: String(row.hostid ?? '').slice(0, 64),
+      name: String(row.name ?? row.host ?? '').slice(0, 200),
+      available: availability(row.available),
+    }),
+  });
+}
+
+export function listItems(source, hostId, { budget, transport } = {}) {
+  if (typeof hostId !== 'string' || !hostId) {
+    throw badRequest('ZABBIX_HOST_REQUIRED', 'hostId is required');
+  }
+  return inventory({
+    source,
+    method: 'item.get',
+    params: { hostids: [hostId] },
+    budget: budget || source.budget || BUDGET_DEFAULT,
+    transport,
+    project: (row) => ({
+      itemId: String(row.itemid ?? '').slice(0, 64),
+      key: String(row.key_ ?? row.key ?? '').slice(0, 500),
+      name: String(row.name ?? '').slice(0, 300),
+      unit: row.units === undefined || row.units === null ? null : String(row.units).slice(0, 40),
+      valueType: valueType(row.value_type),
+    }),
+  });
 }
 
 // ---------------------------------------------------------------------------
