@@ -48,7 +48,18 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await page.goto(`/pipelines/${PIPELINE}/editor`);
   await page.getByRole('button', { name: 'Create draft' }).click();
   await expect(page.getByRole('status')).toContainText('Draft created');
-  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  // Select the node the way the page always offers it. The canvas card is React Flow's:
+  // @xyflow/react keeps .react-flow__node at visibility:hidden until its own ResizeObserver has
+  // measured the node, so a click on the card is a click on a measurement result, not on a
+  // control - when that delivery is late (Chromium reports "ResizeObserver loop completed with
+  // undelivered notifications" on this page) the card stays painted-invisible and the click can
+  // never land. The palette rows are plain DOM: the same nodes, the same onSelect, the same
+  // inspector, no measurement pass in between. Canvas clicking keeps its own coverage in
+  // "studio renders published nodes and inspector selection".
+  const paletteNode = page.locator('.studio-palette .palette-item').filter({ hasText: 'source' }).first();
+  await expect(paletteNode).toBeVisible();
+  await paletteNode.click();
+  await expect(page.locator('.studio-inspector')).toContainText('http_json');
   const timeout = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
   // The edit has to differ from the value that is live right now. A fixed number only differed on
   // the first run: this case publishes what it writes, so the second run found the published
@@ -64,7 +75,13 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.getByRole('status')).toContainText('Draft saved');
   await page.screenshot({ path: path.join(OUT, 'pipeline-draft-saved.png'), fullPage: true });
   await page.reload();
-  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  // The reload is the reason this one states its precondition too: the palette row exists once the
+  // editor has finished loading, and a click that waits for it is reported as a test timeout
+  // instead of naming the row that never arrived.
+  const reloadedNode = page.locator('.studio-palette .palette-item').filter({ hasText: 'source' }).first();
+  await expect(reloadedNode).toBeVisible();
+  await reloadedNode.click();
+  await expect(page.locator('.studio-inspector')).toContainText('http_json');
   await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toHaveValue(String(nextTimeout));
   await page.getByRole('button', { name: 'Validate', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Server validation passed');
@@ -186,8 +203,18 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   // Save draft renders only when the editor holds a draft, so this is the proof that the second
   // tab attached to the same draft rather than to the published, read-only definition.
   await expect(saveB).toBeVisible();
-  await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
-  await pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
+  // The node is selected by clicking its card on the canvas, and a card that is not visible cannot
+  // be clicked: the click waits for it, and a click that waits is invisible in the report - it is
+  // reported as "Test timeout of 60000ms exceeded" with no assertion name at all, which is how this
+  // case failed on 8f52c61 while every named step in it passed. The visibility is therefore stated
+  // here, one line per tab, so the same state costs 10s and names the locator. Both tabs state it:
+  // the second tab loads the draft URL on its own, so neither tab's canvas is the other's evidence.
+  const nodeCardA = page.locator('.studio-rf-node').filter({ hasText: 'source' }).first();
+  const nodeCardB = pageB.locator('.studio-rf-node').filter({ hasText: 'source' }).first();
+  await expect(nodeCardA).toBeVisible();
+  await expect(nodeCardB).toBeVisible();
+  await nodeCardA.click();
+  await nodeCardB.click();
   const timeoutA = page.locator('.studio-inspector').getByLabel('timeoutSeconds');
   const timeoutB = pageB.locator('.studio-inspector').getByLabel('timeoutSeconds');
   // A read-only inspector is the "no draft" state; filling it would wait instead of failing.
@@ -203,9 +230,14 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   const localTimeout = String(base + 2);
   await timeoutA.fill(savedTimeout);
   await timeoutB.fill(localTimeout);
+  // toBeEnabled answers "no disabled attribute", not "there and shown": a hidden element is still
+  // enabled, and the click that follows it would wait instead of failing. Every click in this case
+  // states the visibility of its target first, for that reason.
+  await expect(saveA).toBeVisible();
   await expect(saveA).toBeEnabled();
   await saveA.click();
   await expect(page.getByRole('status')).toContainText('Draft saved');
+  await expect(saveB).toBeVisible();
   await expect(saveB).toBeEnabled();
   await saveB.click();
   await expect(pageB.locator('.studio-conflict')).toContainText('DRAFT_VERSION_CONFLICT');
@@ -225,6 +257,7 @@ test('draft conflict preserves local edits and offers resolution', async ({ page
   await expect(overwrite).toBeVisible();
   await expect(overwrite).toHaveAttribute('data-confirm-state', 'idle');
   const confirmOverwrite = overwrite.locator('[data-confirm-submit]');
+  await expect(confirmOverwrite).toBeVisible();
   await expect(confirmOverwrite).toBeEnabled();
   await pageB.screenshot({ path: path.join(OUT, 'pipeline-conflict-confirm.png') });
   await confirmOverwrite.click();
@@ -239,7 +272,11 @@ test('mobile studio node list opens inspector at 390', async ({ browser }) => {
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/editor`);
   await page.getByRole('button', { name: 'Nodes', exact: true }).click();
-  await page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first().click();
+  // The list is the proof that the toggle above switched the canvas to the node list, so it is
+  // stated rather than waited for inside the click.
+  const mobileNode = page.locator('.mobile-node-list button').filter({ hasText: 'source' }).first();
+  await expect(mobileNode).toBeVisible();
+  await mobileNode.click();
   await expect(page.locator('.studio-inspector').getByLabel('timeoutSeconds')).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);

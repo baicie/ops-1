@@ -1,13 +1,14 @@
 import * as React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
-import type { IncidentEvidence, IncidentEvidenceList, IncidentView } from '../types';
+import type { IncidentEvidence, IncidentEvidenceList, IncidentOwnerTransfer, IncidentTimeline, IncidentTimelineEvent, IncidentView } from '../types';
 import { useAuth } from '../auth';
 import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
 import { ageMessage, clockMessage } from '../lib/age';
 import { cn } from '../lib/utils';
 import { Icon } from '../components/Icons';
+import { Badge } from '../components/ui/badge';
 import { Button, buttonVariants } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -16,6 +17,7 @@ import { CopyButton, Field, KV, useToast } from '../components/Ui';
 import { MetricCard } from '../components/app/metric-card';
 import { PageHeader } from '../components/app/page-header';
 import { Status } from '../components/app/status';
+import { badgeVariantForTone } from '../components/status-tone';
 import {
   EVIDENCE_KIND_CODES,
   EVIDENCE_TRUST_CLAIM_CODES,
@@ -27,13 +29,27 @@ import {
   evidenceTrustKey,
   incidentFacts,
   incidentSourceKey,
+  CLAIMABLE_TRUST_CODES,
+  CLOSURE_NOTE_MAX_CHARS,
+  TRANSFER_REASON_MAX_CHARS,
+  closeIncidentPayload,
+  closureNoteError,
+  incidentCapabilities,
+  losesAccessAfterHandover,
+  newIdempotencyKey,
   shortOwner,
+  timelineEventFacts,
+  timelineEventKey,
+  timelineEventTone,
   toIsoInstant,
+  transferIncidentPayload,
+  transferReasonError,
   toLocalInputValue,
   verificationMethodKey,
   verdictPanelState,
 } from '../incidents';
 import { TrustChip, TrustGap, TrustLegend, TrustSummary } from './incident-trust';
+import { InvestigationPanel } from '../components/investigation-panel';
 import { IncidentFailureNotice, useUserDirectory } from './Incidents';
 import { IdentityCell, LongId, StackCell, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
@@ -149,6 +165,11 @@ export function IncidentDetailPage() {
     );
   }
 
+  const capabilities = incidentCapabilities({ incident, userId: user?.id ?? null, role: user?.role ?? null });
+  // Writing is offered only when the kernel-side reason list is empty; the server refuses
+  // regardless, so this decides what the page offers, not what is allowed.
+  const canOperate = capabilities.readOnlyReason === null;
+  const trail = useIncidentTrail(incident.id, reload);
   const facts = incidentFacts(incident, evidence ?? []);
   const evidenceState = evidencePanelState(
     evidence,
@@ -460,6 +481,49 @@ export function IncidentDetailPage() {
         )}
         {verdictState !== 'recorded' ? <p className="muted small pad">{t('incidents.verdict.onlyTwo')}</p> : null}
       </section>
+
+      {/* G12 E: the bounded investigator. It reads and cites; it cannot write. The panel is
+          mounted here rather than in a separate route because a run is about ONE incident, and
+          a page that made the reader navigate away to see why a record was concluded would be
+          asking them to hold two ids in their head. canOperate gates the start/cancel controls;
+          the server refuses regardless, so this only decides what is offered. */}
+      <InvestigationPanel incidentId={incident.id} canOperate={canOperate} />
+
+      {/* G12 C: the kernel's own audit trail. Read separately from the incident so a failed
+          trail read degrades one panel instead of blanking the page. This is the only place
+          the page shows who wrote what - the incident payload carries no history. */}
+      <section className="panel" data-testid="incident-audit" data-audit-state={trail.state}>
+        <div className="panel-head">
+          <div>
+            <h2>{t('incidents.audit.title')}</h2>
+            <p>{t('incidents.audit.description')}</p>
+          </div>
+        </div>
+        {trail.state === 'loading' ? (
+          <p className="muted small pad" aria-busy="true" data-testid="incident-audit-loading">{t('aria.loading')}</p>
+        ) : trail.state === 'unavailable' ? (
+          <p className="muted small pad" data-testid="incident-audit-unavailable">{t('incidents.audit.unavailable')}</p>
+        ) : trail.events.length === 0 ? (
+          <p className="muted small pad" data-testid="incident-audit-empty">{t('incidents.audit.empty')}</p>
+        ) : (
+          <>
+            <ol className="timeline pad" data-testid="incident-audit-list">
+              {trail.events.map((event) => (
+                <AuditRow key={event.id} event={event} directory={directory} />
+              ))}
+            </ol>
+            {trail.truncated ? (
+              <p className="muted small pad" data-testid="incident-audit-truncated">{t('incidents.audit.truncated')}</p>
+            ) : null}
+          </>
+        )}
+        {canOperate ? (
+          <div className="pad">
+            <CloseIncidentForm incidentId={incident.id} revision={incident.revision} onClosed={() => { toast.push({ tone: 'ok', title: t('incidents.close.success') }); setReload((value) => value + 1); }} />
+            <OwnerTransferForm incidentId={incident.id} revision={incident.revision} currentOwner={incident.owner} onTransferred={() => { toast.push({ tone: 'ok', title: t('incidents.transfer.success') }); setReload((value) => value + 1); }} />
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -644,6 +708,279 @@ function VerdictForm({ incidentId, hasEvidence, onRecorded }: { incidentId: stri
             is deliberately not styled as a peer of it. */}
         <Button onClick={() => void submit()} disabled={submitting} data-testid="incident-verdict-submit">
           {submitting ? t('incidents.verdict.submitting') : t('incidents.verdict.submit')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+
+/* ---- G12 C lifecycle and audit trail, ported from feat/g12-ai-investigator ----
+ * Rebased onto main's #22 incident-detail design: the KPI band, the two-region workspace
+ * and the trust components above are main's and stay. What arrives from the G12 stack is the
+ * capability main never had - the kernel's audited write trail, and the two lifecycle forms
+ * that close or hand over an incident. See docs/design/g12-lifecycle/.
+ */
+/** The trail snapshot, keyed by the route it describes so a late answer cannot cross incidents. */
+interface TrailSnapshot {
+  routeId: string;
+  events: IncidentTimelineEvent[];
+  truncated: boolean;
+  loaded: boolean;
+  failed: boolean;
+}
+
+/**
+ * GET /incidents/{id}/timeline, for the audit panel.
+ *
+ * A separate read from the incident on purpose: a trail that cannot be read degrades one panel
+ * (and says so) instead of blanking a page whose record was read successfully. The route id is
+ * stored with the events and compared at render time, so a slow answer for the previous incident
+ * is never painted under the new one.
+ */
+function useIncidentTrail(incidentId: string, reload: number): {
+  state: 'loading' | 'ready' | 'unavailable';
+  events: IncidentTimelineEvent[];
+  truncated: boolean;
+} {
+  const [snapshot, setSnapshot] = React.useState<TrailSnapshot>({
+    routeId: incidentId,
+    events: [],
+    truncated: false,
+    loaded: false,
+    failed: false,
+  });
+  const seqRef = React.useRef(0);
+
+  React.useEffect(() => {
+    const seq = ++seqRef.current;
+    const live = () => seq === seqRef.current;
+    setSnapshot((current) =>
+      current.routeId === incidentId
+        ? { ...current, failed: false }
+        : { routeId: incidentId, events: [], truncated: false, loaded: false, failed: false },
+    );
+    api
+      .get<IncidentTimeline>('/api/v1/incidents/' + encodeURIComponent(incidentId) + '/timeline')
+      .then((result) => {
+        if (!live()) return;
+        setSnapshot({ routeId: incidentId, events: result.items, truncated: result.truncated, loaded: true, failed: false });
+      })
+      .catch(() => {
+        if (!live()) return;
+        setSnapshot((current) => ({ ...current, routeId: incidentId, failed: true }));
+      });
+  }, [incidentId, reload]);
+
+  if (snapshot.routeId !== incidentId) return { state: 'loading', events: [], truncated: false };
+  if (!snapshot.loaded) return { state: snapshot.failed ? 'unavailable' : 'loading', events: [], truncated: false };
+  return { state: 'ready', events: snapshot.events, truncated: snapshot.truncated };
+}
+
+/** One audited write, rendered from the fields the trail carries for that event type. */
+function AuditRow({ event, directory }: { event: IncidentTimelineEvent; directory: { names: Record<string, string> | null } }) {
+  const t = useT();
+  const { locale } = useI18n();
+  const facts = timelineEventFacts(event);
+  const actorName = directory.names?.[event.actorId] ?? shortOwner(event.actorId);
+  const atValid = Number.isFinite(Date.parse(event.occurredAt));
+  const fromName = facts.fromOwner ? (directory.names?.[facts.fromOwner] ?? shortOwner(facts.fromOwner)) : '';
+  const toName = facts.toOwner ? (directory.names?.[facts.toOwner] ?? shortOwner(facts.toOwner)) : '';
+  return (
+    <li data-audit-event={event.eventType} data-audit-actor={event.actorId} data-audit-at={event.occurredAt}>
+      <span className="timeline-dot" />
+      <div>
+        <strong>
+          <Badge variant={badgeVariantForTone(timelineEventTone(event.eventType))} data-testid="audit-event-type">
+            {t(timelineEventKey(event.eventType))}
+          </Badge>
+        </strong>
+        <span className="tag mono" data-testid="audit-event-code">{event.eventType}</span>
+        <span className="muted small" data-testid="audit-actor">{t('incidents.audit.actor', { name: actorName })}</span>
+        <span className="muted small" data-testid="audit-time">
+          {atValid ? <span title={event.occurredAt}>{ageMessage(locale, event.occurredAt)}</span> : event.occurredAt}
+        </span>
+        {facts.evidenceKind ? <span className="tag">{t(evidenceKindKey(facts.evidenceKind))}</span> : null}
+        {facts.verifiedTrust ? <span className="muted small">{t(evidenceTrustKey(facts.verifiedTrust))}</span> : null}
+        {facts.verdict ? <Status code={facts.verdict} /> : null}
+        {facts.consideredEvidenceCount !== null ? (
+          <span className="muted small" data-testid="audit-considered">{t('incidents.audit.considered', { count: facts.consideredEvidenceCount })}</span>
+        ) : null}
+        {facts.fromOwner || facts.toOwner ? (
+          <span className="muted small" data-testid="audit-owner-change">
+            {t('incidents.audit.ownerChange', { from: fromName, to: toName })}
+          </span>
+        ) : null}
+        {facts.reason ? <span className="muted small" data-testid="audit-reason">{t('incidents.audit.reason', { reason: facts.reason })}</span> : null}
+        {facts.closureNote ? <span className="muted small" data-testid="audit-note">{t('incidents.audit.note', { note: facts.closureNote })}</span> : null}
+      </div>
+    </li>
+  );
+}
+
+/** G12 C: the closure and handover forms. */
+/**
+ * The closure form.
+ *
+ * Two things are stated before submission rather than discovered from a 409: the note is bounded,
+ * and the closure is decided against the revision on screen. The idempotency key is created once
+ * per form and reused by a retry, which is what makes 'the request timed out, try again' safe;
+ * a definitive refusal rotates it so the next attempt is a fresh decision, not a replay claim.
+ */
+function CloseIncidentForm({ incidentId, revision, onClosed }: { incidentId: string; revision: number; onClosed: () => void }) {
+  const t = useT();
+  const [note, setNote] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [failure, setFailure] = React.useState<unknown>(null);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+  const keyRef = React.useRef<string>(newIdempotencyKey());
+
+  const submit = async () => {
+    setFailure(null);
+    setFieldError(null);
+    const invalid = closureNoteError(note);
+    if (invalid) {
+      setFieldError(t(invalid));
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await api.post<IncidentView>(
+        '/api/v1/incidents/' + encodeURIComponent(incidentId) + '/close',
+        closeIncidentPayload(revision, note, keyRef.current),
+      );
+      setNote('');
+      onClosed();
+    } catch (cause) {
+      setFailure(cause);
+      if (cause instanceof ApiError && cause.status === 409) keyRef.current = newIdempotencyKey();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="form-stack pad" data-testid="incident-close-form" data-expected-revision={revision}>
+      <p className="muted small" data-testid="incident-close-requirements">{t('incidents.close.requirements', { revision })}</p>
+      <Field label={t('incidents.close.noteLabel')} hint={t('incidents.close.noteHint')} htmlFor="incident-close-note">
+        <textarea
+          id="incident-close-note"
+          data-testid="incident-close-note"
+          rows={3}
+          maxLength={CLOSURE_NOTE_MAX_CHARS}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </Field>
+      {fieldError ? <p className="inline-error" role="alert" data-testid="incident-close-field-error">{fieldError}</p> : null}
+      <IncidentFailureNotice error={failure} testId="incident-close-error" />
+      <div>
+        <Button onClick={() => void submit()} disabled={submitting} data-testid="incident-close-submit">
+          {submitting ? t('incidents.close.submitting') : t('incidents.close.submit')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The handover form.
+ *
+ * The target list comes from the user directory, which is admin-only. An operator therefore types
+ * the account id - the honest consequence of a directory it may not read, rather than a picker
+ * that silently offers nothing. Either way the kernel validates the target and names the refusal.
+ */
+function OwnerTransferForm({
+  incidentId,
+  revision,
+  currentOwner,
+  onTransferred,
+}: {
+  incidentId: string;
+  revision: number;
+  currentOwner: string;
+  onTransferred: (submitted: { toOwner: string; reason: string; at: string }) => void;
+}) {
+  const t = useT();
+  const directory = useUserDirectory();
+  const [target, setTarget] = React.useState('');
+  const [reason, setReason] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [failure, setFailure] = React.useState<unknown>(null);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+  const candidates = directory.names
+    ? Object.entries(directory.names).filter(([id]) => id !== currentOwner)
+    : [];
+
+  const submit = async () => {
+    setFailure(null);
+    setFieldError(null);
+    const invalid = transferReasonError(reason);
+    if (invalid || !target.trim()) {
+      setFieldError(t(invalid ?? 'incidents.transfer.targetHint'));
+      return;
+    }
+    setSubmitting(true);
+    const submitted = { toOwner: target.trim(), reason: reason.trim(), at: new Date().toISOString() };
+    try {
+      await api.post<IncidentOwnerTransfer>(
+        '/api/v1/incidents/' + encodeURIComponent(incidentId) + '/owner',
+        transferIncidentPayload(revision, submitted.toOwner, submitted.reason),
+      );
+      setReason('');
+      onTransferred(submitted);
+    } catch (cause) {
+      setFailure(cause);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="form-stack pad" data-testid="incident-transfer-form" data-expected-revision={revision}>
+      <h3>{t('incidents.transfer.title')}</h3>
+      <p className="muted small">{t('incidents.transfer.description')}</p>
+      {candidates.length > 0 ? (
+        <Field label={t('incidents.transfer.targetLabel')} hint={t('incidents.transfer.targetHint')} htmlFor="incident-transfer-target">
+          <Select value={target} onValueChange={setTarget}>
+            <SelectTrigger id="incident-transfer-target" data-testid="incident-transfer-target" aria-label={t('incidents.transfer.targetLabel')}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {candidates.map(([id, name]) => (
+                <SelectItem key={id} value={id} data-testid={'incident-transfer-target-' + id}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : (
+        <Field
+          label={t('incidents.transfer.targetLabel')}
+          hint={directory.readable ? t('incidents.transfer.noTargets') : t('incidents.transfer.directoryUnavailable')}
+          htmlFor="incident-transfer-target"
+        >
+          <Input
+            id="incident-transfer-target"
+            data-testid="incident-transfer-target"
+            value={target}
+            placeholder="00000000-0000-0000-0000-000000000000"
+            onChange={(event) => setTarget(event.target.value)}
+          />
+        </Field>
+      )}
+      <Field label={t('incidents.transfer.reasonLabel')} hint={t('incidents.transfer.reasonHint')} htmlFor="incident-transfer-reason">
+        <textarea
+          id="incident-transfer-reason"
+          data-testid="incident-transfer-reason"
+          rows={3}
+          maxLength={TRANSFER_REASON_MAX_CHARS}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
+      </Field>
+      {fieldError ? <p className="inline-error" role="alert" data-testid="incident-transfer-field-error">{fieldError}</p> : null}
+      <IncidentFailureNotice error={failure} testId="incident-transfer-error" />
+      <div>
+        <Button onClick={() => void submit()} disabled={submitting} data-testid="incident-transfer-submit">
+          {submitting ? t('incidents.transfer.submitting') : t('incidents.transfer.submit')}
         </Button>
       </div>
     </div>

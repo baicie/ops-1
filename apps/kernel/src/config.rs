@@ -38,6 +38,27 @@ pub struct Config {
     /// endpoint and never written to the database - only the adapter id is stored
     /// on the evidence row it vouched for.
     pub evidence_adapters: HashMap<String, String>,
+    /// Which provider an investigation uses when its request names none. The default
+    /// is the deterministic test fixture, because shipping a default that pointed at a
+    /// paid model would spend money nobody asked to spend.
+    pub investigation_default_provider: String,
+    /// Related-context sources THIS deployment authorises for get_related_context.
+    ///
+    /// Empty is the shipped posture, and it means the tool refuses with
+    /// SOURCE_UNAVAILABLE instead of answering an empty page: an empty page would be a
+    /// fabricated success for a source that was never read.
+    pub investigation_related_sources: Vec<String>,
+    /// The real provider, when this deployment has one. All three or nothing: a
+    /// half-configured provider is a future outage, and resolve_provider refuses it.
+    /// The credential is only ever NAMED here - the value is read from the environment
+    /// at request time and never stored.
+    pub investigation_http_base_url: Option<String>,
+    pub investigation_http_model: Option<String>,
+    pub investigation_http_display_name: String,
+    pub investigation_http_credential_env: Option<String>,
+    /// Millionths of the account currency per million tokens, when the deployment knows
+    /// what a token costs. Absent means the kernel records tokens and claims no price.
+    pub investigation_price_micros_per_mtok: Option<i64>,
     pub plugin_db_host: String,
     #[allow(dead_code)]
     #[allow(dead_code)]
@@ -104,6 +125,26 @@ impl Config {
                 "OPSWEAVE_EVIDENCE_ADAPTERS",
                 "",
             )),
+            investigation_default_provider: env_string(
+                "OPSWEAVE_INVESTIGATION_PROVIDER",
+                "test-fixture-v1",
+            ),
+            investigation_related_sources: env_list("OPSWEAVE_INVESTIGATION_RELATED_SOURCES", ""),
+            investigation_http_base_url: env_optional("OPSWEAVE_INVESTIGATION_PROVIDER_BASE_URL"),
+            investigation_http_model: env_optional("OPSWEAVE_INVESTIGATION_PROVIDER_MODEL"),
+            investigation_http_display_name: env_string(
+                "OPSWEAVE_INVESTIGATION_PROVIDER_NAME",
+                "Configured model provider",
+            ),
+            investigation_http_credential_env: env_optional(
+                "OPSWEAVE_INVESTIGATION_PROVIDER_CREDENTIAL_ENV",
+            ),
+            investigation_price_micros_per_mtok: env::var(
+                "OPSWEAVE_INVESTIGATION_PRICE_MICROS_PER_MTOKEN",
+            )
+            .ok()
+            .and_then(|value| value.trim().parse::<i64>().ok())
+            .filter(|value| *value >= 0),
             plugin_db_host: env_string("OPSWEAVE_PLUGIN_DB_HOST", "host.docker.internal"),
             plugin_kernel_url: env_string(
                 "OPSWEAVE_PLUGIN_KERNEL_URL",
@@ -303,6 +344,17 @@ fn env_list(key: &str, default: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(|value| value.to_ascii_lowercase())
         .collect()
+}
+
+/// An environment value that is absent when unset, empty or whitespace.
+///
+/// Distinct from env_string: a present-but-empty variable is a deployment mistake, and
+/// an empty endpoint is not a configured endpoint.
+fn env_optional(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn env_i64(key: &str, default: i64) -> i64 {

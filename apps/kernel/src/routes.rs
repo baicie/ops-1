@@ -6,6 +6,7 @@ use crate::diagnostics;
 use crate::error::AppError;
 use crate::gateway;
 use crate::incidents;
+use crate::investigations;
 use crate::jobs;
 use crate::logs;
 use crate::nodes;
@@ -16,6 +17,7 @@ use crate::state::AppState;
 use crate::static_site;
 use crate::storage;
 use crate::users;
+use crate::workspaces;
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
@@ -261,9 +263,69 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/incidents/{incident_id}/evidence",
             get(incidents::list_evidence).post(incidents::append_evidence),
         )
+        // G12 B: the bytes behind one evidence row. A separate route so the
+        // evidence list never carries content: a caller that may read metadata
+        // asks again, in one bounded request, for the single row it wants.
+        .route(
+            "/api/v1/incidents/{incident_id}/evidence/{evidence_id}/content",
+            get(incidents::read_evidence_content),
+        )
         .route(
             "/api/v1/incidents/{incident_id}/verdict",
             get(incidents::get_verdict).post(incidents::create_verdict),
+        )
+        // G12 C: the two lifecycle operations and the trail they write. Closing is
+        // its own route rather than a status field on a PATCH, because a closure is a
+        // decision with a required verdict, a required revision and a required reason -
+        // not one assignable column among five.
+        .route(
+            "/api/v1/incidents/{incident_id}/close",
+            post(incidents::close_incident),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/owner",
+            post(incidents::transfer_owner),
+        )
+        // Scoped by the incident read predicate, so the trail of a record is exactly
+        // as visible as the record. /api/v1/audit answers the platform-wide question
+        // and is not a substitute for this one.
+        .route(
+            "/api/v1/incidents/{incident_id}/timeline",
+            get(incidents::get_timeline),
+        )
+        // G12 E: the bounded read-only investigator. Every route below reaches the
+        // incident through the predicate above, none of them writes to the incident,
+        // and the review route concludes nothing about it (ADR-G12-004 section 2).
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations",
+            get(investigations::list_investigations).post(investigations::start_investigation),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations/{run_id}",
+            get(investigations::get_investigation),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations/{run_id}/cancel",
+            post(investigations::cancel_investigation),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/investigations/{run_id}/review",
+            post(investigations::review_investigation),
+        )
+        // G12 D5: the business workspace, which is the unit of data visibility. The
+        // two writes are admin-gated and audited; the read returns the caller's own
+        // memberships (plus metadata for an admin), never a member's rows.
+        .route(
+            "/api/v1/business-workspaces",
+            get(workspaces::list_workspaces).post(workspaces::create_workspace),
+        )
+        .route(
+            "/api/v1/business-workspaces/{workspace_id}/members",
+            post(workspaces::add_member),
+        )
+        .route(
+            "/api/v1/business-workspaces/{workspace_id}/members/{user_id}",
+            delete(workspaces::remove_member),
         )
         .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
         .layer(middleware::from_fn_with_state(
@@ -366,12 +428,20 @@ async fn security_headers(request: Request, next: Next) -> Response {
         HeaderValue::from_static("no-referrer"),
     );
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-        ),
-    );
+    // A route that set its own policy keeps it. The blanket policy below is built
+    // for the application shell ('self' scripts, inline styles); a response that
+    // carries untrusted bytes must be tighter than that, and overwriting it here
+    // would silently downgrade the one route where the content is arbitrary text
+    // (GET /incidents/{id}/evidence/{evidenceId}/content sets
+    // "default-src 'none'; sandbox").
+    if !headers.contains_key(header::CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+            ),
+        );
+    }
     response
 }
 

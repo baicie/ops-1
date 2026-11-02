@@ -837,6 +837,27 @@ input::placeholder { color: var(--ow-text-muted); }
 .timeline li { display: flex; gap: 8px; padding: 8px 0; border-left: 2px solid var(--ow-border); margin-left: 4px; padding-left: 12px; position: relative; }
 .timeline-dot { position: absolute; left: -6px; top: 12px; width: 10px; height: 10px; border-radius: var(--ow-radius-pill); background: var(--ow-accent); border: 2px solid var(--ow-surface); }
 .timeline li > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: var(--ow-type-sm); }
+
+/* OWNERSHIP. .timeline is a CHRONOLOGICAL TRAIL and nothing else: every `li` starts with its
+   .timeline-dot, and the marker is what the row's left padding is reserving. G12 F found the
+   investigation panel reusing .timeline for three plain lists, which put each row's real
+   content where the marker belongs and rendered every statement as a narrow strip. A list of
+   records uses .record-list below. */
+/* A list of records: one row per record, the row is a COLUMN whose first line is a wrap-able
+   meta line. No marker column, no fixed grid track, and min-width:0 at every level so a long
+   id or a log line wraps inside the row instead of setting the panel's width. */
+.record-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.record-list > li { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--ow-border); }
+.record-list > li:last-child { border-bottom: 0; }
+.record-list > li > .record-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.record-list > li > p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.record-list .link-button, .record-list .mono { min-width: 0; overflow-wrap: anywhere; text-align: start; }
+/* The panel quotes log lines, and a log line has no spaces in it. Nothing inside the panel
+   may make the panel wider than the panel, at any width or in either theme. */
+[data-testid="incident-investigations"] { min-width: 0; }
+[data-testid="incident-investigations"] .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+[data-testid="incident-investigations"] pre,
+[data-testid="incident-investigations"] .evidence-body { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; }
 .studio-conflict { align-items: flex-start; }
 .studio-conflict > div:nth-child(2) { display: flex; flex-direction: column; gap: 4px; }
 .studio-conflict pre { max-height: 90px; overflow: auto; margin: 4px 0 0; font-size: var(--ow-type-label); }
@@ -1326,30 +1347,22 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .capability-status-code { justify-self: start; font-size: var(--ow-type-label); font-weight: 700; letter-spacing: .04em; color: var(--ow-text-secondary); background: var(--ow-surface-2); border: 1px dashed var(--ow-border-strong); border-radius: var(--ow-radius-control); padding: 1px 4px; }
 .capability-status-missing { color: var(--ow-text-muted); overflow-wrap: anywhere; }
 
-/* Investigation workspace: three regions, desktop first, then two, then one. */
-.investigation-layout { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr) minmax(0, 300px); gap: 12px; padding: 12px 16px 16px; min-width: 0; }
+/* Investigation workspace: slots only. The three-region grid (.investigation-layout /
+   .investigation-region) is gone - the workspace layout now comes from
+   components/app/investigation-layout.tsx, and these rules had no consumer left. */
 .investigation-notice { grid-column: 1 / -1; }
-.investigation-region { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); background: var(--ow-surface); overflow: hidden; }
-.investigation-region-head { padding: 12px 12px; border-bottom: 1px solid var(--ow-border); background: var(--ow-surface-2); }
-.investigation-region-head h3 { font-size: var(--ow-type-sm); font-weight: 700; letter-spacing: .01em; }
-.investigation-region-head p { margin-top: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); overflow-wrap: anywhere; }
-.investigation-region-body { flex: 1; display: flex; min-width: 0; }
 .investigation-slot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: 1; margin: 8px; padding: 24px 12px; min-height: 148px; text-align: center; border: 1.5px dashed var(--ow-border-strong); border-radius: var(--ow-radius-card); color: var(--ow-text-muted); }
 .investigation-slot-mark { width: 30px; height: 30px; border-radius: var(--ow-radius-pill); display: inline-flex; align-items: center; justify-content: center; background: var(--ow-surface-2); border: 1px solid var(--ow-border); }
 .investigation-slot-title { font-size: var(--ow-type-sm); font-weight: 600; color: var(--ow-text-secondary); }
 .investigation-slot-line { font-size: var(--ow-type-label); line-height: 1.45; max-width: 280px; overflow-wrap: anywhere; }
 
 @media (max-width: 1024px) {
-  .investigation-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
   /* The detail region keeps a full row instead of shrinking: it is the region that grows. */
-  .investigation-region[data-region="detail"] { grid-column: 1 / -1; }
   .business-card-slot { border-right: 0; border-bottom: 1px solid var(--ow-border); }
   .business-card-slot:last-child { border-bottom: 0; }
 }
 @media (max-width: 768px) {
   .task-grid { grid-template-columns: minmax(0, 1fr); }
-  .investigation-layout { grid-template-columns: minmax(0, 1fr); }
-  .investigation-region[data-region="detail"] { grid-column: auto; }
   .investigation-slot { min-height: 120px; }
   .capability-status-list { padding: 4px 12px 12px; }
   .capability-status-list li { grid-template-columns: 18px minmax(0, 1fr); row-gap: 4px; }
