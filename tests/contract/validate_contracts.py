@@ -253,6 +253,29 @@ def main() -> int:
                 "/sources/{sourceId}/collect",
                 "/collections/{collectionId}/attestation",
             ],
+            # G12 shipped both of these behind this validator's blind spot: the dict above only
+            # named five documents, so incident-v1.yaml and investigation-v1.yaml were never
+            # loaded, and a path removed from either would have passed CI. The required list is
+            # the set of routes the Web app calls; keep it in step with the surface, not with the
+            # file's incidental contents, so deleting a route is a red here.
+            "incident-v1.yaml": [
+                "/business-workspaces",
+                "/business-workspaces/{workspaceId}/members",
+                "/business-workspaces/{workspaceId}/members/{userId}",
+                "/incidents", "/incidents/{incidentId}",
+                "/incidents/{incidentId}/evidence",
+                "/incidents/{incidentId}/evidence/{evidenceId}/content",
+                "/incidents/{incidentId}/verdict",
+                "/incidents/{incidentId}/close",
+                "/incidents/{incidentId}/owner",
+                "/incidents/{incidentId}/timeline",
+            ],
+            "investigation-v1.yaml": [
+                "/incidents/{incidentId}/investigations",
+                "/incidents/{incidentId}/investigations/{runId}",
+                "/incidents/{incidentId}/investigations/{runId}/cancel",
+                "/incidents/{incidentId}/investigations/{runId}/review",
+            ],
         }
         for filename, required_paths in openapi_requirements.items():
             document = yaml.safe_load((CONTRACTS / "openapi" / filename).read_text())

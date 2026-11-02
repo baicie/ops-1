@@ -17,6 +17,9 @@ const BASE = process.env.OPSWEAVE_URL || 'http://127.0.0.1:18199';
 const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@g12d.invalid';
 const PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'g12d-admin-password-1';
 const OUT = process.env.OPSWEAVE_SEED_OUT || '/tmp/g12d/seed.json';
+// The workspace migration 0022 creates for rows filed without an explicit workspaceId. Naming it
+// here is what tests/acceptance/lib/workspace_grant.sh does, and for the same reason: see grant().
+const LEGACY_WORKSPACE = '00000000-0000-4000-8000-000000000001';
 
 let cookie = '';
 let csrf = '';
@@ -51,6 +54,34 @@ async function login() {
 
 const ago = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
 
+/**
+ * Gives the signed-in admin membership of the legacy workspace.
+ *
+ * D5 (migration 0022, d5-business-workspace-adr.md 3.4) made membership the one reason a business
+ * row is readable or fileable, and a FRESH database is the worst case: the kernel migrates before
+ * it creates the bootstrap admin (db.rs init: migrate -> seed_admin), so that admin is a member of
+ * nothing and its first POST /api/v1/incidents answers 403 INCIDENT_WORKSPACE_FORBIDDEN. That is
+ * the ruling, not a bug - the same two public calls an installer makes are made here, and a
+ * refusal is reported by name rather than surfacing later as "this incident is not visible to you".
+ *
+ * A replay is fine: 201 the first time, 200 afterwards. Both mean "this account may file here".
+ */
+async function grant() {
+  const me = await call('GET', '/api/v1/auth/me');
+  const userId = me?.user?.id;
+  if (!userId) throw new Error('GET /api/v1/auth/me carried no user id, so no membership could be granted');
+  const res = await fetch(BASE + '/api/v1/business-workspaces/' + LEGACY_WORKSPACE + '/members', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie, 'x-csrf-token': csrf },
+    body: JSON.stringify({ userId }),
+  });
+  if (res.status !== 200 && res.status !== 201) {
+    throw new Error('grant ' + userId + ' into ' + LEGACY_WORKSPACE + ' -> ' + res.status + ': '
+      + (await res.text()).slice(0, 300)
+      + '\nwithout this membership the admin reads nothing and can file nothing (D5 3.4)');
+  }
+}
+
 const LOG_BODY = Array.from({ length: 26 }, (_, i) => {
   const n = String(i + 1).padStart(2, '0');
   return '2026-10-31T0' + (i % 6) + ':' + n + ':12.4Z  ERROR ingest-worker-7  pipeline=orders-ingest  '
@@ -67,6 +98,7 @@ async function addEvidence(incidentId, spec) {
 
 async function main() {
   await login();
+  await grant();
 
   const a = await createIncident({
     title: 'orders-ingest 连续 17 次变换阶段失败，导致下游 revenue-daily 产出停滞后仍被标记为健康（含 zh-CN 全角标点与 English 混排的极长标题）',

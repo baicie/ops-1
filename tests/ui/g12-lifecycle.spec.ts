@@ -1,4 +1,6 @@
 import { expect, request, test, type APIRequestContext } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { adminSeed, createAccount as createSeededAccount } from './support/accounts';
 
 /**
@@ -24,7 +26,26 @@ import { adminSeed, createAccount as createSeededAccount } from './support/accou
 const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 const RUN = Date.now().toString(36).slice(-6);
-const SHOTS = 'artifacts/g12c';
+/**
+ * Repo-root artifacts, not `tests/ui/artifacts`.
+ *
+ * The relative path this used to be resolved against the test's CWD, which the harness sets to
+ * `tests/ui` (tests/ci/g12_acceptance_ci.sh), so these eleven screenshots landed in
+ * `tests/ui/artifacts/g12c/` while the workflow uploaded `artifacts/g12c/**` - a directory that
+ * never existed. The upload step said `if-no-files-found: warn`, so the run stayed green with
+ * zero evidence in it. Found by reading where the files actually were after a full harness run.
+ * Same helper as g11-page-header-growth.spec.ts, so both answer "where is the repository root"
+ * the same way from either starting directory.
+ */
+function repoRoot() {
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i += 1) {
+    if (fs.existsSync(path.join(dir, 'pnpm-workspace.yaml'))) return dir;
+    dir = path.dirname(dir);
+  }
+  return process.cwd();
+}
+const SHOTS = process.env.OPSWEAVE_LIFECYCLE_OUT || path.join(repoRoot(), 'artifacts/g12c');
 
 interface Actor {
   ctx: APIRequestContext;
@@ -82,6 +103,10 @@ async function signInPage(page: import('@playwright/test').Page, email: string, 
 
 test('G12 C: an operator closes a concluded incident, hands another one over, and a viewer is told why it is read-only', async ({ page, browser, baseURL }) => {
   test.setTimeout(180_000);
+  // The default was a path relative to the CWD, and the CWD is tests/ui under the harness; the
+  // screenshots then landed outside the directory the workflow uploads. TestKit does not create
+  // the parent, so the absence was silent until someone looked for the file.
+  fs.mkdirSync(SHOTS, { recursive: true });
 
   // ---- fixtures --------------------------------------------------------------
   const adminCtx = await request.newContext({ baseURL });

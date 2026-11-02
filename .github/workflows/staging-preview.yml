@@ -23,9 +23,8 @@ name: staging-preview
 # Two acceptance tiers, decided once by the plan job and read by every job that cares:
 #   core  a push, or a workflow_dispatch without full_suite=true and without verify_only: the three
 #         core specs only (staging-smoke, dual-surface, admin-shell), the 4.4 min path.
-#   full  workflow_dispatch full_suite=true, workflow_dispatch verify_only=true, or a pull request
-#         that becomes ready_for_review: adds the eleven-file surfaces suite and the three
-#         seeded-data suites (one job each).
+#   full  workflow_dispatch full_suite=true, or workflow_dispatch verify_only=true: adds the
+#         eleven-file surfaces suite and the three seeded-data suites (one job each).
 # A step the tier leaves out is never silent: the record job writes it into health.json
 # (steps_not_run, with the reason) and into the PR comment. This repository has been bitten by
 # "green because nothing ran" before.
@@ -89,9 +88,12 @@ jobs:
   #
   #   core  a push, or a workflow_dispatch without full_suite=true and without verify_only: the three
   #         core specs only (staging-smoke, dual-surface, admin-shell) - the 4.4 min path.
-  #   full  workflow_dispatch with full_suite=true, workflow_dispatch with verify_only=true, or a
-  #         pull request that becomes ready_for_review: adds the eleven-file surfaces suite and the
-  #         three seeded-data suites.
+  #   full  workflow_dispatch with full_suite=true or with verify_only=true: adds the eleven-file
+  #         surfaces suite and the three seeded-data suites.
+  #
+  # There is no pull_request tier: this workflow has no pull_request trigger, so a branch that
+  # selected one would be unreachable code claiming a behaviour no run has ever had. A pull request
+  # that wants the full suite is dispatched with full_suite=true.
   # A step the tier leaves out is written down by the record job (health.json steps_not_run) instead
   # of disappearing: this repository has already paid for "green because nothing ran" once.
   plan:
@@ -147,7 +149,6 @@ jobs:
         id: tier
         env:
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_ACTION: ${{ github.event.action }}
           REF_NAME: ${{ github.ref_name }}
           FULL_SUITE: ${{ inputs.full_suite }}
           VERIFY_ONLY: ${{ inputs.verify_only }}
@@ -174,8 +175,6 @@ jobs:
           fi
           if [ "$FULL_SUITE" = "true" ]; then
             full_reason="workflow_dispatch asked for the full suite (full_suite=true)"
-          elif [ "$EVENT_NAME" = "pull_request" ] && [ "$EVENT_ACTION" = "ready_for_review" ]; then
-            full_reason="the pull request became ready for review"
           else
             full_reason=""
           fi

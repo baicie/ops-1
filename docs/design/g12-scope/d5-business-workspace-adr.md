@@ -188,6 +188,11 @@ sqlx 把每个迁移包在一个事务里，所以这个文件整体原子。
 
 **回滚 DDL（人工执行，非自动；已实测）**：
 
+> 位置勘误（2026-11-02）：`0022_d5_business_workspace_scope.sql` 的文件头把回滚 DDL 指到"ADR section 6"，
+> 但 §6 是验收矩阵（9 条），回滚 DDL 实际在本节（§5）。迁移文件没有改——sqlx 的 checksum 覆盖整个
+> 文件，连注释改动都会让已应用过 0022 的库在启动时报 `VersionMismatch`；为一个交叉引用笔误去换那一步
+> 不值得。以本文件为准。
+
 ```sql
 BEGIN;
 DROP INDEX IF EXISTS kernel.incidents_workspace_time_idx;

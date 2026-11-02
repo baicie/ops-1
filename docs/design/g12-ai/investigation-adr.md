@@ -528,17 +528,22 @@ its type and its NULLs, so dropping the vocabulary widens nothing and loses noth
 migration added.
 
 
-## 12. Two defects in the acceptance script itself, fixed on `feat/g12-ai-investigator` (099df9f)
+## 12. Two defects in the acceptance script itself, fixed on `feat/g12-ai-investigator` (ef4bd80)
 
 At HEAD the script reported 155 passed / 7 failed. All seven were the script measuring something
 other than the claim it names; the kernel behaved as `contracts/openapi/investigation-v1.yaml` says in
-each of them. After the fixes below the same script reports **199 passed / 0 failed** on a scratch
-kernel (`127.0.0.1:18199`, throw-away database, related source authorised).
+each of them. After the fixes below the same script reports all green on a scratch kernel
+(`127.0.0.1:18199`, throw-away database, related source authorised), most recently 195 passed /
+0 failed under `tests/ci/g12_acceptance_ci.sh`, whose one-kernel harness SKIPs S8 and says so.
+
+The commit is `ef4bd80` (the script and this section). An earlier revision of this heading cited
+`099df9f`, which is a studio-spec commit and touches none of this; the scope gate the S4 rewrite
+depended on landed in `dc8cdac`.
 
 ### 12.1 S4: six expectations `dc8cdac` left behind
 
 S4 drives all five tools at an incident another operator owns and expected `INCIDENT_NOT_FOUND` /
-the incident predicate - the pre-099df9f behaviour. The run-scope gate that landed in 099df9f
+the incident predicate - the behaviour before `dc8cdac`. The run-scope gate that landed in `dc8cdac`
 answers first: `target_incident()` compares the argument with the incident the run is about and
 refuses before any query runs (contract :352-355; `RUN_INCIDENT_SCOPE_PREDICATE` in the closed
 vocabulary at :379-380). `dc8cdac` moved **S8** onto that contract and did not move S4, so S4

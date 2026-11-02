@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { adminSeed } from './support/accounts';
 
@@ -221,7 +222,10 @@ test('the evidence content viewer shows stored bytes as inert text and labels le
     await viewer.scrollIntoViewIfNeeded();
     await content.scrollIntoViewIfNeeded();
     // Relative to this spec's directory (tests/ui), so a run from anywhere lands in the
-    // repository artifacts directory rather than next to the spec.
+    // repository artifacts directory rather than next to the spec. The directory is created
+    // here: Playwright does not create a screenshot's parent, and a missing one fails the test
+    // at the LAST assertion of a 120s spec, which reads as a product failure rather than a path.
+    fs.mkdirSync('../../artifacts/g12b', { recursive: true });
     await page.screenshot({ path: '../../artifacts/g12b/' + view.name + '.png', fullPage: false });
   }
 

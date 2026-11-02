@@ -180,7 +180,13 @@ D2 用例在 `/app/incidents` 上对 **en / zh-CN × 1440 / 1024 / 390** 六组�
 | Playwright（本轮新增） | `npx playwright test g12d-workspace.spec.ts` | **4/4 通过** |
 | Playwright（既有基线） | `npx playwright test g11-page-header-growth.spec.ts` | **2 通过 / 1 失败**：`detail pages` 用例在 `/admin/plugins/dev.opsweave.ops-center @1024` 实测 headerH=**102**，基线要求 80。这是本轮唯一未闭合的门禁，见 §6.4 |
 
-## 6. 需要评审确认的三件事（已做/未做，都写清楚）
+## 6. 阶段 D 提交时待评审的四件事（已做/未做，都写清楚）
+
+> **读法（2026-11-02 补记）**：本节是阶段 D **提交当时**的清单，其中第 4 条与第 3 条**已被 §9 取代或结案**——
+> 第 4 条那条红（`/admin/plugins/{id}` @1024 = 102px）的成因由 §9.1 实测重定，处理方式不是二选一，
+> 而是把断言从「高度必须 80」换成 §9.2 的三条不变量 + 形状键互比；第 3 条（`check-ui-metrics` 读旧产物）
+> 仍是**未闭合**状态，§9 没有解决它，只是把它和本轮的实测数字分开陈述。以下原文保留，便于对照当时的判断。
+> 本节的编号原本就是乱的（1、2、4、3），这次没有重排：重排会让 §9 与别处的「§6.4」引用失去指向。
 
 1. **`tests/ui/g11-page-header-growth.spec.ts` 被修改**（+37/-…）。原因：原规则“内容放得下的页必须 80px”，
    而 `/admin/plugins/{id}` 的 80px 正是 ellipsis 截断换来的；D2 要求去掉截断，于是该页 1024 下变 102（一行描述的高度）。
@@ -198,6 +204,11 @@ D2 用例在 `/app/incidents` 上对 **en / zh-CN × 1440 / 1024 / 390** 六组�
    冲突点纯粹是“这一页应不应该是 80px”。两条路：(a) 接受该页 102px，条件是先把 `descriptionLines` 换成
    “副本块实际占了几行”的量（`Math.max(说明行, chip 行)`），我这轮没时间验证；(b) 该页恢复 ellipsis——与 D2 冲突，不建议。
    需要评审在这两条里选一个，我这轮选择**报红而不是改绿**。
+
+   > 结论（2026-10-31，§9）：两条路都没走。§9.1 实测出 22px 来自 `.page-header-meta > .detail-meta` 在 1024 下
+   > 把 6 个 chip 折成两行——不是描述行、不是 eyebrow。于是 §9.2 把断言对象整体从「高度」换成三条不变量
+   > （无控件被盖、无文字被裁、下一区块不重叠）加形状键互比，「必须是 80」这条被删除。本条的「报红」判断成立，
+   > 只是它不是终局。
 
 3. **`check-ui-metrics` 的输入是旧产物**：`artifacts/ui/visual-v3/audit/_metrics_*.json` 来自上一轮审计，
    本轮没有重跑 `b5-visual-matrix` harness（它依赖一套本机没有的演示数据）。该门禁的 PASS 只说明“既有产物仍合规”；
@@ -234,7 +245,14 @@ D2 之后 header 的高度是内容的结果，不是不变量。本节记录实
 ### 9.1 那 22px 到底是什么（实测，逐子元素）
 
 /admin/plugins/dev.opsweave.ops-center，1440 / 1024，header 内每个子元素的 getBoundingClientRect().height
-加 getComputedStyle 的 margin / line-height（探针 tests/ui/g12e-probe.spec.ts 的 TREE evaluate，产物 /tmp/g12e/tree.json）：
+加 getComputedStyle 的 margin / line-height（一次性探针，产物 /tmp/g12e/tree.json）：
+
+> 可复现性说明（2026-11-02）：那次测量用的探针没有进仓库——`tests/ui/g12e-probe.spec.ts` 在任何一个
+> 分支里都不存在（`git log --all -- tests/ui/g12e*` 为空），`/tmp/g12e/` 也早已不在。下表因此是**一次性
+> 实测记录**，不是本仓库能重跑的证据。仍在仓库里的同类测量是 `tests/ui/g12d-probe.spec.ts`（header 高度、
+> 描述是否被 ellipsis 截断、动作栏是否越界、每个控件能否被点到，产物 `/tmp/g12d/before/before.json`），
+> 以及会常在 CI 跑的 `tests/ui/g11-page-header-growth.spec.ts`。下表的数字若要重新引用，请先用二者之一
+> 复测，不要直接搬用。
 
 | 子元素 | 1440 | 1024 | 计算样式要点 |
 | --- | --- | --- | --- |

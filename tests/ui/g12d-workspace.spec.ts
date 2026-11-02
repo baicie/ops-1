@@ -23,7 +23,18 @@ const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@g12d.invalid';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'g12d-admin-password-1';
 // Repo-root artifacts, not tests/ui: the harness runs with cwd = tests/ui, and a relative path
 // would have dropped 40 PNGs inside the test package. Untracked on purpose - CI collects them.
-const OUT = process.env.OPSWEAVE_G12D_OUT || path.resolve(process.cwd(), '..', '..', 'artifacts', 'g12d');
+// The repository root is WALKED FOR rather than composed from two '..'s, because the harness runs
+// this from tests/ui while a direct `playwright test tests/ui/...` runs it from the repo root -
+// two different answers from one relative path, and only one of them is inside the uploaded tree.
+function repoRoot() {
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i += 1) {
+    if (fs.existsSync(path.join(dir, 'pnpm-workspace.yaml'))) return dir;
+    dir = path.dirname(dir);
+  }
+  return process.cwd();
+}
+const OUT = process.env.OPSWEAVE_G12D_OUT || path.join(repoRoot(), 'artifacts', 'g12d');
 const SEED = JSON.parse(fs.readFileSync(process.env.OPSWEAVE_SEED_OUT || '/tmp/g12d/seed.json', 'utf8'));
 const DETAIL = '/app/incidents/' + SEED.incidentA;
 const CONCLUDED = '/app/incidents/' + SEED.incidentB;

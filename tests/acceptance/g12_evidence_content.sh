@@ -43,7 +43,18 @@ except Exception:
     sys.stdin.seek(0)
     print(sys.stdin.read().strip()[:400])' < "$1"; }
 sha256_of() { python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
-header_of() { python3 -c 'import sys;print(dict(l.split(": ",1) for l in sys.stdin.read().split("\r\n") if ": " in l).get(sys.argv[1],"").strip())' "$1"; }
+# Header names are CASE-INSENSITIVE on the wire (RFC 9110 section 5.1) and the kernel writes them
+# in its own casing (Content-Type, X-Evidence-Digest), while every caller here asks in lowercase.
+# The first version of this helper built the dict with the wire casing and looked up the lowercase
+# name, so all eleven header assertions returned "" and were reported as failures against a kernel
+# that was sending exactly the right values - a test bug that reads like a product bug. The body
+# and every digest assertion passed throughout, which is what located it in the helper.
+header_of() { python3 -c '
+import sys
+want = sys.argv[1].lower()
+line = next((l for l in sys.stdin.read().split("\r\n") if ": " in l and l.split(": ", 1)[0].lower() == want), "")
+print(line.split(": ", 1)[1].strip() if line else "")
+' "$1"; }
 
 # curl's arguments are collected with "set --" rather than in an array, so every expansion here
 # stays a plain "$@" / "$1" form.
