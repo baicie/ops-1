@@ -171,6 +171,24 @@ export function incidentsEmptyKind(input: { scope: IncidentScope | null; filteri
 }
 
 /**
+ * The copy each empty list owns, keyed by the kind `incidentsEmptyKind` derives.
+ *
+ * A table rather than a ternary chain in the page, for two reasons. It is total over the union
+ * by type, so adding a kind to the helper without a row here is a compile error instead of a
+ * page that quietly falls back to "nothing was recorded". And it lives here rather than in
+ * `pages/Incidents.tsx` so a unit test can hold it: the state this page renders for a fact and
+ * the sentence it renders for that state are exactly the pair that drifted when the page was
+ * still choosing copy from `listState` (`docs/design/g12-scope/narrowed-reads.md` 3.3 records
+ * the wiring; the wiring was lost in a merge and only the browser caught it).
+ */
+export const INCIDENT_EMPTY_COPY: Record<IncidentEmptyKind, { title: MessageKey; description: MessageKey }> = {
+  filtered: { title: 'incidents.empty.filtered.title', description: 'incidents.empty.filtered.description' },
+  scoped: { title: 'incidents.empty.scoped.title', description: 'incidents.empty.scoped.description' },
+  workspace: { title: 'incidents.empty.workspace.title', description: 'incidents.empty.workspace.description' },
+  none: { title: 'incidents.empty.none.title', description: 'incidents.empty.none.description' },
+};
+
+/**
  * Failure copy, by the stable error code the kernel sends. The code decides; the server's
  * English sentence is never rendered as copy (rules/06). A code with no entry is reported with
  * the code itself in a <code> element and a generic sentence around it.

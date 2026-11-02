@@ -221,6 +221,20 @@ E2E 第一次跑就撞上了：Playwright 反复报
 ```
 处理：**没有改 `styles.css`**（那会改变所有页面的 header 高度、需要重做全量视觉基线）。本页改为"header 只放一个主操作 + 短描述"，刷新按钮移到筛选工具条，并留下 E2E 几何断言（`elementFromPoint` 命中创建按钮）防止回归。**这是壳层的既有隐患，其他页面写长描述时同样会踩到，建议单独开一条修复项。**
 
+### 8.1 本文件 §2 的 "操作符空态 = `scoped`" 一度在 main 上不成立（2026-11-03 修复）
+
+§2 的交互状态矩阵把 operator 的空列表写成 `data-empty-state="scoped"` / `data-narrowed-to="owner"`，§6 的 Playwright 记录也据此通过过。但合入 main 的 `pages/Incidents.tsx` 在空态一行按 `listState` 选文案：
+
+```tsx
+<div data-empty-state={listState === 'filtered' ? 'filtered' : 'none'} ...>
+```
+
+`incidentsEmptyKind()` 与四条 `incidents.empty.scoped.*` / `workspace.*` 文案都在仓库里，但页面从不读载荷的 `scope`，所以那段文案不可能被渲染，`data-narrowed-to` 也从未出现。operator 看到的是 `none` 态，而 `none` 的句子说"这次读取没有按 owner 收窄"——与事实相反。
+
+同一批还修了 `IdentityCell` 不透传 `data-*` 的问题：`IncidentDetail.tsx` 传给它的 `data-evidence-kind` 从未进入 DOM，本文件 §7 的证据表因此没有机器可读的 kind。两处的完整记录（含变异验证与门禁补齐）在 `docs/design/g12-scope/narrowed-reads.md` §7.5；本文件不重复。
+
+读者要记住的一点是**为什么两者都没被及早发现**：`tests/ui/g11-incident-slice.spec.ts` 同时断言了这两处，而它在此之前不在任何 workflow 里。修复后它已加入 `tests/ci/g12_acceptance_ci.sh`。
+
 ---
 
 ## 9. 本次改动的文件

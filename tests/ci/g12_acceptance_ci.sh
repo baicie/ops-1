@@ -131,7 +131,16 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 # --config is resolved against the CWD, not the repository root: from the root it becomes
 # tests/ui/tests/ui/playwright.config.ts. The specs also resolve their own support files and
 # fixture paths relative to this directory, so the suite runs from here.
+#
+# g11-incident-slice.spec.ts was missing here while the two defects it catches went in, which is
+# why it is first in the list rather than appended: it is the only spec that drives the incident
+# list as an operator, and both regressions below were invisible to every other suite.
+#   * the empty list was rendered from `listState` instead of the `scope` the kernel sends, so a
+#     narrowed read printed "this read applied no owner narrowing" (asserted at :310);
+#   * IdentityCell dropped `data-evidence-kind`, because JSX does not type-check hyphenated
+#     attributes, so the evidence row carried no machine-readable kind (asserted at :178).
 if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
+     g11-incident-slice.spec.ts \
      g11-page-header-growth.spec.ts \
      g12-incident-route-identity.spec.ts \
      g12-evidence-content.spec.ts \

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './api';
 import type { IncidentEvidence, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
+import type { IncidentEmptyKind } from './incidents';
 import {
   CLAIMABLE_TRUST_CODES,
   EVIDENCE_TRUST_CODES,
@@ -10,6 +11,7 @@ import {
   clearsSensitiveView,
   closeIncidentPayload,
   incidentsEmptyKind,
+  INCIDENT_EMPTY_COPY,
   closureNoteError,
   closurePanelState,
   incidentCapabilities,
@@ -786,6 +788,28 @@ describe('incidentsEmptyKind: an empty list says which of four things it is', ()
     // Clearing a filter can show the operator its own rows, so the filter is the cause here.
     expect(incidentsEmptyKind({ scope: NARROWED, filtering: true })).toBe('filtered');
     expect(incidentsEmptyKind({ scope: UNNARROWED, filtering: true })).toBe('filtered');
+  });
+
+  it('every kind has its own copy, and no kind shares another one', () => {
+    // The pair that drifted: the page derived the state correctly and then chose copy from
+    // `listState`, so a narrowed read rendered the unnarrowed sentence. Holding the table here
+    // makes "state X renders sentence X" a unit-testable claim instead of a browser-only one.
+    const kinds: IncidentEmptyKind[] = ['filtered', 'scoped', 'workspace', 'none'];
+    const titles = kinds.map((kind) => INCIDENT_EMPTY_COPY[kind].title);
+    const descriptions = kinds.map((kind) => INCIDENT_EMPTY_COPY[kind].description);
+    expect(new Set(titles).size, 'two kinds share a title').toBe(kinds.length);
+    expect(new Set(descriptions).size, 'two kinds share a description').toBe(kinds.length);
+    for (const kind of kinds) {
+      expect(INCIDENT_EMPTY_COPY[kind].title).toContain('incidents.empty.' + kind + '.');
+      expect(INCIDENT_EMPTY_COPY[kind].description).toContain('incidents.empty.' + kind + '.');
+    }
+  });
+
+  it('the two facts an unnarrowed read cannot tell apart keep separate sentences', () => {
+    // 'none' says this read applied no owner narrowing; 'workspace' says no membership bounds
+    // it. Both answer items: [], and the page must not render one with the other's copy.
+    expect(INCIDENT_EMPTY_COPY.none.title).not.toBe(INCIDENT_EMPTY_COPY.workspace.title);
+    expect(INCIDENT_EMPTY_COPY.scoped.title).not.toBe(INCIDENT_EMPTY_COPY.none.title);
   });
 });
 
