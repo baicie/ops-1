@@ -97,7 +97,8 @@ Proved by, in order:
 - `incidents::tests::the_timeline_is_scoped_like_the_incident_and_read_in_order` — a stranger cannot
   read the trail of an incident it cannot read.
 - `tests/acceptance/g12_lifecycle.sh` steps `C2.1`, `C2.4`, `C4` — the same matrix over real HTTP
-  against a real kernel (88 checks, 0 failures; log in `artifacts/g12c/acceptance.log`).
+  against a real kernel (88 checks, 0 failures; the log is `artifacts/g12-ci/acceptance-lifecycle.log`,
+  written by `tests/ci/g12_acceptance_ci.sh` and kept as a CI artifact for 7 days — not tracked in git).
 - `tests/ui/g12-lifecycle.spec.ts` — a viewer in a real browser is never shown a write form, and
   the operator's handover is visible in the new owner's browser session.
 

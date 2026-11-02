@@ -38,7 +38,7 @@
 * 左栏是**真实可用**的列表：API `GET /api/v1/incidents?limit=50`，筛选 chip 由返回数据推导（无空结果 chip）、
   `aria-pressed` 标记选中、`aria-current="page"` 标记当前事件、加载/不可用/空/空筛选四态各自成句。
 
-### 实测（`artifacts/g12d/d1-*.png`，断言在 `g12d-workspace.spec.ts` D1）
+### 实测（截图落在未跟踪的 `artifacts/g12d/d1-<宽>-<视图>.png`，由 `g12d-workspace.spec.ts` D1 写出；断言在同一用例里）
 
 | 断言 | 结果 |
 |---|---|
@@ -135,7 +135,7 @@ D2 用例在 `/app/incidents` 上对 **en / zh-CN × 1440 / 1024 / 390** 六组�
 ## 4. 视觉矩阵（实测）
 
 命令：`cd tests/ui && OPSWEAVE_URL=http://127.0.0.1:18199 npx playwright test g12d-workspace.spec.ts`
-输入：`artifacts/g12d/matrix.json`（其中 `truncated` 即“描述是否被截断”）；截图：`artifacts/g12d/matrix-<宽>-<主题>-<语言>-<open|concluded>.png`（24 张）。
+输入：`artifacts/g12d/matrix.json`（其中 `truncated` 即“描述是否被截断”，运行后写出，未跟踪）；截图：`artifacts/g12d/matrix-<宽>-<主题>-<语言>-<open|concluded>.png`（24 张，同一用例写出，未跟踪）。
 
 | 宽度 | 主题 | 语言 | 状态 | headerH | 控件 | 横向溢出 | 不可点 | 标题裁切 | 描述省略 |
 |---|---|---|---|---|---|---|---|---|---|
@@ -317,7 +317,16 @@ class values @1024: list=[80]  detail=[80, 96, 102]
 探针实测 0/1 被盖住），在那里断言只会空洞通过。
 
 注入值不从常数来：contentNeed = 最低控件 bottom − header top（本次 152），注入 height: 48px（其一半）。
-实测（/tmp/g12e/run8.log、artifacts/g11-d3/header-counterfactual.json）：
+实测由 `tests/ui/g11-page-header-growth.spec.ts` 的 counterfactual 用例产出，该用例把同一份测量写进
+`artifacts/g11-d3/header-counterfactual.json`（本地未跟踪）。注意这个用例需要宿主上至少有一个 pipeline：
+没有时它以 `no pipeline on this host` 跳过，JSON 也就不会被写出来——所以它是**可重放的测量产物**，不是
+可以引用的固定证据。要自己复现，先在该主机上建一个 pipeline，再跑：
+
+```
+npx playwright test tests/ui/g11-page-header-growth.spec.ts -g counterfactual
+```
+
+本次运行的原始输出（该主机上有 pipeline）：
 
 ```
 counterfactual: injected height 48px of 152px of content
