@@ -93,3 +93,12 @@ Restore verifies a **new** database by default. Never point the Kernel at a part
 `opsweave-node.service` installs `ExecStopPost=/opt/opsweave/bin/opsweave-node-cleanup`. This is a last-resort cleanup for a Node process killed before the Runtime can quarantine itself; it removes containers labeled with that Node identity. The Runtime also quarantines on a `400/401/403/409` heartbeat or when its control lease expires, and removes managed containers before exiting. Test the lease and quarantine paths with `tests/acceptance/node_lease.sh` and `tests/acceptance/node_quarantine.sh`; both are destructive to the local demo state.
 
 Do not expose `OPSWEAVE_NODE_DATA_BIND` beyond loopback until an authenticated TLS/mTLS terminator or tunnel is in front of it. Kernel↔Node mTLS and certificate rotation are still a production release blocker (`NOT_RUN`).
+
+**Known gap (open, unassigned).** The unit and the paragraph above both name
+`/opt/opsweave/bin/opsweave-node-cleanup`, but the repository ships only
+`deployments/linux/opsweave-node-cleanup.sh` and no build or install rule produces the
+extension-less binary at that path. On a host provisioned from this repository,
+`ExecStopPost` therefore fails and the last-resort containment path described above does
+not run. Fix by either installing the `.sh` under that name with the executable bit, or
+changing `ExecStopPost` to invoke the script; the quarantine paths the Runtime performs
+itself are unaffected by this gap.

@@ -1,6 +1,6 @@
 # Contributing
 
-1. Read `docs/blueprint/AGENTS.md`, `docs/blueprint/rules/` and the relevant ADR before changing contracts, permissions, storage or deployment semantics.
+1. Read `AGENTS.md`, `rules/` and the relevant ADR before changing contracts, permissions, storage or deployment semantics.
 2. Contract changes go through `contracts/` and a compatibility check first. Do not hand-edit generated clients.
 3. Keep Kernel trust-root responsibilities out of business plugins. Add an ADR before adding an uninstallable Kernel capability.
 4. Add negative tests for authorization, signature failure, timeout, stale state and rollback behavior.
