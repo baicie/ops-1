@@ -347,13 +347,32 @@ input::placeholder { color: var(--ow-text-muted); }
 
 /* Page primitives */
 .page-stack { display: flex; flex-direction: column; gap: 24px; }
+/* A header is never a shrinking flex item. On a page whose body is a viewport-height workspace
+   (.investigation-page, .studio-page) the column has a declared height, and the default
+   flex-shrink:1 then squeezed the header down to its 80px floor: the title wrapped to two lines
+   inside a one-line box and the second line was painted over by the pane below it. Measured at
+   1440 on /app/incidents/{id}: 107px of content in a 80px box, with the description outside the
+   header's border. flex:none makes the header's height the height its content needs. */
+.page-stack > .page-header { flex: 0 0 auto; }
 .narrow-page { max-width: 980px; }
-.page-header { display: flex; align-items: flex-start; gap: 24px; justify-content: space-between; flex-wrap: wrap; }
-.page-header-copy { min-width: 0; }
+/* The header is two tracks that wrap, not a box with a height to hit.
+
+   Track 1 is the copy, track 2 the action rail. The copy declares a 360px flex-basis, which is
+   the property that decides WHICH of the two leaves the line: with a 0 basis (the default) the
+   rail shrinks its controls until they fit, and at 390 ten controls did exactly that - five of
+   them stopped answering elementFromPoint, measured /tmp/g12d/before/390-injected.png. With a
+   basis the copy keeps a readable column and the rail wraps to the next line, where it has the
+   whole width for its own controls. A wrapped rail is one of the header's layouts, not a
+   fallback: the row gap belongs to the header, so nothing below it moves up into it. */
+.page-header { display: flex; align-items: flex-start; gap: 12px 24px; justify-content: space-between; flex-wrap: wrap; }
+.page-header-copy { flex: 1 1 360px; min-width: 0; }
 .eyebrow { font-size: var(--ow-type-label); letter-spacing: .09em; font-weight: 700; color: var(--ow-text-muted); margin-bottom: 4px; }
 .page-header h1 { font-size: var(--ow-type-xl); font-weight: 700; line-height: 1.2; letter-spacing: -.015em; }
-.page-description { margin-top: 8px; color: var(--ow-text-secondary); max-width: 820px; }
-.page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.page-description { margin-top: 8px; color: var(--ow-text-secondary); max-width: min(820px, 100%); overflow-wrap: anywhere; text-wrap: pretty; }
+/* margin-left:auto right-aligns the rail on whichever line it ends up on, so a wrapped rail keeps
+   the alignment it had while sharing the title's line. flex-basis auto keeps each control at its
+   own width; shrinking is what produced sub-target-width buttons. */
+.page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 0 1 auto; margin-left: auto; min-width: 0; }
 
 /* page-template §2.1/§2.5: one header height and one first-block position on every page.
    160 = topbar 56 + header 80 + stack gap 24, so the canvas' top gutter is not a fifth term of
@@ -375,17 +394,25 @@ input::placeholder { color: var(--ow-text-muted); }
      never doing the clipping - nothing here sets overflow - it was only failing to reserve the
      space its content needed. */
   .page-header { min-height: 80px; box-sizing: border-box; align-items: center; }
-  /* §2.2: the description is one line with an ellipsis. A header whose height depends on how
-     long the sentence is is the mechanism behind the five heights above. */
-  .page-description { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* §2.2 used to clamp this sentence to one line and hide the rest behind an ellipsis, because a
+     header whose height depended on its description was a header with no ruler. That traded the
+     reader's sentence for a number: the description says what the page is for, and "orders-ingest
+     连续 17 次变换阶段失败…" is not the same page as "orders-ingest…". The declared floor is now
+     the only thing the ruler needs - a header that fits is still exactly 80px, and one that does
+     not grows by whole 24px lines that are inside its own box (see the note above).
+     text-wrap: pretty keeps the last line of a zh-CN sentence from being a single character. */
+  .page-description { white-space: normal; text-wrap: pretty; }
 }
 
 /* §2.2: the meta chips ride the description's line instead of opening a third line. A chip row
    of its own is 8px of margin plus a 21px chip, which is the difference between a 80px header
    and the 86px one /admin/plugins/{id} measured. */
-.page-header-sub { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.page-header-sub .page-description { margin-top: 0; }
-.page-header-sub .page-header-meta { margin-top: 0; flex: 0 1 auto; min-width: 0; }
+.page-header-sub { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.page-header-sub .page-description { margin-top: 0; flex: 1 1 auto; min-width: 0; }
+/* A chip row is the one part of the header that changes without the page changing: a status chip
+   goes OPEN -> CONCLUDED, a revision 3 -> 12. Reserving one chip line and never letting a chip
+   shrink keeps that swap from moving the description's wrap point by a whole line. */
+.page-header-sub .page-header-meta { margin-top: 0; flex: 0 0 auto; min-width: 0; max-width: 100%; row-gap: 4px; }
 /* The meta row wraps (see .page-header-meta above) but that wrap was unreachable: as a flex item
    of .page-header-sub this row carried `flex: none`, so flex-shrink was 0 and its flex-basis
    resolved to its OWN MAX-CONTENT WIDTH - every chip on one line. A wrapping container laid out at
@@ -716,8 +743,13 @@ input::placeholder { color: var(--ow-text-muted); }
 @media (max-width: 768px) {
   .main-content { padding: 16px 12px 42px; }
   .page-header { gap: 12px; }
-  .page-actions { width: 100%; }
-  .page-actions .btn { flex: 1; }
+  .page-actions { width: 100%; margin-left: 0; }
+  /* flex:1 is flex-basis:0. Ten controls then share one line by shrinking until the row "fits",
+     and a row that fits is a row of 24px targets that no longer answers elementFromPoint (measured
+     at 390 before this change: 5 of 12 controls unreachable). Basis auto wraps the rail into as
+     many lines as it needs instead, and every control keeps its own width and hit area. */
+  .page-actions .btn { flex: 1 1 auto; min-width: 0; }
+  .health-strip { grid-template-columns: 1fr 1fr; }
   .summary-grid { gap: 12px; }
   .panel-head { padding: 12px 12px; }
   .kv-grid { padding: 4px 12px 8px; grid-template-columns: 1fr 1fr; gap: 0 12px; }
@@ -747,6 +779,7 @@ input::placeholder { color: var(--ow-text-muted); }
   .kv-grid { grid-template-columns: 1fr; }
   .panel-head { flex-direction: column; align-items: flex-start; }
   .page-actions .btn { min-width: 0; }
+  .page-actions { row-gap: 8px; }
   .detail-meta { gap: 4px; }
   .stepper { padding: 0; }
   .dropzone { margin: 12px; padding: 32px 16px; }
@@ -833,10 +866,119 @@ input::placeholder { color: var(--ow-text-muted); }
 .preview-node { padding: 12px; }
 .preview-node pre { max-height: 140px; overflow: auto; font-size: var(--ow-type-label); background: var(--ow-surface-2); padding: 8px; border-radius: var(--ow-radius-card); }
 @media (max-width: 768px) { .studio-preview .panel-head { flex-direction: column; align-items: flex-start; } .preview-grid { grid-template-columns: 1fr; } }
-.timeline { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
-.timeline li { display: flex; gap: 8px; padding: 8px 0; border-left: 2px solid var(--ow-border); margin-left: 4px; padding-left: 12px; position: relative; }
-.timeline-dot { position: absolute; left: -6px; top: 12px; width: 10px; height: 10px; border-radius: var(--ow-radius-pill); background: var(--ow-accent); border: 2px solid var(--ow-surface); }
-.timeline li > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: var(--ow-type-sm); }
+/* The timeline is the investigation's spine, so it is read as a column, not as a stack of cards:
+   one hairline per fact, a marker whose colour states the kind, and the timestamp pushed to the
+   right edge where the eye can scan a column of them. The marker was a solid dot sitting on the
+   border of the previous layout; as a column the border is the marker. */
+.timeline { list-style: none; margin: 0; padding: 0 16px 8px; display: flex; flex-direction: column; }
+.timeline li { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--ow-border); align-items: start; }
+.timeline li:last-child { border-bottom: 0; }
+/* OWNERSHIP. .timeline is a CHRONOLOGICAL TRAIL and nothing else: every `li` must start
+   with its .timeline-dot, because the marker is the grid's first 12px column. Three panels
+   (journals, jobs, incident facts) own that component. Anything else that needs a list of
+   records uses .record-list below - G12 F found the investigation panel reusing .timeline
+   for three plain lists, which put each row's real content into the 12px marker column and
+   rendered every statement as a 12px-wide vertical strip. */
+.timeline-dot { width: 9px; height: 9px; margin-top: 5px; border-radius: var(--ow-radius-pill); background: var(--ow-surface); border: 2px solid var(--ow-accent); }
+.timeline li > div { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: var(--ow-type-meta); min-width: 0; }
+.timeline li strong { font-size: var(--ow-type-meta); font-weight: 600; }
+/* Timestamps are a column, not a sentence: tabular figures keep the digits on one axis and the
+   right margin keeps them out of the description's way when a fact wraps. */
+.timeline li > div > [data-testid="fact-time"] { margin-left: auto; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 768px) {
+  .timeline li > div > [data-testid="fact-time"] { margin-left: 0; }
+}
+/* A list of records: one row per record, the row is a COLUMN whose first line is a wrap-able
+   meta line. No marker column, no fixed grid track, and min-width:0 at every level so a long
+   id or a log line wraps inside the row instead of setting the panel's width. */
+.record-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.record-list > li { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--ow-border); }
+.record-list > li:last-child { border-bottom: 0; }
+.record-list > li > .record-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.record-list > li > p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.record-list .link-button, .record-list .mono { min-width: 0; overflow-wrap: anywhere; text-align: start; }
+/* The panel quotes log lines, and a log line has no spaces in it. Nothing inside the panel
+   may make the panel wider than the panel, at any width or in either theme. */
+[data-testid="incident-investigations"] { min-width: 0; }
+[data-testid="incident-investigations"] .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+[data-testid="incident-investigations"] pre,
+[data-testid="incident-investigations"] .evidence-body { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; }
+
+/* G12 R2 - the run chooser. Five full-width bordered buttons read as five equally important
+   actions and buried the run that was actually open; the selected run now carries the accent
+   and the others are quiet rows. Nothing here is decorative: the row is the control, and its
+   selected state is what tells a reader which run the pane below is describing. */
+/* The run chooser keeps .record-list (it is a list of records, and the repo test asserts the
+   class), and the two rules that made a record list a stack of rows are undone here: a chooser
+   is a column of controls, not five bordered records. */
+[data-testid="investigation-history-list"] { margin-top: 8px; gap: 2px; }
+[data-testid="investigation-history-list"] > li { padding: 2px 0; border-bottom: 0; }
+[data-testid="investigation-history-list"] > li:last-child { border-bottom: 0; }
+.investigation-run-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; min-width: 0; min-height: var(--ow-control-md); padding: 6px 10px;
+  border: 1px solid transparent; border-radius: var(--ow-radius-control);
+  background: transparent; color: var(--ow-text-secondary); font-size: var(--ow-type-sm);
+  text-align: start; cursor: pointer;
+}
+.investigation-run-row:hover { background: var(--ow-surface-2); color: var(--ow-text); }
+.investigation-run-row[data-selected="true"] {
+  background: var(--ow-surface-2); border-color: var(--ow-border-strong); color: var(--ow-text);
+  font-weight: 600; box-shadow: inset 3px 0 0 var(--ow-accent);
+}
+.investigation-run-row:focus-visible { outline: 2px solid var(--ow-focus); outline-offset: 1px; }
+.investigation-run-state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.investigation-run-when { white-space: nowrap; }
+
+/* One line of identity for the open run: the status, what answered, why it stopped, and the
+   cancel control, instead of a badge row and a button separated by the budget tiles. */
+.investigation-run-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+
+/* The numbers a reader needs before the conclusion, at one weight, without four nested cards
+   inside this panel (the old strip reused .panel .metric-card, which drew a border inside a
+   border and made the panel look like a dashboard inside a dashboard). */
+.investigation-meta {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px 16px;
+  margin: 12px 0 4px; padding: 10px 0;
+  border-top: 1px solid var(--ow-border); border-bottom: 1px solid var(--ow-border);
+}
+.investigation-meta > div { min-width: 0; }
+.investigation-meta dt { margin: 0 0 2px; color: var(--ow-text-muted); font-size: var(--ow-type-label); font-weight: 600; }
+.investigation-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ow-text); font-size: var(--ow-type-sm); }
+
+/* A hypothesis is one block: what was inferred, what it is unsure of, and the reads it cites.
+   The statement is set at reading size; reasoning and caveats are subordinate to it instead of
+   being three paragraphs of equal weight. */
+[data-testid="investigation-hypotheses"] > li { gap: 8px; padding: 14px 0; }
+/* A gap code is a sentence, not a word: the shared Badge is nowrap (right for a status pill),
+   which made "{n} evidence rows have no provenance" 29px wider than a 390 viewport. Inside this
+   panel a badge may wrap, so the pane keeps its own width. */
+[data-testid="incident-investigations"] [data-testid="investigation-gaps"] > span,
+[data-testid="incident-investigations"] [data-testid="investigation-hypothesis-kind"],
+[data-testid="incident-investigations"] [data-testid="investigation-stance"] { white-space: normal; }
+[data-testid="incident-investigations"] [data-testid="investigation-uncertainty"],
+[data-testid="incident-investigations"] [data-testid="investigation-reasoning"] { max-width: var(--ow-readable); }
+.investigation-statement { margin: 0; max-width: var(--ow-readable); color: var(--ow-text); font-size: var(--ow-type-base); line-height: 1.6; }
+.investigation-caveat {
+  margin: 0; padding-left: 10px; max-width: var(--ow-readable);
+  border-left: 2px solid var(--ow-warning); color: var(--ow-text-secondary); font-size: var(--ow-type-sm);
+}
+.investigation-citations { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.investigation-citations > ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.investigation-citations > ul > li { min-width: 0; }
+.investigation-citations [data-testid="investigation-citation"] {
+  padding: 2px 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control);
+  background: var(--ow-surface-2); color: var(--ow-text-secondary);
+}
+.investigation-citations [data-testid="investigation-citation"][data-open="true"] {
+  border-color: var(--ow-border-strong); background: var(--ow-surface); color: var(--ow-text);
+}
+/* The bytes open under the citation that named them, and they scroll inside their own box:
+   twenty-four lines of a log are evidence, and they must not push the conclusion off screen. */
+.investigation-citation-body {
+  min-width: 0; padding: 4px 0 4px 10px; border-left: 2px solid var(--ow-border-strong);
+}
+.investigation-citation-body pre { max-height: 240px; overflow: auto; margin: 0; }
 .studio-conflict { align-items: flex-start; }
 .studio-conflict > div:nth-child(2) { display: flex; flex-direction: column; gap: 4px; }
 .studio-conflict pre { max-height: 90px; overflow: auto; margin: 4px 0 0; font-size: var(--ow-type-label); }
@@ -901,42 +1043,42 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .revision-list li { min-width: 0; }
 .revision-list .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Studio is the only page whose action row carries nine controls. Measured at 1440: 842px of
-   controls at one tier, against a copy column whose description alone needs 496 - in one 1328px
-   column the two cannot share a line. Both previous answers were the same defect in two places.
-   Wrapped, the second row fell outside .page-header's declared 80px and the drafts panel painted
-   over 7 of the 9. Scrolled, the row was squeezed to 591px and clipped: Create draft measured
-   1523..1651 in a 1440 viewport, and the document did not scroll because nothing was scrolled out
-   of it. So the controls take the region page-template §2.1 already declares for them - a toolbar
-   row between the header and the page's primary region. The header keeps §2.2's declared 80px and
-   the first block lands at y = 160; the row is §2.4's one row of one control tier (9 x 40px
-   controls + 8 x 4px gaps = 842, inside 1328 at 1440), with no scroll, no clip, no smaller type
-   and no control removed. At 1280 and 1024 the row still holds one line (measured rightmost 922 of
-   1168 and 858 of 977); where nine controls genuinely do not fit it wraps, which is the only
-   alternative left once clipping is off the table. */
-.studio-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: var(--ow-control-md); }
-.studio-toolbar > .btn { flex: 0 0 auto; }
+/* G12 D: .studio-toolbar is gone.
+   It existed because the header could not hold nine controls: at 1440 they measured 842px against
+   a copy column whose description alone needed 496 in one 1328px column, and the two ways out
+   were both defects - wrapped, the second row fell outside a declared 80px and the drafts panel
+   painted over 7 of the 9; scrolled, the row was clipped at 591px. Moving the row below the header
+   fixed the clipping and left the actual problem standing: the header was still a box that a page
+   had to route around, and every page would have had to make the same arrangement again.
+   The header now owns that arrangement (see .page-header at the top of this file): the copy keeps
+   a 360px basis, the rail wraps to its own line inside the header's box, and the nine controls are
+   the header's actions like every other page's. Nothing about a page's controls lives in a
+   page-specific row any more. */
 
 /* Job detail hierarchy */
 .job-subtitle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .job-short-id { font-family: var(--ow-font-mono); font-size: var(--ow-type-sm); color: var(--ow-text-muted); }
 
 /* Studio workspace: full-bleed, canvas-first */
-.main-content:has(.studio-page) { max-width: none; padding: 0; }
-.studio-page { padding: 16px 24px 24px; gap: 12px; }
+.main-content:has(.studio-page) { max-width: none; padding: 0; display: flex; flex-direction: column; min-height: calc(100vh - var(--ow-topbar)); }
+.studio-page { padding: 16px 24px 24px; gap: 12px; flex: 1 1 auto; min-height: 0; }
 /* page-template §1.1: this was the third CSS treatment of one component (padding 2px 2px 8px
    plus a rule under it). Studio pages render the same PageHeader as the admin pages now; only
-   the page's own padding stays studio-specific. */
-/* the nine controls are .studio-toolbar (above); .page-actions stays the admin header's row */
+   the page's own padding stays studio-specific. The nine controls are the header's .page-actions
+   row - there is no page-specific control row left. */
+/* The canvas fills what the header left, whatever the header's height is.
+   The previous declaration was height: clamp(520px, calc(100vh - 288px), 820px): 288 was a
+   hand-summed "topbar 56 + header 80 + gutters + a 40px toolbar row". Every one of those terms is
+   now variable - the header grows when its rail wraps, and its height depends on the pipeline name
+   - so the sum cannot be written down. A flex column states the relationship instead: the page
+   takes the viewport minus the topbar, the shell takes whatever the header did not use. */
 .studio-shell {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr) 300px;
   gap: 10px;
   align-items: stretch;
-  /* 288 = the 236 the canvas was measured against (topbar 56 + header 80 + gutters) + the 40px
-     toolbar row + its 12px gap, so the new row costs the workspace nothing in page height. */
-  height: clamp(520px, calc(100vh - 288px), 820px);
-  min-height: 520px;
+  flex: 1 1 auto;
+  min-height: 420px;
 }
 .studio-palette, .studio-inspector {
   position: static; max-height: none; height: 100%; overflow: auto;
@@ -948,7 +1090,14 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .palette-item strong { font-size: var(--ow-type-sm); }
 .palette-item small { font-size: var(--ow-type-label); }
 .studio-canvas { height: 100%; min-height: 0; border-radius: var(--ow-radius-card); overflow: hidden; position: relative; background-color: var(--ow-canvas-bg); background-image: radial-gradient(var(--ow-border) 1px, transparent 1px); background-size: 20px 20px; }
-.studio-rf-wrap { height: 100%; min-height: 0; width: 100%; }
+/* A node is only visible once @xyflow/react has measured it: the wrapper carries an inline
+   visibility:hidden until then, and that measurement is a ResizeObserver delivery. A floor under
+   the container is still right - the draft flow (?draft=) remounts this subtree and a remount in a
+   collapsed row would measure every node at 0 - but the floor is not the whole answer: a measured
+   box is only one of the ways to arrive at "measured", and until the delivery lands the card is
+   inside a hidden wrapper no matter how big the container is. The card states its own visibility
+   below for exactly that reason. */
+.studio-rf-wrap { height: 100%; min-height: 320px; width: 100%; }
 .studio-note { left: 12px; bottom: 8px; right: 190px; font-size: var(--ow-type-label); pointer-events: none; background: color-mix(in srgb, var(--ow-canvas-bg) 82%, transparent); padding: 4px 4px; border-radius: var(--ow-radius-card); }
 .studio-error { bottom: 34px; }
 
@@ -958,6 +1107,13 @@ details.panel.advanced > summary { padding: 12px 16px; }
   border-radius: var(--ow-radius-card); background: var(--ow-surface); box-shadow: 0 1px 2px rgba(18,26,40,.05), 0 6px 16px rgba(18,26,40,.035);
   overflow: hidden; transition: border-color var(--ow-motion-fast), box-shadow var(--ow-motion-fast);
 }
+/* The card is a CSS-sized box (.studio-rf-node sets its own width and its content sets the
+   height), so drawing it never depended on the measurement @xyflow/react gates it behind. Leaving
+   that gate on made the card exist, occupy its box, and still be invisible - which is also
+   unclickable, unfocusable and unscreenshottable - for as long as a ResizeObserver delivery was
+   outstanding. Visibility is inherited, so the card says it itself; the wrapper still measures, and
+   the edges still use the measured handle bounds. */
+.react-flow__node > .studio-rf-node { visibility: visible; }
 .studio-rf-node:hover { border-color: var(--ow-text-tertiary); box-shadow: 0 2px 4px rgba(18,26,40,.08), 0 10px 22px rgba(18,26,40,.06); }
 .studio-rf-node.selected { border-color: var(--ow-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ow-accent) 22%, transparent); }
 .studio-rf-node-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px; border-bottom: 1px solid var(--ow-border); }
@@ -1246,6 +1402,15 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .notice-stale { border-color: var(--ow-warn); background: var(--ow-warn-soft); }
 .notice-partial { border-color: var(--ow-info); background: var(--ow-info-soft); }
 
+/* One chip line, held by the chip itself rather than by the row: .meta-chip's own recipe
+   (2px padding + an 18px line box + 2px border) already resolves to one chip line, and
+   .status-indicator is two pixels shorter, so the row never needed a height of its own - a
+   declared minimum here restated the tallest child and put a control-height literal on a LAYOUT
+   ROW, which R3 reads as a control off its tiers. The property this row actually owes the page is
+   "a chip whose value gets longer does not change how tall the row is", and align-items:center
+   plus the children's own fixed line boxes are what deliver it. Deleting the literal is therefore
+   not a relaxation: nothing on screen moves. If a future child is shorter than a chip and the row
+   must still reserve a chip line, express it as the row's line-height, not as a control height. */
 .page-header-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .ow-cell-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .ow-utilization { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -1326,30 +1491,79 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .capability-status-code { justify-self: start; font-size: var(--ow-type-label); font-weight: 700; letter-spacing: .04em; color: var(--ow-text-secondary); background: var(--ow-surface-2); border: 1px dashed var(--ow-border-strong); border-radius: var(--ow-radius-control); padding: 1px 4px; }
 .capability-status-missing { color: var(--ow-text-muted); overflow-wrap: anywhere; }
 
-/* Investigation workspace: three regions, desktop first, then two, then one. */
-.investigation-layout { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr) minmax(0, 300px); gap: 12px; padding: 12px 16px 16px; min-width: 0; }
+/* ---------------------------------------------------------------------------------------
+ * Investigation workspace (G12 D)
+ *
+ * Three panes, one grid, and the DOM order - rail, analysis, detail - is also the tab order at
+ * every width. Desktop gets all three; below 1024 the same three panes become tabs, which is a
+ * different navigation model for the same content, not a hidden one: the rail is a tab you can
+ * reach and read on a 390px phone, and selecting an incident in it navigates to that incident.
+ *
+ * The pane is a column, not a card: the cards inside it are the panels the page already had, so
+ * a workspace costs no second surface, no second border and no nested card frame.
+ * ------------------------------------------------------------------------------------- */
+/* The middle column is the one that does the work (timeline, audit, evidence), so it takes what
+   the two reference columns leave: 232 + 320 of 1152 at 1440 leaves ~568 for it. */
+.investigation-workspace { display: grid; grid-template-columns: minmax(0, 232px) minmax(0, 1fr) minmax(0, 320px); gap: 12px; align-items: stretch; min-width: 0; }
 .investigation-notice { grid-column: 1 / -1; }
-.investigation-region { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); background: var(--ow-surface); overflow: hidden; }
-.investigation-region-head { padding: 12px 12px; border-bottom: 1px solid var(--ow-border); background: var(--ow-surface-2); }
-.investigation-region-head h3 { font-size: var(--ow-type-sm); font-weight: 700; letter-spacing: .01em; }
-.investigation-region-head p { margin-top: 4px; font-size: var(--ow-type-sm); color: var(--ow-text-muted); overflow-wrap: anywhere; }
-.investigation-region-body { flex: 1; display: flex; min-width: 0; }
+.investigation-pane { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+.investigation-pane > * { min-width: 0; }
+/* A timestamp is one token, not a sentence: in a 560px column the ISO value wrapped mid-date
+   ("2026-10-" / "31T05:52:09.083Z"), which is the one thing a timestamp must never do. */
+.investigation-pane td .mono, .investigation-pane td > span[title] { overflow-wrap: normal; }
+.investigation-pane .data-table td { white-space: normal; }
+.investigation-pane .data-table td:nth-child(4) { white-space: nowrap; }
+/* On a desktop the workspace is a viewport, not a document: each pane scrolls its own overflow so
+   the timeline and the evidence detail can be read at two different places at once. */
+@media (min-width: 1024px) {
+  /* The workspace IS the viewport. The page does not scroll; the panes do.
+     Declared as min-height only, the grid grew to the height of its tallest column, the document
+     scrolled, and the rail - the shortest column - slid out of view while the evidence table was
+     being read (measured at 1440: a 260px column with nothing visible in it). Height is not a
+     preference here: three panes that are meant to be read at once have to share one viewport. */
+  .main-content:has(.investigation-page) { display: flex; flex-direction: column; height: calc(100vh - var(--ow-topbar)); overflow: hidden; }
+  .investigation-page { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .investigation-workspace { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  .investigation-pane { overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 2px; }
+}
+@media (max-width: 1023px) {
+  .investigation-workspace { grid-template-columns: minmax(0, 1fr); }
+  .investigation-pane[hidden] { display: none; }
+  .investigation-notice { grid-column: 1; }
+}
+
+/* The tab bar exists only below 1024 (rendered from a media query, not hidden by CSS). */
+.investigation-tabs { display: flex; gap: 4px; padding: 4px; min-width: 0; overflow-x: auto; background: var(--ow-surface-2); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); }
+.investigation-tab { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-height: var(--ow-control-md); padding: 0 12px; border: 0; border-radius: var(--ow-radius-control); background: transparent; color: var(--ow-text-secondary); font-size: var(--ow-type-sm); font-weight: 600; white-space: nowrap; }
+.investigation-tab[aria-selected="true"] { background: var(--ow-surface); color: var(--ow-text); box-shadow: var(--ow-shadow-sm); }
+.investigation-tab:hover { color: var(--ow-text); }
+.investigation-tab-count { margin-left: 4px; font-size: var(--ow-type-label); color: var(--ow-text-muted); font-variant-numeric: tabular-nums; }
+.investigation-tab[aria-selected="true"] .investigation-tab-count { color: var(--ow-text-secondary); }
+
+/* Rail: the incident list. One row per incident, scan-first: severity dot, title, then the facts
+   that decide whether you open it (status, age, owner). */
+.investigation-rail { display: flex; flex-direction: column; min-width: 0; }
+.investigation-rail-filter { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px 12px 8px; }
+.investigation-rail-list { list-style: none; margin: 0; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
+.investigation-rail-item { display: flex; flex-direction: column; gap: 4px; padding: 8px 8px; border: 1px solid transparent; border-radius: var(--ow-radius-control); color: inherit; text-decoration: none; min-width: 0; }
+.investigation-rail-item:hover { background: var(--ow-hover); text-decoration: none; }
+.investigation-rail-item[aria-current="page"] { background: var(--ow-accent-soft); border-color: color-mix(in srgb, var(--ow-accent) 34%, transparent); }
+.investigation-rail-head { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.investigation-rail-title { flex: 1; font-size: var(--ow-type-meta); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.investigation-rail-facts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--ow-type-label); color: var(--ow-text-muted); }
+
+/* An empty pane states which interface it is waiting for; it never says "no results". */
 .investigation-slot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; flex: 1; margin: 8px; padding: 24px 12px; min-height: 148px; text-align: center; border: 1.5px dashed var(--ow-border-strong); border-radius: var(--ow-radius-card); color: var(--ow-text-muted); }
 .investigation-slot-mark { width: 30px; height: 30px; border-radius: var(--ow-radius-pill); display: inline-flex; align-items: center; justify-content: center; background: var(--ow-surface-2); border: 1px solid var(--ow-border); }
 .investigation-slot-title { font-size: var(--ow-type-sm); font-weight: 600; color: var(--ow-text-secondary); }
 .investigation-slot-line { font-size: var(--ow-type-label); line-height: 1.45; max-width: 280px; overflow-wrap: anywhere; }
 
 @media (max-width: 1024px) {
-  .investigation-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); }
-  /* The detail region keeps a full row instead of shrinking: it is the region that grows. */
-  .investigation-region[data-region="detail"] { grid-column: 1 / -1; }
   .business-card-slot { border-right: 0; border-bottom: 1px solid var(--ow-border); }
   .business-card-slot:last-child { border-bottom: 0; }
 }
 @media (max-width: 768px) {
   .task-grid { grid-template-columns: minmax(0, 1fr); }
-  .investigation-layout { grid-template-columns: minmax(0, 1fr); }
-  .investigation-region[data-region="detail"] { grid-column: auto; }
   .investigation-slot { min-height: 120px; }
   .capability-status-list { padding: 4px 12px 12px; }
   .capability-status-list li { grid-template-columns: 18px minmax(0, 1fr); row-gap: 4px; }
@@ -1950,6 +2164,24 @@ button.ow-summary-card:focus-visible,
   .panel-head > .panel-count,
   .panel-head > .text-link,
   .panel-head > .btn { flex: none; white-space: nowrap; }
+  /* The three children above keep the title line because each of them can be shrunk to nothing.
+     A head whose right-hand child is a GROUP of buttons cannot: the 390px investigation head
+     handed it the row's leftover 98.14px while the group's own content needs 146.53px, so the
+     "Start investigation" button kept its width, painted its right edge at 398.39 on a 390px
+     viewport, and the document scrolled 8px sideways on /app/incidents/{id} in both themes.
+     A group that cannot shrink gets a line of its own; the title keeps line one, and nothing is
+     clipped, hidden or scrolled inside a mask. */
+  .panel-head:has(> .inline-actions) { flex-wrap: wrap; }
+  .panel-head > .inline-actions { flex: 1 1 100%; }
+  /* The same escape hatch for the other group a panel head can end with. The evidence viewer's
+     head (components/evidence-viewer.tsx) carries a state badge plus Refresh and Close in
+     .job-subtitle, and at 390 the head handed that group 100 of the 132px its two nowrap buttons
+     need - so the group widened the panel by 20px and the document scrolled 7px inside a 375px
+     client area. The title keeps line one; the group wraps to a line of its own instead of being
+     squeezed below its content. Scoped to a DIRECT child, because the incident page header also
+     uses .job-subtitle as its description and is not a panel head. */
+  .panel-head:has(> .job-subtitle) { flex-wrap: wrap; }
+  .panel-head > .job-subtitle { flex: 1 1 100%; }
   .stat-strip,
   .ow-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* An odd last cell spans the row instead of leaving a bare cell of empty grid. */
@@ -3378,26 +3610,14 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 .ow-stamp { font-variant-numeric: tabular-nums; }
 
 /* ── the incident workspace ───────────────────────────────────────────────────
-   Three regions in the order a reader asks the questions: what happened, what it
-   rests on, what a human concluded. This is a LAYOUT over three panels, not three
-   cards inside a panel: one border depth, where the audit found three
-   (solid panel -> solid region -> dashed slot, visual-audit S3).
+   The two-region grid that used to live here (.ow-incident-workspace / -narrative /
+   -record) is gone: the page is a three-pane workspace now, and laying it out with a grid
+   rule nothing emits made a stylesheet that could not be tested against its own source.
+   components/app/investigation-layout.tsx owns the layout; see the investigation-workspace
+   block above for the grid that renders it.
 
-   Narrative and evidence sit side by side because they are read together - a
-   timeline point is checked against the evidence row it refers to. The verdict
-   spans both because it rests on both, and because it is the one region that
-   carries a write. */
-.ow-incident-workspace {
-  display: grid; gap: 24px;
-  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  align-items: start;
-}
-.ow-incident-narrative { grid-column: 1; }
-.ow-incident-record { grid-column: 2; }
-/* The evidence panel is a full-width sibling BELOW this grid, not a cell in it: a five-column
-   evidence table in a 5fr gutter would wrap its content reference on every row. It is not a
-   grid child, so it must not carry a grid-column - a declaration here reads as if it were. */
-
+   What survives is the narrative's marker vocabulary, because the timeline is still here and
+   still needs it. */
 /* The narrative's own dots: shape per kind, so the three entry types are not three
    colours of the same circle. A start is hollow, evidence is filled, a verdict is
    square - distinguishable in greyscale and at the 10px the dot actually occupies. */
@@ -3408,13 +3628,6 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    token table declares (token-table R1 allows control/card/pill and nothing else), and at the
    10px this dot occupies a 6px radius still reads as a square against two circles. */
 .ow-fact-dot--verdict { background: var(--ow-text); border-color: var(--ow-surface); border-radius: var(--ow-radius-control); }
-
-@media (max-width: 1023px) {
-  /* One column below 1024: side-by-side regions at 1023 gave the evidence table a
-     ~300px box, which is §2.6's horizontal-overflow generator. */
-  .ow-incident-workspace { grid-template-columns: minmax(0, 1fr); }
-  .ow-incident-narrative, .ow-incident-evidence, .ow-incident-record { grid-column: 1; }
-}
 
 @media (max-width: 767px) {
   .ow-trust-summary, .ow-trust-legend, .ow-table-notes, .ow-boundary { padding: 12px; }

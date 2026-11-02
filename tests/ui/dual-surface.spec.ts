@@ -192,17 +192,27 @@ test('the workspace states what is missing instead of inventing business data', 
   await stubGrant(page, 'admin');
   await signIn(page);
 
-  // The home page lists every unshipped capability, each marked as such.
+  // The home page lists every capability this build does not serve end to end, each marked as
+  // such. Five, not six, because `incidents` shipped with G11 D3. Note what "shipped" means here:
+  // it is NOT "the route renders". `observability` and `sources` have real pages reading real
+  // rows and are still counted as not shipped, because neither has a business scope an account
+  // can be granted - pages/workspace.tsx states the criterion on the `shipped` field. So this
+  // number is the registry's own statement (business-workspace.spec.ts asserts the same five),
+  // and it moves when a scope ships - not when a page appears.
   await expect(page).toHaveURL(/\/admin\/overview$/);
   await page.goto('/app/home');
   await expect(page.getByTestId('workspace-home')).toBeVisible();
-  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(6);
+  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(5);
+  await expect(page.locator('[data-surface-status="shipped"][data-capability="incidents"]')).toHaveCount(1);
 
-  await page.goto('/app/incidents');
+  // A capability that still has no interface keeps the placeholder: it states the absence and
+  // shows no fabricated business data. It used to be /app/incidents here; that route is a real
+  // list now, so the assertion moved to one that is genuinely not shipped.
+  await page.goto('/app/reports');
   const notYet = page.getByTestId('surface-not-yet');
   await expect(notYet).toBeVisible();
   await expect(notYet).toHaveAttribute('data-surface-status', 'not-shipped');
-  await expect(notYet).toHaveAttribute('data-capability', 'incidents');
+  await expect(notYet).toHaveAttribute('data-capability', 'reports');
   expect((await page.getByTestId('surface-not-yet-status').textContent())?.trim().length ?? 0).toBeGreaterThan(0);
   // No fabricated list, table or metric anywhere on the page.
   await expect(page.locator('table, [data-testid="metric-card"], .metric-card')).toHaveCount(0);

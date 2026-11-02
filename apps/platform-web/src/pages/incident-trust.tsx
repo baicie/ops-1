@@ -58,7 +58,7 @@ function detailKey(code?: string | null): MessageKey {
  * never folded into a neighbouring level - the audit's seven-status-codes-to-one-branch defect
  * is exactly that fold.
  */
-export function TrustChip({ code, title: extra, className }: { code?: string | null; title?: string; className?: string }) {
+export function TrustChip({ code, title: extra, className, ...rest }: { code?: string | null; title?: string; className?: string } & Record<`data-${string}`, string | undefined>) {
   const t = useT();
   const known = isKnownEvidenceTrust(code);
   const tone = evidenceTrustTone(code);
@@ -76,6 +76,7 @@ export function TrustChip({ code, title: extra, className }: { code?: string | n
       data-trust-tone={tone}
       data-trust-known={known ? 'true' : 'false'}
       title={title}
+      {...rest}
     >
       <Icon name={evidenceTrustGlyph(code)} size={13} />
       <span className="ow-trust-word">{t(evidenceTrustKey(code))}</span>

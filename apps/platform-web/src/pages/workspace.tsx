@@ -39,7 +39,21 @@ interface CapabilityCopy {
    * read it, and a shipped capability must never still be described by its missing interface.
    */
   detailKey: MessageKey;
-  /** True only for a capability this build really serves end to end. */
+  /**
+   * True only for a capability this build really serves end to end.
+   *
+   * END TO END includes the authorization: a page that renders is not a shipped capability. That
+   * is why `observability` and `sources` are still false although their routes serve real pages
+   * reading real rows - `/app/observability` reads the platform-wide node sample list and
+   * `/app/sources` reads the plugin and capability registries, and neither has a business scope
+   * an account can be granted (the ADR calls this out for `sources` beside `inNavigation` below).
+   * Flipping either one flips the home board to "This interface is live" for a surface whose
+   * rows every signed-in account can read, and it also flips the task area that points at it -
+   * `evidence` points at `sources` - into claiming a live Evidence status area that does not
+   * exist. If you are here to "fix" the five not-shipped rows: the count in dual-surface.spec.ts
+   * and business-workspace.spec.ts is this field's own statement, and it is correct until a
+   * scope exists.
+   */
   shipped: boolean;
   icon: string;
   /** Sidebar group; the shell derives its navigation from this registry. */

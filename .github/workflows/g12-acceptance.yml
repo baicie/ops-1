@@ -1,0 +1,96 @@
+name: g12-acceptance
+# The G11/G12 acceptance scripts and browser specs were accepted by hand on one workstation and
+# referenced by zero workflows, so "199 assertions passed, 7 specs passed" was a claim no pipeline
+# could reproduce. This job runs tests/ci/g12_acceptance_ci.sh, which starts one real kernel on a
+# throw-away database, runs the four tests/acceptance/g12_*.sh scripts against it, and then drives
+# a real Chromium through the five specs that cover the incident and investigation surfaces.
+#
+# Scope by path so an unrelated change does not pay 20 minutes for it. The list includes the
+# kernel, the web app, contracts and the specs themselves; adding a G12 surface outside these
+# paths means adding it here, which is the same rule the data-foundation workflow follows.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'apps/kernel/**'
+      - 'apps/platform-web/**'
+      - 'contracts/**'
+      - 'tests/acceptance/g12_*.sh'
+      - 'tests/acceptance/g11_*.sh'
+      - 'tests/ui/g11*.spec.ts'
+      - 'tests/ui/g12*.spec.ts'
+      - 'tests/ui/g12d-seed.mjs'
+      - 'tests/ui/support/**'
+      - 'tests/ui/playwright.config.ts'
+      - 'tests/ci/g12_acceptance_ci.sh'
+      - 'tests/ci/check-tracked-png-budget.mjs'
+      - '.github/workflows/g12-acceptance.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/kernel/**'
+      - 'apps/platform-web/**'
+      - 'tests/acceptance/g12_*.sh'
+      - 'tests/ui/g12*.spec.ts'
+      - '.github/workflows/g12-acceptance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    # The harness builds the kernel and the web bundle, runs four script suites and then five
+    # browser specs. Measured locally at roughly 12 minutes cold; 45 is the same ceiling the
+    # data-foundation job uses for a comparable run, so a hang is a red and not a stuck queue.
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      # The harness runs `playwright install chromium` itself so a local run and a CI run take the
+      # same path. Keeping it out of the step list means there is one place that decides the
+      # browser version, and this job cannot pass while the local entry point is broken.
+      - run: bash tests/ci/g12_acceptance_ci.sh
+      # The harness writes its own logs and the fixtures' screenshots into artifacts/. They are
+      # per-run evidence, deliberately outside the tracked PNG budget (which is at its file
+      # ceiling), so the runner is the only place they can be read from after a failure.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: g12-acceptance-logs
+          path: |
+            artifacts/g12-ci/**
+            artifacts/g12b/**
+            artifacts/g12c/**
+            artifacts/g12d/**
+            artifacts/g11-d3/**
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: g12-playwright-failures
+          path: |
+            tests/ui/test-results/**
+            tests/ui/playwright-report/**
+          if-no-files-found: warn
+          retention-days: 7

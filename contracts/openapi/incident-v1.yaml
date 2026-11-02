@@ -14,6 +14,100 @@ servers:
 security:
   - cookieSession: []
 paths:
+  /business-workspaces:
+    get:
+      summary: The business workspaces this caller may read
+      description: >
+        The caller own memberships, because membership is what makes a business
+        record readable. An admin additionally receives every workspace METADATA (key
+        and name, never a record) so it has an id to grant against; the member field
+        says which of those it may actually read, and for an admin that has not been
+        granted one the answer is false - platform administration is not a data
+        grant.
+      responses:
+        '200':
+          description: The workspaces this caller can see, and which it is in
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/BusinessWorkspace'}
+        '401': {description: UNAUTHENTICATED}
+    post:
+      summary: Create a business workspace (admin)
+      description: >
+        Creating a workspace does NOT enter it: the response reports member=false and
+        no incident is readable through it until a membership is granted. That
+        separation is the D5 ruling, not an omission - the container is platform
+        administration, the records inside it are business data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateBusinessWorkspaceRequest'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessWorkspace'}
+        '400': {description: INVALID_REQUEST - key or name shape}
+        '403': {description: FORBIDDEN - admin only}
+        '409': {description: BUSINESS_WORKSPACE_KEY_TAKEN}
+  /business-workspaces/{workspaceId}/members:
+    post:
+      summary: Grant a user membership of a business workspace (admin)
+      description: >
+        The grant is the only route into a workspace data, and the only audited one:
+        it writes a business_workspace_member event in the same transaction.
+        Idempotent - a replay answers 200 with the membership that already exists
+        instead of refusing the retry.
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GrantMembershipRequest'}
+      responses:
+        '201':
+          description: Membership granted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Membership'}
+        '200':
+          description: Already a member; the membership that exists
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Membership'}
+        '403': {description: FORBIDDEN - admin only}
+        '404':
+          description: >
+            BUSINESS_WORKSPACE_NOT_FOUND (no such workspace) or
+            BUSINESS_WORKSPACE_MEMBER_UNKNOWN (no such account)
+  /business-workspaces/{workspaceId}/members/{userId}:
+    delete:
+      summary: Revoke a user membership of a business workspace (admin)
+      description: >
+        Takes effect on the caller NEXT request and on the next tool call of an
+        investigation already in flight: the scope is resolved per request and per
+        tool call, never stored in a session or a run.
+      parameters:
+        - name: workspaceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: userId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '204': {description: Revoked}
+        '403': {description: FORBIDDEN - admin only}
+        '404': {description: BUSINESS_WORKSPACE_MEMBER_NOT_FOUND - not a member}
   /incidents:
     post:
       summary: Create an incident (operator or admin)
@@ -64,10 +158,18 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/CreateIncidentRequest'}
     get:
-      summary: Incident list, scoped by role
+      summary: Incident list, scoped to the caller business workspaces
       description: >
-        admin and viewer see every incident; operator sees only incidents it
-        owns, mirroring the job list predicate at apps/kernel/src/jobs.rs:1883.
+        D5, decided (docs/design/g12-scope/d5-business-workspace-adr.md): a row is
+        readable because the caller is a MEMBER of the business workspace it lives
+        in, and the role then decides which rows inside that workspace - admin and
+        viewer see the workspace rows, operator sees the rows it owns. Neither half
+        is sufficient and neither is a role attribute: membership is data an
+        administrator grants, it is re-read on every request, and a caller that is a
+        member of nothing reads nothing whatever its role. Platform administration is
+        NOT a data grant: an admin that was never made a member reads exactly what a
+        stranger reads. Out-of-scope and nonexistent share one answer (404), so this
+        route cannot be used to probe what exists elsewhere.
       parameters:
         - name: status
           in: query
@@ -97,7 +199,8 @@ paths:
           description: Opaque keyset cursor from a previous nextCursor; rejects with 400 when malformed or expired
       responses:
         '200':
-          description: Bounded page, newest first
+          description: >
+            Bounded page, newest first, with the read scope it was produced under
           content:
             application/json:
               schema: {$ref: '#/components/schemas/IncidentList'}
@@ -133,6 +236,15 @@ paths:
         adapter: an HMAC-SHA256 signature over the exact evidence tuple, keyed by
         a secret the Kernel holds and the client does not. The Kernel records the
         adapter id, the method, the instant and the submitter on the row.
+
+        Since G12 Phase B the request may carry the bytes themselves (content)
+        instead of only a reference. When it does, contentRef is derived by the
+        Kernel from the sha256 it computes over the exact bytes it stored, and a
+        supplied contentRef must be absent or exactly that value: a digest the
+        caller computed is not a check the Kernel performed
+        (EVIDENCE_CONTENT_REF_CONFLICT otherwise). A request with neither content
+        nor contentRef is refused. Everything limits and the read path are
+        specified in docs/design/g12-evidence/evidence-content-adr.md.
       parameters:
         - {$ref: '#/components/parameters/incidentId'}
       requestBody:
@@ -158,6 +270,12 @@ paths:
             EVIDENCE_TRUST_NOT_SELF_ASSERTABLE — the request tried to state
             verifiedTrust: either it carried the retired "trust" field, or it
             named SOURCE_ATTESTED as a claim. Nothing was written.
+            EVIDENCE_CONTENT_EMPTY — content.body was empty.
+            EVIDENCE_CONTENT_REF_CONFLICT — content was supplied together with a
+            contentRef that is not the server-derived digest of those bytes.
+            EVIDENCE_COLLECTED_AT_IN_FUTURE / EVIDENCE_COLLECTED_AT_TOO_OLD —
+            collectedAt is outside the clock window the Kernel accepts
+            (+300s / 400 days), so no row was recorded.
         '401':
           description: >
             UNAUTHENTICATED, or the attestation did not verify:
@@ -172,8 +290,21 @@ paths:
         '409':
           description: >
             INCIDENT_CLOSED — a closed incident accepts no new evidence.
+            INCIDENT_EVIDENCE_LIMIT — this incident already holds the maximum
+            number of evidence rows (200); the cap is what bounds total content.
             INCIDENT_WRITE_CONFLICT — a concurrent write changed the evidence set
             between the insert and the re-read; retry the request.
+        '413':
+          description: >
+            EVIDENCE_CONTENT_TOO_LARGE — content.body exceeds 65536 bytes. The
+            bound is in bytes, not characters, and content is refused rather than
+            truncated: a truncated excerpt is a different piece of evidence.
+        '415':
+          description: >
+            EVIDENCE_CONTENT_TYPE_UNSUPPORTED — contentType is not exactly
+            text/plain or application/json. The Kernel serves content back
+            verbatim and stores no type it cannot serve under its own security
+            headers.
         '500':
           description: >
             AUDIT_WRITE_FAILED — the audit row could not be stored, so the
@@ -181,16 +312,105 @@ paths:
             with it; retryable.
     get:
       summary: Evidence of one incident, newest collection first
+      description: >
+        Metadata only: content is never inlined here, so a caller that may read
+        the list still has to ask for one row's bytes through
+        /incidents/{incidentId}/evidence/{evidenceId}/content. contentStatus says
+        which rows have bytes (STORED) and which are a Legacy reference the
+        Kernel never held.
       parameters:
         - {$ref: '#/components/parameters/incidentId'}
+        - name: since
+          in: query
+          required: false
+          schema: {type: string, format: date-time}
+          description: >
+            Lower bound on collectedAt (RFC 3339, inclusive). Supply together with
+            until; a half-bounded window has no fixed width and is refused.
+        - name: until
+          in: query
+          required: false
+          schema: {type: string, format: date-time}
+          description: >
+            Upper bound on collectedAt (inclusive). The window may not exceed 90
+            days: an unbounded scan is a cost the caller would otherwise choose.
       responses:
         '200':
           description: Evidence list
           content:
             application/json:
               schema: {$ref: '#/components/schemas/EvidenceList'}
+        '400':
+          description: >
+            INCIDENT_EVIDENCE_WINDOW_INVALID — since/until are not RFC 3339, are
+            supplied one without the other, are inverted, or span more than 90
+            days.
         '401': {description: UNAUTHENTICATED}
         '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
+  /incidents/{incidentId}/evidence/{evidenceId}/content:
+    get:
+      summary: The stored bytes of one evidence row
+      description: >
+        G12 Phase B. Returns exactly the bytes the Kernel stored, with the digest
+        it recomputed over them in X-Evidence-Digest. The response is untrusted
+        content by definition (a log excerpt, a pasted note, a JSON document a
+        source produced) and is served with Content-Type text/plain or
+        application/json, X-Content-Type-Options nosniff, a
+        Content-Security-Policy of "default-src 'none'; sandbox" and
+        Cache-Control no-store, so a direct visit to this URL cannot execute
+        anything or leave a copy in the browser cache.
+
+        Four answers, deliberately distinct: the bytes (200), a Legacy reference
+        the Kernel holds no bytes for (404 EVIDENCE_CONTENT_NOT_STORED), content
+        past its 365-day retention horizon (410 EVIDENCE_CONTENT_EXPIRED), and
+        content whose bytes no longer match the recorded digest
+        (500 EVIDENCE_CONTENT_INTEGRITY_FAILED). The Kernel does not serve bytes
+        it cannot verify, and it does not repair a mismatch: rewriting the digest
+        would launder a tamper into a normal row.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+        - name: evidenceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: The stored bytes
+          headers:
+            X-Evidence-Digest:
+              description: sha256 (lowercase hex) recomputed over the bytes in this response.
+              schema: {type: string}
+            X-Evidence-Bytes:
+              description: The verified length of the body.
+              schema: {type: integer}
+            X-Evidence-Content-Type:
+              description: The stored content type.
+              schema: {type: string}
+          content:
+            text/plain:
+              schema: {type: string}
+            application/json:
+              schema: {type: string}
+        '401': {description: UNAUTHENTICATED}
+        '404':
+          description: >
+            INCIDENT_NOT_FOUND — the incident is absent or outside the caller
+            scope (the same predicate the metadata list applies, so content is
+            never readable where its row is not).
+            EVIDENCE_NOT_FOUND — no evidence row with this id belongs to this
+            incident. EVIDENCE_CONTENT_NOT_STORED — the row exists as a Legacy
+            reference and the Kernel holds no content for it.
+        '410':
+          description: >
+            EVIDENCE_CONTENT_EXPIRED — the content passed its retention horizon
+            (capturedAt + 365 days) and is no longer served. The row and its
+            digest stay readable as metadata.
+        '500':
+          description: >
+            EVIDENCE_CONTENT_INTEGRITY_FAILED — the stored bytes no longer match
+            the digest and length recorded with them; the body is not returned and
+            the mismatch is logged. This is a statement about the database, not
+            about the caller.
   /incidents/{incidentId}/verdict:
     post:
       summary: Record the human verdict (operator or admin)
@@ -240,6 +460,128 @@ paths:
               schema: {$ref: '#/components/schemas/Verdict'}
         '401': {description: UNAUTHENTICATED}
         '404': {description: INCIDENT_NOT_FOUND, or INCIDENT_VERDICT_NOT_FOUND when the incident has no verdict yet}
+  /incidents/{incidentId}/close:
+    post:
+      summary: Close a concluded incident (operator or admin; G12 C)
+      description: >
+        The only transition into CLOSED, and the only status a client may ask
+        for. Four gates, in this order: the caller may operate (403 for a
+        viewer), the incident is CONCLUDED (409 INCIDENT_CLOSE_REQUIRES_CONCLUDED
+        - there is deliberately no OPEN -> CLOSED path), a signed Human Verdict
+        exists (409 INCIDENT_CLOSE_REQUIRES_VERDICT), and expectedRevision still
+        matches (409 INCIDENT_VERSION_CONFLICT).
+
+        Idempotent per key, not per URL: a repeat carrying the same
+        idempotencyKey answers 200 with the closure that already happened, while a
+        second close without that key (or with a different one) is 409
+        INCIDENT_ALREADY_CLOSED. Concurrency: the row is locked and the UPDATE is a
+        compare-and-set on (status, revision), so of two simultaneous closes
+        exactly one commits.
+
+        A closure is final. No endpoint moves an incident out of CLOSED, and the
+        schema refuses it too (migration 0019 incidents_closure_guard), so
+        reopening by deleting or resetting the verdict is not a path that exists.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CloseIncidentRequest'}
+      responses:
+        '200':
+          description: Closed (or the closure this request replays)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Incident'}
+        '400': {description: INVALID_REQUEST — note out of bounds, or expectedRevision < 1}
+        '401': {description: UNAUTHENTICATED}
+        '403': {description: FORBIDDEN — viewer may not close}
+        '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
+        '409':
+          description: >
+            INCIDENT_CLOSE_REQUIRES_CONCLUDED, INCIDENT_CLOSE_REQUIRES_VERDICT,
+            INCIDENT_VERSION_CONFLICT, INCIDENT_ALREADY_CLOSED or
+            INCIDENT_STATE_CONFLICT. Each names a different obstacle, so a client
+            can tell 'not concludable' from 'stale version' from 'already closed'
+            without parsing prose.
+        '500':
+          description: >
+            AUDIT_WRITE_FAILED — the closure's audit row could not be stored, so
+            the status update rolled back with it; the incident is still
+            CONCLUDED and retryable.
+  /incidents/{incidentId}/owner:
+    post:
+      summary: Hand an incident to another operator (owner or admin; G12 C)
+      description: >
+        The minimal handover: current owner, target owner, reason, time, the
+        revision it was decided against, and an audit row. No groups, no tenancy
+        and no IAM: the authorization scope it moves is exactly the operator read
+        predicate (an operator reads what it owns), which is why the transferring
+        operator loses read access to the incident the moment this succeeds.
+
+        The answer is therefore the handover, not the incident: returning the
+        record would have to be built as if the caller still had access to it.
+        The target must be an existing, enabled account whose role can operate
+        (INCIDENT_OWNER_UNKNOWN / INCIDENT_OWNER_DISABLED /
+        INCIDENT_OWNER_ROLE_INELIGIBLE), and must differ from the current owner
+        (INCIDENT_OWNER_UNCHANGED). A CLOSED incident accepts no handover
+        (INCIDENT_CLOSED): ownership of a closed record is history.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TransferIncidentOwnerRequest'}
+      responses:
+        '200':
+          description: Handed over
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentOwnerTransfer'}
+        '400':
+          description: >
+            INVALID_REQUEST (reason out of bounds, expectedRevision < 1),
+            INCIDENT_OWNER_UNKNOWN, INCIDENT_OWNER_DISABLED or
+            INCIDENT_OWNER_ROLE_INELIGIBLE
+        '401': {description: UNAUTHENTICATED}
+        '403': {description: FORBIDDEN — viewer may not hand an incident over}
+        '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
+        '409':
+          description: >
+            INCIDENT_VERSION_CONFLICT, INCIDENT_OWNER_UNCHANGED, INCIDENT_CLOSED or
+            INCIDENT_STATE_CONFLICT
+        '500':
+          description: >
+            AUDIT_WRITE_FAILED — the handover's audit row could not be stored, so
+            the ownership change rolled back with it.
+  /incidents/{incidentId}/timeline:
+    get:
+      summary: The incident's own audit trail, in order
+      description: >
+        Scoped by the same predicate as the incident, so the trail of a record is
+        exactly as visible as the record. This is deliberately not a filter on
+        /api/v1/audit: that endpoint answers the platform-wide question and would
+        otherwise hand an operator the trail of an incident it cannot read.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 100}
+          description: >
+            How many of the NEWEST events to return. The page is chronological
+            either way; truncated=true says that older events were dropped rather
+            than that the trail is complete.
+      responses:
+        '200':
+          description: Timeline
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentTimeline'}
+        '401': {description: UNAUTHENTICATED}
+        '404': {description: INCIDENT_NOT_FOUND — absent, or outside the caller scope}
 components:
   securitySchemes:
     cookieSession:
@@ -332,6 +674,17 @@ components:
       additionalProperties: false
       required: [title, severity, startedAt]
       properties:
+        workspaceId:
+          type: string
+          format: uuid
+          description: >
+            The business workspace this incident is filed under. Optional only for a
+            caller that is a member of exactly one, where the kernel has exactly one
+            answer; a caller in two or more must name it (400
+            INCIDENT_WORKSPACE_REQUIRED), and a caller in none has nowhere to write
+            (403 INCIDENT_WORKSPACE_FORBIDDEN). A workspace the caller is not a member
+            of answers 404 BUSINESS_WORKSPACE_NOT_FOUND and creates nothing: a caller
+            cannot state its own scope.
         title: {type: string, minLength: 4, maxLength: 200}
         severity: {$ref: '#/components/schemas/IncidentSeverity'}
         source:
@@ -358,7 +711,8 @@ components:
       additionalProperties: false
       required:
         [id, title, severity, status, source, nativeId, relatedEntity,
-         startedAt, updatedAt, owner, evidenceRefs, humanVerdict]
+         startedAt, updatedAt, owner, ownerAssignedAt, revision, closedAt,
+         closedBy, closureNote, evidenceRefs, humanVerdict]
       properties:
         id: {type: string, format: uuid}
         title: {type: string}
@@ -370,6 +724,42 @@ components:
         startedAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         owner: {type: string, format: uuid, description: Accountable user, set to the creator}
+        ownerAssignedAt:
+          type: string
+          format: date-time
+          description: >
+            When the current owner was assigned. Equal to createdAt for an
+            incident that has never been handed over. A handover (POST
+            /incidents/{id}/owner) moves owner and this instant together, so the
+            two can never be read as disagreeing.
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            G12 C: the version every lifecycle write arbitrates on. It moves with
+            a status transition, a closure and a handover. POST /close and POST
+            /owner take it as expectedRevision and answer 409
+            INCIDENT_VERSION_CONFLICT instead of overwriting a decision the caller
+            never saw.
+        closedAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            The closure of record: non-null if and only if status is CLOSED, which
+            the database enforces (migration 0019
+            incidents_closure_consistency_check). A CLOSED incident with a null
+            closedAt is not representable.
+        closedBy:
+          type: [string, 'null']
+          format: uuid
+          description: >
+            The account that closed it - not necessarily the owner, because an
+            admin may close. Null if and only if closedAt is null.
+        closureNote:
+          type: [string, 'null']
+          maxLength: 1000
+          description: Why it was closed, in the closer's words.
         evidenceRefs:
           type: array
           maxItems: 100
@@ -385,7 +775,7 @@ components:
     IncidentList:
       type: object
       additionalProperties: false
-      required: [items, nextCursor]
+      required: [items, nextCursor, scope]
       properties:
         items:
           type: array
@@ -393,21 +783,119 @@ components:
         nextCursor:
           type: [string, 'null']
           description: Opaque keyset cursor; null when the page is the last one
+        scope:
+          $ref: '#/components/schemas/IncidentScope'
+    IncidentScope:
+      type: object
+      additionalProperties: false
+      required: [narrowedTo, workspaceCount]
+      description: >
+        The read the page was produced under, sent beside the rows because an empty
+        items array cannot say whether the list is empty or narrowed: both cases are
+        the same bytes, and only the Kernel knows which one happened. A client that
+        derived this from the role would be restating 4.3 of the incident ADR from
+        memory, and the drift of that restatement is the bug this field removes.
+        SEMANTIC BOUNDARY: this object describes THIS READ and never the platform.
+        A client is licensed to say "this read applied no owner narrowing". It is not
+        licensed to say "this list is every incident on the platform": the payload
+        cannot know that (a later predicate narrows rows this object does not name),
+        and a sentence built on the stronger reading goes false without one byte of
+        the response changing. There is deliberately no boolean for "sees
+        everything" - the one that existed was consumed as exactly that claim, and
+        for a viewer it was true only through Caller::from_role's !can_operate()
+        half, which no decision chose. Written reason and the open D5 question:
+        docs/design/g12-scope/narrowed-reads.md section 3, ADR section 4.6.
+      properties:
+        narrowedTo:
+          type: [string, 'null']
+          enum: ['owner', null]
+          description: >
+            The field this read was narrowed on, or null when it applied no owner
+            narrowing. 'owner' is the only value the current predicate produces, and
+            null is the absence of a restriction this field can name - it is not a
+            count of what exists, and it is not a claim that the page is complete.
+            It is a field name rather than a boolean so that copy naming ownership
+            is licensed by the payload, and a second narrowing would have to change
+            this value instead of silently reusing the sentence about owners.
+        workspaceCount:
+          type: integer
+          minimum: 0
+          description: >
+            How many business workspaces bounded THIS read - the caller own
+            memberships, resolved when the request was served. Zero is the one value
+            that explains an empty items array completely and that no role explains:
+            a caller that is a member of no workspace cannot be shown a row by any
+            read in the kernel. It is a count of the bound applied, not a count of
+            what exists, and it changes when an administrator grants or revokes
+            membership.
+    BusinessWorkspace:
+      type: object
+      additionalProperties: false
+      required: [workspaceId, key, name, createdAt, member]
+      properties:
+        workspaceId: {type: string, format: uuid}
+        key: {type: string, description: Stable human handle, unique per platform}
+        name: {type: string}
+        createdAt: {type: string, format: date-time}
+        member:
+          type: boolean
+          description: >
+            Whether the CALLER is a member. This is the field that decides whether the
+            business records inside this workspace can reach it; an admin reading
+            workspace metadata it was never granted sees false here.
+    CreateBusinessWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [key, name]
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{1,62}$'
+        name: {type: string, minLength: 2, maxLength: 120}
+    GrantMembershipRequest:
+      type: object
+      additionalProperties: false
+      required: [userId]
+      properties:
+        userId: {type: string, format: uuid}
+    Membership:
+      type: object
+      additionalProperties: false
+      required: [workspaceId, userId, grantedAt]
+      properties:
+        workspaceId: {type: string, format: uuid}
+        userId: {type: string, format: uuid}
+        grantedAt: {type: string, format: date-time}
     CreateEvidenceRequest:
       type: object
       additionalProperties: false
-      required: [kind, source, collectedAt, contentRef]
+      required: [kind, source, collectedAt]
       properties:
         kind: {$ref: '#/components/schemas/EvidenceKind'}
         source: {type: string, minLength: 2, maxLength: 200}
-        collectedAt: {type: string, format: date-time}
+        collectedAt:
+          type: string
+          format: date-time
+          description: >
+            When the source claims it collected this. Bounded by the Kernel clock:
+            more than 300s ahead is EVIDENCE_COLLECTED_AT_IN_FUTURE and more than
+            400 days old is EVIDENCE_COLLECTED_AT_TOO_OLD.
         contentRef:
           type: string
           minLength: 2
           maxLength: 1000
           description: >
-            Opaque locator (content digest or store key). Never inline payload:
-            the Kernel does not fetch it, so it also carries no SSRF surface.
+            Opaque locator (content digest, store key, anything) for a submission
+            that does NOT carry the bytes. The Kernel never fetches it, so it also
+            carries no SSRF surface - and it is rendered, stored and described as
+            a Legacy reference, never as verified content. Optional only since the
+            content field exists; one of contentRef / content is required.
+        content:
+          $ref: '#/components/schemas/EvidenceContent'
+          description: >
+            G12 Phase B: the bytes. When present the Kernel stores them, computes
+            sha256 over exactly what it stored, and derives contentRef from that
+            digest; a supplied contentRef must then be absent or identical.
         claimedTrust:
           allOf: [{$ref: '#/components/schemas/EvidenceTrustClaim'}]
           description: >
@@ -431,11 +919,32 @@ components:
             when present, whatever its value. It is listed so the refusal is
             discoverable: before this change the value in this field was what
             granted attestation.
+    EvidenceContent:
+      type: object
+      additionalProperties: false
+      required: [contentType, body]
+      properties:
+        contentType:
+          type: string
+          enum: [text/plain, application/json]
+          description: >
+            Exact match, no parameters: text/plain and application/json only. The
+            Kernel serves this type back verbatim, so it accepts no type it cannot
+            serve safely (EVIDENCE_CONTENT_TYPE_UNSUPPORTED otherwise).
+        body:
+          type: string
+          minLength: 1
+          description: >
+            The content itself. A JSON string is valid UTF-8 by construction; the
+            65536-byte bound is measured on the UTF-8 bytes and content is refused
+            rather than truncated.
     Evidence:
       type: object
       additionalProperties: false
       required:
         [id, incidentId, kind, source, collectedAt, contentRef,
+         contentStatus, contentType, contentBytes, contentSha256,
+         contentCapturedAt, contentRetentionExpiresAt,
          claimedTrust, verifiedTrust, verificationMethod, verifiedAt,
          verifierIdentity, submittedBy, verificationNote, createdAt, afterVerdict]
       properties:
@@ -444,7 +953,46 @@ components:
         kind: {$ref: '#/components/schemas/EvidenceKind'}
         source: {type: string}
         collectedAt: {type: string, format: date-time}
-        contentRef: {type: string}
+        contentRef:
+          type: string
+          description: >
+            For a STORED row this is the server-derived sha256:<hex> of the stored
+            bytes; for a LEGACY_REFERENCE row it is whatever the submitter typed.
+            contentStatus - never this field's shape - is what distinguishes them.
+        contentStatus:
+          type: string
+          enum: [STORED, LEGACY_REFERENCE]
+          description: >
+            G12 Phase B: STORED means the Kernel holds bytes for this row and the
+            content endpoint can serve them; LEGACY_REFERENCE means it holds a
+            locator only, so the reference is displayed as unverified. Derived from
+            the presence of a content row, never stored as a flag, so it cannot
+            claim content the Kernel does not have.
+        contentType:
+          type: [string, 'null']
+          enum: [text/plain, application/json, null]
+        contentBytes:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 65536
+        contentSha256:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: >
+            sha256 the Kernel computed over the bytes it stored. Never a value that
+            arrived in a request body.
+        contentCapturedAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            When the Kernel accepted the bytes (server clock) - the fact half of
+            the capture window whose claim half is collectedAt.
+        contentRetentionExpiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: >
+            capturedAt + 365 days. After this the content endpoint answers 410 and
+            the metadata stays readable.
         claimedTrust:
           $ref: '#/components/schemas/EvidenceTrust'
           # Validity note: historical rows may carry SOURCE_ATTESTED here, because
@@ -534,4 +1082,110 @@ components:
             the signer weighed. PRE_MIGRATION_UNRECORDED means the verdict was
             signed before the snapshot existed: the set was never stored, so it is
             unknown, and presenting a reconstruction as the record would be a
-            silent rewrite of what was signed.
+            silent rewrite of what was signed.    CloseIncidentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, note]
+      properties:
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            The revision the caller read. Required, with no force flag: closing
+            over someone else's change is not an option the contract offers.
+        note:
+          type: string
+          minLength: 4
+          maxLength: 1000
+          description: Why the incident is over, in the closer's words.
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+          description: >
+            The caller's own key for this close. Optional; the only way a retried
+            close is distinguishable from a second close.
+    TransferIncidentOwnerRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, toOwner, reason]
+      properties:
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+        toOwner:
+          type: string
+          format: uuid
+          description: >
+            Must be an existing, enabled account whose role can operate, and must
+            differ from the current owner.
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 1000
+          description: >
+            Why the incident is changing hands. It is the only place the
+            justification survives, and the next owner reads it.
+    IncidentOwnerTransfer:
+      type: object
+      additionalProperties: false
+      required:
+        [incidentId, previousOwner, owner, ownerAssignedAt, reason,
+         transferredBy, transferredAt, revision]
+      properties:
+        incidentId: {type: string, format: uuid}
+        previousOwner: {type: string, format: uuid}
+        owner: {type: string, format: uuid}
+        ownerAssignedAt: {type: string, format: date-time}
+        reason: {type: string}
+        transferredBy: {type: string, format: uuid}
+        transferredAt: {type: string, format: date-time}
+        revision:
+          type: integer
+          format: int64
+          minimum: 2
+          description: The revision the incident holds after the handover.
+    IncidentTimeline:
+      type: object
+      additionalProperties: false
+      required: [items, truncated]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/TimelineEvent'}
+        truncated:
+          type: boolean
+          description: >
+            True when the incident holds more audit rows than were returned, in
+            which case items are the newest and the oldest were dropped.
+    TimelineEvent:
+      type: object
+      additionalProperties: false
+      required:
+        [id, eventType, actorType, actorId, subjectType, subjectId, action,
+         result, details, requestId, occurredAt]
+      properties:
+        id: {type: string, format: uuid}
+        eventType:
+          type: string
+          description: >
+            INCIDENT_CREATED, INCIDENT_EVIDENCE_ADDED, INCIDENT_VERDICT_RECORDED,
+            INCIDENT_OWNER_TRANSFERRED, INCIDENT_CLOSED. The set is open: a new
+            event type is an addition to the trail, not a breaking change.
+        actorType: {type: string, enum: [USER]}
+        actorId: {type: string, description: The account id, as text}
+        subjectType: {type: string, enum: [INCIDENT]}
+        subjectId: {type: string}
+        action: {type: string}
+        result: {type: string, enum: [ACCEPTED]}
+        details:
+          type: object
+          additionalProperties: true
+          description: >
+            The write's own facts (evidenceId, trusts, verdict, closureNote,
+            fromOwner/toOwner, revisionFrom/revisionTo). Free-form per event type,
+            and never redacted because it never carries a secret.
+        requestId: {type: [string, 'null']}
+        occurredAt: {type: string, format: date-time}

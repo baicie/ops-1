@@ -249,7 +249,9 @@ D3 评审点了六条，本次修前四条。后端两条（审计与业务写�
 
 运行环境与前文相同：scratch 库 `opsweave_g11_http`、Kernel `127.0.0.1:18199`（**非** 18181）、页面来自真实构建产物 `apps/platform-web/dist`、Chromium。
 
-### 10.1 viewer 看得见写入口：保留入口，让 403 当文案
+### 10.1 viewer 看得见写入口：保留入口，让 403 当文案（**已被取代，见注记**）
+
+> **后续注记（2026-10-31）**：本节记录的 (b) 方案已被 ADR §4.5 的修订取代。下面的测量在当时（`c6cb34f`）是真实的——那一版 `IncidentDetail.tsx` 里没有只读分支；`25ba0a7` 加入只读分支后，详情页改为渲染 `incident-evidence-readonly` / `incident-verdict-readonly` 而**不再渲染那两个表单**。现行规则、判据与实测见 ADR §4.5。下表"列表页"三行今天仍然成立，"详情页证据表单"两行**不再成立**；整节保留，是因为它记录的是当时的事实，删掉等于伪造历史。
 
 决定是 ADR §4.5 的 (b) 方案：入口对 viewer 照常渲染，点一次拿到服务端的高质量 403，而不是按角色禁用/隐藏。本次用真实浏览器复核了这条规则的每一格：
 
@@ -286,4 +288,27 @@ D3 评审点了六条，本次修前四条。后端两条（审计与业务写�
 3. 十二个抽样页面在 en 与 zh-CN 下实测仍是 80/160，等于 808047b 自己记录的修复前基线（本次 header 基线测量里 `headerH` 与 `previousHeaderH` 都是 80、`firstBlockY` 与 `previousFirstBlockY` 都是 160；这份基线同样是本机 scratch 产物，未入库，理由见 §4.1）。所以 808047b 对那十二页的回归结论成立，错的只是**页数**：变的是三页，不是一页。
 
 历史提交按评审要求不改，口径以本节为准。
+
+## 11. `g11-page-header-growth:486` 的 102 vs 80 —— `to-verify`，只记录不改（2026-11-01）
+
+> **状态：`to-verify`。未通过、未修、断言未改。**
+
+- **红灯断言**：`tests/ui/g11-page-header-growth.spec.ts:585-587`
+  `expect(detailHeights[0], ...).toBe(listHeights[0])` —— "两类页面在同一宽度下最短的 header 是同一个"。
+- **裁定方实测（本次改动前）**：@1024 `detailHeights[0]=102`、`listHeights[0]=80`；改动后逐字相同 → 既存红，与本次改动无关。
+- **本机复测（2026-11-01，同提交 + 本阶段改动，scratch kernel `127.0.0.1:18199`）**：
+
+  ```
+  $ OPSWEAVE_URL=http://127.0.0.1:18199 playwright test g11-page-header-growth.spec.ts \
+      -g 'detail pages: the peers agree'
+      detail @1440               pages= 2  heights=[80]       shapes=2  (plugin-detail:80 incident-detail:80)
+      detail @1024               pages= 2  heights=[80, 102]  shapes=2  (plugin-detail:102 incident-detail:80)
+      class values @1024: list=[80]  detail=[80, 102]
+      node-detail / job-detail / pipeline-detail / instance-logs  skipped: no record of this kind on this host
+      -> 1 passed
+  ```
+
+  即这台机器上 `detailHeights[0]=80` 与 `listHeights[0]` 相等，该断言**通过**。
+- **两次读数为什么不同**：差的不在 CSS，而在 **detail 类里有哪几页可测**。本机没有 node / job / pipeline / instance-logs 记录（四页 `skipped`），detail 类只剩 `plugin-detail`（@1024 = 102）与 `incident-detail`（@1024 = 80），取最小值得到 80；裁定方那台机器上 `incident-detail` 不可测，detail 类只剩 `plugin-detail`，取最小值就是 102。
+- **结论与待办（`to-verify`）**：`102` 是真实的"类底线缺陷"还是"detail 类只装得下一页时的取样产物"，需要一台**有 node runtime**（`node-detail` / `job-detail` / `pipeline-detail` / `instance-logs` 四页都能测到）的宿主复核：在同一提交上重跑上面这条命令即可判定。本文件不据此修改断言，也不把任何一侧写成"通过"——本节的读数只说明"这条断言的结果依赖宿主上的记录种类"，不说明缺陷存在或不存在。
 

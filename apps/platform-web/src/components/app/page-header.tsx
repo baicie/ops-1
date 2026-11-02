@@ -16,6 +16,7 @@ export function PageHeader({
   actions,
   primary,
   meta,
+  actionsLabel,
   className,
 }: {
   title: React.ReactNode;
@@ -26,6 +27,9 @@ export function PageHeader({
   primary?: React.ReactNode;
   /** Status chips directly below the description. */
   meta?: React.ReactNode;
+  /** Accessible name of the action rail. Pass it when the controls are a set (a workspace toolbar)
+   *  rather than one page's one or two buttons. */
+  actionsLabel?: string;
   className?: string;
 }) {
   return (
@@ -46,7 +50,7 @@ export function PageHeader({
         ) : null}
       </div>
       {actions || primary ? (
-        <div className="page-actions">
+        <div className="page-actions" role={actionsLabel ? 'group' : undefined} aria-label={actionsLabel}>
           {actions}
           {primary}
         </div>

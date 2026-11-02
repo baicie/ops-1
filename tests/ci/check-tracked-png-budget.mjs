@@ -34,7 +34,15 @@ const MANIFEST = 'tests/ci/tracked-png-budget.json';
 const PER_RUN_NAME = /(^|[-_.])[0-9a-f]{7}(?=[-_.]|$)/;
 const PNG_REF = /[A-Za-z0-9._][A-Za-z0-9._/-]*\.png/g;
 const MD_ROOTS = ['docs', 'rules', 'skills', 'plan', 'tests', 'apps'];
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'target', 'dist', '.venv', '__pycache__']);
+// `test-results/` and `playwright-report/` are Playwright's own output, written into tests/ on every
+// failing run. They contain error-context.md files that cite the screenshots the failing test had
+// just written, so walking them turns "I ran the browser suite" into a dangling-doc-reference
+// failure - a red that says nothing about the repository and everything about the local run
+// directory. CI checks out clean and never had them; the local developer did, and got a different
+// answer than CI on the same tree.
+const SKIP_DIRS = new Set([
+  '.git', 'node_modules', 'target', 'dist', '.venv', '__pycache__', 'test-results', 'playwright-report',
+]);
 
 const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 const manifest = JSON.parse(readFileSync(path.join(root, MANIFEST), 'utf8'));
