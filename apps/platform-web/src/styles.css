@@ -1402,9 +1402,16 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .notice-stale { border-color: var(--ow-warn); background: var(--ow-warn-soft); }
 .notice-partial { border-color: var(--ow-info); background: var(--ow-info-soft); }
 
-/* min-height reserves one chip line, so a chip whose text gets longer changes the row it sits in
-   without changing how tall that row is. 24 = the 21px chip plus its 3px optical padding. */
-.page-header-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; min-height: 24px; }
+/* One chip line, held by the chip itself rather than by the row: .meta-chip's own recipe
+   (2px padding + an 18px line box + 2px border) already resolves to one chip line, and
+   .status-indicator is two pixels shorter, so the row never needed a height of its own - a
+   declared minimum here restated the tallest child and put a control-height literal on a LAYOUT
+   ROW, which R3 reads as a control off its tiers. The property this row actually owes the page is
+   "a chip whose value gets longer does not change how tall the row is", and align-items:center
+   plus the children's own fixed line boxes are what deliver it. Deleting the literal is therefore
+   not a relaxation: nothing on screen moves. If a future child is shorter than a chip and the row
+   must still reserve a chip line, express it as the row's line-height, not as a control height. */
+.page-header-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .ow-cell-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .ow-utilization { font-variant-numeric: tabular-nums; font-weight: 600; }
 .ow-filter-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }

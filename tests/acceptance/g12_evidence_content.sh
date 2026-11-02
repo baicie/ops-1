@@ -34,6 +34,19 @@ ok()   { PASS=$((PASS + 1)); printf 'PASS  %s\n' "$*"; }
 bad()  { FAIL=$((FAIL + 1)); FAILED_LIST="$FAILED_LIST
   $*"; printf 'FAIL  %s\n' "$*"; }
 check() { if [ "$2" = "$1" ]; then ok "$3 -> $2"; else bad "$3 -> $2 (expected $1)"; fi; }
+# Every psql call goes through this, so a statement that did not run is a FAILURE and not a
+# quieter state for the next assertions to read. This is not hypothetical: in CI the retention
+# INSERT below failed (postgres runs in a service container, where the file pg_read_binary_file
+# was told to open does not exist) and its output went to /dev/null, so the run continued and
+# reported the DEFAULT row's LEGACY_REFERENCE as if the kernel had lost stored content. A
+# database step that cannot run must be named where it failed, not three assertions later.
+# The SQL arrives on stdin; $1 names the step in the failure line.
+db() {
+  local what="$1" err
+  if err="$(psql "$DB" -q -v ON_ERROR_STOP=1 2>&1 >/dev/null)"; then return 0; fi
+  bad "$what: the database refused the statement: $(printf '%s' "$err" | head -1)"
+  return 1
+}
 step() { printf '\n######## %s ########\n' "$*"; }
 json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)" 2>/dev/null; }
 compact() { python3 -c 'import json,sys
@@ -237,7 +250,7 @@ else
   bad "B3.6a the UPDATE was not refused by the write-once trigger: $UPDATE_OUT"
 fi
 
-psql "$DB" -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
+db 'B3.6b corrupting the stored bytes' <<SQL
 ALTER TABLE kernel.incident_evidence_content DISABLE TRIGGER incident_evidence_content_write_once;
 UPDATE kernel.incident_evidence_content SET body=repeat('T', content_bytes)::bytea WHERE evidence_id='$EV_A';
 ALTER TABLE kernel.incident_evidence_content ENABLE TRIGGER incident_evidence_content_write_once;
@@ -287,7 +300,7 @@ check "$VERDICT_DIGEST" "$(last "['consideredEvidenceDigest']")" "B3.8 the signe
 curl -sS -b "$OP_JAR" -o "$WORK/body" "$URL/api/v1/incidents/$INC/evidence"
 check "True" "$(json "[r['afterVerdict'] for r in d['items'] if r['id']=='$EV_B'][0]" < "$WORK/body")" "B3.8 the new row is flagged afterVerdict"
 
-psql "$DB" -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
+db 'B3.8 corrupting the bytes a verdict was signed over' <<SQL
 ALTER TABLE kernel.incident_evidence_content DISABLE TRIGGER incident_evidence_content_write_once;
 UPDATE kernel.incident_evidence_content SET body=repeat('S', content_bytes)::bytea WHERE evidence_id='$EV_B';
 ALTER TABLE kernel.incident_evidence_content ENABLE TRIGGER incident_evidence_content_write_once;
@@ -367,10 +380,17 @@ check 201 "$STATUS" "R0 a row is created through the API first"
 EV_AGED="$(last "['id']")"
 printf 'an aged query result\n' > "$WORK/aged.txt"
 AGED_DIGEST="$(sha256_of "$WORK/aged.txt")"
-psql "$DB" -q -v ON_ERROR_STOP=1 <<SQL >/dev/null
+# The bytes travel as hex inside the statement, not as a path. pg_read_binary_file reads on the
+# SERVER, so it only works when psql and PostgreSQL share a filesystem - true on a workstation
+# (both on localhost) and false in CI, where postgres is a service container and the runner's
+# /tmp is not visible to it. There the INSERT failed silently, the row never existed, and the
+# four assertions below read a LEGACY_REFERENCE row back as if the kernel had lost the content.
+# decode() has no such dependency: the statement carries what it needs.
+AGED_HEX="$(od -An -v -tx1 "$WORK/aged.txt" | tr -d ' \n')"
+db 'R0 seeding a row past its retention horizon' <<SQL
 INSERT INTO kernel.incident_evidence_content
   (evidence_id, content_type, body, content_bytes, sha256, captured_at, retention_expires_at)
-VALUES ('$EV_AGED', 'text/plain', pg_read_binary_file('$WORK/aged.txt'), $(wc -c < "$WORK/aged.txt" | tr -d ' '),
+VALUES ('$EV_AGED', 'text/plain', decode('$AGED_HEX', 'hex'), $(wc -c < "$WORK/aged.txt" | tr -d ' '),
         '$AGED_DIGEST', now() - interval '400 days', now() - interval '35 days');
 SQL
 curl -sS -b "$OP_JAR" -o "$WORK/body" "$URL/api/v1/incidents/$INC/evidence"
