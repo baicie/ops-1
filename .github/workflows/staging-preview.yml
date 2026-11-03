@@ -1108,35 +1108,32 @@ jobs:
           # this verdict reported PASSED on every run including a failed deploy.
           DEPLOY_RESULT: ${{ needs.deploy.result }}
           EXPECTED_SHA: ${{ needs.deploy.outputs.target_sha }}
+          # The origin the preview answers on, for the served-commit probe.
+          DEPLOY_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          # The deploy step's own outcome: it exits 0 only after /livez, /readyz and / answer.
+          DEPLOY_STEP_OUTCOME: ${{ needs.deploy.outputs.result }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
-          # The host's own report, collected by the deploy job. Absent or unreadable is recorded as
-          # null, never assumed healthy.
-          python3 - <<'PY2'
-          import json, pathlib
-          report = {}
-          for name in ("artifacts/staging-preview/host-status.json", "host-status.json"):
-              path = pathlib.Path(name)
-              if path.exists():
-                  try:
-                      report = json.loads(path.read_text())
-                  except Exception:
-                      report = {}
-                  break
-          served = ""
-          if isinstance(report.get("served_commit"), dict):
-              served = report["served_commit"].get("sha") or ""
-          elif isinstance(report.get("current"), dict):
-              served = report["current"].get("sha") or ""
-          healthy = report.get("healthy")
-          out = pathlib.Path("artifacts/staging-preview/deploy-facts.env")
-          out.write_text(
-              "SERVED_SHA=%s\nDEPLOY_HEALTHY=%s\n"
-              % (served, "" if healthy is None else ("true" if healthy is True else "false"))
-          )
-          print(out.read_text())
-          PY2
+          # What the host actually serves, read from the endpoint that answers it. The deploy
+          # job's host-status.json lives in ITS artifact, not in this job's working directory -
+          # the first version parsed a path this job never has, so served_sha was always empty
+          # (measured on the first post-merge run: served_sha ""). /api/v1/version is the same
+          # fact from the same host, needs no session, and is exactly what the deploy step and
+          # staging-smoke.spec.ts already assert against.
+          BASE_URL_FOR_PROBE="${DEPLOY_BASE_URL:-}"
+          SERVED_SHA=""
+          if [ -n "$BASE_URL_FOR_PROBE" ]; then
+            SERVED_SHA="$(curl -fsS -m 15 "$BASE_URL_FOR_PROBE/api/v1/version" 2>/dev/null \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("commitSha") or "")' 2>/dev/null || true)"
+          fi
+          {
+            printf 'SERVED_SHA=%s\n' "$SERVED_SHA"
+            # The deploy step's own outcome is the health fact this job can see: it polls
+            # /livez, /readyz and / until the release answers, and exits 0 only then.
+            printf 'DEPLOY_STEP_OUTCOME=%s\n' "${DEPLOY_STEP_OUTCOME:-}"
+          } > artifacts/staging-preview/deploy-facts.env
+          cat artifacts/staging-preview/deploy-facts.env
           set -a; . artifacts/staging-preview/deploy-facts.env; set +a
           python3 - <<'PY'
           import json, os
@@ -1474,8 +1471,10 @@ jobs:
           DEPLOY_RESULT = os.environ.get("DEPLOY_RESULT", "") or ""
           SERVED_SHA = os.environ.get("SERVED_SHA", "") or ""
           EXPECTED_SHA = os.environ.get("EXPECTED_SHA", "") or ""
-          _healthy = (os.environ.get("DEPLOY_HEALTHY", "") or "").strip()
-          DEPLOY_HEALTHY = True if _healthy == "true" else (False if _healthy == "false" else None)
+          # The deploy job's own result output: "success" once the release answered /livez,
+          # /readyz and /, "failure" when the script rolled back.
+          _step = (os.environ.get("DEPLOY_STEP_OUTCOME", "") or "").strip()
+          DEPLOY_HEALTHY = True if _step == "success" else (False if _step == "failure" else None)
           deployment_facts = {
               "deploy_job": DEPLOY_RESULT or "not-run",
               "served_sha": SERVED_SHA,
