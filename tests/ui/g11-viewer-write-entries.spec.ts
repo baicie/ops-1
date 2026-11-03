@@ -1,4 +1,4 @@
-import { expect, request, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
+import { expect, request, test, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { adminSeed, createAccount as createSeededAccount, type AccountSpec } from './support/accounts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -121,26 +121,6 @@ const evidenceBody = (source: string) => ({
 /** One verdict body, for the same reason. INCONCLUSIVE is the verdict the kernel accepts with no evidence. */
 const verdictBody = () => ({ verdict: 'INCONCLUSIVE', rationale: 'the same call from two roles; only the role differs (' + RUN + ')' });
 
-/**
- * The three assertions the 403 copy has to satisfy at once. One helper, so every notice the page
- * still shows a viewer is judged by exactly the same rule instead of three drifting variants.
- */
-async function expectLocalisedForbidden(notice: ReturnType<Page['getByTestId']>, entry: string) {
-  await expect(notice, entry + ': the kernel must refuse a viewer write and the page must show it (ADR-G11-001 section 4.5)').toBeVisible();
-  await expect(notice, entry + ': a permission failure is FORBIDDEN, so that is the code the notice must carry').toHaveAttribute('data-error-code', 'FORBIDDEN');
-
-  const sentence = (await notice.locator('p').first().innerText()).trim();
-  // Provenance: the rendered sentence IS the catalog value, so the page cannot drift from it.
-  expect(sentence, entry + ': ADR-G11-001 section 4.5 says the sentence comes from the catalog key ' + FORBIDDEN_KEY + ', but the page rendered something else').toBe(ZH[FORBIDDEN_KEY]);
-  // A hardcoded English string renders the same under every locale; this one must not.
-  expect(sentence, entry + ': the 403 sentence is the English catalog value - either it is hardcoded or the ' + LOCALE + ' catalog lost this key').not.toBe(EN[FORBIDDEN_KEY]);
-  expect(sentence, entry + ': the 403 sentence carries no Chinese at all in the ' + LOCALE + ' build').toMatch(HAN);
-
-  const meta = (await notice.locator('p').nth(1).innerText()).trim();
-  expect(meta, entry + ': the notice must label the kernel request id with the catalog key ' + REQUEST_ID_KEY).toContain(ZH[REQUEST_ID_KEY]);
-  expect(meta, entry + ': the notice must carry the request id the kernel returned, not a placeholder').toMatch(UUID);
-}
-
 test('a viewer is told it cannot write, and the kernel still refuses the write it cannot send (ADR-G11-001 section 4.5)', async ({ browser }) => {
   // The product ships Chinese; the locale is written into this context rather than inherited, so
   // the guard judges the same copy a first-time visitor sees whatever OPSWEAVE_TEST_LOCALE says.
@@ -180,19 +160,22 @@ test('a viewer is told it cannot write, and the kernel still refuses the write i
   await expect(page).not.toHaveURL(/\/login/);
   await expect(page.locator('html'), 'the guard judges the copy in the product default locale').toHaveAttribute('lang', LOCALE);
 
-  // 1. Create. This entry is still RENDERED for a viewer, and that is not an inconsistency with
-  //    the two below: it is one dialog that is opened and closed, its refusal is shown in place,
-  //    and the kernel - not the page - produces it. The assertions on it are unchanged.
+  // 1. Create. STRUCTURE, the same shape as the evidence and verdict panels below: a viewer is
+  //    TOLD its role cannot record an incident, and no live entry is offered. This used to be
+  //    the one exception - a rendered, enabled button whose only outcome was a server refusal -
+  //    and it was defended as "the server answers, not the page". The refusal is still the
+  //    server's (asserted at the endpoint in part 4); what changed is that the page no longer
+  //    invites a write it knows will fail, which is the same ruling section 4.5 applies to the
+  //    other two writes. A rendered form contradicts it and has nothing to do with the server
+  //    half, so it is the mechanism that was over-specified, not the refusal.
   await page.goto('/app/incidents');
   await expect(page.getByTestId('incidents-page')).toBeVisible();
-  const createEntry = page.getByTestId('incident-create-open');
-  await expect(createEntry, 'a viewer still sees the record-an-incident entry').toBeVisible();
-  await expect(createEntry, 'the entry is not disabled by role - the server answers, not the page').toBeEnabled();
-  await createEntry.click();
-  await page.getByTestId('incident-create-title').fill('G11 guard: a viewer must not create this ' + RUN);
-  await page.getByTestId('incident-create-submit').click();
-  await expectLocalisedForbidden(page.getByTestId('incident-create-error'), 'create');
-  await page.keyboard.press('Escape');
+  await expect(
+    page.getByTestId('incident-create-blocked'),
+    'a viewer is told its role cannot record an incident',
+  ).toBeVisible();
+  await expect(page.getByTestId('incident-create-blocked')).toHaveAttribute('data-create-blocked', 'role');
+  await expect(page.getByTestId('incident-create-open'), 'and no live create entry is offered').toHaveCount(0);
 
   // 2. Evidence. STRUCTURE: the read-only sentence is on screen and the form is NOT IN THE DOM.
   //    toHaveCount(0) is the assertion hiding cannot satisfy: a display:none form still counts.
@@ -217,6 +200,16 @@ test('a viewer is told it cannot write, and the kernel still refuses the write i
   //    and gets 201. Both halves run on one record, so "the endpoint is broken" cannot pass as
   //    "the role was refused", and "the role was refused" cannot pass as "the endpoint is broken".
   const viewerSession = await apiSignIn(origin, VIEWER.email, VIEWER.password);
+
+  // Create has no operator control half: an operator creating a row would add a fixture the rest
+  // of this spec does not account for, and the create endpoint's acceptance for a permitted role
+  // is covered by g12-create-gate.spec.ts on three of them. What matters here is that the refusal
+  // is the SERVER's, so the button the page no longer draws is still refused at the endpoint.
+  const viewerCreate = await viewerSession.api.post('/api/v1/incidents', {
+    headers: { 'x-csrf-token': viewerSession.csrfToken },
+    data: { title: 'G11 guard: a viewer must not create this ' + RUN, severity: 'MINOR', source: 'MANUAL', startedAt: new Date().toISOString() },
+  });
+  await expectEndpointForbidden(viewerCreate, 'create');
 
   const viewerEvidence = await viewerSession.api.post('/api/v1/incidents/' + incident.id + '/evidence', {
     headers: { 'x-csrf-token': viewerSession.csrfToken },

@@ -248,16 +248,36 @@ test('a viewer reads incidents it does not own and is refused every write, with 
   await page.goto('/app/incidents/' + concludedId);
   await expect(page.getByTestId('incident-verdict')).toHaveAttribute('data-verdict-state', 'recorded');
 
-  // Write: creating is refused by the server (403), and the page says which code refused it.
+  // Write: creating. The refusal itself has not moved; WHERE the viewer meets it has, for the
+  // same reason the verdict section below records (ADR-G11-001 section 4.5): a role that can
+  // never submit is not handed a form that can only fail. So both halves are asserted, and the
+  // server half is what proves the rule rather than the page's caution.
   await page.goto('/app/incidents');
-  await page.getByTestId('incident-create-open').click();
-  await page.getByTestId('incident-create-title').fill('G11 e2e viewer must not create this ' + RUN);
-  await page.getByTestId('incident-create-submit').click();
-  const createError = page.getByTestId('incident-create-error');
-  await expect(createError).toBeVisible();
-  await expect(createError).toHaveAttribute('data-error-code', 'FORBIDDEN');
-  await page.screenshot({ path: SHOTS + '/05-viewer-create-refused.png', fullPage: true });
-  await page.keyboard.press('Escape');
+  await expect(
+    page.getByTestId('incident-create-blocked'),
+    'a viewer is told its role cannot record an incident, instead of being handed a form that can only fail',
+  ).toBeVisible();
+  await expect(page.getByTestId('incident-create-blocked')).toHaveAttribute('data-create-blocked', 'role');
+  await expect(page.getByTestId('incident-create-open'), 'no live create entry is offered to a viewer').toHaveCount(0);
+  await page.screenshot({ path: SHOTS + '/05-viewer-create-blocked.png', fullPage: true });
+
+  // The endpoint half, unchanged and not weakened: the same POST the form would have sent is
+  // refused 403 FORBIDDEN for the viewer session. Sent from the page so the CSRF token the app
+  // holds is used - `page.request` shares cookies but not that token, and would answer
+  // CSRF_FAILED, which would make this assertion pass for the wrong reason.
+  const viewerRefusal = await page.evaluate(async () => {
+    const me = await fetch('/api/v1/auth/me', { credentials: 'same-origin' });
+    const token = ((await me.json()) as { csrfToken?: string }).csrfToken;
+    const response = await fetch('/api/v1/incidents', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', ...(token ? { 'x-csrf-token': token } : {}) },
+      body: JSON.stringify({ title: 'G11 e2e viewer must not create this', severity: 'MINOR', source: 'MANUAL', startedAt: new Date().toISOString() }),
+    });
+    return { status: response.status, code: ((await response.json().catch(() => ({}))) as { code?: string }).code };
+  });
+  expect(viewerRefusal.status, 'the kernel, not the page, refuses a viewer create').toBe(403);
+  expect(viewerRefusal.code, 'a refused viewer write carries FORBIDDEN, not just any error').toBe('FORBIDDEN');
   await expect(page.locator('[data-incident-row="' + concludedId + '"]')).toHaveCount(1);
 
   // Write: a verdict. The refusal itself has not moved, but WHERE the viewer meets it has
@@ -419,6 +439,17 @@ test('the list and the detail survive 1440/1024/390 in both themes, and the head
         await expect(page.locator('[data-testid="incident-detail"], [data-testid="incidents-page"]').first()).toBeVisible();
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
         expect(overflow, path + ' at ' + width + '/' + theme).toBeLessThanOrEqual(1);
+        // The document-level number is not enough. A long unbreakable run (the verdict's
+        // consideration digest is a 64-character sha256) overflows its own box, and an ancestor
+        // with overflow:auto clips it - so scrollWidth stays clean while the tail of the value is
+        // unreachable. Measured before the fix: right edge 1609px inside a 1024px column.
+        const clipped = await page.evaluate(() => {
+          const de = document.documentElement;
+          return Array.from(document.querySelectorAll('main code'))
+            .filter((el) => el.getBoundingClientRect().right > de.clientWidth + 1)
+            .map((el) => (el.textContent || '').slice(0, 20));
+        });
+        expect(clipped, path + ' at ' + width + '/' + theme + ': a <code> run overflows its column').toEqual([]);
         await page.screenshot({ path: SHOTS + '/matrix-' + width + '-' + theme + '-' + name + '.png', fullPage: true });
       }
     }

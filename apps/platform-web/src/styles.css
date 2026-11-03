@@ -202,7 +202,12 @@ a { color: var(--ow-accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1, h2, h3, p { margin: 0; }
 code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
-code { font-size: var(--ow-type-meta); background: var(--ow-surface-2); border: 1px solid var(--ow-border); padding: 1px 4px; border-radius: var(--ow-radius-control); }
+/* An inline <code> is used for identifiers and digests, and those have no break opportunity:
+   a 64-character sha256 in a 1024px detail column measured 1609px of right edge, clipped by an
+   ancestor's overflow, so the tail of the digest was unreachable rather than merely cut. Wrapping
+   is the fix the file already applies to the same shape elsewhere (.event-facts code); it is not
+   a global overflow:hidden, and it hides nothing - the value stays whole, just on two lines. */
+code { font-size: var(--ow-type-meta); background: var(--ow-surface-2); border: 1px solid var(--ow-border); padding: 1px 4px; border-radius: var(--ow-radius-control); overflow-wrap: anywhere; }
 pre { margin: 0; }
 .icon { flex: none; display: inline-block; vertical-align: middle; }
 .muted { color: var(--ow-text-muted); }
