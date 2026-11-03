@@ -520,6 +520,12 @@ jobs:
       # surfaces did not, and a single job result would collapse the two into one.
       core_outcome: ${{ steps.core.outcome }}
       surfaces_outcome: ${{ steps.surfaces.outcome }}
+      # Diagnostics, carried as job outputs rather than left to the artifact: the record job composes
+      # health.json from the needs context, and a download step would go red whenever a cancelled
+      # smoke job left no artifact. Both are compact JSON summaries of the files the steps also write
+      # under artifacts/staging-preview/ (runner-network.json, playwright-timings.json).
+      runner_network: ${{ steps.netprobe.outputs.summary }}
+      playwright_timings: ${{ steps.timings.outputs.summary }}
     env:
       # Shared by every browser step below: one preview origin, one credential, one expected commit.
       OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
@@ -559,6 +565,289 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+
+      # Stage 1 and stage 2, measured on the machine that has never measured them: this runner.
+      #
+      # docs/acceptance/g12-staging-runner-measurement.md §7.1: four runs of this workflow at the
+      # same commit produced two failures and two passes with no code difference, and every
+      # measurement made anywhere else says the host is healthy - so the failure localises to the
+      # path between this runner and the host, by elimination only. Nothing inside the job had ever
+      # recorded what this runner's own network stack saw. This step does, immediately before the
+      # browsers start: DNS, TCP connect, TLS ('n/a' on this http origin), TTFB and total, four
+      # attempts per path, plus the runner's own nproc, load average and free memory.
+      #
+      # Diagnostics, never a gate: a failed probe is written into the JSON with its curl exit code
+      # and stderr, announced with ::warning::, and the step still exits 0. A probe that failed the
+      # run would turn "the path is bad" into "the job is red", which is the distinction this record
+      # exists to make. The file rides with artifacts/staging-preview and its summary is exported as
+      # the runner_network job output, which the record job carries into health.json.
+      - name: Measure the runner-side network path
+        id: netprobe
+        if: always()
+        # Bounded so a path that blackholes every attempt cannot hold the job open: the worst case
+        # is 16 attempts x curl --max-time 20 s (~5.3 min) plus process start-up.
+        timeout-minutes: 10
+        env:
+          STAGING_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts/staging-preview
+          # Never let an undefined output read as a measurement the record job can trust.
+          printf 'summary=%s\n' '{"available":false,"reason":"probe-did-not-complete"}' >> "${GITHUB_OUTPUT:-/dev/null}"
+          python3 - <<'PY'
+          import json, os, statistics, subprocess, time
+
+          OUT = os.environ.get("RUNNER_NETWORK_OUT", "artifacts/staging-preview/runner-network.json")
+          PATHS = ("/livez", "/readyz", "/api/v1/version", "/")
+          ATTEMPTS = 4
+          CURL_TEMPLATE = (
+              '{"http_code":"%{http_code}","dns_s":%{time_namelookup},"connect_s":%{time_connect},'
+              '"appconnect_s":%{time_appconnect},"starttransfer_s":%{time_starttransfer},'
+              '"total_s":%{time_total},"size_download":%{size_download},'
+              '"remote_ip":"%{remote_ip}","num_connects":%{num_connects}}'
+          )
+
+
+          def now_iso():
+              return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+          def runner_facts():
+              facts = {"nproc": os.cpu_count()}
+              try:
+                  with open("/proc/loadavg", encoding="utf-8") as handle:
+                      facts["loadavg"] = [float(value) for value in handle.read().split()[:3]]
+                  facts["loadavg_source"] = "/proc/loadavg"
+              except (OSError, ValueError):
+                  try:
+                      facts["loadavg"] = list(os.getloadavg())
+                      facts["loadavg_source"] = "os.getloadavg"
+                  except (OSError, AttributeError):
+                      facts["loadavg"] = None
+                      facts["loadavg_source"] = "unavailable"
+              try:
+                  memory = {}
+                  with open("/proc/meminfo", encoding="utf-8") as handle:
+                      for line in handle:
+                          key, _, rest = line.partition(":")
+                          if key in ("MemTotal", "MemFree", "MemAvailable"):
+                              memory[key + "_kb"] = int(rest.split()[0])
+                  facts["memory"] = memory or None
+                  facts["memory_source"] = "/proc/meminfo" if memory else "unavailable"
+              except (OSError, ValueError, IndexError):
+                  facts["memory"] = None
+                  facts["memory_source"] = "unavailable"
+              return facts
+
+
+          def curl_version():
+              try:
+                  completed = subprocess.run(["curl", "--version"], capture_output=True, text=True, timeout=10)
+                  first = (completed.stdout or "").strip().splitlines()
+                  return first[0] if first else None
+              except (OSError, subprocess.TimeoutExpired):
+                  return None
+
+
+          def millis(seconds):
+              try:
+                  return round(float(seconds) * 1000.0, 2)
+              except (TypeError, ValueError):
+                  return None
+
+
+          def probe_once(url, scheme):
+              command = ["curl", "-sS", "-o", os.devnull, "--connect-timeout", "10",
+                         "--max-time", "20", "-w", CURL_TEMPLATE, url]
+              started = time.time()
+              try:
+                  completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+              except (OSError, subprocess.TimeoutExpired) as exc:
+                  return {"ok": False, "curl_exit": None,
+                          "error": "%s: %s" % (type(exc).__name__, exc),
+                          "wall_ms": millis(time.time() - started)}
+              # One line, so the ::warning:: annotation stays one annotation per path.
+              stderr = " ".join((completed.stderr or "").split())
+              lines = (completed.stdout or "").strip().splitlines()
+              parsed, error = None, None
+              if lines:
+                  try:
+                      parsed = json.loads(lines[-1])
+                  except ValueError as exc:
+                      error = "unparseable curl -w output: %s" % exc
+              else:
+                  error = "curl -w produced no output"
+              if completed.returncode != 0:
+                  detail = "curl exit %d" % completed.returncode
+                  if stderr:
+                      detail += ": " + stderr
+                  error = (error + "; " + detail) if error else detail
+              if parsed is None:
+                  return {"ok": False, "curl_exit": completed.returncode,
+                          "error": error or "no measurement", "wall_ms": millis(time.time() - started)}
+              dns = millis(parsed.get("dns_s"))
+              connect = millis(parsed.get("connect_s"))
+              appconnect = millis(parsed.get("appconnect_s"))
+              tcp_connect = None if dns is None or connect is None else round(max(0.0, connect - dns), 2)
+              if scheme == "https":
+                  tls = "n/a" if tcp_connect is None or appconnect is None else round(max(0.0, appconnect - tcp_connect - dns), 2)
+              else:
+                  tls = "n/a"
+              http_code = parsed.get("http_code")
+              try:
+                  http_code = int(http_code)
+              except (TypeError, ValueError):
+                  pass
+              http_ok = isinstance(http_code, int) and 200 <= http_code < 400
+              ok = completed.returncode == 0 and http_ok
+              if not error and completed.returncode == 0 and not http_ok:
+                  error = "http %s" % http_code
+              return {
+                  "ok": ok,
+                  "curl_exit": completed.returncode,
+                  "http_code": http_code,
+                  "dns_ms": dns,
+                  "tcp_connect_ms": tcp_connect,
+                  "tls_ms": tls,
+                  "ttfb_ms": millis(parsed.get("starttransfer_s")),
+                  "total_ms": millis(parsed.get("total_s")),
+                  "size_download": parsed.get("size_download"),
+                  "remote_ip": parsed.get("remote_ip") or None,
+                  "num_connects": parsed.get("num_connects"),
+                  "error": error,
+              }
+
+
+          def stats(values):
+              numbers = [value for value in values if isinstance(value, (int, float))]
+              if not numbers:
+                  return None
+              return {"min": min(numbers), "median": round(statistics.median(numbers), 2), "max": max(numbers)}
+
+
+          def build(base):
+              scheme = "https" if base.lower().startswith("https://") else "http"
+              probes = []
+              for path in PATHS:
+                  url = base + path
+                  attempts = []
+                  for index in range(1, ATTEMPTS + 1):
+                      record = probe_once(url, scheme)
+                      record["attempt"] = index
+                      attempts.append(record)
+                  successes = [record for record in attempts if record["ok"]]
+                  failures = [record for record in attempts if not record["ok"]]
+                  probes.append({
+                      "path": path,
+                      "url": url,
+                      "attempts": attempts,
+                      "summary": {
+                          "attempts": len(attempts),
+                          "successes": len(successes),
+                          "failures": len(failures),
+                          "http_codes": sorted({record.get("http_code") for record in attempts
+                                                if record.get("http_code") is not None}, key=str),
+                          "dns_ms": stats([record.get("dns_ms") for record in successes]),
+                          "tcp_connect_ms": stats([record.get("tcp_connect_ms") for record in successes]),
+                          "tls_ms": "n/a" if scheme == "http" else stats([record.get("tls_ms") for record in successes]),
+                          "ttfb_ms": stats([record.get("ttfb_ms") for record in successes]),
+                          "total_ms": stats([record.get("total_ms") for record in successes]),
+                          "errors": [record["error"] for record in failures if record.get("error")],
+                      },
+                  })
+              if all(probe["summary"]["successes"] == ATTEMPTS for probe in probes):
+                  overall = "ok"
+              elif all(probe["summary"]["successes"] > 0 for probe in probes):
+                  overall = "degraded"
+              else:
+                  overall = "failed"
+              return scheme, probes, overall
+
+
+          def write_payload(payload):
+              directory = os.path.dirname(OUT)
+              if directory:
+                  os.makedirs(directory, exist_ok=True)
+              with open(OUT, "w", encoding="utf-8") as handle:
+                  json.dump(payload, handle, indent=2)
+                  handle.write("\n")
+
+
+          def emit_summary(payload):
+              compact = json.dumps(payload, separators=(",", ":"))
+              output = os.environ.get("GITHUB_OUTPUT")
+              if output:
+                  with open(output, "a", encoding="utf-8") as handle:
+                      handle.write("summary<<OPSWEAVE_NET_EOF\n%s\nOPSWEAVE_NET_EOF\n" % compact)
+
+
+          def main():
+              base = (os.environ.get("STAGING_BASE_URL", "") or "").strip().rstrip("/")
+              if not base:
+                  payload = {"schema": "opsweave.runner-network/1", "available": False,
+                             "reason": "STAGING_BASE_URL-empty", "recorded_at": now_iso()}
+                  write_payload(payload)
+                  emit_summary(payload)
+                  print("::warning::runner network probe did not run: STAGING_BASE_URL is empty")
+                  return
+              scheme, probes, overall = build(base)
+              payload = {
+                  "schema": "opsweave.runner-network/1",
+                  "available": True,
+                  "recorded_at": now_iso(),
+                  "base_url": base,
+                  "scheme": scheme,
+                  "attempts_per_path": ATTEMPTS,
+                  "curl_version": curl_version(),
+                  "runner": runner_facts(),
+                  "time_semantics": ("All values are milliseconds. dns_ms = curl time_namelookup; "
+                                     "tcp_connect_ms = time_connect - time_namelookup; tls_ms = "
+                                     "time_appconnect - time_connect (https only, 'n/a' on http); ttfb_ms = "
+                                     "time_starttransfer; total_ms = time_total. ttfb_ms and total_ms are "
+                                     "cumulative from the start of the request, as curl defines them."),
+                  "overall": overall,
+                  "paths": probes,
+              }
+              write_payload(payload)
+              summary = {
+                  "schema": payload["schema"],
+                  "available": True,
+                  "source": "artifacts/staging-preview/runner-network.json (staging-smoke artifact)",
+                  "recorded_at": payload["recorded_at"],
+                  "base_url": base,
+                  "attempts_per_path": ATTEMPTS,
+                  "curl_version": payload["curl_version"],
+                  "runner": payload["runner"],
+                  "overall": overall,
+                  "paths": [{"path": probe["path"], **{key: probe["summary"][key] for key in
+                             ("successes", "failures", "http_codes", "dns_ms", "tcp_connect_ms",
+                              "tls_ms", "ttfb_ms", "total_ms", "errors")}}
+                            for probe in probes],
+              }
+              emit_summary(summary)
+              print(json.dumps(summary, indent=2))
+              for probe in probes:
+                  failed = probe["summary"]["failures"]
+                  if failed:
+                      errors = "; ".join(dict.fromkeys(probe["summary"]["errors"])) or "unknown error"
+                      print("::warning::runner network probe %s: %d/%d attempts failed (%s)"
+                            % (probe["path"], failed, probe["summary"]["attempts"], errors))
+              print("runner network probe: %s" % overall)
+
+
+          try:
+              main()
+          except Exception as exc:
+              payload = {"schema": "opsweave.runner-network/1", "available": False,
+                         "reason": "probe-crashed", "recorded_at": now_iso(),
+                         "error": "%s: %s" % (type(exc).__name__, exc)}
+              try:
+                  write_payload(payload)
+                  emit_summary(payload)
+              finally:
+                  print("::warning::runner network probe crashed: %s" % payload["error"])
+          PY
+          exit 0
 
       # Which job covers which spec file. The lists are literal file filters - never a substring
       # guess and never --grep - and every spec under tests/ui/ is owned by exactly one job:
@@ -601,7 +890,12 @@ jobs:
         timeout-minutes: 20
         run: |
           set -euo pipefail
-          mkdir -p artifacts/staging-preview
+          mkdir -p artifacts/staging-preview/timings
+          # Bounds for "Record Playwright wall-clock durations", below the last suite: the trap
+          # writes the end marker even when this step fails, so a slow run and a failed run can be
+          # told apart after the fact. Seconds resolution is enough for steps that take minutes.
+          date +%s > artifacts/staging-preview/timings/core.start
+          trap 'date +%s > artifacts/staging-preview/timings/core.end' EXIT
           pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/core \
             staging-smoke.spec.ts \
             dual-surface.spec.ts \
@@ -617,7 +911,11 @@ jobs:
         timeout-minutes: 40
         run: |
           set -euo pipefail
-          mkdir -p artifacts/staging-preview
+          mkdir -p artifacts/staging-preview/timings
+          # Same wall-clock bounds as the core step; absent (and recorded as such) when the tier
+          # skipped this step.
+          date +%s > artifacts/staging-preview/timings/surfaces.start
+          trap 'date +%s > artifacts/staging-preview/timings/surfaces.end' EXIT
           # A separate --output keeps a failed core trace from being overwritten by this run.
           pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/surfaces \
             admin-pages.spec.ts \
@@ -741,6 +1039,11 @@ jobs:
           V3_OUT: ${{ github.workspace }}/artifacts/staging-preview/metrics
         run: |
           set -euo pipefail
+          mkdir -p artifacts/staging-preview/timings
+          # Same wall-clock bounds as the two suites above; this Playwright pass is the last one
+          # that writes into artifacts/staging-preview between the probe and the timing record.
+          date +%s > artifacts/staging-preview/timings/metrics.start
+          trap 'date +%s > artifacts/staging-preview/timings/metrics.end' EXIT
           mkdir -p artifacts/staging-preview/metrics
           pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/metrics \
             ui-table-audit.spec.ts
@@ -754,6 +1057,116 @@ jobs:
           # ls first: when the audit step died, this log says so instead of leaving a bare exit 1.
           ls -la artifacts/staging-preview/metrics
           node scripts/check-ui-metrics.mjs artifacts/staging-preview/metrics
+
+      # A slow run and a failed run are different evidence, and the step outcome alone cannot tell
+      # them apart: core "failure" after 180 s is a stall, core "success" after 19 min is a slow path
+      # that still got there. The runner does not expose per-step durations to the job, so each
+      # Playwright step above writes its own start/end markers (the end via an EXIT trap, so a failed
+      # step has one too) and this step reads them back. Diagnostics only, like the probe: it exits 0
+      # and its file rides with artifacts/staging-preview.
+      - name: Record Playwright wall-clock durations
+        id: timings
+        if: always()
+        env:
+          CORE_OUTCOME: ${{ steps.core.outcome }}
+          SURFACES_OUTCOME: ${{ steps.surfaces.outcome }}
+          METRICS_OUTCOME: ${{ steps.metrics.outcome }}
+        run: |
+          set -uo pipefail
+          mkdir -p artifacts/staging-preview
+          printf 'summary=%s\n' '{"available":false,"reason":"timings-did-not-complete"}' >> "${GITHUB_OUTPUT:-/dev/null}"
+          python3 - <<'PY'
+          import json, os, time
+
+          OUT = os.environ.get("PLAYWRIGHT_TIMINGS_OUT", "artifacts/staging-preview/playwright-timings.json")
+          MARKER_DIR = os.environ.get("PLAYWRIGHT_TIMINGS_DIR", "artifacts/staging-preview/timings")
+          STEPS = (
+              ("core", "Playwright core paths (staging smoke, dual surface, admin shell)", "CORE_OUTCOME"),
+              ("surfaces", "Playwright admin, plugin, i18n and g08 surfaces", "SURFACES_OUTCOME"),
+              ("metrics", "Table geometry audit (Playwright, writes _metrics_*.json)", "METRICS_OUTCOME"),
+          )
+
+
+          def read_epoch(name):
+              try:
+                  with open(os.path.join(MARKER_DIR, name), encoding="utf-8") as handle:
+                      return float((handle.read() or "").strip())
+              except (OSError, ValueError):
+                  return None
+
+
+          def main():
+              now = time.time()
+              steps = []
+              for step, title, outcome_env in STEPS:
+                  started = read_epoch("%s.start" % step)
+                  ended = read_epoch("%s.end" % step)
+                  end_source = "end-marker"
+                  if ended is None and started is not None:
+                      ended = now
+                      end_source = "timing-step-clock"
+                  outcome = (os.environ.get(outcome_env, "") or "").strip()
+                  steps.append({
+                      "step": step,
+                      "title": title,
+                      "outcome": outcome or "not-evaluated",
+                      "outcome_recorded": outcome in ("success", "failure"),
+                      "started_epoch": round(started, 3) if started is not None else None,
+                      "ended_epoch": round(ended, 3) if ended is not None else None,
+                      "elapsed_seconds": round(ended - started, 2) if started is not None and ended is not None else None,
+                      "end_source": end_source if started is not None else "no-start-marker",
+                  })
+              measured = [entry["elapsed_seconds"] for entry in steps if entry["elapsed_seconds"] is not None]
+              payload = {
+                  "schema": "opsweave.playwright-timings/1",
+                  "available": True,
+                  "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "note": ("elapsed_seconds is wall clock between the start and end markers the Playwright step "
+                           "writes itself (end marker via an EXIT trap, so a failed step still has one). A step "
+                           "the tier/mode skipped has no markers and null elapsed_seconds. outcome is the step's "
+                           "own recorded outcome, so a slow run (success, long) is distinguishable from a "
+                           "failed one (failure, any duration)."),
+                  "steps": steps,
+                  "total_playwright_seconds": round(sum(measured), 2) if measured else None,
+              }
+              directory = os.path.dirname(OUT)
+              if directory:
+                  os.makedirs(directory, exist_ok=True)
+              with open(OUT, "w", encoding="utf-8") as handle:
+                  json.dump(payload, handle, indent=2)
+                  handle.write("\n")
+              summary = {
+                  "schema": payload["schema"],
+                  "available": True,
+                  "source": "artifacts/staging-preview/playwright-timings.json (staging-smoke artifact)",
+                  "recorded_at": payload["recorded_at"],
+                  "steps": [{"step": entry["step"], "outcome": entry["outcome"],
+                             "elapsed_seconds": entry["elapsed_seconds"]} for entry in steps],
+                  "total_playwright_seconds": payload["total_playwright_seconds"],
+              }
+              compact = json.dumps(summary, separators=(",", ":"))
+              output = os.environ.get("GITHUB_OUTPUT")
+              if output:
+                  with open(output, "a", encoding="utf-8") as handle:
+                      handle.write("summary<<OPSWEAVE_TIMINGS_EOF\n%s\nOPSWEAVE_TIMINGS_EOF\n" % compact)
+              print(json.dumps(summary, indent=2))
+
+
+          try:
+              main()
+          except Exception as exc:
+              payload = {"schema": "opsweave.playwright-timings/1", "available": False,
+                         "reason": "timings-crashed",
+                         "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                         "error": "%s: %s" % (type(exc).__name__, exc)}
+              try:
+                  with open(OUT, "w", encoding="utf-8") as handle:
+                      json.dump(payload, handle, indent=2)
+                      handle.write("\n")
+              finally:
+                  print("::warning::playwright timing record crashed: %s" % payload["error"])
+          PY
+          exit 0
 
       # The core and surfaces steps above drive admin-pages, admin-polish, g08-batch-c*,
       # overview-partial, async-stale, i18n-locale, dialog-a11y, business-workspace,
@@ -1112,6 +1525,13 @@ jobs:
           DEPLOY_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
           # The deploy step's own outcome: it exits 0 only after /livez, /readyz and / answer.
           DEPLOY_STEP_OUTCOME: ${{ needs.deploy.outputs.result }}
+          # Diagnostics from the smoke job. They are parsed AFTER `verdicts` is computed and nothing
+          # below branches on them: the runner's own network view (docs/acceptance/
+          # g12-staging-runner-measurement.md §7.1) and each Playwright step's wall-clock duration.
+          # A degraded path here is evidence, not a verdict - it must not turn a suite failure into
+          # UNVERIFIED or a green run into anything else.
+          RUNNER_NETWORK: ${{ needs.smoke.outputs.runner_network }}
+          PLAYWRIGHT_TIMINGS: ${{ needs.smoke.outputs.playwright_timings }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
@@ -1524,6 +1944,35 @@ jobs:
               "code_acceptance": code_verdict,
           }
 
+          # Diagnostics, never verdict inputs. The smoke job exports compact JSON summaries; an
+          # empty output means the job never produced one (not run, or the step never reached), and
+          # that is recorded as unavailable rather than as a silent absence.
+          def optional_json_env(name):
+              raw = (os.environ.get(name, "") or "").strip()
+              if not raw:
+                  return {"available": False, "reason": "no-output",
+                          "detail": "the smoke job produced no %s output (job not run, or the step "
+                                    "never reached)" % name.lower()}
+              try:
+                  value = json.loads(raw)
+              except ValueError:
+                  return {"available": False, "reason": "unparseable-output",
+                          "raw_head": raw[:300]}
+              if not isinstance(value, dict):
+                  return {"available": False, "reason": "not-an-object"}
+              value.setdefault("available", True)
+              return value
+
+
+          runner_network = optional_json_env("RUNNER_NETWORK")
+          playwright_timings = optional_json_env("PLAYWRIGHT_TIMINGS")
+          if runner_network.get("available") and runner_network.get("overall") != "ok":
+              failed_paths = [probe.get("path") for probe in (runner_network.get("paths") or [])
+                              if isinstance(probe, dict) and probe.get("failures")]
+              print("::warning::runner-side network was %s in this run (health.json runner_network): %s"
+                    % (runner_network.get("overall") or "unknown",
+                       ", ".join(str(path) for path in failed_paths) or "see paths"))
+
           payload = {
               "mode": MODE,
               "tier": TIER,
@@ -1531,6 +1980,11 @@ jobs:
               "base_url": os.environ.get("OPSWEAVE_URL", ""),
               "verdicts": verdicts,
               "deployment_facts": deployment_facts,
+              # Diagnostics only, and deliberately outside `checks`: no verdict expression above
+              # reads them. They exist so the next failure is attributable from inside this job
+              # instead of by elimination against a machine that is not the runner.
+              "runner_network": runner_network,
+              "playwright_timings": playwright_timings,
               "ok": ok,
               "checks": checks,
               "seeds": SEEDS,
