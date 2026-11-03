@@ -120,6 +120,40 @@ evidence that the product is fine, and it is also not evidence that it is broken
 run does not certify a deployment either: `deployment_environment` is computed from the served
 commit and the health probes, which the suites do not check.
 
+## 6.1 Second observation, after the split verdict shipped (run 41594502897, b3681b5)
+
+This run is the first in which the two verdicts were computed from live facts, and it is worth
+recording because **both** of them behaved as designed for the first time:
+
+```
+verdicts: {"deployment_environment": "PASSED", "code_acceptance": "FAILED"}
+deployment_facts: {"deploy_job": "success", "served_sha": "b3681b55…", "expected_sha": "b3681b55…",
+                   "deploy_healthy": true}
+```
+
+- The deployment verdict is now answerable: served SHA equals the built SHA, and the deploy job's
+  own result is a success. The preceding run (`873aa6f`) had reported `UNVERIFIED` here because
+  the record job was parsing a file that lives in the deploy job's artifact; that is fixed in
+  `b3681b5` and this run is the evidence.
+- `code_acceptance` is `FAILED`, and this time it is a real suite failure: 16 passed, 2 failed
+  with `page.goto … Test timeout of 60000ms exceeded`. The failing legs were `navigate to /login`
+  (admin-shell case 6) and the sign-in probe (dual-surface case 9).
+
+The same suite, same commit, same host, from a non-runner machine: **19 passed (1.2 min)**. Host
+`/livez` answered in 33–42 ms throughout. So the earlier conclusion stands unchanged and is
+re-confirmed: nothing measured outside the runner supports a product or host defect, and the
+runner-side cause remains **unproven**.
+
+One measurable improvement did come out of the first observation: the legacy-URL case, which
+previously consumed its whole 180 s budget on the runner (`2026-11-02` run), took **1.2 min** in
+this run because each navigation now has its own 30 s budget and waits for `commit` rather than
+`load`.
+
+The two cases that failed here are the same shape, so they were given the same treatment after
+this run: `admin-shell.spec.ts`'s `login()` and `dual-surface.spec.ts`'s `signIn()` now await
+`commit` with a 30 s budget. That makes the failing leg nameable; it does not make a slow path
+fast, and it is not offered as a fix for the runner.
+
 ## 7. Still open
 
 1. **The runner-side cause is UNPROVEN.** Isolating it needs something this environment cannot

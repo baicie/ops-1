@@ -51,7 +51,11 @@ function trackNavigations(page: Page): string[] {
 async function signIn(page: Page) {
   // Registered before the navigation: the probe fires while the bundle is still executing.
   const bootstrapProbe = page.waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: 20_000 });
-  await page.goto('/login');
+  // `commit` with its own budget, as the legacy-URL case in this file explains: what this waits
+  // for is the form, not /login's last subresource. Measured on run 41594502897: one case consumed
+  // its entire 60 s test budget here, and the report read "page.goto: Test timeout" rather than
+  // naming the navigation.
+  await page.goto('/login', { waitUntil: 'commit', timeout: 30_000 });
   await bootstrapProbe;
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
