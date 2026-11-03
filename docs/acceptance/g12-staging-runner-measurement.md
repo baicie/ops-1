@@ -213,9 +213,46 @@ budget (`b09a07f`), 1.2 min on a slow run (`b3681b5`), 53 s failure at the expec
    workflow at `b3681b5`, `ec658d2` and `f834402` produced two failures and two passes with no
    code difference that could account for it (the reverted tree and the tree that failed both use
    default `load` on the sign-in path). Isolating it needs something this environment cannot read:
-   the job's network counters. A `curl -w` timing probe emitted *inside* the smoke job before
-   Playwright starts would settle stage 1 and stage 2 from the runner's own view; that is a change
-   to the workflow's diagnostics, not to its thresholds, and is the recommended next step.
+   the job's network counters.
+
+   **The probe now exists.** Two steps were added to the `smoke` job, and neither touches a
+   threshold, a retry or an assertion:
+
+   - *Measure the runner-side network path* (`id: netprobe`) runs after Chromium is installed and
+     immediately before the first Playwright step. For `/livez`, `/readyz`, `/api/v1/version` and
+     `/` it runs `curl -w` with a JSON template **four times per path** and records DNS resolution,
+     TCP connect, TLS handshake (`n/a` on the http origin), time to first byte and total, plus the
+     runner's `nproc`, load average and free memory. It writes
+     `artifacts/staging-preview/runner-network.json` (uploaded with the `staging-smoke` artifact)
+     and exports a compact summary that the record job carries into `health.json` as
+     `runner_network`. A failed attempt is recorded with its curl exit code and stderr, announced
+     with `::warning::`, and the step still exits 0: a failed probe is data about the path, not a
+     red job, and the file is written on every path, including `STAGING_BASE_URL` being empty.
+   - *Record Playwright wall-clock durations* (`id: timings`) runs after the last Playwright step.
+     Each Playwright step writes its own start/end markers (the end via an `EXIT` trap, so a failed
+     step still has one), and this step records elapsed seconds per step next to that step's
+     outcome in `artifacts/staging-preview/playwright-timings.json`, carried into `health.json` as
+     `playwright_timings`. A slow run (`success`, long) is now distinguishable from a failed one
+     (`failure`, any duration).
+
+   Neither new key is read by the `verdicts` expressions: they are computed before the diagnostics
+   are attached, and a degraded `runner_network` cannot turn a suite failure into `UNVERIFIED` or
+   a green run into anything else. This was checked locally by composing `health.json` with a
+   synthetic all-failed network summary and with no summary at all: the verdicts were identical in
+   all three cases.
+
+   **What it will settle.** On the next failing run, if the runner's own DNS/connect/TTFB/TLS
+   numbers for `/livez` and `/readyz` are also stalled, the path between runner and host is
+   implicated with evidence from the machine that failed. If those probes are normal while
+   Playwright stalls, the path is not the binding constraint and the next place to look is the
+   browser/process side of the runner (the timings file names which step was slow). In neither
+   case does the probe fix anything; it replaces elimination with a measurement taken inside the
+   job.
+
+   **Not yet measured in-job.** These two steps have only been validated locally (YAML parse,
+   embedded-Python compile, and a dry run of the probe against `http://82.156.234.84:3000`). The
+   first real in-job measurement is the next push to `main`, and no runner-side number is claimed
+   here until a run reports one.
 2. **`/api/v1/diagnostics` stays in flight after `load`** on `/access` (measured here: still
    pending 500 ms after load, answering in 30-50 ms when called directly with no session). It did
    not cause the observed failure - the failure was `load` itself never firing - but a request
