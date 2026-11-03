@@ -51,11 +51,11 @@ function trackNavigations(page: Page): string[] {
 async function signIn(page: Page) {
   // Registered before the navigation: the probe fires while the bundle is still executing.
   const bootstrapProbe = page.waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: 20_000 });
-  // `commit` with its own budget, as the legacy-URL case in this file explains: what this waits
-  // for is the form, not /login's last subresource. Measured on run 41594502897: one case consumed
-  // its entire 60 s test budget here, and the report read "page.goto: Test timeout" rather than
-  // naming the navigation.
-  await page.goto('/login', { waitUntil: 'commit', timeout: 30_000 });
+  // Default `load`, deliberately. A `commit` + 30 s variant was measured on run 41597654753 and
+  // REVERTED: it returned before the bundle executed, so the 20 s probe below became the binding
+  // constraint and three cases failed instead of two. The cost of a slow path has to be paid by
+  // the step that owns the wait; moving it to a shorter budget does not shorten the path.
+  await page.goto('/login');
   await bootstrapProbe;
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
@@ -187,17 +187,23 @@ test('the legacy URLs land on their canonical /admin path and drop unlisted quer
     // measured separately), which reads as "the product hung" and is not. The budget below names
     // the leg that is slow when one is, instead of blaming whichever test happened to own it.
     await page.goto(from, { waitUntil: 'commit', timeout: 30_000 });
-    await expect(page, from + ' -> ' + to).toHaveURL(new RegExp(to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
+    // `waitForURL`, not `toHaveURL`: once the navigation waits for `commit`, the client-side
+    // redirect happens after the bundle executes, and the assertion's 10 s expect budget became
+    // the binding constraint on a slow path (run 41597654753: this case failed at 53 s with
+    // "expect(page).toHaveURL ... Timeout: 10000ms"). The redirect is the thing under test, so it
+    // gets its own named budget instead of inheriting a default meant for a rendered page.
+    // A failure names the expected canonical URL and the budget it was given.
+    await page.waitForURL(new RegExp(to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), { timeout: 30_000 });
   }
 
   // No open redirect: a parameter the destination does not read is dropped, not forwarded.
   await page.goto('/nodes?next=https://evil.example/steal', { waitUntil: 'commit', timeout: 30_000 });
-  await expect(page).toHaveURL(/\/admin\/nodes$/);
+  await page.waitForURL(/\/admin\/nodes$/, { timeout: 30_000 });
   expect(new URL(page.url()).search).toBe('');
 
   // A path that is not in the table stays a 404 - the compatibility layer is a closed list.
   await page.goto('/not-a-known-route', { waitUntil: 'commit', timeout: 30_000 });
-  await expect(page).toHaveURL(/\/not-a-known-route$/);
+  await page.waitForURL(/\/not-a-known-route$/, { timeout: 30_000 });
 });
 
 test('the workspace states what is missing instead of inventing business data', async ({ page }) => {

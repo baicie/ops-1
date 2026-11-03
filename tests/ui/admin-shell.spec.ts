@@ -11,13 +11,17 @@ const EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 const OUT = path.resolve('../../artifacts/ui-admin-shell-v2');
 
+/**
+ * Signs in. The navigation keeps the default `load` semantics and the test's own budget.
+ *
+ * A `commit` + 30 s variant was measured on run 41597654753 and REVERTED: returning before the
+ * bundle executes moved the wait onto the next step, and three cases failed (two `/auth/me`
+ * probes at their 20 s budget, one redirect assertion at its 10 s expect budget) where `load` had
+ * failed two. Redistributing a slow path's cost between budgets is not a fix; it only changes
+ * which line reports it.
+ */
 async function login(page: Page) {
-  // `commit` with its own budget, for the reason dual-surface.spec.ts records for its legacy-URL
-  // case: this waits for the login FORM, not for the last subresource of /login. On a slow path
-  // the default `load` spends the whole 60 s test budget inside this one call and the failure
-  // reads as "the shell is broken" - measured twice on the runner (run 41594502897: this file's
-  // case 6 and dual-surface's case 9, both exactly 60.0 s, both here).
-  await page.goto('/login', { waitUntil: 'commit', timeout: 30_000 });
+  await page.goto('/login');
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.click('[data-testid="login-submit"]');

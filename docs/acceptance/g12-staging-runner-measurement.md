@@ -154,6 +154,34 @@ this run: `admin-shell.spec.ts`'s `login()` and `dual-surface.spec.ts`'s `signIn
 `commit` with a 30 s budget. That makes the failing leg nameable; it does not make a slow path
 fast, and it is not offered as a fix for the runner.
 
+## 6.2 Third observation: giving the sign-in legs their own budget made it worse (run 41597654753, ec658d2)
+
+The previous run's two failures were both `page.goto('/login')` waiting for `load`, so the same
+treatment the legacy-URL case received was applied to `signIn()` and `login()`: `commit` plus a
+30 s navigation budget. Measured on the next run:
+
+```
+16 passed, 3 failed (5.0 min)
+  dual-surface:108  waitForResponse /api/v1/auth/me  20.2 s
+  dual-surface:132  waitForResponse /api/v1/auth/me  20.2 s
+  dual-surface:145  expect(page).toHaveURL           53.1 s (Timeout: 10000ms)
+```
+
+Two failures became three. `commit` returns before the bundle executes, so the cost of the slow
+path moved onto the next, *shorter* budget: the 20 s bootstrap probe (which starts before the
+navigation) and the 10 s `expect` default. **The change was reverted** — the sign-in helpers keep
+default `load` and the test's own budget.
+
+What was kept, because it targets a real binding constraint rather than moving cost around: the
+legacy-URL case waits for `commit` (its subject is where the URL lands, not that a page finished
+loading), and its redirect assertions now use `page.waitForURL(..., { timeout: 30_000 })` instead
+of `toHaveURL`'s 10 s default, because after `commit` the client redirect happens only once the
+bundle has run.
+
+The lesson is recorded because it is the second time this shape appeared: on a slow leg, every
+wait that is shortened becomes the next failure's budget. That is why this document does not
+claim the runner problem is fixed, and why no global timeout was raised.
+
 ## 7. Still open
 
 1. **The runner-side cause is UNPROVEN.** Isolating it needs something this environment cannot
