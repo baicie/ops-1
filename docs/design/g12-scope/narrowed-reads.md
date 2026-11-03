@@ -1,6 +1,6 @@
 # 窄读与空态：谁说「没有」，谁只是「你看不到」
 
-- 状态：**#2 已实现并实测**；**#3 已收窄并实测**（`seesAll` 已移除，见 §3）；**#4 未修（未实测）**；**/api/v1/overview 的 attention 未修（部分未验证）**
+- 状态：**#2 已实现并实测**；**#3 已收窄并实测**（`seesAll` 已移除，见 §3）；**#4 未修（未实测）**；**/api/v1/overview 的 attention 未修（部分未验证）**；**§9 第 2 条（谓词与枚举的绑定）已闭合，见 §9.2**
 - 分支/基线：`feat/g12-ai-investigator` @ `7785ccb`（本轮改动未提交）
 - 契约：`contracts/openapi/incident-v1.yaml`（`IncidentList.scope` / `IncidentScope`）
 - 理由的书面记录：**本文件 §3** ＋ **ADR-G11-001 §4.6**（`docs/design/g11-incident/incident-adr.md`）。上一轮因文件预算跳过 ADR，本轮补上：契约头要求「改字段先改 ADR」，而本轮**删掉**了一个字段，比加字段更该有书面理由。
@@ -362,10 +362,32 @@ cd tests/ui && pnpm exec playwright test g11-incident-slice.spec.ts    -> 5 pass
 **会。有三种，性质不同。** 收窄字段只取消了「响应自己说出这句话」的许可，没有取消这个读法。
 
 1. **人可以继续推断，只是不再由载荷授权。** `null` 仍然是「没有命名收窄」，读者仍可推出「那我拿到了全部」。没有字段能阻止推断；现在挡住它的是文案纪律（§3.3）与「三个角色形状相同、只有一个键」那条线上测试。这是**弱保护**，靠的是每个写文案的人读这份文件。
-2. **结构性缺口：`narrowedTo` 只枚举了一个谓词。** 将来任何一层行级过滤（软删除、租户、归档、scope_id）加到这个列表上，`null` 立刻又能被读成「全部」——而且这次响应**没有撒谎**，因为它从来没说过那句话。契约的 `additionalProperties: false` 只锁形状、不锁枚举值，**没有任何机制强制新的 WHERE 子句同时扩充这个枚举**。这是我认为下一轮最该补的一处：谓词与枚举必须绑定，否则同样的读法会在新谓词上重演一次，而这次的辩护是「字段本来就没承诺」。
+2. **结构性缺口：`narrowedTo` 只枚举了一个谓词。** ~~将来任何一层行级过滤（软删除、租户、归档、scope_id）加到这个列表上，`null` 立刻又能被读成「全部」……没有任何机制强制新的 WHERE 子句同时扩充这个枚举。~~ **已于 2026-11-03 由「谓词即报告」的单一值闭合，见下面的 §9.2。**
 3. **有一个角色上，`null` 今天字面上就是「全部」：viewer。** §7.1 实测 viewer 与 admin 拿到同样的 6 条。字段不再**断言**它，但 UI 那句「这次读没有按 owner 收窄」是真的，而它背后的事实仍是 D5 的偶然放宽。也就是说：**收窄让句子变真了，但没有让这个角色变窄**。D5 定案前，viewer 的 `null` 是「null 被读成全部」的最强反例，只不过这次错在谓词，不在字段。
 4. **浏览器里还留着第二份抄本**：`apps/platform-web/src/incidents.ts:291` 仍按角色推 `seesAll`（详情页的 `outOfScope` 文案）。那是唯一一处仍然由**角色**而不是**载荷**决定「你看到全部」的地方；D5 一改，它会静默漂移。已记录（§3.4 末），本轮未改。
 
-一句话结论：**字段本身已经不会再声称「全部」，但「null ⇒ 全部」这个读法还需要一条机器可执行的绑定（第 2 条）和一个 D5 的决定（第 3 条）才能真正关掉。**
+### 9.2 谓词即报告（2026-11-03，闭合本节第 2 条）
+
+**改法**（`apps/kernel/src/scope.rs` + `apps/kernel/src/incidents.rs`，谓词文本一个字节未改）：
+
+| 之前 | 之后 |
+|---|---|
+| `scope::predicate(...) -> String`；调用方另算 `caller.sees_every_row()` 绑定 `$all_rows` | `predicate(...) -> RowPredicate { sql, all_rows, narrowing }`，字段私有、唯一构造器；绑定布尔与 `Narrowing` 在同一个 match 里决定 |
+| `scope_view(&DataScope)` 用 `sees_every_row()` 反推 `narrowedTo` | `scope_view(&RowPredicate, workspaceCount)` 只读谓词自己携带的 `Narrowing`；`scope_view(&DataScope)` 已不存在 |
+| `query_incidents` 返回 `(items, nextCursor)`，handler 另行描述这次读 | `query_incidents` 返回 `IncidentRead { items, nextCursor, predicate }`，handler 从 `read.predicate` 生成 scope |
+| 无枚举类型，只有字符串字面量 | `Narrowing` + 穷举的 `wire_name()`：新增收窄变体不写线上名字就编译失败 |
+
+- 六处 incident 读（list / detail / evidence 统一门 / verdict / close / transfer）全部改为从 `DataScope::row_predicate(...)` 取 SQL 与 `all_rows()` 绑定；`audit::visibility_sql` 同样接受 `RowRule` 并取 `.sql()`。线上形状不变：`narrowedTo: 'owner' | null`、`workspaceCount` 不变、`additionalProperties: false` 不变，契约本身未改。
+- DB 测试 `every_narrowing_the_read_applies_is_named_for_every_role`：对 admin / operator / viewer 各做一次真实读，**只用响应里的 `narrowedTo`** 计算「这个角色被许可看到哪些 fixture 行」，再与实际返回比较；不按角色表、不按实现里的第二个布尔。
+- 反事实（代码未提交，输出见 commit message）：在 `query_incidents` 的列表 WHERE 里临时追加 `AND i.severity <> 'MINOR'` 且不新增 `Narrowing`。admin 的读仍报 `narrowedTo: null`，却少返回一条 MINOR 行，测试以 `admin: the rows the predicate returned are not the rows narrowedTo=None licenses`（`left` 2 行 / `right` 3 行）失败；恢复后全绿。这证明测试真的把「SQL 少了行」与「报告没变」钉在一起。（顺带观察到：同一句加进 `predicate()` 时，连 `insert_incident` 的回读都会 404——谓词被所有读路径共用，这也说明它不能只改一个面。）
+
+**残余风险（仍然存在，不能读成「已彻底解决」）**：
+
+1. **编译期能强制「类型上的收窄」，不能强制「字符串里的收窄」。** 在 `predicate()` 内直接 `push_str(" AND ...")` 而不碰 `narrowing` 不会编译失败；它只能被上面的 DB 测试在**改变 fixture 行集**时抓到。像 `archived_at IS NULL` 这种在当前 fixture 上暂时不删行的子句，要等到有归档数据才会被观察到。边界因此是：机制从「依靠注释」变成「唯一构造器 + 穷举映射 + 行集 oracle」，但 Rust 无法阻止函数内部拼字符串。
+2. **`narrowedTo` 仍只能命名一个收窄。** `RowPredicate.narrowing` 是 `Option<Narrowing>`；若将来一次读同时叠加两种收窄，必须把它改成多值类型，`scope_view` 会编译失败，从而迫使契约先扩容。这是故意的：今天的线上枚举只有 `'owner' | null`，代码不能偷偷多报一个值。
+3. **工作区边界不在 `Narrowing` 里。** 它由 `workspaceCount` 报告，绑定值来自 `DataScope.workspaces`；oracle 测试只比较 fixture 所在工作区内的行。工作区集合语义（成员关系从哪来）仍需单独审查，本条不覆盖。
+4. §3.4 末的浏览器第二份抄本（`apps/platform-web/src/incidents.ts:291`）不变，仍归 D5 决策项处理。
+
+一句话结论：**字段本身已经不会再声称「全部」；「null ⇒ 全部」的第 2 条结构性读法现在有了机器可执行的绑定（§9.2）。第 3 条（viewer）已由 ADR-D5-001 的 Business Workspace 模型取代，本节 §7.1 的实测是 D5 之前的状态；第 1 条（人的推断）与第 4 条（浏览器第二份抄本）仍是残余。**
 
 

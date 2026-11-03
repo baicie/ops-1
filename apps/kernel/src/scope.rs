@@ -146,6 +146,27 @@ impl DataScope {
         self.rows == RowRule::AllRows
     }
 
+    /// The row predicate for a query whose parameter positions the caller numbers.
+    ///
+    /// The returned value carries the clause, the boolean to bind at `all_rows_param`,
+    /// and the narrowing the read reports - all derived here from the same `RowRule`,
+    /// so a caller cannot bind or report a different one from the rule the SQL applies.
+    pub(crate) fn row_predicate(
+        &self,
+        alias: &str,
+        workspace_param: usize,
+        all_rows_param: usize,
+        user_param: usize,
+    ) -> RowPredicate {
+        predicate(
+            alias,
+            workspace_param,
+            all_rows_param,
+            user_param,
+            self.rows,
+        )
+    }
+
     /// How many workspaces bounded this read, as the route reports it beside the
     /// rows. A count and not a boolean: zero is the one value that explains an
     /// otherwise inexplicable empty page ("you are a member of no workspace, so no
@@ -169,6 +190,62 @@ impl DataScope {
     }
 }
 
+/// A row-level narrowing that a response can name.
+///
+/// The enum exists so that adding a narrowing is a compile-time decision about
+/// reporting, not a comment: `IncidentScopeView::narrowed_to` maps a `Narrowing`
+/// through `wire_name`, whose match is exhaustive over this enum. A new variant
+/// therefore does not compile until someone decides what the wire calls it - or
+/// decides it is not nameable, which is a change to the wire contract and not a
+/// silent extra WHERE clause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Narrowing {
+    /// The ownership half: `owner = caller`, applied by `RowRule::OwnedRows`.
+    Owner,
+}
+
+impl Narrowing {
+    /// The name this narrowing travels under in a response body.
+    pub(crate) const fn wire_name(self) -> &'static str {
+        match self {
+            Narrowing::Owner => "owner",
+        }
+    }
+}
+
+/// Which rows a read returns, as one value: the SQL clause, the value bound at
+/// `all_rows_param`, and the narrowing the response reports.
+///
+/// The three parts are produced together by `predicate` and cannot be assembled by a
+/// caller (the fields are private). A query binds `all_rows()` and embeds `sql()`; a
+/// response that describes the read reports `narrowing()`. There is no second way to
+/// obtain one of them, so a clause added to the predicate and a narrowing reported
+/// beside it cannot be two independent expressions.
+#[derive(Debug, Clone)]
+pub(crate) struct RowPredicate {
+    sql: String,
+    all_rows: bool,
+    narrowing: Option<Narrowing>,
+}
+
+impl RowPredicate {
+    /// The WHERE fragment. Borrowed, not cloned: the predicate stays the one value
+    /// the query and the response share.
+    pub(crate) fn sql(&self) -> &str {
+        &self.sql
+    }
+
+    /// The value to bind at the parameter the clause names as `all_rows_param`.
+    pub(crate) fn all_rows(&self) -> bool {
+        self.all_rows
+    }
+
+    /// The one narrowing this predicate applied, if any.
+    pub(crate) fn narrowing(&self) -> Option<Narrowing> {
+        self.narrowing
+    }
+}
+
 /// Builds the row predicate. The only place that spells it.
 ///
 /// Parameter positions are the caller's, because each query already numbers its own
@@ -178,16 +255,32 @@ impl DataScope {
 /// (which is what the platform did for a viewer before D5), and there is no
 /// unscoped variant to fall back to - the same rule that makes audit::list_scoped
 /// the only ledger read.
+///
+/// The narrowings are decided in the same match as the bound boolean. Adding a
+/// `RowRule` variant fails to compile here; adding a clause to an existing rule is
+/// what the DB-backed test in incidents.rs (`every_narrowing_the_read_applies_is_named_for_every_role`)
+/// exists to catch, by comparing the rows the predicate returns against the rows the
+/// response's `narrowedTo` licenses.
 pub(crate) fn predicate(
     alias: &str,
     workspace_param: usize,
     all_rows_param: usize,
     user_param: usize,
-) -> String {
-    format!(
+    rows: RowRule,
+) -> RowPredicate {
+    let (all_rows, narrowing) = match rows {
+        RowRule::AllRows => (true, None),
+        RowRule::OwnedRows => (false, Some(Narrowing::Owner)),
+    };
+    let sql = format!(
         "{alias}.workspace_id = ANY(${workspace_param}::uuid[]) \
          AND (${all_rows_param}::boolean OR {alias}.owner = ${user_param})"
-    )
+    );
+    RowPredicate {
+        sql,
+        all_rows,
+        narrowing,
+    }
 }
 
 #[cfg(test)]
@@ -240,9 +333,33 @@ mod tests {
 
     #[test]
     fn the_predicate_never_offers_the_ownership_half_without_the_workspace_half() {
-        let clause = predicate("i", 1, 2, 3);
-        assert!(clause.contains("i.workspace_id = ANY($1::uuid[])"));
-        assert!(clause.contains("($2::boolean OR i.owner = $3)"));
+        for rows in [RowRule::AllRows, RowRule::OwnedRows] {
+            let predicate = predicate("i", 1, 2, 3, rows);
+            let clause = predicate.sql();
+            assert!(clause.contains("i.workspace_id = ANY($1::uuid[])"));
+            assert!(clause.contains("($2::boolean OR i.owner = $3)"));
+        }
+    }
+
+    /// The clause, the bound boolean and the reported narrowing are one value.
+    ///
+    /// This is the unit half of the binding; the DB-backed half in incidents.rs proves
+    /// the rows agree with the report. Here the point is narrower and structural:
+    /// `predicate()` is the only constructor, and the narrowing is decided in the same
+    /// match that decides the boolean, so `all_rows = true` with an `owner` narrowing
+    /// (the shape that made `seesAll` lie) cannot be assembled.
+    #[test]
+    fn the_reported_narrowing_is_decided_with_the_bound_boolean() {
+        for (rows, all_rows, narrowing) in [
+            (RowRule::AllRows, true, None),
+            (RowRule::OwnedRows, false, Some(Narrowing::Owner)),
+        ] {
+            let predicate = predicate("i", 1, 2, 3, rows);
+            assert_eq!(predicate.all_rows(), all_rows, "{rows:?}");
+            assert_eq!(predicate.narrowing(), narrowing, "{rows:?}");
+            assert_eq!(predicate.all_rows(), rows == RowRule::AllRows, "{rows:?}");
+        }
+        assert_eq!(Narrowing::Owner.wire_name(), "owner");
     }
 
     /// Rust mirror vs SQL predicate, over the whole matrix of (rule, membership
@@ -270,13 +387,14 @@ mod tests {
         for rows in [RowRule::AllRows, RowRule::OwnedRows] {
             for workspaces in worksets.clone() {
                 let scope = DataScope::for_test(caller_id, workspaces, rows);
+                let predicate = scope.row_predicate("i", 1, 2, 3);
                 let sql = format!(
                     "SELECT incident_id FROM kernel.incidents i WHERE {}",
-                    predicate("i", 1, 2, 3)
+                    predicate.sql()
                 );
                 let visible: Vec<Uuid> = sqlx::query_scalar(&sql)
                     .bind(&scope.workspaces)
-                    .bind(scope.sees_every_row())
+                    .bind(predicate.all_rows())
                     .bind(scope.user_id)
                     .fetch_all(&pool)
                     .await

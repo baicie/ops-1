@@ -122,14 +122,16 @@ const TIMELINE_MAX_EVENTS: i64 = 200;
 ///
 /// What remains in this module is the SHAPE of the report, because a field name is
 /// part of this module's contract and a scope is not.
-fn scope_view(scope: &DataScope) -> IncidentScopeView {
+///
+/// It is derived from the `RowPredicate` the query actually executed - not from the
+/// caller and not from a second reading of the row rule. `narrowed_to` maps the
+/// predicate's `Narrowing` through its wire name, and that match is exhaustive: a
+/// narrowing added to the predicate has no wire name until someone writes one, so the
+/// response cannot keep claiming "no owner narrowing" for a read that applies more.
+fn scope_view(predicate: &scope::RowPredicate, workspace_count: usize) -> IncidentScopeView {
     IncidentScopeView {
-        narrowed_to: if scope.sees_every_row() {
-            None
-        } else {
-            Some("owner")
-        },
-        workspace_count: scope.workspace_count(),
+        narrowed_to: predicate.narrowing().map(scope::Narrowing::wire_name),
+        workspace_count,
     }
 }
 
@@ -364,6 +366,19 @@ pub struct TimelineQuery {
     pub limit: Option<u32>,
 }
 
+/// One page of incidents together with the row predicate that produced it.
+///
+/// The list response's scope is derived from this value rather than recomputed from
+/// the caller, so the clause that ran and the narrowing that is reported are the same
+/// value. A clause added to the predicate therefore has to be accounted for beside
+/// the rows it changed instead of being invisible to the response.
+#[derive(Debug)]
+pub(crate) struct IncidentRead {
+    pub(crate) items: Vec<IncidentView>,
+    pub(crate) next_cursor: Option<String>,
+    pub(crate) predicate: scope::RowPredicate,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IncidentList {
@@ -596,11 +611,12 @@ pub async fn list_incidents(
     Query(query): Query<IncidentListQuery>,
 ) -> AppResult<Json<IncidentList>> {
     let caller = DataScope::resolve(&state.db, &auth).await?;
-    let (items, next_cursor) = query_incidents(&state.db, caller.clone(), query).await?;
+    let workspace_count = caller.workspace_count();
+    let read = query_incidents(&state.db, caller, query).await?;
     Ok(Json(IncidentList {
-        items,
-        next_cursor,
-        scope: scope_view(&caller),
+        items: read.items,
+        next_cursor: read.next_cursor,
+        scope: scope_view(&read.predicate, workspace_count),
     }))
 }
 
@@ -991,7 +1007,7 @@ pub(crate) async fn query_incidents(
     db: &PgPool,
     caller: DataScope,
     query: IncidentListQuery,
-) -> AppResult<(Vec<IncidentView>, Option<String>)> {
+) -> AppResult<IncidentRead> {
     let limit = i64::from(query.limit.unwrap_or(20).clamp(1, 100));
     let status = match query.status.as_deref() {
         Some(value) => Some(closed_set(value, STATUSES, "status filter")?),
@@ -1029,6 +1045,7 @@ pub(crate) async fn query_incidents(
         }
         None => (None, None),
     };
+    let predicate = caller.row_predicate("i", 1, 2, 10);
     let sql = format!(
         "{INCIDENT_SELECT}
          WHERE {}
@@ -1039,11 +1056,11 @@ pub(crate) async fn query_incidents(
            AND ($9::text IS NULL OR i.related_entity=$9)
          ORDER BY i.started_at DESC, i.incident_id DESC
          LIMIT $7",
-        scope::predicate("i", 1, 2, 10)
+        predicate.sql()
     );
     let rows = sqlx::query_as::<_, IncidentRow>(&sql)
         .bind(&caller.workspaces)
-        .bind(caller.sees_every_row())
+        .bind(predicate.all_rows())
         .bind(status.as_deref())
         .bind(severity.as_deref())
         .bind(cursor_time)
@@ -1070,7 +1087,11 @@ pub(crate) async fn query_incidents(
         .cloned()
         .map(IncidentRow::into_view)
         .collect();
-    Ok((items, next_cursor))
+    Ok(IncidentRead {
+        items,
+        next_cursor,
+        predicate,
+    })
 }
 
 pub(crate) async fn query_incident(
@@ -1078,14 +1099,15 @@ pub(crate) async fn query_incident(
     caller: DataScope,
     incident_id: Uuid,
 ) -> AppResult<IncidentView> {
+    let predicate = caller.row_predicate("i", 2, 3, 4);
     let sql = format!(
         "{INCIDENT_SELECT} WHERE i.incident_id=$1 AND {}",
-        scope::predicate("i", 2, 3, 4)
+        predicate.sql()
     );
     let row = sqlx::query_as::<_, IncidentRow>(&sql)
         .bind(incident_id)
         .bind(&caller.workspaces)
-        .bind(caller.sees_every_row())
+        .bind(predicate.all_rows())
         .bind(caller.user_id)
         .fetch_optional(db)
         .await?;
@@ -1316,14 +1338,15 @@ async fn insert_verdict(
     // concluding at the same instant are serialized, so the second one sees the
     // first verdict and gets 409 instead of overwriting signed history.
     let mut tx = db.begin().await?;
+    let predicate = caller.row_predicate("i", 2, 3, 4);
     let status: Option<String> = sqlx::query_scalar(&format!(
         "SELECT status FROM kernel.incidents i
           WHERE i.incident_id=$1 AND {} FOR UPDATE",
-        scope::predicate("i", 2, 3, 4)
+        predicate.sql()
     ))
     .bind(incident_id)
     .bind(&caller.workspaces)
-    .bind(caller.sees_every_row())
+    .bind(predicate.all_rows())
     .bind(caller.user_id)
     .fetch_optional(&mut *tx)
     .await?;
@@ -1485,14 +1508,15 @@ async fn close_incident_record(
     let mut tx = db.begin().await?;
     // The read that decides, under the row lock: two closers are serialized here, so
     // the second one observes the first closure instead of overwriting it.
+    let predicate = caller.row_predicate("i", 2, 3, 4);
     let current: Option<(String, i64, Option<String>)> = sqlx::query_as(&format!(
         "SELECT status, revision, closure_key FROM kernel.incidents i
           WHERE i.incident_id=$1 AND {} FOR UPDATE",
-        scope::predicate("i", 2, 3, 4)
+        predicate.sql()
     ))
     .bind(incident_id)
     .bind(&caller.workspaces)
-    .bind(caller.sees_every_row())
+    .bind(predicate.all_rows())
     .bind(caller.user_id)
     .fetch_optional(&mut *tx)
     .await?;
@@ -1608,14 +1632,15 @@ async fn transfer_incident_owner(
     }
 
     let mut tx = db.begin().await?;
+    let predicate = caller.row_predicate("i", 2, 3, 4);
     let current: Option<(String, i64, Uuid, Uuid)> = sqlx::query_as(&format!(
         "SELECT status, revision, owner, workspace_id FROM kernel.incidents i
           WHERE i.incident_id=$1 AND {} FOR UPDATE",
-        scope::predicate("i", 2, 3, 4)
+        predicate.sql()
     ))
     .bind(incident_id)
     .bind(&caller.workspaces)
-    .bind(caller.sees_every_row())
+    .bind(predicate.all_rows())
     .bind(caller.user_id)
     .fetch_optional(&mut *tx)
     .await?;
@@ -1816,14 +1841,15 @@ pub(crate) async fn incident_status(
     caller: DataScope,
     incident_id: Uuid,
 ) -> AppResult<String> {
+    let predicate = caller.row_predicate("i", 2, 3, 4);
     sqlx::query_scalar(&format!(
         "SELECT status FROM kernel.incidents i
           WHERE i.incident_id=$1 AND {}",
-        scope::predicate("i", 2, 3, 4)
+        predicate.sql()
     ))
     .bind(incident_id)
     .bind(&caller.workspaces)
-    .bind(caller.sees_every_row())
+    .bind(predicate.all_rows())
     .bind(caller.user_id)
     .fetch_optional(db)
     .await?
@@ -3053,7 +3079,7 @@ mod tests {
                 .await
                 .unwrap();
 
-        let (items, _) = query_incidents(
+        let read = query_incidents(
             &pool,
             caller(operator_a),
             IncidentListQuery {
@@ -3063,6 +3089,7 @@ mod tests {
         )
         .await
         .unwrap();
+        let items = read.items;
         assert!(items.iter().all(|item| item.owner == operator_a));
         assert!(items.iter().any(|item| item.id == mine.id));
 
@@ -3073,7 +3100,7 @@ mod tests {
         assert_eq!(error.status, StatusCode::NOT_FOUND);
         assert_eq!(error.code, "INCIDENT_NOT_FOUND");
 
-        let (admin_items, _) = query_incidents(
+        let admin_read = query_incidents(
             &pool,
             admin_caller(admin),
             IncidentListQuery {
@@ -3083,6 +3110,7 @@ mod tests {
         )
         .await
         .unwrap();
+        let admin_items = admin_read.items;
         assert!(admin_items.iter().any(|item| item.id == mine.id));
         assert!(admin_items.iter().any(|item| item.id == theirs.id));
         assert!(query_incident(&pool, admin_caller(admin), theirs.id)
@@ -3112,7 +3140,7 @@ mod tests {
                 .await
                 .unwrap();
 
-        let (stranger_items, _) = query_incidents(
+        let stranger_read = query_incidents(
             &pool,
             caller(stranger),
             IncidentListQuery {
@@ -3123,19 +3151,19 @@ mod tests {
         .await
         .unwrap();
         // The predicate hides the row...
-        assert!(!stranger_items.iter().any(|item| item.id == theirs.id));
-        // ...and the scope says why, without naming the row.
-        let narrowed = scope_view(&caller(stranger));
+        assert!(!stranger_read.items.iter().any(|item| item.id == theirs.id));
+        // ...and the scope derived from THAT predicate says why, without naming the row.
+        let narrowed = scope_view(&stranger_read.predicate, 1);
         assert_eq!(narrowed.narrowed_to, Some("owner"));
-        // The presence of a named narrowing is the same boolean the query binds, so the two
-        // cannot become two definitions. Since the payload stopped carrying `sees_all`, this
-        // round trip is the only thing keeping the field tied to the predicate.
+        // The reported narrowing and the boolean the query bound are the same value: both come
+        // out of the RowPredicate this read executed, not out of a second reading of the
+        // caller. `all_rows() == true` beside an `owner` narrowing is now unrepresentable.
         assert_eq!(
             narrowed.narrowed_to.is_none(),
-            caller(stranger).sees_every_row()
+            stranger_read.predicate.all_rows()
         );
 
-        let (owner_items, _) = query_incidents(
+        let owner_read = query_incidents(
             &pool,
             caller(owner),
             IncidentListQuery {
@@ -3145,17 +3173,138 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(owner_items.iter().any(|item| item.id == theirs.id));
+        assert!(owner_read.items.iter().any(|item| item.id == theirs.id));
         // An owner who can read its own row is still narrowed: the scope describes the read,
         // not the result, so it does not flip to "unnarrowed" because a row happened to appear.
-        assert_eq!(scope_view(&caller(owner)).narrowed_to, Some("owner"));
+        assert_eq!(
+            scope_view(&owner_read.predicate, 1).narrowed_to,
+            Some("owner")
+        );
 
         // The other end: an unnarrowed read says only that it applied no owner narrowing. It
         // is not a count of the platform - the wire test below is where that reading is kept
         // from coming back as a field.
-        assert_eq!(scope_view(&admin_caller(admin)).narrowed_to, None);
+        let admin_read = query_incidents(
+            &pool,
+            admin_caller(admin),
+            IncidentListQuery {
+                limit: Some(100),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(scope_view(&admin_read.predicate, 1).narrowed_to, None);
 
         cleanup(&pool, &[owner, stranger, admin]).await;
+    }
+
+    /// Every narrowing the predicate applies is named in the response, for every role.
+    ///
+    /// The oracle is the wire value: take the read each role actually performs, read
+    /// `narrowedTo` out of the scope derived from that read's predicate, and compute from
+    /// that one name which seeded rows the caller is licensed to see. If the predicate
+    /// grows a clause the response does not name - the counterfactual in the commit
+    /// message adds a severity filter - the rows returned and the reported narrowing stop
+    /// agreeing, and this test fails for the role whose read lost a row.
+    ///
+    /// The fixture rows are filtered down before comparing, because other tests share
+    /// this database and may hold rows in the same workspace; what is asserted is that
+    /// among these rows, exactly the licensed ones came back.
+    #[tokio::test]
+    async fn every_narrowing_the_read_applies_is_named_for_every_role() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let operator = seed_user(&pool, "operator").await;
+        let peer = seed_user(&pool, "operator").await;
+        let admin = seed_user(&pool, "admin").await;
+        let viewer = seed_user(&pool, "viewer").await;
+
+        let (_, owned) = insert_incident(
+            &pool,
+            caller(operator),
+            incident_request("narrow owned", None),
+        )
+        .await
+        .unwrap();
+        let (_, peer_owned) =
+            insert_incident(&pool, caller(peer), incident_request("narrow peer", None))
+                .await
+                .unwrap();
+        // An ordinary row of another severity: the counterfactual hides it with an
+        // extra clause that does not touch the reported narrowing.
+        let mut minor = incident_request("narrow minor", None);
+        minor.severity = "MINOR".to_string();
+        let (_, owned_minor) = insert_incident(&pool, caller(operator), minor)
+            .await
+            .unwrap();
+
+        for (role, user, rows, expected_narrowing) in [
+            (Role::Admin, admin, crate::scope::RowRule::AllRows, None),
+            (
+                Role::Operator,
+                operator,
+                crate::scope::RowRule::OwnedRows,
+                Some("owner"),
+            ),
+            (Role::Viewer, viewer, crate::scope::RowRule::AllRows, None),
+        ] {
+            let scope = DataScope::for_test(user, vec![scope::legacy_workspace()], rows);
+            let workspace_count = scope.workspace_count();
+            let read = query_incidents(
+                &pool,
+                scope,
+                IncidentListQuery {
+                    limit: Some(100),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            let view = scope_view(&read.predicate, workspace_count);
+            assert_eq!(view.narrowed_to, expected_narrowing, "{role}");
+            // The reported value is the predicate's own narrowing, not a second opinion.
+            assert_eq!(
+                read.predicate.narrowing().map(scope::Narrowing::wire_name),
+                view.narrowed_to,
+                "{role}"
+            );
+
+            // A client reads only the wire value. License rows from it, and from nothing
+            // else; a future narrowing wire name has to teach this oracle what it means.
+            let fixture = [
+                (owned.id, operator),
+                (peer_owned.id, peer),
+                (owned_minor.id, operator),
+            ];
+            let mut licensed: Vec<Uuid> = Vec::new();
+            for (id, owner) in fixture {
+                let licensed_here = match view.narrowed_to {
+                    None => true,
+                    Some("owner") => owner == user,
+                    Some(other) => panic!("the oracle does not know narrowedTo={other:?}"),
+                };
+                if licensed_here {
+                    licensed.push(id);
+                }
+            }
+            let mut visible: Vec<Uuid> = read
+                .items
+                .iter()
+                .map(|item| item.id)
+                .filter(|id| fixture.iter().any(|(fixture_id, _)| fixture_id == id))
+                .collect();
+            licensed.sort();
+            visible.sort();
+            assert_eq!(
+                visible, licensed,
+                "{role}: the rows the predicate returned are not the rows narrowedTo={:?} licenses",
+                view.narrowed_to
+            );
+        }
+
+        cleanup(&pool, &[operator, peer, admin, viewer]).await;
     }
 
     /// The wire shape of the scope, for every role and for a caller with no membership.
@@ -3186,12 +3335,14 @@ mod tests {
                 serde_json::json!({ "narrowedTo": null, "workspaceCount": 1 }),
             ),
         ] {
-            let view = serde_json::to_value(scope_view(&DataScope::for_test(
+            let scope = DataScope::for_test(
                 Uuid::new_v4(),
                 workspaces.clone(),
                 crate::scope::RowRule::for_role(role),
-            )))
-            .unwrap();
+            );
+            let predicate = scope.row_predicate("i", 1, 2, 3);
+            let view =
+                serde_json::to_value(scope_view(&predicate, scope.workspace_count())).unwrap();
             assert_eq!(view, expected, "{role}");
             assert_eq!(
                 view.as_object().unwrap().len(),
@@ -3204,11 +3355,13 @@ mod tests {
             );
         }
         // A caller with no membership: the value that explains an empty page.
-        let starving = serde_json::to_value(scope_view(&DataScope::for_test(
-            Uuid::new_v4(),
-            Vec::new(),
-            crate::scope::RowRule::AllRows,
-        )))
+        let starving_scope =
+            DataScope::for_test(Uuid::new_v4(), Vec::new(), crate::scope::RowRule::AllRows);
+        let starving_predicate = starving_scope.row_predicate("i", 1, 2, 3);
+        let starving = serde_json::to_value(scope_view(
+            &starving_predicate,
+            starving_scope.workspace_count(),
+        ))
         .unwrap();
         assert_eq!(
             starving,
@@ -3244,7 +3397,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (own_rows, _) = query_incidents(
+        let own_rows = query_incidents(
             &pool,
             caller(operator),
             IncidentListQuery {
@@ -3254,11 +3407,12 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .items;
         assert!(own_rows.iter().any(|item| item.id == mine.id));
         assert!(own_rows.iter().all(|item| item.owner == operator));
 
-        let (their_rows, _) = query_incidents(
+        let their_rows = query_incidents(
             &pool,
             caller(operator),
             IncidentListQuery {
@@ -3268,13 +3422,14 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .items;
         assert!(
             their_rows.is_empty(),
             "an operator must not read another owner's rows by filtering for them"
         );
 
-        let (admin_rows, _) = query_incidents(
+        let admin_rows = query_incidents(
             &pool,
             admin_caller(admin),
             IncidentListQuery {
@@ -3284,7 +3439,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .items;
         assert!(admin_rows.iter().any(|item| item.id == theirs.id));
 
         let error = query_incidents(
@@ -4009,7 +4165,7 @@ mod tests {
         let listed = query_incidents(&pool, caller(new_owner), IncidentListQuery::default())
             .await
             .unwrap()
-            .0;
+            .items;
         assert!(!listed.iter().any(|view| view.id == incident.id));
 
         // --- the handover ---------------------------------------------------
@@ -4091,7 +4247,7 @@ mod tests {
         let listed = query_incidents(&pool, caller(new_owner), IncidentListQuery::default())
             .await
             .unwrap()
-            .0;
+            .items;
         assert!(listed.iter().any(|view| view.id == incident.id));
 
         cleanup(&pool, &[old_owner, new_owner]).await;
@@ -4397,7 +4553,7 @@ mod tests {
             insert_incident(&pool, caller(user), request).await.unwrap();
         }
 
-        let (page1, cursor) = query_incidents(
+        let first_page = query_incidents(
             &pool,
             caller(user),
             IncidentListQuery {
@@ -4407,10 +4563,13 @@ mod tests {
         )
         .await
         .unwrap();
+        let page1 = first_page.items;
         assert_eq!(page1.len(), 2);
-        let cursor = cursor.expect("a full page must advertise the next one");
+        let cursor = first_page
+            .next_cursor
+            .expect("a full page must advertise the next one");
 
-        let (page2, cursor2) = query_incidents(
+        let second_page = query_incidents(
             &pool,
             caller(user),
             IncidentListQuery {
@@ -4421,8 +4580,9 @@ mod tests {
         )
         .await
         .unwrap();
+        let page2 = second_page.items;
         assert_eq!(page2.len(), 1);
-        assert!(cursor2.is_none());
+        assert!(second_page.next_cursor.is_none());
         assert!(page1
             .iter()
             .all(|first| page2.iter().all(|second| first.id != second.id)));
@@ -6270,9 +6430,10 @@ mod tests {
         assert!(viewer_scope.may_enter(ws_a));
         assert!(!viewer_scope.may_enter(ws_b));
 
-        let (items, _) = query_incidents(&pool, viewer_scope.clone(), list_query())
+        let items = query_incidents(&pool, viewer_scope.clone(), list_query())
             .await
-            .unwrap();
+            .unwrap()
+            .items;
         assert!(items.iter().any(|item| item.id == in_a.id));
         assert!(!items.iter().any(|item| item.id == in_b.id));
 
@@ -6350,9 +6511,10 @@ mod tests {
                 .code,
             "INCIDENT_NOT_FOUND"
         );
-        let (items, _) = query_incidents(&pool, admin_scope.clone(), list_query())
+        let items = query_incidents(&pool, admin_scope.clone(), list_query())
             .await
-            .unwrap();
+            .unwrap()
+            .items;
         assert!(!items.iter().any(|item| item.id == incident.id));
 
         // And the grant is what changes it - one row, not a role.
@@ -6480,7 +6642,7 @@ mod tests {
         let scope_a = DataScope::resolve_for(&pool, operator_a, Role::Operator)
             .await
             .unwrap();
-        let (items, _) = query_incidents(
+        let items = query_incidents(
             &pool,
             scope_a.clone(),
             IncidentListQuery {
@@ -6490,7 +6652,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .items;
         assert!(
             items.is_empty(),
             "an owner filter naming an account in another workspace returned a row"
@@ -6500,7 +6663,7 @@ mod tests {
         let admin_scope = DataScope::resolve_for(&pool, admin, Role::Admin)
             .await
             .unwrap();
-        let (items, _) = query_incidents(
+        let items = query_incidents(
             &pool,
             admin_scope,
             IncidentListQuery {
@@ -6510,7 +6673,8 @@ mod tests {
             },
         )
         .await
-        .unwrap();
+        .unwrap()
+        .items;
         assert!(items.is_empty());
         assert_eq!(
             query_incident(

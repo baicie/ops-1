@@ -1005,9 +1005,10 @@ async fn related_context(
         limit: Some(10),
         ..Default::default()
     };
-    let (items, _cursor) = query_incidents(db, caller, query)
+    let items = query_incidents(db, caller, query)
         .await
-        .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?;
+        .map_err(|error| ToolFailure::from_predicate(PREDICATE_INCIDENT_READ, &error))?
+        .items;
     Ok(ToolOutcome {
         payload: json!({
             "sourceId": source_id,

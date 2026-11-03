@@ -298,11 +298,13 @@ fn visibility_sql(
     scope_param: usize,
     all_rows_param: usize,
     user_param: usize,
+    rows: RowRule,
 ) -> String {
     // The INCIDENT clause is scope::predicate - the same text the incident endpoints apply,
     // with the alias of this subquery's table. Writing it here by hand is how this clause
     // and the incident route drifted apart in the first place.
-    let incident = scope::predicate("i", scope_param, all_rows_param, user_param);
+    let incident = scope::predicate("i", scope_param, all_rows_param, user_param, rows);
+    let incident_sql = incident.sql();
     let user_param_text = format!("${user_param}");
     format!(
         r#"
@@ -310,7 +312,7 @@ fn visibility_sql(
           ${platform_param}::boolean
           OR (e.subject_type = 'INCIDENT' AND EXISTS (
                 SELECT 1 FROM kernel.incidents i
-                 WHERE i.incident_id::text = e.subject_id AND {incident}))
+                 WHERE i.incident_id::text = e.subject_id AND {incident_sql}))
           OR (e.subject_type = 'job' AND EXISTS (
                 SELECT 1 FROM kernel.pipeline_jobs j
                  WHERE j.job_id::text = e.subject_id AND j.submitted_by = {user_param_text}))
@@ -339,7 +341,7 @@ pub async fn list_scoped(
         ORDER BY e.occurred_at DESC
         LIMIT $3
         "#,
-        visibility_sql(5, 6, 7, 4)
+        visibility_sql(5, 6, 7, 4, scope.rows)
     );
     sqlx::query_as::<_, AuditEventView>(&sql)
         .bind(subject_type)
