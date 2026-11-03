@@ -652,7 +652,10 @@ export function IncidentDetailPage() {
                             <p>{t('incidents.verdict.description')}</p>
                           </div>
                         </div>
-                        {verdictState === 'recorded' && incident.humanVerdict ? (
+                        {/* The signed record is shown whenever one exists - including on a CLOSED
+                            incident, where the panel state is 'sealed' because no further verdict
+                            is accepted. 'Sealed' is not 'the decision disappeared'. */}
+                        {incident.humanVerdict ? (
                           <div className="pad" data-testid="incident-verdict-record" data-verdict-value={incident.humanVerdict.verdict}>
                             <p><Status code={incident.humanVerdict.verdict} /> <span className="muted small" data-testid="incident-verdict-attribution">{t('incidents.verdict.decidedBy', { id: decidedByLabel ?? '' })}</span></p>
                             <p className="muted small">{t('incidents.verdict.writeOnce')}</p>
@@ -697,7 +700,16 @@ export function IncidentDetailPage() {
                             }}
                           />
                         )}
-                        {verdictState !== 'recorded' ? <p className="muted small pad">{t('incidents.verdict.onlyTwo')}</p> : null}
+                        {/* A closed incident with a verdict renders the record above AND the
+                            sealed sentence: the record is what was signed, the sentence is why no
+                            second one is offered. The no-verdict sealed branch above is the other
+                            (kernel-unreachable) shape, and must not print the sentence twice. */}
+                        {verdictState === 'sealed' && incident.humanVerdict ? (
+                          <p className="muted small pad" data-testid="incident-verdict-sealed">{t('incidents.verdict.sealed')}</p>
+                        ) : null}
+                        {/* The two-choices sentence describes the form; it is not shown when the
+                            form is not on screen. */}
+                        {verdictState === 'open' ? <p className="muted small pad">{t('incidents.verdict.onlyTwo')}</p> : null}
                       </section>
                 <section className="panel" data-testid="incident-lifecycle" data-lifecycle-state={closureState}>
                         <div className="panel-head">

@@ -57,6 +57,8 @@
 
 **失败文案规则**：前端**只用错误码**取文案（`incidents.error.<CODE>`），从不把 Kernel 的英文句子直接渲染给用户；码表里没有的码显示"内核以错误码 {code} 拒绝了该请求"。
 
+**状态优先级**：同一记录可以同时满足 `recorded` 与 `sealed`（关闭要求并保留结论），此时 **`sealed` 优先**：它只表达"不再接受新结论"，已签结论仍照常渲染在页面上。2026-11-03 之前实现把 `recorded` 判在前面，导致 `sealed` 只能由产品造不出的"CLOSED 且无结论"命中；修复与回归断言见 §5 第 3 条。
+
 ---
 
 ## 3. 权限三档实测（真实浏览器 + 真实后端）
@@ -109,14 +111,14 @@
 
 ## 5. 自评：哪一条我其实没有端到端跑通
 
-诚实清单，每条都写清"做到哪一步"：
+D4 交付时这份清单有六条。2026-11-03 的 `tests/ui/g11-incident-state-gaps.spec.ts` 关掉了其中四条（第 1、2、3、5 条），并由此暴露、修复了一个真实缺陷（第 3 条）。每条仍写清"做到哪一步"：
 
-1. **`data-evidence-state="unavailable"`（详情页证据读取失败）没有在浏览器里真实触发过。** 这个状态需要"incident 读到了、evidence 没读到"，真实环境里很难天然出现：断网时两个请求都会失败，页面走的是整页失败分支。目前它只被**单元测试**覆盖（`evidencePanelState(null,true)==='unavailable'`），UI 分支未被 E2E 命中。**没有写进通过项。**
-2. **409 `INCIDENT_EVIDENCE_REQUIRED` 与 `INCIDENT_ALREADY_CONCLUDED` 的页面呈现没有走浏览器。** 这两个码用 curl 在真实后端验证过（见 §6 的 `6a`/`8`），前端码表与文案存在，但 E2E 里没有构造"无证据下 CONFIRMED"和"二次下结论"的点击路径（因为测试流程本身先补了证据、只下一次结论）。
-3. **CLOSED 状态**：本切片没有任何端点能把记录关掉，所以 `data-verdict-state="sealed"` 与 `[data-evidence-state]←closed` 这两条分支**只由单元测试覆盖**，没有真实数据触发。页面上的"关闭"筛选同理只可能返回空。
-4. **server 端 owner 筛选的越权组合**在浏览器里只验证了"operator 看不到他人记录"这一方向（列表 + 直接 URL）；"operator 显式用 owner=他人 id 查询返回空"只在 **Rust 单测**里验证（`owner_filter_narrows_the_scope_and_never_widens_it`），没有走 UI。
-5. **分页（nextCursor）**：E2E 没有造 20 条以上记录，因此"下一页"按钮只验证了初始 disabled 状态，没有真翻页。
-6. **`GET /verdict` 端点**只被 curl 与 Kernel 单测覆盖；页面读的是详情投影里派生的 `humanVerdict`（同一个权威，ADR §2.4），因此详情页本身不单独调用该端点。
+1. **`data-evidence-state="unavailable"` — 已覆盖。** 新 spec 用 `page.route` **只中止证据端点**（`**\/api/v1/incidents/*/evidence`）；incident 读、timeline 读和其他请求都是真实的。断言：`[data-testid=incident-evidence][data-evidence-state="unavailable"]`；`incident-evidence-unavailable` 同时包含 i18n catalog 的 `incidents.detail.evidence.unavailable.title` 与 `.description`；`incident-evidence-empty` 计数为 0（这不是"没有证据"）；`incident-evidence-error[data-error-code="UNREACHABLE"]` 证明失败确实到达页面。随后解除拦截、点击面板内的重试按钮，断言同一面板变为 `data-evidence-state="missing"` 并出现空态——证明 unavailable 来自被中止的读，而不是空列表。断言见 spec 的 test 1。
+2. **409 `INCIDENT_EVIDENCE_REQUIRED` 与 `INCIDENT_ALREADY_CONCLUDED` — 已覆盖。** 两个 409 都由页面真实提交触发：无证据记录上选 CONFIRMED 并提交 → `incident-verdict-error[data-error-code="INCIDENT_EVIDENCE_REQUIRED"]` + catalog 的 `incidents.error.evidenceRequired`，`data-status` 仍为 OPEN，API 回读 `humanVerdict=null`；同一记录先经 API 写入 INCONCLUSIVE，再从仍显示表单的页面二次提交 → `data-error-code="INCIDENT_ALREADY_CONCLUDED"` + catalog 的 `incidents.error.alreadyConcluded`，API 回读 verdict/rationale/decidedAt 与第一次完全相同，刷新后 `data-verdict-state="recorded"`、`data-verdict-value="INCONCLUSIVE"` 且不包含第二次理由。断言见 test 2/3。
+3. **CLOSED / `sealed` — 已覆盖，并修掉一个真实缺陷。** G12 C 之后关闭端点已经存在；spec 走完 evidence → CONFIRMED verdict → `POST /close`，打开详情页断言 `[data-testid=incident-verdict][data-verdict-state="sealed"]`、`incident-verdict-form` 计数为 0、`incident-verdict-sealed` 等于 catalog 的 `incidents.verdict.sealed`，并断言已签结论仍在页面上（`incident-verdict-record[data-verdict-value="CONFIRMED"]`）。**第一次运行这条断言时页面返回的是 `recorded`**：`verdictPanelState` 先判 `humanVerdict`、后判 `status === 'CLOSED'`，而关闭要求并保留结论（Kernel 单测 `closing_a_concluded_incident_records_the_closure_and_its_audit` 断言 `closed.human_verdict.is_some()`），所以 `sealed` 只能由"CLOSED 且无结论"这种产品造不出的手写状态命中。修复很小且保留信息：先判 CLOSED；渲染层在 sealed 时仍展示已签结论，并追加 sealed 说明（已关闭、不再接受结论）。回归断言即 test 5，单元测试新增 `verdictPanelState({status:'CLOSED', humanVerdict}) === 'sealed'`。
+4. **server 端 owner 筛选的越权组合 — 仍未覆盖。** 只在 Rust 单测 `owner_filter_narrows_the_scope_and_never_widens_it` 里验证；浏览器里仍只有"operator 看不到他人记录"这一方向。原因：页面没有"按 owner id 直接查询"的入口，要构造它就得给产品加一个不存在的筛选形状——不为测试改产品行为。
+5. **分页（nextCursor）— 已覆盖。** 通过 API 创建 21 条记录；首屏断言 20 行、`[data-testid=incidents-pagination-next]` 可用、first 禁用；点击 next 后捕获真实请求里的 `cursor`，断言它匹配 `^[A-Za-z0-9_-]+$`（不含 `/`、`\`，不以 `.` 开头——不透明，不是宿主路径）；第二屏与第一屏无交集，且与 **Kernel 用同一 cursor 回答的 items 顺序完全一致**；first 变为可用。断言见 test 4。分页两个按钮原本没有机器可读锚点，本次只加了 `data-testid`，无行为变化。
+6. **`GET /verdict` 端点 — 仍未覆盖（页面不调用它）。** 页面读的是详情投影里派生的 `humanVerdict`（同一个权威，ADR §2.4），UI 层没有这个请求可断言；它仍由 curl 与 Kernel 单测覆盖。
 
 ---
 
@@ -183,6 +185,36 @@ $ OPSWEAVE_TEST_DATABASE_URL=postgres://localhost/opsweave_g11_d3_test OPSWEAVE_
   cargo test --locked --workspace     -> 全部 suite ok（kernel 89 passed；incidents 模块 11 条，其中 8 条 DB 级，OPSWEAVE_REQUIRE_TEST_DATABASE=1 下无 skip）
 ```
 闸门阈值一字未改：`ui-debt.json`、`table-spec.md`、`check-ui-*` 脚本全部原样。
+
+### 6.4 状态缺口 spec（2026-11-03，§5 第 1/2/3/5 条）
+
+运行环境：scratch 库 `opsweave_g11_gaps_lucid`，Kernel `127.0.0.1:18299`（不是 staging，也不是 18199），页面来自本次构建的 `apps/platform-web/dist`。没有 stub；唯一的请求拦截是第 1 条要测的"证据读失败"本身。
+
+```
+$ OPSWEAVE_URL=http://127.0.0.1:18299 OPSWEAVE_ADMIN_EMAIL=admin@opsweave.local \
+  OPSWEAVE_ADMIN_PASSWORD=*** \
+  pnpm --filter @opsweave/ui-tests exec playwright test --config playwright.config.ts \
+    g11-incident-state-gaps.spec.ts --reporter=list
+  ✓ 1 the evidence panel says the read failed, not that there is no evidence, and its retry is real (2.9s)
+  ✓ 2 a CONFIRMED verdict with no evidence is refused as INCIDENT_EVIDENCE_REQUIRED and leaves the record OPEN (1.7s)
+  ✓ 3 a second verdict is refused as INCIDENT_ALREADY_CONCLUDED and the first verdict is unchanged (1.7s)
+  ✓ 4 the list pages past 20 records with an opaque cursor, and page two never repeats page one (2.3s)
+  ✓ 5 a closed incident seals the verdict panel: sealed, no form, and the signed verdict stays on record (1.4s)
+  5 passed (11.4s)
+```
+
+同一 scratch 库上，CI harness 现有的七个 incident/investigation spec 与本 spec 一起跑：
+```
+  2 skipped
+  34 passed (4.8m)
+```
+之后运行的闸门：
+```
+$ node scripts/check-i18n.mjs            -> OK — 1900 keys across 2 locale(s), 17 unused（均为既有警告，本次未新增）
+$ node tests/ci/check-spec-coverage.mjs  -> exit 0；g11-incident-state-gaps.spec.ts COVERED <- g12-acceptance.yml
+$ pnpm --filter @opsweave/platform-web test -> Test Files 30 passed, Tests 417 passed
+$ pnpm --filter @opsweave/platform-web build -> built（tsc --noEmit 通过）
+```
 
 ---
 

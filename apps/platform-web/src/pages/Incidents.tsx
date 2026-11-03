@@ -605,8 +605,8 @@ export function IncidentsPage() {
           error panel invites a click that cannot change anything. */}
       {hasRows ? (
         <div className="pagination-row">
-          <Button variant="secondary" disabled={!cursor} onClick={() => setCursor(null)}>{t('pipelines.pagination.first')}</Button>
-          <Button variant="secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor ?? null)}>{t('pipelines.pagination.next')}</Button>
+          <Button variant="secondary" data-testid="incidents-pagination-first" disabled={!cursor} onClick={() => setCursor(null)}>{t('pipelines.pagination.first')}</Button>
+          <Button variant="secondary" data-testid="incidents-pagination-next" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor ?? null)}>{t('pipelines.pagination.next')}</Button>
         </div>
       ) : null}
 

@@ -262,6 +262,15 @@ describe('verdictPanelState', () => {
   it('treats a closed incident as sealed rather than offering a write that would 409', () => {
     expect(verdictPanelState(incident({ status: 'CLOSED' }))).toBe('sealed');
   });
+
+  it('is sealed for the closed shape the product actually produces: one that carries its verdict', () => {
+    // CLOSED is reachable only from CONCLUDED, and the close guard requires a signed verdict
+    // that the closure retains (apps/kernel/src/incidents.rs,
+    // closing_a_concluded_incident_records_the_closure_and_its_audit). An incident with
+    // status CLOSED and no verdict is a shape the kernel refuses to produce - which is why
+    // checking `humanVerdict` first left 'sealed' unreachable from real data.
+    expect(verdictPanelState(incident({ status: 'CLOSED', humanVerdict: verdict() }))).toBe('sealed');
+  });
 });
 
 describe('incidentFacts', () => {
