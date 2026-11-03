@@ -93,59 +93,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await api.post<SessionResponse>('/api/v1/auth/login', { email, password });
-    // /auth/me is the contract's authority for `access`; the login body carries `user` and
-    // `csrfToken` but not the grant, so it still has to be read.
+    // The login body IS the session: it carries the user, the CSRF token and - since this round -
+    // the surface grant, the same value `/auth/me` reports. There is no second read.
     //
-    // It is awaited - the first authenticated render picks the surface for "/", and landing on
-    // the deny shape and then jumping to the console is a visible, wrong transition - but it is
-    // awaited with a BOUND. The old code awaited it without one, so a slow read serialised the
-    // whole sign-in: POST, then /auth/me, then resolve. On the staging link (measured ~250 ms
-    // TCP connect and ~500-830 ms TTFB per request) that is where a 20 s budget went, and
-    // delaying only this second read by 25 s reproduced it locally (waitForURL timed out at
-    // 20.9 s while the login POST had already returned).
+    // There used to be one: the body omitted `access`, so every sign-in posted, then serially
+    // read `/auth/me`, then resolved, and the form's `await login(); navigate()` waited for two
+    // round trips. On the staging link (~250 ms TCP, ~500-830 ms TTFB per request) that was most
+    // of a 20 s budget. A bounded fallback was tried first and was worse than the bug: giving up
+    // on the grant left the session on the DENY shape, an admin landed on /app/home, and the
+    // remembered surface kept it there across reloads. Sending the grant with the session removes
+    // the round trip instead of racing it.
     //
-    // The bound is a stated budget, not a global timeout: past it the identity from the login
-    // body stands and the grant upgrades the session when it does land, under the generation
-    // check below. A hang therefore costs at most GRANT_BUDGET_MS instead of the caller's whole
-    // timeout, and the failure names the stage it happened in.
-    const GRANT_BUDGET_MS = 5_000;
-    let authoritative = result;
-    let grantTimedOut = false;
-    const ticket = authGeneration.ticket();
-    try {
-      authoritative = await Promise.race([
-        api.get<SessionResponse>('/api/v1/auth/me'),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('grant read exceeded ' + GRANT_BUDGET_MS + ' ms')), GRANT_BUDGET_MS),
-        ),
-      ]);
-    } catch (cause) {
-      grantTimedOut = true;
-      // Surfaced rather than swallowed: the session is still usable, but the caller deserves to
-      // know the shell is running on the deny grant until the late read lands.
-      console.warn('[auth] grant read did not complete; continuing with the login identity:', cause);
-    }
-    // A committed login *is* the new session intent: advancing here - with no await between
-    // the advance and the writes - makes every response issued before this point stale, so
-    // the pre-login probe can no longer clear the session it never knew about.
+    // A committed login *is* the new session intent: advancing here - with no await between the
+    // advance and the writes - makes every response issued before this point stale, so the
+    // pre-login probe can no longer clear the session it never knew about.
     authGeneration.advance();
-    setCsrfToken(authoritative.csrfToken);
-    applySession(authoritative);
+    setCsrfToken(result.csrfToken);
+    applySession(result);
     setLoading(false);
-
-    if (grantTimedOut) {
-      // The bounded read above was abandoned; pick the grant up when (if) it arrives, and only
-      // while this login is still the current session intent.
-      const lateTicket = authGeneration.ticket();
-      void api
-        .get<SessionResponse>('/api/v1/auth/me')
-        .then((me) => {
-          if (!authGeneration.accepts(lateTicket)) return;
-          setCsrfToken(me.csrfToken);
-          applySession(me);
-        })
-        .catch(() => undefined);
-    }
   }, [applySession]);
 
   const logout = useCallback(async () => {

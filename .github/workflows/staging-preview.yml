@@ -532,6 +532,9 @@ jobs:
       # the "green because nothing recorded it" failure this workflow exists to prevent.
       metrics_outcome: ${{ steps.metrics.outcome }}
       geometry_outcome: ${{ steps.geometry.outcome }}
+      # What Playwright actually said when it failed, so the record can tell "the product answered
+      # wrong" from "the browser never reached the product". Empty on a green run.
+      core_failure: ${{ steps.core.outputs.failure_summary }}
     env:
       # Shared by every browser step below: one preview origin, one credential, one expected commit.
       OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
@@ -907,10 +910,27 @@ jobs:
           # told apart after the fact. Seconds resolution is enough for steps that take minutes.
           date +%s > artifacts/staging-preview/timings/core.start
           trap 'date +%s > artifacts/staging-preview/timings/core.end' EXIT
+          # Capture the run's output so the record can classify a red. Step outcomes say only
+          # "failure"; without the text, a navigation that expired and an assertion that was
+          # contradicted are indistinguishable downstream - measured: every reachable
+          # check["detail"] is "failure: file1, file2", which matches no classifier.
+          set +e
           pnpm --filter @opsweave/ui-tests exec playwright test --output test-results/core \
             staging-smoke.spec.ts \
             dual-surface.spec.ts \
-            admin-shell.spec.ts
+            admin-shell.spec.ts 2>&1 | tee artifacts/staging-preview/core.log
+          core_status=${PIPESTATUS[0]}
+          set -e
+          # Keep only the lines that say WHY, bounded so the job output stays small.
+          grep -E 'Error:|expect\(|Timeout|TimeoutError|waitFor|navigating to|ERR_|at .*spec\.ts' \
+            artifacts/staging-preview/core.log 2>/dev/null | tail -40 \
+            > artifacts/staging-preview/core-failure.txt || true
+          {
+            printf 'failure_summary<<OPSWEAVE_CORE_EOF\n'
+            head -c 4000 artifacts/staging-preview/core-failure.txt 2>/dev/null || true
+            printf '\nOPSWEAVE_CORE_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+          exit "$core_status"
 
       # Runs even when the core step failed: a red core path must not silently drop the remaining
       # eleven specs. Both outcomes are recorded separately in the next step and in the PR comment.
@@ -1545,6 +1565,7 @@ jobs:
           PLAYWRIGHT_TIMINGS: ${{ needs.smoke.outputs.playwright_timings }}
           METRICS_OUTCOME: ${{ needs.smoke.outputs.metrics_outcome }}
           GEOMETRY_OUTCOME: ${{ needs.smoke.outputs.geometry_outcome }}
+          CORE_FAILURE: ${{ needs.smoke.outputs.core_failure }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
@@ -1951,17 +1972,43 @@ jobs:
           # statement about the product. This is a classification of the recorded text, not a
           # re-run and not a retry: it changes which verdict a red produces, never whether it is
           # red.
+          # The Playwright text comes from the step's own captured output, not from `checks`:
+          # a check's detail is "failure: <files>" and matches no classifier at all (measured).
+          core_failure = (os.environ.get("CORE_FAILURE", "") or "").lower()
           failure_text = " ".join(
               json.dumps(check).lower() for check in executed if check["status"] == "failed"
-          )
+          ) + " " + core_failure
+          # A Playwright call that ran out of time is, by itself, evidence that the value never
+          # arrived - it is the same shape whether the cause is the link or the product. Stated as
+          # a closed list of the calls that mean "waiting for something external": navigation,
+          # response, url change, request. Everything else (`expect(received).toBe(...)` with a
+          # received value) is a verdict about what the product answered.
           unreachable = any(
               marker in failure_text
               for marker in (
                   "waitforresponse", "page.goto", "navigating to", "test timeout",
+                  "page.waitforurl", "waiting until", "page.waitforloadstate",
+                  # A locator that never appeared is the element/response never arriving, not a
+                  # contradicted value. FILLED/CLICK belong here for the same reason.
+                  "waiting for locator", "waiting for selector", "page.fill", "page.click",
                   "econnreset", "enotfound", "net::err", "socket hang up",
               )
           )
-          assertion_failed = ("expect(" in failure_text or "tohave" in failure_text) and not unreachable
+          # A Playwright expectation that EXPIRED is not a contradicted expectation: the message
+          # contains both `expect(` and `Timeout:`, and it means the value never arrived. Order
+          # matters, and the first version got it backwards - it read `expect(...toHaveURL ...
+          # Timeout: 10000ms` as a product failure, which is exactly the red this round is trying
+          # to classify as UNVERIFIED.
+          expectation_expired = any(
+              marker in failure_text
+              for marker in ("timeout:", "exceeded while waiting", "waiting for locator",
+                             "waiting for getby")
+          )
+          assertion_failed = (
+              ("expect(" in failure_text or "tohave" in failure_text)
+              and not unreachable
+              and not expectation_expired
+          )
           if not executed:
               code_verdict = "NOT_RUN"
           elif assertion_failed:
@@ -1973,7 +2020,10 @@ jobs:
               # A skipped known-flaky group does not veto a green run; a failed one cannot hide,
               # because known-flaky groups are still reported and this reads their status.
               code_verdict = "PASSED"
-          elif unreachable:
+          elif unreachable or expectation_expired:
+              # The wait expired and nothing was contradicted: the value never arrived. This is the
+              # staging shape - a 20 s response wait or an expectation whose deadline passed - and
+              # it must not read as a product failure.
               code_verdict = "UNVERIFIED"
           else:
               code_verdict = "FAILED"
