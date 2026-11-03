@@ -814,7 +814,12 @@ jobs:
                   "available": True,
                   "source": "artifacts/staging-preview/runner-network.json (staging-smoke artifact)",
                   "recorded_at": payload["recorded_at"],
-                  "base_url": base,
+                  # The origin is DELIBERATELY absent here even though the file keeps it: it is the
+                  # value of the STAGING_BASE_URL secret, and an output carrying a secret does not
+                  # survive into the record job. Measured on run 41611651844: the probe ran and
+                  # printed its summary, the record job received `RUNNER_NETWORK: ` empty, and the
+                  # only difference from the step output that did propagate (playwright_timings)
+                  # was this field. The record job already has the URL through DEPLOY_BASE_URL.
                   "attempts_per_path": ATTEMPTS,
                   "curl_version": payload["curl_version"],
                   "runner": payload["runner"],
