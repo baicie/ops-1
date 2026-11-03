@@ -99,6 +99,11 @@ No external link involved. Clean database, kernel serving the build from this br
 | vitest | 30 files / **417 passed** |
 | typecheck / build / i18n / status-vocabulary / ui-tokens / PNG budget / spec-coverage | clean |
 
+`dual-surface.spec.ts` - the spec that drives the sign-in lifecycle this round changed - was
+referenced only by `staging-preview`, a REMOTE check, so a regression in sign-in could not fail any
+deterministic job. It is now part of `tests/ci/g12_acceptance_ci.sh`, and the coverage gate caught
+its absence from that workflow's `paths:` filters (the check failed until both were updated).
+
 **53/53 on the deterministic host, while the same code intermittently fails on the runner against
 staging.** That juxtaposition is the core finding of this round: the product code, permissions,
 state machines, evidence handling and UI pass completely when the link is local.

@@ -22,6 +22,7 @@ on:
       - 'contracts/**'
       - 'tests/acceptance/g12_*.sh'
       - 'tests/acceptance/g11_*.sh'
+      - 'tests/ui/dual-surface.spec.ts'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/g12d-seed.mjs'
@@ -41,6 +42,7 @@ on:
       # harness itself decides which specs run - so a change to any of the three must rerun it on
       # main. Without these three lines a push that edits the suite's own inputs would land with
       # no run of the job that depends on them.
+      - 'tests/ui/dual-surface.spec.ts'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/support/**'
