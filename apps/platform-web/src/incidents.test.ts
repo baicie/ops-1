@@ -878,6 +878,18 @@ describe('incidentCreateGate: the create affordance follows the role and the mem
     expect(incidentCreateGate({ role: 'admin', workspaces: [ws('w1', false), ws('w2')], workspaceReadFailed: false, scope: scope(1) }))
       .toEqual({ kind: 'allowed', workspaceId: 'w2', needsChoice: false });
   });
+
+  it('the scope may refuse even when the workspace read succeeded and disagrees', () => {
+    // Two reads, millions of statements, one moment apart: the workspace list says "one
+    // membership", the incident list's own scope says "none". The first version trusted the
+    // workspace read and returned allowed - the comment promised the scope was "only ever used to
+    // refuse", and on this path it was not used at all. The narrower witness wins.
+    expect(incidentCreateGate({ role: 'operator', workspaces: [ws('w1')], workspaceReadFailed: false, scope: scope(0) }))
+      .toEqual({ kind: 'workspace', reason: 'incidents.create.blocked.workspace' });
+    // A non-zero scope still permits nothing on its own: the workspace read is what says yes.
+    expect(incidentCreateGate({ role: 'operator', workspaces: [], workspaceReadFailed: false, scope: scope(1) }))
+      .toEqual({ kind: 'workspace', reason: 'incidents.create.blocked.workspace' });
+  });
 });
 
 

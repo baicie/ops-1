@@ -2650,9 +2650,25 @@ mod tests {
             // key cascades from the evidence row, which is the one delete the
             // trigger allows. So this cleanup deletes evidence and the bytes follow
             // - no test has to switch a lock off to clean up after itself.
+            //
+            // 0025 makes verdicts write-once, deletion included, because a closure stands on
+            // one. This is test cleanup, not a product path, so it states that in the one way
+            // the schema accepts: a transaction-local flag that no route and no kernel code
+            // sets. Without it the tests below would either leak their fixtures or delete
+            // through the very guard they exist to prove.
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query("SET LOCAL kernel.allow_verdict_removal = 'on'")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
             let sql =
                 format!("DELETE FROM kernel.incident_verdicts WHERE incident_id IN ({incidents})");
-            sqlx::query(&sql).bind(user).execute(pool).await.unwrap();
+            sqlx::query(&sql)
+                .bind(user)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
             let sql =
                 format!("DELETE FROM kernel.incident_evidence WHERE incident_id IN ({incidents})");
             sqlx::query(&sql).bind(user).execute(pool).await.unwrap();
@@ -3398,6 +3414,40 @@ mod tests {
         assert_eq!(error.code, "INCIDENT_ALREADY_CONCLUDED");
         assert_eq!(error.status, StatusCode::CONFLICT);
 
+        // 0025: "write-once" is now a property of the TABLE, not of the absence of an endpoint.
+        // The API refusal above always held; what did not hold - measured on a real database -
+        // was that any SQL could rewrite or delete the row the closure stands on.
+        let revise = sqlx::query(
+            "UPDATE kernel.incident_verdicts SET verdict='INCONCLUSIVE' WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .execute(&pool)
+        .await
+        .expect_err("a signed verdict must not be revisable");
+        assert!(
+            revise.to_string().contains("cannot be revised"),
+            "expected the 0025 refusal, got: {revise}"
+        );
+        let remove = sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id=$1")
+            .bind(incident.id)
+            .execute(&pool)
+            .await
+            .expect_err("a signed verdict must not be deletable");
+        assert!(
+            remove.to_string().contains("cannot be deleted"),
+            "expected the 0025 refusal, got: {remove}"
+        );
+        let still: String =
+            sqlx::query_scalar("SELECT verdict FROM kernel.incident_verdicts WHERE incident_id=$1")
+                .bind(incident.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            still, "CONFIRMED",
+            "the signature is exactly what was signed"
+        );
+
         cleanup(&pool, &[user]).await;
     }
 
@@ -3863,12 +3913,20 @@ mod tests {
 
         // The worst case the rule names: delete the verdict, then try to reopen. The
         // verdict is gone (no endpoint can do this; a table owner just did), and the
-        // incident is STILL closed.
-        sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id=$1")
-            .bind(closed.id)
-            .execute(&pool)
+        // incident is STILL closed. 0025 refuses the delete too, so the test says
+        // explicitly that it is acting as a table owner who switched the lock off -
+        // which is the premise, not the thing under test.
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL kernel.allow_verdict_removal = 'on'")
+            .execute(&mut *tx)
             .await
             .unwrap();
+        sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id=$1")
+            .bind(closed.id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
         let reopened =
             sqlx::query("UPDATE kernel.incidents SET status='CONCLUDED' WHERE incident_id=$1")
                 .bind(closed.id)
@@ -5533,10 +5591,18 @@ mod tests {
         .unwrap();
 
         // Rewrite the row into the shape 0017 produces for a pre-existing
-        // verdict: no snapshot, no digest, no count.
+        // verdict: no snapshot, no digest, no count. 0025 refuses a verdict
+        // update, so the test states that it is a MIGRATION doing this - the one
+        // context the schema allows to reshape a verdict row - rather than
+        // pretending the write is legal for a running system.
         sqlx::query("DELETE FROM kernel.incident_verdict_evidence WHERE incident_id=$1")
             .bind(incident.id)
             .execute(&pool)
+            .await
+            .unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL kernel.allow_verdict_backfill = 'on'")
+            .execute(&mut *tx)
             .await
             .unwrap();
         sqlx::query(
@@ -5547,9 +5613,10 @@ mod tests {
               WHERE incident_id=$1",
         )
         .bind(incident.id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await
         .unwrap();
+        tx.commit().await.unwrap();
 
         let verdict = query_verdict(&pool, caller(user), incident.id)
             .await

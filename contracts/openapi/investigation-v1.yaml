@@ -439,6 +439,26 @@ components:
         status:
           type: string
           enum: [RUNNING, SUCCEEDED, PARTIAL, FAILED, CANCELLED, EXPIRED, BUDGET_EXHAUSTED]
+          description: |
+            What the run may claim. Read with `stopReason`, not on its own.
+
+            SUCCEEDED means the investigator reached a final answer (stopReason FINAL_ANSWER)
+            that STORED at least one hypothesis and whose every tool call succeeded. An empty
+            `hypotheses` array next to SUCCEEDED is therefore not a valid record.
+
+            PARTIAL means a hypothesis was stored, but at least one read was refused, failed or
+            timed out; the hypotheses stand on the reads that did succeed and say so in their
+            gapCodes.
+
+            FAILED with stopReason FINAL_ANSWER is the case this note exists for: the model
+            answered, and the answer stated no hypothesis. There is no conclusion to record, so
+            the run is not a successful diagnosis - but it is also not a transport failure, and
+            the transcript still holds every read it made.
+
+            This is not "every run must find something". A run with no evidence rows still
+            writes one UNCERTAIN hypothesis carrying the NO_EVIDENCE_ROWS gap code: that is a
+            real conclusion about the record - it says the record does not contain one - and the
+            run is SUCCEEDED or PARTIAL on its reads like any other.
         stale:
           type: boolean
           description: |

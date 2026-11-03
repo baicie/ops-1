@@ -167,12 +167,14 @@ export function incidentCreateGate(input: {
   const { role, workspaces, workspaceReadFailed, scope } = input;
   if (!role) return { kind: 'unknown', reason: 'incidents.create.blocked.session' };
   if (role !== 'operator' && role !== 'admin') return { kind: 'role', reason: 'incidents.create.blocked.role' };
-  if (workspaceReadFailed) {
-    // The incident list's scope is a second witness, and it is only used to REFUSE, never to
-    // permit: zero there means zero everywhere.
-    if (scope?.workspaceCount === 0) return { kind: 'workspace', reason: 'incidents.create.blocked.workspace' };
-    return { kind: 'unknown', reason: 'incidents.create.blocked.workspacesUnread' };
-  }
+  // The incident list's scope can only REFUSE, never permit - and that has to hold whether or not
+  // the workspace read answered. The first version read the scope only on the failure path, so a
+  // successful workspace read saying "one membership" went straight to `allowed` even when the
+  // incident list said this account is in NO workspace. Both statements can be true a moment
+  // apart (the incident list is re-read on every filter change), and the safe reading of two
+  // disagreeing witnesses is the narrower one: no create until they agree again.
+  if (scope?.workspaceCount === 0) return { kind: 'workspace', reason: 'incidents.create.blocked.workspace' };
+  if (workspaceReadFailed) return { kind: 'unknown', reason: 'incidents.create.blocked.workspacesUnread' };
   if (!workspaces) return { kind: 'unknown', reason: 'incidents.create.blocked.session' };
   const writable = workspaces.filter((workspace) => workspace.member);
   if (writable.length === 0) return { kind: 'workspace', reason: 'incidents.create.blocked.workspace' };

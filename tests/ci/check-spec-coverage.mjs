@@ -76,51 +76,165 @@ const KNOWN_UNRUN = new Map([
 /** Read a file, or '' when it is missing (a workflow may reference a path this checkout lacks). */
 const read = (path) => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
 
-/** Every spec file in tests/ui, by basename. */
-const specFiles = readdirSync(UI).filter((name) => name.endsWith('.spec.ts')).sort();
-
 /**
- * Command lines that would run a spec: every `run:` block, plus the text of every harness a
- * run block calls. A spec named only in a comment does not count - which is the point, since a
- * commented-out line is exactly how g11-incident-slice.spec.ts looked before #24.
+ * Every spec file under tests/ui, recursively, as a path relative to tests/ui.
+ *
+ * Recursive because a spec in a subdirectory is still a spec: the first version read only the
+ * top level and would have reported a nested spec as "0 unreferenced" without ever looking at it.
  */
-function commandText(text) {
-  return text
-    .split('\n')
-    .filter((line) => !/^\s*#/.test(line))   // comments, whole-line
-    .map((line) => line.replace(/\s+#.*$/, '')) // and trailing
-    .join('\n');
+function listSpecs(dir, prefix = '') {
+  const out = [];
+  for (const name of readdirSync(join(dir, prefix || '.'))) {
+    const rel = prefix ? prefix + '/' + name : name;
+    const full = join(dir, rel);
+    let stat;
+    try { stat = statSync(full); } catch { continue; }
+    if (stat.isDirectory()) out.push(...listSpecs(dir, rel));
+    else if (name.endsWith('.spec.ts')) out.push(rel);
+  }
+  return out;
 }
 
-const harnessFiles = new Map(); // basename -> command text of that .sh
+/** Every spec file in tests/ui, by path relative to that directory. */
+const specFiles = listSpecs(UI).sort();
+
+/**
+ * Only lines that INVOKE a runner count.
+ *
+ * This is the whole point of the checker, and the first version got it wrong in the same way it
+ * was built to catch: it searched the raw workflow text, so a `paths:` filter entry, a step
+ * `name:`, an echo string, or a comment that happened to contain `foo.spec.ts` counted as "this
+ * workflow runs foo.spec.ts". Measured: with every real `playwright test … visual-layout.spec.ts`
+ * removed, the checker still reported COVERED because the path filter the same commit added
+ * named the file.
+ *
+ * A line counts when it contains a runner invocation AND the spec. `playwright test` may span
+ * several lines through backslash continuations, so a continuation is folded into its command
+ * first. Comments are dropped, whole-line and trailing.
+ */
+const RUNNER = /\b(playwright\s+test|npx\s+playwright\s+test|pnpm\b[^\n]*\bplaywright\s+test|yarn\s+playwright\s+test)\b/;
+
+/**
+ * The bodies of a workflow's `run:` steps, and nothing else.
+ *
+ * Reading the whole YAML is what let a `paths:` filter entry count as an execution: the first
+ * version scanned the file, so adding `- 'tests/ui/v.spec.ts'` to a path filter made the checker
+ * report the spec as covered even after every real invocation was deleted. A `paths:` entry is a
+ * TRIGGER, not a command; only `run:` text and step `with:`/`env:` values could ever execute
+ * something, and only `run:` does. Measured on this tree: with the real invocations removed and
+ * the path filter left, the whole-file scan still printed COVERED.
+ */
+function runBlocks(text) {
+  const lines = text.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const start = /^(\s*)(?:-\s+)?run:\s*(.*)$/.exec(lines[i]);
+    if (!start) continue;
+    const indent = start[1].length + (lines[i].trimStart().startsWith('- run:') ? 2 : 0);
+    const inline = start[2];
+    if (inline && !/^[|>]/.test(inline)) {
+      out.push(inline.trim());
+      continue;
+    }
+    // Block scalar (`run: |` / `run: >`) or the next lines indented deeper than `run:`.
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const line = lines[j];
+      if (!line.trim()) { out.push(''); continue; }
+      const lineIndent = line.length - line.trimStart().length;
+      if (lineIndent <= indent && !/^\s*-/.test(line)) break;
+      if (lineIndent < indent) break;
+      out.push(line);
+    }
+  }
+  return out.join('\n');
+}
+
+/** Every non-comment command line, continuations folded. Used for workflow `run:` blocks. */
+function commandLines(text) {
+  const lines = text.split('\n').filter((line) => !/^\s*#/.test(line)).map((line) => line.replace(/\s+#.*$/, ''));
+  const folded = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    let line = lines[i];
+    while (/\\\s*$/.test(line) && i + 1 < lines.length) {
+      line = line.replace(/\\\s*$/, ' ') + lines[i + 1].trim();
+      i += 1;
+    }
+    folded.push(line);
+  }
+  return folded;
+}
+
+/** Command lines that actually invoke a test runner. Used for harness bodies only. */
+function invocations(text) {
+  return commandLines(text).filter((line) => RUNNER.test(line));
+}
+
+const harnessFiles = new Map(); // basename -> invocation lines of that .sh
 for (const dir of ['tests/ci', 'tests/acceptance']) {
   let names = [];
   try { names = readdirSync(join(ROOT, dir)); } catch { continue; }
   for (const name of names) {
-    if (name.endsWith('.sh')) harnessFiles.set(name, commandText(read(join(ROOT, dir, name))));
+    if (name.endsWith('.sh')) harnessFiles.set(name, invocations(read(join(ROOT, dir, name))));
   }
 }
 
-/** Where a workflow's own `run:` text plus the harnesses it invokes would execute a spec. */
+/**
+ * Every invocation line a workflow would execute, following harness indirection as far as it
+ * actually goes (workflow -> a.sh -> b.sh -> spec) rather than exactly one level.
+ *
+ * Returns { files, lines }: the harness files reached, and every invocation line from the
+ * workflow's own `run:` blocks plus those harnesses.
+ */
 function workflowCommands(name) {
-  const text = commandText(read(join(WORKFLOWS, name)));
-  const parts = [text];
-  for (const [harness, body] of harnessFiles) {
-    // The workflow invokes the harness by name; include the harness's own text then.
-    if (new RegExp(`(^|[\\s/])${harness.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(text)) {
-      parts.push(body);
+  // Two kinds of line, deliberately: a WORKFLOW line may be `bash tests/ci/x.sh` (not a runner
+  // invocation), while a HARNESS line must be a runner invocation. Folding both into one
+  // `invocations()` call made every harnessed spec look unreferenced - the harness call was
+  // dropped before its body was ever read.
+  const own = commandLines(runBlocks(read(join(WORKFLOWS, name))));
+  const reached = new Set();
+  let frontier = own;
+  // A harness is reached when a line names it in a CALL position (start, `bash`, `sh`, `.`, or a
+  // path), not when it appears in an echo or a comment.
+  const harnessCall = (line) =>
+    [...harnessFiles.keys()].filter((harness) => {
+      const escaped = harness.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(^|[\\s;&|(])(?:\\.|bash|sh|source)?\\s*(?:\\S*/)?${escaped}(?=\\s|$)`).test(line);
+    });
+  for (let depth = 0; depth < 4 && frontier.length; depth += 1) {
+    const next = [];
+    for (const line of frontier) {
+      for (const harness of harnessCall(line)) {
+        if (reached.has(harness)) continue;
+        reached.add(harness);
+        next.push(...harnessFiles.get(harness));
+      }
     }
+    frontier = next;
   }
-  return parts.join('\n');
+  return { files: [...reached], lines: own.concat([...reached].flatMap((h) => harnessFiles.get(h))) };
 }
 
 const workflows = readdirSync(WORKFLOWS).filter((name) => name.endsWith('.yml') || name.endsWith('.yaml')).sort();
 const commandsByWorkflow = new Map(workflows.map((name) => [name, workflowCommands(name)]));
 
+/**
+ * Whether an invocation line runs a spec. Matched on the file name as a word, so
+ * `data-foundation.spec.ts` is not satisfied by `data-foundation-flows.spec.ts`.
+ */
+function lineRuns(line, spec) {
+  const base = spec.split('/').pop();
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // The name must START at a token boundary and must not CONTINUE into a longer file name.
+  // Trailing context is deliberately any non-name character: a spec is followed by `\`, `)`,
+  // `|`, a quote, or end of line depending on how the command was written, and enumerating
+  // those spellings is how the first version dropped a spec that was plainly on the line.
+  return new RegExp(`(^|[\\s'"/])${escaped}(?![\\w.-])`).test(line);
+}
+
 const coveredBy = new Map(specFiles.map((spec) => [spec, []]));
-for (const [workflow, commands] of commandsByWorkflow) {
+for (const [workflow, { lines }] of commandsByWorkflow) {
   for (const spec of specFiles) {
-    if (commands.includes(spec)) coveredBy.get(spec).push(workflow);
+    if (lines.some((line) => RUNNER.test(line) && lineRuns(line, spec))) coveredBy.get(spec).push(workflow);
   }
 }
 
@@ -186,8 +300,9 @@ for (const workflow of workflows) {
   const paths = triggerPaths(workflow);
   if (paths.length === 0) continue; // triggered on every push/pull_request: nothing to miss
   const inputs = new Set();
+  const { lines: wfLines } = commandsByWorkflow.get(workflow);
   for (const spec of specFiles) {
-    if (commandsByWorkflow.get(workflow).includes(spec)) inputs.add('tests/ui/' + spec);
+    if (wfLines.some((line) => RUNNER.test(line) && lineRuns(line, spec))) inputs.add('tests/ui/' + spec);
   }
   for (const extra of IMPLICIT_INPUTS[workflow] ?? []) inputs.add(extra);
   // Per EVENT, not "any event covers it". A workflow that runs a spec on pull_request but whose

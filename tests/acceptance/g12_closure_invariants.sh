@@ -186,8 +186,50 @@ check 'INCIDENT_CLOSE_REQUIRES_VERDICT' "$(code)" '5.3 and names the missing ver
 DIRECT="$(sql "UPDATE kernel.incidents SET status='CLOSED', closed_at=now(), closed_by='$ADMIN_ID' WHERE incident_id='$INC_UNSIGNED'")"
 contains 'no human verdict' "$DIRECT" '5.4 the schema refuses the same closure written by hand'
 
-# Leave the database as this script found it: the two rows it made are test fixtures, not data.
-sql "DELETE FROM kernel.incidents WHERE incident_id IN ('$INC','$INC_UNSIGNED')" > /dev/null 2>&1 || true
+# ---------------------------------------------------------------------------
+step '6 - the signature a closure stands on is write-once (0025)'
+# ---------------------------------------------------------------------------
+# D2's rule is "a closure stands on a signed verdict". Before 0025 that sentence was a claim about
+# the absence of an endpoint: the row could be rewritten or deleted by any SQL. Now the table says
+# it. Each hostile statement is run and then the row is re-read, so a refusal that still changed
+# something cannot pass.
+VERDICT_BEFORE="$(sqlq "SELECT verdict FROM kernel.incident_verdicts WHERE incident_id='$INC'")"
+R_VERDICT="$(sql "UPDATE kernel.incident_verdicts SET verdict='INCONCLUSIVE' WHERE incident_id='$INC'")"
+contains 'cannot be revised' "$R_VERDICT" '6.1 a signed verdict cannot be revised'
+R_WHY="$(sql "UPDATE kernel.incident_verdicts SET rationale='a different reason entirely' WHERE incident_id='$INC'")"
+contains 'cannot be revised' "$R_WHY" '6.2 nor can its rationale'
+R_WHO="$(sql "UPDATE kernel.incident_verdicts SET decided_by='$OTHER_ID' WHERE incident_id='$INC'")"
+contains 'cannot be revised' "$R_WHO" '6.3 nor can the account it is attributed to'
+R_GONE="$(sql "DELETE FROM kernel.incident_verdicts WHERE incident_id='$INC'")"
+contains 'cannot be deleted' "$R_GONE" '6.4 the signature cannot be deleted out from under the closure'
+check "$VERDICT_BEFORE" "$(sqlq "SELECT verdict FROM kernel.incident_verdicts WHERE incident_id='$INC'")" '6.5 the verdict is exactly what was signed'
+check '1' "$(sqlq "SELECT count(*) FROM kernel.incident_verdicts WHERE incident_id='$INC'")" '6.6 and exactly one row still stands'
+
+# Leave the database as this script found it. The rows are fixtures, not data - and the previous
+# version of this cleanup silently did nothing: `$INC` has a signed verdict and
+# `incident_verdicts.incident_id` is ON DELETE RESTRICT, so the bare DELETE always failed with a
+# foreign-key error which `|| true` swallowed. Every run leaked a CLOSED incident and an orphan,
+# and the script still reported success (measured on a real database). The order matters and is
+# asserted rather than hoped for: runs cascade their hypotheses and citations, the verdict must go
+# before the incident, and the evidence cascades with it.
+cleanup_ok=1
+sql "DELETE FROM kernel.investigation_runs
+      WHERE incident_id IN ('$INC','$INC_UNSIGNED')" > /dev/null 2>&1 || cleanup_ok=0
+# 0025 makes a verdict write-once, deletion included. This is test cleanup on a throwaway
+# database, so it states that in the transaction it performs it - the same transaction-local
+# flag the kernel's own test cleanup uses.
+sql "BEGIN; SET LOCAL kernel.allow_verdict_removal='on';
+     DELETE FROM kernel.incident_verdicts
+      WHERE incident_id IN ('$INC','$INC_UNSIGNED'); COMMIT;" > /dev/null 2>&1 || cleanup_ok=0
+sql "DELETE FROM kernel.incidents
+      WHERE incident_id IN ('$INC','$INC_UNSIGNED')" > /dev/null 2>&1 || cleanup_ok=0
+check '1' "$cleanup_ok" 'Z1 cleanup: every fixture row was removed (a failed delete fails the script)'
+if [ "$cleanup_ok" = "1" ]; then
+  LEFTOVER="$(sqlq "SELECT count(*) FROM kernel.incidents WHERE incident_id IN ('$INC','$INC_UNSIGNED')")"
+  check '0' "$LEFTOVER" 'Z2 cleanup: and they are actually gone, not merely reported deleted'
+else
+  bad 'Z2 cleanup could not run, so the leak was not verified'
+fi
 
 echo
 echo "== D2 result: $PASS passed, $FAIL failed"

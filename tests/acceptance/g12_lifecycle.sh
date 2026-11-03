@@ -296,8 +296,16 @@ step 'C1.10 - a closure is final, and deleting the verdict does not reopen it'
 # ---------------------------------------------------------------------------
 REOPEN="$(sql "UPDATE kernel.incidents SET status='INVESTIGATING' WHERE incident_id='$INC'")"
 contains 'cannot return to' "$REOPEN" 'C1.10 the schema refuses a hand-written reopen'
-DROP_VERDICT="$(sql "DELETE FROM kernel.incident_verdicts WHERE incident_id='$INC'")"
-check 'DELETE 1' "$DROP_VERDICT" 'C1.10 setup: the verdict row is gone (a table owner did this)'
+# 0025 refuses this DELETE on purpose: a closure stands on its signature. The step exists to prove
+# what happens when the signature vanishes, so it does what a table owner demonstrating that would
+# do - states the intent in the transaction that performs it. The flag is transaction-local and no
+# route or kernel path sets it.
+DENIED="$(sql "DELETE FROM kernel.incident_verdicts WHERE incident_id='$INC'")"
+contains 'cannot be deleted' "$DENIED" 'C1.10 an ordinary DELETE of the signed verdict is refused (0025)'
+STILL_SIGNED="$(sql "SELECT count(*) FROM kernel.incident_verdicts WHERE incident_id='$INC'")"
+check '1' "$STILL_SIGNED" 'C1.10 and the signature is still there'
+DROP_VERDICT="$(sql "BEGIN; SET LOCAL kernel.allow_verdict_removal='on'; DELETE FROM kernel.incident_verdicts WHERE incident_id='$INC'; COMMIT;")"
+contains 'DELETE 1' "$DROP_VERDICT" 'C1.10 setup: the verdict row is gone (a table owner did this)'
 REOPEN="$(sql "UPDATE kernel.incidents SET status='CONCLUDED' WHERE incident_id='$INC'")"
 contains 'cannot return to' "$REOPEN" 'C1.10 reopening by deleting the verdict is still refused'
 check CLOSED "$(sql "SELECT status FROM kernel.incidents WHERE incident_id='$INC'")" 'C1.10 the incident is still CLOSED'
