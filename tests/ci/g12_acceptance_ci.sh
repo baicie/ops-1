@@ -142,6 +142,7 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 #     attributes, so the evidence row carried no machine-readable kind (asserted at :178).
 if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
      g11-incident-slice.spec.ts \
+     g12-create-gate.spec.ts \
      g11-page-header-growth.spec.ts \
      g12-incident-route-identity.spec.ts \
      g12-evidence-content.spec.ts \

@@ -45,6 +45,7 @@ on:
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/support/**'
       - 'tests/ui/playwright.config.ts'
+      - 'tests/ui/g12d-seed.mjs'
       - 'tests/ci/g12_acceptance_ci.sh'
       - '.github/workflows/g12-acceptance.yml'
 
