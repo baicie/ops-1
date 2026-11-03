@@ -526,6 +526,12 @@ jobs:
       # under artifacts/staging-preview/ (runner-network.json, playwright-timings.json).
       runner_network: ${{ steps.netprobe.outputs.summary }}
       playwright_timings: ${{ steps.timings.outputs.summary }}
+      # The table audit and its geometry gate are acceptance steps too, and they used to be
+      # invisible to the record: run 41612408372 had 4/6 audit cases time out, the job went red,
+      # and health.json still said ok:true / exit_code:0. A red step that the record cannot see is
+      # the "green because nothing recorded it" failure this workflow exists to prevent.
+      metrics_outcome: ${{ steps.metrics.outcome }}
+      geometry_outcome: ${{ steps.geometry.outcome }}
     env:
       # Shared by every browser step below: one preview origin, one credential, one expected commit.
       OPSWEAVE_URL: ${{ secrets.STAGING_BASE_URL }}
@@ -1537,6 +1543,8 @@ jobs:
           # UNVERIFIED or a green run into anything else.
           RUNNER_NETWORK: ${{ needs.smoke.outputs.runner_network }}
           PLAYWRIGHT_TIMINGS: ${{ needs.smoke.outputs.playwright_timings }}
+          METRICS_OUTCOME: ${{ needs.smoke.outputs.metrics_outcome }}
+          GEOMETRY_OUTCOME: ${{ needs.smoke.outputs.geometry_outcome }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
@@ -1647,6 +1655,8 @@ jobs:
           }
 
           CORE_FILES = ("staging-smoke.spec.ts", "dual-surface.spec.ts", "admin-shell.spec.ts")
+          # The table audit writes geometry and the gate judges it; both belong to acceptance.
+          METRICS_FILES = ("ui-table-audit.spec.ts",)
           SURFACES_FILES = (
               "admin-pages.spec.ts", "admin-polish.spec.ts", "plugin-surfaces.spec.ts",
               "plugin-detail-tabs.spec.ts", "business-workspace.spec.ts", "overview-partial.spec.ts",
@@ -1661,6 +1671,10 @@ jobs:
           STEPS = [
               ("core", "core", "core", CORE_FILES,
                os.environ.get("CORE_OUTCOME", ""), ""),
+              ("metrics", "table-geometry", "core", METRICS_FILES,
+               os.environ.get("METRICS_OUTCOME", ""), ""),
+              ("geometry", "table-geometry", "core", METRICS_FILES,
+               os.environ.get("GEOMETRY_OUTCOME", ""), ""),
               ("surfaces", "admin-plugin-i18n", "full", SURFACES_FILES,
                os.environ.get("SURFACES_OUTCOME", ""), ""),
               ("seeded_studio", "seeded-data", "full", ("studio.spec.ts",),
@@ -1673,7 +1687,8 @@ jobs:
 
           # (group name, known_flaky). A known-flaky group still runs and is still reported; it is only
           # excluded from the gate.
-          GROUPS = [("core", False), ("admin-plugin-i18n", False), ("seeded-data", True)]
+          GROUPS = [("core", False), ("table-geometry", False),
+                    ("admin-plugin-i18n", False), ("seeded-data", True)]
 
 
           def resolve_status(step_tier, reported, job_result):
@@ -1944,6 +1959,16 @@ jobs:
               code_verdict = "UNVERIFIED"
           else:
               code_verdict = "FAILED"
+          # A run whose primary suite did not execute has not accepted any code, whatever else
+          # passed. This is the same "green because nothing ran" rule the workflow applies to the
+          # tier: the table audit alone is not the core path, so a PASSED built from it would be a
+          # claim about acceptance that the run did not make. (Found by simulating CORE_OUTCOME
+          # empty with the audit green: it reported PASSED before this guard.)
+          if MODE == "playwright" and code_verdict == "PASSED":
+              core_check = next((c for c in checks if c["name"] == "core"), None)
+              if core_check is None or core_check["status"] != "passed":
+                  code_verdict = "UNVERIFIED"
+
           verdicts = {
               "deployment_environment": deployment_verdict,
               "code_acceptance": code_verdict,
