@@ -334,12 +334,19 @@ export type VerdictPanelState = 'recorded' | 'open' | 'sealed';
 
 /**
  * A verdict is write-once (ADR-G11-001 §5.1): once recorded the form is replaced by the record.
- * CLOSED is 'sealed' - no write endpoint in this slice reaches it, but the state is honoured
- * rather than rendered as a form that would 409.
+ *
+ * CLOSED is 'sealed', and the CLOSED check comes FIRST. The order is the whole rule: closing
+ * requires a signed verdict and the closure retains it (the kernel's own closure test asserts
+ * `closed.human_verdict.is_some()`), so a record that is both closed and concluded is the NORMAL
+ * shape of a closed incident, not an edge case. Checking `humanVerdict` first made 'sealed'
+ * unreachable from real data - it survived only in a unit test built from a hand-made incident
+ * that had a CLOSED status and no verdict, a state the product cannot produce. The render still
+ * shows the signed verdict alongside the sealed notice: sealed says no more verdicts are
+ * accepted, not that the decision disappeared.
  */
 export function verdictPanelState(incident: Pick<IncidentView, 'humanVerdict' | 'status'>): VerdictPanelState {
-  if (incident.humanVerdict) return 'recorded';
   if (incident.status === 'CLOSED') return 'sealed';
+  if (incident.humanVerdict) return 'recorded';
   return 'open';
 }
 // ---------------------------------------------------------------------------
