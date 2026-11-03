@@ -102,6 +102,7 @@ run_acceptance() {
 run_acceptance trusted-evidence tests/acceptance/g12_trusted_evidence.sh
 run_acceptance evidence-content tests/acceptance/g12_evidence_content.sh
 run_acceptance lifecycle        tests/acceptance/g12_lifecycle.sh
+run_acceptance closure-invariants tests/acceptance/g12_closure_invariants.sh
 run_acceptance ai-investigator  tests/acceptance/g12_ai_investigator.sh
 
 echo

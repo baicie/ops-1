@@ -2838,6 +2838,53 @@ async fn record_hypothesis(
 // The loop.
 // ---------------------------------------------------------------------------
 
+/// What a run that reached a FINAL decision is actually reporting.
+///
+/// `SUCCEEDED` used to mean only "the model stopped asking for tools and no call failed". A
+/// model can answer `FINAL` with an empty `hypotheses` array, and then the run was recorded as
+/// a success with zero hypotheses - a record a reader would reasonably take for "the
+/// investigator finished and found nothing worth stating", which is not what happened: it
+/// stated nothing at all. The protocol already has a value for "answered, on an incomplete
+/// read" and one for "nothing usable" - the defect was that neither was reachable from this
+/// branch, because the branch only looked at tool outcomes.
+///
+/// The three outcomes are kept distinct instead of collapsing into one:
+///
+///   SUCCEEDED   at least one hypothesis was stored, and every read succeeded
+///   PARTIAL     a hypothesis was stored, but a read was refused, failed or timed out
+///   FAILED      no hypothesis was stored: there is no conclusion to stand on, whatever the
+///               reads did. `stop_reason` stays FINAL_ANSWER because that is what the model
+///               produced; refusing it is a protocol failure, not a transport one.
+///
+/// "No evidence" is NOT this branch. A run with no evidence rows still writes one UNCERTAIN
+/// hypothesis with `NO_EVIDENCE_ROWS` (see `fixture_hypothesis`), which is a real conclusion
+/// about the record: it says the record does not contain one. That stays SUCCEEDED/PARTIAL on
+/// its reads. What this refuses is silence.
+fn final_answer_outcome(
+    written_hypotheses: i64,
+    any_failed: bool,
+) -> (&'static str, Option<String>) {
+    if written_hypotheses == 0 {
+        return (
+            "FAILED",
+            Some(
+                "the investigator reached a final answer that stated no hypothesis, so there is no conclusion to record; every read it made stays in the transcript, and a run that says nothing is not a successful diagnosis"
+                    .to_string(),
+            ),
+        );
+    }
+    if any_failed {
+        return (
+            "PARTIAL",
+            Some(
+                "the investigator reached a conclusion, but at least one read it asked for was refused, failed or timed out; the hypotheses stand on the reads that did succeed and say so through their gap codes"
+                    .to_string(),
+            ),
+        );
+    }
+    ("SUCCEEDED", None)
+}
+
 async fn run_loop(context: RunContext<'_>) -> AppResult<()> {
     let RunContext {
         state,
@@ -3175,17 +3222,7 @@ async fn run_loop(context: RunContext<'_>) -> AppResult<()> {
                 .fetch_one(db)
                 .await?;
                 spent.hypotheses = written_hypotheses;
-                let (status, detail) = if any_failed {
-                    (
-                        "PARTIAL",
-                        Some(
-                            "the investigator reached a conclusion, but at least one read it asked for was refused, failed or timed out; the hypotheses stand on the reads that did succeed and say so through their gap codes"
-                                .to_string(),
-                        ),
-                    )
-                } else {
-                    ("SUCCEEDED", None)
-                };
+                let (status, detail) = final_answer_outcome(written_hypotheses, any_failed);
                 return finish_run(
                     db,
                     run_id,
@@ -3481,6 +3518,214 @@ mod tests {
         assert_eq!(first.statement, second.statement);
         assert_eq!(first.supporting, second.supporting);
         assert_eq!(first.confidence, second.confidence);
+    }
+
+    /// D3: the model protocol, against the closed vocabularies it claims to enforce.
+    ///
+    /// `parse_model_decision` decides what a model is allowed to have said before any of it
+    /// touches a row. It had no test of its own - the acceptance script drives the FIXTURE, so
+    /// every assertion about a real model's shape was an assertion about code no run had taken.
+    /// These are pure: no database, no network, no credential.
+    mod model_protocol {
+        use super::super::*;
+
+        fn final_with(hypotheses: Value) -> Value {
+            json!({ "action": "FINAL", "hypotheses": hypotheses })
+        }
+
+        fn hypothesis(stance: &str, confidence: &str) -> Value {
+            json!({
+                "statement": "a statement long enough to be stored",
+                "stance": stance,
+                "confidence": confidence,
+                "reasoning": "because the rows say so",
+            })
+        }
+
+        #[test]
+        fn valid_final_is_accepted_and_keeps_what_the_model_said() {
+            let decision =
+                parse_model_decision(&final_with(json!([hypothesis("SUPPORTED", "HIGH")])))
+                    .expect("a well-formed FINAL is accepted");
+            let ModelDecision::Final { hypotheses } = decision else {
+                panic!("a FINAL action must parse to Final");
+            };
+            assert_eq!(hypotheses.len(), 1);
+            assert_eq!(hypotheses[0].stance, "SUPPORTED");
+            assert_eq!(hypotheses[0].confidence, "HIGH");
+            assert_eq!(hypotheses[0].reasoning, "because the rows say so");
+        }
+
+        #[test]
+        fn invalid_json_shape_is_refused_with_a_stable_code() {
+            for body in [
+                json!({}),
+                json!({ "action": "THINK" }),
+                json!({ "action": "FINAL" }),
+                json!({ "action": "FINAL", "hypotheses": "not an array" }),
+                json!({ "action": "TOOL_CALL" }),
+                json!("a bare string"),
+            ] {
+                let failure =
+                    parse_model_decision(&body).expect_err(&format!("{body} must be refused"));
+                assert_eq!(failure.code, "MODEL_RESPONSE_INVALID", "for {body}");
+            }
+        }
+
+        #[test]
+        fn a_stance_or_confidence_outside_the_closed_set_is_refused_not_coerced() {
+            // The property that matters: the answer is refused, never mapped to the nearest
+            // legal value. A coerced stance would put words in the model's mouth.
+            for (stance, confidence) in [
+                ("CONFIRMED", "HIGH"), // the human verdict's vocabulary
+                ("SUPPORTED", "CERTAIN"),
+                ("PROBABLY", "HIGH"),
+                ("", ""),
+            ] {
+                let failure =
+                    parse_model_decision(&final_with(json!([hypothesis(stance, confidence)])))
+                        .expect_err(&format!("{stance}/{confidence} must be refused"));
+                assert_eq!(failure.code, "MODEL_RESPONSE_INVALID");
+                assert!(
+                    failure.message.contains("STANCES")
+                        || failure.message.contains("stance must be"),
+                    "the message names the closed set, got: {}",
+                    failure.message
+                );
+            }
+        }
+
+        #[test]
+        fn an_empty_hypothesis_array_parses_and_is_the_callers_problem() {
+            // The parser is not where silence is refused - it reports faithfully that the model
+            // said FINAL with nothing. `final_answer_outcome` is what turns that into FAILED,
+            // and keeping the two apart is what lets the run record the model's actual answer.
+            let decision =
+                parse_model_decision(&final_with(json!([]))).expect("an empty FINAL parses");
+            let ModelDecision::Final { hypotheses } = decision else {
+                panic!("expected Final");
+            };
+            assert!(hypotheses.is_empty());
+        }
+
+        #[test]
+        fn more_hypotheses_than_the_cap_are_truncated_not_refused() {
+            let many: Vec<Value> = (0..TOOL_HYPOTHESIS_MAX + 3)
+                .map(|_| hypothesis("UNCERTAIN", "LOW"))
+                .collect();
+            let decision =
+                parse_model_decision(&final_with(json!(many))).expect("over-cap truncates");
+            let ModelDecision::Final { hypotheses } = decision else {
+                panic!("expected Final");
+            };
+            assert_eq!(hypotheses.len(), TOOL_HYPOTHESIS_MAX);
+        }
+
+        #[test]
+        fn citations_are_parsed_as_uuids_and_junk_is_dropped_not_guessed() {
+            let mut item = hypothesis("SUPPORTED", "MEDIUM");
+            let real = Uuid::new_v4();
+            item["supportingEvidence"] = json!([real.to_string(), "not-a-uuid", 42]);
+            item["contradictingEvidence"] = json!(["also-not-a-uuid"]);
+            let ModelDecision::Final { hypotheses } =
+                parse_model_decision(&final_with(json!([item]))).expect("parses")
+            else {
+                panic!("expected Final");
+            };
+            assert_eq!(
+                hypotheses[0].supporting,
+                vec![real],
+                "only the parseable id survives"
+            );
+            assert!(hypotheses[0].contradicting.is_empty());
+        }
+
+        #[test]
+        fn a_tool_call_may_be_anything_and_the_executor_is_what_refuses_it() {
+            // Deliberate split: the parser does not own the tool allowlist. A name outside
+            // TOOL_NAMES parses, and `execute_tool` refuses it with PRE_PREDICATE_TOOL_ALLOWLIST
+            // before any query - measured in the acceptance script (S4/S8) and in
+            // `a_tool_the_investigator_invented_is_not_in_the_catalogue`. Naming that here keeps
+            // a future reader from adding a second allowlist to this function.
+            let decision = parse_model_decision(&json!({
+                "action": "TOOL_CALL",
+                "tool": "run_shell",
+                "arguments": { "cmd": "rm -rf /" },
+            }))
+            .expect("the parser accepts the shape");
+            let ModelDecision::ToolCall { tool, .. } = decision else {
+                panic!("expected ToolCall");
+            };
+            assert_eq!(tool, "run_shell");
+            assert!(
+                !TOOL_NAMES.contains(&tool.as_str()),
+                "and it is not in the catalogue"
+            );
+        }
+
+        #[test]
+        fn arguments_default_to_an_empty_object() {
+            let ModelDecision::ToolCall { arguments, .. } =
+                parse_model_decision(&json!({ "action": "TOOL_CALL", "tool": "get_incident" }))
+                    .expect("parses")
+            else {
+                panic!("expected ToolCall");
+            };
+            assert_eq!(arguments, json!({}));
+        }
+    }
+
+    /// D1: a FINAL answer that states nothing is not a successful diagnosis.
+    ///
+    /// The four cases the brief names, as four rows of one table, because they are one
+    /// decision seen from four sides and a separate test per row would let three pass while
+    /// the fourth regressed.
+    #[test]
+    fn a_final_answer_is_judged_by_what_it_stated_and_what_it_read() {
+        // (hypotheses stored, a read failed, expected status, whether a reason is required)
+        let cases: [(i64, bool, &str, bool); 4] = [
+            // A normal conclusion on clean reads.
+            (1, false, "SUCCEEDED", false),
+            // A conclusion that had to stand on a read that was refused or failed.
+            (1, true, "PARTIAL", true),
+            // The defect this closes: silent FINAL with clean reads used to be SUCCEEDED.
+            (0, false, "FAILED", true),
+            // Silent FINAL over failed reads is still FAILED: there is nothing to be partial
+            // about. PARTIAL means "here is a conclusion, it is incomplete", and a run with no
+            // conclusion has none to qualify.
+            (0, true, "FAILED", true),
+        ];
+        for (written, any_failed, status, needs_detail) in cases {
+            let (actual, detail) = final_answer_outcome(written, any_failed);
+            assert_eq!(
+                actual, status,
+                "{written} hypothesis(es), any_failed={any_failed}: got {actual}, expected {status}"
+            );
+            assert_eq!(
+                detail.is_some(),
+                needs_detail,
+                "{status}: the detail sentence must be present exactly when the run did not simply answer"
+            );
+            if let Some(detail) = detail {
+                assert!(
+                    detail.chars().count() >= 4,
+                    "the schema requires a detail of at least 4 characters"
+                );
+            }
+        }
+    }
+
+    /// A run with no evidence is NOT the silent case: it states an UNCERTAIN hypothesis, which
+    /// is a real conclusion about the record. This keeps a future reader from "fixing" the test
+    /// above by requiring evidence for every run.
+    #[test]
+    fn no_evidence_still_counts_as_a_stated_hypothesis() {
+        let started = Utc::now();
+        let stated = fixture_hypothesis(&transcript_with(started, &[]));
+        assert_eq!(stated.stance, "UNCERTAIN");
+        // `written_hypotheses` counts rows, and a row was written: the run is not silent.
+        let (status, _) = final_answer_outcome(1, false);
+        assert_eq!(status, "SUCCEEDED");
     }
 
     #[test]
