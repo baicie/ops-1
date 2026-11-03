@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './api';
 import type { IncidentEvidence, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
-import type { IncidentEmptyKind } from './incidents';
+import type { IncidentEmptyKind, BusinessWorkspace } from './incidents';
 import {
   CLAIMABLE_TRUST_CODES,
   EVIDENCE_TRUST_CODES,
@@ -12,6 +12,7 @@ import {
   closeIncidentPayload,
   incidentsEmptyKind,
   INCIDENT_EMPTY_COPY,
+  incidentCreateGate,
   closureNoteError,
   closurePanelState,
   incidentCapabilities,
@@ -810,6 +811,72 @@ describe('incidentsEmptyKind: an empty list says which of four things it is', ()
     // it. Both answer items: [], and the page must not render one with the other's copy.
     expect(INCIDENT_EMPTY_COPY.none.title).not.toBe(INCIDENT_EMPTY_COPY.workspace.title);
     expect(INCIDENT_EMPTY_COPY.scoped.title).not.toBe(INCIDENT_EMPTY_COPY.none.title);
+  });
+});
+
+describe('incidentCreateGate: the create affordance follows the role and the memberships', () => {
+  const ws = (workspaceId: string, member = true): BusinessWorkspace => ({
+    workspaceId, key: workspaceId, name: workspaceId, createdAt: '2026-11-02T00:00:00Z', member,
+  });
+  const scope = (workspaceCount: number) => ({ narrowedTo: null, workspaceCount }) as const;
+
+  it('an admin in a workspace may create, and is not asked which one', () => {
+    expect(incidentCreateGate({ role: 'admin', workspaces: [ws('w1')], workspaceReadFailed: false, scope: scope(1) }))
+      .toEqual({ kind: 'allowed', workspaceId: 'w1', needsChoice: false });
+  });
+
+  it('an operator with one workspace may create there without being asked', () => {
+    expect(incidentCreateGate({ role: 'operator', workspaces: [ws('w1')], workspaceReadFailed: false, scope: scope(1) }))
+      .toEqual({ kind: 'allowed', workspaceId: 'w1', needsChoice: false });
+  });
+
+  it('an operator with several workspaces must choose, and no default is invented', () => {
+    // Pre-selecting one would be the page deciding a scope the kernel asked it to state.
+    expect(incidentCreateGate({ role: 'operator', workspaces: [ws('w1'), ws('w2')], workspaceReadFailed: false, scope: scope(2) }))
+      .toEqual({ kind: 'allowed', workspaceId: null, needsChoice: true });
+  });
+
+  it('an operator in no workspace is refused with the membership reason', () => {
+    expect(incidentCreateGate({ role: 'operator', workspaces: [], workspaceReadFailed: false, scope: scope(0) }))
+      .toEqual({ kind: 'workspace', reason: 'incidents.create.blocked.workspace' });
+  });
+
+  it('a viewer never creates, even inside a workspace it may read', () => {
+    // The role gate is first on purpose: membership grants reading, not a verb. A viewer that
+    // owns a workspace still gets INCIDENT_FORBIDDEN from POST /incidents.
+    expect(incidentCreateGate({ role: 'viewer', workspaces: [ws('w1')], workspaceReadFailed: false, scope: scope(1) }))
+      .toEqual({ kind: 'role', reason: 'incidents.create.blocked.role' });
+    expect(incidentCreateGate({ role: 'viewer', workspaces: [], workspaceReadFailed: false, scope: scope(0) }))
+      .toEqual({ kind: 'role', reason: 'incidents.create.blocked.role' });
+  });
+
+  it('a workspace list that has not answered yet is unknown, never allowed', () => {
+    // The failure this closes: `!workspaces` was falsy-tested into "no restriction" in an
+    // earlier draft, which opened the form while the read was still in flight.
+    expect(incidentCreateGate({ role: 'operator', workspaces: null, workspaceReadFailed: false, scope: null }))
+      .toEqual({ kind: 'unknown', reason: 'incidents.create.blocked.session' });
+  });
+
+  it('a failed workspace read does not become a permission, but a zero scope still refuses', () => {
+    expect(incidentCreateGate({ role: 'operator', workspaces: null, workspaceReadFailed: true, scope: scope(1) }))
+      .toEqual({ kind: 'unknown', reason: 'incidents.create.blocked.workspacesUnread' });
+    // The incident list is a second witness: it says zero memberships, so creation is impossible
+    // whatever the failed read would have said. This is the one asymmetry - the scope may REFUSE,
+    // never permit.
+    expect(incidentCreateGate({ role: 'operator', workspaces: null, workspaceReadFailed: true, scope: scope(0) }))
+      .toEqual({ kind: 'workspace', reason: 'incidents.create.blocked.workspace' });
+  });
+
+  it('no session is unknown, not a silent allow', () => {
+    expect(incidentCreateGate({ role: null, workspaces: [ws('w1')], workspaceReadFailed: false, scope: scope(1) }))
+      .toEqual({ kind: 'unknown', reason: 'incidents.create.blocked.session' });
+  });
+
+  it('a workspace the caller is not a member of does not count toward the choice', () => {
+    // An admin sees every workspace's metadata; only `member: true` rows are somewhere it may
+    // file. Counting the metadata rows would offer a workspace whose create would answer 404.
+    expect(incidentCreateGate({ role: 'admin', workspaces: [ws('w1', false), ws('w2')], workspaceReadFailed: false, scope: scope(1) }))
+      .toEqual({ kind: 'allowed', workspaceId: 'w2', needsChoice: false });
   });
 });
 
