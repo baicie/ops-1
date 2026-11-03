@@ -1959,6 +1959,16 @@ jobs:
               code_verdict = "UNVERIFIED"
           else:
               code_verdict = "FAILED"
+          # A run whose primary suite did not execute has not accepted any code, whatever else
+          # passed. This is the same "green because nothing ran" rule the workflow applies to the
+          # tier: the table audit alone is not the core path, so a PASSED built from it would be a
+          # claim about acceptance that the run did not make. (Found by simulating CORE_OUTCOME
+          # empty with the audit green: it reported PASSED before this guard.)
+          if MODE == "playwright" and code_verdict == "PASSED":
+              core_check = next((c for c in checks if c["name"] == "core"), None)
+              if core_check is None or core_check["status"] != "passed":
+                  code_verdict = "UNVERIFIED"
+
           verdicts = {
               "deployment_environment": deployment_verdict,
               "code_acceptance": code_verdict,
