@@ -182,12 +182,40 @@ The lesson is recorded because it is the second time this shape appeared: on a s
 wait that is shortened becomes the next failure's budget. That is why this document does not
 claim the runner problem is fixed, and why no global timeout was raised.
 
+## 6.3 Fourth observation: the reverted tree is green, with both verdicts right (run 41601617851, f834402)
+
+After the revert, the same commit's run completed **green**, and it is the first run in this
+document where both verdicts are `PASSED`:
+
+```
+verdicts: {"deployment_environment": "PASSED", "code_acceptance": "PASSED"}
+deployment_facts: {"deploy_job": "success", "served_sha": "f834402e…", "expected_sha": "f834402e…",
+                   "deploy_healthy": true}
+core paths:   19 passed (2.7 min)   slowest case 49.5 s (the legacy-URL case), no stall
+table audit:   6 passed (7.0 min)
+```
+
+This does not prove the runner path is fixed, and it is not presented as such: two runs earlier
+at `b3681b5` and one at `ec658d2` failed on the same workflow, same host, same suite. What it does
+establish is that **(a)** the split verdict reports the truth in both directions - it said
+`deployment_environment: PASSED` because the served SHA matched and the deploy job reported
+success, and `code_acceptance: PASSED` because the suites actually ran and passed; and **(b)** the
+revert did not leave the suite in a state that only fails, which was worth checking rather than
+assuming.
+
+The legacy-URL case is the clearest single data point: 180 s timeout before its per-navigation
+budget (`b09a07f`), 1.2 min on a slow run (`b3681b5`), 53 s failure at the expect default
+(`ec658d2`), 49.5 s pass here.
+
 ## 7. Still open
 
-1. **The runner-side cause is UNPROVEN.** Isolating it needs something this environment cannot
-   read: the job's network counters. A `curl -w` timing probe emitted *inside* the smoke job
-   before Playwright starts would settle stage 1 and stage 2 from the runner's own view; that is
-   a change to the workflow's diagnostics, not to its thresholds, and is the recommended next step.
+1. **The runner-side cause is UNPROVEN, and the failure is INTERMITTENT.** Four runs of the same
+   workflow at `b3681b5`, `ec658d2` and `f834402` produced two failures and two passes with no
+   code difference that could account for it (the reverted tree and the tree that failed both use
+   default `load` on the sign-in path). Isolating it needs something this environment cannot read:
+   the job's network counters. A `curl -w` timing probe emitted *inside* the smoke job before
+   Playwright starts would settle stage 1 and stage 2 from the runner's own view; that is a change
+   to the workflow's diagnostics, not to its thresholds, and is the recommended next step.
 2. **`/api/v1/diagnostics` stays in flight after `load`** on `/access` (measured here: still
    pending 500 ms after load, answering in 30-50 ms when called directly with no session). It did
    not cause the observed failure - the failure was `load` itself never firing - but a request
