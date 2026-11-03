@@ -165,13 +165,57 @@ See §7: findings raised by a fresh review pass over this branch's diff, each wi
 
 ## 7. Findings and their disposition
 
-*(Filled by the review step; P0/P1 items are reproduced, asserted, fixed and re-verified.)*
+An independent adversarial review of the branch (not told what the fixes were meant to prove)
+found three P1s and four P2s. Each was reproduced before it was changed; each fix was then broken
+again to show the new assertion fails. All are fixed in `e2a045e`.
+
+| # | Sev | Finding | Status |
+|---|---|---|---|
+| 1 | P1 | `deployment_environment` was hard-wired to `PASSED`: it filtered `checks` for names (`identity`, `health`) the workflow never produces, so the list was empty and the expression fell through. Executing the block reproduced `PASSED` on a failed deploy. | **Fixed** — reads the deploy job's result, the served SHA from `host-status.json` and the deploy script's health verdict; 8 scenarios executed, each answering for itself. The same check exposed that `code_acceptance` required every group (including tier-skipped ones) and so was always `FAILED`; it now counts executed groups only. |
+| 2 | P1 | The spec-coverage checker counted any mention as an execution: a `paths:` entry, an echo string or a dict key was enough. With every real invocation deleted and only the path filter left, it still printed COVERED. | **Fixed** — parses `run:` blocks only, folds continuations, requires a runner invocation on the same line, follows harnesses to depth 4, lists recursively. The reported counterfactual now fails and exits 1. |
+| 3 | P1 | The new script's cleanup never ran: `DELETE` on a verdict-bearing incident hits `ON DELETE RESTRICT`, and `\|\| true` swallowed it — two fixtures leaked per run while the suite reported success. | **Fixed** — deletes runs, verdict and incident in order, asserts each step, re-reads to prove the rows are gone (`Z1`, `Z2`). |
+| 4 | P2 | The create gate's "second witness" refused only on the failure path; a successful workspace read disagreeing with `scope.workspaceCount === 0` returned `allowed`. | **Fixed** — the scope refuses on every path, as its comment always claimed; unit case added. |
+| 5 | P2 | `incident_verdicts` was rewritable and deletable by any SQL while 0019 called it write-once, and 0024's closure guard leans on that. Measured `UPDATE 1` / `DELETE 1`. | **Fixed** — migration 0025; two transaction-local flags are the declared exits (test cleanup, migration backfill), set by nothing in the kernel or any route. |
+| 6 | P2 | `code { overflow-wrap: anywhere }` was global, changing break behaviour for every exact token at every width, where the phone rule already covered narrow viewports. | **Fixed** — scoped to `code[data-long-token]`, set on the two digest sites; 20/20 sweep still clean. |
+| 7 | P2 | The contract did not say what `FAILED` + `FINAL_ANSWER` means, and the panel renders the two labels side by side, which reads as a contradiction. | **Fixed** — the status field's description states it; `validate_contracts` passes. |
+
+Re-measured after the fixes:
+
+```
+cargo test (real DB, REQUIRE=1)      190 passed / 0 failed / 0 ignored
+g12_closure_invariants.sh            31 passed / 0 failed   (was 23)
+g12_lifecycle.sh                     90 passed / 0 failed   (was 88)
+browser, 7 specs                     29 passed, 2 skipped (no pipeline on this host), 4.2 min
+vitest                               30 files / 416 passed
+typecheck / build / i18n / tokens / PNG / spec-coverage / fmt / clippy   clean
+```
+
+The review also listed what it could **not** verify, and this record does not claim more than it
+did: the browser-level numbers and the staging runner path were not reproduced by the reviewer,
+and the multi-workspace dialog race was inspected, not driven live.
+
+## 7.1 What the review changed about this document's own claims
+
+Three statements in earlier revisions of this file were weaker than they read, and are corrected
+above rather than silently left standing:
+
+- "`deployment_environment` … is computed from the served commit and the health probes" was false
+  in the code even though it was true in intent (finding 1).
+- The two coverage counterfactuals in §3 passed partly because the checker was weak (finding 2);
+  the counterfactual that actually matters — deleting the real invocation — is the one now
+  recorded.
+- §2 D2's "it leaves no fixtures" was not true (finding 3).
 
 ## 8. Open items / not done
 
-1. `contracts/openapi/investigation-v1.yaml` does not state what SUCCEEDED implies (§2 D1).
+1. ~~`contracts/openapi/investigation-v1.yaml` does not state what SUCCEEDED implies~~ — done in
+   `e2a045e` (§7 finding 7): the status field now states SUCCEEDED / PARTIAL / FAILED with
+   FINAL_ANSWER, and the no-evidence case.
 2. The runner-side stage-1 measurement needs a timing probe inside the job (§4).
 3. `/api/v1/diagnostics` outlives `load` on `/access`; measured, not explained (§4).
 4. Surfaces and seeded-data tiers were skipped by the tier rule.
 5. Real-model E2E remains blocked by absent credentials (§2 D3).
 6. The create dialog's membership-revoked-while-open transition has no browser case (§1).
+7. Migration 0025 is what makes the verdict write-once. It runs after 0024 in order, so a
+   deployment that stops at 0024 has the closure invariant without the signature guarantee; there
+   is no supported partial upgrade, and the migration list is the record of that.
