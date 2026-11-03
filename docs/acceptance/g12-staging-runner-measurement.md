@@ -249,6 +249,34 @@ and at a ~0.5 s floor per request the browser spends tens of seconds before `loa
 not *prove* the intermittent 180 s stalls - those need several runs and their tails compared - but
 it replaces "nothing was measured" with a floor and a distribution.
 
+## 6.5 Second measured run: the same latency floor, and the record finally tells the truth about a red
+
+Run 41632227950 (main `8341e35`) failed its core step (18 passed, 1 failed: dual-surface:132 at its
+20 s `waitForResponse` budget, with `/login` still waiting for `load`). What matters for this
+document is that **the record said so**, and the probe data arrived in the same file:
+
+```
+verdicts: {"deployment_environment": "PASSED", "code_acceptance": "FAILED"}
+ok: false
+checks: core failed / table-geometry passed / admin-plugin-i18n skipped / seeded-data skipped
+runner_network: available true, overall ok
+  /livez          tcp median 249.62 ms  ttfb median 511.00 ms  failures 0/4
+  /readyz         tcp median 249.69 ms  ttfb median 499.66 ms  failures 0/4
+  /api/v1/version tcp median 241.74 ms  ttfb median 825.07 ms  failures 0/4
+  /               tcp median 251.17 ms  ttfb median 502.08 ms  failures 0/4
+```
+
+Two runs, two independent measurements of the same floor: **TCP ≈ 220–250 ms** and **TTFB ≈ 440–830
+ms**, with zero failed probe attempts in both. Against a non-runner host's 33–111 ms TTFB this is a
+stable 5–20x penalty on every single request, which is exactly the kind of floor that turns a page
+load of dozens of requests into tens of seconds.
+
+The failure mode is still **intermittent and unproven as a single cause**: the same tree passed at
+`1823001` (then failed at the record layer, not the suite) and failed here at `8341e35` for a case
+that passed in the previous run. What has changed is that a red run now leaves a record that is
+internally consistent - `code_acceptance: FAILED` with the failing group named, next to the network
+distribution measured minutes earlier in the same job.
+
 ## 7. Still open
 
 1. **The runner-side cause now has a measured floor, but the intermittent 180 s stalls are still
