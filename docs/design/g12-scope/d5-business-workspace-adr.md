@@ -49,8 +49,9 @@ kernel.business_workspace_members (workspace_id, user_id, granted_at, granted_by
 kernel.incidents.workspace_id     uuid NOT NULL REFERENCES business_workspaces ON DELETE RESTRICT
 ```
 
-**谓词单一来源**：`scope::predicate(alias, workspace_param, all_rows_param, user_param)` 是唯一拼写，
-返回的两半**总是同时出现**——不存在「只用户主那一半」的变体。审计账本复用同一个函数
+**谓词单一来源**：`scope::predicate(alias, workspace_param, all_rows_param, user_param, rows)` 是唯一拼写，
+返回的 `RowPredicate` 同时携带 SQL、`all_rows` 绑定值与本次施加的 `Narrowing`；两半**总是同时出现**——
+不存在「只用户主那一半」的变体（「谓词即报告」的绑定见 `narrowed-reads.md` §9.2）。审计账本复用同一个函数
 （`audit::visibility_sql` 里的 INCIDENT 分支就是它），所以「账本与主体路由各写一遍」这件事在结构上
 不再可能。没有无 scope 变体：所有数据读都要求一个 `DataScope`。
 
