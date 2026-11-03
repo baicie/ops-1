@@ -207,9 +207,55 @@ The legacy-URL case is the clearest single data point: 180 s timeout before its 
 budget (`b09a07f`), 1.2 min on a slow run (`b3681b5`), 53 s failure at the expect default
 (`ec658d2`), 49.5 s pass here.
 
+## 6.4 First in-job measurement (run 41629465381, main 1823001)
+
+Two fixes were needed before the probe's data reached the record:
+
+1. The summary carried `base_url`, the value of `STAGING_BASE_URL`. GitHub Actions **drops a job
+   output whose value may contain a secret**, so `RUNNER_NETWORK` arrived empty while the sibling
+   `playwright_timings` (no secret) propagated. The summary no longer carries the origin; the
+   artifact file still does.
+2. The table audit and its geometry gate were absent from `checks`: run 41612408372 had 2/6 audit
+   cases time out, the job went red, and `health.json` still said `ok: true, exit_code: 0`. Both
+   steps now join a non-flaky `table-geometry` group, and a `PASSED` built only from the audit
+   (core not run) reports `UNVERIFIED`.
+
+The first complete record (run 41629465381) is internally consistent:
+
+```
+verdicts: {"deployment_environment": "PASSED", "code_acceptance": "PASSED"}
+checks:   core passed / table-geometry passed / admin-plugin-i18n skipped / seeded-data skipped
+timings:  core 219 s, metrics 429 s
+runner_network:
+  /livez            tcp median 223.28 ms   ttfb median 446.44 ms   max total 1494.70 ms
+  /readyz           tcp median 241.32 ms   ttfb median 482.70 ms   max total 2506.76 ms
+  /api/v1/version   tcp median 220.38 ms   ttfb median 441.08 ms   max total 1531.41 ms
+  /                 tcp median 222.97 ms   ttfb median 806.08 ms   max total 1913.99 ms
+  failures: 0 across 4 attempts x 4 paths
+```
+
+The same endpoints from a non-runner host measure **TTFB 33–111 ms** and TCP connect well under
+10 ms. The first in-job evidence is therefore:
+
+- **a ~220–240 ms TCP-connect floor and a ~440–800 ms TTFB floor** from the runner to this host,
+  i.e. roughly 5–20x the latency a different host sees for the same request;
+- **tail totals of 1.5–2.5 s** on individual requests even when every attempt succeeds;
+- zero failed attempts in this run, so the failure mode is latency/tail, not packet loss at the
+  probe's granularity.
+
+That is consistent with, and is the first direct evidence for, the hypothesis the earlier sections
+could only state as "consistent but unproven": a page load on the runner issues dozens of requests,
+and at a ~0.5 s floor per request the browser spends tens of seconds before `load`. It still does
+not *prove* the intermittent 180 s stalls - those need several runs and their tails compared - but
+it replaces "nothing was measured" with a floor and a distribution.
+
 ## 7. Still open
 
-1. **The runner-side cause is UNPROVEN, and the failure is INTERMITTENT.** Four runs of the same
+1. **The runner-side cause now has a measured floor, but the intermittent 180 s stalls are still
+   UNPROVEN.** §6.4 records the first in-job distribution (TCP ~220–240 ms, TTFB ~440–800 ms, tails
+   to 2.5 s) against a non-runner host's 33–111 ms TTFB. That is direct evidence for the latency
+   hypothesis; several more runs are needed before the tail behaviour explains the stalls.
+   The failure is INTERMITTENT. Four runs of the same
    workflow at `b3681b5`, `ec658d2` and `f834402` produced two failures and two passes with no
    code difference that could account for it (the reverted tree and the tree that failed both use
    default `load` on the sign-in path). Isolating it needs something this environment cannot read:
