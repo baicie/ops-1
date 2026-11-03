@@ -33,6 +33,7 @@ import {
   collapseIncidentRuns,
   incidentColumnPlan,
   incidentCountKnown,
+  incidentCreateGate,
   incidentFailureKey,
   incidentListQuery,
   incidentListState,
@@ -43,7 +44,7 @@ import {
   toIsoInstant,
   toLocalInputValue,
 } from '../incidents';
-import type { IncidentColumnId, IncidentListPayload } from '../incidents';
+import type { IncidentColumnId, IncidentCreateGate, IncidentListPayload, BusinessWorkspace } from '../incidents';
 import {
   IdentityCell,
   RowActions,
@@ -94,6 +95,34 @@ export function useUserDirectory(): { names: Record<string, string> | null; read
         setState({ names, readable: true });
       })
       .catch(() => { if (!cancelled) setState({ names: null, readable: false }); });
+    return () => { cancelled = true; };
+  }, []);
+  return state;
+}
+
+/**
+ * The caller's business workspaces, from `GET /api/v1/business-workspaces`.
+ *
+ * Three outcomes, and the create gate needs all three kept apart: rows arrived, the read was
+ * refused or failed, or no read has answered yet. `loading` is not `empty` for the same reason
+ * the incident list refuses to draw a failed read as "no incidents" - an unanswered read must
+ * not become a permission decision.
+ */
+export function useBusinessWorkspaces(): {
+  workspaces: BusinessWorkspace[] | null;
+  failed: boolean;
+  loading: boolean;
+} {
+  const [state, setState] = React.useState<{ workspaces: BusinessWorkspace[] | null; failed: boolean; loading: boolean }>({
+    workspaces: null,
+    failed: false,
+    loading: true,
+  });
+  React.useEffect(() => {
+    let cancelled = false;
+    api.get<BusinessWorkspace[]>('/api/v1/business-workspaces')
+      .then((rows) => { if (!cancelled) setState({ workspaces: rows, failed: false, loading: false }); })
+      .catch(() => { if (!cancelled) setState({ workspaces: null, failed: true, loading: false }); });
     return () => { cancelled = true; };
   }, []);
   return state;
@@ -193,6 +222,7 @@ export function IncidentsPage() {
   const [boundaryOpen, setBoundaryOpen] = React.useState(false);
 
   const directory = useUserDirectory();
+  const workspaceList = useBusinessWorkspaces();
   const viewportWidth = useViewportWidth();
 
   React.useEffect(() => {
@@ -233,6 +263,17 @@ export function IncidentsPage() {
   // copy would be the one that drifts (docs/design/g12-scope/narrowed-reads.md 3.3). It is null
   // until a read answers, and the state it governs is only reachable after one.
   const emptyKind = incidentsEmptyKind({ scope: data?.scope ?? null, filtering });
+  // What the create affordance may be, from the role and the memberships, never from a guess.
+  // It is `unknown` while the workspace read is in flight or failed, and both create entries
+  // read THIS value - a second derivation for the empty-state button is how the two entries
+  // drift apart. See `incidentCreateGate` for why the server still decides.
+  const createGate = incidentCreateGate({
+    role: user?.role ?? null,
+    workspaces: workspaceList.workspaces,
+    workspaceReadFailed: workspaceList.failed,
+    scope: data?.scope ?? null,
+  });
+  const canCreate = createGate.kind === 'allowed';
   // §2.4 collapse and §2.2 degradation are decided on the rows actually on screen, before render.
   const runs = React.useMemo(() => collapseIncidentRuns(items), [items]);
   const plan = React.useMemo(() => incidentColumnPlan(items, viewportWidth), [items, viewportWidth]);
@@ -262,7 +303,20 @@ export function IncidentsPage() {
         // wrapped action row fall under the next panel. This page keeps a single primary action for a
         // product reason, not a geometric one: one primary CTA per page (page-header.tsx), and
         // refresh acts on the list, so it belongs in the toolbar next to the filters.
-        primary={<Button onClick={() => setCreateOpen(true)} data-testid="incident-create-open"><Icon name="plus" size={15} /> {t('incidents.action.create')}</Button>}
+        //
+        // The primary is the SAME gate the empty-state button reads. It used to be unconditional,
+        // so a viewer or an account with no workspace was invited to open a form whose submit the
+        // kernel refuses - the one affordance on the page that contradicted the server.
+        primary={createGate.kind === 'unknown' ? undefined : canCreate ? (
+          <Button onClick={() => setCreateOpen(true)} data-testid="incident-create-open"><Icon name="plus" size={15} /> {t('incidents.action.create')}</Button>
+        ) : (
+          // Disabled, not hidden: the control is still where the reader expects it, and the
+          // tooltip plus the empty-state explanation say which rule is standing in the way.
+          <span data-testid="incident-create-blocked" data-create-blocked={createGate.kind} title={t(createGate.reason)}>
+            <Button variant="secondary" disabled aria-describedby="incident-create-blocked-reason"><Icon name="plus" size={15} /> {t('incidents.action.create')}</Button>
+            <span id="incident-create-blocked-reason" className="sr-only">{t(createGate.reason)}</span>
+          </span>
+        )}
       />
 
       {/* page-template §2.1: KPI band, 0 or 1, immediately after the header. `.metric-grid` is
@@ -410,12 +464,16 @@ export function IncidentsPage() {
                 // page is the same action drawn twice with two different weights. This is the
                 // in-context repeat of it, so it takes the lesser weight.
                 //
-                // A caller in no workspace gets no action at all: recording one is refused with
-                // INCIDENT_WORKSPACE_FORBIDDEN until an administrator grants the membership, so a
-                // button here would offer the one thing this account cannot do.
-                : emptyKind === 'workspace'
-                  ? undefined
-                  : <Button variant="secondary" onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
+                // Gated by the SAME value as the header primary. Two independent decisions for
+                // one capability is how one of them ends up offering what the server refuses -
+                // this page already shipped that defect once with the empty-state copy. The
+                // explanation for a blocked account is the empty-state description itself, which
+                // names the missing membership; no second sentence is repeated here.
+                : canCreate
+                  ? <Button variant="secondary" onClick={() => setCreateOpen(true)} data-testid="incident-create-open-empty">{t('incidents.action.create')}</Button>
+                  : emptyKind === 'workspace' || createGate.kind === 'workspace'
+                    ? undefined
+                    : <span className="muted small" data-testid="incident-create-blocked-empty" data-create-blocked={createGate.kind === 'unknown' ? 'unknown' : createGate.kind}>{t(createGate.reason)}</span>}
             />
           </div>
         ) : (
@@ -574,7 +632,9 @@ export function IncidentsPage() {
       </section>
 
       <CreateIncidentDialog
-        open={createOpen}
+        open={createOpen && canCreate}
+        gate={createGate}
+        workspaces={workspaceList.workspaces ?? []}
         onClose={() => setCreateOpen(false)}
         onCreated={(incident) => {
           setCreateOpen(false);
@@ -595,22 +655,49 @@ export function IncidentsPage() {
  * the kernel's own refusal (403 for a viewer, 400 for a field) is what the reader sees when the
  * two disagree.
  */
-function CreateIncidentDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (incident: IncidentView) => void }) {
+function CreateIncidentDialog({
+  open,
+  gate,
+  workspaces,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  gate: IncidentCreateGate;
+  workspaces: BusinessWorkspace[];
+  onClose: () => void;
+  onCreated: (incident: IncidentView) => void;
+}) {
   const t = useT();
   const [title, setTitle] = React.useState('');
   const [severity, setSeverity] = React.useState<string>('MAJOR');
   const [startedAt, setStartedAt] = React.useState(() => toLocalInputValue(new Date()));
   const [relatedEntity, setRelatedEntity] = React.useState('');
+  // The workspace the record is filed under. A single membership is pre-filled from the gate and
+  // never asked about; several memberships MUST be answered here, because the kernel refuses a
+  // body that leaves it out (`INCIDENT_WORKSPACE_REQUIRED`) and will not guess which one was meant.
+  const writable = workspaces.filter((workspace) => workspace.member);
+  const [workspaceId, setWorkspaceId] = React.useState<string>('');
   const [submitting, setSubmitting] = React.useState(false);
   const [failure, setFailure] = React.useState<unknown>(null);
   const [fieldError, setFieldError] = React.useState<string | null>(null);
 
-  const reset = () => { setTitle(''); setSeverity('MAJOR'); setStartedAt(toLocalInputValue(new Date())); setRelatedEntity(''); setFailure(null); setFieldError(null); };
+  const needsChoice = gate.kind === 'allowed' && gate.needsChoice;
+  React.useEffect(() => {
+    if (!open) return;
+    setWorkspaceId(gate.kind === 'allowed' && !gate.needsChoice ? gate.workspaceId ?? '' : '');
+  }, [open, gate]);
+
+  const reset = () => { setTitle(''); setSeverity('MAJOR'); setStartedAt(toLocalInputValue(new Date())); setRelatedEntity(''); setWorkspaceId(''); setFailure(null); setFieldError(null); };
   const close = () => { reset(); onClose(); };
 
   const trimmedTitle = title.trim();
   const submit = async () => {
     setFieldError(null);
+    if (needsChoice && !writable.some((workspace) => workspace.workspaceId === workspaceId)) {
+      setFieldError(t('incidents.create.workspaceRequired'));
+      return;
+    }
     setFailure(null);
     if (trimmedTitle.length < TITLE_MIN_CHARS || trimmedTitle.length > TITLE_MAX_CHARS) {
       setFieldError(t('incidents.create.titleInvalid'));
@@ -629,6 +716,10 @@ function CreateIncidentDialog({ open, onClose, onCreated }: { open: boolean; onC
         severity,
         source: 'MANUAL',
         startedAt: iso,
+        // Named only when this account has several memberships: with exactly one the kernel
+        // resolves it, and sending it anyway would be the page asserting a scope it was only
+        // told about. A body that names a workspace the caller cannot enter is 404, not a grant.
+        ...(needsChoice ? { workspaceId } : {}),
         ...(related ? { relatedEntity: related } : {}),
       });
       reset();
@@ -657,6 +748,20 @@ function CreateIncidentDialog({ open, onClose, onCreated }: { open: boolean; onC
     >
       <div className="form-stack" data-testid="incident-create-form">
         <p className="muted small">{t('incidents.create.description')}</p>
+        {/* Several memberships: the kernel will not choose, so the form asks. One membership is
+            not shown at all - a field with one option is a question whose answer is not in doubt. */}
+        {needsChoice ? (
+          <Field label={t('incidents.create.field.workspace')} hint={t('incidents.create.workspaceHint')} htmlFor="incident-create-workspace">
+            <Select value={workspaceId} onValueChange={setWorkspaceId}>
+              <SelectTrigger id="incident-create-workspace" data-testid="incident-create-workspace" aria-label={t('incidents.create.field.workspace')}><SelectValue placeholder={t('incidents.create.workspacePlaceholder')} /></SelectTrigger>
+              <SelectContent>
+                {writable.map((workspace) => (
+                  <SelectItem key={workspace.workspaceId} value={workspace.workspaceId} data-testid={'incident-create-workspace-option-' + workspace.key}>{workspace.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
         <Field label={t('incidents.create.field.title')} hint={t('incidents.create.titleHint')} htmlFor="incident-create-title">
           <Input id="incident-create-title" data-testid="incident-create-title" value={title} maxLength={TITLE_MAX_CHARS} onChange={(event) => setTitle(event.target.value)} />
         </Field>

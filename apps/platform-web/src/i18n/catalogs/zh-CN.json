@@ -1890,5 +1890,13 @@
   "workspace.tasks.open": "打开{name}",
   "workspace.tasks.services.description": "与分派给你的故障相关的服务，以及把它们关联起来的证据。",
   "workspace.tasks.services.scope": "本分区不读取平台资源清单，因此不展示任何资源总数：当前会话可能无权读取。",
-  "workspace.tasks.services.title": "关联服务"
+  "workspace.tasks.services.title": "关联服务",
+  "incidents.create.blocked.role": "viewer 账号是只读的，不能录入故障。operator 或管理员可以。",
+  "incidents.create.blocked.session": "尚不能确定该账号能否录入故障：工作区成员关系读取失败。请刷新页面。",
+  "incidents.create.blocked.workspace": "该账号不属于任何业务工作区，因此没有可写入的地方。需要管理员授予成员关系。",
+  "incidents.create.blocked.workspacesUnread": "该账号的业务工作区读取失败，页面无法判断记录会落在哪里。请刷新页面。",
+  "incidents.create.field.workspace": "业务工作区",
+  "incidents.create.workspaceHint": "该账号属于多个工作区，因此记录必须指明归属哪一个。",
+  "incidents.create.workspacePlaceholder": "选择工作区",
+  "incidents.create.workspaceRequired": "请选择这条故障归属的业务工作区。"
 }

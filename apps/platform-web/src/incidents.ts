@@ -114,6 +114,75 @@ export interface IncidentScope {
 }
 
 /**
+ * GET /api/v1/business-workspaces: one row per workspace this caller may see.
+ *
+ * Mirrors `workspaces::BusinessWorkspaceView`. `member` is the one field that decides
+ * anything about writing: an admin sees every workspace's metadata so it has an id to grant
+ * against, but a workspace it is not a member of can hold no row it may file (D5 §2).
+ */
+export interface BusinessWorkspace {
+  workspaceId: string;
+  key: string;
+  name: string;
+  createdAt: string;
+  member: boolean;
+}
+
+/** What the create affordance is allowed to be, and why, for one caller. */
+export type IncidentCreateGate =
+  /** Creation is offered. `workspaceId` is set only when the caller must choose one. */
+  | { kind: 'allowed'; workspaceId: string | null; needsChoice: boolean }
+  /** Creation is never possible for this account: the role cannot write. */
+  | { kind: 'role'; reason: MessageKey }
+  /** The role may write, but the account belongs to no workspace to file under. */
+  | { kind: 'workspace'; reason: MessageKey }
+  /** The memberships could not be read, so the page cannot say either way. */
+  | { kind: 'unknown'; reason: MessageKey };
+
+/**
+ * Whether to offer "Record an incident", from the facts the kernel exports.
+ *
+ * The server is still the authority - `POST /incidents` calls `require_operator()` and then
+ * refuses a caller with no membership (`INCIDENT_WORKSPACE_FORBIDDEN`) or one with several
+ * unless the body names a workspace (`INCIDENT_WORKSPACE_REQUIRED`). This function only decides
+ * what the page draws, and it must not out-guess the server in either direction:
+ *
+ *   * a viewer can never create, whatever workspace it belongs to - the role gate is first,
+ *     because membership does not grant a verb;
+ *   * an operator or admin with no membership has nowhere to file and is told so;
+ *   * several memberships mean the request must name one, so the dialog asks;
+ *   * an unread or failed workspace list is `unknown`, never `allowed`: opening a form nobody
+ *     can submit is the same defect this page just fixed for the empty list, in a button.
+ *
+ * `scope` is the list payload's own count, used only as a corroborating signal when the
+ * workspace request failed: a caller the incident list says has zero workspaces cannot create
+ * one either, and reporting `unknown` there would hide a fact the page already holds.
+ */
+export function incidentCreateGate(input: {
+  role: Role | null;
+  workspaces: BusinessWorkspace[] | null;
+  workspaceReadFailed: boolean;
+  scope: IncidentScope | null;
+}): IncidentCreateGate {
+  const { role, workspaces, workspaceReadFailed, scope } = input;
+  if (!role) return { kind: 'unknown', reason: 'incidents.create.blocked.session' };
+  if (role !== 'operator' && role !== 'admin') return { kind: 'role', reason: 'incidents.create.blocked.role' };
+  // The incident list's scope can only REFUSE, never permit - and that has to hold whether or not
+  // the workspace read answered. The first version read the scope only on the failure path, so a
+  // successful workspace read saying "one membership" went straight to `allowed` even when the
+  // incident list said this account is in NO workspace. Both statements can be true a moment
+  // apart (the incident list is re-read on every filter change), and the safe reading of two
+  // disagreeing witnesses is the narrower one: no create until they agree again.
+  if (scope?.workspaceCount === 0) return { kind: 'workspace', reason: 'incidents.create.blocked.workspace' };
+  if (workspaceReadFailed) return { kind: 'unknown', reason: 'incidents.create.blocked.workspacesUnread' };
+  if (!workspaces) return { kind: 'unknown', reason: 'incidents.create.blocked.session' };
+  const writable = workspaces.filter((workspace) => workspace.member);
+  if (writable.length === 0) return { kind: 'workspace', reason: 'incidents.create.blocked.workspace' };
+  if (writable.length === 1) return { kind: 'allowed', workspaceId: writable[0].workspaceId, needsChoice: false };
+  return { kind: 'allowed', workspaceId: null, needsChoice: true };
+}
+
+/**
  * GET /api/v1/incidents: the rows and the read they were produced under.
  *
  * `scope` is null when the body carried none (an older kernel, or a test fixture). Never

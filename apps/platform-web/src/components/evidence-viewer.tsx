@@ -181,7 +181,7 @@ export function EvidenceContentViewer({
 
         {/* The integrity summary: the kernel's digest, and whether this browser reproduced it. */}
         <p className="muted small" data-testid="evidence-content-digest" data-server-digest={read.digest ?? row.contentSha256 ?? ''}>
-          {t('incidents.content.digest.label')} <code>{read.digest ?? row.contentSha256 ?? t('common.none')}</code>
+          {t('incidents.content.digest.label')} <code data-long-token>{read.digest ?? row.contentSha256 ?? t('common.none')}</code>
         </p>
         {read.phase === 'ready' ? (
           <p>

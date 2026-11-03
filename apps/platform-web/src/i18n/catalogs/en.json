@@ -1890,5 +1890,13 @@
   "workspace.tasks.open": "Open {name}",
   "workspace.tasks.services.description": "The services behind the incidents assigned to you, and the evidence that links them.",
   "workspace.tasks.services.scope": "This area reads no platform resource list, so it states no resource total: this session may not be allowed to read one.",
-  "workspace.tasks.services.title": "Related services"
+  "workspace.tasks.services.title": "Related services",
+  "incidents.create.blocked.role": "A viewer account is read-only, so it cannot record an incident. An operator or an administrator can.",
+  "incidents.create.blocked.session": "Whether this account can record an incident is not known yet: the memberships could not be read. Reload the page.",
+  "incidents.create.blocked.workspace": "This account is a member of no business workspace, so there is nowhere to file an incident. An administrator grants membership.",
+  "incidents.create.blocked.workspacesUnread": "This account's business workspaces could not be read, so the page cannot tell where an incident would be filed. Reload the page.",
+  "incidents.create.field.workspace": "Business workspace",
+  "incidents.create.workspaceHint": "This account belongs to more than one workspace, so the record must name the one it belongs to.",
+  "incidents.create.workspacePlaceholder": "Choose a workspace",
+  "incidents.create.workspaceRequired": "Choose the business workspace this incident belongs to."
 }

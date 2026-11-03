@@ -672,7 +672,7 @@ export function IncidentDetailPage() {
                             </p>
                             {incident.humanVerdict.consideredEvidenceDigest ? (
                               <p className="muted small" data-testid="incident-verdict-digest">
-                                {t('incidents.verdict.considered.digest')} <code>{incident.humanVerdict.consideredEvidenceDigest}</code>
+                                {t('incidents.verdict.considered.digest')} <code data-long-token>{incident.humanVerdict.consideredEvidenceDigest}</code>
                               </p>
                             ) : null}
                             {partition.afterVerdict.length > 0 ? (

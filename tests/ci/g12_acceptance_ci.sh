@@ -102,6 +102,7 @@ run_acceptance() {
 run_acceptance trusted-evidence tests/acceptance/g12_trusted_evidence.sh
 run_acceptance evidence-content tests/acceptance/g12_evidence_content.sh
 run_acceptance lifecycle        tests/acceptance/g12_lifecycle.sh
+run_acceptance closure-invariants tests/acceptance/g12_closure_invariants.sh
 run_acceptance ai-investigator  tests/acceptance/g12_ai_investigator.sh
 
 echo
@@ -141,6 +142,7 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 #     attributes, so the evidence row carried no machine-readable kind (asserted at :178).
 if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
      g11-incident-slice.spec.ts \
+     g12-create-gate.spec.ts \
      g11-page-header-growth.spec.ts \
      g12-incident-route-identity.spec.ts \
      g12-evidence-content.spec.ts \

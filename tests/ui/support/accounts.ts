@@ -113,11 +113,15 @@ export async function adminSeed(
  * is a member of nothing, so a "the viewer reads the operator's record" assertion would read an
  * empty list and fail for a reason that has nothing to do with the rule under test - or, worse,
  * pass on the pre-D5 predicate. Every spec that fabricates an account goes through here.
+ *
+ * `grant: false` is for the one fixture that must own NO membership: the create gate refuses an
+ * account in no workspace, and a spec that cannot produce that account cannot test the refusal.
  */
 export async function createAccount(
   api: APIRequestContext,
   admin: AdminSeed,
   account: AccountSpec,
+  options: { grant?: boolean } = {},
 ): Promise<SeedAccount> {
   const created = await api.post('/api/v1/users', {
     headers: { 'x-csrf-token': admin.csrf },
@@ -142,6 +146,56 @@ export async function createAccount(
   expect(id, 'POST /api/v1/users returned no id, so no membership can be granted for ' + account.email).toBeTruthy();
 
   const seeded: SeedAccount = { ...account, id: id as string };
-  await grantLegacyMembership(api, admin, seeded.id);
+  if (options.grant !== false) await grantLegacyMembership(api, admin, seeded.id);
   return seeded;
+}
+
+/** A workspace created through the admin API, with the membership each caller needs. */
+export interface SeedWorkspace {
+  workspaceId: string;
+  key: string;
+}
+
+/**
+ * POST /api/v1/business-workspaces (admin), then grant it to every listed account.
+ *
+ * Creating a workspace does NOT enter it (D5 §2: platform administration is not a data grant),
+ * so each grant is a second, explicit call. A spec that wants "an operator in TWO workspaces"
+ * gets it from here, and the create gate then has to ask which one - which is the whole point.
+ */
+export async function createWorkspace(
+  api: APIRequestContext,
+  admin: AdminSeed,
+  memberIds: string[],
+  key: string,
+): Promise<SeedWorkspace> {
+  const created = await api.post('/api/v1/business-workspaces', {
+    headers: { 'x-csrf-token': admin.csrf },
+    data: { key, name: key },
+  });
+  const body = await created.text();
+  expect([200, 201, 409], 'create workspace ' + key + ' -> ' + created.status() + ': ' + body.slice(0, 300))
+    .toContain(created.status());
+  let workspaceId: string;
+  if (created.status() === 409) {
+    // Idempotent for a re-run against the same database: read the id back from the list the
+    // admin is allowed to see (every workspace's metadata, member or not).
+    const listed = await api.get('/api/v1/business-workspaces');
+    expect(listed.ok(), 'list workspaces to resolve ' + key).toBeTruthy();
+    const rows = (await listed.json()) as Array<{ workspaceId: string; key: string }>;
+    const found = rows.find((row) => row.key === key);
+    expect(found, 'workspace ' + key + ' exists but is not in the admin list').toBeTruthy();
+    workspaceId = found!.workspaceId;
+  } else {
+    workspaceId = (JSON.parse(body) as { workspaceId: string }).workspaceId;
+  }
+  for (const userId of memberIds) {
+    const granted = await api.post('/api/v1/business-workspaces/' + workspaceId + '/members', {
+      headers: { 'x-csrf-token': admin.csrf },
+      data: { userId },
+    });
+    expect([200, 201], 'grant ' + userId + ' membership of ' + key + ' -> ' + granted.status() + ': ' + (await granted.text()).slice(0, 200))
+      .toContain(granted.status());
+  }
+  return { workspaceId, key };
 }

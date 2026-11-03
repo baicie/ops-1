@@ -11,6 +11,15 @@ on:
       - 'tests/acceptance/**'
       - 'tests/runtime/**'
       - 'tests/ci/**'
+      # data_foundation_ci.sh runs four specs from tests/ui (data-foundation, data-foundation-flows,
+      # studio, visual-layout) and reads tests/ui/support. Editing any of them without these two
+      # lines produced no run of the job that executes them - measured by
+      # tests/ci/check-spec-coverage.mjs, which now fails on it.
+      - 'tests/ui/data-foundation*.spec.ts'
+      - 'tests/ui/studio.spec.ts'
+      - 'tests/ui/visual-layout.spec.ts'
+      - 'tests/ui/support/**'
+      - 'tests/ui/playwright.config.ts'
       - '.github/workflows/typed-pipeline-runtime.yml'
 permissions:
   contents: read

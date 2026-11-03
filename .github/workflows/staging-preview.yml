@@ -1076,7 +1076,7 @@ jobs:
   # paid for once.
   record:
     name: record the acceptance evidence
-    needs: [plan, smoke, seeded_studio, seeded_visual_layout, seeded_visual]
+    needs: [plan, build, deploy, smoke, seeded_studio, seeded_visual_layout, seeded_visual]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Always: a red core step, a failed seeded job and a cancelled run all still owe the reader a record.
@@ -1103,9 +1103,41 @@ jobs:
           # The demo-plugin seed's own outcome, so a red visual suite can name the step that was
           # supposed to install the plugin instead of only the plugin it is missing.
           VISUAL_SEED_OUTCOME: ${{ needs.seeded_visual.outputs.hello_install }}
+          # Deployment facts. These are the ONLY inputs the deployment verdict may read: `checks`
+          # carries suite groups and nothing about the deploy, which is how the first version of
+          # this verdict reported PASSED on every run including a failed deploy.
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          EXPECTED_SHA: ${{ needs.deploy.outputs.target_sha }}
         run: |
           set -euo pipefail
           mkdir -p artifacts/staging-preview
+          # The host's own report, collected by the deploy job. Absent or unreadable is recorded as
+          # null, never assumed healthy.
+          python3 - <<'PY2'
+          import json, pathlib
+          report = {}
+          for name in ("artifacts/staging-preview/host-status.json", "host-status.json"):
+              path = pathlib.Path(name)
+              if path.exists():
+                  try:
+                      report = json.loads(path.read_text())
+                  except Exception:
+                      report = {}
+                  break
+          served = ""
+          if isinstance(report.get("served_commit"), dict):
+              served = report["served_commit"].get("sha") or ""
+          elif isinstance(report.get("current"), dict):
+              served = report["current"].get("sha") or ""
+          healthy = report.get("healthy")
+          out = pathlib.Path("artifacts/staging-preview/deploy-facts.env")
+          out.write_text(
+              "SERVED_SHA=%s\nDEPLOY_HEALTHY=%s\n"
+              % (served, "" if healthy is None else ("true" if healthy is True else "false"))
+          )
+          print(out.read_text())
+          PY2
+          set -a; . artifacts/staging-preview/deploy-facts.env; set +a
           python3 - <<'PY'
           import json, os
 
@@ -1416,11 +1448,90 @@ jobs:
                         % ("visual.spec.ts", seed["short_reason"], seed["job"], seed["step"],
                            seed["installs"]))
 
+          # The two questions this workflow answers are kept apart on purpose, because a green
+          # answer to one has been read as a green answer to the other more than once:
+          #
+          #   DEPLOYED_ENVIRONMENT  is the commit we built the one the host serves, and is the host
+          #                         healthy? A failure here is about the deployment or the host.
+          #   CODE_ACCEPTANCE       do the browser suites pass against that deployment? A failure
+          #                         here may be a product defect OR the path between this runner
+          #                         and the host (measured: the same suite is 19/19 in 1.8 min from
+          #                         a laptop against this host, and stalled twice for 180 s on the
+          #                         runner at the same commit and image).
+          #
+          # `code_acceptance` is UNVERIFIED - never PASSED - when the suites could not reach the
+          # host: a run that proved nothing must not be quoted as if it had.
+          # The deployment question is answered from the DEPLOY job's own reported facts, not from
+          # `checks`. `checks` only ever carries the three suite groups (core, admin-plugin-i18n,
+          # seeded-data) - there has never been an "identity" or "health" entry - so filtering it
+          # produced an EMPTY list on every run and the previous expression then fell through to
+          # PASSED. Measured: a run whose deploy job failed and whose smoke job never started
+          # reported deployment_environment=PASSED. That is the one case this field exists for.
+          #
+          # deploy_result is the job outcome; SERVED_SHA is what the host reports (collected above
+          # from deploy-facts.env, itself parsed from host-status.json); DEPLOY_HEALTHY is the
+          # deploy script's own health verdict, "" when it recorded none.
+          DEPLOY_RESULT = os.environ.get("DEPLOY_RESULT", "") or ""
+          SERVED_SHA = os.environ.get("SERVED_SHA", "") or ""
+          EXPECTED_SHA = os.environ.get("EXPECTED_SHA", "") or ""
+          _healthy = (os.environ.get("DEPLOY_HEALTHY", "") or "").strip()
+          DEPLOY_HEALTHY = True if _healthy == "true" else (False if _healthy == "false" else None)
+          deployment_facts = {
+              "deploy_job": DEPLOY_RESULT or "not-run",
+              "served_sha": SERVED_SHA,
+              "expected_sha": EXPECTED_SHA,
+              "deploy_healthy": DEPLOY_HEALTHY,
+          }
+          if DEPLOY_RESULT != "success":
+              # The deploy job did not complete successfully: whatever the host serves, this run
+              # did not put it there and did not verify it.
+              deployment_verdict = "NOT_RUN" if DEPLOY_RESULT in ("", "skipped", "cancelled") else "FAILED"
+          elif not SERVED_SHA or not EXPECTED_SHA:
+              deployment_verdict = "UNVERIFIED"
+          elif SERVED_SHA != EXPECTED_SHA:
+              # The host answered, and it answered with a different commit: a definite failure.
+              deployment_verdict = "FAILED"
+          elif DEPLOY_HEALTHY is not True:
+              # Served commit matches but the health verdict was not a recorded pass.
+              deployment_verdict = "UNVERIFIED" if DEPLOY_HEALTHY is None else "FAILED"
+          else:
+              deployment_verdict = "PASSED"
+
+          # Only the groups this tier was SUPPOSED to run can decide the verdict. A core-tier push
+          # leaves `admin-plugin-i18n` and `seeded-data` as status "skipped" with ok=false - the
+          # tier rule, not a failure - so requiring every check to be ok made code_acceptance
+          # FAILED on every core run. Measured: core success -> FAILED before this line.
+          #
+          # A skipped group is not evidence either way: it neither passes nor fails the verdict.
+          # At least one group must have actually run, or the answer is NOT_RUN.
+          executed = [c for c in checks if c["status"] in ("passed", "failed")]
+          unreachable = any(
+              marker in json.dumps(check).lower()
+              for check in executed
+              for marker in ("timeout", "econnreset", "enotfound", "network", "waitforresponse")
+          )
+          if not executed:
+              code_verdict = "NOT_RUN"
+          elif all(c["status"] == "passed" for c in executed):
+              # A skipped known-flaky group does not veto a green run; a failed one cannot hide,
+              # because known-flaky groups are still reported and this reads their status.
+              code_verdict = "PASSED"
+          elif unreachable:
+              code_verdict = "UNVERIFIED"
+          else:
+              code_verdict = "FAILED"
+          verdicts = {
+              "deployment_environment": deployment_verdict,
+              "code_acceptance": code_verdict,
+          }
+
           payload = {
               "mode": MODE,
               "tier": TIER,
               "tier_reason": TIER_REASON,
               "base_url": os.environ.get("OPSWEAVE_URL", ""),
+              "verdicts": verdicts,
+              "deployment_facts": deployment_facts,
               "ok": ok,
               "checks": checks,
               "seeds": SEEDS,

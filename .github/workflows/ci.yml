@@ -111,6 +111,18 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: node tests/ci/check-tracked-png-budget.mjs
+  # A spec that no workflow executes guarantees nothing, however correct it is; two defects
+  # reached main through exactly that hole (tests/ui/g11-incident-slice.spec.ts asserted both and
+  # was referenced by nothing). This job reads the command lines the workflows actually run and
+  # the path filters that decide whether they run at all, so "wired in" and "editing it reruns the
+  # job" are both checked. Its own known-unrun list is in the script, with a reason per entry.
+  spec-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node tests/ci/check-spec-coverage.mjs
   contracts:
     runs-on: ubuntu-latest
     steps:
