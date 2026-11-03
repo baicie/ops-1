@@ -3,7 +3,12 @@ name: g12-acceptance
 # referenced by zero workflows, so "199 assertions passed, 7 specs passed" was a claim no pipeline
 # could reproduce. This job runs tests/ci/g12_acceptance_ci.sh, which starts one real kernel on a
 # throw-away database, runs the four tests/acceptance/g12_*.sh scripts against it, and then drives
-# a real Chromium through the five specs that cover the incident and investigation surfaces.
+# a real Chromium through the six specs that cover the incident and investigation surfaces.
+#
+# The sixth, g11-incident-slice.spec.ts, was excluded while two product defects it catches shipped
+# (the scope-blind empty list and the evidence row's missing data-evidence-kind). Both were in the
+# browser layer only, so every other suite stayed green - the exclusion, not the code, is what let
+# them through.
 #
 # Scope by path so an unrelated change does not pay 20 minutes for it. The list includes the
 # kernel, the web app, contracts and the specs themselves; adding a G12 surface outside these
@@ -30,8 +35,17 @@ on:
     paths:
       - 'apps/kernel/**'
       - 'apps/platform-web/**'
+      - 'tests/acceptance/g11_*.sh'
       - 'tests/acceptance/g12_*.sh'
+      # The suite now includes g11-incident-slice.spec.ts and reads tests/ui/support/**, and the
+      # harness itself decides which specs run - so a change to any of the three must rerun it on
+      # main. Without these three lines a push that edits the suite's own inputs would land with
+      # no run of the job that depends on them.
+      - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
+      - 'tests/ui/support/**'
+      - 'tests/ui/playwright.config.ts'
+      - 'tests/ci/g12_acceptance_ci.sh'
       - '.github/workflows/g12-acceptance.yml'
 
 permissions:

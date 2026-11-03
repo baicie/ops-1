@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../api';
-import type { IncidentList, IncidentView } from '../types';
+import type { IncidentView } from '../types';
 import { useAuth } from '../auth';
 import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
@@ -23,6 +23,7 @@ import { statusForCode } from '../components/status-tone';
 import {
   FILTER_ANY,
   INCIDENT_COLUMN_LABEL_KEYS,
+  INCIDENT_EMPTY_COPY,
   INCIDENT_SEVERITY_CODES,
   INCIDENT_STATUS_CODES,
   OWNER_ANY,
@@ -36,12 +37,13 @@ import {
   incidentListQuery,
   incidentListState,
   incidentSourceKey,
+  incidentsEmptyKind,
   ownerFilterValue,
   shortOwner,
   toIsoInstant,
   toLocalInputValue,
 } from '../incidents';
-import type { IncidentColumnId } from '../incidents';
+import type { IncidentColumnId, IncidentListPayload } from '../incidents';
 import {
   IdentityCell,
   RowActions,
@@ -183,7 +185,7 @@ export function IncidentsPage() {
   const [owner, setOwner] = React.useState(OWNER_ANY);
   const [cursor, setCursor] = React.useState<string | null>(null);
   const [reload, setReload] = React.useState(0);
-  const [data, setData] = React.useState<IncidentList | null>(null);
+  const [data, setData] = React.useState<IncidentListPayload | null>(null);
   const [error, setError] = React.useState<Error | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [observedAt, setObservedAt] = React.useState<string | null>(null);
@@ -203,7 +205,7 @@ export function IncidentsPage() {
       cursor,
       limit: 20,
     });
-    api.get<IncidentList>('/api/v1/incidents?' + query)
+    api.get<IncidentListPayload>('/api/v1/incidents?' + query)
       .then((result) => {
         if (cancelled) return;
         setData(result);
@@ -225,6 +227,12 @@ export function IncidentsPage() {
   // "spinner or empty list". `rows` is null until a read answers, so a failed first read can
   // never be drawn as "no incidents" (the audit's seven-codes-to-unknown defect, in its list form).
   const listState = incidentListState({ rows: data ? items : null, error, loading, filtering });
+  // Which empty list this is, from the scope the kernel sent beside the rows. The payload is the
+  // only thing that can tell a narrowed read from an unnarrowed one, because both answer
+  // `items: []`; deriving it from the role here would be a second copy of the predicate, and the
+  // copy would be the one that drifts (docs/design/g12-scope/narrowed-reads.md 3.3). It is null
+  // until a read answers, and the state it governs is only reachable after one.
+  const emptyKind = incidentsEmptyKind({ scope: data?.scope ?? null, filtering });
   // §2.4 collapse and §2.2 degradation are decided on the rows actually on screen, before render.
   const runs = React.useMemo(() => collapseIncidentRuns(items), [items]);
   const plan = React.useMemo(() => incidentColumnPlan(items, viewportWidth), [items, viewportWidth]);
@@ -379,19 +387,35 @@ export function IncidentsPage() {
           </div>
         ) : listState === 'empty' || listState === 'filtered' ? (
           // M1: an answered zero is an EmptyState - no dashed token, no NO_DATA, no "0".
-          // The two zeros are different facts with different remedies, so they are different copy.
-          <div data-empty-state={listState === 'filtered' ? 'filtered' : 'none'} data-testid="incidents-empty">
+          // The zeros are different facts with different remedies, so they are different copy:
+          // a filtered miss is the page's own filters, and the other three come from the scope
+          // the kernel sent. `data-empty-state` is the derived kind itself, so a harness reads
+          // the same value the copy was chosen from instead of re-deriving it.
+          <div
+            data-empty-state={emptyKind}
+            // The payload value itself, not a verdict about it: 'owner' or 'none' (this read
+            // applied no owner narrowing). Absent when the body carried no scope at all, so an
+            // unreadable body and an unnarrowed read stay distinguishable in the DOM too.
+            data-narrowed-to={data?.scope ? data.scope.narrowedTo ?? 'none' : undefined}
+            data-testid="incidents-empty"
+          >
             <EmptyState
               icon="inbox"
-              title={listState === 'filtered' ? t('incidents.empty.filtered.title') : t('incidents.empty.none.title')}
-              description={listState === 'filtered' ? t('incidents.empty.filtered.description') : t('incidents.empty.none.description')}
-              action={listState === 'filtered'
+              title={t(INCIDENT_EMPTY_COPY[emptyKind].title)}
+              description={t(INCIDENT_EMPTY_COPY[emptyKind].description)}
+              action={emptyKind === 'filtered'
                 ? <Button variant="secondary" onClick={clearFilters}>{t('ui.clearFilters')}</Button>
                 // Secondary, not primary: the page header already carries the one primary CTA
                 // (page-template §2.2), and two "Record an incident" buttons stacked on an empty
                 // page is the same action drawn twice with two different weights. This is the
                 // in-context repeat of it, so it takes the lesser weight.
-                : <Button variant="secondary" onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
+                //
+                // A caller in no workspace gets no action at all: recording one is refused with
+                // INCIDENT_WORKSPACE_FORBIDDEN until an administrator grants the membership, so a
+                // button here would offer the one thing this account cannot do.
+                : emptyKind === 'workspace'
+                  ? undefined
+                  : <Button variant="secondary" onClick={() => setCreateOpen(true)}>{t('incidents.action.create')}</Button>}
             />
           </div>
         ) : (

@@ -298,6 +298,53 @@ await expect(page.getByTestId('incidents-empty')).not.toContainText('no owner na
 
 `artifacts/` 为未跟踪目录；截图与日志见 `artifacts/g12h-scratch/`（`playwright-run1.log`、`playwright-run2.log`、`cargo-test.log`、`clippy.log`、`gates.txt`、`shots/`）。
 
+## 7.5 回归（2026-11-03）：§3.3 的接线在合并中丢失，页面重新按 `listState` 选文案
+
+**这不是新缺陷，是本文件 §3.3 描述过的修复在 G12 合入 main 时被覆盖。**
+
+`git show c6cb34f:apps/platform-web/src/pages/Incidents.tsx` 与 main 上的版本在空态一行完全相同：
+
+```tsx
+<div data-empty-state={listState === 'filtered' ? 'filtered' : 'none'} data-testid="incidents-empty">
+```
+
+也就是说页面**从未**读过载荷里的 `scope`：`incidentsEmptyKind()` 有实现、有 5 条单测、两套文案，却没有一个调用方；`data-narrowed-to` 从未渲染过。后果是本轮之前 operator 的窄读被渲染成 `none` 态，而 `none` 的文案正是「这次读取**没有**按 owner 收窄」——对读者是一句假话，且方向恰好相反。四条 `incidents.empty.scoped.*` / `workspace.*` 键在 `check-i18n` 里长期挂在 unused 列表中，是这件事的机器可读痕迹。
+
+**为什么没被任何门禁抓住**：`g11-incident-slice.spec.ts` 会断言 `data-empty-state="scoped"` 与 `data-narrowed-to="owner"`（见 §7.2 第 3 条），但这条 spec 不在任何 workflow 里——`tests/ci/g12_acceptance_ci.sh` 的浏览器段落只列了 `g11-page-header-growth.spec.ts` 等五条。
+
+**修法**（4 个文件）：
+
+| 文件 | 改动 |
+|---|---|
+| `pages/Incidents.tsx` | 状态从 `data.scope` 派生：`emptyKind = incidentsEmptyKind({ scope: data?.scope ?? null, filtering })`；`data-empty-state={emptyKind}`；`data-narrowed-to` 直接暴露载荷值（`owner` / `none`，无 `scope` 时属性不出现，与「读不到 body ≠ 未收窄」一致）；`workspace` 态不提供「录入一条」按钮——该账号此刻提交会得到 `INCIDENT_WORKSPACE_FORBIDDEN` |
+| `incidents.ts` | 新增 `INCIDENT_EMPTY_COPY`：`Record<IncidentEmptyKind, {title, description}>`，按 kind 全映射，新增 kind 不同步补行即编译失败 |
+| `incidents.test.ts` | +2 条：四种 kind 的文案两两不同且键名与 kind 对齐；`none` 与 `workspace` 各自保留独立句子 |
+| `pages/table-kit.tsx` | `IdentityCell` 透传其余 `data-*`（见下） |
+
+**同批修掉的第二处**：`IncidentDetail.tsx:466` 给 `IdentityCell` 传了 `data-evidence-kind`，但该组件没有透传，属性在 DOM 里根本不存在。TypeScript 抓不到——JSX 对带连字符的属性不做类型检查，这正是 `data-*` 好用的原因，也是它静默丢失的原因。`IdentityCell` 现在 `...rest` 透传，四个自有属性（`data-label`、`data-column`、`data-card-fact`、`title`）在展开之后设置，调用方无法覆盖单元格的机器读数。
+
+**证据（真实运行，非推断）**：
+
+```
+# 修复后，独立 scratch 库 + 18299 + 由本树重建的 dist
+pnpm --filter @opsweave/platform-web typecheck                         -> tsc --noEmit，无输出
+pnpm --filter @opsweave/platform-web test                              -> Test Files 30 passed，Tests 406 passed
+pnpm --filter @opsweave/platform-web build                             -> ✓ built
+node scripts/check-i18n.mjs                                            -> 1892 keys / 17 unused（原 21，四条空态键转被引用）
+cd tests/ui && pnpm exec playwright test g11-incident-slice.spec.ts    -> 5 passed (15.6s)
+```
+
+**变异验证**（证明这两条断言真的承重，而不是碰巧通过）：
+
+| 变异 | 结果 |
+|---|---|
+| 只回退 `pages/Incidents.tsx` | 第 3 条在 `data-empty-state` 上失败：`Expected "scoped" / Received "none"` |
+| 只回退 `pages/table-kit.tsx` | 第 1 条在 `data-evidence-kind` 上失败：`element(s) not found` |
+
+**门禁补齐**：`g11-incident-slice.spec.ts` 已加入 `tests/ci/g12_acceptance_ci.sh` 的浏览器段落并排在首位；`.github/workflows/g12-acceptance.yml` 的 `push` 路径过滤补上 `tests/ui/g11*.spec.ts`、`tests/ui/support/**`、`tests/ci/g12_acceptance_ci.sh`，否则改这些输入不会触发那条 job。**该 workflow 在 main 上的这次运行结果尚未观察到（本地无 CI），下一轮以实际 run 为准。**
+
+**仍未修的既有项**（与本回归无关，保留原判）：§7.3 已由决策者裁定结案；§7.4 的 390 详情页 8px 溢出仍在。
+
 ## 8. 预算与越界说明
 
 **本轮（收窄 `seesAll`）的预算**：

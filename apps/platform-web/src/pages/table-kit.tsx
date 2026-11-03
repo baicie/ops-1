@@ -222,15 +222,18 @@ export function formatIdentity(options: {
  *
  * cardFact marks the <=3 columns §2.5 keeps at 390; every other cell is a desktop column the
  * card drops, not information that was deleted.
+ *
+ * Props the cell forwards to its <td>, the way StackCell already allows: the evidence table
+ * marks each row's kind with `data-evidence-kind`, so a harness reads the code the row was built
+ * from instead of the localized label - and this component used to drop it on the floor.
+ * TypeScript could not catch that: JSX deliberately accepts hyphenated attributes without
+ * checking them against a component's props type, which is what makes `data-*` convenient
+ * everywhere else. So the attribute was simply absent from the DOM, and the assertion that read
+ * it waited on a locator that could never match. The four props this component OWNS (data-label,
+ * data-column, data-card-fact) and its title are set AFTER the spread, so a caller cannot
+ * overwrite the machine reading of the cell through the passthrough.
  */
-export function IdentityCell({
-  label,
-  identity,
-  href,
-  cardFact,
-  className,
-  children,
-}: {
+type IdentityCellProps = Omit<React.TdHTMLAttributes<HTMLTableCellElement>, 'title'> & {
   label: string;
   identity: Identity;
   /**
@@ -244,15 +247,24 @@ export function IdentityCell({
    */
   href?: string;
   cardFact?: boolean;
-  className?: string;
-  children?: React.ReactNode;
-}) {
+};
+
+export function IdentityCell({
+  label,
+  identity,
+  href,
+  cardFact,
+  className,
+  children,
+  ...rest
+}: IdentityCellProps) {
   // The card's identity line is the box the reader hovers once the cell is `display: contents`
   // (styles.css: the two-line card), so the full id and the age travel on it as well as on the
   // cell. Same string, one owner: both are built from the same two fields.
   const detail = [identity.fullId, identity.age].filter(Boolean).join(' · ') || undefined;
   return (
     <TableCell
+      {...rest}
       data-label={label}
       data-column={label}
       title={detail}
