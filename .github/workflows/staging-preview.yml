@@ -1416,11 +1416,46 @@ jobs:
                         % ("visual.spec.ts", seed["short_reason"], seed["job"], seed["step"],
                            seed["installs"]))
 
+          # The two questions this workflow answers are kept apart on purpose, because a green
+          # answer to one has been read as a green answer to the other more than once:
+          #
+          #   DEPLOYED_ENVIRONMENT  is the commit we built the one the host serves, and is the host
+          #                         healthy? A failure here is about the deployment or the host.
+          #   CODE_ACCEPTANCE       do the browser suites pass against that deployment? A failure
+          #                         here may be a product defect OR the path between this runner
+          #                         and the host (measured: the same suite is 19/19 in 1.8 min from
+          #                         a laptop against this host, and stalled twice for 180 s on the
+          #                         runner at the same commit and image).
+          #
+          # `code_acceptance` is UNVERIFIED - never PASSED - when the suites could not reach the
+          # host: a run that proved nothing must not be quoted as if it had.
+          deployment_checks = [check for check in checks if check["name"] in ("identity", "health")]
+          code_checks = [check for check in checks if check["name"] not in ("identity", "health")]
+          unreachable = any(
+              marker in json.dumps(check).lower()
+              for check in code_checks
+              for marker in ("timeout", "econnreset", "enotfound", "network", "waitforresponse")
+          )
+          if not code_checks:
+              code_verdict = "NOT_RUN"
+          elif all(check["ok"] for check in code_checks):
+              code_verdict = "PASSED"
+          elif unreachable:
+              code_verdict = "UNVERIFIED"
+          else:
+              code_verdict = "FAILED"
+          verdicts = {
+              "deployment_environment": "PASSED" if all(c["ok"] for c in deployment_checks) else "FAILED"
+              if deployment_checks else "NOT_RUN",
+              "code_acceptance": code_verdict,
+          }
+
           payload = {
               "mode": MODE,
               "tier": TIER,
               "tier_reason": TIER_REASON,
               "base_url": os.environ.get("OPSWEAVE_URL", ""),
+              "verdicts": verdicts,
               "ok": ok,
               "checks": checks,
               "seeds": SEEDS,

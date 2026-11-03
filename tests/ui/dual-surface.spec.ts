@@ -174,17 +174,25 @@ test('the legacy URLs land on their canonical /admin path and drop unlisted quer
     ['/ext/trusted-team/data-catalog', '/admin/ext/trusted-team/data-catalog'],
   ];
   for (const [from, to] of cases) {
-    await page.goto(from);
+    // `commit`, not the default `load`, and a per-navigation budget instead of only the test's.
+    // This case asserts WHERE a legacy URL lands, which is known once the navigation commits plus
+    // the client redirect; it never reads a resource whose availability `load` would report. On
+    // staging the default made the whole case depend on the last subresource of every page: a
+    // run that took 6.1 min wall-clock for 19 specs stalled here for the full 180 s test timeout
+    // while `navigating to /access, waiting until "load"` (the document itself answers in ~90 ms;
+    // measured separately), which reads as "the product hung" and is not. The budget below names
+    // the leg that is slow when one is, instead of blaming whichever test happened to own it.
+    await page.goto(from, { waitUntil: 'commit', timeout: 30_000 });
     await expect(page, from + ' -> ' + to).toHaveURL(new RegExp(to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
   }
 
   // No open redirect: a parameter the destination does not read is dropped, not forwarded.
-  await page.goto('/nodes?next=https://evil.example/steal');
+  await page.goto('/nodes?next=https://evil.example/steal', { waitUntil: 'commit', timeout: 30_000 });
   await expect(page).toHaveURL(/\/admin\/nodes$/);
   expect(new URL(page.url()).search).toBe('');
 
   // A path that is not in the table stays a 404 - the compatibility layer is a closed list.
-  await page.goto('/not-a-known-route');
+  await page.goto('/not-a-known-route', { waitUntil: 'commit', timeout: 30_000 });
   await expect(page).toHaveURL(/\/not-a-known-route$/);
 });
 
