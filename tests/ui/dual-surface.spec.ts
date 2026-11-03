@@ -49,18 +49,54 @@ function trackNavigations(page: Page): string[] {
  * irrelevant to this file; only that it is over before a second session starts.
  */
 async function signIn(page: Page) {
-  // Registered before the navigation: the probe fires while the bundle is still executing.
-  const bootstrapProbe = page.waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: 20_000 });
-  // Default `load`, deliberately. A `commit` + 30 s variant was measured on run 41597654753 and
-  // REVERTED: it returned before the bundle executed, so the 20 s probe below became the binding
-  // constraint and three cases failed instead of two. The cost of a slow path has to be paid by
-  // the step that owns the wait; moving it to a shorter budget does not shorten the path.
-  await page.goto('/login');
+  // Every stage carries its own name and budget, because "Test timeout of 60000ms" cannot tell a
+  // slow document from a missing response from a form that never rendered. Measured on the
+  // staging link (run 41632959836): the failure read `waitForResponse: Timeout 20000ms` with
+  // `navigating to /login, waiting until "load"` underneath it, and the only way to tell those
+  // apart was to reproduce them by hand.
+  //
+  // The three stages, in the order the page performs them:
+  //   1. the document and its bundle load            (`goto`, default `load`)
+  //   2. the bootstrap probe answers                 (registered before 1, so it cannot be missed)
+  //   3. the form is usable and the session commits  (fill/click/waitForURL)
+  //
+  // Default `load` for stage 1 is deliberate. A `commit` + 30 s variant was measured on run
+  // 41597654753 and REVERTED: it returned before the bundle executed, so stage 2 became the
+  // binding constraint and three cases failed instead of two. The cost of a slow path has to be
+  // paid by the step that owns the wait; moving it to a shorter budget does not shorten the path.
+  const stage = (name: string, error: unknown): never => {
+    throw new Error('signIn stage failed [' + name + ']: ' + String((error as Error)?.message || error).split('\n')[0]);
+  };
+  // The document budget must be the SHORTER of the two, or a slow document is misreported as a
+  // slow probe: the probe's clock starts at registration (before the navigation), so with equal
+  // budgets the probe expires first and the message blames `/auth/me` for a page that never
+  // loaded. Measured on the harness itself: a document delayed 12 s under two equal 8 s budgets
+  // reported `bootstrap-probe`, which is the wrong stage.
+  const DOCUMENT_BUDGET_MS = 20_000;
+  const PROBE_BUDGET_MS = 30_000;
+  let probeError: unknown = null;
+  const bootstrapProbe = page
+    .waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: PROBE_BUDGET_MS })
+    .catch((error) => { probeError = error; });
+  try {
+    await page.goto('/login', { waitUntil: 'load', timeout: DOCUMENT_BUDGET_MS });
+  } catch (error) {
+    stage('document (/login, waitUntil load)', error);
+  }
   await bootstrapProbe;
-  await page.fill('input[type=email]', EMAIL);
-  await page.fill('input[type=password]', PASSWORD);
-  await page.click('[data-testid="login-submit"]');
-  await expect(page).not.toHaveURL(/\/login/);
+  if (probeError) stage('bootstrap-probe (/auth/me after load)', probeError);
+  try {
+    await page.fill('input[type=email]', EMAIL);
+    await page.fill('input[type=password]', PASSWORD);
+    await page.click('[data-testid="login-submit"]');
+  } catch (error) {
+    stage('login-form (fill and submit)', error);
+  }
+  try {
+    await expect(page).not.toHaveURL(/\/login/);
+  } catch (error) {
+    stage('session-commit (session established and routed away from /login)', error);
+  }
 }
 
 async function switchSurface(page: Page, target: 'admin' | 'workspace') {
@@ -269,3 +305,50 @@ test('the switcher is usable at 390px without horizontal overflow', async ({ pag
   await switchSurface(page, 'admin');
   await expect(page).toHaveURL(/\/admin\/overview$/);
 });
+
+/**
+ * A hanging grant read costs a bounded budget, not the caller's whole timeout.
+ *
+ * `login()` posts credentials, then reads `/api/v1/auth/me` for `access` (the login body carries
+ * the user and the CSRF token, not the grant). It awaits that read because the first
+ * authenticated render picks the surface for `/`, but the await used to be unbounded: on the
+ * staging link (~250 ms TCP connect, ~500-830 ms TTFB per request) two serial round trips ate the
+ * budget, and delaying only the SECOND read by 25 s reproduced it locally - `waitForURL` timed out
+ * at 20.9 s while the login POST had already returned.
+ *
+ * This case holds that read open for 8 s and asserts the sign-in still completes: past the
+ * bounded grant budget the identity from the login body is used, and the late answer upgrades the
+ * same session instead of being lost. A future refactor that drops the bound fails here.
+ */
+test('a hanging grant read costs a bounded budget, not the whole sign-in', async ({ page }) => {
+  grantProbeCalls = 0;
+  await page.route('**/api/v1/auth/me', async (route) => {
+    grantProbeCalls += 1;
+    // The first call is the bootstrap probe; the second is the one login() starts.
+    if (grantProbeCalls === 2) await new Promise((resolve) => setTimeout(resolve, 8_000));
+    const response = await route.fetch();
+    const body = await response.json();
+    body.access = ADMIN_GRANT;
+    await route.fulfill({ response, json: body });
+  });
+
+  const started = Date.now();
+  await signIn(page);
+  const elapsed = Date.now() - started;
+  // Signed in and routed while the second /auth/me is still held for 8 s.
+  await expect(page).toHaveURL(/\/app\/home$/);
+  expect(elapsed, 'sign-in waited for the held grant read instead of its own budget').toBeLessThan(7_000);
+  // At least two: the bootstrap probe, then the one login() starts. Exactly three here, and the
+  // third is the point of the fix - the bounded read was abandoned on its budget and re-issued,
+  // so the grant still lands instead of being lost to a hung socket.
+  expect(grantProbeCalls, 'the bootstrap probe and the post-login grant read both ran').toBeGreaterThanOrEqual(2);
+
+  // The late grant upgrades the same session: the console becomes reachable without a second
+  // sign-in, once the held read finally answers.
+  await expect(page.getByTestId('user-menu-trigger')).toBeVisible();
+  await page.getByTestId('user-menu-trigger').click();
+  await expect(page.getByTestId('surface-switch-admin'), 'the late grant upgrades the same session').toBeVisible();
+});
+
+/** Counts `/auth/me` calls for the test above; declared here so the route handler can close over it. */
+let grantProbeCalls = 0;

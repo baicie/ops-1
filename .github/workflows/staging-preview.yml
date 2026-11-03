@@ -1944,13 +1944,31 @@ jobs:
           # A skipped group is not evidence either way: it neither passes nor fails the verdict.
           # At least one group must have actually run, or the answer is NOT_RUN.
           executed = [c for c in checks if c["status"] in ("passed", "failed")]
-          unreachable = any(
-              marker in json.dumps(check).lower()
-              for check in executed
-              for marker in ("timeout", "econnreset", "enotfound", "network", "waitforresponse")
+          # What a failure actually says, so "the assertion was wrong" and "the browser never got
+          # to make the assertion" are not reported as the same thing. A Playwright timeout that
+          # expires inside a navigation, a response wait, or the test budget itself is consistent
+          # with the product never having been reached; an expectation that received a value is a
+          # statement about the product. This is a classification of the recorded text, not a
+          # re-run and not a retry: it changes which verdict a red produces, never whether it is
+          # red.
+          failure_text = " ".join(
+              json.dumps(check).lower() for check in executed if check["status"] == "failed"
           )
+          unreachable = any(
+              marker in failure_text
+              for marker in (
+                  "waitforresponse", "page.goto", "navigating to", "test timeout",
+                  "econnreset", "enotfound", "net::err", "socket hang up",
+              )
+          )
+          assertion_failed = ("expect(" in failure_text or "tohave" in failure_text) and not unreachable
           if not executed:
               code_verdict = "NOT_RUN"
+          elif assertion_failed:
+              # The product answered and an expectation was contradicted. That is evidence about
+              # the code, and it outranks the reachability heuristic: a run can contain both a
+              # stall and a real failure, and the real failure is the one worth reporting.
+              code_verdict = "FAILED"
           elif all(c["status"] == "passed" for c in executed):
               # A skipped known-flaky group does not veto a green run; a failed one cannot hide,
               # because known-flaky groups are still reported and this reads their status.
@@ -1969,8 +1987,31 @@ jobs:
               if core_check is None or core_check["status"] != "passed":
                   code_verdict = "UNVERIFIED"
 
+          # Three layers, because they fail for different reasons and a red in one must never be
+          # read as a verdict about another. The brief for this round requires the split:
+          #
+          #   deployment_environment  the host serves the commit this run built, and the deploy
+          #                           job's own health polling succeeded.
+          #   remote_browser          the browser suites that ran HERE, against that live host,
+          #                           passed. This is the only layer that can be hurt by the
+          #                           runner->host link.
+          #   code_acceptance         the code under test is accepted. It is computed from the
+          #                           same checks, but it is UNVERIFIED whenever remote_browser is
+          #                           UNVERIFIED, because a suite that could not reach the product
+          #                           has not accepted its code either.
+          #
+          # The deterministic layer (a runner-local kernel + database + browser) is NOT this
+          # workflow; it is the g12-acceptance job, and it reports separately.
+          # There is no browser layer at all in `http` mode: the inline HTTP smoke checks
+          # reachability and the served SHA, nothing about the product's rendering. Reporting
+          # PASSED here would be the "green because nothing ran" defect in a new place.
+          remote_browser_verdict = "NOT_RUN" if MODE != "playwright" else code_verdict
+          # `code_acceptance` can never be stronger than the remote-browser layer it is derived
+          # from: a suite that could not reach the product has not accepted its code either.
+          code_verdict = remote_browser_verdict if remote_browser_verdict in ("PASSED", "FAILED") else "UNVERIFIED"
           verdicts = {
               "deployment_environment": deployment_verdict,
+              "remote_browser": remote_browser_verdict,
               "code_acceptance": code_verdict,
           }
 
@@ -2009,6 +2050,32 @@ jobs:
               "tier_reason": TIER_REASON,
               "base_url": os.environ.get("OPSWEAVE_URL", ""),
               "verdicts": verdicts,
+              # The meaning of `ok`, stated where the value is, so nobody has to infer it from
+              # this workflow's source. `ok` answers one question: did every non-known-flaky
+              # check that RAN avoid failing. It does NOT mean "release accepted" - read
+              # `verdicts` for that, and `steps_not_run` for what the tier left out.
+              "verdict_definition": {
+                  "ok": ("true when every non-known-flaky check that ran has status != failed. "
+                         "It says nothing about steps the tier skipped, and it is not a release "
+                         "decision."),
+                  "verdicts.deployment_environment": ("PASSED only when the deploy job succeeded, "
+                                                      "the served commit equals the built commit, "
+                                                      "and the deploy script's health polling "
+                                                      "passed; UNVERIFIED when any of those facts "
+                                                      "could not be read; FAILED otherwise."),
+                  "verdicts.remote_browser": ("the browser suites executed here against the live "
+                                              "host. UNVERIFIED when a group that should have "
+                                              "run did not, or when the run recorded a "
+                                              "timeout/reset that is consistent with not reaching "
+                                              "the product."),
+                  "verdicts.code_acceptance": ("the code under test is accepted. A definite "
+                                               "assertion failure is FAILED; a suite that could "
+                                               "not reach the product leaves this UNVERIFIED "
+                                               "rather than pretending either way."),
+                  "not_covered_here": ("deterministic acceptance (runner-local kernel, database "
+                                       "and browser, no external link) is the g12-acceptance "
+                                       "workflow; this one never certifies code on its own."),
+              },
               "deployment_facts": deployment_facts,
               # Diagnostics only, and deliberately outside `checks`: no verdict expression above
               # reads them. They exist so the next failure is attributable from inside this job

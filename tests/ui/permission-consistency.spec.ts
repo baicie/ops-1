@@ -88,9 +88,22 @@ function trackApiRequests(page: Page): string[] {
 // Signs a specific account in through the form; the bootstrap probe is awaited first so a
 // cold 401 cannot wipe the session the login just established.
 async function signInAs(page: Page, email: string, password: string) {
-  const probe = page.waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: 20_000 });
-  await page.goto('/login');
+  // Same staged budgets as dual-surface.spec.ts's signIn: the document's budget is the shorter
+  // one so a slow page is reported as a slow page, not as a slow `/auth/me`. See that helper for
+  // the measurement that made the distinction necessary.
+  let probeError: unknown = null;
+  const probe = page
+    .waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: 30_000 })
+    .catch((error) => { probeError = error; });
+  try {
+    await page.goto('/login', { waitUntil: 'load', timeout: 20_000 });
+  } catch (error) {
+    throw new Error('signIn stage failed [document (/login, waitUntil load)]: ' + String((error as Error)?.message || error).split('\n')[0]);
+  }
   await probe;
+  if (probeError) {
+    throw new Error('signIn stage failed [bootstrap-probe (/auth/me after load)]: ' + String((probeError as Error)?.message || probeError).split('\n')[0]);
+  }
   await page.fill('input[type=email]', email);
   await page.fill('input[type=password]', password);
   await page.click('[data-testid="login-submit"]');
