@@ -24,6 +24,7 @@
 | 第一标杆 `/admin/overview` | PASS（本地真实 Chromium + 矩阵） | 本文 §第一标杆 |
 | Incident 证据 403 / 0-0 语义修复 | PASS（`g11-incident-state-gaps` 6/6 + lifecycle 1/1） | [report §1](report.md) |
 | Observability 0/0 / DEGRADED 语义修复 | PASS（`observability-surface` 11/11 + 426 单测） | [report §1](report.md) |
+| 三标杆矩阵接入 PR 门禁 | PASS（g12 harness 64 tests；`check-spec-coverage` 30 covered） | [report §2](report.md) |
 | 第二/第三标杆（完整视觉重做） | NOT_RUN | 下一阶段 |
 | 全局字体/PageHeader/Button 收敛 | NOT_RUN | DS-V1-1 |
 | 门禁迁移（route→pattern、route coverage） | NOT_RUN | ADR-017 §D6 |

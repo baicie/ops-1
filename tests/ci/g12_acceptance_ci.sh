@@ -146,6 +146,11 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 #     narrowed read printed "this read applied no owner narrowing" (asserted at :310);
 #   * IdentityCell dropped `data-evidence-kind`, because JSX does not type-check hyphenated
 #     attributes, so the evidence row carried no machine-readable kind (asserted at :178).
+# The Visual System V1 flagship specs are part of this deterministic job, not the remote
+# staging tier: the Overview matrix/states and the Observability matrix had no PR gate before
+# this change. The Incident matrix is already g12d-workspace.spec.ts; incidents-workspace.spec.ts
+# stays an explicit skip because its fixture expects a SOURCE_ATTESTED row the seed does not
+# create (recorded in docs/design/opsweave-visual-system-v1/report.md).
 if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
      dual-surface.spec.ts \
      g11-incident-slice.spec.ts \
@@ -155,7 +160,10 @@ if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
      g12-incident-route-identity.spec.ts \
      g12-evidence-content.spec.ts \
      g12-lifecycle.spec.ts \
-     g12d-workspace.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
+     g12d-workspace.spec.ts \
+     overview-matrix.spec.ts \
+     overview-partial.spec.ts \
+     observability-surface.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
   echo "######## browser suite -> PASS"
 else
   echo "######## browser suite -> FAIL (see $LOG_DIR/playwright.log)"

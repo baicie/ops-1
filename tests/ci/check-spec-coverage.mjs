@@ -54,7 +54,6 @@ const KNOWN_UNRUN = new Map([
   ['g12r2-states.spec.ts', 'G12 R2 state capture; superseded in CI by g12d-workspace + the investigation panel assertions.'],
   ['g12r2-races.spec.ts', 'G12 R2 race capture; its R4 case needs two concurrent suites against one kernel, which no CI host arranges.'],
   ['incidents-workspace.spec.ts', 'G12 D layout capture; the same geometry is asserted by g12d-workspace.spec.ts in CI.'],
-  ['observability-surface.spec.ts', 'Observability console capture suite; the surface has no CI seed in this repository yet.'],
   ['permission-consistency.spec.ts', 'Cross-surface permission capture; superseded by dual-surface + g12-create-gate for the create path.'],
   ['sources-audit.spec.ts', 'Sources surface capture; same as observability - no seed in CI.'],
   ['g12d-probe.spec.ts', 'A probe used while building the D workspace spec; asserts nothing.'],

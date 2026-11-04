@@ -116,6 +116,8 @@ PASS
 
 这些是 DS-V1-3/独立 Gate PR 的范围，本轮不修，但报告里不把它们写成 PASS。
 
+**2026-11-04 追加（gate wiring）**：`overview-matrix`、`overview-partial`、`observability-surface` 已加入 `tests/ci/g12_acceptance_ci.sh` 与 `g12-acceptance.yml` 的两条 `paths:`；`check-spec-coverage` 报告三者 COVERED，`observability-surface` 不再是 `EXPLICIT_SKIP`。Incident 矩阵仍由 `g12d-workspace.spec.ts` 覆盖；`incidents-workspace.spec.ts` 仍 skip（fixture 缺 `SOURCE_ATTESTED`）。`check-ui-metrics` 的 fail-open、route coverage 清单、PNG 零余量、a11y/对比度/视觉 diff、`tests/ui` 不 typecheck 等仍开放。
+
 ## 6. 与 normative 文档的冲突（逐条）
 
 | # | 主题 | 现有规范 | 设计包/V1 | 处理 |

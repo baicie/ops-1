@@ -25,6 +25,8 @@
 - `apps/platform-web/src/pages/Observability.tsx`：Reporting 卡在 total=0 时 UNKNOWN 而非 0/0；中段刷新失败显示本地化 NoticeBar 并保留旧行；coverage note 显示 staleSamples 计数。
 - `apps/platform-web/src/pages/ObservabilityEntity.tsx`：DEGRADED 提示；实例 KPI 在不可上报状态显示 UNKNOWN；instances/events 面板补 loading/unavailable 分支。
 - `apps/platform-web/src/pages/observability-model.test.ts`、`tests/ui/observability-surface.spec.ts`：DEGRADED/0/0/缺失计数/刷新失败的单测与 Playwright 断言；fixture 从 13 增至 14（新增 degraded 节点）。
+- `tests/ui/overview-matrix.spec.ts`：新的 12 组合 Overview 矩阵（3 视口 × 2 主题 × 2 语言），断言 header、无横向溢出、无 pageerror、来源行与审计面板；截图写入未跟踪的 `artifacts/ui/visual-v1/gate`。
+- `tests/ci/g12_acceptance_ci.sh`、`.github/workflows/g12-acceptance.yml`、`tests/ci/check-spec-coverage.mjs`：把 `overview-matrix`、`overview-partial`、`observability-surface` 加入确定性 g12 job 与两条事件的 `paths:`，移除 observability 的 `KNOWN_UNRUN`。
 - `tests/ui/visual-v1-capture.mjs`：Phase 0 的 before/after 矩阵捕获工具（不断言，产物未跟踪）。
 - `docs/adr/ADR-017-visual-system-v1.md`、`docs/design/opsweave-visual-system-v1/*`。
 
@@ -48,6 +50,8 @@
 
 关键状态（Overview）：正常/未配置、PARTIAL（503、空 body、pending）、DEGRADED、ATTENTION、READY+非就绪计数、INFO、未知 health code。`UNKNOWN` 不再画成 ATTENTION；`PARTIAL` 的来源行在首屏可见；READY 不再在计数未就绪时打印 all-clear。
 
+**Gate wiring（本轮）**：`overview-matrix.spec.ts`、`overview-partial.spec.ts`、`observability-surface.spec.ts` 进入 `g12-acceptance` 的确定性 job，并写入该 workflow 的 `pull_request`/`push` paths；`check-spec-coverage` 现在报告三者 COVERED，`observability-surface` 不再是 `EXPLICIT_SKIP`。Incident 矩阵继续由 `g12d-workspace.spec.ts` 覆盖；`incidents-workspace.spec.ts` 仍是 explicit skip（fixture 缺 SOURCE_ATTESTED）。
+
 ## 3. 门禁及真实命令
 
 | 检查 | 命令 | PASS / FAIL / NOT_RUN | 日志/artifact/HEAD |
@@ -59,9 +63,12 @@
 | Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 codes | 同上 |
 | UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — 0/0/6/3/0/0 | 同上 |
 | UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 measurements，0 violations | fixture 矩阵 |
-| Playwright Overview 状态 | `... playwright test overview-partial.spec.ts` | **PASS** — 7/7 | 本机 Kernel `18291` |
+| Playwright Overview 状态 | `... playwright test overview-partial.spec.ts` | **PASS** — 7/7 | 本机 Kernel `18291`；已进入 g12-acceptance 确定性 job |
 | Playwright Overview 矩阵 | `... playwright test visual.spec.ts -g "responsive overview matrix"` | **PASS** — 6 组合 | 本机 |
-| Playwright Observability fixture | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 11/11 | fixture，明确标注；该 spec 仍是 `EXPLICIT_SKIP`，未进 PR 门禁（见 §5） |
+| Playwright Observability fixture | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 11/11 | fixture，明确标注；已由 g12-acceptance 在 PR 上运行 |
+| Playwright Overview 矩阵 | `... playwright test overview-matrix.spec.ts` | **PASS** — 12 组合 | 本机；已进入 g12-acceptance 确定性 job |
+| Spec coverage | `node tests/ci/check-spec-coverage.mjs` | **PASS** — 30 covered / 23 explicit-skip / 0 unreferenced；三个旗舰 spec 均 COVERED ← g12-acceptance | 本机 |
+| Deterministic g12 harness | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.6 min；acceptance 195/0；exit 0 | 本机后台，含新增 3 个 spec |
 | Playwright Incident 状态 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） | 本机 Kernel `18291` |
 | Playwright Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（trusted 行仍在 present 时渲染） | 本机，DB `opsweave_visual_v1` |
 | Playwright Incident workspace trust | `... --config incidents-workspace.config.ts -g "every evidence row carries a trust level"` | **FAIL（预存在 fixture 不符）** | 该 spec 期望种子里有 SOURCE_ATTESTED 行；g12d 种子只有 UNVERIFIED/OPERATOR_ASSERTED，且 legend 自带 `ok` chip；本轮改动未触及 trust 渲染 |
@@ -85,10 +92,10 @@
 ## 5. 余留风险与裁决
 
 - **P0（未修，需产品决策）**：Incident 的 digest mismatch 仍可读 bytes（安全/产品决策，不能只改视觉）；Observability 的 per-row observed time 仍只在 hover title；Observability/Incident 的完整视觉重排仍 `NOT_RUN`。
-- **P1**：Overview 无 STALE 策略、shell/页面双轮询可短暂矛盾、KPI 逐卡时间缺失；Observability 的 `observability-surface.spec.ts` 仍是 `EXPLICIT_SKIP`（新增断言是本地证据，不是 PR 门禁）、history/events 的更多边界；Incident 的 header 缺 owner/scope、审计不可折叠、verifiedAt 未渲染、fingerprint 只在 viewer、rail 首答前 0/0。
+- **P1**：Overview 无 STALE 策略、shell/页面双轮询可短暂矛盾、KPI 逐卡时间缺失；Observability 的 history/events 更多边界、per-row observed time 仍 hover-only；Incident 的 header 缺 owner/scope、审计不可折叠、verifiedAt 未渲染、fingerprint 只在 viewer、rail 首答前 0/0。三标杆矩阵已进入 g12-acceptance；`incidents-workspace.spec.ts` 仍是 explicit skip（fixture 缺 SOURCE_ATTESTED）。
 - **已修（本轮）**：Observability 的 Reporting 0/0、`entityRows` 缺失计数、unreachable 实体 KPI 0/N、DEGRADED 折叠、实例/事件面板 loading/error、刷新失败静默、`staleSamples` 不可见、Reporting 计数与过滤谓词不一致；Incident 证据 403 死代码、`incident-evidence-trusted` 在 loading/forbidden 时的 0/0、assurance 改为 considered 集、stale banner 的原始码与浏览器 locale 时间。
 - **P1（门禁）**：三标杆矩阵不在 PR 门禁；`check-ui-metrics` fail-open；PNG 预算零余量；无对比度/触摸目标/视觉 diff；`tests/ui` 不 typecheck。
 - **P2**：字体 12px 迁移的表格卡片几何重算；`Ui.StatusBadge` 零调用未删；`AVAILABLE`/`CANCELLED` 语义分歧；`components/domain/` 未建。
-- **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义修复**。全量 V1（三标杆完整视觉重排、字体/组件收敛、Gate 迁移）**NOT_READY**，不在本 PR 声称完成。
-- 下一最小 PR 建议：① 把三标杆矩阵接入 PR 门禁并补 route coverage（含 `observability-surface.spec.ts` 去 `EXPLICIT_SKIP`）；② 再做 DS-V1-1 的字体/PageHeader/Button 收敛；③ 产品决策：Incident digest mismatch 的可读性。
+- **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring**。全量 V1（字体/组件收敛、三标杆完整视觉重排、route coverage 强化）**NOT_READY**，不在本 PR 声称完成。
+- 下一最小 PR 建议：① DS-V1-1 的字体/PageHeader/Button 收敛；② route coverage 强化（`check-ui-metrics` 空页 fail-open、route 清单）；③ 产品决策：Incident digest mismatch 的可读性。
 - 本 PR **未**自动合并、未转 Ready（Draft）、未打 Tag、未发布、未部署。

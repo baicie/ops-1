@@ -3,9 +3,10 @@ name: g12-acceptance
 # referenced by zero workflows, so "199 assertions passed, 7 specs passed" was a claim no pipeline
 # could reproduce. This job runs tests/ci/g12_acceptance_ci.sh, which starts one real kernel on a
 # throw-away database, runs the four tests/acceptance/g12_*.sh scripts against it, and then drives
-# a real Chromium through the six specs that cover the incident and investigation surfaces.
+# a real Chromium through the twelve specs that cover the incident and investigation surfaces,
+# plus the Visual System V1 flagships (Overview matrix/states and Observability matrix).
 #
-# The sixth, g11-incident-slice.spec.ts, was excluded while two product defects it catches shipped
+# g11-incident-slice.spec.ts was excluded while two product defects it catches shipped
 # (the scope-blind empty list and the evidence row's missing data-evidence-kind). Both were in the
 # browser layer only, so every other suite stayed green - the exclusion, not the code, is what let
 # them through.
@@ -23,6 +24,9 @@ on:
       - 'tests/acceptance/g12_*.sh'
       - 'tests/acceptance/g11_*.sh'
       - 'tests/ui/dual-surface.spec.ts'
+      - 'tests/ui/overview-matrix.spec.ts'
+      - 'tests/ui/overview-partial.spec.ts'
+      - 'tests/ui/observability-surface.spec.ts'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/g12d-seed.mjs'
@@ -43,6 +47,9 @@ on:
       # main. Without these three lines a push that edits the suite's own inputs would land with
       # no run of the job that depends on them.
       - 'tests/ui/dual-surface.spec.ts'
+      - 'tests/ui/overview-matrix.spec.ts'
+      - 'tests/ui/overview-partial.spec.ts'
+      - 'tests/ui/observability-surface.spec.ts'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/support/**'
@@ -57,9 +64,10 @@ permissions:
 jobs:
   acceptance:
     runs-on: ubuntu-latest
-    # The harness builds the kernel and the web bundle, runs four script suites and then five
-    # browser specs. Measured locally at roughly 12 minutes cold; 45 is the same ceiling the
-    # data-foundation job uses for a comparable run, so a hang is a red and not a stuck queue.
+    # The harness builds the kernel and the web bundle, runs four script suites and then twelve
+    # browser specs. Measured locally at roughly 12 minutes cold; the three flagship specs add
+    # about two minutes, and 45 is the same ceiling the data-foundation job uses for a comparable
+    # run, so a hang is a red and not a stuck queue.
     timeout-minutes: 45
     services:
       postgres:
