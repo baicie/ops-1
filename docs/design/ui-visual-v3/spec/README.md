@@ -8,6 +8,14 @@ Written against HEAD `7fd0c99` (`feat/ui-visual-excellence-v3`); every gate outp
 prove today” and in each file's §4 was re-run at HEAD `1f1feeb`. Every number in the three files was produced
 by a command whose output is quoted next to it, and every rule has a gate that can fail a build.
 
+> **Visual System V1 (2026-11-04).** [ADR-017](../../../adr/ADR-017-visual-system-v1.md) amends this spec:
+> `page-template.md` gains Pattern A/B/C/D plus a route→pattern registry (Pattern B stays the default);
+> `token-table.md` keeps 11/13/15/26 with a documented 20→26 title clamp, and the 12px tier is scheduled for
+> removal in DS-V1-1. The census and gate transcripts below are historical (HEAD `7fd0c99`/`1f1feeb`); the
+> measured state at `775a1e2` and the migration order are in
+> [`docs/design/opsweave-visual-system-v1/`](../../opsweave-visual-system-v1/README.md). This spec remains
+> normative until the ADR's migration steps land; the ADR wins only where it names an explicit exception.
+
 | file | answers | gate |
 |---|---|---|
 | `token-table.md` | **what a value is**: 3 radii, 4 type tiers, 2 control heights, 2 button sizes, and why *that* value | `check-ui-tokens.mjs` (R1–R4) |
