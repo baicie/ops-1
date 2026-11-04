@@ -27,6 +27,8 @@ node tests/ui/visual-v1-capture.mjs
 | `artifacts/ui/visual-v1/before/` | 36 张 PNG + `_manifest.json` + 每页 `_metrics_*.json` |
 | `artifacts/ui/visual-v1/after/` | 同上；after 是改动后的实现提交 `25a784c`（基于 `775a1e2`） |
 | `artifacts/ui/observability/shots/` | `observability-surface.spec.ts` 的 fixture 矩阵（未跟踪） |
+| `artifacts/ui/visual-v1/after/incident-forbidden-1440-light-en.png` | 证据 403 的全页证据（stale banner） |
+| `artifacts/ui/visual-v1/after/incident-forbidden-panel-1440-light-en.png` | 证据 403 的 permission-wall 面板特写 |
 
 `_manifest.json` 记录 base URL、base SHA、capturedAt、Chromium 版本、账号、每页 metrics 文件名。该脚本不断言任何东西，只记录；断言在 Playwright 测试里。
 
@@ -49,7 +51,7 @@ node tests/ui/visual-v1-capture.mjs
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | TypeScript | `pnpm --filter @opsweave/platform-web typecheck` | **PASS** |
-| Vitest | `pnpm --filter @opsweave/platform-web test` | **PASS** — 31 files / 419 tests（新增 2 个 `overview-events` 测试） |
+| Vitest | `pnpm --filter @opsweave/platform-web test` | **PASS** — 31 files / 420 tests（`overview-events` + `evidencePanelState` 403） |
 | Build | `pnpm --filter @opsweave/platform-web build` | **PASS** — vite build，169.26 kB CSS / 1,313.78 kB JS（既有 chunk 警告，未新增） |
 | i18n | `node scripts/check-i18n.mjs` | **PASS** — en/zh-CN 各 1,920 keys；17 条既有 unused warning（非本轮新增） |
 | Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 protocol codes |
@@ -65,6 +67,9 @@ node tests/ui/visual-v1-capture.mjs
 | Overview 状态 | `OPSWEAVE_URL=http://127.0.0.1:18291 pnpm exec playwright test overview-partial.spec.ts`（cwd `tests/ui`） | **PASS** — 7/7 |
 | Overview 响应式矩阵 | `... playwright test visual.spec.ts -g "responsive overview matrix"` | **PASS** — 1 test / 6 组合（1440/1024/390 × light/dark），无 pageerror，无 overflow |
 | Observability fixture 矩阵 | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 7/7（含 24 组合矩阵与 3 个语义断言） |
+| Incident 状态缺口 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） |
+| Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（trusted 行仍在 present 时渲染） |
+| Incident workspace trust | `... --config incidents-workspace.config.ts -g "every evidence row carries a trust level"` | **FAIL（预存在 fixture 不符）** — g12d 种子只有 UNVERIFIED/OPERATOR_ASSERTED，spec 期望 SOURCE_ATTESTED；页面 legend 自带 `ok` chip；本轮未改 trust 渲染 |
 
 `overview-partial.spec.ts` 新增/修正的用例：
 
@@ -77,6 +82,7 @@ node tests/ui/visual-v1-capture.mjs
 | 项 | 状态 | 原因 |
 |---|---|---|
 | 全量 staging-preview / 远端浏览器层 | **NOT_RUN** | 本机无 staging 凭据；ADR-016 已把远端层定为 advisory |
+| `incidents-workspace` 的 trust 用例 | **FAIL（预存在 fixture）** | 该 spec 是 EXPLICIT_SKIP；g12d 种子没有 SOURCE_ATTESTED 行，页面 legend 自带 `ok` chip；本轮未改 trust 渲染，失败不是本轮引入 |
 | Docker 依赖的 admin-shell / plugin-surfaces / studio 套件 | **NOT_RUN** | 本机 Docker 不可用，无法启动节点与插件实例 |
 | `g11-page-header-growth.spec.ts` | **NOT_RUN** | 需要 pipeline/Studio 数据；header 未改动，PR CI 的 g12-acceptance 覆盖 |
 | 全局字体迁移（11/13/15/26） | **NOT_RUN** | 决策已写 ADR-017 §D5；实现属 DS-V1-1，需要同步改 `styles.token-contract.test.ts` 与 Tailwind 映射 |

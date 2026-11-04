@@ -97,6 +97,8 @@ PASS
 - rail 在首答前打印 0 of 0。
 - 证据子资源 403 没有测试；详情矩阵只 pin en。
 
+**2026-11-04 追加（本轮已修）**：证据 403 的 `evidencePanelState` 现在收到 status，403 显示 forbidden 且不提供 retry；`incident-evidence-trusted` 只在 `present` 时渲染；assurance 改为 verdict 实际考虑的 `considered` 集；stale banner 使用本地化 HTTP 类别与页面语言时间，原始码只在 `data-error-code`。其余条目仍开放。
+
 ## 5. Gate 现状（要点）
 
 完整命令/覆盖/预算见审计输出，结论按 `PASS / FAIL / NOT_RUN` 记录：

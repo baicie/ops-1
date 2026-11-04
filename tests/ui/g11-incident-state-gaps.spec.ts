@@ -197,6 +197,53 @@ test('the evidence panel says the read failed, not that there is no evidence, an
   }
 });
 
+test('a refused evidence read is a permission wall, not a retryable failure', async ({ page, baseURL }) => {
+  const api = await apiFor(baseURL);
+  const incident = await createIncident(api, 'G11 gaps evidence forbidden ' + RUN);
+  try {
+    await signIn(page);
+
+    // A 403 is an answer, not a missing one: the incident loaded and the evidence request was
+    // refused. The page must not offer a retry (a grant is the fix), must not share the
+    // unavailable panel, and must not print a provenance count over rows it never received.
+    await page.route('**/api/v1/incidents/*/evidence', (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'FORBIDDEN', message: 'refused by g11-incident-state-gaps' }),
+      }),
+    );
+    await page.goto('/app/incidents/' + incident.id);
+
+    await expect(page.getByTestId('incident-detail')).toHaveAttribute('data-incident-id', incident.id);
+    const panel = page.getByTestId('incident-evidence');
+    await expect(panel).toHaveAttribute('data-evidence-state', 'forbidden');
+    const forbidden = page.getByTestId('incident-evidence-forbidden');
+    await expect(forbidden).toBeVisible();
+    await expect(forbidden).toContainText(copy('incidents.detail.evidence.forbidden.title'));
+    await expect(forbidden).toContainText(copy('incidents.detail.evidence.forbidden.description'));
+    await expect(page.getByTestId('incident-evidence-unavailable')).toHaveCount(0);
+    await expect(page.getByTestId('incident-evidence-trusted')).toHaveCount(0);
+    // A retry cannot create a grant; the panel must not pretend it can.
+    await expect(forbidden.getByRole('button')).toHaveCount(0);
+
+    // The stale banner names the failure in the page language. The wire code stays in the
+    // attribute; printing "FORBIDDEN" in the sentence would be protocol data as copy.
+    const freshness = page.getByTestId('incident-freshness');
+    await expect(freshness).toHaveAttribute('data-error-code', 'FORBIDDEN');
+    await expect(freshness).not.toContainText('FORBIDDEN');
+    await expect(freshness).toContainText(copy('ui.error.rejected'));
+
+    // The panel only exists for a refused read, so a fixture cannot replace this evidence.
+    const shots = path.join(repoRoot(), 'artifacts/ui/visual-v1/after');
+    fs.mkdirSync(shots, { recursive: true });
+    await page.screenshot({ path: path.join(shots, 'incident-forbidden-1440-light-en.png'), fullPage: true });
+    await forbidden.screenshot({ path: path.join(shots, 'incident-forbidden-panel-1440-light-en.png') });
+  } finally {
+    await api.ctx.dispose();
+  }
+});
+
 test('a CONFIRMED verdict with no evidence is refused as INCIDENT_EVIDENCE_REQUIRED and leaves the record OPEN', async ({ page, baseURL }) => {
   const api = await apiFor(baseURL);
   const incident = await createIncident(api, 'G11 gaps evidence required ' + RUN);

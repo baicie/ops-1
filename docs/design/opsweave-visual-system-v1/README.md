@@ -22,7 +22,8 @@
 | 组件所有权与调用点 | PASS（静态审计） | [component-ownership.md](component-ownership.md) |
 | Token/字体冲突与决策 | PASS（决策）；迁移 NOT_RUN | [ADR-017 §D5](../../adr/ADR-017-visual-system-v1.md) |
 | 第一标杆 `/admin/overview` | PASS（本地真实 Chromium + 矩阵） | 本文 §第一标杆 |
-| 第二/第三标杆 | NOT_RUN | 下一阶段 |
+| Incident 证据 403 / 0-0 语义修复 | PASS（`g11-incident-state-gaps` 6/6 + lifecycle 1/1） | [report §1](report.md) |
+| 第二/第三标杆（完整视觉重做） | NOT_RUN | 下一阶段 |
 | 全局字体/PageHeader/Button 收敛 | NOT_RUN | DS-V1-1 |
 | 门禁迁移（route→pattern、route coverage） | NOT_RUN | ADR-017 §D6 |
 | 证据与命令 | PASS | [evidence-index.md](evidence-index.md) |

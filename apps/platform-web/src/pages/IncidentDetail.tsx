@@ -6,6 +6,7 @@ import { useAuth } from '../auth';
 import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
 import { ageMessage, clockMessage } from '../lib/age';
+import { apiFailureCopy } from '../lib/kernel-messages';
 import { cn } from '../lib/utils';
 import { Icon } from '../components/Icons';
 import { Badge } from '../components/ui/badge';
@@ -222,7 +223,12 @@ export function IncidentDetailPage() {
   const evidence = view.evidence ?? [];
   const partition = partitionEvidence(evidence, incident.humanVerdict);
   const facts = incidentFacts(incident, partition.considered);
-  const evidenceState = evidencePanelState(view.evidence, Boolean(view.evidenceError));
+  // The HTTP status is the difference between "a grant fixes this" and "a retry might". The
+  // state machine already accepts it; the page used to drop it, so a 403 on the evidence
+  // sub-resource rendered the retryable unavailable panel and the tailored forbidden branch was
+  // dead code (incidents.ts:321-331).
+  const evidenceStatus = view.evidenceError instanceof ApiError ? view.evidenceError.status : null;
+  const evidenceState = evidencePanelState(view.evidence, Boolean(view.evidenceError), evidenceStatus);
   const verdictState = verdictPanelState(incident);
   // Resolved against the rows this page actually holds, so an id from a previous read cannot
   // resurrect a row that is no longer in the list.
@@ -240,10 +246,11 @@ export function IncidentDetailPage() {
   const capabilities = incidentCapabilities({ incident, userId: user?.id ?? null, role: user?.role ?? null });
   const closureState = closurePanelState(incident);
   const verifiedCount = kernelVerifiedCount(evidence);
-  // What the set is worth as its weakest row. The verdict rests on the whole set, so the figure a
-  // reader needs before signing one is the floor, not the best row in it (incident-trust.tsx
-  // TrustSummary renders exactly this and nothing else).
-  const assurance = evidenceAssurance(evidence);
+  // What the set the verdict actually weighed is worth as its weakest row: the considered set,
+  // not rows appended after signing. For an open incident `partitionEvidence` returns every row,
+  // so this is unchanged there; for a concluded one it is the difference between the record and a
+  // later addition (incidents.ts:917-936).
+  const assurance = evidenceAssurance(partition.considered);
 
   // The handover succeeded and this account is no longer allowed to read the record. Saying that
   // is the whole point: the alternative is a form that would 404 on the next keystroke.
@@ -414,10 +421,17 @@ export function IncidentDetailPage() {
                       verdict rests on the weakest row, never the best). E's trustedSummary is a COUNT of
                       kernel-verified rows, which answers a different question and is asserted by
                       g12-lifecycle. Neither is a repeat of the other. */}
-                  {evidenceState === 'present' ? <TrustSummary assurance={assurance} /> : null}
-                  <p className="muted small pad" data-testid="incident-evidence-trusted" data-kernel-verified-count={verifiedCount} data-evidence-count={evidence.length}>
-                    {t('incidents.evidence.trustedSummary', { verified: verifiedCount, total: evidence.length })}
-                  </p>
+                  {evidenceState === 'present' ? (
+                    <>
+                      <TrustSummary assurance={assurance} />
+                      {/* A count of the rows on screen. It must not render before the rows exist:
+                          "0 of 0 carry provenance" under a loading/forbidden/unavailable panel is
+                          an absent answer printed as a zero. */}
+                      <p className="muted small pad" data-testid="incident-evidence-trusted" data-kernel-verified-count={verifiedCount} data-evidence-count={evidence.length}>
+                        {t('incidents.evidence.trustedSummary', { verified: verifiedCount, total: evidence.length })}
+                      </p>
+                    </>
+                  ) : null}
                   {evidenceState === 'loading' ? (
                     <p className="muted small pad" aria-busy="true" data-testid="incident-evidence-loading">{t('aria.loading')}</p>
                   ) : evidenceState === 'forbidden' ? (
@@ -891,12 +905,15 @@ function IncidentRail({ currentId }: { currentId: string }) {
 /** The banner a page shows when it is still rendering rows from a read that has since failed. */
 function IncidentStale({ observedAt, error }: { observedAt: string | null; error: unknown }) {
   const t = useT();
-  const at = observedAt ? new Date(observedAt) : null;
-  const stamp = at && !Number.isNaN(at.getTime()) ? at.toLocaleTimeString() : (observedAt ?? '');
+  const { locale } = useI18n();
+  // The stamp follows the page language, and the reason is the localized HTTP-class sentence:
+  // a raw wire code ("FORBIDDEN") is protocol data for the attribute, not copy for the reader.
+  const stamp = clockMessage(locale, observedAt);
   const code = classifyFailure(error).code;
+  const reason = apiFailureCopy(error instanceof Error ? error : null, t).reason;
   return (
-    <p className="notice-bar" data-testid="incident-freshness" data-stale="true">
-      {t('incidents.freshness.stale', { at: stamp, reason: code ?? t('incidents.error.network') })}
+    <p className="notice-bar" data-testid="incident-freshness" data-stale="true" data-error-code={code ?? ''}>
+      {t('incidents.freshness.stale', { at: stamp, reason })}
     </p>
   );
 }

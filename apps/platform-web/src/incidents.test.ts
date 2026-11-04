@@ -245,6 +245,11 @@ describe('evidencePanelState', () => {
   it('keeps the rows it already has when a later read fails', () => {
     expect(evidencePanelState([evidence()], true)).toBe('present');
   });
+
+  it('treats a 403 as a permission wall, even over an older list', () => {
+    expect(evidencePanelState(null, true, 403)).toBe('forbidden');
+    expect(evidencePanelState([evidence()], true, 403)).toBe('forbidden');
+  });
 });
 
 describe('verdictPanelState', () => {
@@ -442,7 +447,11 @@ describe('detailReducer: route identity is not a refresh', () => {
     const denied = detailReducer(loaded(), { type: 'evidence-failed', routeId: ROUTE_ID, cause: apiFailure(403, 'FORBIDDEN') });
     expect(denied.evidence).toBeNull();
     expect(denied.incident?.id).toBe(ROUTE_ID);
-    expect(evidencePanelState(denied.evidence, Boolean(denied.evidenceError))).toBe('unavailable');
+    const status = (denied.evidenceError as { status: number }).status;
+    expect(status).toBe(403);
+    // The page used to drop the status and call this "unavailable", which offered a retry that
+    // cannot fix a missing grant. The reducer test now pins the classification the page needs.
+    expect(evidencePanelState(denied.evidence, Boolean(denied.evidenceError), status)).toBe('forbidden');
   });
 });
 
