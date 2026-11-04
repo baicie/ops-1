@@ -11,7 +11,8 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { CopyButton, EmptyState, ErrorState, KV, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
+import { CopyButton, EmptyState, KV, Progress, Skeleton, TimeAgo, useToast } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { FilterScroller } from '../components/app/filter-scroller';
 import { PageHeader } from '../components/app/page-header';
@@ -119,7 +120,7 @@ export function PluginDetailPage() {
   // The header keeps its description in the loading and error states too: the page still is what
   // it says it is while the answer is missing or refused.
   if (loading && !data) return <><PageHeader title={t('table.plugin')} /><Skeleton rows={6} /></>;
-  if (error) return <><PageHeader title={t('table.plugin')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
+  if (error) return <><PageHeader title={t('table.plugin')} /><AsyncBoundary loading={false} error={error} hasData={false} onRetry={() => void reload()}>{null}</AsyncBoundary></>;
   if (!data) return null;
 
   /**

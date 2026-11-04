@@ -98,7 +98,7 @@ async function probe(page: Page) {
     };
     const boxed = (selector: string) => Array.from(document.querySelectorAll(selector)).filter(visible).length;
     const headings = Array.from(document.querySelectorAll('#main-content h1, #main-content h2, #main-content h3')).filter(visible).map(text);
-    const labels = Array.from(document.querySelectorAll('#main-content .metric-label, #main-content .ow-metric-label, #main-content .kv-label, #main-content .panel-head h2')).filter(visible).map(text);
+    const labels = Array.from(document.querySelectorAll('#main-content .ow-metric-label, #main-content .ow-metric-label, #main-content .kv-label, #main-content .panel-head h2')).filter(visible).map(text);
     const statuses = Array.from(document.querySelectorAll('#main-content .status, #main-content .status-indicator')).filter(visible).map(text);
     const repeats = (list: string[]) => {
       const counts = new Map<string, number>();
@@ -129,7 +129,7 @@ async function probe(page: Page) {
       firstBlockY: firstPanel ? Math.round(firstPanel.getBoundingClientRect().top) : null,
       boxed: {
         panel: boxed('#main-content .panel'),
-        metricCard: boxed('#main-content .metric-card'),
+        metricCard: boxed('#main-content .ow-metric'),
         statStripItem: boxed('#main-content .stat-strip > *'),
         businessCard: boxed('#main-content .business-card-slot'),
         investigation: boxed('#main-content .investigation-region'),
@@ -146,7 +146,7 @@ async function probe(page: Page) {
       contrast: [
         contrast('#main-content .page-description'),
         contrast('#main-content .panel-head h2'),
-        contrast('#main-content .metric-label'),
+        contrast('#main-content .ow-metric-label'),
         contrast('#main-content .kv-label'),
         contrast('#main-content table tbody td'),
       ].filter(Boolean),

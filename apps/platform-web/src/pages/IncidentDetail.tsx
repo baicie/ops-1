@@ -321,10 +321,10 @@ export function IncidentDetailPage() {
             content: (
               <>
                 <section className="summary-grid">
-                        <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><Status code={incident.status} /></strong></div>
-                        <div className="panel metric-card"><span className="metric-label">{t('table.severity')}</span><strong className="metric-value"><Status code={incident.severity} /></strong></div>
-                        <div className="panel metric-card"><span className="metric-label">{t('table.evidence')}</span><strong className="metric-value mono" data-testid="incident-detail-evidence-count">{view.evidence ? evidence.length : '—'}</strong></div>
-                        <div className="panel metric-card"><span className="metric-label">{t('table.updated')}</span><strong className="metric-value"><span title={incident.updatedAt}>{ageMessage(locale, incident.updatedAt)}</span></strong></div>
+                        <MetricCard label={t('table.status')} value={<Status code={incident.status} />} showSampled={false} />
+                        <MetricCard label={t('table.severity')} value={<Status code={incident.severity} />} showSampled={false} />
+                        <MetricCard label={t('table.evidence')} value={<span data-testid="incident-detail-evidence-count">{evidence.length}</span>} state={view.evidence ? 'ready' : 'noData'} showSampled={false} metricId="incidentEvidence" />
+                        <MetricCard label={t('table.updated')} value={<span title={incident.updatedAt}>{ageMessage(locale, incident.updatedAt)}</span>} showSampled={false} />
                       </section>
                 <section className="panel" data-testid="incident-timeline">
                         <div className="panel-head">

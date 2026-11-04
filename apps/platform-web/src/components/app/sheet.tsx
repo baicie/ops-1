@@ -1,24 +1,20 @@
 import * as React from 'react';
-import { cn } from '../../lib/utils';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog';
+import { Dialog, DialogClose } from '../ui/dialog';
+import { DialogFrame } from './dialog-frame';
 
 /**
- * Side sheet built on the existing Radix dialog primitive (no new dependency, no second
- * overlay stack: it inherits the dialog's z-index, focus trap and Escape handling).
+ * Side sheet built on the shared dialog frame (no new dependency, no second overlay stack: it
+ * inherits the dialog's z-index, focus trap and Escape handling).
  *
- * The panel stays a dialog at every width; only the geometry changes, so the mobile
- * command palette and a future DetailSheet share one implementation.
+ * The panel stays a dialog at every width; only the geometry changes, so the mobile command
+ * palette and a future DetailSheet share one implementation - the same head/body/foot as every
+ * centred dialog, positioned to one edge instead of the middle.
  */
 export const Sheet = Dialog;
 
 export type SheetSide = 'left' | 'right';
 
-const sideStyles: Record<SheetSide, string> = {
-  left: 'left-0 top-0 h-full max-h-full w-[86vw] max-w-[320px] translate-x-0 translate-y-0 rounded-none rounded-r-lg p-4',
-  right: 'left-auto right-0 top-0 h-full max-h-full w-[86vw] max-w-[360px] translate-x-0 translate-y-0 rounded-none rounded-l-lg p-4',
-};
-
-export interface SheetContentProps extends React.ComponentPropsWithoutRef<typeof DialogContent> {
+export interface SheetContentProps extends Omit<React.ComponentPropsWithoutRef<typeof DialogFrame>, 'variant' | 'size'> {
   side?: SheetSide;
   title: string;
   /** Radix warns when a dialog has no description; pass `undefined` explicitly to opt out. */
@@ -26,22 +22,9 @@ export interface SheetContentProps extends React.ComponentPropsWithoutRef<typeof
   closeLabel: string;
 }
 
-export const SheetContent = React.forwardRef<
-  React.ElementRef<typeof DialogContent>,
-  SheetContentProps
->(({ side = 'left', title, description, closeLabel, className, children, ...props }, ref) => (
-  <DialogContent
-    ref={ref}
-    closeLabel={closeLabel}
-    className={cn('ow-sheet gap-3', sideStyles[side], className)}
-    {...props}
-  >
-    <DialogTitle className="text-sm font-semibold text-foreground">{title}</DialogTitle>
-    {description ? <DialogDescription className="text-sm text-muted-foreground">{description}</DialogDescription> : null}
-    {children}
-  </DialogContent>
-));
-SheetContent.displayName = 'SheetContent';
+export function SheetContent({ side = 'left', ...props }: SheetContentProps) {
+  return <DialogFrame variant={side === 'left' ? 'sheet-left' : 'sheet-right'} {...props} />;
+}
 
 export function SheetClose({ label, children }: { label?: string; children: React.ReactNode }) {
   return (

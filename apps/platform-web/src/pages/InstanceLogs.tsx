@@ -6,7 +6,8 @@ import { Icon } from '../components/Icons';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { EmptyState, ErrorState } from '../components/Ui';
+import { EmptyState } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
 import { NoticeBar } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
@@ -122,7 +123,7 @@ export function InstanceLogsPage() {
     />
   );
 
-  if (detailError) return <div className="log-page">{header}<ErrorState error={detailError} /></div>;
+  if (detailError) return <div className="log-page">{header}<AsyncBoundary loading={false} error={detailError} hasData={false}>{null}</AsyncBoundary></div>;
   if (!detail) return <div className="log-page">{header}<div className="skeleton" style={{ height: 320 }} /></div>;
 
   return (

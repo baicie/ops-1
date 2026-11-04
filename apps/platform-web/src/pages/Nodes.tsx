@@ -11,7 +11,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { CopyButton, EmptyState, ErrorState, KV, Skeleton, TimeAgo, useToast } from '../components/Ui';
+import { CopyButton, EmptyState, KV, Skeleton, TimeAgo, useToast } from '../components/Ui';
 import { formatBytes, formatDate } from '../format';
 import { useI18n, useT } from '../i18n';
 import { auditEmptyKind, readAuditList } from '../lib/audit-scope';
@@ -427,7 +427,7 @@ export function NodeDetailPage() {
   const toast = useToast();
 
   if (loading && !data) return <><PageHeader title={t('nodeDetail.title')} /><Skeleton rows={6} /></>;
-  if (error) return <><PageHeader title={t('nodeDetail.title')} /><ErrorState error={error} onRetry={() => void reload()} /></>;
+  if (error) return <><PageHeader title={t('nodeDetail.title')} /><AsyncBoundary loading={false} error={error} hasData={false} onRetry={() => void reload()}>{null}</AsyncBoundary></>;
   if (!data) return null;
   const snapshot = data.resourceSnapshot;
   const memoryPercent = snapshot?.memoryUsedBytes && snapshot?.memoryTotalBytes ? snapshot.memoryUsedBytes / snapshot.memoryTotalBytes : null;

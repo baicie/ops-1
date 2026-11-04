@@ -14,6 +14,7 @@ import { AsyncBoundary } from '../components/app/async-boundary';
 import { FilterScroller } from '../components/app/filter-scroller';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
+import { MetricCard } from '../components/app/metric-card';
 import { useDocumentTitle } from '../hooks';
 import { executionLabel as durationLabel, spanLabel } from './jobDuration';
 import { useI18n, useT } from '../i18n';
@@ -263,13 +264,13 @@ export function JobDetailPage() {
     <div className="page-stack">
       <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId} data-testid="job-short-id">{t('jobs.runShortId', { id: identityDisambiguator(job.jobId) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
       <section className="summary-grid job-stats">
-        <div className="panel metric-card"><span className="metric-label">{t('table.status')}</span><strong className="metric-value"><StatusPill status={job.status} /></strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('jobs.metric.execution')}</span><strong className="metric-value mono">{durationLabel(job)}</strong></div>
+        <MetricCard label={t('table.status')} value={<StatusPill status={job.status} />} showSampled={false} />
+        <MetricCard label={t('jobs.metric.execution')} value={<span className="mono">{durationLabel(job)}</span>} showSampled={false} />
         {/* Was the pipeline id, which is the h1 79px above it: one string printed twice on one
             screen. The strip carries the attempt count instead - a fact that until now lived only
             inside the collapsed "advanced" panel, so the card states something new rather than
             disappearing. */}
-        <div className="panel metric-card"><span className="metric-label">{t('table.attempts')}</span><strong className="metric-value mono">{job.attempts} / {job.maxAttempts}</strong></div>
+        <MetricCard label={t('table.attempts')} value={<span className="mono">{job.attempts} / {job.maxAttempts}</span>} showSampled={false} />
         {/* Was the pipeline revision, which the page subtitle 79px above already prints as
             "Revision r9" - a second copy of one word on one screen, and the fourth card of a band
             whose other three each state a fact that appears nowhere else. Three cards, unchanged. */}

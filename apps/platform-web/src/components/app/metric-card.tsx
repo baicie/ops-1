@@ -25,6 +25,7 @@ export function MetricCard({
   href,
   state = 'ready',
   showSampled = true,
+  size = 'default',
   className,
   /** A stable identity for evidence: the visible label is localized, this one is not. */
   metricId,
@@ -45,6 +46,11 @@ export function MetricCard({
    * called out - so the card stops repeating it instead of the CSS hiding four nodes.
    */
   showSampled?: boolean;
+  /**
+   * A pill or a timestamp is not a count: it keeps the body step instead of the 26px figure.
+   * The detail pages used to spell this with .metric-value.small, a second value vocabulary.
+   */
+  size?: 'default' | 'small';
   className?: string;
   metricId?: string;
 }) {
@@ -52,7 +58,7 @@ export function MetricCard({
   const body = (
     <>
       <span className="ow-metric-label">{label}</span>
-      <span className="ow-metric-value" data-metric-state={state}>
+      <span className={size === 'small' ? 'ow-metric-value ow-metric-value--sm' : 'ow-metric-value'} data-metric-state={state}>
         {state === 'ready' ? (
           <>
             {value}

@@ -111,7 +111,7 @@ test('the home task space names what is missing instead of rendering a zero', as
   }
 
   // No KPI wall: no metric card, no table, no count badge on the home page at all.
-  await expect(page.locator('[data-testid="metric-card"], .metric-card, table')).toHaveCount(0);
+  await expect(page.locator('[data-testid="metric-card"], [data-metric-card], .ow-metric, table')).toHaveCount(0);
 
   // Five destinations are still declared as not shipped, one row each; incidents is shipped and
   // says what it actually exposes instead of what it is waiting for.

@@ -78,6 +78,8 @@ jobs:
       # i18n gate because both answer the same question - what may a message say?
       - run: node scripts/check-status-vocabulary.mjs
       - run: node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
+      # The geometry gate's own fail-closed properties: an empty pass and a dropped route.
+      - run: node --test scripts/check-ui-metrics.test.mjs
       - run: pnpm --filter @opsweave/platform-web build
       - run: pnpm --filter @opsweave/hello-web build
       - run: pnpm --filter @opsweave/data-catalog-web build

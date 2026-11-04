@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "description": "Routes the table-geometry audit owns (tests/ui/ui-table-audit.spec.ts, run by staging-preview). check-ui-metrics --manifest fails when one of these disappears from a pass, and when a pass measures a route this list does not name. Detail routes carry a run-specific id, so they match by shape. Adding a route to the harness means adding it here in the same change.",
+  "routes": [
+    { "key": "jobs", "match": "^/admin/jobs$" },
+    { "key": "activity", "match": "^/admin/activity$" },
+    { "key": "nodes", "match": "^/admin/nodes$" },
+    { "key": "node-detail", "match": "^/admin/nodes/[^/]+$" },
+    { "key": "plugins", "match": "^/admin/plugins$" },
+    { "key": "governance", "match": "^/admin/governance$" },
+    { "key": "access", "match": "^/admin/access$" },
+    { "key": "diagnostics", "match": "^/admin/settings/diagnostics$" },
+    { "key": "plugin-detail", "match": "^/admin/plugins/[^/]+$" },
+    { "key": "job-detail", "match": "^/admin/jobs/[^/]+$" }
+  ]
+}

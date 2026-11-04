@@ -5,7 +5,8 @@ import { usePolling } from '../hooks';
 import type { NodeView, Overview, PluginSummary } from '../types';
 import { Icon } from '../components/Icons';
 import { buttonVariants } from '../components/ui/button';
-import { EmptyState, ErrorState, Skeleton, TimeAgo } from '../components/Ui';
+import { EmptyState, Skeleton, TimeAgo } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { BytesPair } from '../components/app/status-indicator';
 import { formatBytes } from '../format';
@@ -18,7 +19,7 @@ export function OpsCenterPage() {
   const nodes = usePolling(() => api.get<NodeView[]>('/api/v1/nodes'), 8000);
   const plugins = usePolling(() => api.get<PluginSummary[]>('/api/v1/plugins'), 8000);
   if (overview.loading && !overview.data) return <><PageHeader title={t('page.opsCenter')} /><Skeleton rows={6} /></>;
-  if (overview.error) return <><PageHeader title={t('page.opsCenter')} /><ErrorState error={overview.error} onRetry={() => void overview.reload()} /></>;
+  if (overview.error) return <><PageHeader title={t('page.opsCenter')} /><AsyncBoundary loading={false} error={overview.error} hasData={false} onRetry={() => void overview.reload()}>{null}</AsyncBoundary></>;
   const data = overview.data!;
   const nodeList = nodes.data || [];
   const pluginList = (plugins.data || []).filter((plugin) => !plugin.isSystem);

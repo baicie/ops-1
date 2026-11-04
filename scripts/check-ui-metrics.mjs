@@ -29,7 +29,13 @@ import { join, relative, resolve } from 'node:path';
 const ROOT = process.cwd();
 const SPEC = resolve(ROOT, process.env.UI_METRICS_SPEC || 'docs/design/ui-visual-v3/spec/table-spec.md');
 const argv = process.argv.slice(2);
-const inputs = argv.filter((a) => !a.startsWith('--'));
+const manifestIndex = argv.indexOf('--manifest');
+const manifestPath = manifestIndex === -1 ? null : argv[manifestIndex + 1];
+if (manifestIndex !== -1 && (!manifestPath || manifestPath.startsWith('--'))) {
+  console.error('check-ui-metrics: --manifest needs a path. A gate that treats a missing manifest as "no routes expected" is the pass-by-default bug this flag exists to close.');
+  process.exit(2);
+}
+const inputs = argv.filter((a, i) => !a.startsWith('--') && (manifestIndex === -1 || i !== manifestIndex + 1));
 const withTemplate = argv.includes('--template');
 
 /* ── thresholds: parsed from the spec, never retyped ───────────────────────── */
@@ -151,6 +157,9 @@ const CARD_CLIPPED_MAX = 0;
 
 const CODES = [
   'page-errored',
+  'page-map-empty',
+  'route-missing',
+  'route-unknown',
   'overflow-unmeasured',
   'overflow>0',
   'identity-unmeasured',
@@ -309,14 +318,69 @@ console.log(
 );
 console.log('  cardClipped = ' + CARD_CLIPPED_MAX + ' @<768 (§2.5 "the disambiguator · age is never ellipsised")');
 
+/**
+ * A manifest is the list of routes this audit owns. It is matched per artifact, not across the
+ * union of artifacts: one `_metrics_<label>.json` is one pass (viewport × theme × locale), and a
+ * pass that silently dropped a route has not measured that route even if another pass did.
+ *
+ * Matching is on the route part of `"<route> @<viewport>"`, because the detail routes carry an id
+ * (`/admin/nodes/:id`) that changes every run. A measured route the manifest does not name is a
+ * FAIL too: a typo in the harness would otherwise add a page nobody asked for and hide the one
+ * that disappeared.
+ */
+let manifest = null;
+if (manifestPath) {
+  const path = resolve(ROOT, manifestPath);
+  if (!existsSync(path)) {
+    console.error('check-ui-metrics: cannot read the route manifest ' + manifestPath);
+    process.exit(2);
+  }
+  const doc = JSON.parse(readFileSync(path, 'utf8'));
+  const routes = Array.isArray(doc.routes) ? doc.routes : [];
+  if (routes.length === 0) {
+    console.error('check-ui-metrics: the route manifest ' + manifestPath + ' declares no routes; an empty manifest asserts nothing');
+    process.exit(2);
+  }
+  try {
+    manifest = routes.map((route, index) => {
+      if (typeof route.match !== 'string') throw new Error('route #' + index + ' has no `match` pattern');
+      return { key: route.key || route.match, re: new RegExp(route.match) };
+    });
+  } catch (cause) {
+    console.error('check-ui-metrics: cannot compile the route manifest ' + manifestPath + ': ' + cause.message);
+    process.exit(2);
+  }
+  console.log('check-ui-metrics: route manifest ' + relative(ROOT, path) + ' (' + manifest.length + ' routes)');
+}
+
 let failures = 0;
 let pages = 0;
 for (const file of files) {
   const doc = JSON.parse(readFileSync(file, 'utf8'));
   const label = (doc.config && doc.config.label) || relative(ROOT, file);
   const pageMap = doc.pages || {};
+  const entries = Object.entries(pageMap);
   let localFailures = 0;
-  for (const [route, m] of Object.entries(pageMap)) {
+  // The original fail-open: `{"pages":{}}` looped zero times, printed `ok ... pages=0` and exited 0.
+  // A pass that measured nothing is the loudest failure this gate has, not a green run.
+  if (entries.length === 0) {
+    console.log('FAIL  ' + 'page-map-empty'.padEnd(26) + label + '  the artifact records no page measurement; a run that measured nothing is a FAIL');
+    tally['page-map-empty'] += 1;
+    localFailures += 1;
+  }
+  const routesSeen = new Set();
+  for (const [route, m] of entries) {
+    if (manifest) {
+      const pathPart = route.replace(/\s*@\d+$/, '');
+      const matched = manifest.findIndex((entry) => entry.re.test(pathPart));
+      if (matched === -1) {
+        console.log('FAIL  ' + 'route-unknown'.padEnd(26) + label + '  ' + route + '  not named by the route manifest');
+        tally['route-unknown'] += 1;
+        localFailures += 1;
+      } else {
+        routesSeen.add(matched);
+      }
+    }
     // A route the harness recorded as failed is an unmeasured page, and an unmeasured page is a
     // FAIL - the same rule as a missing field, one level up. Silence here would let a route drop
     // out of the audit without changing the verdict.
@@ -330,6 +394,14 @@ for (const file of files) {
     for (const violation of violationsFor(m)) {
       console.log('FAIL  ' + violation.code.padEnd(26) + label + '  ' + route + '  ' + violation.detail);
       tally[violation.code] += 1;
+      localFailures += 1;
+    }
+  }
+  if (manifest) {
+    for (const [index, entry] of manifest.entries()) {
+      if (routesSeen.has(index)) continue;
+      console.log('FAIL  ' + 'route-missing'.padEnd(26) + label + '  ' + entry.key + '  declared by the manifest, never measured');
+      tally['route-missing'] += 1;
       localFailures += 1;
     }
   }
@@ -372,6 +444,6 @@ console.log('');
 const fired = CODES.filter((code) => tally[code] > 0);
 console.log('  by assertion: ' + (fired.length ? fired.map((code) => code + ' ' + tally[code]).join(' | ') : 'none fired'));
 console.log(failures === 0
-  ? 'check-ui-metrics: PASS (' + pages + ' page measurements, 9 §4.2 assertions each + §2.5 card clipping)'
+  ? 'check-ui-metrics: PASS (' + pages + ' page measurements, 9 §4.2 assertions each + §2.5 card clipping' + (manifest ? ', ' + manifest.length + '-route manifest' : '') + ')'
   : 'check-ui-metrics: FAIL (' + failures + ' violation(s) across ' + pages + ' page measurements)');
 process.exit(failures === 0 ? 0 : 1);

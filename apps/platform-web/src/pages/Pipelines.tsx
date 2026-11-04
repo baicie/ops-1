@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { EmptyState, TimeAgo } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
-import { NoData } from '../components/app/status-indicator';
+import { MetricCard } from '../components/app/metric-card';
 import { useDocumentTitle } from '../hooks';
 import { getPipelineExecutionOrder } from '../studio/ir/topology';
 import { useT } from '../i18n';
@@ -233,11 +233,12 @@ export function PipelineDetailPage() {
         primary={<Link className={buttonVariants()} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link>}
       />
       <section className="summary-grid pipeline-stats">
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRevision')}</span><strong className="metric-value">r{detail.latestRevision}</strong></div>
+        <MetricCard label={t('pipelines.metric.latestRevision')} value={`r${detail.latestRevision}`} showSampled={false} />
         {/* A missing published definition is NO_DATA; printing 0 nodes would claim a real count of zero. */}
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.nodes')}</span><strong className="metric-value">{latest ? latest.definition.nodes.length : <NoData detail={t('ui.noData.detail')} />}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRun')}</span><strong className="metric-value small">{jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.updated')}</span><strong className="metric-value small">{latest?.publishedAt ? <TimeAgo value={latest.publishedAt} /> : <NoData detail={t('ui.noData.detail')} />}</strong></div>
+        <MetricCard label={t('pipelines.metric.nodes')} value={latest ? latest.definition.nodes.length : undefined} state={latest ? 'ready' : 'noData'} showSampled={false} />
+        {/* An unloaded job list is not "no runs": noRuns is only a fact once the list answered. */}
+        <MetricCard label={t('pipelines.metric.latestRun')} value={jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')} state={jobs ? 'ready' : 'noData'} size="small" showSampled={false} />
+        <MetricCard label={t('pipelines.metric.updated')} value={latest?.publishedAt ? <TimeAgo value={latest.publishedAt} /> : undefined} state={latest?.publishedAt ? 'ready' : 'noData'} size="small" showSampled={false} />
       </section>
       {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>{t('pipelines.latestRevision.title')}</h2>{/* The 64-char digest is unbreakable text: at 390 it forced a 122px page-level
               horizontal overflow on this panel before (the same markup pre-dated the migration).
