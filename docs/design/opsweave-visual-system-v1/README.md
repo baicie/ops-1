@@ -1,6 +1,6 @@
 # OpsWeave Visual System V1 — 实施记录
 
-- 状态：**Phase 0 完成；第一标杆 `/admin/overview` 已实现；DS-V1-1 / DS-V1-1b 完成（token、ErrorState、MetricCard、Dialog/Sheet、route coverage）；三标杆完整视觉重排未开始**
+- 状态：**Phase 0 完成；第一标杆 `/admin/overview` 已实现；DS-V1-1 / DS-V1-1b / DS-V1-1c 完成（token、ErrorState、MetricCard、Dialog/Sheet、ARIA/busy、boundary 所有权、Sources 矩阵、matrix gate）；三标杆完整视觉重排未开始**
 - 设计输入：`opsweave-visual-system-v1` 设计包（PROPOSED / NOT IMPLEMENTED，基线 `main@b9a01db`）
 - 复核基线：`origin/main@775a1e2`（2026-11-04）
 - 决策记录：[ADR-017](../../adr/ADR-017-visual-system-v1.md)
@@ -26,8 +26,10 @@
 | Observability 0/0 / DEGRADED 语义修复 | PASS（`observability-surface` 11/11 + 426 单测） | [report §1](report.md) |
 | 三标杆矩阵接入 PR 门禁 | PASS（g12 harness 64 tests；`check-spec-coverage` 30 covered） | [report §2](report.md) |
 | 第二/第三标杆（完整视觉重做） | NOT_RUN | 下一阶段 |
-| 全局字体/PageHeader/ErrorState/MetricCard/Dialog 收敛 | PASS（DS-V1-1 + DS-V1-1b）；`.btn`（Studio）与 CSS 拆分为兼容期保留 | [ds-v1-1b](ds-v1-1b.md) |
-| 门禁加固（`check-ui-metrics` 空页 fail-closed、route manifest） | PASS（含 5 条 gate 自测，已进 CI） | [ds-v1-1b §5](ds-v1-1b.md) / `docs/design/ui-visual-v3/spec/route-manifest.json` |
+| 全局字体/PageHeader/ErrorState/MetricCard/Dialog 收敛 | PASS（DS-V1-1 + DS-V1-1b + DS-V1-1c 的 ARIA/busy）；`.btn`（Studio）与 CSS 拆分为兼容期保留 | [ds-v1-1b](ds-v1-1b.md) / [ds-v1-1c](ds-v1-1c.md) |
+| 门禁加固（`check-ui-metrics` 空页/route/matrix fail-closed） | PASS（14 条 gate 自测；tracked artifacts 在 CI 直接跑 manifest + matrix） | [ds-v1-1c §8](ds-v1-1c.md) / `docs/design/ui-visual-v3/spec/{route,matrix}-manifest.json` |
+| Sources 12 组合 + 两张 sheet 契约 | PASS（`sources-audit` 18/18，已进 g12） | [ds-v1-1c §6](ds-v1-1c.md) |
+| MetricCard 15 点响应式矩阵 | PASS（4 surface × 12 组合，48 截图） | [ds-v1-1c §7](ds-v1-1c.md) |
 | route→pattern registry 与 `--template` 全量覆盖 | NOT_RUN | ADR-017 §D3 |
 | 证据与命令 | PASS | [evidence-index.md](evidence-index.md) |
 | 交付报告 | PASS（Draft PR 链接在 PR 创建后补） | [report.md](report.md) |
@@ -55,6 +57,7 @@ node scripts/check-status-vocabulary.mjs
 node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
 node --test scripts/check-ui-metrics.test.mjs
 node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/audit
+node scripts/check-ui-metrics.mjs --matrix docs/design/ui-visual-v3/spec/matrix-manifest.json artifacts/ui/observability/metrics
 node tests/ci/check-tracked-png-budget.mjs
 ```
 

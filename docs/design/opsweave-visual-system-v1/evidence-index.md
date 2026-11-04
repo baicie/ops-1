@@ -28,6 +28,10 @@ node tests/ui/visual-v1-capture.mjs
 | `artifacts/ui/visual-v1/after/` | 同上；三页矩阵在 `25a784c`，证据 403 特写与全页截图在 `d47fbfd`，Observability metrics 在 `ef30d48`，Gate wiring 在 `c90c8f6`（均基于 `775a1e2`） |
 | `artifacts/ui/visual-v1/after-ds-v1-1/` | DS-V1-1 后的 36 张矩阵（`31d0d88`）：body 15 / sm 13 / metric 21（命名例外）/ title clamp；Overview header 80，无横向溢出 |
 | `artifacts/ui/visual-v1/after-ds-v1-1b/` | DS-V1-1b 后的 36 张矩阵（未提交的工作树）：token 改名 + MetricCard 迁移；Overview/Observability 几何与 DS-V1-1 完全一致；Incident 的四个 KPI 卡改用 `.ow-metric-value` 后首次被 capture 测到（26 / 21.5 / 20），header 与 overflow 未变 |
+| `artifacts/ui/visual-v1/after-ds-v1-1c/` | DS-V1-1c 后的 36 张 Overview / Observability / Incident 矩阵（当前构建）；几何与 DS-V1-1b 一致 |
+| `artifacts/ui/visual-v1/dialogs/` | 48 张 ConfirmAction / create-incident Modal / command palette（4 视口 × 2 主题 × 2 语言）；`dialog-geometry.spec.ts` 生成，未跟踪 |
+| `artifacts/ui/visual-v1/metric-cards/` | 48 张 Incident / Jobs / Pipelines / Governance KPI 矩阵；`metric-card-matrix.spec.ts` 生成，未跟踪 |
+| `artifacts/ui/visual-v1/sources/` | `sources-audit.spec.ts` 的 12 组合列表 + detail/config sheet，另含状态与长错误截图；未跟踪 |
 | `artifacts/ui/observability/shots/` | `observability-surface.spec.ts` 的 fixture 矩阵（未跟踪） |
 | `artifacts/ui/visual-v1/after/` | 证据 403 的两张 capture：`incident-forbidden-1440-light-en`（全页，stale banner）与 `incident-forbidden-panel-1440-light-en`（permission-wall 面板特写）；未跟踪，不作为 Git evidence link，由 `g11-incident-state-gaps.spec.ts` 复现 |
 
@@ -54,13 +58,15 @@ node tests/ui/visual-v1-capture.mjs
 | TypeScript | `pnpm --filter @opsweave/platform-web typecheck` | **PASS** |
 | Vitest | `pnpm --filter @opsweave/platform-web test` | **PASS** — 31 files / 426 tests（`overview-events`、`evidencePanelState` 403、`entityState` degraded、0/0 与过滤谓词） |
 | Build | `pnpm --filter @opsweave/platform-web build` | **PASS** — vite build，169.26 kB CSS / 1,313.78 kB JS（既有 chunk 警告，未新增） |
-| i18n | `node scripts/check-i18n.mjs` | **PASS** — en/zh-CN 各 1,930 keys（DS-V1-1b 新增 `ui.textSource.plugin`，删除未引用的 `error.unknown`）；17 条既有 unused warning |
-| Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 protocol codes |
+| i18n | `node scripts/check-i18n.mjs` | **PASS** — en/zh-CN 各 1,940 keys（DS-V1-1b 新增 `ui.textSource.plugin`，删除未引用的 `error.unknown`）；17 条既有 unused warning |
+| Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 43 protocol codes |
 | UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — radius 0/0、control 0/0、type 0/0、one-header 0/0、uppercase 0/0、format 0/0（DS-V1-1b 后；token 已改名为 label/meta/body/title） |
 | UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 page measurements，0 violations（14 节点 fixture；tracked metrics 未变） |
 | UI geometry + manifest | `node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/audit` | **PASS** — 30 measurements / 10 routes；DS-V1-1b 新增 |
 | UI geometry fail-closed | `node scripts/check-ui-metrics.mjs <空 pages 临时目录>` | **FAIL（预期）** — `page-map-empty`，exit 1；旧实现会打印 `ok pages=0` 并 exit 0 |
-| Gate 自测 | `node --test scripts/check-ui-metrics.test.mjs` | **PASS** — 5/5（空 pages、route-missing、route-unknown、全覆盖、仓库 manifest 可解析）；已加入 CI web job |
+| Gate 自测 | `node --test scripts/check-ui-metrics.test.mjs` | **PASS** — 14/14（空 pages、route-missing/unknown、matrix-missing/duplicate、缺 theme/locale/viewport、格式错误、损坏 manifest、仓库 manifest 可解析）；已加入 CI web job |
+| Matrix gate | `node scripts/check-ui-metrics.mjs --matrix docs/design/ui-visual-v3/spec/matrix-manifest.json artifacts/ui/observability/metrics` | **PASS** — 24/24 组合（2 路由 × 3 视口 × 2 主题 × 2 语言） |
+| 缺组合反事实 | 删除一个 `_metrics` 页 / 复制一个组合 | **FAIL（预期）** — `matrix-missing` / `matrix-duplicate`；阈值未改 |
 | PNG budget | `node tests/ci/check-tracked-png-budget.mjs` | **PASS** — 408 files / 65.97 MB（ceiling 408 / 68.24 MB），0 新增 |
 | Spec coverage | `node tests/ci/check-spec-coverage.mjs` | **PASS** — 30 covered / 23 explicit-skip / 0 unreferenced；`overview-matrix`、`overview-partial`、`observability-surface` 均 COVERED ← g12-acceptance |
 | Whitespace | `git diff --check` | **PASS** |
@@ -76,6 +82,12 @@ node tests/ui/visual-v1-capture.mjs
 | Deterministic g12 harness | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.6 min；acceptance 195/0；exit 0 | 本机后台，含新增 3 个 spec |
 | Deterministic g12 harness (DS-V1-1) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），8.0 min；acceptance 195/0；exit 0 | 本机后台，类型/PageHeader 变更后 |
 | Deterministic g12 harness (DS-V1-1b) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.5 min；acceptance 195/0；exit 0 | 本机后台，改名 + ErrorState/MetricCard/DialogFrame 后 |
+| Deterministic g12 harness (DS-V1-1c) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 98 tests（96 passed / 2 skipped），7.8 min；acceptance 195/0；exit 0 | 本机后台，含 dialog/boundary/sources/metric 矩阵 |
+| Dialog contract | `... playwright test dialog-contract.spec.ts` | **PASS** — 4/4（ARIA、pending、palette、modal） | 本机 |
+| Dialog geometry | `... playwright test dialog-geometry.spec.ts` | **PASS** — 16/16，48 screenshots；modal 16/16 | 本机，47s |
+| Boundary ownership | `... playwright test boundary-ownership.spec.ts` | **PASS** — 6/6 | 本机，含真实 extension loader |
+| Sources matrix | `... playwright test sources-audit.spec.ts` | **PASS** — 18/18 | 本机，40s；12 组合 + detail/config + sheet 契约 |
+| MetricCard matrix | `... playwright test metric-card-matrix.spec.ts` | **PASS** — 2/2；incident 12/12；48 screenshots | 本机，33s |
 | Incident 状态缺口 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） |
 | Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（ConfirmAction → DialogFrame） |
 | Command palette（desktop center dialog） | `... playwright test admin-shell.spec.ts -g "command palette opens"` | **PASS** — 1/1 |

@@ -126,6 +126,19 @@ DS-V1-1 是 values-first：先把 11/13/15/26 写进旧 t-shirt token，再改�
 - **`sources-audit.spec.ts`**：预存在缺陷，spec 用 `{ w, h }` 作为 Playwright `viewport`（Playwright 要 `{ width, height }`），14 个矩阵用例在改动前就无法启动。本批未修，已在 evidence index 标为预存在 FAIL。
 - **全量 staging / Docker 依赖套件**：未运行（本机 Docker 不可用）。
 
+## 7.1 DS-V1-1c 修正（2026-11-04）
+
+审查发现并已修复的本批遗留：
+
+- **ARIA**：`DialogFrame` 无条件 `aria-describedby={undefined}` 与 Radix 的描述注册叠加，产生指向不存在节点的 `"_r_t_ radix-_r_s_"`；现在由 Radix 单独设置属性与元素 id，有描述时关联、无描述时属性缺席。
+- **Pending 关闭**：关闭键在写入中仍可点击；现在保留但禁用，Escape/遮罩被同一 `dismissible` 标志阻止，失败恢复、重试、单次写入有 Playwright 断言。
+- **插件恢复**：`AsyncBoundary` 报告后从不清除，插件恢复/卸载后 chrome 仍显示 unavailable；改为 per-boundary 所有权表，卸载撤销自己的报告；插件失败映射 attention。
+- **Sources**：`totalInstances === null` 时打印 `0/0`（三处）改为 `NoData`；sheet 关闭焦点回到 row-actions。
+- **sources-audit**：`{w,h}` viewport 参数、过期的 `inspect` 动作 id、凭据字段 testid 与 "Unknown" 文案断言全部修正；12 组合现在真的会跑。
+- **Gate**：`config.theme/locale` 无条件必填；新增 `--matrix` 执行清单与故障注入。
+
+完整记录：[ds-v1-1c.md](ds-v1-1c.md)。
+
 ## 8. 回滚
 
 - Token 改名：把 `styles.css`/`tailwind.config.cjs`/两个契约测试/gate 白名单里的 `meta→sm`、`body→base|lg`、`title→xl` 反向替换；值不变，无像素回滚。

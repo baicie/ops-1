@@ -95,11 +95,22 @@ DS-V1-1 执行值迁移（token 块、Tailwind 映射、契约测试、checker �
 
 ### D8 — 本轮交付范围
 
-本轮（Draft PR）交付：
+本轮（Draft PR #34）交付：
 
 1. Phase 0：基线、组件所有权、Token/文档冲突、证据索引；
 2. 第一标杆 `/admin/overview`：健康判决与计数对账、来源/观测时间行、事件词表本地化、INFO 严重度图形、测试修正；
-3. 不交付：全局字体迁移、双 PageHeader 删除、三个标杆中的 Observability/Incident 重做、Studio 重构、后端/API/DB/权限变更。
+3. DS-V1-1：类型值 11/13/15/26、双 PageHeader 删除、死 `StatusBadge` 清理；
+4. DS-V1-1b：token 改名为 label/meta/body/title、`ErrorState`→`AsyncBoundary`、15 处 `MetricCard`、`DialogFrame`、`check-ui-metrics` 空页/route manifest；
+5. DS-V1-1c：Dialog ARIA 与 busy 关闭策略、Boundary 状态所有权、Sources 12 组合与 sheet 契约、MetricCard 响应式矩阵、matrix manifest 与故障注入；
+6. 不交付：三个标杆的完整视觉重排、Studio 重构、CSS 模块化拆分、后端/API/DB/权限变更。
+
+### D9 — 产品词汇：AVAILABLE 与 CANCELLED
+
+本轮只记录词汇决定与影响面，不在本 PR 改全局状态表（另起小 PR）。
+
+**AVAILABLE** 是"该插件包可供安装"，不是安装状态。`lib/installation-state.ts` 把 `AVAILABLE` 映射为 `notInstalled`，所以安装状态上下文里显示 "Uninstalled / 未安装" 是正确的；`status-tone.ts` 的 `AVAILABLE → "Available"` 描述的是包状态，不得拿来渲染安装状态。前端两个上下文必须各自命名轴：包可用性用 Available，安装状态用 Not installed；同一屏出现两者时必须带轴标签（如 "Package: Available · Installation: Not installed"），不能只留一个裸词。影响面：`pages/Plugins.tsx` 的 `AVAILABLE` 过滤值、`installation-state.ts`、`status-tone.ts`；本轮不改。
+
+**CANCELLED** 是主动取消，`neutral / stopped`，不是失败。取消必须有操作者与时间；异常中断（崩溃、租约丢失、超时）必须使用独立原因码并在界面说明，不得复用 `CANCELLED` 伪装成"用户取消"。影响面：`STATUS_MAP.CANCELLED`、`Jobs.tsx` 的取消确认与 readback、`verified-writes.ts`；本轮不改，只确认现有映射符合该定义。
 
 ## 3. 被否决的方案
 

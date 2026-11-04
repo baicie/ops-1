@@ -25,6 +25,7 @@ by a command whose output is quoted next to it, and every rule has a gate that c
 | `table-spec.md` | **how a row behaves**: identity cell, column degradation, 40px rows, collapse runs, 390 cards, overflow | `check-ui-metrics.mjs` |
 | `machine-language-rules.md` | **what the machine may say**: NO_DATA budget, `:lang(en)` casing, `Intl` units, destructive colour | `check-ui-tokens.mjs` (R5–R7) |
 | `route-manifest.json` | **which routes the audit owns**: 10 patterns, detail routes matched by shape | `check-ui-metrics.mjs --manifest` |
+| `matrix-manifest.json` | **which executions the audit owns**: 2 routes × 1440/1024/390 × light/dark × en/zh-CN | `check-ui-metrics.mjs --matrix` |
 
 ## Execution order
 

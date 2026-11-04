@@ -3,7 +3,7 @@
 - 日期：2026-11-04
 - 执行环境：macOS 15.7.7 / Apple M1；Node 22.12.0；pnpm 10.34.3；Playwright 1.64.1（Chromium）；PostgreSQL 17（本机）；Docker 不可用
 - 原始基线 `origin/main` SHA：`775a1e2`
-- 实际开发分支 / HEAD：`design/opsweave-visual-system-v1` / `25a784c`（Overview）+ `d47fbfd`（Incident 语义）+ `ef30d48`（Observability 语义）+ `c90c8f6`（Gate wiring）+ `31d0d88`（DS-V1-1）+ DS-V1-1b（本批）
+- 实际开发分支 / HEAD：`design/opsweave-visual-system-v1` / `25a784c`（Overview）+ `d47fbfd`（Incident 语义）+ `ef30d48`（Observability 语义）+ `c90c8f6`（Gate wiring）+ `31d0d88`（DS-V1-1）+ `16ede58`/`d3d5955`（DS-V1-1b）+ DS-V1-1c（本批）
 - Draft PR / base / mergeability：[#34](https://github.com/baicie/ops-1/pull/34) / `main` / Draft
 - 工作树状态：实现与文档已提交；`artifacts/ui/visual-v1/` 为未跟踪的本地证据
 
@@ -53,6 +53,16 @@
 - **`check-ui-metrics` 加固**：空 `pages` 不再通过；新增 `--manifest` route 清单与 `route-missing`/`route-unknown`；5 条 gate 自测进入 CI。
 - 完整记录：[ds-v1-1b.md](ds-v1-1b.md)。仍未做：`.btn`（Studio 例外）、CSS 拆分、`AVAILABLE`/`CANCELLED` 产品决策、第二/第三标杆的完整视觉重排。
 
+### DS-V1-1c — 审查整改与验收收口
+
+- **Dialog ARIA**：`aria-describedby` 不再被组件覆盖；有描述时指向真实节点，无描述时属性缺席；标题 accessible name 由 DOM 验证。
+- **Pending 关闭策略**：写入进行中关闭键禁用而非隐藏，Escape/遮罩被阻止；失败恢复、重试、单次写入均有测试。
+- **Boundary 状态所有权**：`platform-status` 改为 per-boundary 报告表，卸载撤销自己的报告；插件失败是 attention 而非 Kernel unavailable；插件恢复后 chrome 不再残留。
+- **Sources**：实例分母未知不再打印 `0/0`；sheet 关闭焦点回到行操作；`sources-audit` 的 viewport、动作 id、凭证字段与文案断言全部修正；12 组合矩阵覆盖 detail/config。
+- **MetricCard**：4 个迁移页面 × 3 视口 × 2 主题 × 2 语言矩阵；缺失计数为 UNKNOWN/NO_DATA。
+- **UI Metrics Gate**：无条件要求 theme/locale；`--matrix` 24 组合执行清单；14 条自测含删除/重复组合故障注入；CI 对 tracked artifacts 直接运行两个清单。
+- 完整记录：[ds-v1-1c.md](ds-v1-1c.md)。
+
 ## 2. 三个标杆的 Before / After
 
 | 页面 | Before 证据 | After 证据 | 数据真实性与关键状态 | 结论 |
@@ -72,12 +82,18 @@
 | TypeScript | `pnpm --filter @opsweave/platform-web typecheck` | **PASS** | 本机，`775a1e2` + 工作树 |
 | Frontend Vitest | `pnpm --filter @opsweave/platform-web test` | **PASS** — 31 files / 426 tests | 同上 |
 | Build | `pnpm --filter @opsweave/platform-web build` | **PASS** | 同上 |
-| i18n | `node scripts/check-i18n.mjs` | **PASS** — 1,930 keys × 2；17 条既有 unused | DS-V1-1b 后 |
-| Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 codes | 同上 |
+| i18n | `node scripts/check-i18n.mjs` | **PASS** — 1,940 keys × 2；17 条既有 unused | DS-V1-1b 后 |
+| Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 43 codes | 同上 |
 | UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — 0/0/0/0/0/0（DS-V1-1b 后） | 同上 |
 | UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 measurements，0 violations | fixture 矩阵 |
 | UI geometry + manifest | `node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/audit` | **PASS** — 30 measurements / 10 routes | DS-V1-1b |
-| Gate self-tests | `node --test scripts/check-ui-metrics.test.mjs` | **PASS** — 5/5 | DS-V1-1b；已加入 CI web job |
+| Gate self-tests | `node --test scripts/check-ui-metrics.test.mjs` | **PASS** — 14/14（含 matrix 缺组合/重复组合/格式错误） | DS-V1-1c；已加入 CI web job |
+| Matrix gate | `node scripts/check-ui-metrics.mjs --matrix docs/design/ui-visual-v3/spec/matrix-manifest.json artifacts/ui/observability/metrics` | **PASS** — 24/24 combinations | DS-V1-1c |
+| Dialog contract | `... playwright test dialog-contract.spec.ts` | **PASS** — 4/4（ARIA、pending、palette、modal） | DS-V1-1c |
+| Dialog geometry | `... playwright test dialog-geometry.spec.ts` | **PASS** — 16/16 combos, 48 screenshots | DS-V1-1c |
+| Boundary ownership | `... playwright test boundary-ownership.spec.ts` | **PASS** — 9/9（503/403/plugin load/render+retry/account/upload/section/client-nav） | DS-V1-1c |
+| Sources matrix | `... playwright test sources-audit.spec.ts` | **PASS** — 18/18（12 combos + detail/config + sheet contract） | DS-V1-1c |
+| MetricCard matrix | `... playwright test metric-card-matrix.spec.ts` | **PASS** — 12/12 incident combos, 48 screenshots（KPI 21 / label 11；390 为 2×2） | DS-V1-1c |
 | Playwright Overview 状态 | `... playwright test overview-partial.spec.ts` | **PASS** — 7/7 | 本机 Kernel `18291`；已进入 g12-acceptance 确定性 job |
 | Playwright Overview 矩阵 | `... playwright test visual.spec.ts -g "responsive overview matrix"` | **PASS** — 6 组合 | 本机 |
 | Playwright Observability fixture | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 11/11 | fixture，明确标注；已由 g12-acceptance 在 PR 上运行 |
@@ -87,6 +103,7 @@
 | Playwright DS-V1-1 矩阵 | `artifacts/ui/visual-v1/after-ds-v1-1/` | **PASS（证据）** — 36 images；Overview header 80，无横向溢出 | 本机 |
 | Deterministic g12 harness (DS-V1-1) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），8.0 min；acceptance 195/0；exit 0 | 类型/PageHeader 变更后 |
 | Deterministic g12 harness (DS-V1-1b) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.5 min；acceptance 195/0；exit 0 | 本机后台，DS-V1-1b 后 |
+| Deterministic g12 harness (DS-V1-1c) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 98 tests（96 passed / 2 skipped），7.8 min；acceptance 195/0；exit 0 | 本机后台，含 dialog/boundary/sources/metric 矩阵 |
 | Playwright Incident 状态 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） | 本机 Kernel `18291` |
 | Playwright Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（ConfirmAction → DialogFrame） | 本机，DB `opsweave_visual_v1` |
 | Playwright command palette | `... playwright test admin-shell.spec.ts -g "command palette opens"` / `-g "navigation becomes a drawer at 1024"` | **PASS** — 2/2（center dialog + 1024 sheet） | 本机 |
