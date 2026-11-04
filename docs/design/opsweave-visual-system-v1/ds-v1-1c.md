@@ -96,7 +96,7 @@
 - Pipelines：4 卡，latestRevision `r2`、nodes、latest run、updated；列数与 Jobs 一致。
 - Governance：4 卡，1440 4 列、1024 2 列、390 1 列；缺失 `datasetCount`/`lineageWindowCount` 时 `data-metric-state="unknown"`、`data-value="UNKNOWN"`，不打印 0。
 - 每张卡：值非空、无 `NaN`/`undefined`、`data-metric-state` 合法、页面无横向溢出。
-- **类型层级修正**：`.ow-metric-value` 从 title 26 改为 metric 21，`.ow-metric-label` 从 meta 13 改为 label 11；与 Overview 的 stat-strip 一致，满足 ADR-017 §D5 的 title 26 > KPI 21 > body 15。修复前 15 个迁移卡片的 KPI 与 h1 同大。
+- **类型层级修正**：`.ow-metric-value` 从 title 26 改为 `min(metric, title)`（1440 为 21，390 与 20px 的 h1 同为 20），`.ow-metric-label` 从 meta 13 改为 label 11；与 Overview 的 stat-strip 一致，满足 ADR-017 §D5 的 title 26 > KPI 21 > body 15，且窄屏不会出现 KPI 大于 h1。修复前 15 个迁移卡片的 KPI 与 h1 同大。
 - **手机 KPI 密度**：≤640 时 `.metric-grid`、`.pipeline-stats`、`.job-stats` 与 IncidentDetail 的 `.incident-kpis` 为 2×2，而不是 4 张全宽卡；表格卡仍按 1 列。390 上 Sources 首个连接器行从约 y=1000 提前到约 y=740。
 - 未改动的可点击 KPI 卡（Overview/Observability/Sources/Incidents）已有 `[data-metric-card]` 链接；本批未改其目标。
 

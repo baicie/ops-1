@@ -1373,7 +1373,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .ow-metric-link { transition: border-color var(--ow-motion-fast), box-shadow var(--ow-motion-fast); }
 .ow-metric-link:hover { border-color: var(--ow-accent); text-decoration: none; }
 .ow-metric-label { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
-.ow-metric-value { display: flex; align-items: baseline; gap: 4px; min-height: 32px; font-size: var(--ow-type-metric); font-weight: 600; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.ow-metric-value { display: flex; align-items: baseline; gap: 4px; min-height: 32px; font-size: min(var(--ow-type-metric), var(--ow-type-title)); font-weight: 600; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
 .ow-metric-value--sm { font-size: var(--ow-type-body); font-weight: 500; letter-spacing: 0; }
 .ow-metric-unit { font-size: var(--ow-type-meta); font-weight: 600; color: var(--ow-text-muted); }
 .ow-metric-detail { font-size: var(--ow-type-meta); color: var(--ow-text-muted); overflow-wrap: anywhere; }
@@ -1669,7 +1669,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .stat-strip .ow-metric-label,
 .ow-summary-label { font-size: var(--ow-type-label); font-weight: 600; letter-spacing: .055em; color: var(--ow-text-muted); }
 .stat-strip .ow-metric-value,
-.ow-summary-value { display: flex; align-items: baseline; gap: 4px; min-height: 0; font-size: var(--ow-type-metric); font-weight: 600; letter-spacing: -.015em; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.ow-summary-value { display: flex; align-items: baseline; gap: 4px; min-height: 0; font-size: min(var(--ow-type-metric), var(--ow-type-title)); font-weight: 600; letter-spacing: -.015em; line-height: 1.25; font-variant-numeric: tabular-nums; }
 .ow-summary-card.is-warn .ow-summary-value { color: var(--ow-warn); }
 .ow-summary-card.is-danger .ow-summary-value { color: var(--ow-danger); }
 .stat-strip .ow-metric-detail { font-size: var(--ow-type-label); color: var(--ow-text-muted); min-height: 15px; overflow-wrap: anywhere; }

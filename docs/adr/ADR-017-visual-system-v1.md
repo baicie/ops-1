@@ -61,7 +61,7 @@ V1 的目标不是换 UI 库，也不是重写界面，而是让仓库已有的 
 
 1. **正文/次要/标签**收敛到 15 / 13 / 11。`--ow-type-sm` 的 12px 被删除，其 122 处调用在 DS-V1-1 中随 token 值变为 13px；`--ow-type-base` 变为 15px；`--ow-type-lg` 的 16px 并入 15px。
 2. **标题**使用 `--ow-type-xl: clamp(20px, 2.1vw, 26px)`（目标名 `--ow-type-title`，DS-V1-1b 改名）：1440 的实测是 26px，390 的实测是 20px。26 是**上限**，不是所有宽度都平铺 26px——390 上的长事件标题平铺 26px 会挤占阅读区，实测 20px 更稳。这是**显式显示例外**，必须同时写进 `token-table.md` 与 `scripts/check-ui-tokens.mjs` 的命名例外表；不得只改文档而让检查器继续把 clamp 当违规。
-3. **metric** 保持 21px，作为第二个命名的显示例外。实测把 `--ow-type-metric` 设成 26px 后，Overview 的 KPI `0` 比健康判决更抢眼，且首屏下移 33px；21px 让 title 26 > KPI 21 > body 15 的层级成立。
+3. **metric** 保持 21px，作为第二个命名的显示例外。实测把 `--ow-type-metric` 设成 26px 后，Overview 的 KPI `0` 比健康判决更抢眼，且首屏下移 33px；21px 让 title 26 > KPI 21 > body 15 的层级成立。KPI 的 21 以 title clamp 为上限（`min(metric, title)`）：390 上 h1 为 20 时 KPI 同为 20，不能出现 KPI 比页面标题还大的反超。
 4. **hero** 只保留在 `/login`；`InstallWizard` 的 `.readiness-number` 改用 title clamp。例外必须有命名清单，不再用"预算里还有 6"冒充豁免。
 5. **先改值，后改名**。删除/重命名 token 会触碰 307 处 `font-size` 声明；DS-V1-1 先用最小 token-block 改动把值收敛，并同步修改 `styles.token-contract.test.ts`（它当前断言 base 14 / sm 12，是迁移的硬阻塞），再决定是否改成 job-name（label/meta/body/title）。Tailwind 的 `text-sm/base/lg/xl` 必须映射到同一组值；`text-xs` 当前指向未声明的 `--ow-type-xs`，必须删除或补声明。
 6. `ui-debt.json` 的 `type-tier` 只能随树下降，不能为了绿而提高；`one-header` 从 3 降到 0 需要先迁移双 `PageHeader`。
