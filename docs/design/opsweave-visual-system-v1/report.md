@@ -3,7 +3,7 @@
 - 日期：2026-11-04
 - 执行环境：macOS 15.7.7 / Apple M1；Node 22.12.0；pnpm 10.34.3；Playwright 1.64.1（Chromium）；PostgreSQL 17（本机）；Docker 不可用
 - 原始基线 `origin/main` SHA：`775a1e2`
-- 实际开发分支 / HEAD：`design/opsweave-visual-system-v1` / `25a784c`（Overview 实现）+ Incident 语义修复提交（见 PR）
+- 实际开发分支 / HEAD：`design/opsweave-visual-system-v1` / `25a784c`（Overview 实现）+ `d47fbfd`（Incident 语义修复）
 - Draft PR / base / mergeability：[#34](https://github.com/baicie/ops-1/pull/34) / `main` / Draft
 - 工作树状态：实现与文档已提交；`artifacts/ui/visual-v1/` 为未跟踪的本地证据
 
