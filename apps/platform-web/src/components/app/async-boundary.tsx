@@ -2,7 +2,7 @@ import * as React from 'react';
 import { ApiError } from '../../api';
 import { usePolling } from '../../hooks';
 import { apiFailureCopy } from '../../lib/kernel-messages';
-import { reportBodyState, type BodyState } from '../../lib/platform-status';
+import { clearBodyState, reportBodyState, type BodyState } from '../../lib/platform-status';
 import { useT } from '../../i18n';
 import { Icon } from '../Icons';
 import { Button } from '../ui/button';
@@ -98,17 +98,21 @@ export function AsyncBoundary({
 }) {
   const t = useT();
   const state = classify(error);
-  // The chrome reads this: a body that says "did not answer" or "403" must not sit under a
-  // topbar and a rail that still advertise READY (lib/platform-status).
+  // Each boundary owns its claim: it releases it on unmount, so a plugin that recovers cannot
+  // leave the chrome saying "unavailable". A plugin failure is attention, not unavailable -
+  // the Kernel answered; one isolated extension did not.
+  const owner = React.useId();
   const bodyState: BodyState =
     state === 'forbidden' ? 'forbidden'
       : state === 'conflict' ? 'attention'
-        : state === 'error' ? 'unavailable'
+        : state === 'error' ? (source === 'plugin' ? 'attention' : 'unavailable')
           : isEmpty ? 'empty'
             : 'ready';
   React.useEffect(() => {
-    if (report) reportBodyState(bodyState);
-  }, [bodyState, report]);
+    if (!report) return;
+    reportBodyState(bodyState, owner);
+    return () => clearBodyState(owner);
+  }, [bodyState, report, owner]);
 
   if (loading && !hasData) {
     return (

@@ -70,7 +70,11 @@ function AdminShellFrame() {
 
   // Keep the pre-G02 behaviour: a route change always parks the drawer, and a new page has
   // not reported a body state yet, so the chrome must not inherit the previous page's verdict.
-  React.useEffect(() => {
+  //
+  // Layout effect, not passive: React flushes passive mount effects children-first, so a page
+  // boundary would report its state and this reset would then erase it. Layout effects run
+  // before any passive effect, so the new page's report is the last word.
+  React.useLayoutEffect(() => {
     setMobileOpen(false);
     resetBodyState();
   }, [location.pathname, setMobileOpen]);

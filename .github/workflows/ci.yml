@@ -78,8 +78,14 @@ jobs:
       # i18n gate because both answer the same question - what may a message say?
       - run: node scripts/check-status-vocabulary.mjs
       - run: node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
-      # The geometry gate's own fail-closed properties: an empty pass and a dropped route.
+      # The geometry gate's own fail-closed properties: empty passes, dropped routes, missing
+      # matrix combinations and duplicate passes.
       - run: node --test scripts/check-ui-metrics.test.mjs
+      # The tracked audit artifacts are a real pass: every named route is present in each file.
+      # The matrix command below is the one that checks the viewport/theme/locale combinations;
+      # the route manifest deliberately has no such axis.
+      - run: node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/audit
+      - run: node scripts/check-ui-metrics.mjs --matrix docs/design/ui-visual-v3/spec/matrix-manifest.json artifacts/ui/observability/metrics
       - run: pnpm --filter @opsweave/platform-web build
       - run: pnpm --filter @opsweave/hello-web build
       - run: pnpm --filter @opsweave/data-catalog-web build

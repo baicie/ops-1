@@ -45,6 +45,9 @@ export function SettingsPage() {
               save button: permission wall for a non-admin, an empty list for an admin whose
               deployment reports none, and the values themselves. */}
           <AsyncBoundary
+            // A policies panel is a section of this page: a refusal here must not tell the
+            // chrome the whole platform is forbidden.
+            report={false}
             loading={loading}
             error={isAdmin ? error : null}
             hasData={Boolean(data)}

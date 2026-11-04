@@ -37,7 +37,7 @@ function page(viewport = 1440) {
 }
 
 function artifact(pages) {
-  return JSON.stringify({ config: { label: 'test' }, pages });
+  return JSON.stringify({ config: { label: 'test', theme: 'light', locale: 'en' }, pages });
 }
 
 function run(args) {
@@ -85,6 +85,98 @@ test('a pass that covers the manifest is green', () => {
   const result = run(['--manifest', TEMP_MANIFEST, file]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /PASS \(2 page measurements/);
+});
+
+/* ── the execution matrix: declared, not inferred ───────────────────────────── */
+
+const MATRIX = join(mkdtempSync(join(tmpdir(), 'ow-matrix-')), 'matrix.json');
+writeFileSync(MATRIX, JSON.stringify({
+  version: 1,
+  routes: [
+    { key: 'a', match: '^/a$' },
+    { key: 'b', match: '^/b$' },
+  ],
+  viewports: [1440, 1024],
+  themes: ['light'],
+  locales: ['en'],
+}));
+
+function matrixArtifact(pages, config = {}) {
+  return JSON.stringify({ config: { label: 'test', theme: 'light', locale: 'en', ...config }, pages });
+}
+
+test('a complete matrix is green across both viewports and both routes', () => {
+  const file = writeTemp('_metrics_matrix_ok.json', matrixArtifact({
+    '/a @1440': page(1440), '/b @1440': page(1440),
+    '/a @1024': page(1024), '/b @1024': page(1024),
+  }));
+  const result = run(['--matrix', MATRIX, file]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /matrix\s+4\/4 combinations measured/);
+});
+
+test('deleting one combination from the matrix turns the gate red', () => {
+  const file = writeTemp('_metrics_matrix_missing.json', matrixArtifact({
+    '/a @1440': page(1440), '/b @1440': page(1440), '/a @1024': page(1024),
+  }));
+  const result = run(['--matrix', MATRIX, file]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /matrix-missing.*b @1024 light en/);
+});
+
+test('measuring the same combination in two artifacts is a duplicate, not coverage', () => {
+  const first = writeTemp('_metrics_matrix_first.json', matrixArtifact({
+    '/a @1440': page(1440), '/b @1440': page(1440), '/a @1024': page(1024), '/b @1024': page(1024),
+  }));
+  const second = writeTemp('_metrics_matrix_second.json', matrixArtifact({ '/a @1440': page(1440) }));
+  const result = run(['--matrix', MATRIX, first, second]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /matrix-duplicate/);
+});
+
+test('an artifact that does not name its theme and locale is unmeasured', () => {
+  const file = writeTemp('_metrics_matrix_config.json', matrixArtifact({ '/a @1440': page(1440) }, { theme: undefined, locale: undefined }));
+  const result = run([file]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /config-unmeasured/);
+});
+
+test('a measurement without a viewport cannot be scoped and is a FAIL', () => {
+  const missing = page(1440);
+  delete missing.viewport;
+  const file = writeTemp('_metrics_no_viewport.json', artifact({ '/a @1440': missing }));
+  const result = run([file]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /viewport-unmeasured/);
+});
+
+test('a malformed measurement is a named FAIL, not a stack trace', () => {
+  const file = writeTemp('_metrics_format.json', JSON.stringify({ config: { label: 'bad', theme: 'light', locale: 'en' }, pages: [] }));
+  const result = run([file]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /measurement-format/);
+});
+
+test('invalid JSON in an artifact is a named FAIL, not a stack trace', () => {
+  const file = writeTemp('_metrics_broken.json', '{not json');
+  const result = run([file]);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /measurement-format/);
+});
+
+test('manifest and matrix flags together are rejected, not silently mixed', () => {
+  const file = writeTemp('_metrics_both.json', matrixArtifact({ '/a @1440': page(1440) }));
+  const result = run(['--manifest', TEMP_MANIFEST, '--matrix', MATRIX, file]);
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.match(result.stderr, /answer different questions/);
+});
+
+test('a corrupt matrix manifest is exit 2, not an empty pass', () => {
+  const broken = writeTemp('matrix-broken.json', '{not json');
+  const file = writeTemp('_metrics_any.json', matrixArtifact({ '/a @1440': page(1440) }));
+  const result = run(['--matrix', broken, file]);
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.match(result.stderr, /not valid JSON/);
 });
 
 test('the repository manifest parses and names the detail routes by shape', () => {

@@ -320,7 +320,7 @@ export function IncidentDetailPage() {
             count: view.evidence ? evidence.length : null,
             content: (
               <>
-                <section className="summary-grid">
+                <section className="summary-grid incident-kpis">
                         <MetricCard label={t('table.status')} value={<Status code={incident.status} />} showSampled={false} />
                         <MetricCard label={t('table.severity')} value={<Status code={incident.severity} />} showSampled={false} />
                         <MetricCard label={t('table.evidence')} value={<span data-testid="incident-detail-evidence-count">{evidence.length}</span>} state={view.evidence ? 'ready' : 'noData'} showSampled={false} metricId="incidentEvidence" />

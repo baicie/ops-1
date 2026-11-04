@@ -151,7 +151,7 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 # this change. The Incident matrix is already g12d-workspace.spec.ts; incidents-workspace.spec.ts
 # stays an explicit skip because its fixture expects a SOURCE_ATTESTED row the seed does not
 # create (recorded in docs/design/opsweave-visual-system-v1/report.md).
-if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
+if (cd tests/ui && V3_CHANNEL="${V3_CHANNEL:-chromium}" pnpm exec playwright test --config playwright.config.ts \
      dual-surface.spec.ts \
      g11-incident-slice.spec.ts \
      g11-incident-state-gaps.spec.ts \
@@ -163,7 +163,12 @@ if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
      g12d-workspace.spec.ts \
      overview-matrix.spec.ts \
      overview-partial.spec.ts \
-     observability-surface.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
+     observability-surface.spec.ts \
+     dialog-contract.spec.ts \
+     dialog-geometry.spec.ts \
+     boundary-ownership.spec.ts \
+     sources-audit.spec.ts \
+     metric-card-matrix.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
   echo "######## browser suite -> PASS"
 else
   echo "######## browser suite -> FAIL (see $LOG_DIR/playwright.log)"

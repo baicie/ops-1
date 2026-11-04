@@ -19,7 +19,7 @@ import path from 'node:path';
  */
 test.use({ channel: process.env.V3_CHANNEL || 'chrome' });
 
-const OUT = process.env.SOURCES_OUT || path.resolve('../../artifacts/ui/sources');
+const OUT = process.env.SOURCES_OUT || path.resolve('../../artifacts/ui/visual-v1/sources');
 const BASE = process.env.OPSWEAVE_URL || 'http://127.0.0.1:5178';
 
 const ago = (hours: number) => new Date(Date.now() - hours * 3600_000).toISOString();
@@ -125,7 +125,9 @@ const FIXTURES: [RegExp, unknown][] = [
   [/\/api\/v1\/extensions$/, extensions],
 ];
 
-async function stub(page: Page, options: { grantsForbidden?: boolean; capabilitiesDown?: boolean; empty?: boolean } = {}) {
+const LONG_ID = 'acme.' + 'x'.repeat(110);
+
+async function stub(page: Page, options: { grantsForbidden?: boolean; capabilitiesDown?: boolean; empty?: boolean; longId?: boolean; nullInstances?: boolean } = {}) {
   await page.route('**/api/v1/**', async (route) => {
     const url = new URL(route.request().url());
     if (options.grantsForbidden && /capability-grants/.test(url.pathname)) {
@@ -139,7 +141,18 @@ async function stub(page: Page, options: { grantsForbidden?: boolean; capabiliti
     }
     const hit = FIXTURES.find(([pattern]) => pattern.test(url.pathname));
     if (!hit) return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(hit[1]) });
+    // One connector gets an absurd id in this mode: the layout must wrap it without widening
+    // the page. The id is replaced in every fixture so the row is still a real connector.
+    let body = options.longId
+      ? JSON.parse(JSON.stringify(hit[1]).split('acme.zabbix').join(LONG_ID))
+      : hit[1];
+    if (options.nullInstances && /\/api\/v1\/plugins$/.test(url.pathname)) {
+      // A ready count without a reported total is a partial observation; it must not print 0.
+      body = JSON.parse(JSON.stringify(body));
+      body[0].readyInstances = 0;
+      body[0].totalInstances = null;
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 }
 
@@ -261,7 +274,13 @@ for (const viewport of VIEWPORTS) {
       const label = 'r' + viewport.w + '-' + theme + '-' + (locale === 'en' ? 'en' : 'zh');
       test(label, async ({ browser }) => {
         test.setTimeout(120_000);
-        const context = await browser.newContext({ viewport, deviceScaleFactor: 1, baseURL: BASE });
+        // `viewport` is this spec's `{ w, h }` label, not Playwright's `{ width, height }`.
+        // Passing it through directly threw before any page loaded, so 14 matrix cases never ran.
+        const context = await browser.newContext({
+          viewport: { width: viewport.w, height: viewport.h },
+          deviceScaleFactor: 1,
+          baseURL: BASE,
+        });
         await context.addInitScript(([t, l]) => {
           localStorage.setItem('opsweave-theme', t as string);
           localStorage.setItem('opsweave-locale', l as string);
@@ -280,14 +299,36 @@ for (const viewport of VIEWPORTS) {
         );
         await page.screenshot({ path: path.join(OUT, label + '__sources.png'), fullPage: true });
 
-        // The drawer is part of the page's state matrix, so it is captured too.
-        if (theme === 'light' && locale === 'en') {
-          await page.click('tbody tr:first-child [data-testid=row-actions]');
-          await page.click('[data-action=inspect]');
-          await page.waitForSelector('[data-testid=sources-detail]', { timeout: 10000 });
-          await page.waitForTimeout(300);
-          await page.screenshot({ path: path.join(OUT, label + '__sources-drawer.png'), fullPage: true });
-        }
+        // Both sheets are part of the matrix, not a light-en extra: geometry, overflow and the
+        // detail->config handover are measured at every viewport, theme and language.
+        await page.click('tbody tr:first-child [data-testid=row-actions]');
+        await page.click('[data-action=detail]');
+        await page.waitForSelector('[data-testid=sources-detail]', { timeout: 10000 });
+        const drawer = page.getByTestId('sources-detail');
+        await expect(drawer).toBeVisible();
+        await expect(drawer.locator('.ow-dialog-head button')).toHaveCount(1);
+        const drawerBox = await drawer.boundingBox();
+        expect(drawerBox!.x, label + ' drawer left').toBeGreaterThanOrEqual(-1);
+        expect(drawerBox!.x + drawerBox!.width, label + ' drawer right').toBeLessThanOrEqual(viewport.w + 1);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), label + ' drawer overflow').toBeLessThanOrEqual(1);
+        await page.waitForTimeout(300);
+        await page.screenshot({ path: path.join(OUT, label + '__sources-drawer.png'), fullPage: true });
+
+        await page.getByTestId('sources-detail-configure').click();
+        const config = page.getByTestId('sources-config');
+        await expect(config).toBeVisible();
+        await expect(config.locator('.ow-dialog-head button')).toHaveCount(1);
+        const configBox = await config.boundingBox();
+        expect(configBox!.x, label + ' config left').toBeGreaterThanOrEqual(-1);
+        expect(configBox!.x + configBox!.width, label + ' config right').toBeLessThanOrEqual(viewport.w + 1);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), label + ' config overflow').toBeLessThanOrEqual(1);
+        await page.screenshot({ path: path.join(OUT, label + '__sources-config.png'), fullPage: true });
+        await page.keyboard.press('Escape');
+        await expect(config).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => document.body.hasAttribute('data-scroll-locked')), { timeout: 5_000 })
+          .toBe(false);
+        await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents), { timeout: 5_000 })
+          .not.toBe('none');
         await context.close();
       });
     }
@@ -320,14 +361,23 @@ for (const state of STATES) {
     // A withheld grants list must never read as "nothing may call this": the page says so.
     if (state.key === 'grants-forbidden') {
       await expect(page.locator('[data-notice]').first()).toBeVisible();
-      const reach = await page.locator('tbody tr').first().innerText();
-      expect(reach).toContain('Unknown');
+      // Assert the state, not one English word: the copy for `unknown` is "Reach
+      // unconfirmed", and pinning a sentence here made a copy edit look like a data defect.
+      const row = page.locator('tbody tr').first();
+      await expect(row).toHaveAttribute('data-reach', 'unknown');
+      const reach = await row.innerText();
+      expect(reach).not.toContain('Granted');
     }
     // The capability registry is what classifies a plugin as a source; without it the page
     // must state that, not render an empty table that reads as "no connectors installed".
     if (state.key === 'registry-down') {
-      const body = await page.locator('body').innerText();
-      expect(body).not.toContain('No connectors installed');
+      // A failed registry read is a failed observation, not an empty inventory. Assert the
+      // notice that says so; the old "No connectors installed" needle matched neither the
+      // normal empty copy nor the registry copy, so it could never fail.
+      const notice = page.locator('[data-notice="noData"]').first();
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText('did not answer');
+      await expect(page.locator('.empty-state').first()).toContainText('Connectors are unavailable');
     }
     await context.close();
   });
@@ -350,9 +400,12 @@ test('credential-field-refuses-secrets', async ({ browser }) => {
   await page.waitForSelector('[data-testid=sources-config-form]', { timeout: 10000 });
 
   const PASTED = 'Bearer eyJhbGciOiJIUzI1NiJ9.super-secret-value';
-  await page.fill('[data-testid=sources-credential-input]', PASTED);
-  await page.click('[data-testid=sources-config-submit]');
-  const error = page.locator('[data-testid=sources-credential-error]');
+  const credential = page.locator('[data-testid=sources-config-credential]');
+  await credential.fill(PASTED);
+  await credential.blur();
+  // The form validates on blur and its submit is deliberately disabled (there is no endpoint
+  // behind it), so the refusal is the field error, not a submit response.
+  const error = page.locator('[data-testid=sources-config-form] [role=alert]');
   await expect(error).toBeVisible();
 
   // The refusal must not quote what was refused: that would put the token in the DOM.
@@ -365,9 +418,110 @@ test('credential-field-refuses-secrets', async ({ browser }) => {
   expect(body).not.toContain('super-secret-value');
 
   // The input is deliberately not a password field: this is where a NAME goes, not a secret.
-  await expect(page.locator('[data-testid=sources-credential-input]')).toHaveAttribute('type', 'text');
+  await expect(credential).toHaveAttribute('type', 'text');
+  // There is no write endpoint: the form states that instead of offering a button that cannot work.
+  await expect(page.getByTestId('sources-config-save')).toBeDisabled();
 
   fs.mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: path.join(OUT, 'state-credential-refused.png'), fullPage: true });
   await context.close();
+});
+
+/**
+ * The two Sources sheets as surfaces: named, focus-trapped, internally scrolling, and able to
+ * hand a connector from detail to config. The connector carries a 115-character id in this run,
+ * so the long-identity case is measured rather than assumed.
+ */
+test('an unknown instance denominator is NO_DATA, never a zero', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, baseURL: BASE });
+  await context.addInitScript(() => {
+    localStorage.setItem('opsweave-theme', 'light');
+    localStorage.setItem('opsweave-locale', 'en');
+  });
+  const page = await context.newPage();
+  await stub(page, { nullInstances: true });
+  await page.goto(BASE + ROUTE);
+  await page.waitForSelector('[data-testid=sources-table-panel]', { timeout: 20_000 });
+  const row = page.locator('tbody tr[data-connector="acme.zabbix"]');
+  await expect(row).toBeVisible();
+  // The instance fraction renders 0 / NO_DATA, not 0 / 0.
+  await expect(row.locator('[data-value="NO_DATA"]')).toBeVisible();
+  expect(await row.innerText()).not.toContain('0/0');
+  await row.locator('[data-testid=row-actions]').click();
+  await page.click('[data-action=detail]');
+  const sheet = page.getByTestId('sources-detail');
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator('[data-value="NO_DATA"]').first()).toBeVisible();
+  expect(await sheet.innerText()).not.toContain('0 / 0');
+});
+
+test('the sheets are named, hold focus, scroll internally and hand detail to config', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const context = await browser.newContext({ viewport: { width: 390, height: 600 }, deviceScaleFactor: 1, baseURL: BASE });
+  await context.addInitScript(() => {
+    localStorage.setItem('opsweave-theme', 'light');
+    localStorage.setItem('opsweave-locale', 'en');
+  });
+  const page = await context.newPage();
+  await stub(page, { longId: true });
+  await page.goto(BASE + ROUTE);
+  await page.waitForSelector('[data-testid=sources-table-panel]', { timeout: 20_000 });
+
+  const row = page.locator('[data-connector="' + LONG_ID + '"]');
+  await expect(row).toBeVisible();
+  const trigger = row.locator('[data-testid=row-actions]');
+  await trigger.click();
+  await page.click('[data-action=detail]');
+
+  const sheet = page.getByTestId('sources-detail');
+  await expect(sheet).toBeVisible();
+  const labelledby = await sheet.getAttribute('aria-labelledby');
+  expect(await page.evaluate((id) => document.getElementById(id!)?.textContent?.trim(), labelledby), 'sheet name').toBeTruthy();
+  const describedby = await sheet.getAttribute('aria-describedby');
+  expect(describedby, 'sheet description reference').toBeTruthy();
+  expect(await page.evaluate((id) => document.getElementById(id!)?.textContent?.trim(), describedby), 'sheet description').toBeTruthy();
+
+  const box = await sheet.boundingBox();
+  expect(box!.x, 'sheet left').toBeGreaterThanOrEqual(-1);
+  expect(box!.x + box!.width, 'sheet right').toBeLessThanOrEqual(391);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'page overflow').toBeLessThanOrEqual(1);
+  const scroll = await sheet.locator('.ow-dialog-body').evaluate((el) => ({
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+    overflow: getComputedStyle(el).overflowY,
+  }));
+  expect(scroll.scroll, 'the sheet body scrolls').toBeGreaterThan(scroll.client);
+  expect(['auto', 'scroll'], 'the sheet body is the scroll container').toContain(scroll.overflow);
+  const idBox = await sheet.locator('.ow-source-id').boundingBox();
+  expect(idBox!.x + idBox!.width, 'long id stays inside the sheet').toBeLessThanOrEqual(box!.x + box!.width + 1);
+
+  expect(await page.evaluate(() => document.querySelector('[role=dialog]')?.contains(document.activeElement)), 'focus enters the sheet').toBe(true);
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => document.querySelector('[role=dialog]')?.contains(document.activeElement)), 'Tab stays inside').toBe(true);
+  }
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect.poll(() => trigger.evaluate((el) => el === document.activeElement || el.contains(document.activeElement)), { timeout: 5_000 }).toBe(true);
+
+  await trigger.click();
+  await page.click('[data-action=detail]');
+  await page.getByTestId('sources-detail-configure').click();
+  await expect(page.getByTestId('sources-config')).toBeVisible();
+  await expect(sheet, 'detail closes when config opens').toHaveCount(0);
+
+  const credential = page.getByTestId('sources-config-credential');
+  await credential.fill('x'.repeat(200));
+  await credential.blur();
+  const alert = page.locator('[data-testid=sources-config-form] [role=alert]');
+  await expect(alert).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'long error overflow').toBeLessThanOrEqual(1);
+  // Bring the rejection and the actions into view before capturing: a screenshot of the top of
+  // a scrollable sheet does not prove the error is readable.
+  await page.getByTestId('sources-config').locator('.ow-dialog-body').evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  await expect(alert).toBeInViewport();
+  await page.screenshot({ path: path.join(OUT, 'state-sources-config-long-error.png'), fullPage: true });
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('sources-config')).toHaveCount(0);
 });

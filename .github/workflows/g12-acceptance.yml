@@ -27,6 +27,10 @@ on:
       - 'tests/ui/overview-matrix.spec.ts'
       - 'tests/ui/overview-partial.spec.ts'
       - 'tests/ui/observability-surface.spec.ts'
+      - 'tests/ui/dialog-*.spec.ts'
+      - 'tests/ui/boundary-ownership.spec.ts'
+      - 'tests/ui/sources-audit.spec.ts'
+      - 'tests/ui/metric-card-matrix.spec.ts'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/g12d-seed.mjs'
@@ -50,6 +54,10 @@ on:
       - 'tests/ui/overview-matrix.spec.ts'
       - 'tests/ui/overview-partial.spec.ts'
       - 'tests/ui/observability-surface.spec.ts'
+      - 'tests/ui/dialog-*.spec.ts'
+      - 'tests/ui/boundary-ownership.spec.ts'
+      - 'tests/ui/sources-audit.spec.ts'
+      - 'tests/ui/metric-card-matrix.spec.ts'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/support/**'
@@ -108,6 +116,10 @@ jobs:
             artifacts/g12c/**
             artifacts/g12d/**
             artifacts/g11-d3/**
+            artifacts/ui/visual-v1/gate/**
+            artifacts/ui/visual-v1/dialogs/**
+            artifacts/ui/visual-v1/metric-cards/**
+            artifacts/ui/visual-v1/sources/**
           if-no-files-found: warn
           retention-days: 7
       - uses: actions/upload-artifact@v4

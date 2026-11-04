@@ -14,15 +14,18 @@ import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { MetricCard } from '../components/app/metric-card';
 import { useDocumentTitle } from '../hooks';
-import { getPipelineExecutionOrder } from '../studio/ir/topology';
-import { useT } from '../i18n';
+import { getPipelineExecutionOrder, type TopologyStatus } from '../studio/ir/topology';
+import { useT, type MessageKey } from '../i18n';
 import { cn } from '../lib/utils';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
- * The revision panels show a fixed copy line, not a status code StatusPill could localize — so
- * the pill is painted here through the same shared tone map instead of growing a second label
- * vocabulary. The wire text stays verbatim; only the tone comes from STATUS_MAP, so a revision
+ * The revision pill paints through the shared tone map, and its label comes from the same
+ * STATUS_MAP entry the rest of the shell uses. The raw wire code stays in `data-status`, so a
+ * reader of the DOM can still see exactly what the Kernel sent. (The old comment here said the
+ * wire text stayed verbatim, which meant a zh-CN page printed "PUBLISHED" in English.)
+ *
+ * A revision
  * the shell cannot classify is painted neutral instead of borrowing the "ok" colour.
  */
 function TonePill({ tone, label, className }: { tone: StatusTone; label: string; className?: string }) {
@@ -35,15 +38,31 @@ function TonePill({ tone, label, className }: { tone: StatusTone; label: string;
 }
 
 function RevisionPill({ status }: { status: string }) {
+  const t = useT();
   const code = (status || '').toUpperCase();
-  const tone = (code && STATUS_MAP[code]?.tone) || 'unknown';
+  const entry = STATUS_MAP[code] ?? null;
+  const tone = entry?.tone || 'unknown';
   return (
     <Badge variant={badgeVariantForTone(tone)} data-status={code || undefined}>
       <Icon name={glyphForTone(tone)} size={12} />
-      {status}
+      {entry ? t(entry.labelKey) : status}
     </Badge>
   );
 }
+
+/**
+ * Topology diagnostics are produced by the client analyzer in English. The stable status code is
+ * the machine token; the sentence the reader acts on is localized here. The analyzer's raw
+ * detail is kept behind a disclosure and attributed, never used as the primary sentence.
+ */
+const TOPOLOGY_MESSAGE: Record<Exclude<TopologyStatus, 'VALID'>, MessageKey> = {
+  CYCLE: 'pipelines.topology.diagnostic.cycle',
+  DISCONNECTED: 'pipelines.topology.diagnostic.disconnected',
+  INVALID_EDGE: 'pipelines.topology.diagnostic.invalidEdge',
+  MULTIPLE_SINKS: 'pipelines.topology.diagnostic.multipleSinks',
+  MULTIPLE_SOURCES: 'pipelines.topology.diagnostic.multipleSources',
+  NON_LINEAR: 'pipelines.topology.diagnostic.nonLinear',
+};
 
 export function PipelinesPage() {
   const t = useT();
@@ -162,7 +181,23 @@ function NodeSummary({ definition }: { definition: PipelineDefinition }) {
   };
   const execution = getPipelineExecutionOrder(definition);
   if (execution.topologyStatus !== 'VALID') {
-    return <div className="inline-error" role="alert"><strong>{execution.topologyStatus}</strong><span>{execution.diagnostics.join(' · ') || t('pipelines.topology.notLinear')}</span></div>;
+    return (
+      <div className="inline-error topology-notice" role="alert" data-topology={execution.topologyStatus}>
+        <div>
+          <strong>{execution.topologyStatus}</strong>
+          <span>{t(TOPOLOGY_MESSAGE[execution.topologyStatus])}</span>
+          {execution.diagnostics.length > 0 ? (
+            <details className="topology-detail">
+              <summary>{t('pipelines.topology.diagnostics')}</summary>
+              <p className="server-quote" data-testid="analyzer-message" data-source="analyzer">
+                <span className="server-source">{t('ui.textSource.analyzer')}</span>
+                {execution.diagnostics.join(' · ')}
+              </p>
+            </details>
+          ) : null}
+        </div>
+      </div>
+    );
   }
   return (
     <div className="pipeline-flow" aria-label={t('pipelines.topology.aria')}>

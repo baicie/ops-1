@@ -40,6 +40,33 @@ const INITIAL: PlatformSnapshot = { overview: null, overviewFailure: null, body:
 let snapshot: PlatformSnapshot = INITIAL;
 const listeners = new Set<() => void>();
 
+/**
+ * Who claims what the body is showing.
+ *
+ * A single `snapshot.body` was written by every boundary and never released: a plugin that
+ * crashed once kept the topbar saying "unavailable" after it had recovered and unmounted. The
+ * map is the smallest ownership record that fixes that - each mounted boundary reports under its
+ * own id, clearing one cannot revoke another, and the chrome reads the worst live claim.
+ */
+const bodyReports = new Map<string, BodyState>();
+
+/** Higher wins. Forbidden is a permission wall and outranks every other body state. */
+const BODY_SEVERITY: Record<BodyState, number> = {
+  ready: 0,
+  empty: 1,
+  attention: 2,
+  unavailable: 3,
+  forbidden: 4,
+};
+
+function effectiveBodyState(): BodyState {
+  let worst: BodyState = 'ready';
+  for (const state of bodyReports.values()) {
+    if (BODY_SEVERITY[state] > BODY_SEVERITY[worst]) worst = state;
+  }
+  return worst;
+}
+
 function publish(next: PlatformSnapshot): void {
   snapshot = next;
   for (const listener of listeners) listener();
@@ -62,11 +89,16 @@ export function deriveVerdict(state: PlatformSnapshot): PlatformVerdict {
   // client did not observe the platform at all.
   if (state.body === 'forbidden' || state.overviewFailure === 'forbidden') return 'forbidden';
   if (state.body === 'unavailable' || state.overviewFailure === 'unavailable') return 'unavailable';
-  if (state.body === 'attention') return 'attention';
-  if (!state.overview) return state.body === 'empty' ? 'not-configured' : 'unknown';
+  if (!state.overview) {
+    if (state.body === 'empty') return 'not-configured';
+    return state.body === 'attention' ? 'attention' : 'unknown';
+  }
   if (isUnconfigured(state.overview)) return 'not-configured';
-  if (state.overview.health === 'READY') return 'ready';
+  // A degraded kernel outranks a local plugin/section failure: the danger colour and the
+  // critical count must not disappear because one isolated extension is also unhappy.
   if (state.overview.health === 'DEGRADED') return 'degraded';
+  if (state.body === 'attention') return 'attention';
+  if (state.overview.health === 'READY') return 'ready';
   return 'attention';
 }
 
@@ -79,15 +111,35 @@ export function reportOverview(overview: Overview | null, failure: ReadFailure |
  * Called by `AsyncBoundary` so a panel the reader can see ("this source did not answer",
  * "a 403 wall") is also what the rail and the topbar say. Without this the rail kept
  * advertising READY on 3 of the 4 pages whose body said otherwise.
+ *
+ * `owner` is the boundary instance. A second boundary reporting does not overwrite the first;
+ * the chrome sees the most severe live claim. Re-reporting the same state is a no-op.
  */
-export function reportBodyState(body: BodyState): void {
-  if (snapshot.body === body) return;
-  publish({ ...snapshot, body });
+export function reportBodyState(body: BodyState, owner = 'shell'): void {
+  if (bodyReports.get(owner) === body) return;
+  bodyReports.set(owner, body);
+  const next = effectiveBodyState();
+  if (snapshot.body === next) return;
+  publish({ ...snapshot, body: next });
 }
 
-/** A route change starts a body that has not reported yet. */
+/**
+ * A boundary that unmounted (recovered, navigated away, or was replaced) withdraws only its own
+ * claim. This is the half that was missing: without it a recovered plugin left the shell saying
+ * unavailable forever.
+ */
+export function clearBodyState(owner: string): void {
+  if (!bodyReports.delete(owner)) return;
+  const next = effectiveBodyState();
+  if (snapshot.body === next) return;
+  publish({ ...snapshot, body: next });
+}
+
+/** A route change starts a body that has not reported yet; every stale claim is released. */
 export function resetBodyState(): void {
-  reportBodyState('ready');
+  bodyReports.clear();
+  if (snapshot.body === 'ready') return;
+  publish({ ...snapshot, body: 'ready' });
 }
 
 export function readPlatformSnapshot(): PlatformSnapshot {

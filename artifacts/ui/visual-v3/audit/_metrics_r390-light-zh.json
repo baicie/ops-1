@@ -4,7 +4,8 @@
   "theme": "light",
   "mode": "after",
   "baseURL": "http://127.0.0.1:5173",
-  "data": "fixtures"
+  "data": "fixtures",
+  "locale": "zh-CN"
  },
  "pages": {
   "/admin/jobs": {
@@ -14,20 +15,20 @@
    "docHeight": 1503,
    "offenders": [],
    "identityKey": [
-    "host-metrics · 1285",
-    "host-metrics · e273",
-    "host-metrics · 9c4a",
-    "host-metrics · 3f8b",
-    "host-metrics · a71d",
-    "host-metrics · 5b6e",
-    "host-metrics · c04f",
-    "host-metrics · 7d2e",
-    "host-metrics · f19a",
-    "host-metrics · 6e35",
-    "host-metrics · 2a8f",
-    "host-metrics · b53c",
-    "host-metrics · 8f47",
-    "host-metrics · 41e6"
+    "host-metrics \u00b7 1285",
+    "host-metrics \u00b7 e273",
+    "host-metrics \u00b7 9c4a",
+    "host-metrics \u00b7 3f8b",
+    "host-metrics \u00b7 a71d",
+    "host-metrics \u00b7 5b6e",
+    "host-metrics \u00b7 c04f",
+    "host-metrics \u00b7 7d2e",
+    "host-metrics \u00b7 f19a",
+    "host-metrics \u00b7 6e35",
+    "host-metrics \u00b7 2a8f",
+    "host-metrics \u00b7 b53c",
+    "host-metrics \u00b7 8f47",
+    "host-metrics \u00b7 41e6"
    ],
    "identityUnique": 1,
    "rowHeight": {
@@ -44,10 +45,10 @@
     1
    ],
    "columnLabels": [
-    "任务",
-    "状态",
-    "耗时",
-    "创建时间"
+    "\u4efb\u52a1",
+    "\u72b6\u6001",
+    "\u8017\u65f6",
+    "\u521b\u5efa\u65f6\u95f4"
    ],
    "tableRowCounts": [
     14
@@ -63,7 +64,7 @@
    "cardLabelCount": 0,
    "cards": [
     {
-     "key": "host-metrics · 1285",
+     "key": "host-metrics \u00b7 1285",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -76,12 +77,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 1285",
-      "qualifier": "r7尝试次数 1/3",
+      "identity": "host-metrics \u00b7 1285",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 1/3",
       "facts": [
-       "已成功",
+       "\u5df2\u6210\u529f",
        "1800.0 s",
-       "18小时前"
+       "18\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -126,7 +127,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · e273",
+     "key": "host-metrics \u00b7 e273",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -139,12 +140,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · e273",
-      "qualifier": "r7尝试次数 2/3",
+      "identity": "host-metrics \u00b7 e273",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 2/3",
       "facts": [
-       "已成功",
+       "\u5df2\u6210\u529f",
        "1800.0 s",
-       "16小时前"
+       "16\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -189,7 +190,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 9c4a",
+     "key": "host-metrics \u00b7 9c4a",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -202,12 +203,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 9c4a",
-      "qualifier": "r7尝试次数 3/3",
+      "identity": "host-metrics \u00b7 9c4a",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 3/3",
       "facts": [
-       "运行中",
+       "\u8fd0\u884c\u4e2d",
        "54865.9 s running",
-       "15小时前"
+       "15\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -252,7 +253,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 3f8b",
+     "key": "host-metrics \u00b7 3f8b",
      "clipped": false,
      "width": 221,
      "facts": 0,
@@ -265,12 +266,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 3f8b",
-      "qualifier": "r7尝试次数 1/3",
+      "identity": "host-metrics \u00b7 3f8b",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 1/3",
       "facts": [
-       "失败",
+       "\u5931\u8d25",
        "1800.0 s",
-       "14小时前"
+       "14\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -315,7 +316,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · a71d",
+     "key": "host-metrics \u00b7 a71d",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -328,12 +329,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · a71d",
-      "qualifier": "r7尝试次数 2/3",
+      "identity": "host-metrics \u00b7 a71d",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 2/3",
       "facts": [
-       "已成功",
+       "\u5df2\u6210\u529f",
        "1800.0 s",
-       "13小时前"
+       "13\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -378,7 +379,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 5b6e",
+     "key": "host-metrics \u00b7 5b6e",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -391,12 +392,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 5b6e",
-      "qualifier": "r7尝试次数 3/3",
+      "identity": "host-metrics \u00b7 5b6e",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 3/3",
       "facts": [
-       "排队中",
+       "\u6392\u961f\u4e2d",
        "Queued",
-       "12小时前"
+       "12\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -441,7 +442,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · c04f",
+     "key": "host-metrics \u00b7 c04f",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -454,12 +455,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · c04f",
-      "qualifier": "r7尝试次数 1/3",
+      "identity": "host-metrics \u00b7 c04f",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 1/3",
       "facts": [
-       "已成功",
+       "\u5df2\u6210\u529f",
        "1800.0 s",
-       "11小时前"
+       "11\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -504,7 +505,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 7d2e",
+     "key": "host-metrics \u00b7 7d2e",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -517,12 +518,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 7d2e",
-      "qualifier": "r7尝试次数 2/3",
+      "identity": "host-metrics \u00b7 7d2e",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 2/3",
       "facts": [
-       "已取消",
+       "\u5df2\u53d6\u6d88",
        "1800.0 s",
-       "9小时前"
+       "9\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -567,7 +568,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · f19a",
+     "key": "host-metrics \u00b7 f19a",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -580,12 +581,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · f19a",
-      "qualifier": "r7尝试次数 3/3",
+      "identity": "host-metrics \u00b7 f19a",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 3/3",
       "facts": [
-       "运行中",
+       "\u8fd0\u884c\u4e2d",
        "30025.9 s running",
-       "8小时前"
+       "8\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -630,7 +631,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 6e35",
+     "key": "host-metrics \u00b7 6e35",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -643,12 +644,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 6e35",
-      "qualifier": "r7尝试次数 1/3",
+      "identity": "host-metrics \u00b7 6e35",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 1/3",
       "facts": [
-       "已成功",
+       "\u5df2\u6210\u529f",
        "1800.0 s",
-       "7小时前"
+       "7\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -693,7 +694,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 2a8f",
+     "key": "host-metrics \u00b7 2a8f",
      "clipped": false,
      "width": 221,
      "facts": 0,
@@ -706,12 +707,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 2a8f",
-      "qualifier": "r7尝试次数 2/3",
+      "identity": "host-metrics \u00b7 2a8f",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 2/3",
       "facts": [
-       "失败",
+       "\u5931\u8d25",
        "1800.0 s",
-       "6小时前"
+       "6\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -756,7 +757,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · b53c",
+     "key": "host-metrics \u00b7 b53c",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -769,12 +770,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · b53c",
-      "qualifier": "r7尝试次数 3/3",
+      "identity": "host-metrics \u00b7 b53c",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 3/3",
       "facts": [
-       "已成功",
+       "\u5df2\u6210\u529f",
        "1800.0 s",
-       "5小时前"
+       "5\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -819,7 +820,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 8f47",
+     "key": "host-metrics \u00b7 8f47",
      "clipped": false,
      "width": 209,
      "facts": 0,
@@ -832,12 +833,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 8f47",
-      "qualifier": "r7尝试次数 1/3",
+      "identity": "host-metrics \u00b7 8f47",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 1/3",
       "facts": [
-       "运行中",
+       "\u8fd0\u884c\u4e2d",
        "13465.9 s running",
-       "4小时前"
+       "4\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -882,7 +883,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 41e6",
+     "key": "host-metrics \u00b7 41e6",
      "clipped": false,
      "width": 215,
      "facts": 0,
@@ -895,12 +896,12 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 41e6",
-      "qualifier": "r7尝试次数 2/3",
+      "identity": "host-metrics \u00b7 41e6",
+      "qualifier": "r7\u5c1d\u8bd5\u6b21\u6570 2/3",
       "facts": [
-       "已成功",
+       "\u5df2\u6210\u529f",
        "1800.0 s",
-       "3小时前"
+       "3\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -968,23 +969,23 @@
    "docHeight": 3140,
    "offenders": [],
    "identityKey": [
-    "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
-    "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
-    "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
-    "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
-    "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
-    "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
-    "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
-    "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
-    "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
-    "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
-    "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
-    "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
-    "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
-    "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
-    "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
-    "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
-    "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45"
+    "deployment.created \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=0 \u00b7 2026-10-30T21:02:45",
+    "plugin.enabled \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=1 \u00b7 2026-10-30T20:38:45",
+    "node.enrolled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=2 \u00b7 2026-10-30T20:14:45",
+    "plugin.disabled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=3 \u00b7 2026-10-30T19:50:45",
+    "policy.updated \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=4 \u00b7 2026-10-30T19:26:45",
+    "enrollment_token.issued \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=5 \u00b7 2026-10-30T19:02:45",
+    "deployment.failed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=6 \u00b7 2026-10-30T18:38:45",
+    "node.unreachable \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=7 \u00b7 2026-10-30T18:14:45",
+    "plugin.probed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=8 \u00b7 2026-10-30T17:50:45 \u00b7 +8@2026-10-30T14:14:45",
+    "plugin.enabled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=17 \u00b7 2026-10-30T14:14:45",
+    "node.enrolled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=18 \u00b7 2026-10-30T13:50:45",
+    "plugin.disabled \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=19 \u00b7 2026-10-30T13:26:45",
+    "policy.updated \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=20 \u00b7 2026-10-30T13:02:45",
+    "enrollment_token.issued \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=21 \u00b7 2026-10-30T12:38:45",
+    "deployment.failed \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=22 \u00b7 2026-10-30T12:14:45",
+    "node.unreachable \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=23 \u00b7 2026-10-30T11:50:45",
+    "deployment.created \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=24 \u00b7 2026-10-30T11:26:45"
    ],
    "identityUnique": 1,
    "rowHeight": {
@@ -1000,9 +1001,9 @@
     1
    ],
    "columnLabels": [
-    "事件",
-    "结果",
-    "发生时间"
+    "\u4e8b\u4ef6",
+    "\u7ed3\u679c",
+    "\u53d1\u751f\u65f6\u95f4"
    ],
    "tableRowCounts": [
     17
@@ -1018,7 +1019,7 @@
    "cardLabelCount": 2,
    "cards": [
     {
-     "key": "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
+     "key": "deployment.created \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=0 \u00b7 2026-10-30T21:02:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1031,11 +1032,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.created · f0fe",
+      "identity": "deployment.created \u00b7 f0fe",
       "qualifier": "USER 82475274sequence 0",
       "facts": [
-       "已接受deployment.create",
-       "2分钟前05:02:45"
+       "\u5df2\u63a5\u53d7deployment.create",
+       "2\u5206\u949f\u524d05:02:45"
       ]
      },
      "cardLines": {
@@ -1054,7 +1055,7 @@
      "values": 4
     },
     {
-     "key": "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
+     "key": "plugin.enabled \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=1 \u00b7 2026-10-30T20:38:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1067,11 +1068,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.enabled · 6b1c",
+      "identity": "plugin.enabled \u00b7 6b1c",
       "qualifier": "USER 82475274sequence 1",
       "facts": [
-       "已成功plugin.enable",
-       "26分钟前04:38:45"
+       "\u5df2\u6210\u529fplugin.enable",
+       "26\u5206\u949f\u524d04:38:45"
       ]
      },
      "cardLines": {
@@ -1090,7 +1091,7 @@
      "values": 4
     },
     {
-     "key": "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
+     "key": "node.enrolled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=2 \u00b7 2026-10-30T20:14:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1103,11 +1104,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.enrolled · 22dd",
+      "identity": "node.enrolled \u00b7 22dd",
       "qualifier": "USER 82475274sequence 2",
       "facts": [
-       "未知node.enroll",
-       "50分钟前04:14:45"
+       "\u672a\u77e5node.enroll",
+       "50\u5206\u949f\u524d04:14:45"
       ]
      },
      "cardLines": {
@@ -1126,7 +1127,7 @@
      "values": 4
     },
     {
-     "key": "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
+     "key": "plugin.disabled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=3 \u00b7 2026-10-30T19:50:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1139,11 +1140,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.disabled · d47a",
+      "identity": "plugin.disabled \u00b7 d47a",
       "qualifier": "USER 82475274sequence 3",
       "facts": [
-       "已接受plugin.disable",
-       "1小时前03:50:45"
+       "\u5df2\u63a5\u53d7plugin.disable",
+       "1\u5c0f\u65f6\u524d03:50:45"
       ]
      },
      "cardLines": {
@@ -1162,7 +1163,7 @@
      "values": 4
     },
     {
-     "key": "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
+     "key": "policy.updated \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=4 \u00b7 2026-10-30T19:26:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1175,11 +1176,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "policy.updated · 19e4",
+      "identity": "policy.updated \u00b7 19e4",
       "qualifier": "USER 82475274sequence 4",
       "facts": [
-       "已成功policy.update",
-       "1小时前03:26:45"
+       "\u5df2\u6210\u529fpolicy.update",
+       "1\u5c0f\u65f6\u524d03:26:45"
       ]
      },
      "cardLines": {
@@ -1198,7 +1199,7 @@
      "values": 4
     },
     {
-     "key": "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
+     "key": "enrollment_token.issued \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=5 \u00b7 2026-10-30T19:02:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1211,11 +1212,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "enrollment_token.issued · f0fe",
+      "identity": "enrollment_token.issued \u00b7 f0fe",
       "qualifier": "USER 82475274sequence 5",
       "facts": [
-       "未知token.issue",
-       "2小时前03:02:45"
+       "\u672a\u77e5token.issue",
+       "2\u5c0f\u65f6\u524d03:02:45"
       ]
      },
      "cardLines": {
@@ -1234,7 +1235,7 @@
      "values": 4
     },
     {
-     "key": "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
+     "key": "deployment.failed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=6 \u00b7 2026-10-30T18:38:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1247,11 +1248,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.failed · 6b1c",
+      "identity": "deployment.failed \u00b7 6b1c",
       "qualifier": "USER 82475274sequence 6",
       "facts": [
-       "已接受deployment.deploy",
-       "2小时前02:38:45"
+       "\u5df2\u63a5\u53d7deployment.deploy",
+       "2\u5c0f\u65f6\u524d02:38:45"
       ]
      },
      "cardLines": {
@@ -1270,7 +1271,7 @@
      "values": 4
     },
     {
-     "key": "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
+     "key": "node.unreachable \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=7 \u00b7 2026-10-30T18:14:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1283,11 +1284,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.unreachable · 22dd",
+      "identity": "node.unreachable \u00b7 22dd",
       "qualifier": "USER 82475274sequence 7",
       "facts": [
-       "已成功node.observe",
-       "2小时前02:14:45"
+       "\u5df2\u6210\u529fnode.observe",
+       "2\u5c0f\u65f6\u524d02:14:45"
       ]
      },
      "cardLines": {
@@ -1306,7 +1307,7 @@
      "values": 4
     },
     {
-     "key": "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
+     "key": "plugin.probed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=8 \u00b7 2026-10-30T17:50:45 \u00b7 +8@2026-10-30T14:14:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1319,11 +1320,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.probed · 6b1c",
-      "qualifier": "USER 82475274sequence 8× 9 3小时前 → 6小时前",
+      "identity": "plugin.probed \u00b7 6b1c",
+      "qualifier": "USER 82475274sequence 8\u00d7 9 3\u5c0f\u65f6\u524d \u2192 6\u5c0f\u65f6\u524d",
       "facts": [
-       "已接受plugin.probe",
-       "3小时前01:50:45"
+       "\u5df2\u63a5\u53d7plugin.probe",
+       "3\u5c0f\u65f6\u524d01:50:45"
       ]
      },
      "cardLines": {
@@ -1342,7 +1343,7 @@
      "values": 4
     },
     {
-     "key": "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
+     "key": "plugin.enabled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=17 \u00b7 2026-10-30T14:14:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1355,11 +1356,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.enabled · 22dd",
+      "identity": "plugin.enabled \u00b7 22dd",
       "qualifier": "USER 82475274sequence 17",
       "facts": [
-       "未知plugin.enable",
-       "6小时前22:14:45"
+       "\u672a\u77e5plugin.enable",
+       "6\u5c0f\u65f6\u524d22:14:45"
       ]
      },
      "cardLines": {
@@ -1378,7 +1379,7 @@
      "values": 4
     },
     {
-     "key": "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
+     "key": "node.enrolled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=18 \u00b7 2026-10-30T13:50:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1391,11 +1392,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.enrolled · d47a",
+      "identity": "node.enrolled \u00b7 d47a",
       "qualifier": "USER 82475274sequence 18",
       "facts": [
-       "已接受node.enroll",
-       "7小时前21:50:45"
+       "\u5df2\u63a5\u53d7node.enroll",
+       "7\u5c0f\u65f6\u524d21:50:45"
       ]
      },
      "cardLines": {
@@ -1414,7 +1415,7 @@
      "values": 4
     },
     {
-     "key": "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
+     "key": "plugin.disabled \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=19 \u00b7 2026-10-30T13:26:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1427,11 +1428,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.disabled · 19e4",
+      "identity": "plugin.disabled \u00b7 19e4",
       "qualifier": "USER 82475274sequence 19",
       "facts": [
-       "已成功plugin.disable",
-       "7小时前21:26:45"
+       "\u5df2\u6210\u529fplugin.disable",
+       "7\u5c0f\u65f6\u524d21:26:45"
       ]
      },
      "cardLines": {
@@ -1450,7 +1451,7 @@
      "values": 4
     },
     {
-     "key": "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
+     "key": "policy.updated \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=20 \u00b7 2026-10-30T13:02:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1463,11 +1464,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "policy.updated · f0fe",
+      "identity": "policy.updated \u00b7 f0fe",
       "qualifier": "USER 82475274sequence 20",
       "facts": [
-       "未知policy.update",
-       "8小时前21:02:45"
+       "\u672a\u77e5policy.update",
+       "8\u5c0f\u65f6\u524d21:02:45"
       ]
      },
      "cardLines": {
@@ -1486,7 +1487,7 @@
      "values": 4
     },
     {
-     "key": "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
+     "key": "enrollment_token.issued \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=21 \u00b7 2026-10-30T12:38:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1499,11 +1500,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "enrollment_token.issued · 6b1c",
+      "identity": "enrollment_token.issued \u00b7 6b1c",
       "qualifier": "USER 82475274sequence 21",
       "facts": [
-       "已接受token.issue",
-       "8小时前20:38:45"
+       "\u5df2\u63a5\u53d7token.issue",
+       "8\u5c0f\u65f6\u524d20:38:45"
       ]
      },
      "cardLines": {
@@ -1522,7 +1523,7 @@
      "values": 4
     },
     {
-     "key": "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
+     "key": "deployment.failed \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=22 \u00b7 2026-10-30T12:14:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1535,11 +1536,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.failed · 22dd",
+      "identity": "deployment.failed \u00b7 22dd",
       "qualifier": "USER 82475274sequence 22",
       "facts": [
-       "已成功deployment.deploy",
-       "8小时前20:14:45"
+       "\u5df2\u6210\u529fdeployment.deploy",
+       "8\u5c0f\u65f6\u524d20:14:45"
       ]
      },
      "cardLines": {
@@ -1558,7 +1559,7 @@
      "values": 4
     },
     {
-     "key": "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
+     "key": "node.unreachable \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=23 \u00b7 2026-10-30T11:50:45",
      "clipped": false,
      "width": 285,
      "facts": 2,
@@ -1571,11 +1572,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.unreachable · d47a",
+      "identity": "node.unreachable \u00b7 d47a",
       "qualifier": "USER 82475274sequence 23",
       "facts": [
-       "未知node.observe",
-       "9小时前19:50:45"
+       "\u672a\u77e5node.observe",
+       "9\u5c0f\u65f6\u524d19:50:45"
       ]
      },
      "cardLines": {
@@ -1594,7 +1595,7 @@
      "values": 4
     },
     {
-     "key": "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45",
+     "key": "deployment.created \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=24 \u00b7 2026-10-30T11:26:45",
      "clipped": false,
      "width": 291,
      "facts": 2,
@@ -1607,11 +1608,11 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.created · 19e4",
+      "identity": "deployment.created \u00b7 19e4",
       "qualifier": "USER 82475274sequence 24",
       "facts": [
-       "已接受deployment.create",
-       "9小时前19:26:45"
+       "\u5df2\u63a5\u53d7deployment.create",
+       "9\u5c0f\u65f6\u524d19:26:45"
       ]
      },
      "cardLines": {
@@ -1681,10 +1682,10 @@
     1
    ],
    "columnLabels": [
-    "节点",
-    "状态",
-    "实例",
-    "资源"
+    "\u8282\u70b9",
+    "\u72b6\u6001",
+    "\u5b9e\u4f8b",
+    "\u8d44\u6e90"
    ],
    "tableRowCounts": [
     12
@@ -1714,11 +1715,11 @@
      },
      "slots": {
       "identity": "lab-node-1",
-      "qualifier": "macos/aarch64代次 1",
+      "qualifier": "macos/aarch64\u4ee3\u6b21 1",
       "facts": [
-       "就绪",
-       "1/4 就绪",
-       "12% · 31%2.3 GiB / 7.5 GiB · 2分钟前"
+       "\u5c31\u7eea",
+       "1/4 \u5c31\u7eea",
+       "12% \u00b7 31%2.3 GiB / 7.5 GiB \u00b7 2\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -1775,11 +1776,11 @@
      },
      "slots": {
       "identity": "lab-node-2",
-      "qualifier": "linux/x86_64代次 2",
+      "qualifier": "linux/x86_64\u4ee3\u6b21 2",
       "facts": [
-       "就绪",
-       "2/4 就绪",
-       "18% · 32%2.4 GiB / 7.5 GiB · 5分钟前"
+       "\u5c31\u7eea",
+       "2/4 \u5c31\u7eea",
+       "18% \u00b7 32%2.4 GiB / 7.5 GiB \u00b7 5\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -1836,11 +1837,11 @@
      },
      "slots": {
       "identity": "edge-ams-3",
-      "qualifier": "macos/aarch64代次 3",
+      "qualifier": "macos/aarch64\u4ee3\u6b21 3",
       "facts": [
-       "就绪",
-       "3/4 就绪",
-       "24% · 34%2.5 GiB / 7.5 GiB · 8分钟前"
+       "\u5c31\u7eea",
+       "3/4 \u5c31\u7eea",
+       "24% \u00b7 34%2.5 GiB / 7.5 GiB \u00b7 8\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -1898,11 +1899,11 @@
      },
      "slots": {
       "identity": "edge-fra-1",
-      "qualifier": "linux/x86_64代次 1",
+      "qualifier": "linux/x86_64\u4ee3\u6b21 1",
       "facts": [
-       "不可达",
-       "1/4 就绪",
-       "该节点在此时间窗没有上报资源快照。"
+       "\u4e0d\u53ef\u8fbe",
+       "1/4 \u5c31\u7eea",
+       "\u8be5\u8282\u70b9\u5728\u6b64\u65f6\u95f4\u7a97\u6ca1\u6709\u4e0a\u62a5\u8d44\u6e90\u5feb\u7167\u3002"
       ]
      },
      "cardLines": {
@@ -1960,11 +1961,11 @@
      },
      "slots": {
       "identity": "edge-sin-2",
-      "qualifier": "macos/aarch64代次 2",
+      "qualifier": "macos/aarch64\u4ee3\u6b21 2",
       "facts": [
-       "就绪",
-       "2/4 就绪",
-       "36% · 36%2.7 GiB / 7.5 GiB · 14分钟前"
+       "\u5c31\u7eea",
+       "2/4 \u5c31\u7eea",
+       "36% \u00b7 36%2.7 GiB / 7.5 GiB \u00b7 14\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2021,11 +2022,11 @@
      },
      "slots": {
       "identity": "edge-iad-4",
-      "qualifier": "linux/x86_64代次 3",
+      "qualifier": "linux/x86_64\u4ee3\u6b21 3",
       "facts": [
-       "观测陈旧",
-       "3/4 就绪",
-       "42% · 37%2.7 GiB / 7.5 GiB · 17分钟前"
+       "\u89c2\u6d4b\u9648\u65e7",
+       "3/4 \u5c31\u7eea",
+       "42% \u00b7 37%2.7 GiB / 7.5 GiB \u00b7 17\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2082,11 +2083,11 @@
      },
      "slots": {
       "identity": "batch-05",
-      "qualifier": "macos/aarch64代次 1",
+      "qualifier": "macos/aarch64\u4ee3\u6b21 1",
       "facts": [
-       "就绪",
-       "1/4 就绪",
-       "48% · 38%2.8 GiB / 7.5 GiB · 20分钟前"
+       "\u5c31\u7eea",
+       "1/4 \u5c31\u7eea",
+       "48% \u00b7 38%2.8 GiB / 7.5 GiB \u00b7 20\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2144,11 +2145,11 @@
      },
      "slots": {
       "identity": "batch-06",
-      "qualifier": "linux/x86_64代次 2",
+      "qualifier": "linux/x86_64\u4ee3\u6b21 2",
       "facts": [
-       "就绪",
-       "2/4 就绪",
-       "54% · 39%2.9 GiB / 7.5 GiB · 23分钟前"
+       "\u5c31\u7eea",
+       "2/4 \u5c31\u7eea",
+       "54% \u00b7 39%2.9 GiB / 7.5 GiB \u00b7 23\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2206,11 +2207,11 @@
      },
      "slots": {
       "identity": "gpu-01",
-      "qualifier": "macos/aarch64代次 3",
+      "qualifier": "macos/aarch64\u4ee3\u6b21 3",
       "facts": [
-       "就绪",
-       "3/4 就绪",
-       "60% · 40%3.0 GiB / 7.5 GiB · 26分钟前"
+       "\u5c31\u7eea",
+       "3/4 \u5c31\u7eea",
+       "60% \u00b7 40%3.0 GiB / 7.5 GiB \u00b7 26\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2267,11 +2268,11 @@
      },
      "slots": {
       "identity": "gpu-02",
-      "qualifier": "linux/x86_64代次 1",
+      "qualifier": "linux/x86_64\u4ee3\u6b21 1",
       "facts": [
-       "需要关注",
-       "1/4 就绪",
-       "66% · 41%3.1 GiB / 7.5 GiB · 29分钟前"
+       "\u9700\u8981\u5173\u6ce8",
+       "1/4 \u5c31\u7eea",
+       "66% \u00b7 41%3.1 GiB / 7.5 GiB \u00b7 29\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2328,11 +2329,11 @@
      },
      "slots": {
       "identity": "spare-07",
-      "qualifier": "macos/aarch64代次 2",
+      "qualifier": "macos/aarch64\u4ee3\u6b21 2",
       "facts": [
-       "就绪",
-       "2/4 就绪",
-       "72% · 43%3.2 GiB / 7.5 GiB · 32分钟前"
+       "\u5c31\u7eea",
+       "2/4 \u5c31\u7eea",
+       "72% \u00b7 43%3.2 GiB / 7.5 GiB \u00b7 32\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2390,11 +2391,11 @@
      },
      "slots": {
       "identity": "spare-08",
-      "qualifier": "linux/x86_64代次 3",
+      "qualifier": "linux/x86_64\u4ee3\u6b21 3",
       "facts": [
-       "就绪",
-       "3/4 就绪",
-       "78% · 44%3.3 GiB / 7.5 GiB · 35分钟前"
+       "\u5c31\u7eea",
+       "3/4 \u5c31\u7eea",
+       "78% \u00b7 44%3.3 GiB / 7.5 GiB \u00b7 35\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -2481,15 +2482,15 @@
     null
    ],
    "columnLabels": [
-    "观测时间",
+    "\u89c2\u6d4b\u65f6\u95f4",
     "CPU",
-    "内存",
-    "文件系统",
-    "插件",
-    "版本",
-    "状态",
-    "容器",
-    "日志"
+    "\u5185\u5b58",
+    "\u6587\u4ef6\u7cfb\u7edf",
+    "\u63d2\u4ef6",
+    "\u7248\u672c",
+    "\u72b6\u6001",
+    "\u5bb9\u5668",
+    "\u65e5\u5fd7"
    ],
    "tableRowCounts": [
     12,
@@ -2557,11 +2558,11 @@
     1
    ],
    "columnLabels": [
-    "插件",
-    "版本",
-    "部署状态",
-    "就绪 副本",
-    "摘要 / 信任"
+    "\u63d2\u4ef6",
+    "\u7248\u672c",
+    "\u90e8\u7f72\u72b6\u6001",
+    "\u5c31\u7eea \u526f\u672c",
+    "\u6458\u8981 / \u4fe1\u4efb"
    ],
    "tableRowCounts": [
     12
@@ -2591,12 +2592,12 @@
      },
      "slots": {
       "identity": "Hello Ops",
-      "qualifier": "系统trusted-team",
+      "qualifier": "\u7cfb\u7edftrusted-team",
       "facts": [
        "0.2.0",
-       "已安装2分钟前 · 代次 2",
+       "\u5df2\u5b89\u88c52\u5206\u949f\u524d \u00b7 \u4ee3\u6b21 2",
        "0/3",
-       "sha256:a100a10…a100a100已验证"
+       "sha256:a100a10\u2026a100a100\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -2656,9 +2657,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.1",
-       "已安装32分钟前 · 代次 3",
+       "\u5df2\u5b89\u88c532\u5206\u949f\u524d \u00b7 \u4ee3\u6b21 3",
        "1/3",
-       "sha256:a101a10…a101a101已验证"
+       "sha256:a101a10\u2026a101a101\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -2718,9 +2719,9 @@
       "qualifier": "lab",
       "facts": [
        "0.2.2",
-       "已禁用1小时前 · 代次 4",
+       "\u5df2\u7981\u75281\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 4",
        "2/3",
-       "sha256:a102a10…a102a102已验证"
+       "sha256:a102a10\u2026a102a102\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -2779,10 +2780,10 @@
       "identity": "Data Catalog",
       "qualifier": "trusted-team",
       "facts": [
-       "0.2.0有更新版本 0.2.3",
-       "已安装1小时前 · 代次 5",
+       "0.2.0\u6709\u66f4\u65b0\u7248\u672c 0.2.3",
+       "\u5df2\u5b89\u88c51\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 5",
        "0/3",
-       "sha256:a103a10…a103a103已验证"
+       "sha256:a103a10\u2026a103a103\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -2842,10 +2843,10 @@
       "identity": "Policy Engine",
       "qualifier": "trusted-team",
       "facts": [
-       "0.2.1有更新版本 0.2.0",
-       "已暂存2小时前 · 代次 6",
+       "0.2.1\u6709\u66f4\u65b0\u7248\u672c 0.2.0",
+       "\u5df2\u6682\u5b582\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 6",
        "1/3",
-       "sha256:a104a10…a104a104已验证"
+       "sha256:a104a10\u2026a104a104\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -2905,10 +2906,10 @@
       "identity": "Registry Mirror",
       "qualifier": "lab",
       "facts": [
-       "0.2.2有更新版本 0.2.1",
-       "失败2小时前 · 代次 7",
+       "0.2.2\u6709\u66f4\u65b0\u7248\u672c 0.2.1",
+       "\u5931\u8d252\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 7",
        "2/3",
-       "sha256:a105a10…a105a105已验证"
+       "sha256:a105a10\u2026a105a105\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -2968,10 +2969,10 @@
       "identity": "Edge Probe",
       "qualifier": "trusted-team",
       "facts": [
-       "0.2.0有更新版本 0.2.2",
-       "已安装3小时前 · 代次 8",
+       "0.2.0\u6709\u66f4\u65b0\u7248\u672c 0.2.2",
+       "\u5df2\u5b89\u88c53\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 8",
        "0/3",
-       "sha256:a106a10…a106a106已验证"
+       "sha256:a106a10\u2026a106a106\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -3031,10 +3032,10 @@
       "identity": "Edge Tunnel",
       "qualifier": "trusted-team",
       "facts": [
-       "0.2.1有更新版本 0.2.3",
-       "已安装3小时前 · 代次 9",
+       "0.2.1\u6709\u66f4\u65b0\u7248\u672c 0.2.3",
+       "\u5df2\u5b89\u88c53\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 9",
        "1/3",
-       "sha256:a107a10…a107a107已验证"
+       "sha256:a107a10\u2026a107a107\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -3095,10 +3096,10 @@
       "identity": "Fault Lab",
       "qualifier": "lab",
       "facts": [
-       "0.2.2有更新版本 0.2.0",
-       "已暂存4小时前 · 代次 10",
+       "0.2.2\u6709\u66f4\u65b0\u7248\u672c 0.2.0",
+       "\u5df2\u6682\u5b584\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 10",
        "2/3",
-       "sha256:a108a10…a108a108已验证"
+       "sha256:a108a10\u2026a108a108\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -3158,10 +3159,10 @@
       "identity": "Replay Lab",
       "qualifier": "trusted-team",
       "facts": [
-       "0.2.0有更新版本 0.2.1",
-       "已安装4小时前 · 代次 11",
+       "0.2.0\u6709\u66f4\u65b0\u7248\u672c 0.2.1",
+       "\u5df2\u5b89\u88c54\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 11",
        "0/3",
-       "sha256:a109a10…a109a109已验证"
+       "sha256:a109a10\u2026a109a109\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -3221,10 +3222,10 @@
       "identity": "Audit Sink",
       "qualifier": "trusted-team",
       "facts": [
-       "0.2.1有更新版本 0.2.2",
-       "已安装5小时前 · 代次 12",
+       "0.2.1\u6709\u66f4\u65b0\u7248\u672c 0.2.2",
+       "\u5df2\u5b89\u88c55\u5c0f\u65f6\u524d \u00b7 \u4ee3\u6b21 12",
        "1/3",
-       "sha256:a110a11…a110a110已验证"
+       "sha256:a110a11\u2026a110a110\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -3286,9 +3287,9 @@
       "qualifier": "lab",
       "facts": [
        "0.2.3",
-       "已禁用5小时前",
+       "\u5df2\u7981\u75285\u5c0f\u65f6\u524d",
        "2/3",
-       "sha256:a111a11…a111a111已验证"
+       "sha256:a111a11\u2026a111a111\u5df2\u9a8c\u8bc1"
       ]
      },
      "cardLines": {
@@ -3366,9 +3367,9 @@
     "audit-ledger",
     "risk-scores",
     "stale-feed",
-    "orders-curated · 4f1c",
-    "inventory · b93d",
-    "orders-curated · 71ae",
+    "orders-curated \u00b7 4f1c",
+    "inventory \u00b7 b93d",
+    "orders-curated \u00b7 71ae",
     "lab-node-1",
     "lab-node-2",
     "edge-ams-3",
@@ -3400,13 +3401,13 @@
     0.25
    ],
    "columnLabels": [
-    "数据集",
+    "\u6570\u636e\u96c6",
     "Schema",
-    "数据集",
-    "状态",
-    "节点",
-    "状态",
-    "代次"
+    "\u6570\u636e\u96c6",
+    "\u72b6\u6001",
+    "\u8282\u70b9",
+    "\u72b6\u6001",
+    "\u4ee3\u6b21"
    ],
    "tableRowCounts": [
     12,
@@ -3820,7 +3821,7 @@
      "values": 2
     },
     {
-     "key": "orders-curated · 4f1c",
+     "key": "orders-curated \u00b7 4f1c",
      "clipped": false,
      "width": 285,
      "facts": 1,
@@ -3833,10 +3834,10 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "orders-curated · 4f1c",
+      "identity": "orders-curated \u00b7 4f1c",
       "qualifier": "",
       "facts": [
-       "失败"
+       "\u5931\u8d25"
       ]
      },
      "cardLines": {
@@ -3853,7 +3854,7 @@
      "values": 2
     },
     {
-     "key": "inventory · b93d",
+     "key": "inventory \u00b7 b93d",
      "clipped": false,
      "width": 285,
      "facts": 1,
@@ -3866,10 +3867,10 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "inventory · b93d",
+      "identity": "inventory \u00b7 b93d",
       "qualifier": "",
       "facts": [
-       "未知"
+       "\u672a\u77e5"
       ]
      },
      "cardLines": {
@@ -3886,7 +3887,7 @@
      "values": 2
     },
     {
-     "key": "orders-curated · 71ae",
+     "key": "orders-curated \u00b7 71ae",
      "clipped": false,
      "width": 291,
      "facts": 1,
@@ -3899,10 +3900,10 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "orders-curated · 71ae",
+      "identity": "orders-curated \u00b7 71ae",
       "qualifier": "",
       "facts": [
-       "失败"
+       "\u5931\u8d25"
       ]
      },
      "cardLines": {
@@ -3935,7 +3936,7 @@
       "identity": "lab-node-1",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "1"
       ]
      },
@@ -3970,7 +3971,7 @@
       "identity": "lab-node-2",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "2"
       ]
      },
@@ -4005,7 +4006,7 @@
       "identity": "edge-ams-3",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "3"
       ]
      },
@@ -4040,7 +4041,7 @@
       "identity": "edge-fra-1",
       "qualifier": "",
       "facts": [
-       "不可达",
+       "\u4e0d\u53ef\u8fbe",
        "1"
       ]
      },
@@ -4075,7 +4076,7 @@
       "identity": "edge-sin-2",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "2"
       ]
      },
@@ -4110,7 +4111,7 @@
       "identity": "edge-iad-4",
       "qualifier": "",
       "facts": [
-       "观测陈旧",
+       "\u89c2\u6d4b\u9648\u65e7",
        "3"
       ]
      },
@@ -4145,7 +4146,7 @@
       "identity": "batch-05",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "1"
       ]
      },
@@ -4180,7 +4181,7 @@
       "identity": "batch-06",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "2"
       ]
      },
@@ -4215,7 +4216,7 @@
       "identity": "gpu-01",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "3"
       ]
      },
@@ -4250,7 +4251,7 @@
       "identity": "gpu-02",
       "qualifier": "",
       "facts": [
-       "需要关注",
+       "\u9700\u8981\u5173\u6ce8",
        "1"
       ]
      },
@@ -4285,7 +4286,7 @@
       "identity": "spare-07",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "2"
       ]
      },
@@ -4320,7 +4321,7 @@
       "identity": "spare-08",
       "qualifier": "",
       "facts": [
-       "就绪",
+       "\u5c31\u7eea",
        "3"
       ]
      },
@@ -4396,14 +4397,14 @@
     null
    ],
    "columnLabels": [
-    "用户",
-    "角色",
-    "状态",
-    "操作",
-    "发布者",
-    "指纹",
-    "信任状态",
-    "备注"
+    "\u7528\u6237",
+    "\u89d2\u8272",
+    "\u72b6\u6001",
+    "\u64cd\u4f5c",
+    "\u53d1\u5e03\u8005",
+    "\u6307\u7eb9",
+    "\u4fe1\u4efb\u72b6\u6001",
+    "\u5907\u6ce8"
    ],
    "tableRowCounts": [
     8,
@@ -4437,8 +4438,8 @@
       "qualifier": "admin@opsweave.local",
       "facts": [
        "admin",
-       "活跃",
-       "禁用"
+       "\u6d3b\u8dc3",
+       "\u7981\u7528"
       ]
      },
      "cardLines": {
@@ -4474,8 +4475,8 @@
       "qualifier": "dana@opsweave.local",
       "facts": [
        "operator",
-       "活跃",
-       "禁用"
+       "\u6d3b\u8dc3",
+       "\u7981\u7528"
       ]
      },
      "cardLines": {
@@ -4511,8 +4512,8 @@
       "qualifier": "lee@opsweave.local",
       "facts": [
        "viewer",
-       "活跃",
-       "禁用"
+       "\u6d3b\u8dc3",
+       "\u7981\u7528"
       ]
      },
      "cardLines": {
@@ -4548,8 +4549,8 @@
       "qualifier": "sam@opsweave.local",
       "facts": [
        "operator",
-       "活跃",
-       "禁用"
+       "\u6d3b\u8dc3",
+       "\u7981\u7528"
       ]
      },
      "cardLines": {
@@ -4585,8 +4586,8 @@
       "qualifier": "nia@opsweave.local",
       "facts": [
        "viewer",
-       "活跃",
-       "禁用"
+       "\u6d3b\u8dc3",
+       "\u7981\u7528"
       ]
      },
      "cardLines": {
@@ -4622,8 +4623,8 @@
       "qualifier": "rui@opsweave.local",
       "facts": [
        "operator",
-       "活跃",
-       "禁用"
+       "\u6d3b\u8dc3",
+       "\u7981\u7528"
       ]
      },
      "cardLines": {
@@ -4659,8 +4660,8 @@
       "qualifier": "aki@opsweave.local",
       "facts": [
        "auditor",
-       "活跃",
-       "禁用"
+       "\u6d3b\u8dc3",
+       "\u7981\u7528"
       ]
      },
      "cardLines": {
@@ -4696,8 +4697,8 @@
       "qualifier": "noa@opsweave.local",
       "facts": [
        "viewer",
-       "已禁用",
-       "启动副本"
+       "\u5df2\u7981\u7528",
+       "\u542f\u52a8\u526f\u672c"
       ]
      },
      "cardLines": {
@@ -4732,8 +4733,8 @@
       "identity": "trusted-team",
       "qualifier": "",
       "facts": [
-       "sha256:1111111111111…11111111",
-       "未知",
+       "sha256:1111111111111\u202611111111",
+       "\u672a\u77e5",
        "Seeded for the table audit"
       ]
      },
@@ -4770,9 +4771,9 @@
       "identity": "lab",
       "qualifier": "",
       "facts": [
-       "sha256:2222222222222…22222222",
-       "未知",
-       "无"
+       "sha256:2222222222222\u202622222222",
+       "\u672a\u77e5",
+       "\u65e0"
       ]
      },
      "cardLines": {
@@ -4808,8 +4809,8 @@
       "identity": "partner-a",
       "qualifier": "",
       "facts": [
-       "sha256:3333333333333…33333333",
-       "待处理",
+       "sha256:3333333333333\u202633333333",
+       "\u5f85\u5904\u7406",
        "Seeded for the table audit"
       ]
      },
@@ -4846,9 +4847,9 @@
       "identity": "partner-b",
       "qualifier": "",
       "facts": [
-       "sha256:4444444444444…44444444",
-       "未知",
-       "无"
+       "sha256:4444444444444\u202644444444",
+       "\u672a\u77e5",
+       "\u65e0"
       ]
      },
      "cardLines": {
@@ -4884,8 +4885,8 @@
       "identity": "community",
       "qualifier": "",
       "facts": [
-       "sha256:5555555555555…55555555",
-       "未知",
+       "sha256:5555555555555\u202655555555",
+       "\u672a\u77e5",
        "Seeded for the table audit"
       ]
      },
@@ -4922,9 +4923,9 @@
       "identity": "vendor-x",
       "qualifier": "",
       "facts": [
-       "sha256:6666666666666…66666666",
-       "待处理",
-       "无"
+       "sha256:6666666666666\u202666666666",
+       "\u5f85\u5904\u7406",
+       "\u65e0"
       ]
      },
      "cardLines": {
@@ -4994,9 +4995,9 @@
     0.75
    ],
    "columnLabels": [
-    "节点",
-    "状态",
-    "最近观测"
+    "\u8282\u70b9",
+    "\u72b6\u6001",
+    "\u6700\u8fd1\u89c2\u6d4b"
    ],
    "tableRowCounts": [
     12
@@ -5028,8 +5029,8 @@
       "identity": "lab-node-1",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "2分钟前"
+       "\u5c31\u7eea",
+       "2\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -5063,8 +5064,8 @@
       "identity": "lab-node-2",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "44分钟前"
+       "\u5c31\u7eea",
+       "44\u5206\u949f\u524d"
       ]
      },
      "cardLines": {
@@ -5098,8 +5099,8 @@
       "identity": "edge-ams-3",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "1小时前"
+       "\u5c31\u7eea",
+       "1\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5133,8 +5134,8 @@
       "identity": "edge-fra-1",
       "qualifier": "",
       "facts": [
-       "不可达",
-       "2小时前"
+       "\u4e0d\u53ef\u8fbe",
+       "2\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5168,8 +5169,8 @@
       "identity": "edge-sin-2",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "2小时前"
+       "\u5c31\u7eea",
+       "2\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5203,8 +5204,8 @@
       "identity": "edge-iad-4",
       "qualifier": "",
       "facts": [
-       "未知",
-       "3小时前"
+       "\u672a\u77e5",
+       "3\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5238,8 +5239,8 @@
       "identity": "batch-05",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "4小时前"
+       "\u5c31\u7eea",
+       "4\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5273,8 +5274,8 @@
       "identity": "batch-06",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "4小时前"
+       "\u5c31\u7eea",
+       "4\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5308,8 +5309,8 @@
       "identity": "gpu-01",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "5小时前"
+       "\u5c31\u7eea",
+       "5\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5343,8 +5344,8 @@
       "identity": "gpu-02",
       "qualifier": "",
       "facts": [
-       "排空中",
-       "6小时前"
+       "\u6392\u7a7a\u4e2d",
+       "6\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5378,8 +5379,8 @@
       "identity": "spare-07",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "7小时前"
+       "\u5c31\u7eea",
+       "7\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5413,8 +5414,8 @@
       "identity": "spare-08",
       "qualifier": "",
       "facts": [
-       "就绪",
-       "7小时前"
+       "\u5c31\u7eea",
+       "7\u5c0f\u65f6\u524d"
       ]
      },
      "cardLines": {
@@ -5488,11 +5489,11 @@
     null
    ],
    "columnLabels": [
-    "节点",
-    "槽位",
-    "状态",
-    "容器",
-    "日志"
+    "\u8282\u70b9",
+    "\u69fd\u4f4d",
+    "\u72b6\u6001",
+    "\u5bb9\u5668",
+    "\u65e5\u5fd7"
    ],
    "tableRowCounts": [
     3
@@ -5522,10 +5523,10 @@
      },
      "slots": {
       "identity": "lab-node-1",
-      "qualifier": "READY重启次数 0",
+      "qualifier": "READY\u91cd\u542f\u6b21\u6570 0",
       "facts": [
        "#0",
-       "运行中",
+       "\u8fd0\u884c\u4e2d",
        "c0ffee0deadb"
       ]
      },
@@ -5560,10 +5561,10 @@
      },
      "slots": {
       "identity": "lab-node-2",
-      "qualifier": "READY重启次数 1",
+      "qualifier": "READY\u91cd\u542f\u6b21\u6570 1",
       "facts": [
        "#1",
-       "运行中",
+       "\u8fd0\u884c\u4e2d",
        "c0ffee1deadb"
       ]
      },
@@ -5598,10 +5599,10 @@
      },
      "slots": {
       "identity": "edge-ams-3",
-      "qualifier": "READY重启次数 2",
+      "qualifier": "READY\u91cd\u542f\u6b21\u6570 2",
       "facts": [
        "#2",
-       "未知exit code 137",
+       "\u672a\u77e5exit code 137",
        "c0ffee2deadb"
       ]
      },
@@ -5661,11 +5662,11 @@
     null
    ],
    "columnLabels": [
-    "尝试",
-    "状态",
-    "栅栏",
-    "节点",
-    "开始时间"
+    "\u5c1d\u8bd5",
+    "\u72b6\u6001",
+    "\u6805\u680f",
+    "\u8282\u70b9",
+    "\u5f00\u59cb\u65f6\u95f4"
    ],
    "tableRowCounts": [
     2

@@ -70,8 +70,13 @@ export function ConfirmAction({
     <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onClose(); }}>
       <DialogFrame
         title={title}
+        description={description}
         size="small"
         closeLabel={t('aria.closeDialog')}
+        // A write in flight is not a state the reader can cancel by dismissing the surface: the
+        // request is already out. The close control stays visible but disabled, and Escape /
+        // overlay dismissal are suppressed by the same flag.
+        dismissible={!pending}
         data-testid="confirm-dialog"
         data-confirm-state={pending ? 'pending' : error ? 'error' : 'idle'}
         footer={<>
@@ -87,7 +92,6 @@ export function ConfirmAction({
           </Button>
         </>}
       >
-        <div className="text-[var(--ow-text-secondary)] leading-relaxed">{description}</div>
         {error ? (
           <div className="inline-error" role="alert" data-confirm-error>
             <Icon name="warning" size={16} />

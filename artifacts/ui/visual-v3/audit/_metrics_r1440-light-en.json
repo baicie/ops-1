@@ -4,7 +4,8 @@
   "theme": "light",
   "mode": "after",
   "baseURL": "http://127.0.0.1:5173",
-  "data": "fixtures"
+  "data": "fixtures",
+  "locale": "en"
  },
  "pages": {
   "/admin/jobs": {
@@ -14,20 +15,20 @@
    "docHeight": 970,
    "offenders": [],
    "identityKey": [
-    "host-metrics · 1285",
-    "host-metrics · e273",
-    "host-metrics · 9c4a",
-    "host-metrics · 3f8b",
-    "host-metrics · a71d",
-    "host-metrics · 5b6e",
-    "host-metrics · c04f",
-    "host-metrics · 7d2e",
-    "host-metrics · f19a",
-    "host-metrics · 6e35",
-    "host-metrics · 2a8f",
-    "host-metrics · b53c",
-    "host-metrics · 8f47",
-    "host-metrics · 41e6"
+    "host-metrics \u00b7 1285",
+    "host-metrics \u00b7 e273",
+    "host-metrics \u00b7 9c4a",
+    "host-metrics \u00b7 3f8b",
+    "host-metrics \u00b7 a71d",
+    "host-metrics \u00b7 5b6e",
+    "host-metrics \u00b7 c04f",
+    "host-metrics \u00b7 7d2e",
+    "host-metrics \u00b7 f19a",
+    "host-metrics \u00b7 6e35",
+    "host-metrics \u00b7 2a8f",
+    "host-metrics \u00b7 b53c",
+    "host-metrics \u00b7 8f47",
+    "host-metrics \u00b7 41e6"
    ],
    "identityUnique": 1,
    "rowHeight": {
@@ -63,7 +64,7 @@
    "cardLabelCount": null,
    "cards": [
     {
-     "key": "host-metrics · 1285",
+     "key": "host-metrics \u00b7 1285",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -76,7 +77,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 1285",
+      "identity": "host-metrics \u00b7 1285",
       "qualifier": "r7Attempts 1/3",
       "facts": [
        "Succeeded",
@@ -124,7 +125,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · e273",
+     "key": "host-metrics \u00b7 e273",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -137,7 +138,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · e273",
+      "identity": "host-metrics \u00b7 e273",
       "qualifier": "r7Attempts 2/3",
       "facts": [
        "Succeeded",
@@ -185,7 +186,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 9c4a",
+     "key": "host-metrics \u00b7 9c4a",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -198,7 +199,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 9c4a",
+      "identity": "host-metrics \u00b7 9c4a",
       "qualifier": "r7Attempts 3/3",
       "facts": [
        "Running",
@@ -246,7 +247,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 3f8b",
+     "key": "host-metrics \u00b7 3f8b",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -259,7 +260,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 3f8b",
+      "identity": "host-metrics \u00b7 3f8b",
       "qualifier": "r7Attempts 1/3",
       "facts": [
        "Failed",
@@ -307,7 +308,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · a71d",
+     "key": "host-metrics \u00b7 a71d",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -320,7 +321,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · a71d",
+      "identity": "host-metrics \u00b7 a71d",
       "qualifier": "r7Attempts 2/3",
       "facts": [
        "Succeeded",
@@ -368,7 +369,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 5b6e",
+     "key": "host-metrics \u00b7 5b6e",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -381,7 +382,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 5b6e",
+      "identity": "host-metrics \u00b7 5b6e",
       "qualifier": "r7Attempts 3/3",
       "facts": [
        "Queued",
@@ -429,7 +430,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · c04f",
+     "key": "host-metrics \u00b7 c04f",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -442,7 +443,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · c04f",
+      "identity": "host-metrics \u00b7 c04f",
       "qualifier": "r7Attempts 1/3",
       "facts": [
        "Succeeded",
@@ -490,7 +491,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 7d2e",
+     "key": "host-metrics \u00b7 7d2e",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -503,7 +504,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 7d2e",
+      "identity": "host-metrics \u00b7 7d2e",
       "qualifier": "r7Attempts 2/3",
       "facts": [
        "Cancelled",
@@ -551,7 +552,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · f19a",
+     "key": "host-metrics \u00b7 f19a",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -564,7 +565,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · f19a",
+      "identity": "host-metrics \u00b7 f19a",
       "qualifier": "r7Attempts 3/3",
       "facts": [
        "Running",
@@ -612,7 +613,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 6e35",
+     "key": "host-metrics \u00b7 6e35",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -625,7 +626,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 6e35",
+      "identity": "host-metrics \u00b7 6e35",
       "qualifier": "r7Attempts 1/3",
       "facts": [
        "Succeeded",
@@ -673,7 +674,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 2a8f",
+     "key": "host-metrics \u00b7 2a8f",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -686,7 +687,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 2a8f",
+      "identity": "host-metrics \u00b7 2a8f",
       "qualifier": "r7Attempts 2/3",
       "facts": [
        "Failed",
@@ -734,7 +735,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · b53c",
+     "key": "host-metrics \u00b7 b53c",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -747,7 +748,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · b53c",
+      "identity": "host-metrics \u00b7 b53c",
       "qualifier": "r7Attempts 3/3",
       "facts": [
        "Succeeded",
@@ -795,7 +796,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 8f47",
+     "key": "host-metrics \u00b7 8f47",
      "clipped": false,
      "width": 277,
      "facts": 0,
@@ -808,7 +809,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 8f47",
+      "identity": "host-metrics \u00b7 8f47",
       "qualifier": "r7Attempts 1/3",
       "facts": [
        "Running",
@@ -856,7 +857,7 @@
      "values": 5
     },
     {
-     "key": "host-metrics · 41e6",
+     "key": "host-metrics \u00b7 41e6",
      "clipped": false,
      "width": 279,
      "facts": 0,
@@ -869,7 +870,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "host-metrics · 41e6",
+      "identity": "host-metrics \u00b7 41e6",
       "qualifier": "r7Attempts 2/3",
       "facts": [
        "Succeeded",
@@ -940,23 +941,23 @@
    "docHeight": 1077,
    "offenders": [],
    "identityKey": [
-    "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
-    "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
-    "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
-    "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
-    "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
-    "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
-    "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
-    "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
-    "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
-    "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
-    "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
-    "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
-    "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
-    "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
-    "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
-    "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
-    "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45"
+    "deployment.created \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=0 \u00b7 2026-10-30T21:02:45",
+    "plugin.enabled \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=1 \u00b7 2026-10-30T20:38:45",
+    "node.enrolled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=2 \u00b7 2026-10-30T20:14:45",
+    "plugin.disabled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=3 \u00b7 2026-10-30T19:50:45",
+    "policy.updated \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=4 \u00b7 2026-10-30T19:26:45",
+    "enrollment_token.issued \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=5 \u00b7 2026-10-30T19:02:45",
+    "deployment.failed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=6 \u00b7 2026-10-30T18:38:45",
+    "node.unreachable \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=7 \u00b7 2026-10-30T18:14:45",
+    "plugin.probed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=8 \u00b7 2026-10-30T17:50:45 \u00b7 +8@2026-10-30T14:14:45",
+    "plugin.enabled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=17 \u00b7 2026-10-30T14:14:45",
+    "node.enrolled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=18 \u00b7 2026-10-30T13:50:45",
+    "plugin.disabled \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=19 \u00b7 2026-10-30T13:26:45",
+    "policy.updated \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=20 \u00b7 2026-10-30T13:02:45",
+    "enrollment_token.issued \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=21 \u00b7 2026-10-30T12:38:45",
+    "deployment.failed \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=22 \u00b7 2026-10-30T12:14:45",
+    "node.unreachable \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=23 \u00b7 2026-10-30T11:50:45",
+    "deployment.created \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=24 \u00b7 2026-10-30T11:26:45"
    ],
    "identityUnique": 1,
    "rowHeight": {
@@ -990,7 +991,7 @@
    "cardLabelCount": null,
    "cards": [
     {
-     "key": "deployment.created · f0fe · USER 82475274 · sequence=0 · 2026-10-30T21:02:45",
+     "key": "deployment.created \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=0 \u00b7 2026-10-30T21:02:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1003,7 +1004,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.created · f0fe",
+      "identity": "deployment.created \u00b7 f0fe",
       "qualifier": "USER 82475274sequence 0",
       "facts": [
        "Accepteddeployment.create",
@@ -1023,7 +1024,7 @@
      "values": 4
     },
     {
-     "key": "plugin.enabled · 6b1c · USER 82475274 · sequence=1 · 2026-10-30T20:38:45",
+     "key": "plugin.enabled \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=1 \u00b7 2026-10-30T20:38:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1036,7 +1037,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.enabled · 6b1c",
+      "identity": "plugin.enabled \u00b7 6b1c",
       "qualifier": "USER 82475274sequence 1",
       "facts": [
        "Succeededplugin.enable",
@@ -1056,7 +1057,7 @@
      "values": 4
     },
     {
-     "key": "node.enrolled · 22dd · USER 82475274 · sequence=2 · 2026-10-30T20:14:45",
+     "key": "node.enrolled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=2 \u00b7 2026-10-30T20:14:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1069,7 +1070,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.enrolled · 22dd",
+      "identity": "node.enrolled \u00b7 22dd",
       "qualifier": "USER 82475274sequence 2",
       "facts": [
        "Unknownnode.enroll",
@@ -1089,7 +1090,7 @@
      "values": 4
     },
     {
-     "key": "plugin.disabled · d47a · USER 82475274 · sequence=3 · 2026-10-30T19:50:45",
+     "key": "plugin.disabled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=3 \u00b7 2026-10-30T19:50:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1102,7 +1103,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.disabled · d47a",
+      "identity": "plugin.disabled \u00b7 d47a",
       "qualifier": "USER 82475274sequence 3",
       "facts": [
        "Acceptedplugin.disable",
@@ -1122,7 +1123,7 @@
      "values": 4
     },
     {
-     "key": "policy.updated · 19e4 · USER 82475274 · sequence=4 · 2026-10-30T19:26:45",
+     "key": "policy.updated \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=4 \u00b7 2026-10-30T19:26:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1135,7 +1136,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "policy.updated · 19e4",
+      "identity": "policy.updated \u00b7 19e4",
       "qualifier": "USER 82475274sequence 4",
       "facts": [
        "Succeededpolicy.update",
@@ -1155,7 +1156,7 @@
      "values": 4
     },
     {
-     "key": "enrollment_token.issued · f0fe · USER 82475274 · sequence=5 · 2026-10-30T19:02:45",
+     "key": "enrollment_token.issued \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=5 \u00b7 2026-10-30T19:02:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1168,7 +1169,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "enrollment_token.issued · f0fe",
+      "identity": "enrollment_token.issued \u00b7 f0fe",
       "qualifier": "USER 82475274sequence 5",
       "facts": [
        "Unknowntoken.issue",
@@ -1188,7 +1189,7 @@
      "values": 4
     },
     {
-     "key": "deployment.failed · 6b1c · USER 82475274 · sequence=6 · 2026-10-30T18:38:45",
+     "key": "deployment.failed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=6 \u00b7 2026-10-30T18:38:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1201,7 +1202,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.failed · 6b1c",
+      "identity": "deployment.failed \u00b7 6b1c",
       "qualifier": "USER 82475274sequence 6",
       "facts": [
        "Accepteddeployment.deploy",
@@ -1221,7 +1222,7 @@
      "values": 4
     },
     {
-     "key": "node.unreachable · 22dd · USER 82475274 · sequence=7 · 2026-10-30T18:14:45",
+     "key": "node.unreachable \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=7 \u00b7 2026-10-30T18:14:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1234,7 +1235,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.unreachable · 22dd",
+      "identity": "node.unreachable \u00b7 22dd",
       "qualifier": "USER 82475274sequence 7",
       "facts": [
        "Succeedednode.observe",
@@ -1254,7 +1255,7 @@
      "values": 4
     },
     {
-     "key": "plugin.probed · 6b1c · USER 82475274 · sequence=8 · 2026-10-30T17:50:45 · +8@2026-10-30T14:14:45",
+     "key": "plugin.probed \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=8 \u00b7 2026-10-30T17:50:45 \u00b7 +8@2026-10-30T14:14:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1267,8 +1268,8 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.probed · 6b1c",
-      "qualifier": "USER 82475274sequence 8× 9 3h ago → 6h ago",
+      "identity": "plugin.probed \u00b7 6b1c",
+      "qualifier": "USER 82475274sequence 8\u00d7 9 3h ago \u2192 6h ago",
       "facts": [
        "Acceptedplugin.probe",
        "3h ago01:50:45"
@@ -1287,7 +1288,7 @@
      "values": 4
     },
     {
-     "key": "plugin.enabled · 22dd · USER 82475274 · sequence=17 · 2026-10-30T14:14:45",
+     "key": "plugin.enabled \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=17 \u00b7 2026-10-30T14:14:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1300,7 +1301,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.enabled · 22dd",
+      "identity": "plugin.enabled \u00b7 22dd",
       "qualifier": "USER 82475274sequence 17",
       "facts": [
        "Unknownplugin.enable",
@@ -1320,7 +1321,7 @@
      "values": 4
     },
     {
-     "key": "node.enrolled · d47a · USER 82475274 · sequence=18 · 2026-10-30T13:50:45",
+     "key": "node.enrolled \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=18 \u00b7 2026-10-30T13:50:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1333,7 +1334,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.enrolled · d47a",
+      "identity": "node.enrolled \u00b7 d47a",
       "qualifier": "USER 82475274sequence 18",
       "facts": [
        "Acceptednode.enroll",
@@ -1353,7 +1354,7 @@
      "values": 4
     },
     {
-     "key": "plugin.disabled · 19e4 · USER 82475274 · sequence=19 · 2026-10-30T13:26:45",
+     "key": "plugin.disabled \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=19 \u00b7 2026-10-30T13:26:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1366,7 +1367,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "plugin.disabled · 19e4",
+      "identity": "plugin.disabled \u00b7 19e4",
       "qualifier": "USER 82475274sequence 19",
       "facts": [
        "Succeededplugin.disable",
@@ -1386,7 +1387,7 @@
      "values": 4
     },
     {
-     "key": "policy.updated · f0fe · USER 82475274 · sequence=20 · 2026-10-30T13:02:45",
+     "key": "policy.updated \u00b7 f0fe \u00b7 USER 82475274 \u00b7 sequence=20 \u00b7 2026-10-30T13:02:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1399,7 +1400,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "policy.updated · f0fe",
+      "identity": "policy.updated \u00b7 f0fe",
       "qualifier": "USER 82475274sequence 20",
       "facts": [
        "Unknownpolicy.update",
@@ -1419,7 +1420,7 @@
      "values": 4
     },
     {
-     "key": "enrollment_token.issued · 6b1c · USER 82475274 · sequence=21 · 2026-10-30T12:38:45",
+     "key": "enrollment_token.issued \u00b7 6b1c \u00b7 USER 82475274 \u00b7 sequence=21 \u00b7 2026-10-30T12:38:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1432,7 +1433,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "enrollment_token.issued · 6b1c",
+      "identity": "enrollment_token.issued \u00b7 6b1c",
       "qualifier": "USER 82475274sequence 21",
       "facts": [
        "Acceptedtoken.issue",
@@ -1452,7 +1453,7 @@
      "values": 4
     },
     {
-     "key": "deployment.failed · 22dd · USER 82475274 · sequence=22 · 2026-10-30T12:14:45",
+     "key": "deployment.failed \u00b7 22dd \u00b7 USER 82475274 \u00b7 sequence=22 \u00b7 2026-10-30T12:14:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1465,7 +1466,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.failed · 22dd",
+      "identity": "deployment.failed \u00b7 22dd",
       "qualifier": "USER 82475274sequence 22",
       "facts": [
        "Succeededdeployment.deploy",
@@ -1485,7 +1486,7 @@
      "values": 4
     },
     {
-     "key": "node.unreachable · d47a · USER 82475274 · sequence=23 · 2026-10-30T11:50:45",
+     "key": "node.unreachable \u00b7 d47a \u00b7 USER 82475274 \u00b7 sequence=23 \u00b7 2026-10-30T11:50:45",
      "clipped": false,
      "width": 533,
      "facts": 0,
@@ -1498,7 +1499,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "node.unreachable · d47a",
+      "identity": "node.unreachable \u00b7 d47a",
       "qualifier": "USER 82475274sequence 23",
       "facts": [
        "Unknownnode.observe",
@@ -1518,7 +1519,7 @@
      "values": 4
     },
     {
-     "key": "deployment.created · 19e4 · USER 82475274 · sequence=24 · 2026-10-30T11:26:45",
+     "key": "deployment.created \u00b7 19e4 \u00b7 USER 82475274 \u00b7 sequence=24 \u00b7 2026-10-30T11:26:45",
      "clipped": false,
      "width": 535,
      "facts": 0,
@@ -1531,7 +1532,7 @@
       "codeLineBoxes": 1
      },
      "slots": {
-      "identity": "deployment.created · 19e4",
+      "identity": "deployment.created \u00b7 19e4",
       "qualifier": "USER 82475274sequence 24",
       "facts": [
        "Accepteddeployment.create",
@@ -1639,7 +1640,7 @@
       "facts": [
        "Ready",
        "1/4 Ready",
-       "12% · 31%2.3 GiB / 7.5 GiB · just now"
+       "12% \u00b7 31%2.3 GiB / 7.5 GiB \u00b7 just now"
       ]
      },
      "cardLines": {
@@ -1697,7 +1698,7 @@
       "facts": [
        "Ready",
        "2/4 Ready",
-       "18% · 32%2.4 GiB / 7.5 GiB · 3m ago"
+       "18% \u00b7 32%2.4 GiB / 7.5 GiB \u00b7 3m ago"
       ]
      },
      "cardLines": {
@@ -1755,7 +1756,7 @@
       "facts": [
        "Ready",
        "3/4 Ready",
-       "24% · 34%2.5 GiB / 7.5 GiB · 6m ago"
+       "24% \u00b7 34%2.5 GiB / 7.5 GiB \u00b7 6m ago"
       ]
      },
      "cardLines": {
@@ -1871,7 +1872,7 @@
       "facts": [
        "Ready",
        "2/4 Ready",
-       "36% · 36%2.7 GiB / 7.5 GiB · 12m ago"
+       "36% \u00b7 36%2.7 GiB / 7.5 GiB \u00b7 12m ago"
       ]
      },
      "cardLines": {
@@ -1929,7 +1930,7 @@
       "facts": [
        "Stale",
        "3/4 Ready",
-       "42% · 37%2.7 GiB / 7.5 GiB · 15m ago"
+       "42% \u00b7 37%2.7 GiB / 7.5 GiB \u00b7 15m ago"
       ]
      },
      "cardLines": {
@@ -1987,7 +1988,7 @@
       "facts": [
        "Ready",
        "1/4 Ready",
-       "48% · 38%2.8 GiB / 7.5 GiB · 18m ago"
+       "48% \u00b7 38%2.8 GiB / 7.5 GiB \u00b7 18m ago"
       ]
      },
      "cardLines": {
@@ -2045,7 +2046,7 @@
       "facts": [
        "Ready",
        "2/4 Ready",
-       "54% · 39%2.9 GiB / 7.5 GiB · 21m ago"
+       "54% \u00b7 39%2.9 GiB / 7.5 GiB \u00b7 21m ago"
       ]
      },
      "cardLines": {
@@ -2103,7 +2104,7 @@
       "facts": [
        "Ready",
        "3/4 Ready",
-       "60% · 40%3.0 GiB / 7.5 GiB · 24m ago"
+       "60% \u00b7 40%3.0 GiB / 7.5 GiB \u00b7 24m ago"
       ]
      },
      "cardLines": {
@@ -2161,7 +2162,7 @@
       "facts": [
        "Needs attention",
        "1/4 Ready",
-       "66% · 41%3.1 GiB / 7.5 GiB · 27m ago"
+       "66% \u00b7 41%3.1 GiB / 7.5 GiB \u00b7 27m ago"
       ]
      },
      "cardLines": {
@@ -2219,7 +2220,7 @@
       "facts": [
        "Ready",
        "2/4 Ready",
-       "72% · 43%3.2 GiB / 7.5 GiB · 30m ago"
+       "72% \u00b7 43%3.2 GiB / 7.5 GiB \u00b7 30m ago"
       ]
      },
      "cardLines": {
@@ -2277,7 +2278,7 @@
       "facts": [
        "Ready",
        "3/4 Ready",
-       "78% · 44%3.3 GiB / 7.5 GiB · 33m ago"
+       "78% \u00b7 44%3.3 GiB / 7.5 GiB \u00b7 33m ago"
       ]
      },
      "cardLines": {
@@ -2473,9 +2474,9 @@
       "qualifier": "Systemtrusted-team",
       "facts": [
        "0.2.0",
-       "Installed27s ago · gen 2",
+       "Installed27s ago \u00b7 gen 2",
        "0/3",
-       "sha256:a100a10…a100a100Verified"
+       "sha256:a100a10\u2026a100a100Verified"
       ]
      },
      "cardLines": {
@@ -2532,9 +2533,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.1",
-       "Installed30m ago · gen 3",
+       "Installed30m ago \u00b7 gen 3",
        "1/3",
-       "sha256:a101a10…a101a101Verified"
+       "sha256:a101a10\u2026a101a101Verified"
       ]
      },
      "cardLines": {
@@ -2591,9 +2592,9 @@
       "qualifier": "lab",
       "facts": [
        "0.2.2",
-       "Disabled1h ago · gen 4",
+       "Disabled1h ago \u00b7 gen 4",
        "2/3",
-       "sha256:a102a10…a102a102Verified"
+       "sha256:a102a10\u2026a102a102Verified"
       ]
      },
      "cardLines": {
@@ -2650,9 +2651,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.0Newer package 0.2.3",
-       "Installed1h ago · gen 5",
+       "Installed1h ago \u00b7 gen 5",
        "0/3",
-       "sha256:a103a10…a103a103Verified"
+       "sha256:a103a10\u2026a103a103Verified"
       ]
      },
      "cardLines": {
@@ -2709,9 +2710,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.1Newer package 0.2.0",
-       "Staged2h ago · gen 6",
+       "Staged2h ago \u00b7 gen 6",
        "1/3",
-       "sha256:a104a10…a104a104Verified"
+       "sha256:a104a10\u2026a104a104Verified"
       ]
      },
      "cardLines": {
@@ -2768,9 +2769,9 @@
       "qualifier": "lab",
       "facts": [
        "0.2.2Newer package 0.2.1",
-       "Failed2h ago · gen 7",
+       "Failed2h ago \u00b7 gen 7",
        "2/3",
-       "sha256:a105a10…a105a105Verified"
+       "sha256:a105a10\u2026a105a105Verified"
       ]
      },
      "cardLines": {
@@ -2827,9 +2828,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.0Newer package 0.2.2",
-       "Installed3h ago · gen 8",
+       "Installed3h ago \u00b7 gen 8",
        "0/3",
-       "sha256:a106a10…a106a106Verified"
+       "sha256:a106a10\u2026a106a106Verified"
       ]
      },
      "cardLines": {
@@ -2886,9 +2887,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.1Newer package 0.2.3",
-       "Installed3h ago · gen 9",
+       "Installed3h ago \u00b7 gen 9",
        "1/3",
-       "sha256:a107a10…a107a107Verified"
+       "sha256:a107a10\u2026a107a107Verified"
       ]
      },
      "cardLines": {
@@ -2945,9 +2946,9 @@
       "qualifier": "lab",
       "facts": [
        "0.2.2Newer package 0.2.0",
-       "Staged4h ago · gen 10",
+       "Staged4h ago \u00b7 gen 10",
        "2/3",
-       "sha256:a108a10…a108a108Verified"
+       "sha256:a108a10\u2026a108a108Verified"
       ]
      },
      "cardLines": {
@@ -3004,9 +3005,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.0Newer package 0.2.1",
-       "Installed4h ago · gen 11",
+       "Installed4h ago \u00b7 gen 11",
        "0/3",
-       "sha256:a109a10…a109a109Verified"
+       "sha256:a109a10\u2026a109a109Verified"
       ]
      },
      "cardLines": {
@@ -3063,9 +3064,9 @@
       "qualifier": "trusted-team",
       "facts": [
        "0.2.1Newer package 0.2.2",
-       "Installed5h ago · gen 12",
+       "Installed5h ago \u00b7 gen 12",
        "1/3",
-       "sha256:a110a11…a110a110Verified"
+       "sha256:a110a11\u2026a110a110Verified"
       ]
      },
      "cardLines": {
@@ -3124,7 +3125,7 @@
        "0.2.3",
        "Disabled5h ago",
        "2/3",
-       "sha256:a111a11…a111a111Verified"
+       "sha256:a111a11\u2026a111a111Verified"
       ]
      },
      "cardLines": {
@@ -3199,9 +3200,9 @@
     "audit-ledger",
     "risk-scores",
     "stale-feed",
-    "orders-curated · 4f1c",
-    "inventory · b93d",
-    "orders-curated · 71ae",
+    "orders-curated \u00b7 4f1c",
+    "inventory \u00b7 b93d",
+    "orders-curated \u00b7 71ae",
     "lab-node-1",
     "lab-node-2",
     "edge-ams-3",
@@ -3641,7 +3642,7 @@
      "values": 2
     },
     {
-     "key": "orders-curated · 4f1c",
+     "key": "orders-curated \u00b7 4f1c",
      "clipped": false,
      "width": 326,
      "facts": 0,
@@ -3654,7 +3655,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "orders-curated · 4f1c",
+      "identity": "orders-curated \u00b7 4f1c",
       "qualifier": "",
       "facts": [
        "Failed"
@@ -3673,7 +3674,7 @@
      "values": 2
     },
     {
-     "key": "inventory · b93d",
+     "key": "inventory \u00b7 b93d",
      "clipped": false,
      "width": 326,
      "facts": 0,
@@ -3686,7 +3687,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "inventory · b93d",
+      "identity": "inventory \u00b7 b93d",
       "qualifier": "",
       "facts": [
        "Unknown"
@@ -3705,7 +3706,7 @@
      "values": 2
     },
     {
-     "key": "orders-curated · 71ae",
+     "key": "orders-curated \u00b7 71ae",
      "clipped": false,
      "width": 328,
      "facts": 0,
@@ -3718,7 +3719,7 @@
       "codeLineBoxes": null
      },
      "slots": {
-      "identity": "orders-curated · 71ae",
+      "identity": "orders-curated \u00b7 71ae",
       "qualifier": "",
       "facts": [
        "Failed"
@@ -4502,7 +4503,7 @@
       "identity": "trusted-team",
       "qualifier": "",
       "facts": [
-       "sha256:1111111111111…11111111",
+       "sha256:1111111111111\u202611111111",
        "Unknown",
        "Seeded for the table audit"
       ]
@@ -4536,7 +4537,7 @@
       "identity": "lab",
       "qualifier": "",
       "facts": [
-       "sha256:2222222222222…22222222",
+       "sha256:2222222222222\u202622222222",
        "Unknown",
        "None"
       ]
@@ -4570,7 +4571,7 @@
       "identity": "partner-a",
       "qualifier": "",
       "facts": [
-       "sha256:3333333333333…33333333",
+       "sha256:3333333333333\u202633333333",
        "Pending",
        "Seeded for the table audit"
       ]
@@ -4604,7 +4605,7 @@
       "identity": "partner-b",
       "qualifier": "",
       "facts": [
-       "sha256:4444444444444…44444444",
+       "sha256:4444444444444\u202644444444",
        "Unknown",
        "None"
       ]
@@ -4638,7 +4639,7 @@
       "identity": "community",
       "qualifier": "",
       "facts": [
-       "sha256:5555555555555…55555555",
+       "sha256:5555555555555\u202655555555",
        "Unknown",
        "Seeded for the table audit"
       ]
@@ -4672,7 +4673,7 @@
       "identity": "vendor-x",
       "qualifier": "",
       "facts": [
-       "sha256:6666666666666…66666666",
+       "sha256:6666666666666\u202666666666",
        "Pending",
        "None"
       ]
