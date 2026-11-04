@@ -128,4 +128,4 @@ node tests/ui/visual-v1-capture.mjs
 
 ## 6. 结论
 
-Phase 0 与 DS-V1-1/1b/1c 的静态与浏览器证据齐全；三标杆矩阵、dialog/boundary/sources/metric 矩阵与 14 条门禁自测通过，完整 g12 harness 98 tests（96 passed / 2 skipped）。未执行项全部标 `NOT_RUN`；没有把 fixture、截图或未运行项写成 PASS。最新代码 HEAD 的 CI 结论见 report.md §3。
+Phase 0 与 DS-V1-1/1b/1c 的静态与浏览器证据齐全；三标杆矩阵、dialog/boundary/sources/metric 矩阵与 14 条门禁自测通过，完整 g12 harness 98 tests（96 passed / 2 skipped）。未执行项全部标 `NOT_RUN`；没有把 fixture、截图或未运行项写成 PASS。最新代码 HEAD 的 CI：11 项 workflow run 全部 success（acceptance 9m43s、runtime-golden-path 16m41s；golden-path 的 check 行滞后但 run conclusion=success）。

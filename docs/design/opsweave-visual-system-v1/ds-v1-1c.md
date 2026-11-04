@@ -11,7 +11,7 @@
 ## 1. 最新 HEAD
 
 - 基线：`d3d5955`（DS-V1-1b）
-- 本批提交：`f7c64e9`（代码）、`33202e3`（文档）、`78a3561`（KPI 以标题为上限）
+- 本批提交：`f7c64e9`（代码）、`33202e3`（文档）、`78a3561`（KPI 以标题为上限）、`f23ae40`（证据定稿）
 - 工作树：实现、测试、文档；完整矩阵截图未跟踪
 
 ## 2. 实际修改文件
@@ -126,7 +126,7 @@ CI 中对应截图作为 Playwright artifact；PNG 预算未增加（408 文件 
 ## 10. 最新 CI 结论
 
 - 本地确定性 harness（本批代码）：`bash tests/ci/g12_acceptance_ci.sh` — **PASS**，**98 tests（96 passed / 2 skipped）**，7.7 min；acceptance **195/0**；exit 0。两条 skip 仍是 Docker/Studio 依赖（`g11-page-header-growth` 的 counterfactual 与 Studio 用例）。
-- 最新 HEAD 的 GitHub Actions 结论：见 §12 推送后回填（必须亲自确认，不以本地替代）。
+- GitHub Actions（最新代码 HEAD `78a3561`，`f23ae40` 为 docs-only）：**11 项 workflow run 全部 conclusion=success** —— acceptance 9m43s、runtime-golden-path 16m41s、golden-path、legacy-regression、web、web-unit、rust、quality-faults、artifact-budget、contracts、spec-coverage。`golden-path` 的 check 行在写入时仍显示 pending，但其 run conclusion 已为 success（GitHub 状态滞后），已通过 API 亲自确认。
 
 ## 11. 独立审查与 P0 / P1 / P2
 
@@ -172,7 +172,7 @@ CI 中对应截图作为 Playwright artifact；PNG 预算未增加（408 文件 
 
 ## 12. 是否可将 PR #34 转 Ready
 
-**READY_TO_MARK_READY（条件：最新 HEAD 的 GitHub Actions 全绿）**。本轮不自行转 Ready、不 merge、不 tag、不 release。
+**READY_TO_MARK_READY**。最新代码 HEAD `78a3561`（以及其后的 docs-only 提交）的 11 项 workflow run 全部 conclusion=success；没有 P0/P1 遗留。本轮不自行转 Ready、不 merge、不 tag、不 release。
 
 - 若 CI 出现与本批相关的红灯：回到本文件补修复与证据。
 - 若 CI 仅有与本批无关的既有失败：记录为外部依赖，不擅自修改 staging。

@@ -50,7 +50,7 @@
 - **`Ui.ErrorState` 删除**：10 个调用点迁移到 `AsyncBoundary`；新增 `report`（页内 section 不污染 chrome 状态）与 `source`（插件句子不冒充 Kernel）；`AsyncErrorMessage` 由 boundary 与 `ConfirmAction` 共用。
 - **15 处 `.panel.metric-card` → `MetricCard`**：IncidentDetail 的 em dash 改为 `NoData`，Pipelines 未加载的 job 列表不再说 "No runs"；新增 `size="small"`；删除 `.metric-*` CSS 并同步 8 个审计 spec 的选择器。
 - **Dialog/Sheet 统一**：新增 `components/app/dialog-frame.tsx`，`Modal`/`SheetContent`/`ConfirmAction` 共用一个 head/body/foot 与三种几何；`.modal*` 删除，替换为 `.ow-dialog*`。
-- **`check-ui-metrics` 加固**：空 `pages` 不再通过；新增 `--manifest` route 清单与 `route-missing`/`route-unknown`；5 条 gate 自测进入 CI。
+- **`check-ui-metrics` 加固**：空 `pages` 不再通过；新增 `--manifest` route 清单与 `route-missing`/`route-unknown`；5 条 gate 自测进入 CI（DS-V1-1c 扩到 14）。
 - 完整记录：[ds-v1-1b.md](ds-v1-1b.md)。仍未做：`.btn`（Studio 例外）、CSS 拆分、`AVAILABLE`/`CANCELLED` 产品决策、第二/第三标杆的完整视觉重排。
 
 ### DS-V1-1c — 审查整改与验收收口
@@ -133,6 +133,6 @@
 - **P1（门禁）**：三标杆矩阵与 Sources/KPI/dialog/boundary 矩阵已进入 g12-acceptance；`check-ui-metrics` 的空页/route/matrix fail-open 已修（`--manifest`、`--matrix`、14 条自测），PNG 预算零余量、无对比度/触摸目标/视觉 diff、`tests/ui` 不 typecheck 仍未解决。
 - **P2**：CSS 文件拆分、`.btn`（Studio 例外）、`AVAILABLE`/`CANCELLED` 词汇改造（决策见 ADR-017 §D9）、`components/domain/` 未建、route→pattern registry 与 `--template` 全量覆盖；视觉审查保留的 Overview/Jobs/zh 文案等 P2 见 `ds-v1-1c.md` §11。
 - **已修（DS-V1-1b）**：token 改名；`ErrorState` → `AsyncBoundary`（含 `report`/`source`/`AsyncErrorMessage`）；15 处 `.panel.metric-card` → `MetricCard`；`.modal*` 与 DialogHeader 两套几何合并为 `DialogFrame`；`check-ui-metrics` 空 pages fail-open 与 route manifest。
-- **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring + DS-V1-1 + DS-V1-1b**。全量 V1（三标杆完整视觉重排、route→pattern registry、CSS 拆分）**NOT_READY**，不在本 PR 声称完成。
+- **裁决**：`READY_TO_MARK_READY`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring + DS-V1-1 + DS-V1-1b + DS-V1-1c**。最新代码 HEAD 的 11 项 GitHub Actions workflow run 全部 success。全量 V1（三标杆完整视觉重排、route→pattern registry、CSS 拆分）**NOT_READY**，不在本 PR 声称完成。
 - 下一最小 PR 建议：① 产品决策：Incident digest mismatch 的可读性；② route→pattern registry 与 `--template` 全量覆盖；③ CSS 模块化拆分与 `.btn`（Studio）迁移。
 - 本 PR **未**自动合并、未转 Ready（Draft）、未打 Tag、未发布、未部署。
