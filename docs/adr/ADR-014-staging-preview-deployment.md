@@ -4,6 +4,7 @@
 - 日期：2026-10-28
 - 版本状态：本 ADR **不**改变 `0.0.5_PARTIAL`
 - 前置：`docs/adr/ADR-011..013`、`docs/RUNBOOK.md`
+- 相关决策：`docs/adr/ADR-016-acceptance-layers-and-code-acceptance-ownership.md`（验收分层；不改变本 ADR 的部署形态）
 
 ## 1. 目标
 

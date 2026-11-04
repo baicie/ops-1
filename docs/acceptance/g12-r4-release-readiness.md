@@ -3,7 +3,7 @@
 - Date: 2026-11-03
 - Base: `main` @ `b9a01db2b10bb60b5389e16588ab7ececa342ee1`
 - Branch: `fix/r4-login-lifecycle`
-- PR: [#32](https://github.com/baicie/ops-1/pull/32) (draft)
+- PR: [#32](https://github.com/baicie/ops-1/pull/32) (merged as `9fa9f09` on 2026-11-04)
 - Status: **PARTIAL** — see §11 for what is still unproven and §12 for the release recommendation.
 
 ## 1. What this round was asked to settle
@@ -250,6 +250,29 @@ Not ready to start G13 on the strength of this round alone. Two conditions befor
    good" does not depend on a remote link at all.
 2. Either a runner closer to the staging host, or a decision that the remote browser tier is
    advisory and `code_acceptance` is owned by the deterministic layer.
+
+### 12.1 Addendum — 2026-11-04: condition 2 decided; condition 1 re-measured
+
+Condition 2 is decided in [ADR-016](../adr/ADR-016-acceptance-layers-and-code-acceptance-ownership.md):
+the second branch is adopted — the remote browser layer is advisory, and `code_acceptance` is owned
+by the deterministic layer. The first branch (a runner closer to the host) is rejected for this
+round: it is not a repository-only change, and proximity does not explain the 180 s stalls (the one
+failing run that carried an in-job probe showed 0/4 failed probes while Playwright still timed out).
+ADR-016 §3 records the three variants and the evidence that would reopen them.
+
+Measured on `main` @ `9fa9f09` while making that decision:
+
+**Condition 1 is not met as written.** The per-PR deterministic job
+(`tests/ci/g12_acceptance_ci.sh:149-158`, `.github/workflows/g12-acceptance.yml:18-33`) runs
+9 spec files / 44 `test()` declarations, covering 8 of the 11 specs and **39 of the 53 tests**
+listed in §6. `admin-shell` (7 tests) and `staging-smoke` (5) run only in `staging-preview`'s remote
+core step, and that workflow has no `pull_request` trigger. `g11-viewer-write-entries` (2) runs in
+no workflow and is an explicit `KNOWN_UNRUN` in `tests/ci/check-spec-coverage.mjs:61`. The eleven
+surfaces specs and `ui-table-audit`/geometry also remain remote-only.
+
+Under ADR-016, `code_acceptance` may be claimed only after the deterministic job runs that full set
+and is a required check; until then the honest value is absent / `NOT_RUN`, never `PASSED`. Closing
+condition 1 is the concrete next step named in ADR-016 §5.
 
 ## Verdict
 
