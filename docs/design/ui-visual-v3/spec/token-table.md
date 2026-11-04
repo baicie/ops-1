@@ -5,11 +5,13 @@ Supersedes nothing; there is no earlier token spec. `docs/design/ui-visual-v3/vi
 what the last six review rounds found; it is evidence, not a rule.
 
 > **Visual System V1 note (2026-11-04).** The census in §1 and the gate transcript in §4 were produced at
-> earlier HEADs. At `775a1e2` the ratchet prints `radius-tier 0/0`, `control-tier 0/0`, `type-tier 6/6`,
-> `one-header 3/3`, `uppercase-guard 0/0`, `format-locale 0/0`. [ADR-017](../../../adr/ADR-017-visual-system-v1.md)
-> §D5 decides the 11/13/15/26 target, the 20→26 title clamp as a named exception, and the value-first
-> migration; the 12px tier is scheduled for removal in DS-V1-1. Do not read the historical numbers above as
-> the current state; the measured state and evidence are under `docs/design/opsweave-visual-system-v1/`.
+> earlier HEADs. At `775a1e2` (before DS-V1-1) the ratchet printed `radius-tier 0/0`, `control-tier 0/0`,
+> `type-tier 6/6`, `one-header 3/3`, `uppercase-guard 0/0`, `format-locale 0/0`; after DS-V1-1 it prints
+> 0/0 for all six rules. [ADR-017](../../../adr/ADR-017-visual-system-v1.md) §D5 decided the 11/13/15/26
+> target, the 20→26 title clamp as a named exception, and the value-first migration. DS-V1-1 landed the
+> values, removed the 12px tier, and left the t-shirt rename for DS-V1-1b. Do not read the historical
+> numbers above as the current state; the measured state and evidence are under
+> `docs/design/opsweave-visual-system-v1/`.
 
 Every number below was produced by a command shown in §1 or §4. Numbers marked `[audit]` come from the
 committed measurement artifacts under `artifacts/ui/visual-v3/` (captured 2026-10-29 against the deployed
@@ -128,6 +130,15 @@ utility in TSX. `rounded-full` is `9999px` and is allowed; `rounded-none` is `0`
 | `--ow-type-meta` | **13px** | table values, secondary copy, captions, table row detail | 13px is the largest size at which a **two-line** cell fits the 40px row target: 13×1.2 + 11×1.4 + 4+4 padding + 1 border = 40.0 (table-spec §2.3 derives this). Any larger and the row target is unattainable without deleting the two-line cell. |
 | `--ow-type-body` | **15px** | reading copy, dialog body, form labels | one 2px step above `meta` — 15.4%, just over the ~10% threshold at which a size change is read as hierarchy rather than as noise; CJK has no ascender/descender cue, so a 13→14 step (7.7%) reads as a rendering accident. 14 and 16 both disappear into this tier. |
 | `--ow-type-title` | **26px** | `h1`, one value at every viewport | 26px is what the current clamp already resolves to on desktop, so **no desktop pixel moves**; it removes the 20.0 / 21.5 / 26 spread the clamp produces across 390/1024/1440, and 26 = 15 × 1.73 keeps the title two clear steps above body. |
+
+**V1 implementation note (2026-11-04).** ADR-017 §D5 takes the values-first route: the existing
+tokens now carry the four job values — `--ow-type-sm: 13px`, `--ow-type-base: 15px`,
+`--ow-type-lg: 15px`, and `--ow-type-xl: clamp(20px, 2.1vw, 26px)`. `--ow-type-metric` stays
+21px as a named display exception: at 26 the KPI zeros measured louder than the health verdict
+and pushed the first screen down. The t-shirt names remain until the DS-V1-1b rename; the title
+clamp is a named exception in `check-ui-tokens.mjs` (26px maximum, a measured 20px floor at 390).
+`--ow-type-hero` survives only on `/login`; the InstallWizard readiness figure moved to the title
+clamp. The deletion list below is the target for the rename pass, not the current tree.
 
 **Deleted**: `--ow-type-xs`, `--ow-type-sm`, `--ow-type-row`, `--ow-type-base`, `--ow-type-lg`,
 `--ow-type-xl`, `--ow-type-metric`, `--ow-type-hero`, and the `.94em` on `code`.

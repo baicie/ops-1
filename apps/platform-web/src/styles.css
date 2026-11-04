@@ -94,20 +94,25 @@
   --ow-space-4: 16px;
   --ow-space-6: 24px;
   --ow-space-8: 32px;
-  /* Type ladder: five reading steps and one display step, nothing below 11px. The 8.5/9/9.5/
-     10/10.5px values the v3 audit found on the Studio canvas all fold into --ow-type-label, and
-     --ow-type-sm (12px) stays the dense/meta step for tables so raising the reading baseline
-     to 14px does not inflate every row. */
+  /* Type ladder: four job tiers plus two named display exceptions (ADR-017 §D5). Label 11 /
+     meta 13 / body 15 / title 26 are the target. `sm` and `lg` are the values-first names for
+     the dense and heading steps until DS-V1-1b renames them; the old 12px dense step and the
+     14/16px body steps are gone. The title is a clamp whose 26px maximum is the spec's title
+     tier - 390 keeps a measured 20px floor rather than setting a long incident title at 26. */
   --ow-type-label: 11px;
   /* The table-value step. A row needs its value one step above its meta line but one step
      below reading copy, which is exactly 13px; it is a token, not a literal. */
   --ow-type-meta: 13px;
-  --ow-type-sm: 12px;
-  --ow-type-base: 14px;
-  --ow-type-lg: 16px;
+  --ow-type-sm: 13px;
+  --ow-type-base: 15px;
+  --ow-type-lg: 15px;
   --ow-type-xl: clamp(20px, 2.1vw, 26px);
-  /* The one display step the strips use: a headline figure that is not a page title. */
+  /* The strips' headline figure is a named display exception, not a fifth job tier: 21px sits
+     between body and title and keeps the health verdict the loudest text on the page. At 26 it
+     measured louder than the verdict and pushed the first screen down; see ADR-017 §D5. */
   --ow-type-metric: 21px;
+  /* The one display exception: the login headline. The 403 surface uses the standard header,
+     and the InstallWizard readiness figure moved to the metric tier (ADR-017 §D5). */
   --ow-type-hero: clamp(30px, 4vw, 44px);
   --ow-control-sm: 32px;
   /* 40px, not 36: 36 measured 37px in the browser and no control on a phone met the 40px
@@ -266,18 +271,8 @@ input::placeholder { color: var(--ow-text-muted); }
 .form-stack { display: flex; flex-direction: column; gap: var(--ow-space-4); }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--ow-space-4); }
 
-/* Status and tags */
-.status { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ow-type-sm); font-weight: 600; padding: 2px 8px; border-radius: var(--ow-radius-pill); border: 1px solid transparent; white-space: nowrap; }
-.status svg { flex: none; }
-/* --ow-ok-ink is the token that exists for status TEXT (5.2:1 on this soft fill, where the fill
-   token measured 3.9:1) and the pill was still painted with the fill token. Same two colours, the
-   readable one. */
-.status-ok { color: var(--ow-ok-ink); background: var(--ow-ok-soft); border-color: color-mix(in srgb, var(--ow-ok) 26%, transparent); }
-.status-warn { color: var(--ow-warn); background: var(--ow-warn-soft); border-color: color-mix(in srgb, var(--ow-warn) 26%, transparent); }
-.status-danger { color: var(--ow-danger); background: var(--ow-danger-soft); border-color: color-mix(in srgb, var(--ow-danger) 26%, transparent); }
-.status-info { color: var(--ow-info); background: var(--ow-info-soft); border-color: color-mix(in srgb, var(--ow-info) 26%, transparent); }
-.status-neutral { color: var(--ow-text-secondary); background: var(--ow-surface-2); border-color: var(--ow-border); }
-.status-unknown { color: var(--ow-unknown); background: var(--ow-unknown-soft); border-color: var(--ow-border); border-style: dashed; }
+/* Tags. The legacy `.status` pill and its tone classes were removed with `Ui.StatusBadge`
+   (zero callers); the canonical renderers are components/app/status.tsx and status-indicator.tsx. */
 /* The caps are presentation, so they live here and the catalog holds prose ("System", not
    "SYSTEM"). It is also what lets the vocabulary gate tell a design tag apart from a wire code. */
 .tag { display: inline-flex; align-items: center; font-size: var(--ow-type-label); font-weight: 700; letter-spacing: .04em; padding: 2px 4px; border: 1px solid var(--ow-border-strong); border-radius: var(--ow-radius-control); color: var(--ow-text-secondary); margin-left: 8px; vertical-align: middle; }
@@ -593,7 +588,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .spinner-label { display: inline-flex; align-items: center; gap: 8px; color: var(--ow-accent); font-size: var(--ow-type-sm); margin-top: 8px; }
 .wizard-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px 16px; border-top: 1px solid var(--ow-border); }
 .readiness-block { display: flex; align-items: center; gap: 24px; padding: 24px 16px 8px; }
-.readiness-number { font-size: var(--ow-type-hero); font-weight: 600; letter-spacing: -.04em; line-height: 1; color: var(--ow-text); }
+.readiness-number { font-size: var(--ow-type-xl); font-weight: 600; letter-spacing: -.04em; line-height: 1; color: var(--ow-text); }
 .readiness-number span { color: var(--ow-text-muted); font-size: var(--ow-type-xl); }
 .readiness-copy strong { font-size: var(--ow-type-base); }
 .readiness-copy p { color: var(--ow-text-muted); font-size: var(--ow-type-sm); }

@@ -4,53 +4,7 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { Label } from './ui/label';
 import { useI18n, useT } from '../i18n';
 import { ageMessage } from '../lib/age';
-import { STATUS_MAP, glyphForTone } from './status-tone';
 import { Button } from './ui/button';
-import type { MessageKey } from '../i18n';
-
-export function PageHeader({
-  title,
-  description,
-  actions,
-  eyebrow,
-}: {
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  actions?: React.ReactNode;
-  eyebrow?: string;
-}) {
-  return (
-    <header className="page-header">
-      <div className="page-header-copy">
-        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <h1>{title}</h1>
-        {description && <p className="page-description">{description}</p>}
-      </div>
-      {actions && <div className="page-actions">{actions}</div>}
-    </header>
-  );
-}
-
-// The wire code -> tone/label contract lives in status-tone.ts so the shadcn Badge in the
-// migrated pages and this legacy pill can never disagree about it.
-
-export function StatusBadge({ status, label }: { status: string; label?: string }) {
-  const t = useT();
-  const code = status?.toUpperCase();
-  const known = code ? STATUS_MAP[code] : undefined;
-  const tone = known?.tone || 'unknown';
-  const glyph = glyphForTone(tone);
-  // A code this mapping does not know is protocol data, not copy: render it verbatim
-  // (only a missing code becomes a localized "Unknown"). data-status keeps the value
-  // machine-readable so selectors never depend on localized text.
-  const text = label || (known ? t(known.labelKey) : status || t('status.unknown'));
-  return (
-    <span className={`status status-${tone}`} data-status={code || undefined}>
-      <Icon name={glyph} size={12} />
-      {text}
-    </span>
-  );
-}
 
 export function EmptyState({
   icon = 'inbox',

@@ -53,6 +53,10 @@ const CONTROL_TIERS = [32, 40];
 const RADIUS_OK = /(var\(--ow-radius-(control|card|pill)\)|^0$|^inherit$|^9999px$)/;
 const TYPE_TIERS = [11, 13, 15, 26];
 const TYPE_TOKENS = ['--ow-type-label', '--ow-type-meta', '--ow-type-body', '--ow-type-title'];
+// ADR-017 §D5 names these three display exceptions. A clamp is a range, not a tier: the title's
+// maximum is 26 and its 390 floor is 20. The metric figure stays 21 so the KPI zeros do not
+// outshout the health verdict; the login hero is the one display headline.
+const TYPE_EXEMPT_TOKENS = new Set(['--ow-type-xl', '--ow-type-metric', '--ow-type-hero']);
 const CONTROL_PRIMITIVES = ['button.tsx', 'input.tsx', 'select.tsx', 'checkbox.tsx', 'switch.tsx', 'tabs.tsx'];
 const GLYPH_HEIGHTS = ['h-2', 'h-3', 'h-3.5', 'h-4', 'h-5', 'h-6'];
 
@@ -126,6 +130,7 @@ for (const line of cssLines) {
   if (m) declared.set('--ow-type-' + m[1], m[2].trim());
 }
 for (const [token, value] of declared) {
+  if (TYPE_EXEMPT_TOKENS.has(token)) continue;
   const px = value.match(/^(\d+)px$/);
   const named = TYPE_TOKENS.includes(token);
   if (!px) { if (named || TYPE_TIERS.length) add('type-tier', 'styles.css', 0, token + ': ' + value + ' is not one of the four tiers'); continue; }

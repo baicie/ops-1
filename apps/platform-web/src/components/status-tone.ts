@@ -111,7 +111,7 @@ export function statusForCode(code?: string | null): StatusEntry | undefined {
 }
 
 /**
- * `StatusBadge` glyph for a tone. Colour never carries the meaning alone: every tone has its
+ * The status renderer's glyph for a tone. Colour never carries the meaning alone: every tone has its
  * own glyph, and UNKNOWN is the only one that draws a question-like arrow next to a dashed
  * border, so "success" and "unknown" separate in shape as well as in hue.
  */

@@ -40,6 +40,10 @@
 
 见 `phase-0-baseline.md` §6 与 ADR-017。最关键的三个：四类页面模式进入 `page-template.md`（Pattern D 保留 Studio header，P3 移出 V1）；字体 12/14/16 与 11/13/15/26 的冲突（ADR-017 §D5 决定值先行、标题 20→26 例外）；`code_acceptance` 与本轮无关，未改。
 
+### DS-V1-1 — Token 值与 PageHeader 收敛
+
+本轮同时执行 DS-V1-1 的第一批：类型值迁移（body 15 / sm 13 / label 11 / title clamp 20→26；metric 21 作为命名例外；hero 仅 login）、删除双 PageHeader（3 个调用点迁移）与零调用的 `Ui.StatusBadge` 及其 6 条 `.status-*` CSS。`type-tier` 与 `one-header` 从 6/3 降到 **0/0**，Tailwind 删除未声明的 `text-xs`，`styles.token-contract.test.ts` 与 `check-ui-tokens` 的例外表同步。metric 的 26px 第一版在实测中让 KPI 的 `0` 比健康判决更抢眼并把首屏下移 33px，已回退为命名的 21px 例外。完整记录：[ds-v1-1.md](ds-v1-1.md)。未做：token 改名、`ErrorState`/`MetricCard`/`Dialog` 收敛、CSS 文件拆分、`.btn`（Studio 例外）。
+
 ## 2. 三个标杆的 Before / After
 
 | 页面 | Before 证据 | After 证据 | 数据真实性与关键状态 | 结论 |
@@ -61,7 +65,7 @@
 | Build | `pnpm --filter @opsweave/platform-web build` | **PASS** | 同上 |
 | i18n | `node scripts/check-i18n.mjs` | **PASS** — 1,920 keys × 2；17 条既有 unused | 同上 |
 | Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 codes | 同上 |
-| UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — 0/0/6/3/0/0 | 同上 |
+| UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — 0/0/0/0/0/0（DS-V1-1 后） | 同上 |
 | UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 measurements，0 violations | fixture 矩阵 |
 | Playwright Overview 状态 | `... playwright test overview-partial.spec.ts` | **PASS** — 7/7 | 本机 Kernel `18291`；已进入 g12-acceptance 确定性 job |
 | Playwright Overview 矩阵 | `... playwright test visual.spec.ts -g "responsive overview matrix"` | **PASS** — 6 组合 | 本机 |
@@ -69,6 +73,8 @@
 | Playwright Overview 矩阵 | `... playwright test overview-matrix.spec.ts` | **PASS** — 12 组合 | 本机；已进入 g12-acceptance 确定性 job |
 | Spec coverage | `node tests/ci/check-spec-coverage.mjs` | **PASS** — 30 covered / 23 explicit-skip / 0 unreferenced；三个旗舰 spec 均 COVERED ← g12-acceptance | 本机 |
 | Deterministic g12 harness | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.6 min；acceptance 195/0；exit 0 | 本机后台，含新增 3 个 spec |
+| Playwright DS-V1-1 矩阵 | `artifacts/ui/visual-v1/after-ds-v1-1/` | **PASS（证据）** — 36 images；Overview header 80，无横向溢出 | 本机 |
+| Deterministic g12 harness (DS-V1-1) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），8.0 min；acceptance 195/0；exit 0 | 类型/PageHeader 变更后 |
 | Playwright Incident 状态 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） | 本机 Kernel `18291` |
 | Playwright Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（trusted 行仍在 present 时渲染） | 本机，DB `opsweave_visual_v1` |
 | Playwright Incident workspace trust | `... --config incidents-workspace.config.ts -g "every evidence row carries a trust level"` | **FAIL（预存在 fixture 不符）** | 该 spec 期望种子里有 SOURCE_ATTESTED 行；g12d 种子只有 UNVERIFIED/OPERATOR_ASSERTED，且 legend 自带 `ok` chip；本轮改动未触及 trust 渲染 |
@@ -93,9 +99,9 @@
 
 - **P0（未修，需产品决策）**：Incident 的 digest mismatch 仍可读 bytes（安全/产品决策，不能只改视觉）；Observability 的 per-row observed time 仍只在 hover title；Observability/Incident 的完整视觉重排仍 `NOT_RUN`。
 - **P1**：Overview 无 STALE 策略、shell/页面双轮询可短暂矛盾、KPI 逐卡时间缺失；Observability 的 history/events 更多边界、per-row observed time 仍 hover-only；Incident 的 header 缺 owner/scope、审计不可折叠、verifiedAt 未渲染、fingerprint 只在 viewer、rail 首答前 0/0。三标杆矩阵已进入 g12-acceptance；`incidents-workspace.spec.ts` 仍是 explicit skip（fixture 缺 SOURCE_ATTESTED）。
-- **已修（本轮）**：Observability 的 Reporting 0/0、`entityRows` 缺失计数、unreachable 实体 KPI 0/N、DEGRADED 折叠、实例/事件面板 loading/error、刷新失败静默、`staleSamples` 不可见、Reporting 计数与过滤谓词不一致；Incident 证据 403 死代码、`incident-evidence-trusted` 在 loading/forbidden 时的 0/0、assurance 改为 considered 集、stale banner 的原始码与浏览器 locale 时间。
-- **P1（门禁）**：三标杆矩阵不在 PR 门禁；`check-ui-metrics` fail-open；PNG 预算零余量；无对比度/触摸目标/视觉 diff；`tests/ui` 不 typecheck。
-- **P2**：字体 12px 迁移的表格卡片几何重算；`Ui.StatusBadge` 零调用未删；`AVAILABLE`/`CANCELLED` 语义分歧；`components/domain/` 未建。
-- **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring**。全量 V1（字体/组件收敛、三标杆完整视觉重排、route coverage 强化）**NOT_READY**，不在本 PR 声称完成。
-- 下一最小 PR 建议：① DS-V1-1 的字体/PageHeader/Button 收敛；② route coverage 强化（`check-ui-metrics` 空页 fail-open、route 清单）；③ 产品决策：Incident digest mismatch 的可读性。
+- **已修（本轮）**：Observability 的 Reporting 0/0、`entityRows` 缺失计数、unreachable 实体 KPI 0/N、DEGRADED 折叠、实例/事件面板 loading/error、刷新失败静默、`staleSamples` 不可见、Reporting 计数与过滤谓词不一致；Incident 证据 403 死代码、`incident-evidence-trusted` 在 loading/forbidden 时的 0/0、assurance 改为 considered 集、stale banner 的原始码与浏览器 locale 时间；DS-V1-1 的类型值迁移、双 PageHeader 去重、死 `Ui.StatusBadge` 与 `.status-*` CSS、type-tier/one-header 预算归零。
+- **P1（门禁）**：三标杆矩阵已进入 g12-acceptance；`check-ui-metrics` 仍 fail-open、PNG 预算零余量、无对比度/触摸目标/视觉 diff、`tests/ui` 不 typecheck。
+- **P2**：token 改名、`ErrorState`/`MetricCard`/`Dialog` 收敛、CSS 文件拆分、`.btn`（Studio 例外）、`AVAILABLE`/`CANCELLED` 语义分歧、`components/domain/` 未建。
+- **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring + DS-V1-1 第一批**。全量 V1（DS-V1-1b、三标杆完整视觉重排、route coverage 强化）**NOT_READY**，不在本 PR 声称完成。
+- 下一最小 PR 建议：① DS-V1-1b（`ErrorState`/`MetricCard`/`Dialog` 收敛与 token 改名）；② route coverage 强化（`check-ui-metrics` 空页 fail-open、route 清单）；③ 产品决策：Incident digest mismatch 的可读性。
 - 本 PR **未**自动合并、未转 Ready（Draft）、未打 Tag、未发布、未部署。

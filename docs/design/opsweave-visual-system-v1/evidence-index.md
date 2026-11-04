@@ -26,6 +26,7 @@ node tests/ui/visual-v1-capture.mjs
 |---|---|
 | `artifacts/ui/visual-v1/before/` | 36 张 PNG + `_manifest.json` + 每页 `_metrics_*.json` |
 | `artifacts/ui/visual-v1/after/` | 同上；三页矩阵在 `25a784c`，证据 403 特写与全页截图在 `d47fbfd`，Observability metrics 在 `ef30d48`，Gate wiring 在 `c90c8f6`（均基于 `775a1e2`） |
+| `artifacts/ui/visual-v1/after-ds-v1-1/` | DS-V1-1 后的 36 张矩阵：body 15 / sm 13 / metric 21（命名例外）/ title clamp；Overview header 80，无横向溢出 |
 | `artifacts/ui/observability/shots/` | `observability-surface.spec.ts` 的 fixture 矩阵（未跟踪） |
 | `artifacts/ui/visual-v1/after/` | 证据 403 的两张 capture：`incident-forbidden-1440-light-en`（全页，stale banner）与 `incident-forbidden-panel-1440-light-en`（permission-wall 面板特写）；未跟踪，不作为 Git evidence link，由 `g11-incident-state-gaps.spec.ts` 复现 |
 
@@ -54,7 +55,7 @@ node tests/ui/visual-v1-capture.mjs
 | Build | `pnpm --filter @opsweave/platform-web build` | **PASS** — vite build，169.26 kB CSS / 1,313.78 kB JS（既有 chunk 警告，未新增） |
 | i18n | `node scripts/check-i18n.mjs` | **PASS** — en/zh-CN 各 1,920 keys；17 条既有 unused warning（非本轮新增） |
 | Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 protocol codes |
-| UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — radius 0/0、control 0/0、type 6/6、one-header 3/3、uppercase 0/0、format 0/0 |
+| UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — radius 0/0、control 0/0、type 0/0、one-header 0/0、uppercase 0/0、format 0/0（DS-V1-1 后） |
 | UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 page measurements，0 violations（14 节点 fixture；tracked metrics 已更新） |
 | PNG budget | `node tests/ci/check-tracked-png-budget.mjs` | **PASS** — 408 files / 65.97 MB（ceiling 408 / 68.24 MB），0 新增 |
 | Spec coverage | `node tests/ci/check-spec-coverage.mjs` | **PASS** — 30 covered / 23 explicit-skip / 0 unreferenced；`overview-matrix`、`overview-partial`、`observability-surface` 均 COVERED ← g12-acceptance |
@@ -69,6 +70,7 @@ node tests/ui/visual-v1-capture.mjs
 | Overview 12 组合矩阵（门禁） | `... playwright test overview-matrix.spec.ts` | **PASS** — 1 test / 12 组合（3 视口 × 2 主题 × 2 语言），已进入 g12-acceptance |
 | Observability fixture 矩阵 | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 11/11（14 节点 fixture；新增 DEGRADED、zero fleet 0/0、unreachable KPI、刷新失败 4 个断言）；已进入 g12-acceptance |
 | Deterministic g12 harness | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.6 min；acceptance 195/0；exit 0 | 本机后台，含新增 3 个 spec |
+| Deterministic g12 harness (DS-V1-1) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），8.0 min；acceptance 195/0；exit 0 | 本机后台，类型/PageHeader 变更后 |
 | Incident 状态缺口 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） |
 | Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（trusted 行仍在 present 时渲染） |
 | Incident workspace trust | `... --config incidents-workspace.config.ts -g "every evidence row carries a trust level"` | **FAIL（预存在 fixture 不符）** — g12d 种子只有 UNVERIFIED/OPERATOR_ASSERTED，spec 期望 SOURCE_ATTESTED；页面 legend 自带 `ok` chip；本轮未改 trust 渲染 |

@@ -20,13 +20,13 @@
 |---|---|---|
 | 基线与设计决策（DS-V1-0） | PASS（见证据索引） | [phase-0-baseline.md](phase-0-baseline.md) |
 | 组件所有权与调用点 | PASS（静态审计） | [component-ownership.md](component-ownership.md) |
-| Token/字体冲突与决策 | PASS（决策）；迁移 NOT_RUN | [ADR-017 §D5](../../adr/ADR-017-visual-system-v1.md) |
+| Token/字体冲突与决策 | PASS（决策）；值迁移 PASS；改名 NOT_RUN | [ADR-017 §D5](../../adr/ADR-017-visual-system-v1.md) / [ds-v1-1](ds-v1-1.md) |
 | 第一标杆 `/admin/overview` | PASS（本地真实 Chromium + 矩阵） | 本文 §第一标杆 |
 | Incident 证据 403 / 0-0 语义修复 | PASS（`g11-incident-state-gaps` 6/6 + lifecycle 1/1） | [report §1](report.md) |
 | Observability 0/0 / DEGRADED 语义修复 | PASS（`observability-surface` 11/11 + 426 单测） | [report §1](report.md) |
 | 三标杆矩阵接入 PR 门禁 | PASS（g12 harness 64 tests；`check-spec-coverage` 30 covered） | [report §2](report.md) |
 | 第二/第三标杆（完整视觉重做） | NOT_RUN | 下一阶段 |
-| 全局字体/PageHeader/Button 收敛 | NOT_RUN | DS-V1-1 |
+| 全局字体/PageHeader/Button 收敛 | PASS（值 + PageHeader + 死 StatusBadge）；ErrorState/MetricCard/Dialog/改名 NOT_RUN | [ds-v1-1](ds-v1-1.md) |
 | 门禁迁移（route→pattern、route coverage） | NOT_RUN | ADR-017 §D6 |
 | 证据与命令 | PASS | [evidence-index.md](evidence-index.md) |
 | 交付报告 | PASS（Draft PR 链接在 PR 创建后补） | [report.md](report.md) |

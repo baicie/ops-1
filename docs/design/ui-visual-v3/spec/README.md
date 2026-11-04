@@ -10,11 +10,11 @@ by a command whose output is quoted next to it, and every rule has a gate that c
 
 > **Visual System V1 (2026-11-04).** [ADR-017](../../../adr/ADR-017-visual-system-v1.md) amends this spec:
 > `page-template.md` gains Pattern A/B/C/D plus a route→pattern registry (Pattern B stays the default);
-> `token-table.md` keeps 11/13/15/26 with a documented 20→26 title clamp, and the 12px tier is scheduled for
-> removal in DS-V1-1. The census and gate transcripts below are historical (HEAD `7fd0c99`/`1f1feeb`); the
-> measured state at `775a1e2` and the migration order are in
-> [`docs/design/opsweave-visual-system-v1/`](../../opsweave-visual-system-v1/README.md). This spec remains
-> normative until the ADR's migration steps land; the ADR wins only where it names an explicit exception.
+> `token-table.md` keeps 11/13/15/26 with named exceptions for the 20→26 title clamp and the 21px metric
+> figure; DS-V1-1 removed the 12px tier. The census and gate transcripts below are historical (HEAD
+> `7fd0c99`/`1f1feeb`); the measured state at `775a1e2`, the DS-V1-1 record and the remaining rename work are
+> in [`docs/design/opsweave-visual-system-v1/ds-v1-1.md`](../../opsweave-visual-system-v1/ds-v1-1.md). This
+> spec remains normative until the migration steps land; the ADR wins only where it names an explicit exception.
 
 | file | answers | gate |
 |---|---|---|
