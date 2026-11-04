@@ -25,7 +25,7 @@ node tests/ui/visual-v1-capture.mjs
 | 目录 | 内容 |
 |---|---|
 | `artifacts/ui/visual-v1/before/` | 36 张 PNG + `_manifest.json` + 每页 `_metrics_*.json` |
-| `artifacts/ui/visual-v1/after/` | 同上；after 是改动后的工作树（基于 `775a1e2`，提交 SHA 见 PR） |
+| `artifacts/ui/visual-v1/after/` | 同上；after 是改动后的实现提交 `25a784c`（基于 `775a1e2`） |
 | `artifacts/ui/observability/shots/` | `observability-surface.spec.ts` 的 fixture 矩阵（未跟踪） |
 
 `_manifest.json` 记录 base URL、base SHA、capturedAt、Chromium 版本、账号、每页 metrics 文件名。该脚本不断言任何东西，只记录；断言在 Playwright 测试里。
