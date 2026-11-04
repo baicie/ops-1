@@ -27,8 +27,7 @@ node tests/ui/visual-v1-capture.mjs
 | `artifacts/ui/visual-v1/before/` | 36 张 PNG + `_manifest.json` + 每页 `_metrics_*.json` |
 | `artifacts/ui/visual-v1/after/` | 同上；三页矩阵在 `25a784c`，证据 403 特写与全页截图在 `d47fbfd`（均基于 `775a1e2`） |
 | `artifacts/ui/observability/shots/` | `observability-surface.spec.ts` 的 fixture 矩阵（未跟踪） |
-| `artifacts/ui/visual-v1/after/incident-forbidden-1440-light-en.png` | 证据 403 的全页证据（stale banner） |
-| `artifacts/ui/visual-v1/after/incident-forbidden-panel-1440-light-en.png` | 证据 403 的 permission-wall 面板特写 |
+| `artifacts/ui/visual-v1/after/` | 证据 403 的两张 capture：`incident-forbidden-1440-light-en`（全页，stale banner）与 `incident-forbidden-panel-1440-light-en`（permission-wall 面板特写）；未跟踪，不作为 Git evidence link，由 `g11-incident-state-gaps.spec.ts` 复现 |
 
 `_manifest.json` 记录 base URL、base SHA、capturedAt、Chromium 版本、账号、每页 metrics 文件名。该脚本不断言任何东西，只记录；断言在 Playwright 测试里。
 

@@ -38,9 +38,9 @@
 
 | 页面 | Before 证据 | After 证据 | 数据真实性与关键状态 | 结论 |
 |---|---|---|---|---|
-| `/admin/overview` | `artifacts/ui/visual-v1/before/overview__r{1440,1024,390}-{light,dark}-{en,zh-CN}.png` | `artifacts/ui/visual-v1/after/overview__...` | live 空/未配置（无 Docker）；PARTIAL/DEGRADED/ATTENTION/READY+计数矛盾由 `overview-partial.spec.ts` 对真实 `/api/v1/overview` 改写后验证 | **PASS（本轮范围）** |
-| `/app/observability` | `.../before/observability__...` | 未重做（after 仅同状态捕获） | live 空 + 13 节点 fixture 矩阵（`OBS_DATA=fixtures`，明确标注） | **NOT_RUN（视觉重做）**；现有 fixture 矩阵 PASS |
-| `/app/incidents/:id` | `.../before/incident__...`（g12d 种子 incident A，5 条 evidence） | `.../after/incident-forbidden-1440-light-en.png`、`.../after/incident-forbidden-panel-1440-light-en.png`；正常布局沿用 before | 真实 g12d 数据 + 对证据端点强制 403（明确为 forced）；403/0-0 语义由 `g11-incident-state-gaps.spec.ts` 6/6 与 `g12-lifecycle` 1/1 验证 | **PASS（403/0-0 语义）**；完整视觉重做 **NOT_RUN** |
+| `/admin/overview` | `artifacts/ui/visual-v1/before/`（36-image matrix） | `artifacts/ui/visual-v1/after/`（同矩阵） | live 空/未配置（无 Docker）；PARTIAL/DEGRADED/ATTENTION/READY+计数矛盾由 `overview-partial.spec.ts` 对真实 `/api/v1/overview` 改写后验证 | **PASS（本轮范围）** |
+| `/app/observability` | `artifacts/ui/visual-v1/before/`（observability__*） | 未重做（after 仅同状态捕获） | live 空 + 13 节点 fixture 矩阵（`OBS_DATA=fixtures`，明确标注） | **NOT_RUN（视觉重做）**；现有 fixture 矩阵 PASS |
+| `/app/incidents/:id` | `artifacts/ui/visual-v1/before/`（incident__*，g12d 种子 incident A，5 条 evidence） | `artifacts/ui/visual-v1/after/` 的 `incident-forbidden-*` 两张 capture（未跟踪）；正常布局沿用 before | 真实 g12d 数据 + 对证据端点强制 403（明确为 forced）；403/0-0 语义由 `g11-incident-state-gaps.spec.ts` 6/6 与 `g12-lifecycle` 1/1 验证 | **PASS（403/0-0 语义）**；完整视觉重做 **NOT_RUN** |
 
 关键状态（Overview）：正常/未配置、PARTIAL（503、空 body、pending）、DEGRADED、ATTENTION、READY+非就绪计数、INFO、未知 health code。`UNKNOWN` 不再画成 ATTENTION；`PARTIAL` 的来源行在首屏可见；READY 不再在计数未就绪时打印 all-clear。
 
