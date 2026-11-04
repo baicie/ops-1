@@ -11,7 +11,7 @@
 ## 1. 最新 HEAD
 
 - 基线：`d3d5955`（DS-V1-1b）
-- 本批提交：见 §12（提交哈希在推送后回填）
+- 本批提交：`f7c64e9`（代码）、`33202e3`（文档）、`78a3561`（KPI 以标题为上限）
 - 工作树：实现、测试、文档；完整矩阵截图未跟踪
 
 ## 2. 实际修改文件
@@ -96,7 +96,7 @@
 - Pipelines：4 卡，latestRevision `r2`、nodes、latest run、updated；列数与 Jobs 一致。
 - Governance：4 卡，1440 4 列、1024 2 列、390 1 列；缺失 `datasetCount`/`lineageWindowCount` 时 `data-metric-state="unknown"`、`data-value="UNKNOWN"`，不打印 0。
 - 每张卡：值非空、无 `NaN`/`undefined`、`data-metric-state` 合法、页面无横向溢出。
-- **类型层级修正**：`.ow-metric-value` 从 title 26 改为 `min(metric, title)`（1440 为 21，390 与 20px 的 h1 同为 20），`.ow-metric-label` 从 meta 13 改为 label 11；与 Overview 的 stat-strip 一致，满足 ADR-017 §D5 的 title 26 > KPI 21 > body 15，且窄屏不会出现 KPI 大于 h1。修复前 15 个迁移卡片的 KPI 与 h1 同大。
+- **类型层级修正**：`.ow-metric-value` 从 title 26 改为 `min(metric, title)`（1440 为 21，390 与 20px 的 h1 同为 20），`.ow-metric-label` 从 meta 13 改为 label 11；与 Overview 的 stat-strip 一致，满足 ADR-017 §D5 的 title 26 > KPI 21 > body 15，且窄屏不会出现 KPI 大于 h1。修复前 15 个迁移卡片的 KPI 与 h1 同大。最终矩阵实测：1440 h1 26 / KPI 21 / label 11；390 h1 20 / KPI 20 / label 11。
 - **手机 KPI 密度**：≤640 时 `.metric-grid`、`.pipeline-stats`、`.job-stats` 与 IncidentDetail 的 `.incident-kpis` 为 2×2，而不是 4 张全宽卡；表格卡仍按 1 列。390 上 Sources 首个连接器行从约 y=1000 提前到约 y=740。
 - 未改动的可点击 KPI 卡（Overview/Observability/Sources/Incidents）已有 `[data-metric-card]` 链接；本批未改其目标。
 
@@ -125,7 +125,7 @@ CI 中对应截图作为 Playwright artifact；PNG 预算未增加（408 文件 
 
 ## 10. 最新 CI 结论
 
-- 本地确定性 harness（本批代码）：`bash tests/ci/g12_acceptance_ci.sh` — **PASS**，**98 tests（96 passed / 2 skipped）**，7.8 min；acceptance **195/0**；exit 0。两条 skip 仍是 Docker/Studio 依赖（`g11-page-header-growth` 的 counterfactual 与 Studio 用例）。
+- 本地确定性 harness（本批代码）：`bash tests/ci/g12_acceptance_ci.sh` — **PASS**，**98 tests（96 passed / 2 skipped）**，7.7 min；acceptance **195/0**；exit 0。两条 skip 仍是 Docker/Studio 依赖（`g11-page-header-growth` 的 counterfactual 与 Studio 用例）。
 - 最新 HEAD 的 GitHub Actions 结论：见 §12 推送后回填（必须亲自确认，不以本地替代）。
 
 ## 11. 独立审查与 P0 / P1 / P2
@@ -136,7 +136,7 @@ CI 中对应截图作为 Playwright artifact；PNG 预算未增加（408 文件 
 
 **P1（已修复并留反事实）**
 1. **路由切换 reset 顺序**：`resetBodyState()` 在 passive effect 中晚于新页面 boundary 的 report，会清掉刚到任的状态；插件错误缓存后离开再返回，页面报错而 chrome 显示 ready。修复为 `useLayoutEffect`；用 client-side link + `goBack()` 复现，反事实（改回 `useEffect`）下插件历史测试转红。
-2. **KPI 类型层级**：15 个迁移卡片的 value 为 title 26、label 13，与 Overview 的 21/11 不一致，KPI 与 h1 同大。修复 `.ow-metric-value: 21px` / `.ow-metric-label: 11px`，重建 48 张矩阵。
+2. **KPI 类型层级**：15 个迁移卡片的 value 为 title 26、label 13，与 Overview 的 21/11 不一致，KPI 与 h1 同大。修复为 `.ow-metric-value: min(metric, title)` / `.ow-metric-label: label`；实测 1440 为 26/21/11，390 为 20/20/11（KPI 不再高于 h1）。重建 48 张矩阵。
 
 **P2（已处理）**
 - `--manifest` + `--matrix` 同时传入会混用两套路由索引 → 直接 exit 2，并加自测。

@@ -103,7 +103,7 @@
 | Playwright DS-V1-1 矩阵 | `artifacts/ui/visual-v1/after-ds-v1-1/` | **PASS（证据）** — 36 images；Overview header 80，无横向溢出 | 本机 |
 | Deterministic g12 harness (DS-V1-1) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），8.0 min；acceptance 195/0；exit 0 | 类型/PageHeader 变更后 |
 | Deterministic g12 harness (DS-V1-1b) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.5 min；acceptance 195/0；exit 0 | 本机后台，DS-V1-1b 后 |
-| Deterministic g12 harness (DS-V1-1c) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 98 tests（96 passed / 2 skipped），7.8 min；acceptance 195/0；exit 0 | 本机后台，含 dialog/boundary/sources/metric 矩阵 |
+| Deterministic g12 harness (DS-V1-1c) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 98 tests（96 passed / 2 skipped），7.7 min；acceptance 195/0；exit 0 | 本机后台，含 dialog/boundary/sources/metric 矩阵 |
 | Playwright Incident 状态 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） | 本机 Kernel `18291` |
 | Playwright Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（ConfirmAction → DialogFrame） | 本机，DB `opsweave_visual_v1` |
 | Playwright command palette | `... playwright test admin-shell.spec.ts -g "command palette opens"` / `-g "navigation becomes a drawer at 1024"` | **PASS** — 2/2（center dialog + 1024 sheet） | 本机 |
@@ -130,8 +130,8 @@
 - **P0（未修，需产品决策）**：Incident 的 digest mismatch 仍可读 bytes（安全/产品决策，不能只改视觉）；Observability 的 per-row observed time 仍只在 hover title；Observability/Incident 的完整视觉重排仍 `NOT_RUN`。
 - **P1**：Overview 无 STALE 策略、shell/页面双轮询可短暂矛盾、KPI 逐卡时间缺失；Observability 的 history/events 更多边界、per-row observed time 仍 hover-only；Incident 的 header 缺 owner/scope、审计不可折叠、verifiedAt 未渲染、fingerprint 只在 viewer、rail 首答前 0/0。三标杆矩阵已进入 g12-acceptance；`incidents-workspace.spec.ts` 仍是 explicit skip（fixture 缺 SOURCE_ATTESTED）。
 - **已修（本轮）**：Observability 的 Reporting 0/0、`entityRows` 缺失计数、unreachable 实体 KPI 0/N、DEGRADED 折叠、实例/事件面板 loading/error、刷新失败静默、`staleSamples` 不可见、Reporting 计数与过滤谓词不一致；Incident 证据 403 死代码、`incident-evidence-trusted` 在 loading/forbidden 时的 0/0、assurance 改为 considered 集、stale banner 的原始码与浏览器 locale 时间；DS-V1-1 的类型值迁移、双 PageHeader 去重、死 `Ui.StatusBadge` 与 `.status-*` CSS、type-tier/one-header 预算归零。
-- **P1（门禁）**：三标杆矩阵已进入 g12-acceptance；`check-ui-metrics` 的空页/route fail-open 已修（`--manifest` + 自测），PNG 预算零余量、无对比度/触摸目标/视觉 diff、`tests/ui` 不 typecheck 仍未解决。
-- **P2**：CSS 文件拆分、`.btn`（Studio 例外）、`AVAILABLE`/`CANCELLED` 语义分歧、`components/domain/` 未建、route→pattern registry 与 `--template` 全量覆盖。
+- **P1（门禁）**：三标杆矩阵与 Sources/KPI/dialog/boundary 矩阵已进入 g12-acceptance；`check-ui-metrics` 的空页/route/matrix fail-open 已修（`--manifest`、`--matrix`、14 条自测），PNG 预算零余量、无对比度/触摸目标/视觉 diff、`tests/ui` 不 typecheck 仍未解决。
+- **P2**：CSS 文件拆分、`.btn`（Studio 例外）、`AVAILABLE`/`CANCELLED` 词汇改造（决策见 ADR-017 §D9）、`components/domain/` 未建、route→pattern registry 与 `--template` 全量覆盖；视觉审查保留的 Overview/Jobs/zh 文案等 P2 见 `ds-v1-1c.md` §11。
 - **已修（DS-V1-1b）**：token 改名；`ErrorState` → `AsyncBoundary`（含 `report`/`source`/`AsyncErrorMessage`）；15 处 `.panel.metric-card` → `MetricCard`；`.modal*` 与 DialogHeader 两套几何合并为 `DialogFrame`；`check-ui-metrics` 空 pages fail-open 与 route manifest。
 - **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring + DS-V1-1 + DS-V1-1b**。全量 V1（三标杆完整视觉重排、route→pattern registry、CSS 拆分）**NOT_READY**，不在本 PR 声称完成。
 - 下一最小 PR 建议：① 产品决策：Incident digest mismatch 的可读性；② route→pattern registry 与 `--template` 全量覆盖；③ CSS 模块化拆分与 `.btn`（Studio）迁移。

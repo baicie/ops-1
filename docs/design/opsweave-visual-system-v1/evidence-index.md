@@ -82,7 +82,7 @@ node tests/ui/visual-v1-capture.mjs
 | Deterministic g12 harness | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.6 min；acceptance 195/0；exit 0 | 本机后台，含新增 3 个 spec |
 | Deterministic g12 harness (DS-V1-1) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），8.0 min；acceptance 195/0；exit 0 | 本机后台，类型/PageHeader 变更后 |
 | Deterministic g12 harness (DS-V1-1b) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.5 min；acceptance 195/0；exit 0 | 本机后台，改名 + ErrorState/MetricCard/DialogFrame 后 |
-| Deterministic g12 harness (DS-V1-1c) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 98 tests（96 passed / 2 skipped），7.8 min；acceptance 195/0；exit 0 | 本机后台，含 dialog/boundary/sources/metric 矩阵 |
+| Deterministic g12 harness (DS-V1-1c) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 98 tests（96 passed / 2 skipped），7.7 min；acceptance 195/0；exit 0 | 本机后台，含 dialog/boundary/sources/metric 矩阵 |
 | Dialog contract | `... playwright test dialog-contract.spec.ts` | **PASS** — 4/4（ARIA、pending、palette、modal） | 本机 |
 | Dialog geometry | `... playwright test dialog-geometry.spec.ts` | **PASS** — 16/16，48 screenshots；modal 16/16 | 本机，47s |
 | Boundary ownership | `... playwright test boundary-ownership.spec.ts` | **PASS** — 6/6 | 本机，含真实 extension loader |
@@ -120,12 +120,12 @@ node tests/ui/visual-v1-capture.mjs
 ## 5. 预存在缺陷（不属于本轮，未修）
 
 - `g11-page-header-growth.spec.ts` 的 Studio 用例在有 pipeline 的 host 上失败（`controls.length` 0，期望 ≥9）；在 `b9a01db` 上已复现。
-- `check-ui-metrics.mjs` 对 `{"pages":{}}` fail-open；无 route/width/theme 覆盖清单。
-- `observability-surface.spec.ts`、`incidents-workspace.spec.ts`、`admin-shell.spec.ts`、`visual.spec.ts`、`overview-partial.spec.ts` 不在 PR 门禁（见 `phase-0-baseline.md` §5）。
-- `sources-audit.spec.ts` 的矩阵用例把 `{ w, h }` 直接作为 Playwright `viewport` 传入（Playwright 需要 `{ width, height }`），14 个用例在 DS-V1-1b 改动前就无法启动；本批未修。这一条是**预存在 FAIL**，不是本批回归。
+- ~~`check-ui-metrics.mjs` 对 `{"pages":{}}` fail-open；无 route/width/theme 覆盖清单。~~ **已在 DS-V1-1c 修复**：空页 `page-map-empty`、`--manifest`、`--matrix`、theme/locale 必填、14 条自测。
+- `incidents-workspace.spec.ts`、`admin-shell.spec.ts`、`visual.spec.ts` 仍不在 PR 门禁；`observability-surface`、`overview-partial`、`sources-audit` 与三标杆矩阵已在 DS-V1-1c 进入 g12。
+- ~~`sources-audit.spec.ts` 的矩阵用例把 `{ w, h }` 直接作为 Playwright `viewport` 传入。~~ **已在 DS-V1-1c 修复**：14 个矩阵用例现在真实执行，另加 detail/config 与 sheet 契约。
 - `tests/ui` 不被 typecheck；`test:studio` 不在 CI。
 - `AVAILABLE` 在插件安装状态显示 "Uninstalled" 与 `STATUS_MAP` 的 "Available" 分歧；`CANCELLED` 在 investigation/全局 tone 不一致。
 
 ## 6. 结论
 
-Phase 0 的静态与浏览器证据齐全；第一标杆的改动通过类型、单元、i18n、状态词表、Token、几何、PNG 预算与相关 Playwright。未执行项全部标 `NOT_RUN`；没有把 fixture、截图或未运行项写成 PASS。
+Phase 0 与 DS-V1-1/1b/1c 的静态与浏览器证据齐全；三标杆矩阵、dialog/boundary/sources/metric 矩阵与 14 条门禁自测通过，完整 g12 harness 98 tests（96 passed / 2 skipped）。未执行项全部标 `NOT_RUN`；没有把 fixture、截图或未运行项写成 PASS。最新代码 HEAD 的 CI 结论见 report.md §3。
