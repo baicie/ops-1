@@ -50,12 +50,12 @@ node tests/ui/visual-v1-capture.mjs
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | TypeScript | `pnpm --filter @opsweave/platform-web typecheck` | **PASS** |
-| Vitest | `pnpm --filter @opsweave/platform-web test` | **PASS** — 31 files / 420 tests（`overview-events` + `evidencePanelState` 403） |
+| Vitest | `pnpm --filter @opsweave/platform-web test` | **PASS** — 31 files / 426 tests（`overview-events`、`evidencePanelState` 403、`entityState` degraded、0/0 与过滤谓词） |
 | Build | `pnpm --filter @opsweave/platform-web build` | **PASS** — vite build，169.26 kB CSS / 1,313.78 kB JS（既有 chunk 警告，未新增） |
 | i18n | `node scripts/check-i18n.mjs` | **PASS** — en/zh-CN 各 1,920 keys；17 条既有 unused warning（非本轮新增） |
 | Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 protocol codes |
 | UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — radius 0/0、control 0/0、type 6/6、one-header 3/3、uppercase 0/0、format 0/0 |
-| UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 page measurements，0 violations |
+| UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 page measurements，0 violations（14 节点 fixture；tracked metrics 已更新） |
 | PNG budget | `node tests/ci/check-tracked-png-budget.mjs` | **PASS** — 408 files / 65.97 MB（ceiling 408 / 68.24 MB），0 新增 |
 | Whitespace | `git diff --check` | **PASS** |
 
@@ -65,7 +65,7 @@ node tests/ui/visual-v1-capture.mjs
 |---|---|---|
 | Overview 状态 | `OPSWEAVE_URL=http://127.0.0.1:18291 pnpm exec playwright test overview-partial.spec.ts`（cwd `tests/ui`） | **PASS** — 7/7 |
 | Overview 响应式矩阵 | `... playwright test visual.spec.ts -g "responsive overview matrix"` | **PASS** — 1 test / 6 组合（1440/1024/390 × light/dark），无 pageerror，无 overflow |
-| Observability fixture 矩阵 | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 7/7（含 24 组合矩阵与 3 个语义断言） |
+| Observability fixture 矩阵 | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 11/11（14 节点 fixture；新增 DEGRADED、zero fleet 0/0、unreachable KPI、刷新失败 4 个断言） |
 | Incident 状态缺口 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） |
 | Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（trusted 行仍在 present 时渲染） |
 | Incident workspace trust | `... --config incidents-workspace.config.ts -g "every evidence row carries a trust level"` | **FAIL（预存在 fixture 不符）** — g12d 种子只有 UNVERIFIED/OPERATOR_ASSERTED，spec 期望 SOURCE_ATTESTED；页面 legend 自带 `ok` chip；本轮未改 trust 渲染 |
@@ -86,7 +86,7 @@ node tests/ui/visual-v1-capture.mjs
 | `g11-page-header-growth.spec.ts` | **NOT_RUN** | 需要 pipeline/Studio 数据；header 未改动，PR CI 的 g12-acceptance 覆盖 |
 | 全局字体迁移（11/13/15/26） | **NOT_RUN** | 决策已写 ADR-017 §D5；实现属 DS-V1-1，需要同步改 `styles.token-contract.test.ts` 与 Tailwind 映射 |
 | 双 PageHeader / `.btn` / `ErrorState` 收敛 | **NOT_RUN** | DS-V1-1 |
-| Observability / IncidentDetail 标杆重做 | **NOT_RUN** | 下一阶段；差距见 `phase-0-baseline.md` §4 |
+| Observability / IncidentDetail 完整视觉重排 | **NOT_RUN** | 语义修复已完成；布局/视觉重排下一阶段。`observability-surface.spec.ts` 仍是 `EXPLICIT_SKIP`，新增断言是本地证据 |
 | route→pattern registry 与 `--template` gate | **NOT_RUN** | ADR-017 §D3；先改 spec/gate 再改页面 |
 | 对比度 / 触摸目标 / axe | **NOT_RUN** | 仓库当前无此 Gate；`gateb-v3-evidence.mjs` 只打印比值 |
 | 视觉 diff（toHaveScreenshot） | **NOT_RUN** | 仓库当前没有；截图只作证据 |

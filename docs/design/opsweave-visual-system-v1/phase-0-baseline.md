@@ -79,6 +79,8 @@ PASS
 - 实体页 instances KPI 对 unreachable/revoked 仍打印存储的 0/N；instances/events 面板在 loading/failed 时显示"空"。
 - 该页矩阵规格存在，但**不在任何 workflow**（`check-spec-coverage.mjs:57` EXPLICIT_SKIP）；改动可以无浏览器门禁合入。
 
+**2026-11-04 追加（本轮已修）**：Reporting 卡 `total=0` 不再 0/0；`DEGRADED` 不再折叠为 `unknown`（fleet 与 entity 都有 degraded 状态与提示）；`entityRows` 缺失计数返回 `null`；unreachable 实体 KPI 显示 `UNKNOWN`；instances/events 面板补 loading/unavailable；刷新失败保留旧行并显示本地化 NoticeBar；`staleSamples` 在 coverage note 可见；Reporting 计数与 filtering 使用同一谓词。per-row observed time 仍 hover-only，完整视觉重排仍 `NOT_RUN`。
+
 ### C. `/app/incidents/:id`
 
 现状：事件 → 时间线 → 证据 → 判定；Trust 轴分离（claimed vs verified、弱链接、legend）；409/403/异步失败/readback 有独立状态；390 三 pane 以 tab 可达。

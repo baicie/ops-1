@@ -66,20 +66,24 @@ export function utilisation(value?: number | null): number | null {
  * The effective observational state of a node, in the priority docs/09 §9.5 fixes: a node that
  * stopped answering can never read as healthy, whatever its stored status column says.
  */
-export type EntityState = 'revoked' | 'unreachable' | 'stale' | 'ready' | 'unknown';
+export type EntityState = 'revoked' | 'unreachable' | 'stale' | 'degraded' | 'ready' | 'unknown';
 
 export function entityState(node: NodeView): EntityState {
   if (node.revokedAt) return 'revoked';
   const status = (node.status || '').toUpperCase();
   if (status === 'UNREACHABLE') return 'unreachable';
   if (node.stale) return 'stale';
+  // DEGRADED is a health answer, not an absence of one. The kernel accepts it from the node
+  // agent (apps/kernel/src/nodes.rs:424-427) and status-tone already knows the word; folding it
+  // into `unknown` made a fresh node look like one that had stopped reporting.
+  if (status === 'DEGRADED') return 'degraded';
   if (status === 'READY') return 'ready';
   return 'unknown';
 }
 
 /** Whether a state permits a load reading to be believed at all. */
 export function stateCanReport(state: EntityState): boolean {
-  return state === 'ready' || state === 'stale';
+  return state === 'ready' || state === 'degraded' || state === 'stale';
 }
 
 /**
@@ -97,6 +101,7 @@ const INDICATOR_BY_STATE: Record<EntityState, IndicatorState> = {
   revoked: 'revoked',
   unreachable: 'unreachable',
   stale: 'stale',
+  degraded: 'degraded',
   ready: 'ready',
   unknown: 'unknown',
 };
@@ -248,9 +253,15 @@ export function entityRows(nodes: NodeView[], now = Date.now()): EntityRow[] {
       node,
       state,
       readings: nodeReadings(node),
-      instances: stateCanReport(state)
-        ? { ready: node.instancesReady ?? 0, total: node.instancesTotal ?? 0 }
-        : null,
+      // The two counts are required by the wire type, but an absent pair is not 0/0: the old
+      // `?? 0` fallback would print "0 of 0 ready" for a node whose counts never arrived, which
+      // is the same absence-as-a-number defect the readings type prevents.
+      instances:
+        stateCanReport(state)
+        && typeof node.instancesReady === 'number'
+        && typeof node.instancesTotal === 'number'
+          ? { ready: node.instancesReady, total: node.instancesTotal }
+          : null,
       observedAt,
       stale: sampleIsStale(observedAt, now),
     };
@@ -268,8 +279,11 @@ export function rowSeverity(row: EntityRow): number {
   if (row.state === 'unreachable') return 4;
   if (row.state === 'revoked') return 3;
   if (row.state === 'unknown') return 3;
-  if (row.readings.cpu.kind !== 'reading' && row.readings.memory.kind !== 'reading') return 2;
-  if (row.stale || row.state === 'stale') return 1;
+  // "Reporting" is the same predicate `summarise` uses: ANY metric with a reading. Testing only
+  // CPU and memory counted a filesystem-only node on the KPI card but dropped it from the
+  // `?state=reporting` list the card links to.
+  if (!METRIC_KEYS.some((key) => row.readings[key].kind === 'reading')) return 2;
+  if (row.stale || row.state === 'stale' || row.state === 'degraded') return 1;
   return 0;
 }
 

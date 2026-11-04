@@ -111,6 +111,13 @@ describe('entityState', () => {
     expect(entityState(node({ status: 'READY' }))).toBe('ready');
     expect(entityState(node({ status: 'WAT' }))).toBe('unknown');
   });
+
+  it('keeps DEGRADED as a health answer, and lets staleness outrank it', () => {
+    // A fresh DEGRADED node used to be folded into `unknown`, then explained as an expired
+    // heartbeat. It is a reachable node with a health answer of its own.
+    expect(entityState(node({ status: 'DEGRADED' }))).toBe('degraded');
+    expect(entityState(node({ status: 'DEGRADED', stale: true }))).toBe('stale');
+  });
 });
 
 describe('nodeReadings', () => {
@@ -128,6 +135,12 @@ describe('nodeReadings', () => {
     expect(readings.cpu.kind).toBe('unknown');
     expect(readings.memory.kind).toBe('unknown');
     expect(readings.filesystem.kind).toBe('unknown');
+  });
+
+  it('lets a DEGRADED node report: degraded is a health answer, not an absence', () => {
+    const readings = nodeReadings(node({ status: 'DEGRADED' }));
+    expect(readings.cpu.kind).toBe('reading');
+    expect(readings.memory.kind).toBe('reading');
   });
 
   it('answers NO_DATA when the node is reachable but carries no snapshot', () => {
@@ -190,6 +203,20 @@ describe('entityRows - the instance count is gated like every other reading', ()
     expect(row.state).toBe('stale');
     expect(row.instances).toEqual({ ready: 1, total: 4 });
   });
+
+  it('keeps the count for a DEGRADED node, because it is still answering', () => {
+    const [row] = entityRows([node({ status: 'DEGRADED', instancesReady: 2, instancesTotal: 3 })], NOW);
+    expect(row.state).toBe('degraded');
+    expect(row.instances).toEqual({ ready: 2, total: 3 });
+  });
+
+  it('does not turn an absent pair into 0/0', () => {
+    const [row] = entityRows([node({
+      instancesReady: undefined as unknown as number,
+      instancesTotal: undefined as unknown as number,
+    })], NOW);
+    expect(row.instances).toBeNull();
+  });
 });
 
 describe('sampleIsStale', () => {
@@ -239,6 +266,13 @@ describe('summarise', () => {
     expect(summary.notObservable).toBe(1);
     // The three populations partition the fleet: nothing is silently dropped or double-counted.
     expect(summary.reporting + summary.noSample + summary.notObservable).toBe(summary.total);
+  });
+
+  it('counts a DEGRADED node that reports as reporting, not as unobservable', () => {
+    const summary = summarise([node({ status: 'DEGRADED' })], NOW);
+    expect(summary.reporting).toBe(1);
+    expect(summary.noSample).toBe(0);
+    expect(summary.notObservable).toBe(0);
   });
 
   it('attributes the peak to the node and the sample time it came from', () => {
@@ -294,6 +328,30 @@ describe('row ordering and filtering', () => {
     expect(filterRows(all, 'all')).toHaveLength(4);
     expect(filterRows(all, 'unobservable').map((row) => row.node.id)).toEqual(['gone', 'blank']);
     expect(filterRows(all, 'reporting').map((row) => row.node.id).sort()).toEqual(['busy', 'ok']);
+  });
+
+  it('uses the same reporting predicate the KPI card counts', () => {
+    // A filesystem-only row used to be counted on the card but dropped from the list the card
+    // links to, because rowSeverity tested CPU and memory alone.
+    const [filesystemOnly] = entityRows([node({
+      id: 'fs',
+      name: 'fs',
+      resourceSnapshot: {
+        sampledAt: ago(2_000),
+        cpuUtilization: null,
+        memoryUsedBytes: null,
+        memoryTotalBytes: null,
+        filesystemUsedBytes: 10,
+        filesystemTotalBytes: 100,
+      },
+    })], NOW);
+    expect(rowLoad(filesystemOnly)).toBeGreaterThanOrEqual(0);
+    expect(filterRows([filesystemOnly], 'reporting')).toHaveLength(1);
+    expect(filterRows([filesystemOnly], 'unobservable')).toHaveLength(0);
+
+    const [degraded] = entityRows([node({ id: 'deg', name: 'deg', status: 'DEGRADED' })], NOW);
+    expect(rowSeverity(degraded)).toBe(1);
+    expect(filterRows([degraded], 'attention').map((row) => row.node.id)).toEqual(['deg']);
   });
 });
 

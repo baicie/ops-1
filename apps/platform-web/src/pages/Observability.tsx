@@ -15,6 +15,7 @@ import { MetricCard } from '../components/app/metric-card';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, UnknownValue } from '../components/app/status-indicator';
 import { formatBytes } from '../format';
+import { apiFailureCopy } from '../lib/kernel-messages';
 import {
   IdentityCell,
   RowActions,
@@ -216,8 +217,11 @@ export function ObservabilityPage() {
           metricId="obs-reporting"
           label={t('observability.kpi.reporting')}
           value={<span className="ow-tnum">{summary.reporting}</span>}
-          denominator={summary.total}
-          detail={t('observability.kpi.reporting.detail')}
+          // A fleet of zero is not "0 of 0 reporting": there is nothing to report on. The card
+          // says UNKNOWN with the reason, the same rule the other three cards already follow.
+          denominator={summary.total === 0 ? undefined : summary.total}
+          state={summary.total === 0 ? 'unknown' : 'ready'}
+          detail={summary.total === 0 ? t('observability.kpi.reporting.none') : t('observability.kpi.reporting.detail')}
           sampledAt={summary.observedAt}
           href="/app/observability?state=reporting"
         />
@@ -307,6 +311,21 @@ export function ObservabilityPage() {
         />
       ) : null}
 
+      {/* Rows already on screen survive a failed refresh; a first load is the AsyncBoundary's
+          error panel. A mid-session refusal is named here rather than swallowed by
+          `error={data ? null : error}` - a revoked grant and a transient blip must not look
+          identical, and the clock-based STALE notice is not a reason. */}
+      {data && error ? (
+        <div data-testid="observability-refresh-error">
+          <NoticeBar
+            state="error"
+            title={t('observability.refresh.failed.title')}
+            detail={apiFailureCopy(error, t).reason}
+            action={<Button variant="secondary" onClick={() => void reload()}>{t('action.retry')}</Button>}
+          />
+        </div>
+      ) : null}
+
       <AsyncBoundary
         loading={loading}
         // Rows already on screen survive a failed refresh; only a first load with nothing to
@@ -353,6 +372,9 @@ export function ObservabilityPage() {
                   <UnknownValue detail={t('observability.unknown.detail')} />{' '}
                   {t('observability.table.unobservable', { count: summary.notObservable })}
                 </>
+              ) : null}
+              {summary.staleSamples > 0 ? (
+                <> {t('observability.table.stale', { count: summary.staleSamples })}</>
               ) : null}
             </p>
             <Table className={stackTable}>

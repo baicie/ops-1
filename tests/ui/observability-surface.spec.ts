@@ -28,6 +28,19 @@ const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 const LIVE = process.env.OBS_DATA === 'live';
 
+/** Copy assertions follow the catalog the page renders, not a duplicated English sentence. */
+const EN = JSON.parse(
+  fs.readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../apps/platform-web/src/i18n/catalogs/en.json'),
+    'utf8',
+  ),
+) as Record<string, string>;
+function copy(key: string, params: Record<string, string | number> = {}): string {
+  return (EN[key] ?? key).replace(/\{(\w+)\}/g, (match, name: string) => (
+    params[name] === undefined ? match : String(params[name])
+  ));
+}
+
 const VIEWPORTS = [
   { w: 1440, h: 900 },
   { w: 1024, h: 768 },
@@ -39,17 +52,18 @@ const LOCALES = ['en', 'zh-CN'] as const;
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 /**
- * Thirteen nodes covering every state the surface must keep apart, because a fixture that is all
- * healthy proves only that the happy path renders. Seven report, two carry no sample, two are
- * unreachable, one is unknown and one is revoked — so UNKNOWN, NO_DATA and a real reading are all
- * on screen at once and the §2.7 budget (one dashed token per table) is actually under pressure.
+ * Fourteen nodes covering every state the surface must keep apart, because a fixture that is all
+ * healthy proves only that the happy path renders. Eight report, two carry no sample, two are
+ * unreachable, one is degraded, one is unknown and one is revoked — so DEGRADED, UNKNOWN, NO_DATA
+ * and a real reading are all on screen at once and the §2.7 budget (one dashed token per table)
+ * is actually under pressure.
  *
  * Two properties of this set are measured, not decorative:
- *   - 6 of 13 unobservable (0.46) keeps the load column ABOVE §2.2's `< 0.5` floor. An earlier
+ *   - 6 of 14 unobservable (0.43) keeps the load column ABOVE §2.2's `< 0.5` floor. An earlier
  *     version had exactly 6 of 12 (0.50), the column silently dropped, and the table lost the one
  *     column this surface exists for - the gate reported it as a low distinct ratio first.
  *   - `ready`/`total` vary per node. A uniform 2/2 across every row gives the instances column two
- *     distinct values in thirteen rows (0.15) and it fails §2.2's 0.2 floor, which is the rule
+ *     distinct values in fourteen rows (0.14) and it fails §2.2's 0.2 floor, which is the rule
  *     working as intended: a column that repeats itself is not showing the reader anything.
  */
 const NODES = [
@@ -60,6 +74,8 @@ const NODES = [
   { name: 'ow-node-e', id: 'a71d0c93-2e58-4b47-9f36-1c8e5d2a704b', status: 'READY', cpu: 0.11, mem: 1.6, stale: false, ready: 0, total: 1 },
   { name: 'ow-node-f', id: '5b6e91c4-8a27-4f30-9d84-7e2b10c6a5f9', status: 'READY', cpu: 0.07, mem: 1.1, stale: true, ready: 2, total: 3 },
   { name: 'ow-node-m', id: 'e04b8d92-7f31-4a68-b5c0-9d2e17fa3b46', status: 'READY', cpu: 0.66, mem: 6.0, stale: false, ready: 5, total: 6 },
+  // Reachable with its own health answer: DEGRADED is neither READY nor an expired heartbeat.
+  { name: 'ow-node-n', id: 'c7b1e9a4-2d68-4f05-9b73-6e1d4a8c20f5', status: 'DEGRADED', cpu: 0.62, mem: 4.8, stale: false, ready: 1, total: 2 },
   // Reachable, no sample: the NO_DATA population. Never a 0%.
   { name: 'ow-node-g', id: 'c04f7d18-3b96-4a52-8e71-d5a29c034f6b', status: 'READY', cpu: null, mem: null, stale: false, ready: 0, total: 2 },
   { name: 'ow-node-h', id: '7d2e48b5-1c60-4f93-a7d2-6b9e35c81a04', status: 'READY', cpu: null, mem: null, stale: false, ready: 0, total: 1 },
@@ -434,6 +450,104 @@ test('states a missing sample as a token and never as a number', async ({ browse
   expect(keys.length).toBeGreaterThan(0);
   for (const key of keys) expect(key).not.toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/);
   expect(new Set(keys).size).toBe(keys.length);
+
+  // A DEGRADED node is reachable and reports: the chip says degraded, and the load is a number
+  // rather than UNKNOWN. Folding it into UNKNOWN was the defect this fixture now pins.
+  const degradedRow = page.locator('tbody tr[data-entity-state=degraded]').first();
+  await expect(degradedRow).toBeVisible();
+  await expect(degradedRow.locator('.status-indicator').first()).toHaveAttribute('data-indicator', 'degraded');
+  await expect(degradedRow.locator('.ow-utilization').first()).toBeVisible();
+
+  await context.close();
+});
+
+test('does not print 0/0 when there is no fleet to observe', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => localStorage.setItem('opsweave-locale', 'en'));
+  const page = await context.newPage();
+  await page.route('**/api/v1/nodes', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: '[]',
+  }));
+  await login(page);
+  await page.goto('/app/observability');
+  await page.waitForSelector('[data-async-state=empty]', { timeout: 20_000 });
+
+  // "0 of 0 reporting" claims a completeness the page never observed. A fleet of zero has
+  // nothing to report on, so the card says UNKNOWN with the reason.
+  const card = page.locator('[data-metric="obs-reporting"]');
+  await expect(card.locator('.ow-metric-value')).toHaveAttribute('data-metric-state', 'unknown');
+  await expect(card).not.toContainText('0/0');
+  await expect(card).toContainText(copy('observability.kpi.reporting.none'));
+
+  await context.close();
+});
+
+test('a DEGRADED node is a health state, not an expired heartbeat', async ({ browser }) => {
+  const degraded = NODES.find((node) => node.status === 'DEGRADED')!;
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => localStorage.setItem('opsweave-locale', 'en'));
+  const page = await context.newPage();
+  await installFixtures(page);
+  await login(page);
+  await page.goto(`/app/observability/nodes/${degraded.id}`);
+  await page.waitForSelector('[data-testid=observability-entity-degraded]', { timeout: 20_000 });
+
+  await expect(page.locator('.ow-entity-state')).toHaveAttribute('data-entity-state', 'degraded');
+  await expect(page.getByTestId('observability-entity-degraded')).toContainText(copy('observability.notice.degraded.title'));
+
+  // The stored replica count is still a fact for a node that answers; only an unreachable node
+  // loses it. The card must not fall back to UNKNOWN for DEGRADED.
+  const instancesCard = page.locator('[data-metric="obs-entity-instances"]');
+  await expect(instancesCard.locator('.ow-metric-value')).toHaveAttribute('data-metric-state', 'ready');
+  await expect(instancesCard).toContainText('1/2');
+
+  await context.close();
+});
+
+test('an unreachable node does not print a stored instance count', async ({ browser }) => {
+  const unreachable = NODES.find((node) => node.status === 'UNREACHABLE' && node.cpu !== null)!;
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => localStorage.setItem('opsweave-locale', 'en'));
+  const page = await context.newPage();
+  await installFixtures(page);
+  await login(page);
+  await page.goto(`/app/observability/nodes/${unreachable.id}`);
+  await page.waitForSelector('[data-entity-state=unreachable]', { timeout: 20_000 });
+
+  const instancesCard = page.locator('[data-metric="obs-entity-instances"]');
+  await expect(instancesCard.locator('.ow-metric-value')).toHaveAttribute('data-metric-state', 'unknown');
+  await expect(instancesCard).not.toContainText('0/2');
+
+  await context.close();
+});
+
+test('a failed refresh keeps the rows and names the failure', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => localStorage.setItem('opsweave-locale', 'en'));
+  const page = await context.newPage();
+  await installFixtures(page);
+  await login(page);
+  await page.goto('/app/observability');
+  await page.waitForSelector('[data-region=fleet]', { timeout: 20_000 });
+
+  // The most recently added handler wins, so this replaces installFixtures' list route.
+  let fail = false;
+  await page.route('**/api/v1/nodes', (route) => route.fulfill({
+    status: fail ? 503 : 200,
+    contentType: 'application/json',
+    body: fail ? JSON.stringify({ code: 'UNAVAILABLE', message: 'refresh refused' }) : JSON.stringify(NODES.map(nodePayload)),
+  }));
+  fail = true;
+  await page.getByRole('button', { name: copy('action.refresh') }).click();
+
+  const notice = page.getByTestId('observability-refresh-error');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText(copy('observability.refresh.failed.title'));
+  await expect(notice).toContainText(copy('ui.error.serverFault'));
+  // The old rows are still the last thing observed; a failed refresh does not erase them.
+  await expect(page.locator('[data-region=fleet]')).toBeVisible();
 
   await context.close();
 });
