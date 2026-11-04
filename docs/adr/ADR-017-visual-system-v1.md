@@ -66,7 +66,7 @@ V1 的目标不是换 UI 库，也不是重写界面，而是让仓库已有的 
 5. **先改值，后改名**。删除/重命名 token 会触碰 307 处 `font-size` 声明；DS-V1-1 先用最小 token-block 改动把值收敛，并同步修改 `styles.token-contract.test.ts`（它当前断言 base 14 / sm 12，是迁移的硬阻塞），再决定是否改成 job-name（label/meta/body/title）。Tailwind 的 `text-sm/base/lg/xl` 必须映射到同一组值；`text-xs` 当前指向未声明的 `--ow-type-xs`，必须删除或补声明。
 6. `ui-debt.json` 的 `type-tier` 只能随树下降，不能为了绿而提高；`one-header` 从 3 降到 0 需要先迁移双 `PageHeader`。
 
-DS-V1-1 执行值迁移（token 块、Tailwind 映射、契约测试、checker 命名例外）；改名、`ErrorState`/`MetricCard`/`Dialog` 收敛留 DS-V1-1b。
+DS-V1-1 执行值迁移（token 块、Tailwind 映射、契约测试、checker 命名例外）；DS-V1-1b 完成改名：`--ow-type-sm` 并入 `meta`、`base`/`lg` 并入 `body`、`xl` 改名为 `title`，四个 job 名成为唯一词汇。改名是零像素变化（值未动），36 张矩阵的 header/h1/h2/metric/overflow 与 DS-V1-1 基线一致。
 
 ### D6 — 证据协议：PASS / FAIL / NOT_RUN，fixture/live 必须可机读
 
@@ -87,9 +87,9 @@ DS-V1-1 执行值迁移（token 块、Tailwind 映射、契约测试、checker �
 | Button | `components/ui/button.tsx` + `buttonVariants` | `.btn` 只剩 `studio/PipelineEditor.tsx` 16 处；Pattern D 兼容期保留，V1 不迁移 |
 | Table | `components/ui/table.tsx` | `pages/table-kit.tsx` 是组合层不是第二原语；`plugins-table/nodes-table` CSS 在 390/768 重测前不得删除 |
 | Status | `status-tone.ts` + `app/status.tsx` + `app/status-indicator.tsx` | `Ui.StatusBadge` 零调用，删除；`installation-state.ts` 与 `investigations.ts` 的私有 tone 表是域扩展，必须收敛到同一词汇或记录例外 |
-| AsyncBoundary | `components/app/async-boundary.tsx` | 10 处 `Ui.ErrorState` 打印原始 `error.message`，违反 i18n 错误码规则；DS-V1-1 逐一替换 |
-| Dialog/Sheet | `components/ui/dialog.tsx` | `Ui.Modal`、`app/sheet.tsx`、`ConfirmAction` 是包装；统一前先选定 `.modal*` 或 DialogHeader 几何，二者不可互换 |
-| MetricCard | `components/app/metric-card.tsx` | 15 处手写 `.panel.metric-card`，缺 NO_DATA/UNKNOWN 与 observedAt；IncidentDetail 的 em dash 必须改为 NoData token |
+| AsyncBoundary | `components/app/async-boundary.tsx` | DS-V1-1b 完成：10 处 `Ui.ErrorState` 已删除，页面/页内/section 三种用法由 `report` 与 `source` 区分；原始句子经 `AsyncErrorMessage` 标注来源，不再直接当正文 |
+| Dialog/Sheet | `components/app/dialog-frame.tsx` | DS-V1-1b 完成：`Ui.Modal`、`SheetContent`、`ConfirmAction` 共用 `DialogFrame`（一个 head/body/foot，三种几何）；`.modal*` 已删除，Radix 仍是底座 |
+| MetricCard | `components/app/metric-card.tsx` | DS-V1-1b 完成：15 处手写 `.panel.metric-card` 已迁移；`.metric-*` CSS 删除；`size="small"` 取代 `.metric-value.small`；未加载的计数是 NO_DATA/UNKNOWN，不是 0 或 em dash |
 
 不得新建 `components/domain/`，直到本 ADR 的 ownership map 被实现并证明至少两处复用；域组件可以消费状态权威，不得重新推导。
 

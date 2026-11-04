@@ -56,19 +56,19 @@
 | 项 | 值 |
 |---|---|
 | 权威 | `components/app/async-boundary.tsx:67-189`（loading/403/409/error/empty/ready、`reportBodyState`、`useObservedPolling`、`isStale`、`NoticeBar`） |
-| 旧/绕过 | `components/Ui.tsx:76` `ErrorState`（10 处打印原始 `error.message`）；`shells/workspace/business-states.tsx:68-106`；`pages/Incidents.tsx:17` 导入未渲染 |
-| 契约 | `data-async-state`、403 不泄露资源细节、409 conflict、`apiFailureCopy` + `server-message`、`reportBodyState`、STALE/PARTIAL/NOT_CONFIGURED 走 `NoticeBar` |
-| 决定 | DS-V1-1 逐一把 `ErrorState` 调用改为 `AsyncBoundary`（需要一个小 wrapper 处理"保留旧数据"的页面）；不得把 STALE/PARTIAL 折进 boundary 的 error |
+| 旧/绕过 | **已删除**：`Ui.ErrorState`（10 处）；DS-V1-1b 后无页面直接渲染原始 `error.message`。`shells/workspace/business-states.tsx` 仍持有旧的 workspace 空/错状态，待独立评估 |
+| 契约 | `data-async-state`、403 不泄露资源细节、409 conflict、`apiFailureCopy` + `server-message` + `data-source=kernel|plugin`、`reportBodyState`、STALE/PARTIAL/NOT_CONFIGURED 走 `NoticeBar` |
+| 决定 | **已执行（DS-V1-1b）**：`ErrorState` 删除，10 个调用点改用 `AsyncBoundary`；`report={false}` 用于页内 section 错误（InstallWizard 上传），`source="plugin"` 用于扩展加载/渲染失败；错误正文由 `AsyncErrorMessage` 统一，`ConfirmAction` 复用。不得把 STALE/PARTIAL 折进 boundary 的 error |
 
 ## 6. Dialog / Sheet
 
 | 项 | 值 |
 |---|---|
 | 原语 | `components/ui/dialog.tsx:5-101`（Radix） |
-| 包装 | `Ui.Modal`（`Ui.tsx:141-204`，`.modal*` 几何，始终自带关闭按钮）、`app/sheet.tsx:12-51`（86vw 侧面板，`ow-sheet` 无独立 CSS）、`app/confirm-action.tsx:69-104`（pending/error、拒绝时保持打开） |
-| 调用 | Modal 1（`Incidents.tsx:735`）；Sheet 3（`command.tsx:153`、`Sources.tsx:706/805`）；ConfirmAction 12；直接 DialogContent 9 |
-| 必须保留 | `aria-modal=true`、confirm testid/`data-confirm-state`（`admin-polish.spec.ts:230/284`、`studio.spec.ts:256`）、`.modal` 尺寸映射、`.modal-body` 唯一滚动容器 |
-| 决定 | 统一前先选定 `.modal*` 或 DialogHeader/Footer 几何，二者不可互换；不在 V1 强行合并 |
+| 包装 | `components/app/dialog-frame.tsx`（**唯一**：head/title/description/body/foot，`center`/`sheet-left`/`sheet-right` 三种几何）；`Ui.Modal`、`app/sheet.tsx`、`app/confirm-action.tsx` 都是它的薄包装 |
+| 调用 | Modal 1（`Incidents.tsx:735`）；Sheet 3（`command.tsx:153`、`Sources.tsx:706/805`）；ConfirmAction 12；命令面板中心态仍直接使用 `DialogContent`（palette 的 sr-only 标题与固定 20vh 定位是独立形状） |
+| 必须保留 | `aria-modal=true`、confirm testid/`data-confirm-state`、`ow-dialog--small|medium|large` 尺寸映射、`.ow-dialog-body` 唯一滚动容器 |
+| 决定 | **已执行（DS-V1-1b）**：`.modal*` 与裸 `DialogHeader` 两套几何合并为 `.ow-dialog*`；侧边几何写在 CSS（`styles.css` 晚于 Tailwind 加载），不再依赖 utility 覆盖顺序 |
 
 ## 7. MetricCard
 
@@ -76,8 +76,8 @@
 |---|---|
 | 权威 | `components/app/metric-card.tsx:17-84`（`.ow-metric`，state ready/noData/unknown、denominator、sampledAt、href、data-metric） |
 | 旧/手写 | 15 处 `.panel.metric-card`：Governance 4、IncidentDetail 4、Jobs 3、Pipelines 4 |
-| 差异 | 旧卡无 state 契约、无 observedAt、任意 children、min-height 92；审计钩子是 `.metric-card` / `[data-testid=metric-card]`，而权威卡输出 `.ow-metric`/`data-metric-card`（仅链接卡） |
-| 决定 | 新代码用 `MetricCard`；旧卡在各自页面迁移时补 NO_DATA/UNKNOWN 与 observedAt；`IncidentDetail.tsx:319` 的 em dash 改为 `NoData` token；迁移时必须同步更新读 `.metric-card` 的审计（`admin-polish.spec.ts:150`、`b1-visual-review.spec.ts:132`、`business-workspace.spec.ts:114`）或保留兼容钩子 |
+| 差异 | **已消失（DS-V1-1b）**：15 处旧卡全部迁移；`.metric-card` / `.metric-label` / `.metric-value*` CSS 删除；审计选择器改为 `[data-metric]` / `.ow-metric` |
+| 决定 | **已执行（DS-V1-1b）**：`MetricCard` 是唯一 KPI 卡；新增 `size="small"` 取代 `.metric-value.small`；未加载的计数是 `NO_DATA`/`UNKNOWN`（IncidentDetail 的 em dash 与 Pipelines 的 "No runs" 都已改）；`showSampled={false}` 用于没有真实 observedAt 的旧页面，不伪造时间 |
 
 ## 8. 页面层例外
 

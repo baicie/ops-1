@@ -3,7 +3,7 @@
 - 日期：2026-11-04
 - 执行环境：macOS 15.7.7 / Apple M1；Node 22.12.0；pnpm 10.34.3；Playwright 1.64.1（Chromium）；PostgreSQL 17（本机）；Docker 不可用
 - 原始基线 `origin/main` SHA：`775a1e2`
-- 实际开发分支 / HEAD：`design/opsweave-visual-system-v1` / `25a784c`（Overview）+ `d47fbfd`（Incident 语义）+ `ef30d48`（Observability 语义）+ `c90c8f6`（Gate wiring）+ `31d0d88`（DS-V1-1）
+- 实际开发分支 / HEAD：`design/opsweave-visual-system-v1` / `25a784c`（Overview）+ `d47fbfd`（Incident 语义）+ `ef30d48`（Observability 语义）+ `c90c8f6`（Gate wiring）+ `31d0d88`（DS-V1-1）+ DS-V1-1b（本批）
 - Draft PR / base / mergeability：[#34](https://github.com/baicie/ops-1/pull/34) / `main` / Draft
 - 工作树状态：实现与文档已提交；`artifacts/ui/visual-v1/` 为未跟踪的本地证据
 
@@ -42,7 +42,16 @@
 
 ### DS-V1-1 — Token 值与 PageHeader 收敛
 
-本轮同时执行 DS-V1-1 的第一批：类型值迁移（body 15 / sm 13 / label 11 / title clamp 20→26；metric 21 作为命名例外；hero 仅 login）、删除双 PageHeader（3 个调用点迁移）与零调用的 `Ui.StatusBadge` 及其 6 条 `.status-*` CSS。`type-tier` 与 `one-header` 从 6/3 降到 **0/0**，Tailwind 删除未声明的 `text-xs`，`styles.token-contract.test.ts` 与 `check-ui-tokens` 的例外表同步。metric 的 26px 第一版在实测中让 KPI 的 `0` 比健康判决更抢眼并把首屏下移 33px，已回退为命名的 21px 例外。完整记录：[ds-v1-1.md](ds-v1-1.md)。未做：token 改名、`ErrorState`/`MetricCard`/`Dialog` 收敛、CSS 文件拆分、`.btn`（Studio 例外）。
+本轮同时执行 DS-V1-1 的第一批：类型值迁移（body 15 / sm 13 / label 11 / title clamp 20→26；metric 21 作为命名例外；hero 仅 login）、删除双 PageHeader（3 个调用点迁移）与零调用的 `Ui.StatusBadge` 及其 6 条 `.status-*` CSS。`type-tier` 与 `one-header` 从 6/3 降到 **0/0**，Tailwind 删除未声明的 `text-xs`，`styles.token-contract.test.ts` 与 `check-ui-tokens` 的例外表同步。metric 的 26px 第一版在实测中让 KPI 的 `0` 比健康判决更抢眼并把首屏下移 33px，已回退为命名的 21px 例外。完整记录：[ds-v1-1.md](ds-v1-1.md)。
+
+### DS-V1-1b — 改名与组件收敛
+
+- **Token 改名（零像素变化）**：`sm→meta`、`base|lg→body`、`xl→title`；Tailwind、契约测试、gate 白名单同步。
+- **`Ui.ErrorState` 删除**：10 个调用点迁移到 `AsyncBoundary`；新增 `report`（页内 section 不污染 chrome 状态）与 `source`（插件句子不冒充 Kernel）；`AsyncErrorMessage` 由 boundary 与 `ConfirmAction` 共用。
+- **15 处 `.panel.metric-card` → `MetricCard`**：IncidentDetail 的 em dash 改为 `NoData`，Pipelines 未加载的 job 列表不再说 "No runs"；新增 `size="small"`；删除 `.metric-*` CSS 并同步 8 个审计 spec 的选择器。
+- **Dialog/Sheet 统一**：新增 `components/app/dialog-frame.tsx`，`Modal`/`SheetContent`/`ConfirmAction` 共用一个 head/body/foot 与三种几何；`.modal*` 删除，替换为 `.ow-dialog*`。
+- **`check-ui-metrics` 加固**：空 `pages` 不再通过；新增 `--manifest` route 清单与 `route-missing`/`route-unknown`；5 条 gate 自测进入 CI。
+- 完整记录：[ds-v1-1b.md](ds-v1-1b.md)。仍未做：`.btn`（Studio 例外）、CSS 拆分、`AVAILABLE`/`CANCELLED` 产品决策、第二/第三标杆的完整视觉重排。
 
 ## 2. 三个标杆的 Before / After
 
@@ -63,10 +72,12 @@
 | TypeScript | `pnpm --filter @opsweave/platform-web typecheck` | **PASS** | 本机，`775a1e2` + 工作树 |
 | Frontend Vitest | `pnpm --filter @opsweave/platform-web test` | **PASS** — 31 files / 426 tests | 同上 |
 | Build | `pnpm --filter @opsweave/platform-web build` | **PASS** | 同上 |
-| i18n | `node scripts/check-i18n.mjs` | **PASS** — 1,920 keys × 2；17 条既有 unused | 同上 |
+| i18n | `node scripts/check-i18n.mjs` | **PASS** — 1,930 keys × 2；17 条既有 unused | DS-V1-1b 后 |
 | Status vocabulary | `node scripts/check-status-vocabulary.mjs` | **PASS** — 41 codes | 同上 |
-| UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — 0/0/0/0/0/0（DS-V1-1 后） | 同上 |
+| UI Token ratchet | `node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` | **PASS** — 0/0/0/0/0/0（DS-V1-1b 后） | 同上 |
 | UI geometry | `node scripts/check-ui-metrics.mjs artifacts/ui/observability/metrics` | **PASS** — 24 measurements，0 violations | fixture 矩阵 |
+| UI geometry + manifest | `node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/audit` | **PASS** — 30 measurements / 10 routes | DS-V1-1b |
+| Gate self-tests | `node --test scripts/check-ui-metrics.test.mjs` | **PASS** — 5/5 | DS-V1-1b；已加入 CI web job |
 | Playwright Overview 状态 | `... playwright test overview-partial.spec.ts` | **PASS** — 7/7 | 本机 Kernel `18291`；已进入 g12-acceptance 确定性 job |
 | Playwright Overview 矩阵 | `... playwright test visual.spec.ts -g "responsive overview matrix"` | **PASS** — 6 组合 | 本机 |
 | Playwright Observability fixture | `OBS_DATA=fixtures ... playwright test observability-surface.spec.ts` | **PASS** — 11/11 | fixture，明确标注；已由 g12-acceptance 在 PR 上运行 |
@@ -75,8 +86,10 @@
 | Deterministic g12 harness | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.6 min；acceptance 195/0；exit 0 | 本机后台，含新增 3 个 spec |
 | Playwright DS-V1-1 矩阵 | `artifacts/ui/visual-v1/after-ds-v1-1/` | **PASS（证据）** — 36 images；Overview header 80，无横向溢出 | 本机 |
 | Deterministic g12 harness (DS-V1-1) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），8.0 min；acceptance 195/0；exit 0 | 类型/PageHeader 变更后 |
+| Deterministic g12 harness (DS-V1-1b) | `bash tests/ci/g12_acceptance_ci.sh` | **PASS** — 64 tests（62 passed / 2 skipped），6.5 min；acceptance 195/0；exit 0 | 本机后台，DS-V1-1b 后 |
 | Playwright Incident 状态 | `... playwright test g11-incident-state-gaps.spec.ts` | **PASS** — 6/6（含新增证据 403） | 本机 Kernel `18291` |
-| Playwright Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（trusted 行仍在 present 时渲染） | 本机，DB `opsweave_visual_v1` |
+| Playwright Incident lifecycle | `... playwright test g12-lifecycle.spec.ts -g "an operator closes a concluded incident"` | **PASS** — 1/1（ConfirmAction → DialogFrame） | 本机，DB `opsweave_visual_v1` |
+| Playwright command palette | `... playwright test admin-shell.spec.ts -g "command palette opens"` / `-g "navigation becomes a drawer at 1024"` | **PASS** — 2/2（center dialog + 1024 sheet） | 本机 |
 | Playwright Incident workspace trust | `... --config incidents-workspace.config.ts -g "every evidence row carries a trust level"` | **FAIL（预存在 fixture 不符）** | 该 spec 期望种子里有 SOURCE_ATTESTED 行；g12d 种子只有 UNVERIFIED/OPERATOR_ASSERTED，且 legend 自带 `ok` chip；本轮改动未触及 trust 渲染 |
 | PNG budget | `node tests/ci/check-tracked-png-budget.mjs` | **PASS** — 408 / 65.97 MB，0 新增 | 预算未提高 |
 | Accessibility / contrast | — | **NOT_RUN** | 仓库无此 Gate |
@@ -100,8 +113,9 @@
 - **P0（未修，需产品决策）**：Incident 的 digest mismatch 仍可读 bytes（安全/产品决策，不能只改视觉）；Observability 的 per-row observed time 仍只在 hover title；Observability/Incident 的完整视觉重排仍 `NOT_RUN`。
 - **P1**：Overview 无 STALE 策略、shell/页面双轮询可短暂矛盾、KPI 逐卡时间缺失；Observability 的 history/events 更多边界、per-row observed time 仍 hover-only；Incident 的 header 缺 owner/scope、审计不可折叠、verifiedAt 未渲染、fingerprint 只在 viewer、rail 首答前 0/0。三标杆矩阵已进入 g12-acceptance；`incidents-workspace.spec.ts` 仍是 explicit skip（fixture 缺 SOURCE_ATTESTED）。
 - **已修（本轮）**：Observability 的 Reporting 0/0、`entityRows` 缺失计数、unreachable 实体 KPI 0/N、DEGRADED 折叠、实例/事件面板 loading/error、刷新失败静默、`staleSamples` 不可见、Reporting 计数与过滤谓词不一致；Incident 证据 403 死代码、`incident-evidence-trusted` 在 loading/forbidden 时的 0/0、assurance 改为 considered 集、stale banner 的原始码与浏览器 locale 时间；DS-V1-1 的类型值迁移、双 PageHeader 去重、死 `Ui.StatusBadge` 与 `.status-*` CSS、type-tier/one-header 预算归零。
-- **P1（门禁）**：三标杆矩阵已进入 g12-acceptance；`check-ui-metrics` 仍 fail-open、PNG 预算零余量、无对比度/触摸目标/视觉 diff、`tests/ui` 不 typecheck。
-- **P2**：token 改名、`ErrorState`/`MetricCard`/`Dialog` 收敛、CSS 文件拆分、`.btn`（Studio 例外）、`AVAILABLE`/`CANCELLED` 语义分歧、`components/domain/` 未建。
-- **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring + DS-V1-1 第一批**。全量 V1（DS-V1-1b、三标杆完整视觉重排、route coverage 强化）**NOT_READY**，不在本 PR 声称完成。
-- 下一最小 PR 建议：① DS-V1-1b（`ErrorState`/`MetricCard`/`Dialog` 收敛与 token 改名）；② route coverage 强化（`check-ui-metrics` 空页 fail-open、route 清单）；③ 产品决策：Incident digest mismatch 的可读性。
+- **P1（门禁）**：三标杆矩阵已进入 g12-acceptance；`check-ui-metrics` 的空页/route fail-open 已修（`--manifest` + 自测），PNG 预算零余量、无对比度/触摸目标/视觉 diff、`tests/ui` 不 typecheck 仍未解决。
+- **P2**：CSS 文件拆分、`.btn`（Studio 例外）、`AVAILABLE`/`CANCELLED` 语义分歧、`components/domain/` 未建、route→pattern registry 与 `--template` 全量覆盖。
+- **已修（DS-V1-1b）**：token 改名；`ErrorState` → `AsyncBoundary`（含 `report`/`source`/`AsyncErrorMessage`）；15 处 `.panel.metric-card` → `MetricCard`；`.modal*` 与 DialogHeader 两套几何合并为 `DialogFrame`；`check-ui-metrics` 空 pages fail-open 与 route manifest。
+- **裁决**：`READY_FOR_REVIEW`，**Phase 0 + Overview + Incident 证据语义 + Observability 语义 + Gate wiring + DS-V1-1 + DS-V1-1b**。全量 V1（三标杆完整视觉重排、route→pattern registry、CSS 拆分）**NOT_READY**，不在本 PR 声称完成。
+- 下一最小 PR 建议：① 产品决策：Incident digest mismatch 的可读性；② route→pattern registry 与 `--template` 全量覆盖；③ CSS 模块化拆分与 `.btn`（Studio）迁移。
 - 本 PR **未**自动合并、未转 Ready（Draft）、未打 Tag、未发布、未部署。

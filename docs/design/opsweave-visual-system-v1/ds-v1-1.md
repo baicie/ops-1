@@ -51,6 +51,10 @@
 
 ## 5. 未做（DS-V1-1b / 后续）
 
+> **2026-11-04 更新：** 本节的前四项（token 改名、`ErrorState`、`MetricCard`、Dialog/Sheet）已在
+> [ds-v1-1b](ds-v1-1b.md) 完成；`.btn`、CSS 拆分与 `AVAILABLE`/`CANCELLED` 仍按原计划保留。
+
+
 - token **改名**（label/meta/body/title）——需要触碰 307 处 `font-size` 声明；本轮只改值。
 - `Ui.ErrorState` 10 处调用打印原始 `error.message`，迁移到 `AsyncBoundary`；需要处理“保留旧数据”的页面包装。
 - 15 处手写 `.panel.metric-card` 迁移到 `MetricCard`；需要保留审计选择器或同步更新。
