@@ -93,23 +93,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const result = await api.post<SessionResponse>('/api/v1/auth/login', { email, password });
-    // /auth/me is the contract's authority for `access`; the login body only mirrors it.
-    // Reading it *before* the identity lands keeps the first authenticated render - the one
-    // that picks the surface for "/" - from racing ahead of the grant.
-    let authoritative = result;
-    try {
-      const me = await api.get<SessionResponse>('/api/v1/auth/me');
-      authoritative = me;
-    } catch {
-      // Keep the session usable when /auth/me is momentarily unreachable: the login body
-      // still yields the identity, and a missing grant normalizes to the deny shape.
-    }
-    // A committed login *is* the new session intent: advancing here - with no await between
-    // the advance and the writes - makes every response issued before this point stale, so
-    // the pre-login probe can no longer clear the session it never knew about.
+    // The login body IS the session: it carries the user, the CSRF token and - since this round -
+    // the surface grant, the same value `/auth/me` reports. There is no second read.
+    //
+    // There used to be one: the body omitted `access`, so every sign-in posted, then serially
+    // read `/auth/me`, then resolved, and the form's `await login(); navigate()` waited for two
+    // round trips. On the staging link (~250 ms TCP, ~500-830 ms TTFB per request) that was most
+    // of a 20 s budget. A bounded fallback was tried first and was worse than the bug: giving up
+    // on the grant left the session on the DENY shape, an admin landed on /app/home, and the
+    // remembered surface kept it there across reloads. Sending the grant with the session removes
+    // the round trip instead of racing it.
+    //
+    // A committed login *is* the new session intent: advancing here - with no await between the
+    // advance and the writes - makes every response issued before this point stale, so the
+    // pre-login probe can no longer clear the session it never knew about.
     authGeneration.advance();
-    setCsrfToken(authoritative.csrfToken);
-    applySession(authoritative);
+    setCsrfToken(result.csrfToken);
+    applySession(result);
     setLoading(false);
   }, [applySession]);
 

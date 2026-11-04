@@ -133,6 +133,12 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 # tests/ui/tests/ui/playwright.config.ts. The specs also resolve their own support files and
 # fixture paths relative to this directory, so the suite runs from here.
 #
+# dual-surface.spec.ts is FIRST for the same reason g11-incident-slice.spec.ts was added before
+# it: it is the only spec that drives the sign-in lifecycle end to end, and the R4 round changed
+# that lifecycle (the grant now arrives with the login body). It was referenced only by
+# staging-preview - a REMOTE check - so a regression in sign-in could not fail any deterministic
+# job. It runs here against a runner-local kernel and database, where the link is not a variable.
+#
 # g11-incident-slice.spec.ts was missing here while the two defects it catches went in, which is
 # why it is first in the list rather than appended: it is the only spec that drives the incident
 # list as an operator, and both regressions below were invisible to every other suite.
@@ -141,6 +147,7 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 #   * IdentityCell dropped `data-evidence-kind`, because JSX does not type-check hyphenated
 #     attributes, so the evidence row carried no machine-readable kind (asserted at :178).
 if (cd tests/ui && pnpm exec playwright test --config playwright.config.ts \
+     dual-surface.spec.ts \
      g11-incident-slice.spec.ts \
      g11-incident-state-gaps.spec.ts \
      g12-create-gate.spec.ts \

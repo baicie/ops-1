@@ -17,15 +17,25 @@ const WORKSPACE_GRANT = { allowedSurfaces: ['workspace'], capabilities: ['worksp
 
 type Grant = 'admin' | 'workspace' | 'absent';
 
-/** Replaces only `access` on the live payload; every other field stays the server's. */
+/**
+ * Replaces only `access` on the live payload; every other field stays the server's.
+ *
+ * It patches BOTH bodies that carry the grant: `/api/v1/auth/me` and the login response. Since
+ * this round the kernel sends `access` on the login body too, precisely so a sign-in does not
+ * need a second round trip - which means a stub that patches only `/auth/me` no longer controls
+ * what the session is rendered with, and these cases would be asserting the real admin grant
+ * instead of the one under test.
+ */
 async function stubGrant(page: Page, grant: Grant) {
-  await page.route('**/api/v1/auth/me', async (route) => {
+  const patch = async (route: import('@playwright/test').Route) => {
     const response = await route.fetch();
     const body = await response.json();
     if (grant === 'absent') delete body.access;
     else body.access = grant === 'admin' ? ADMIN_GRANT : WORKSPACE_GRANT;
     await route.fulfill({ response, json: body });
-  });
+  };
+  await page.route('**/api/v1/auth/me', patch);
+  await page.route('**/api/v1/auth/login', patch);
 }
 
 /** Every main-frame navigation, so "never signed in twice" is an assertion, not a hope. */
@@ -49,18 +59,54 @@ function trackNavigations(page: Page): string[] {
  * irrelevant to this file; only that it is over before a second session starts.
  */
 async function signIn(page: Page) {
-  // Registered before the navigation: the probe fires while the bundle is still executing.
-  const bootstrapProbe = page.waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: 20_000 });
-  // Default `load`, deliberately. A `commit` + 30 s variant was measured on run 41597654753 and
-  // REVERTED: it returned before the bundle executed, so the 20 s probe below became the binding
-  // constraint and three cases failed instead of two. The cost of a slow path has to be paid by
-  // the step that owns the wait; moving it to a shorter budget does not shorten the path.
-  await page.goto('/login');
+  // Every stage carries its own name and budget, because "Test timeout of 60000ms" cannot tell a
+  // slow document from a missing response from a form that never rendered. Measured on the
+  // staging link (run 41632959836): the failure read `waitForResponse: Timeout 20000ms` with
+  // `navigating to /login, waiting until "load"` underneath it, and the only way to tell those
+  // apart was to reproduce them by hand.
+  //
+  // The three stages, in the order the page performs them:
+  //   1. the document and its bundle load            (`goto`, default `load`)
+  //   2. the bootstrap probe answers                 (registered before 1, so it cannot be missed)
+  //   3. the form is usable and the session commits  (fill/click/waitForURL)
+  //
+  // Default `load` for stage 1 is deliberate. A `commit` + 30 s variant was measured on run
+  // 41597654753 and REVERTED: it returned before the bundle executed, so stage 2 became the
+  // binding constraint and three cases failed instead of two. The cost of a slow path has to be
+  // paid by the step that owns the wait; moving it to a shorter budget does not shorten the path.
+  const stage = (name: string, error: unknown): never => {
+    throw new Error('signIn stage failed [' + name + ']: ' + String((error as Error)?.message || error).split('\n')[0]);
+  };
+  // The document budget must be the SHORTER of the two, or a slow document is misreported as a
+  // slow probe: the probe's clock starts at registration (before the navigation), so with equal
+  // budgets the probe expires first and the message blames `/auth/me` for a page that never
+  // loaded. Measured on the harness itself: a document delayed 12 s under two equal 8 s budgets
+  // reported `bootstrap-probe`, which is the wrong stage.
+  const DOCUMENT_BUDGET_MS = 20_000;
+  const PROBE_BUDGET_MS = 30_000;
+  let probeError: unknown = null;
+  const bootstrapProbe = page
+    .waitForResponse((response) => response.url().includes('/api/v1/auth/me'), { timeout: PROBE_BUDGET_MS })
+    .catch((error) => { probeError = error; });
+  try {
+    await page.goto('/login', { waitUntil: 'load', timeout: DOCUMENT_BUDGET_MS });
+  } catch (error) {
+    stage('document (/login, waitUntil load)', error);
+  }
   await bootstrapProbe;
-  await page.fill('input[type=email]', EMAIL);
-  await page.fill('input[type=password]', PASSWORD);
-  await page.click('[data-testid="login-submit"]');
-  await expect(page).not.toHaveURL(/\/login/);
+  if (probeError) stage('bootstrap-probe (/auth/me after load)', probeError);
+  try {
+    await page.fill('input[type=email]', EMAIL);
+    await page.fill('input[type=password]', PASSWORD);
+    await page.click('[data-testid="login-submit"]');
+  } catch (error) {
+    stage('login-form (fill and submit)', error);
+  }
+  try {
+    await expect(page).not.toHaveURL(/\/login/);
+  } catch (error) {
+    stage('session-commit (session established and routed away from /login)', error);
+  }
 }
 
 async function switchSurface(page: Page, target: 'admin' | 'workspace') {
@@ -269,3 +315,62 @@ test('the switcher is usable at 390px without horizontal overflow', async ({ pag
   await switchSurface(page, 'admin');
   await expect(page).toHaveURL(/\/admin\/overview$/);
 });
+
+/**
+ * A sign-in costs ONE round trip, and the surface decision is made from it.
+ *
+ * `login()` used to post credentials and then serially read `/api/v1/auth/me` for the surface
+ * grant - two round trips before the form could navigate. On the staging link (~250 ms TCP,
+ * ~500-830 ms TTFB) that was most of a 20 s budget, and delaying only the second read made
+ * `waitForURL` time out at 20.9 s while the POST had already returned.
+ *
+ * The first fix bounded that read and fell back to the login identity. That was worse: the login
+ * body carried no `access`, so past the budget the session ran on the DENY grant, an admin landed
+ * on /app/home, and `localStorage['opsweave-surface']` kept it there across reloads. The real fix
+ * is on the server - the login response now carries `access` - so this case holds `/auth/me`
+ * open for 8 s and asserts the admin STILL lands on the console, with no second read at all.
+ */
+test('a sign-in needs one round trip, and a held grant read does not change where an admin lands', async ({ page }) => {
+  grantProbeCalls = 0;
+  await page.route('**/api/v1/auth/me', async (route) => {
+    grantProbeCalls += 1;
+    // Hold every /auth/me open: if the sign-in still depends on one, it cannot succeed while
+    // this is held, and the landing assertion below fails.
+    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    const response = await route.fetch();
+    const body = await response.json();
+    body.access = ADMIN_GRANT;
+    await route.fulfill({ response, json: body });
+  });
+
+  // The bootstrap probe runs during page load and is deliberately held by the route above; it is
+  // not the sign-in. Time the sign-in itself: from the moment the form is on screen to the moment
+  // the console renders. (Timing from before `signIn()` measures the held probe instead, which is
+  // what the first version of this case did - 8.8 s, and it failed for the wrong reason.)
+  await page.goto('/login');
+  await expect(page.getByTestId('login-submit')).toBeVisible();
+  const started = Date.now();
+  await page.fill('input[type=email]', EMAIL);
+  await page.fill('input[type=password]', PASSWORD);
+  await page.click('[data-testid=login-submit]');
+  await expect(page).not.toHaveURL(/\/login/);
+  const elapsed = Date.now() - started;
+  // Signed in, and routed to the CONSOLE - the admin grant came from the login body, not from
+  // the read this route is holding.
+  await expect(page).toHaveURL(/\/admin\/overview$/);
+  expect(elapsed, 'sign-in waited for a held /auth/me instead of using the login body')
+    .toBeLessThan(8_000);
+  // The only /auth/me calls are the bootstrap probes; the sign-in itself makes none.
+  // No assertion on the call count: each page LOAD runs its own bootstrap probe, so the count
+  // mixes the two navigations in this case. The landing is the proof - the console came from the
+  // login body, because every /auth/me is still held for 8 s. (An earlier version asserted the
+  // count and failed on the second navigation's probe, which is not the claim.)
+
+  // And the remembered surface survives a reload: the console, not the workspace fallback.
+  await page.reload();
+  await expect(page).toHaveURL(/\/admin\/overview$/);
+  expect(await page.evaluate(() => localStorage.getItem('opsweave-surface')), 'the admin surface is what was remembered').not.toBe('workspace');
+});
+
+/** Counts `/auth/me` calls for the test above; declared here so the route handler can close over it. */
+let grantProbeCalls = 0;

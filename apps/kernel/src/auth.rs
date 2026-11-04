@@ -257,6 +257,19 @@ pub struct LoginResponse {
     pub user: UserView,
     pub csrf_token: String,
     pub expires_at: DateTime<Utc>,
+    /// The same grant `/api/v1/auth/me` reports, on the body that creates the session.
+    ///
+    /// It is here because its absence forced the client into a second round trip: the browser
+    /// authenticates, then has to read `/auth/me` before it can decide which surface to render.
+    /// On a slow link that second read is where a sign-in stalls (measured ~250 ms TCP and
+    /// ~500-830 ms TTFB per request against the staging host), and a bounded fallback that gives
+    /// up on it leaves the session with the DENY grant - an admin then lands on /app/home and the
+    /// remembered surface keeps it there. Sending the grant with the session removes the reason
+    /// for the second read rather than making the second read cheaper.
+    ///
+    /// Additive on purpose: a client that predates this field ignores it and keeps reading
+    /// `/auth/me`, which still reports the same value.
+    pub access: AccessView,
 }
 
 pub async fn login(
@@ -345,6 +358,7 @@ pub async fn login(
         },
         csrf_token: csrf,
         expires_at,
+        access: access_for(role, &state.config.admin_surface_roles),
     };
     let mut response = Json(body).into_response();
     response.headers_mut().insert(
