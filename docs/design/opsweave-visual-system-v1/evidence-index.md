@@ -26,7 +26,7 @@ node tests/ui/visual-v1-capture.mjs
 |---|---|
 | `artifacts/ui/visual-v1/before/` | 36 张 PNG + `_manifest.json` + 每页 `_metrics_*.json` |
 | `artifacts/ui/visual-v1/after/` | 同上；三页矩阵在 `25a784c`，证据 403 特写与全页截图在 `d47fbfd`，Observability metrics 在 `ef30d48`，Gate wiring 在 `c90c8f6`（均基于 `775a1e2`） |
-| `artifacts/ui/visual-v1/after-ds-v1-1/` | DS-V1-1 后的 36 张矩阵：body 15 / sm 13 / metric 21（命名例外）/ title clamp；Overview header 80，无横向溢出 |
+| `artifacts/ui/visual-v1/after-ds-v1-1/` | DS-V1-1 后的 36 张矩阵（`31d0d88`）：body 15 / sm 13 / metric 21（命名例外）/ title clamp；Overview header 80，无横向溢出 |
 | `artifacts/ui/observability/shots/` | `observability-surface.spec.ts` 的 fixture 矩阵（未跟踪） |
 | `artifacts/ui/visual-v1/after/` | 证据 403 的两张 capture：`incident-forbidden-1440-light-en`（全页，stale banner）与 `incident-forbidden-panel-1440-light-en`（permission-wall 面板特写）；未跟踪，不作为 Git evidence link，由 `g11-incident-state-gaps.spec.ts` 复现 |
 
