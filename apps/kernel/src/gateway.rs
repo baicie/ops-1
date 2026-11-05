@@ -1,4 +1,5 @@
 use crate::auth::AuthUser;
+use crate::capabilities::user_context_token;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use axum::body::Bytes;
@@ -69,6 +70,24 @@ pub async fn proxy(
         ));
     }
     let request_id = Uuid::new_v4().to_string();
+    // The plugin must be able to tell "this is user X with role Y" from "the
+    // client claimed role Y". Only the Kernel may answer that, and it answers
+    // from the membership table at the moment of the call - not from a header
+    // the request brought with it (G10 R1).
+    let workspace_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT workspace_id FROM kernel.business_workspace_members WHERE user_id=$1 ORDER BY workspace_id",
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await?;
+    let user_context = user_context_token(
+        &state,
+        &first.plugin_id,
+        auth.user_id,
+        &auth.role.to_string(),
+        workspace_ids,
+        &request_id,
+    )?;
     let attempts = if method == Method::GET || method == Method::HEAD {
         routes.len().max(2)
     } else {
@@ -112,6 +131,7 @@ pub async fn proxy(
             )
             .header("x-opsweave-user-id", auth.user_id.to_string())
             .header("x-opsweave-user-role", auth.role.to_string())
+            .header("x-opsweave-user-context", &user_context)
             .timeout(Duration::from_secs(
                 state.config.request_timeout_seconds.max(1),
             ));

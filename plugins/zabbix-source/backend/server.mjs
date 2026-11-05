@@ -8,12 +8,23 @@
 // per call from the plugin secret store and lives in a local variable for the
 // duration of that call. It is not stored, not logged, not echoed in an error
 // body and not accepted in a URL (rules/03).
+//
+// Identity: only Kernel-signed contexts are accepted (identity.mjs). The bare
+// x-opsweave-user-role header is not read: G10's R1 showed that trusting it is
+// safe only while the data port is unreachable, and a signature does not depend
+// on that network assumption.
+//
+// Storage: sources and collections live in the plugin's own PostgreSQL schema
+// (storage.mjs). Without it the plugin refuses to start unless an explicit
+// test-only memory flag is set; it never silently forgets configured sources.
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import {
   BUDGET_CEILING,
   collect,
+  evidenceBodyOf,
   listHosts,
   listItems,
   probe,
@@ -21,45 +32,34 @@ import {
   resolveBudget,
   signAttestation,
 } from './zabbix.mjs';
+import {
+  SourceConflictError,
+  StorageUnavailableError,
+  openStorage,
+  sourceView,
+} from './storage.mjs';
+import { createIdentityResolver, hasScope, workspaceAllowed } from './identity.mjs';
 
-const PLUGIN_ID = process.env.OPSWEAVE_PLUGIN_ID || 'opsweave.zabbix-source';
-const VERSION = process.env.OPSWEAVE_PLUGIN_VERSION || '0.0.1';
-const CAPABILITY_DIGEST = process.env.OPSWEAVE_CAPABILITY_DIGEST || 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
-const BUILD_DIGEST = process.env.OPSWEAVE_BUILD_DIGEST || 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
-const PORT = Number(process.env.PORT || 8080);
+const DEFAULTS = {
+  pluginId: 'opsweave.zabbix-source',
+  version: '0.0.1',
+  capabilityDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+  buildDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+  port: 8080,
+};
 
-// The adapter identity this plugin signs as, and the secret it signs with. The
-// same pair must be configured on the Kernel as OPSWEAVE_EVIDENCE_ADAPTERS
-// (adapterId:secret). With no secret the plugin still collects and still serves
-// every read endpoint - it simply cannot attest, and says so with
-// EVIDENCE_ADAPTER_NOT_CONFIGURED instead of returning evidence that would be
-// stored as UNVERIFIED while looking attested to a reader.
-const ADAPTER_ID = process.env.OPSWEAVE_EVIDENCE_ADAPTER_ID || '';
-const ADAPTER_SECRET = process.env.OPSWEAVE_EVIDENCE_ADAPTER_SECRET || '';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EVIDENCE_KINDS = new Set(['METRIC_SNAPSHOT']);
 
-// Resolving a secretref. In a deployed node this is the plugin secret store
-// mount; the map form exists so a developer can run the plugin without one.
-// Either way the value never leaves this process.
-let SECRET_MAP = {};
-try {
-  SECRET_MAP = JSON.parse(process.env.OPSWEAVE_ZABBIX_SECRETS || '{}');
-} catch {
-  // A malformed map is the same as none: refuse to resolve rather than guess.
-  SECRET_MAP = {};
+function parseSecretMap(raw) {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    // A malformed map is the same as none: refuse to resolve rather than guess.
+    return {};
+  }
 }
-
-let stopping = false;
-const ready = true;
-
-/** In-memory source registry. Sources are plugin-owned state; 0.0.1 keeps them
- *  in process because a restart losing a source configuration is visible and
- *  safe, while a half-migrated secret reference is not. Persisting them is a
- *  follow-up, recorded in the implementation-status note. */
-const SOURCES = new Map();
-/** Collections retained for attestation. Bounded so a long-running plugin
- *  cannot grow without limit (AGENTS.md: storage has a ceiling). */
-const COLLECTIONS = new Map();
-const MAX_RETAINED_COLLECTIONS = 200;
 
 function rid(req) {
   const value = req.headers['x-opsweave-request-id'];
@@ -77,365 +77,491 @@ function send(res, status, body, id) {
   res.end(payload);
 }
 
-function fail(res, status, code, message, id, retryable = false) {
-  // Every message that reaches a client goes through redact: an error path is
-  // exactly where a token tends to escape, and a stable code is what the UI
-  // localises against (AGENTS.md).
-  send(res, status, { code, message: redact(message, knownSecrets()), requestId: id, retryable }, id);
-}
+/**
+ * Build the plugin with explicit dependencies, so the socket tests can start a
+ * real server against a real database without importing a self-listening
+ * module. `server.mjs` only listens when it is executed as the entry point.
+ */
+export function createPlugin(options) {
+  const pluginId = options.pluginId || DEFAULTS.pluginId;
+  const version = options.version || DEFAULTS.version;
+  const store = options.store;
+  const verifyIdentity = options.verifyIdentity;
+  const adapterId = options.adapterId || '';
+  const adapterSecret = options.adapterSecret || '';
+  const secretMap = options.secretMap || {};
+  const capabilityDigest = options.capabilityDigest || DEFAULTS.capabilityDigest;
+  const buildDigest = options.buildDigest || DEFAULTS.buildDigest;
+  const logger = options.logger || console;
+  const state = { stopping: false };
 
-function knownSecrets() {
-  const values = Object.values(SECRET_MAP).filter((value) => typeof value === 'string');
-  return ADAPTER_SECRET ? [...values, ADAPTER_SECRET] : values;
-}
+  function knownSecrets() {
+    const values = Object.values(secretMap).filter((value) => typeof value === 'string');
+    return adapterSecret ? [...values, adapterSecret] : values;
+  }
 
-async function readJson(req, limit = 256 * 1024) {
-  let body = '';
-  for await (const chunk of req) {
-    body += chunk;
-    if (Buffer.byteLength(body) > limit) {
-      throw Object.assign(new Error('request body is larger than this endpoint accepts'), {
-        status: 413,
-        code: 'REQUEST_TOO_LARGE',
+  function fail(res, status, code, message, id, retryable = false) {
+    // Every message that reaches a client goes through redact: an error path is
+    // exactly where a token tends to escape, and a stable code is what the UI
+    // localises against (AGENTS.md).
+    send(res, status, { code, message: redact(message, knownSecrets()), requestId: id, retryable }, id);
+  }
+
+  async function readJson(req, limit = 256 * 1024) {
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
+      if (Buffer.byteLength(body) > limit) {
+        throw Object.assign(new Error('request body is larger than this endpoint accepts'), {
+          status: 413,
+          code: 'REQUEST_TOO_LARGE',
+        });
+      }
+    }
+    if (!body) return {};
+    try {
+      return JSON.parse(body);
+    } catch {
+      throw Object.assign(new Error('request body is not valid JSON'), { status: 400, code: 'INVALID_REQUEST' });
+    }
+  }
+
+  function whoOr401(req) {
+    const who = verifyIdentity(req.headers);
+    if (!who) {
+      throw Object.assign(new Error('this endpoint requires a Kernel-signed caller identity'), {
+        status: 401,
+        code: 'ZBX_IDENTITY_UNVERIFIED',
       });
     }
+    return who;
   }
-  if (!body) return {};
-  try {
-    return JSON.parse(body);
-  } catch {
-    throw Object.assign(new Error('request body is not valid JSON'), { status: 400, code: 'INVALID_REQUEST' });
-  }
-}
 
-/** Identity comes from the Kernel-verified headers, never from a self-reported
- *  body field (rules/03, rules/10). An unauthenticated request is refused
- *  before any Zabbix call is made. */
-function identity(req) {
-  const role = req.headers['x-opsweave-user-role'];
-  if (typeof role === 'string' && role) {
-    const normalised = role.toLowerCase();
-    if (normalised === 'admin' || normalised === 'operator') {
-      return { kind: 'user', role: normalised, scope: ['telemetry.source.read', 'telemetry.source.write'] };
+  function requireScope(who, scope) {
+    if (!hasScope(who, scope)) {
+      throw Object.assign(new Error(`this endpoint requires ${scope}`), { status: 403, code: 'FORBIDDEN' });
     }
-    if (normalised === 'viewer') return { kind: 'user', role: normalised, scope: ['telemetry.source.read'] };
-    return { kind: 'user', role: normalised, scope: [] };
-  }
-  const workload = req.headers['x-opsweave-caller-context'];
-  if (typeof workload === 'string' && workload) {
-    // The Gateway signs this; an unsigned or unverifiable context is not an
-    // identity. Verification lives in the shared runtime helper in a deployed
-    // node, so here an unverified context grants read only.
-    return { kind: 'workload', scope: ['telemetry.source.read'] };
-  }
-  return null;
-}
-
-function requireScope(who, scope) {
-  if (!who) {
-    throw Object.assign(new Error('this endpoint requires an authenticated caller'), {
-      status: 401,
-      code: 'UNAUTHENTICATED',
-    });
-  }
-  if (!who.scope.includes(scope)) {
-    throw Object.assign(new Error(`this endpoint requires ${scope}`), { status: 403, code: 'FORBIDDEN' });
-  }
-}
-
-/** Resolve a secretref to its value, for the duration of one call. */
-function resolveSecret(ref) {
-  const value = SECRET_MAP[ref];
-  if (typeof value !== 'string' || !value) {
-    throw Object.assign(
-      new Error('the secret store has no value for this source credential reference'),
-      { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
-    );
-  }
-  return value;
-}
-
-function sourceOr404(sourceId) {
-  const source = SOURCES.get(sourceId);
-  if (!source) {
-    throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
-  }
-  return source;
-}
-
-/** What a source looks like to a caller: the reference, never the secret. */
-function publicSource(source) {
-  return {
-    sourceId: source.sourceId,
-    name: source.name,
-    endpoint: source.endpoint,
-    credential: { kind: source.credential.kind, ref: source.credential.ref },
-    verifyTls: source.verifyTls,
-    status: source.status,
-    ...(source.lastProbe ? { lastProbe: source.lastProbe } : {}),
-    budget: source.budget,
-    createdAt: source.createdAt,
-  };
-}
-
-function validateCreate(body) {
-  const name = typeof body.name === 'string' ? body.name.trim() : '';
-  if (name.length < 2 || name.length > 120) {
-    throw Object.assign(new Error('name must be 2..120 characters'), { status: 400, code: 'INVALID_REQUEST' });
-  }
-  const endpoint = typeof body.endpoint === 'string' ? body.endpoint.trim() : '';
-  let url;
-  try {
-    url = new URL(endpoint);
-  } catch {
-    throw Object.assign(new Error('endpoint is not a valid URL'), { status: 400, code: 'INVALID_REQUEST' });
-  }
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw Object.assign(new Error('endpoint must be http or https'), { status: 400, code: 'INVALID_REQUEST' });
-  }
-  if (url.username || url.password) {
-    // A credential in a URL ends up in logs and metrics labels. Refused at the
-    // boundary rather than stripped silently (rules/03).
-    throw Object.assign(
-      new Error('endpoint must not carry credentials; use a credential reference'),
-      { status: 400, code: 'CREDENTIAL_IN_URL' },
-    );
-  }
-  const credential = body.credential;
-  if (!credential || typeof credential !== 'object') {
-    throw Object.assign(new Error('credential is required'), { status: 400, code: 'INVALID_REQUEST' });
-  }
-  if (!['api-token', 'basic'].includes(credential.kind)) {
-    throw Object.assign(new Error('credential.kind must be api-token or basic'), {
-      status: 400,
-      code: 'INVALID_REQUEST',
-    });
-  }
-  if (typeof credential.ref !== 'string' || !/^secretref:[A-Za-z0-9._\-/]{1,180}$/.test(credential.ref)) {
-    // A raw token pasted here would otherwise be stored as if it were a
-    // reference, so the shape is enforced rather than assumed.
-    throw Object.assign(
-      new Error('credential.ref must be a secretref: handle, not a secret value'),
-      { status: 400, code: 'CREDENTIAL_NOT_A_REFERENCE' },
-    );
-  }
-  return { name, endpoint, credential: { kind: credential.kind, ref: credential.ref } };
-}
-
-async function handle(req, res) {
-  const id = rid(req);
-  const url = new URL(req.url, 'http://plugin.invalid');
-  const path = url.pathname.replace(/^\/api\/zabbix-source/, '') || '/';
-
-  if (url.pathname === '/_opsweave/health/live') {
-    return send(res, stopping ? 503 : 200, { status: stopping ? 'stopping' : 'live' }, id);
-  }
-  if (url.pathname === '/_opsweave/health/ready') {
-    return send(res, ready && !stopping ? 200 : 503, { status: ready && !stopping ? 'ready' : 'not_ready' }, id);
-  }
-  if (url.pathname === '/_opsweave/health/startup') {
-    return send(res, 200, { status: 'started' }, id);
-  }
-  if (url.pathname === '/_opsweave/runtime-info') {
-    return send(res, 200, {
-      pluginId: PLUGIN_ID,
-      version: VERSION,
-      protocol: { name: 'http-json', version: '1' },
-      capabilityDigest: CAPABILITY_DIGEST,
-      buildDigest: BUILD_DIGEST,
-      // Whether this instance can attest at all is operational truth a reader
-      // needs: without it, evidence silently arrives as UNVERIFIED.
-      attestation: { adapterId: ADAPTER_ID || null, configured: Boolean(ADAPTER_ID && ADAPTER_SECRET) },
-      budgetCeiling: BUDGET_CEILING,
-    }, id);
   }
 
-  const who = identity(req);
-
-  if (path === '/sources' && req.method === 'GET') {
-    requireScope(who, 'telemetry.source.read');
-    const sources = [...SOURCES.values()].map(publicSource);
-    return send(res, 200, { sources, nextCursor: null }, id);
+  /** Writes need a user: a workload has no principal to attribute the change to
+   *  and no membership of its own beyond grant-scoped workspaces. */
+  function requireUser(who) {
+    if (who.kind !== 'user' || !UUID_RE.test(String(who.userId || ''))) {
+      throw Object.assign(new Error('this operation requires a signed user identity'), {
+        status: 403,
+        code: 'ZBX_USER_REQUIRED',
+      });
+    }
+    return who.userId;
   }
 
-  if (path === '/sources' && req.method === 'POST') {
-    requireScope(who, 'telemetry.source.write');
-    const body = await readJson(req);
-    const parsed = validateCreate(body);
-    const source = {
-      sourceId: crypto.randomUUID(),
-      ...parsed,
+  /** Resolve a secretref to its value, for the duration of one call. */
+  function resolveSecret(ref) {
+    const value = secretMap[ref];
+    if (typeof value !== 'string' || !value) {
+      throw Object.assign(
+        new Error('the secret store has no value for this source credential reference'),
+        { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
+      );
+    }
+    return value;
+  }
+
+  function resolveSecretQuietly(ref) {
+    try {
+      return resolveSecret(ref);
+    } catch {
+      return null;
+    }
+  }
+
+  function validateSourceBody(body, { requireWorkspace }) {
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (name.length < 2 || name.length > 120) {
+      throw Object.assign(new Error('name must be 2..120 characters'), { status: 400, code: 'INVALID_REQUEST' });
+    }
+    const endpoint = typeof body.endpoint === 'string' ? body.endpoint.trim() : '';
+    let url;
+    try {
+      url = new URL(endpoint);
+    } catch {
+      throw Object.assign(new Error('endpoint is not a valid URL'), { status: 400, code: 'INVALID_REQUEST' });
+    }
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw Object.assign(new Error('endpoint must be http or https'), { status: 400, code: 'INVALID_REQUEST' });
+    }
+    if (url.username || url.password) {
+      // A credential in a URL ends up in logs and metrics labels. Refused at the
+      // boundary rather than stripped silently (rules/03).
+      throw Object.assign(
+        new Error('endpoint must not carry credentials; use a credential reference'),
+        { status: 400, code: 'CREDENTIAL_IN_URL' },
+      );
+    }
+    const credential = body.credential;
+    if (!credential || typeof credential !== 'object') {
+      throw Object.assign(new Error('credential is required'), { status: 400, code: 'INVALID_REQUEST' });
+    }
+    if (!['api-token', 'basic'].includes(credential.kind)) {
+      throw Object.assign(new Error('credential.kind must be api-token or basic'), {
+        status: 400,
+        code: 'INVALID_REQUEST',
+      });
+    }
+    if (typeof credential.ref !== 'string' || !/^secretref:[A-Za-z0-9._\-/]{1,180}$/.test(credential.ref)) {
+      // A raw token pasted here would otherwise be stored as if it were a
+      // reference, so the shape is enforced rather than assumed.
+      throw Object.assign(
+        new Error('credential.ref must be a secretref: handle, not a secret value'),
+        { status: 400, code: 'CREDENTIAL_NOT_A_REFERENCE' },
+      );
+    }
+    let workspaceId;
+    if (requireWorkspace) {
+      workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+      if (!UUID_RE.test(workspaceId)) {
+        throw Object.assign(new Error('workspaceId is required and must be a UUID'), {
+          status: 400,
+          code: 'ZBX_WORKSPACE_REQUIRED',
+        });
+      }
+    }
+    return {
+      name,
+      endpoint,
+      credential: { kind: credential.kind, ref: credential.ref },
+      workspaceId,
       verifyTls: body.verifyTls !== false,
-      // A new source has not been probed, so it is UNVERIFIED. It does not
-      // become READY because the operator supplied plausible settings.
-      status: 'UNVERIFIED',
       budget: resolveBudget(body.budget).budget,
-      createdAt: new Date().toISOString(),
     };
-    SOURCES.set(source.sourceId, source);
-    return send(res, 201, publicSource(source), id);
   }
 
-  const probeMatch = path.match(/^\/sources\/([^/]+)\/probe$/);
-  if (probeMatch && req.method === 'POST') {
-    requireScope(who, 'telemetry.source.write');
-    const source = sourceOr404(probeMatch[1]);
-    // The secret is attached to the source view for this one call. A probe that
-    // cannot resolve its secret still runs, so it reports UNAUTHORIZED rather
-    // than a local configuration error the operator cannot distinguish from a
-    // bad token.
-    const result = await probe({ ...source, secret: resolveSecretQuietly(source) });
-    source.lastProbe = result;
+  function probeStatus(source, result) {
     // Only a probe moves status, and it records what it saw. A TIMEOUT leaves
     // the source DEGRADED rather than UNAVAILABLE: a slow endpoint is not a
     // down endpoint, and inferring "stopped" from silence is forbidden.
-    source.status = result.outcome === 'OK'
-      ? (source.verifyTls ? 'READY' : 'DEGRADED')
-      : result.outcome === 'UNAVAILABLE'
-        ? 'UNAVAILABLE'
-        : result.outcome === 'TIMEOUT'
-          ? 'DEGRADED'
-          : 'UNVERIFIED';
-    return send(res, 200, result, id);
+    if (result.outcome === 'OK') return source.verify_tls ? 'READY' : 'DEGRADED';
+    if (result.outcome === 'UNAVAILABLE') return 'UNAVAILABLE';
+    if (result.outcome === 'TIMEOUT') return 'DEGRADED';
+    return 'UNVERIFIED';
   }
 
-  const hostsMatch = path.match(/^\/sources\/([^/]+)\/hosts$/);
-  if (hostsMatch && req.method === 'GET') {
-    requireScope(who, 'telemetry.source.read');
-    const source = sourceOr404(hostsMatch[1]);
-    const result = await listHosts({ ...source, secret: resolveSecret(source.credential.ref) });
-    return send(res, 200, result, id);
-  }
-
-  const itemsMatch = path.match(/^\/sources\/([^/]+)\/items$/);
-  if (itemsMatch && req.method === 'GET') {
-    requireScope(who, 'telemetry.source.read');
-    const source = sourceOr404(itemsMatch[1]);
-    const result = await listItems(
-      { ...source, secret: resolveSecret(source.credential.ref) },
-      url.searchParams.get('hostId'),
-    );
-    return send(res, 200, result, id);
-  }
-
-  const collectMatch = path.match(/^\/sources\/([^/]+)\/collect$/);
-  if (collectMatch && req.method === 'POST') {
-    requireScope(who, 'telemetry.source.read');
-    const source = sourceOr404(collectMatch[1]);
-    const body = await readJson(req);
-    // The body is the contract's request shape: itemIds plus a window. Anything
-    // the caller did not send stays unset and is defaulted inside collect(),
-    // never invented here.
-    const result = await collect({
-      source: { ...source, secret: resolveSecret(source.credential.ref) },
-      itemIds: Array.isArray(body.itemIds) ? body.itemIds : [],
-      window: body.window,
-      budget: body.budget,
-    });
-    retainCollection(result);
-    return send(res, 200, result, id);
-  }
-
-  const attestMatch = path.match(/^\/collections\/([^/]+)\/attestation$/);
-  if (attestMatch && req.method === 'POST') {
-    requireScope(who, 'telemetry.source.write');
-    const collection = COLLECTIONS.get(attestMatch[1]);
-    if (!collection) {
-      throw Object.assign(new Error('no such collection, or it is no longer retained'), {
-        status: 404,
-        code: 'COLLECTION_NOT_FOUND',
-      });
-    }
-    if (!ADAPTER_ID || !ADAPTER_SECRET) {
-      // Refused rather than returned unsigned: an unsigned envelope would be
-      // stored as UNVERIFIED while looking like attested evidence to a caller
-      // that did not check.
-      throw Object.assign(
-        new Error('this instance has no evidence adapter credential, so it cannot attest a collection'),
-        { status: 503, code: 'EVIDENCE_ADAPTER_NOT_CONFIGURED' },
-      );
-    }
-    const body = await readJson(req);
-    const incidentId = typeof body.incidentId === 'string' ? body.incidentId : '';
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(incidentId)) {
-      throw Object.assign(new Error('incidentId must be a UUID'), { status: 400, code: 'INVALID_REQUEST' });
-    }
-    // The signature covers the incident it is being filed against, so a
-    // genuine envelope cannot be moved to another incident.
-    const envelope = signAttestation({
-      adapterId: ADAPTER_ID,
-      secret: ADAPTER_SECRET,
-      incidentId,
-      kind: 'METRIC_SNAPSHOT',
-      source: `zabbix:${collection.sourceId}`,
-      collectedAt: collection.observedAt,
-      contentRef: collection.contentRef,
-      issuedAt: new Date().toISOString(),
-    });
-    return send(res, 200, {
-      // Exactly the body the Kernel's evidence endpoint expects, so the caller
-      // relays it without reassembling the signed fields.
-      evidence: {
-        kind: 'METRIC_SNAPSHOT',
-        source: `zabbix:${collection.sourceId}`,
-        collectedAt: collection.observedAt,
-        contentRef: collection.contentRef,
-        attestation: envelope,
-      },
-      outcome: collection.outcome,
-    }, id);
-  }
-
-  return fail(res, 404, 'NOT_FOUND', 'no such endpoint', id);
-}
-
-/** A probe must be able to report UNAUTHORIZED, which means it has to run even
- *  when the secret cannot be resolved. Returns null instead of throwing. */
-function resolveSecretQuietly(source) {
-  try {
-    return resolveSecret(source.credential.ref);
-  } catch {
-    return null;
-  }
-}
-
-function retainCollection(result) {
-  COLLECTIONS.set(result.collectionId, result);
-  while (COLLECTIONS.size > MAX_RETAINED_COLLECTIONS) {
-    const oldest = COLLECTIONS.keys().next().value;
-    COLLECTIONS.delete(oldest);
-  }
-}
-
-const server = http.createServer((req, res) => {
-  handle(req, res).catch((error) => {
+  async function handle(req, res) {
     const id = rid(req);
-    // Below 500 the message is the caller's own input problem and is safe to
-    // return once redacted; at 500 it is replaced, because an internal message
-    // is the one most likely to quote a token or a host path.
-    fail(
-      res,
-      error.status || 500,
-      error.code || 'INTERNAL',
-      error.status && error.status < 500 ? error.message : 'internal zabbix-source error',
-      id,
-      Boolean(error.retryable),
-    );
-  });
-});
+    const url = new URL(req.url, 'http://plugin.invalid');
+    const path = url.pathname.replace(/^\/api\/zabbix-source/, '') || '/';
 
-process.on('SIGTERM', () => {
-  stopping = true;
-  server.close(() => process.exit(0));
-});
+    if (url.pathname === '/_opsweave/health/live') {
+      return send(res, state.stopping ? 503 : 200, { status: state.stopping ? 'stopping' : 'live' }, id);
+    }
+    if (url.pathname === '/_opsweave/health/ready') {
+      return send(res, state.stopping ? 503 : 200, { status: state.stopping ? 'not_ready' : 'ready' }, id);
+    }
+    if (url.pathname === '/_opsweave/health/startup') {
+      return send(res, 200, { status: 'started' }, id);
+    }
+    if (url.pathname === '/_opsweave/runtime-info') {
+      return send(res, 200, {
+        pluginId,
+        version,
+        protocol: { name: 'http-json', version: '1' },
+        capabilityDigest,
+        buildDigest,
+        // Whether this instance can attest at all is operational truth a reader
+        // needs: without it, evidence silently arrives as UNVERIFIED.
+        attestation: { adapterId: adapterId || null, configured: Boolean(adapterId && adapterSecret) },
+        storage: { mode: store.mode },
+        budgetCeiling: BUDGET_CEILING,
+      }, id);
+    }
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`zabbix-source ${VERSION} listening on ${PORT}`);
-  if (!ADAPTER_ID || !ADAPTER_SECRET) {
-    // Said once at startup, because "evidence is arriving as UNVERIFIED" is
-    // otherwise discovered much later by a reader who trusted it.
-    console.log('zabbix-source: no evidence adapter credential configured; collections cannot be attested');
+    const who = whoOr401(req);
+
+    if (path === '/sources' && req.method === 'GET') {
+      requireScope(who, 'telemetry.source.read');
+      const items = await store.listSources(who.workspaces);
+      // The contract has always said {items}; the old {sources,nextCursor}
+      // shape was server-side drift with no consumer to preserve.
+      return send(res, 200, { items }, id);
+    }
+
+    if (path === '/sources' && req.method === 'POST') {
+      requireScope(who, 'telemetry.source.write');
+      const actorId = requireUser(who);
+      const body = await readJson(req);
+      const parsed = validateSourceBody(body, { requireWorkspace: true });
+      if (!workspaceAllowed(who, parsed.workspaceId)) {
+        throw Object.assign(new Error('the signed caller context does not include this workspace'), {
+          status: 403,
+          code: 'ZBX_WORKSPACE_FORBIDDEN',
+        });
+      }
+      const row = await store.createSource({
+        sourceId: crypto.randomUUID(),
+        workspaceId: parsed.workspaceId,
+        createdBy: actorId,
+        name: parsed.name,
+        endpoint: parsed.endpoint,
+        credential: parsed.credential,
+        verifyTls: parsed.verifyTls,
+        budget: parsed.budget,
+      });
+      return send(res, 201, sourceView(row), id);
+    }
+
+    const sourceMatch = path.match(/^\/sources\/([^/]+)$/);
+    if (sourceMatch && req.method === 'PUT') {
+      requireScope(who, 'telemetry.source.write');
+      const actorId = requireUser(who);
+      const body = await readJson(req);
+      const parsed = validateSourceBody(body, { requireWorkspace: false });
+      const row = await store.updateSource(sourceMatch[1], who.workspaces, parsed, actorId);
+      if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      return send(res, 200, sourceView(row), id);
+    }
+
+    const probeMatch = path.match(/^\/sources\/([^/]+)\/probe$/);
+    if (probeMatch && req.method === 'POST') {
+      requireScope(who, 'telemetry.source.write');
+      const actorId = requireUser(who);
+      const row = await store.getSource(probeMatch[1], who.workspaces);
+      if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      // A probe that cannot resolve its secret still runs, so it reports
+      // UNAUTHORIZED rather than a local configuration error the operator
+      // cannot distinguish from a bad token.
+      const result = await probe({
+        sourceId: row.source_id,
+        endpoint: row.endpoint,
+        verifyTls: row.verify_tls,
+        budget: row.budget,
+        secret: resolveSecretQuietly(row.credential_ref),
+      });
+      const updated = await store.recordProbe(row.source_id, who.workspaces, result, probeStatus(row, result), actorId);
+      if (!updated) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      return send(res, 200, result, id);
+    }
+
+    const hostsMatch = path.match(/^\/sources\/([^/]+)\/hosts$/);
+    if (hostsMatch && req.method === 'GET') {
+      requireScope(who, 'telemetry.source.read');
+      const row = await store.getSource(hostsMatch[1], who.workspaces);
+      if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      const result = await listHosts({
+        sourceId: row.source_id,
+        endpoint: row.endpoint,
+        verifyTls: row.verify_tls,
+        budget: row.budget,
+        secret: resolveSecret(row.credential_ref),
+      });
+      return send(res, 200, result, id);
+    }
+
+    const itemsMatch = path.match(/^\/sources\/([^/]+)\/items$/);
+    if (itemsMatch && req.method === 'GET') {
+      requireScope(who, 'telemetry.source.read');
+      const row = await store.getSource(itemsMatch[1], who.workspaces);
+      if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      const result = await listItems(
+        {
+          sourceId: row.source_id,
+          endpoint: row.endpoint,
+          verifyTls: row.verify_tls,
+          budget: row.budget,
+          secret: resolveSecret(row.credential_ref),
+        },
+        url.searchParams.get('hostId'),
+      );
+      return send(res, 200, result, id);
+    }
+
+    const collectMatch = path.match(/^\/sources\/([^/]+)\/collect$/);
+    if (collectMatch && req.method === 'POST') {
+      requireScope(who, 'telemetry.source.read');
+      // collect persists a collection for attestation; a workload has no
+      // principal and therefore no attributable evidence.
+      const actorId = requireUser(who);
+      const row = await store.getSource(collectMatch[1], who.workspaces);
+      if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      const body = await readJson(req);
+      const result = await collect({
+        source: {
+          sourceId: row.source_id,
+          endpoint: row.endpoint,
+          verifyTls: row.verify_tls,
+          budget: row.budget,
+          secret: resolveSecret(row.credential_ref),
+        },
+        itemIds: Array.isArray(body.itemIds) ? body.itemIds : [],
+        window: body.window,
+        budget: body.budget,
+      });
+      const bodyBytes = evidenceBodyOf(result);
+      await store.saveCollection({
+        collectionId: result.collectionId,
+        sourceId: row.source_id,
+        workspaceId: row.workspace_id,
+        createdBy: actorId,
+        outcome: result.outcome,
+        contentRef: result.contentRef,
+        body: bodyBytes,
+        observedAt: new Date(result.observedAt),
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      return send(res, 200, result, id);
+    }
+
+    const attestMatch = path.match(/^\/collections\/([^/]+)\/attestation$/);
+    if (attestMatch && req.method === 'POST') {
+      requireScope(who, 'telemetry.source.write');
+      requireUser(who);
+      const collection = await store.getCollection(attestMatch[1], who.workspaces);
+      if (!collection) {
+        throw Object.assign(new Error('no such collection, or it is no longer retained'), {
+          status: 404,
+          code: 'COLLECTION_NOT_FOUND',
+        });
+      }
+      if (!adapterId || !adapterSecret) {
+        // Refused rather than returned unsigned: an unsigned envelope would be
+        // stored as UNVERIFIED while looking like attested evidence to a caller
+        // that did not check.
+        throw Object.assign(
+          new Error('this instance has no evidence adapter credential, so it cannot attest a collection'),
+          { status: 503, code: 'EVIDENCE_ADAPTER_NOT_CONFIGURED' },
+        );
+      }
+      const body = await readJson(req);
+      const incidentId = typeof body.incidentId === 'string' ? body.incidentId : '';
+      if (!UUID_RE.test(incidentId)) {
+        throw Object.assign(new Error('incidentId must be a UUID'), { status: 400, code: 'INVALID_REQUEST' });
+      }
+      const kind = body.kind === undefined ? 'METRIC_SNAPSHOT' : body.kind;
+      if (!EVIDENCE_KINDS.has(kind)) {
+        throw Object.assign(new Error('this plugin produces METRIC_SNAPSHOT evidence only'), {
+          status: 400,
+          code: 'INVALID_REQUEST',
+        });
+      }
+      if (collection.outcome === 'UNAVAILABLE' || collection.outcome === 'UNKNOWN') {
+        throw Object.assign(
+          new Error('a collection that never obtained data cannot be attested as a measurement'),
+          { status: 409, code: 'ZBX_COLLECTION_NOT_ATTESTABLE' },
+        );
+      }
+      const envelope = signAttestation({
+        adapterId,
+        secret: adapterSecret,
+        incidentId,
+        kind,
+        source: `zabbix:${collection.source_id}`,
+        collectedAt: collection.observed_at.toISOString(),
+        contentRef: collection.content_ref,
+        issuedAt: new Date().toISOString(),
+      });
+      return send(res, 200, {
+        // Exactly the body the Kernel's evidence endpoint expects, so the caller
+        // relays it without reassembling the signed fields.
+        evidence: {
+          kind,
+          source: `zabbix:${collection.source_id}`,
+          collectedAt: collection.observed_at.toISOString(),
+          contentRef: collection.content_ref,
+          content: { contentType: 'application/json', body: collection.body },
+          attestation: envelope,
+        },
+        outcome: collection.outcome,
+      }, id);
+    }
+
+    return fail(res, 404, 'NOT_FOUND', 'no such endpoint', id);
   }
-});
 
-export { handle, publicSource, validateCreate };
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((error) => {
+      const id = rid(req);
+      const status = error.status || (error instanceof StorageUnavailableError ? 503 : error instanceof SourceConflictError ? 409 : 500);
+      const code = error.code || (status === 500 ? 'INTERNAL' : 'INVALID_REQUEST');
+      if (status >= 500) {
+        logger.error(
+          `zabbix-source internal error (${id}) ${code}: ${redact(error instanceof Error ? error.message : String(error), knownSecrets())}`,
+        );
+      }
+      // Below 500 the message is the caller's own input problem and is safe to
+      // return once redacted; at 500 it is replaced, because an internal message
+      // is the one most likely to quote a token or a host path.
+      fail(
+        res,
+        status,
+        code,
+        status < 500 ? error.message : 'internal zabbix-source error',
+        id,
+        Boolean(error.retryable),
+      );
+    });
+  });
+
+  return {
+    server,
+    state,
+    async close() {
+      state.stopping = true;
+      const closed = new Promise((resolve) => server.close(resolve));
+      // Keep-alive sockets from fetch/Playwright would otherwise hold the close
+      // open until their timeout; a test that cannot stop its server is not a
+      // passing test.
+      server.closeIdleConnections?.();
+      server.closeAllConnections?.();
+      await closed;
+      await store.close();
+    },
+  };
+}
+
+/**
+ * Start the plugin from the environment. This is the only path that listens on
+ * a port; `createPlugin` is the test entry point.
+ */
+export async function startServer(env = process.env) {
+  const pluginId = env.OPSWEAVE_PLUGIN_ID || DEFAULTS.pluginId;
+  const store = await openStorage({
+    databaseUrl: env.OPSWEAVE_PLUGIN_DATABASE_URL || '',
+    allowMemory: env.OPSWEAVE_ALLOW_MEMORY_STORAGE === '1',
+  });
+  const verifyIdentity = createIdentityResolver({
+    contextKeyHex: env.OPSWEAVE_CALLER_CONTEXT_KEY || '',
+    pluginId,
+  });
+  const plugin = createPlugin({
+    pluginId,
+    version: env.OPSWEAVE_PLUGIN_VERSION || DEFAULTS.version,
+    capabilityDigest: env.OPSWEAVE_CAPABILITY_DIGEST,
+    buildDigest: env.OPSWEAVE_BUILD_DIGEST,
+    adapterId: env.OPSWEAVE_EVIDENCE_ADAPTER_ID || '',
+    adapterSecret: env.OPSWEAVE_EVIDENCE_ADAPTER_SECRET || '',
+    secretMap: parseSecretMap(env.OPSWEAVE_ZABBIX_SECRETS),
+    store,
+    verifyIdentity,
+  });
+  const port = Number(env.PORT || DEFAULTS.port);
+  plugin.server.listen(port, '0.0.0.0', () => {
+    console.log(`zabbix-source ${pluginId} listening on ${port} (storage=${store.mode})`);
+    if (!env.OPSWEAVE_EVIDENCE_ADAPTER_ID || !env.OPSWEAVE_EVIDENCE_ADAPTER_SECRET) {
+      // Said once at startup, because "evidence is arriving as UNVERIFIED" is
+      // otherwise discovered much later by a reader who trusted it.
+      console.log('zabbix-source: no evidence adapter credential configured; collections cannot be attested');
+    }
+  });
+  process.on('SIGTERM', () => {
+    plugin.close().then(() => process.exit(0)).catch(() => process.exit(1));
+  });
+  return plugin;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startServer().catch((error) => {
+    console.error(`zabbix-source failed to start: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}
+
+export { sourceView };

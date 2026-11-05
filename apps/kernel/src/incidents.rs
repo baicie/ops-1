@@ -5065,6 +5065,107 @@ mod tests {
         cleanup(&pool, &[user]).await;
     }
 
+    /// G13-A: the plugin's exact bytes and its signature meet in one write.
+    ///
+    /// The signature covers a `contentRef`; the Kernel derives that ref from the
+    /// bytes it is about to store and refuses a mismatch. This test proves the
+    /// three facts line up in one transaction - the signature verifies, the
+    /// stored bytes are byte-identical, and a ref that does not describe those
+    /// bytes writes nothing.
+    #[tokio::test]
+    async fn a_plugin_signed_snapshot_is_stored_byte_for_byte_and_attested() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("signed snapshot", None),
+        )
+        .await
+        .unwrap();
+
+        // Multi-byte content and a non-trivial key order: the digest is over the
+        // bytes, not over a re-serialized object.
+        let body = r#"{"outcome":"OK","observedAt":"2026-11-01T03:00:00Z","requestedItems":1,"series":[{"itemId":"10401","samples":[{"occurredAt":"2026-11-01T02:30:00Z","value":17.5}],"unit":"%"}]}"#;
+        let digest = digest_of(body.as_bytes());
+        let content_ref = format!("sha256:{digest}");
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+
+        let mut payload = content_request("application/json", body);
+        payload.content_ref = Some(content_ref.clone());
+        payload.source = "zabbix:source-1".to_string();
+        payload.collected_at = collected_at;
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-1",
+            &content_ref,
+            collected_at,
+        );
+        payload.attestation =
+            attested_request(&bound, ADAPTER_ID, ADAPTER_SECRET, issued_at).attestation;
+
+        let (created, row) =
+            insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
+                .await
+                .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
+        assert_eq!(row.verification_method, "SOURCE_ADAPTER");
+        assert_eq!(row.content_ref, content_ref);
+        assert_eq!(row.content_status, "STORED");
+
+        let (stored, stored_digest, stored_bytes): (Vec<u8>, String, i32) = sqlx::query_as(
+            "SELECT body, sha256, content_bytes FROM kernel.incident_evidence_content WHERE evidence_id=$1",
+        )
+        .bind(row.evidence_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored,
+            body.as_bytes(),
+            "the Kernel stored exactly the submitted bytes"
+        );
+        assert_eq!(stored_digest, digest);
+        assert_eq!(stored_bytes, body.len() as i32);
+
+        // The same bytes with a ref that does not describe them: the signature
+        // can verify (it signs that wrong ref) and the write still must fail,
+        // because the digest check is independent of the signature.
+        let mut mismatched = content_request("application/json", body);
+        let wrong_ref = format!("sha256:{}", "0".repeat(64));
+        mismatched.content_ref = Some(wrong_ref.clone());
+        mismatched.source = "zabbix:source-1".to_string();
+        mismatched.collected_at = collected_at;
+        let wrong_bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-1",
+            &wrong_ref,
+            collected_at,
+        );
+        mismatched.attestation =
+            attested_request(&wrong_bound, ADAPTER_ID, ADAPTER_SECRET, issued_at).attestation;
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, mismatched)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_REF_CONFLICT");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1, "a refused write leaves no second row");
+
+        cleanup(&pool, &[user]).await;
+    }
+
     /// Four ways an attestation can be wrong. All four are refused, none of them
     /// degrades to UNVERIFIED: an unverifiable attestation is an attempt to claim
     /// provenance, and storing it as an ordinary row would bury it.

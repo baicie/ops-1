@@ -478,6 +478,7 @@ export async function collect({ source, itemIds, window: requested, budget: requ
   });
 
   const result = {
+    collectionId: crypto.randomUUID(),
     sourceId: source.sourceId,
     outcome,
     requestedItems,
@@ -487,8 +488,32 @@ export async function collect({ source, itemIds, window: requested, budget: requ
     budget,
     observedAt,
   };
-  result.contentRef = contentRef(result);
+  // Build the exact evidence bytes once. When the collection exceeds the
+  // Kernel's 64 KiB content bound the snapshot is bounded, the outcome becomes
+  // PARTIAL, and `snapshot` records what was left out; the digest is taken over
+  // the snapshot bytes the caller will actually submit.
+  const evidence = buildEvidence(result);
+  result.outcome = evidence.outcome;
+  if (evidence.snapshot) result.snapshot = evidence.snapshot;
+  result.contentRef = evidence.contentRef;
+  // Non-enumerable: the HTTP response stays the contract's CollectionResult,
+  // while the server can persist the exact bytes this digest was taken over
+  // without recomputing them (recomputation after the outcome became PARTIAL
+  // would produce different bytes and break the digest).
+  Object.defineProperty(result, 'evidenceBody', {
+    value: evidence.body,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
   return result;
+}
+
+/** The exact bytes stored for a collection, if this result came from collect().
+ *  A result reconstructed from the database carries its body separately. */
+export function evidenceBodyOf(result) {
+  if (typeof result?.evidenceBody === 'string') return result.evidenceBody;
+  return buildEvidence(result).body;
 }
 
 async function collectOne({ source, itemId, window, timeFrom, timeTill, budget, transport }) {
@@ -764,14 +789,13 @@ export function canonical(value) {
   return JSON.stringify(value === undefined ? null : value);
 }
 
-/**
- * The digest the evidence row points at.
- *
- * Covers the samples and the outcome together, so a collection cannot be
- * re-labelled OK while keeping the digest of a PARTIAL one.
- */
-export function contentRef(result) {
-  const covered = {
+/** The Kernel stores at most this many bytes of evidence content. The plugin
+ *  builds its snapshot to the same bound rather than letting the Kernel refuse
+ *  a collection the operator already paid for. */
+export const EVIDENCE_CONTENT_MAX_BYTES = 65536;
+
+function coveredOf(result) {
+  return {
     sourceId: result.sourceId,
     outcome: result.outcome,
     requestedItems: result.requestedItems,
@@ -781,7 +805,90 @@ export function contentRef(result) {
     observedAt: result.observedAt,
     series: result.series,
   };
-  return 'sha256:' + crypto.createHash('sha256').update(canonical(covered)).digest('hex');
+}
+
+function digestOf(body) {
+  return 'sha256:' + crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+}
+
+/**
+ * The exact bytes that become Kernel evidence content.
+ *
+ * When the canonical collection body fits in 65536 bytes it is submitted whole.
+ * When it does not, this returns a deterministic bounded snapshot: samples are
+ * reduced first, then trailing series are dropped, and `snapshot` records what
+ * was left out. A truncated snapshot is PARTIAL by construction - the returned
+ * `outcome` is PARTIAL and the signed bytes say so, so a reader can never
+ * mistake the snapshot for the complete window (rules/05).
+ *
+ * The body is built here, once, and the digest is taken over exactly these
+ * bytes. The Kernel re-derives the digest from the stored body; if the two ever
+ * differ it refuses the write (EVIDENCE_CONTENT_REF_CONFLICT) instead of
+ * storing bytes the signature did not cover.
+ */
+export function buildEvidence(result, maxBytes = EVIDENCE_CONTENT_MAX_BYTES) {
+  const base = coveredOf(result);
+  const originalBody = canonical(base);
+  const originalBytes = Buffer.byteLength(originalBody, 'utf8');
+  if (originalBytes <= maxBytes) {
+    return {
+      body: originalBody,
+      contentRef: digestOf(originalBody),
+      snapshot: null,
+      outcome: result.outcome,
+    };
+  }
+
+  const requestedSamples = base.series.reduce((sum, entry) => sum + (entry.samples?.length || 0), 0);
+  let sampleCap = Math.max(1, ...base.series.map((entry) => entry.samples?.length || 0));
+  let droppedSeries = 0;
+  let best = null;
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const kept = base.series.slice(0, Math.max(0, base.series.length - droppedSeries));
+    const reduced = {
+      ...base,
+      // A bounded snapshot is not a complete observation, and the signed bytes
+      // must say PARTIAL even when every item answered.
+      outcome: 'PARTIAL',
+      series: kept.map((entry) => ({ ...entry, samples: (entry.samples || []).slice(0, sampleCap) })),
+    };
+    const returnedSamples = reduced.series.reduce((sum, entry) => sum + entry.samples.length, 0);
+    const snapshot = {
+      maxBytes,
+      originalBytes,
+      truncated: true,
+      reason: 'CONTENT_LIMIT',
+      requestedSamples,
+      returnedSamples,
+      droppedSeries,
+    };
+    const body = canonical({ ...reduced, snapshot });
+    best = { body, snapshot };
+    if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
+    if (sampleCap > 1) {
+      sampleCap = Math.max(1, Math.floor(sampleCap / 2));
+    } else if (droppedSeries < base.series.length) {
+      droppedSeries += 1;
+    } else {
+      break;
+    }
+  }
+  return {
+    body: best.body,
+    contentRef: digestOf(best.body),
+    snapshot: best.snapshot,
+    outcome: 'PARTIAL',
+  };
+}
+
+/**
+ * The digest the evidence row points at.
+ *
+ * Covers the samples and the outcome together, so a collection cannot be
+ * re-labelled OK while keeping the digest of a PARTIAL one.
+ */
+export function contentRef(result) {
+  return buildEvidence(result).contentRef;
 }
 
 /**
