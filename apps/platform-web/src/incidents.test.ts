@@ -40,6 +40,7 @@ import {
   evidenceExportFileName,
   evidenceKindKey,
   evidencePanelState,
+  incidentEvidenceKpiStates,
   evidenceTrustKey,
   evidenceTrustTone,
   incidentFacts,
@@ -246,9 +247,44 @@ describe('evidencePanelState', () => {
     expect(evidencePanelState([evidence()], true)).toBe('present');
   });
 
+  it('does not turn a failed refresh over an empty snapshot into a successful empty answer', () => {
+    // A successful empty read leaves []; a later 503 must not make that [] look like the
+    // latest answer. With no rows to stand on, it is unavailable, not missing.
+    expect(evidencePanelState([], true, 503)).toBe('unavailable');
+    expect(evidencePanelState([], true)).toBe('unavailable');
+  });
+
   it('treats a 403 as a permission wall, even over an older list', () => {
     expect(evidencePanelState(null, true, 403)).toBe('forbidden');
     expect(evidencePanelState([evidence()], true, 403)).toBe('forbidden');
+  });
+});
+
+describe('incidentEvidenceKpiStates', () => {
+  it('keeps a refused or unavailable read UNKNOWN even when the page holds zero rows', () => {
+    // The regression this pins: the verified card used `rows === 0 ? noData : ...`, so a 403
+    // with an empty page painted NO_DATA while the evidence card correctly said UNKNOWN.
+    expect(incidentEvidenceKpiStates('forbidden', 0)).toEqual({ evidence: 'unknown', verified: 'unknown' });
+    expect(incidentEvidenceKpiStates('unavailable', 0)).toEqual({ evidence: 'unknown', verified: 'unknown' });
+  });
+
+  it('does not let a stale empty list turn a failed refresh into a successful zero', () => {
+    // The reachable path: successful empty read -> [] stays on the page -> same-id refresh 503.
+    // evidencePanelState must classify that as unavailable, and the KPI pair must be UNKNOWN.
+    expect(evidencePanelState([], true, 503)).toBe('unavailable');
+    expect(incidentEvidenceKpiStates('unavailable', 0)).toEqual({ evidence: 'unknown', verified: 'unknown' });
+  });
+
+  it('reports a loading read as NO_DATA, never as zero', () => {
+    expect(incidentEvidenceKpiStates('loading', 0)).toEqual({ evidence: 'noData', verified: 'noData' });
+  });
+
+  it('treats a successful empty answer as a real zero for Evidence and NO_DATA for verified', () => {
+    expect(incidentEvidenceKpiStates('missing', 0)).toEqual({ evidence: 'ready', verified: 'noData' });
+  });
+
+  it('reports a successful read with rows as ready, with the ratio denominator', () => {
+    expect(incidentEvidenceKpiStates('present', 5)).toEqual({ evidence: 'ready', verified: 'ready' });
   });
 });
 

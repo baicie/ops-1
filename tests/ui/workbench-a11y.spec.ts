@@ -22,19 +22,38 @@ const TARGETS = [
   '[data-testid=incident-evidence] button',
   '[data-testid=incident-verdict] button',
   '[data-testid=incident-lifecycle] button',
+  '[data-testid=investigation-rail-filter] button',
   '.ow-window-switch button',
 ].join(', ');
 
+/**
+ * The target is "zero violations of the WCAG A/AA rules this analysis selects", not "zero
+ * serious ones". Filtering to serious/critical would print a green result while a moderate
+ * violation sits in the same tree, so every violation from the target rule set blocks. The
+ * console line reports the count by impact, including zeroes, so a green run says what it
+ * actually scanned instead of implying more.
+ */
 async function axe(page: Page, label: string) {
   const result = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
     .analyze();
-  const blocking = result.violations.filter((violation) => violation.impact === 'serious' || violation.impact === 'critical');
+  const counts = { critical: 0, serious: 0, moderate: 0, minor: 0 };
+  for (const violation of result.violations) {
+    if (violation.impact && violation.impact in counts) counts[violation.impact as keyof typeof counts] += 1;
+  }
+  console.log(`[a11y] ${label}: ${result.violations.length} violation(s) — critical ${counts.critical}, serious ${counts.serious}, moderate ${counts.moderate}, minor ${counts.minor}`);
   expect(
-    blocking.map((violation) => violation.id + ' (' + violation.impact + '): ' + violation.help + ' :: ' + violation.nodes.map((node) => node.target.join(' ') + ' ' + (node.failureSummary || '')).join(', ')),
-    label + ': serious/critical axe violations',
+    result.violations.map((violation) => violation.id + ' (' + violation.impact + '): ' + violation.help + ' :: ' + violation.nodes.map((node) => node.target.join(' ') + ' ' + (node.failureSummary || '')).join(', ')),
+    label + ': all WCAG A/AA axe violations',
   ).toEqual([]);
   return result;
+}
+
+/** Assert which regions are actually laid out, not merely present in the DOM. */
+async function visibleRegions(page: Page, label: string, regions: string[]) {
+  for (const region of regions) {
+    await expect(page.locator(`[data-region="${region}"]`), `${label}: region ${region} must be visible`).toBeVisible();
+  }
 }
 
 async function targets(page: Page, label: string) {
@@ -92,6 +111,7 @@ test('workbench accessibility at 1440 light en', async ({ browser }) => {
 
   await page.goto('/app/observability');
   await page.waitForSelector('[data-async-state]:not([data-async-state=loading])');
+  await visibleRegions(page, 'observability 1440 light en', ['kpi', 'fleet', 'scope']);
   await axe(page, 'observability 1440 light en');
   await targets(page, 'observability 1440 light en');
   await focusRing(page, 'observability 1440 light en');
@@ -100,6 +120,7 @@ test('workbench accessibility at 1440 light en', async ({ browser }) => {
   await page.waitForSelector('[data-testid=observability-entity] [data-async-state]:not([data-async-state=loading])');
   await page.waitForTimeout(400);
   await expect(page.locator('.ow-window-switch button')).toHaveCount(3);
+  await visibleRegions(page, 'observability entity 1440 light en', ['current', 'history', 'instances', 'events']);
   await axe(page, 'observability entity 1440 light en');
   await targets(page, 'observability entity 1440 light en');
 
@@ -109,6 +130,10 @@ test('workbench accessibility at 1440 light en', async ({ browser }) => {
   await page.waitForSelector('[data-testid=incident-timeline]');
   await page.waitForSelector('[data-testid=incident-evidence]:not([data-evidence-state=loading])');
   await page.waitForSelector('[data-testid=incident-investigations]:is([data-state=ready],[data-state=failed])', { timeout: 20_000 });
+  // At 1440 all three panes are laid out, so this scan must include the investigation and the
+  // decision content, not just the default compact tab.
+  await visibleRegions(page, 'incident 1440 light en', ['rail', 'kpi', 'timeline', 'evidence', 'ai', 'verdict', 'lifecycle', 'audit', 'identity']);
+  await expect(page.getByTestId('incident-investigations')).toBeVisible();
   await axe(page, 'incident 1440 light en');
   await targets(page, 'incident 1440 light en');
   await focusRing(page, 'incident 1440 light en');
@@ -127,6 +152,7 @@ test('workbench accessibility at 390 dark zh-CN', async ({ browser }) => {
 
   await page.goto('/app/observability');
   await page.waitForSelector('[data-async-state]:not([data-async-state=loading])');
+  await visibleRegions(page, 'observability 390 dark zh-CN', ['kpi', 'fleet', 'scope']);
   await axe(page, 'observability 390 dark zh-CN');
   await targets(page, 'observability 390 dark zh-CN');
 
@@ -134,6 +160,7 @@ test('workbench accessibility at 390 dark zh-CN', async ({ browser }) => {
   await page.waitForSelector('[data-testid=observability-entity] [data-async-state]:not([data-async-state=loading])');
   await page.waitForTimeout(400);
   await expect(page.locator('.ow-window-switch button')).toHaveCount(3);
+  await visibleRegions(page, 'observability entity 390 dark zh-CN', ['current', 'history', 'instances', 'events']);
   await axe(page, 'observability entity 390 dark zh-CN');
   await targets(page, 'observability entity 390 dark zh-CN');
 
@@ -143,11 +170,23 @@ test('workbench accessibility at 390 dark zh-CN', async ({ browser }) => {
   await page.waitForSelector('[data-testid=incident-timeline]');
   await page.waitForSelector('[data-testid=incident-evidence]:not([data-evidence-state=loading])');
   await page.waitForSelector('[data-testid=incident-investigations]:is([data-state=ready],[data-state=failed])', { timeout: 20_000 });
-  await axe(page, 'incident 390 dark zh-CN');
-  await targets(page, 'incident 390 dark zh-CN');
+  await visibleRegions(page, 'incident analysis 390 dark zh-CN', ['kpi', 'timeline', 'evidence', 'ai']);
+  await expect(page.locator('[data-region=verdict]')).toBeHidden();
+  await expect(page.locator('[data-region=rail]')).toBeHidden();
+  await expect(page.getByTestId('incident-investigations')).toBeVisible();
+  await axe(page, 'incident analysis 390 dark zh-CN');
+  await targets(page, 'incident analysis 390 dark zh-CN');
+  await page.getByTestId('investigation-tab-rail').click();
+  await visibleRegions(page, 'incident rail 390 dark zh-CN', ['rail']);
+  await expect(page.locator('[data-region=kpi]')).toBeHidden();
+  await axe(page, 'incident rail 390 dark zh-CN');
+  await targets(page, 'incident rail 390 dark zh-CN');
   await page.getByTestId('investigation-tab-detail').click();
-  await axe(page, 'incident detail tab 390 dark zh-CN');
-  await targets(page, 'incident detail tab 390 dark zh-CN');
+  await visibleRegions(page, 'incident decision 390 dark zh-CN', ['verdict', 'lifecycle', 'audit', 'identity']);
+  await expect(page.locator('[data-region=kpi]')).toBeHidden();
+  await expect(page.getByTestId('incident-investigations')).toBeHidden();
+  await axe(page, 'incident decision 390 dark zh-CN');
+  await targets(page, 'incident decision 390 dark zh-CN');
   await context.close();
 });
 
@@ -165,6 +204,7 @@ test('workbench accessibility at the tablet widths', async ({ browser }) => {
 
     await page.goto('/app/observability');
     await page.waitForSelector('[data-async-state]:not([data-async-state=loading])');
+    await visibleRegions(page, 'observability ' + label, ['kpi', 'fleet', 'scope']);
     await axe(page, 'observability ' + label);
     await targets(page, 'observability ' + label);
 
@@ -174,8 +214,28 @@ test('workbench accessibility at the tablet widths', async ({ browser }) => {
     await page.waitForSelector('[data-testid=incident-timeline]');
     await page.waitForSelector('[data-testid=incident-evidence]:not([data-evidence-state=loading])');
     await page.waitForSelector('[data-testid=incident-investigations]:is([data-state=ready],[data-state=failed])', { timeout: 20_000 });
-    await axe(page, 'incident ' + label);
-    await targets(page, 'incident ' + label);
+    if (viewport.width < 1024) {
+      await visibleRegions(page, 'incident analysis ' + label, ['kpi', 'timeline', 'evidence', 'ai']);
+      await expect(page.locator('[data-region=verdict]')).toBeHidden();
+      await expect(page.locator('[data-region=rail]')).toBeHidden();
+      await axe(page, 'incident analysis ' + label);
+      await targets(page, 'incident analysis ' + label);
+      await page.getByTestId('investigation-tab-rail').click();
+      await visibleRegions(page, 'incident rail ' + label, ['rail']);
+      await expect(page.locator('[data-region=kpi]')).toBeHidden();
+      await axe(page, 'incident rail ' + label);
+      await targets(page, 'incident rail ' + label);
+      await page.getByTestId('investigation-tab-detail').click();
+      await visibleRegions(page, 'incident decision ' + label, ['verdict', 'lifecycle', 'audit', 'identity']);
+      await expect(page.locator('[data-region=kpi]')).toBeHidden();
+      await axe(page, 'incident decision ' + label);
+      await targets(page, 'incident decision ' + label);
+    } else {
+      await visibleRegions(page, 'incident ' + label, ['rail', 'kpi', 'timeline', 'evidence', 'ai', 'verdict', 'lifecycle', 'audit', 'identity']);
+      await expect(page.getByTestId('incident-investigations')).toBeVisible();
+      await axe(page, 'incident ' + label);
+      await targets(page, 'incident ' + label);
+    }
     await context.close();
   }
 });

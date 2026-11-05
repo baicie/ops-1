@@ -38,6 +38,7 @@ import {
   evidenceAssurance,
   evidenceKindKey,
   evidencePanelState,
+  incidentEvidenceKpiStates,
   evidenceTrustKey,
   evidenceTrustTone,
   incidentCapabilities,
@@ -230,11 +231,9 @@ export function IncidentDetailPage() {
   const evidenceStatus = view.evidenceError instanceof ApiError ? view.evidenceError.status : null;
   const evidenceState = evidencePanelState(view.evidence, Boolean(view.evidenceError), evidenceStatus);
   // A refused or failed evidence read is UNKNOWN, not NO_DATA: NO_DATA would claim the set is
-  // empty. Only a loading read is NO_DATA; a read that answered with zero rows is a real 0.
-  const evidenceKpiState: 'ready' | 'noData' | 'unknown' =
-    evidenceState === 'present' || evidenceState === 'missing'
-      ? 'ready'
-      : evidenceState === 'loading' ? 'noData' : 'unknown';
+  // empty. The two cards share one derivation so the strip cannot contradict itself; the row
+  // count only decides whether the verified ratio has a denominator.
+  const evidenceKpiStates = incidentEvidenceKpiStates(evidenceState, evidence.length);
   const verdictState = verdictPanelState(incident);
   // Resolved against the rows this page actually holds, so an id from a previous read cannot
   // resurrect a row that is no longer in the list.
@@ -335,12 +334,12 @@ export function IncidentDetailPage() {
             content: (
               <>
                 <section className="summary-grid incident-kpis" data-region="kpi">
-                        <MetricCard label={t('table.evidence')} value={<span data-testid="incident-detail-evidence-count">{evidence.length}</span>} state={evidenceKpiState} showSampled={false} metricId="incidentEvidence" />
+                        <MetricCard label={t('table.evidence')} value={<span data-testid="incident-detail-evidence-count">{evidence.length}</span>} state={evidenceKpiStates.evidence} showSampled={false} metricId="incidentEvidence" />
                         <MetricCard
                           label={t('incidents.kpi.verified')}
                           value={<span className="ow-tnum">{verifiedCount}</span>}
                           denominator={evidence.length > 0 ? evidence.length : undefined}
-                          state={evidence.length === 0 ? 'noData' : evidenceKpiState}
+                          state={evidenceKpiStates.verified}
                           detail={t('incidents.kpi.verified.detail')}
                           showSampled={false}
                           metricId="incidentVerified"
