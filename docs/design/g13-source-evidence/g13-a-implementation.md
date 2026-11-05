@@ -107,6 +107,34 @@ zabbix_collections(collection_id, source_id, workspace_id, created_by,
                    outcome, content_ref, body, observed_at, expires_at, created_at)
 ```
 
+## 4.1 API 示例（经 Gateway，节选）
+
+```bash
+# 注册来源（workspaceId 必填，凭据只允许 secretref:）
+curl -sS -b "$JAR" -H "x-csrf-token: $CSRF" -H 'content-type: application/json' \
+  -X POST "$URL/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/sources" \
+  -d '{"workspaceId":"<uuid>","name":"zabbix-main","endpoint":"https://zabbix.example/api_jsonrpc.php",
+       "credential":{"kind":"api-token","ref":"secretref:zabbix/main"}}'
+
+# 采集（预算可收窄，不能超过 source 预算）
+curl -sS -b "$JAR" -H "x-csrf-token: $CSRF" -H 'content-type: application/json' \
+  -X POST "$URL/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/sources/<sourceId>/collect" \
+  -d '{"itemIds":["10401"],"window":{"from":"2026-11-06T09:00:00Z","to":"2026-11-06T10:00:00Z"}}'
+# → {collectionId, outcome, requestedItems, answeredItems, clamped:[], series, observedAt, contentRef, snapshot?}
+
+# 签名（返回 evidence.content.body，即 Kernel 要保存的精确字节）
+curl -sS -b "$JAR" -H "x-csrf-token: $CSRF" -H 'content-type: application/json' \
+  -X POST "$URL/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/collections/<collectionId>/attestation" \
+  -d '{"incidentId":"<uuid>","kind":"METRIC_SNAPSHOT"}'
+
+# 保存为 Incident Evidence（attestation 与 content 一起提交；verifiedTrust 不由调用方填写）
+curl -sS -b "$JAR" -H "x-csrf-token: $CSRF" -H 'content-type: application/json' \
+  -X POST "$URL/api/v1/incidents/<incidentId>/evidence" \
+  -d '{"kind":"METRIC_SNAPSHOT","source":"zabbix:<sourceId>","collectedAt":"...",
+       "contentRef":"sha256:...","content":{"contentType":"application/json","body":"..."},
+       "attestation":{"adapterId":"zabbix-main","issuedAt":"...","signature":"..."}}'
+```
+
 ## 5. Source 持久化
 
 - 启动时读取 `OPSWEAVE_PLUGIN_DATABASE_URL`（Kernel 按 ADR-012 注入的 plugin schema/role）。连接或迁移失败 → 进程退出；没有 URL 且未设置 `OPSWEAVE_ALLOW_MEMORY_STORAGE=1` → 退出码 1。内存模式只在测试/本地显式开启，并由 `/runtime-info` 报告 `storage.mode`。
@@ -238,6 +266,8 @@ Kernel：
 - Gateway 复制了 `DataScope` 的成员查询；改为调用 `DataScope::resolve`。
 - `/collect` 忽略 source 预算且预算可低于 schema 最小值；现在请求预算只能收窄 source 预算，并在边界校验整数/范围。路径 UUID、`workspaceId`、`incidentId` 统一小写化并在边界校验。
 - 契约与实际响应不一致：attestation 响应的 `evidence.attestation`、`outcome`、kind 枚举、错误码、`maxSamplesPerItem` 默认值已对齐；create+audit 改为同一事务；npm lock 改用官方 registry。
+
+UI 审查的 P2 剩余：409/500 的逐码文案、关闭弹窗时的采集中断、以及 16 个视觉矩阵中的另外 8 个组合尚未覆盖；这些不影响本轮 14 个浏览器用例的结论。
 
 仍未关闭（P1，不能以 PASS 掩盖）：
 
