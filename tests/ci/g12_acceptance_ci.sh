@@ -151,7 +151,7 @@ pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
 # this change. The Incident matrix is already g12d-workspace.spec.ts; incidents-workspace.spec.ts
 # stays an explicit skip because its fixture expects a SOURCE_ATTESTED row the seed does not
 # create (recorded in docs/design/opsweave-visual-system-v1/report.md).
-if (cd tests/ui && V3_CHANNEL="${V3_CHANNEL:-chromium}" pnpm exec playwright test --config playwright.config.ts \
+if (cd tests/ui && V3_CHANNEL="${V3_CHANNEL:-chromium}" WORKBENCH_MODE=after pnpm exec playwright test --config playwright.config.ts \
      dual-surface.spec.ts \
      g11-incident-slice.spec.ts \
      g11-incident-state-gaps.spec.ts \
@@ -168,8 +168,16 @@ if (cd tests/ui && V3_CHANNEL="${V3_CHANNEL:-chromium}" pnpm exec playwright tes
      dialog-geometry.spec.ts \
      boundary-ownership.spec.ts \
      sources-audit.spec.ts \
-     metric-card-matrix.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
+     metric-card-matrix.spec.ts \
+     workbench-matrix.spec.ts \
+     workbench-a11y.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
   echo "######## browser suite -> PASS"
+  if node scripts/check-workbench-metrics.mjs artifacts/ui/visual-v2/after docs/design/opsweave-visual-system-v2/workbench-baseline.json; then
+    echo "######## workbench regression gate -> PASS"
+  else
+    echo "######## workbench regression gate -> FAIL"
+    rc=1
+  fi
 else
   echo "######## browser suite -> FAIL (see $LOG_DIR/playwright.log)"
   rc=1

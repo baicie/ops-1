@@ -149,7 +149,7 @@ test('metric cards 1440/1024/390 x light/dark x en/zh-CN', async ({ browser }) =
             await page.goto('/app/incidents/' + incidentId);
             await expect(page.getByTestId('incident-timeline')).toBeVisible();
             await expectCards(page, 4, label + ' incident');
-            expect(await columnsOf(page, '.summary-grid'), label + ' incident columns').toBe(viewport.w > 1024 ? 2 : viewport.w > 640 ? 1 : 2);
+            expect(await columnsOf(page, '.summary-grid'), label + ' incident columns').toBe(2);
             await page.screenshot({ path: path.join(OUT, `incident__${label}.png`), fullPage: true });
             incidentCombos += 1;
           }

@@ -222,6 +222,10 @@ export function AccountMenu({ surface }: { surface: Surface }) {
       >
         <Avatar className="avatar" name={user?.displayName} email={user?.email} aria-hidden="true" />
         <span className="user-copy"><strong>{user?.displayName}</strong><small>{user?.role}</small></span>
+        {/* The avatar is aria-hidden and the copy is display:none on a phone. A hidden suffix
+            keeps the button named at every width without overriding the visible name, which
+            would trip axe's label-content-name-mismatch. */}
+        <span className="sr-only">{t('topbar.menu.account')}</span>
         <Icon name="down" size={14} />
       </button>
       {open ? (

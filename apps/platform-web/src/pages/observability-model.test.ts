@@ -300,6 +300,63 @@ describe('summarise', () => {
     })], NOW);
     expect(summary.reporting).toBe(1);
     expect(summary.staleSamples).toBe(1);
+    expect(summary.staleRows).toBe(1);
+    expect(summary.attention).toBe(1);
+  });
+
+  it('counts a kernel-stale row with a fresh sample as stale, which is the filter it links to', () => {
+    const summary = summarise([node({
+      status: 'UNREACHABLE',
+      stale: true,
+      resourceSnapshot: { sampledAt: ago(2_000), cpuUtilization: 0.3 },
+    })], NOW);
+    // The kernel says the node is stale even though the last sample is recent. The card and
+    // the ?state=stale list must both include it.
+    const [row] = entityRows([node({
+      status: 'UNREACHABLE',
+      stale: true,
+      resourceSnapshot: { sampledAt: ago(2_000), cpuUtilization: 0.3 },
+    })], NOW);
+    expect(summary.staleRows).toBe(1);
+    expect(filterRows([row], 'stale')).toHaveLength(1);
+  });
+
+  it('counts attention once per row, with the state buckets that explain it', () => {
+    const summary = summarise([
+      node({ id: 'a', name: 'a', resourceSnapshot: { sampledAt: ago(2_000), cpuUtilization: 0.2 } }),
+      node({ id: 'b', name: 'b', status: 'DEGRADED', resourceSnapshot: { sampledAt: ago(2_000), cpuUtilization: 0.3 } }),
+      node({ id: 'c', name: 'c', resourceSnapshot: null }),
+      node({ id: 'd', name: 'd', status: 'UNREACHABLE' }),
+      node({ id: 'e', name: 'e', status: 'UNKNOWN' }),
+      node({ id: 'f', name: 'f', revokedAt: ago(60_000) }),
+    ], NOW);
+    // a is healthy; b is degraded; c has no sample; d/e not observable; f revoked.
+    expect(summary.attention).toBe(5);
+    expect(summary.degraded).toBe(1);
+    expect(summary.unreachable).toBe(1);
+    expect(summary.unknown).toBe(1);
+    expect(summary.revoked).toBe(1);
+    expect(summary.noSample).toBe(1);
+    expect(summary.staleStates).toBe(0);
+    expect(
+      summary.degraded + summary.staleStates + summary.staleReadySamples
+      + summary.unreachable + summary.unknown + summary.revoked + summary.noSample,
+    ).toBe(summary.attention);
+  });
+
+  it('gives one reason bucket per attention row when a state and a sample are both absent', () => {
+    const summary = summarise([node({ status: 'DEGRADED', resourceSnapshot: null })], NOW);
+    expect(summary.attention).toBe(1);
+    expect(summary.noSample).toBe(1);
+    expect(summary.degraded).toBe(0);
+  });
+
+  it('keeps the oldest reporting sample for the freshness card', () => {
+    const summary = summarise([
+      node({ id: 'a', name: 'a', resourceSnapshot: { sampledAt: ago(1_000), cpuUtilization: 0.2 } }),
+      node({ id: 'b', name: 'b', resourceSnapshot: { sampledAt: ago(40_000), cpuUtilization: 0.3 } }),
+    ], NOW);
+    expect(summary.oldestReportingSampleAt).toBe(ago(40_000));
   });
 });
 
@@ -328,6 +385,19 @@ describe('row ordering and filtering', () => {
     expect(filterRows(all, 'all')).toHaveLength(4);
     expect(filterRows(all, 'unobservable').map((row) => row.node.id)).toEqual(['gone', 'blank']);
     expect(filterRows(all, 'reporting').map((row) => row.node.id).sort()).toEqual(['busy', 'ok']);
+  });
+
+  it('filters the stale population without turning a fresh node into a stale one', () => {
+    const all = entityRows([
+      node({ id: 'fresh', name: 'fresh', resourceSnapshot: { sampledAt: ago(2_000), cpuUtilization: 0.1 } }),
+      node({ id: 'stale', name: 'stale', stale: true, resourceSnapshot: { sampledAt: ago(SAMPLE_STALE_AFTER_MS + 10_000), cpuUtilization: 0.2 } }),
+    ], NOW);
+    expect(filterRows(all, 'stale').map((row) => row.node.id)).toEqual(['stale']);
+
+    const mixed = entityRows([
+      node({ id: 'ready-old', name: 'ready-old', resourceSnapshot: { sampledAt: ago(SAMPLE_STALE_AFTER_MS + 10_000), cpuUtilization: 0.2 } }),
+    ], NOW);
+    expect(filterRows(mixed, 'stale').map((row) => row.node.id)).toEqual(['ready-old']);
   });
 
   it('uses the same reporting predicate the KPI card counts', () => {

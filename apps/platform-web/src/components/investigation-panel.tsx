@@ -2,6 +2,7 @@ import * as React from 'react';
 import { api, ApiError } from '../api';
 import { useI18n, useT } from '../i18n';
 import { ageMessage } from '../lib/age';
+import { cn } from '../lib/utils';
 import { Badge, type BadgeVariant } from './ui/badge';
 import { Button } from './ui/button';
 import { useToast } from './Ui';
@@ -75,7 +76,7 @@ function variantFor(tone: 'neutral' | 'positive' | 'warning' | 'negative'): Badg
 const REVIEW_NOTE_MIN = 10;
 const REVIEW_NOTE_MAX = 2000;
 
-export function InvestigationPanel({ incidentId, canOperate }: { incidentId: string; canOperate: boolean }) {
+export function InvestigationPanel({ incidentId, canOperate, className }: { incidentId: string; canOperate: boolean; className?: string }) {
   const t = useT();
   const { locale } = useI18n();
   const toast = useToast();
@@ -271,7 +272,7 @@ export function InvestigationPanel({ incidentId, canOperate }: { incidentId: str
   }
 
   return (
-    <section className="panel" data-testid="incident-investigations" data-runs={runs.length} data-state={state} data-stale={stale ? 'true' : 'false'}>
+    <section className={cn('panel', className)} data-testid="incident-investigations" data-region="ai" data-runs={runs.length} data-state={state} data-stale={stale ? 'true' : 'false'}>
       <div className="panel-head">
         <div>
           <h2>{t('investigations.title')}</h2>

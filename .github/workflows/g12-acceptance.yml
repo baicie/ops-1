@@ -31,6 +31,9 @@ on:
       - 'tests/ui/boundary-ownership.spec.ts'
       - 'tests/ui/sources-audit.spec.ts'
       - 'tests/ui/metric-card-matrix.spec.ts'
+      - 'tests/ui/workbench-*.spec.ts'
+      - 'scripts/check-workbench-metrics.mjs'
+      - 'docs/design/opsweave-visual-system-v2/**'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/g12d-seed.mjs'
@@ -58,6 +61,9 @@ on:
       - 'tests/ui/boundary-ownership.spec.ts'
       - 'tests/ui/sources-audit.spec.ts'
       - 'tests/ui/metric-card-matrix.spec.ts'
+      - 'tests/ui/workbench-*.spec.ts'
+      - 'scripts/check-workbench-metrics.mjs'
+      - 'docs/design/opsweave-visual-system-v2/**'
       - 'tests/ui/g11*.spec.ts'
       - 'tests/ui/g12*.spec.ts'
       - 'tests/ui/support/**'
@@ -120,6 +126,7 @@ jobs:
             artifacts/ui/visual-v1/dialogs/**
             artifacts/ui/visual-v1/metric-cards/**
             artifacts/ui/visual-v1/sources/**
+            artifacts/ui/visual-v2/**
           if-no-files-found: warn
           retention-days: 7
       - uses: actions/upload-artifact@v4

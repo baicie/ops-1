@@ -23,6 +23,8 @@
   --ow-ok: #0f8a5f;
   --ow-ok-soft: #e6f6ef;
   --ow-warn: #a86400;
+  /* The pill's ink, not the border's: #a86400 on #fff4df measured 4.29:1, just under AA. */
+  --ow-warning-ink: #8a5200;
   --ow-warn-soft: #fff4df;
   --ow-danger: #c03636;
   --ow-danger-soft: #fdecec;
@@ -166,6 +168,7 @@ html[data-theme="dark"] {
   --ow-ok: #3ecf9a;
   --ow-ok-soft: #133227;
   --ow-warn: #e4ad4e;
+  --ow-warning-ink: #e4ad4e;
   --ow-warn-soft: #33260f;
   --ow-danger: #ff7b7b;
   --ow-danger-soft: #35191c;
@@ -436,6 +439,19 @@ input::placeholder { color: var(--ow-text-muted); }
 .detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .meta-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-meta); padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); background: var(--ow-surface); }
 .panel { background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); box-shadow: none; min-width: 0; }
+/* AI inference and human decision are different kinds of statement; the reader must see which
+   region they are in without reading the title. Inset so the border does not move the content. */
+.ow-window-switch { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; max-width: 100%; gap: 2px; padding: 2px; border-radius: var(--ow-radius-control); background: var(--ow-chip-bg); }
+.ow-window-switch button { min-height: var(--ow-control-sm); padding: 0 12px; border: 0; border-radius: var(--ow-radius-control); background: transparent; color: var(--ow-chip-text); font-size: var(--ow-type-meta); font-weight: 500; }
+.ow-window-switch button[aria-pressed='true'] { background: var(--ow-chip-active-bg); color: var(--ow-chip-active-text); }
+@media (max-width: 640px) {
+  /* The window choice is a control row, not a title accessory: give it the full line so
+     "24h" is never the 40px that hangs off a 390 viewport. */
+  .ow-window-switch { flex: 1 1 100%; width: 100%; }
+  .ow-window-switch button { flex: 1 1 0; }
+}
+.ow-ai-panel { box-shadow: inset 3px 0 0 var(--ow-border-strong); }
+.ow-verdict-panel { box-shadow: inset 3px 0 0 var(--ow-accent); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--ow-control-md); padding: 12px 16px; border-bottom: 1px solid var(--ow-border); flex-wrap: wrap; }
 .panel-head h2 { font-size: var(--ow-type-body); font-weight: 600; letter-spacing: -.01em; }
 .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-meta); margin-top: 4px; }
@@ -1175,12 +1191,14 @@ details.panel.advanced > summary { padding: 12px 16px; }
   .studio-inspector { max-height: none; }
   .studio-note { right: 12px; bottom: 8px; }
 }
+/* Incident KPIs are a band, not a content grid: SummaryGrid's 1-column rule at <=1024 would
+   stack four full-width cards on a tablet. Two columns at every width keeps the band readable. */
+.summary-grid.incident-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 640px) {
   /* A KPI band stays a band on a phone: 2x2 reads as a group, while four full-width cards
      push the page's primary content (a list or a table) below the first screen. Table cards
      keep their 1-column rule. */
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .summary-grid.incident-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-grid { gap: 16px; }
   .page-actions { width: 100%; }
   .timeline li > div { gap: 4px; }
@@ -1335,8 +1353,8 @@ details.panel.advanced > summary { padding: 12px 16px; }
 }
 .status-indicator--ready { color: var(--ow-success); background: var(--ow-success-soft); border-color: transparent; }
 .status-indicator--running { color: var(--ow-info); background: var(--ow-info-soft); border-color: transparent; }
-.status-indicator--degraded { color: var(--ow-warning); background: var(--ow-warning-soft); border-color: transparent; }
-.status-indicator--attention { color: var(--ow-warning); background: var(--ow-warning-soft); border-color: transparent; }
+.status-indicator--degraded { color: var(--ow-warning-ink); background: var(--ow-warning-soft); border-color: transparent; }
+.status-indicator--attention { color: var(--ow-warning-ink); background: var(--ow-warning-soft); border-color: transparent; }
 .status-indicator--stale { color: var(--ow-warning); background: transparent; border-color: var(--ow-warning); border-style: dashed; }
 .status-indicator--unreachable { color: var(--ow-error); background: var(--ow-error-soft); border-color: transparent; }
 .status-indicator--revoked { color: var(--ow-text-secondary); background: var(--ow-surface-3); border-color: var(--ow-border-strong); }
@@ -1521,6 +1539,12 @@ details.panel.advanced > summary { padding: 12px 16px; }
 /* On a desktop the workspace is a viewport, not a document: each pane scrolls its own overflow so
    the timeline and the evidence detail can be read at two different places at once. */
 @media (min-width: 1024px) {
+  /* A pane that scrolls must show that it scrolls: macOS overlay scrollbars are invisible until
+     the reader scrolls, so the evidence/AI below the fold had no affordance at all. */
+  .investigation-pane { scrollbar-width: thin; scrollbar-color: var(--ow-border-strong) transparent; }
+  .investigation-pane::-webkit-scrollbar { width: 8px; }
+  .investigation-pane::-webkit-scrollbar-thumb { background: var(--ow-border-strong); border-radius: var(--ow-radius-control); }
+  .investigation-pane::-webkit-scrollbar-track { background: transparent; }
   /* The workspace IS the viewport. The page does not scroll; the panes do.
      Declared as min-height only, the grid grew to the height of its tallest column, the document
      scrolled, and the rail - the shortest column - slid out of view while the evidence table was
@@ -1553,6 +1577,10 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .investigation-rail-item { display: flex; flex-direction: column; gap: 4px; padding: 8px 8px; border: 1px solid transparent; border-radius: var(--ow-radius-control); color: inherit; text-decoration: none; min-width: 0; }
 .investigation-rail-item:hover { background: var(--ow-hover); text-decoration: none; }
 .investigation-rail-item[aria-current="page"] { background: var(--ow-accent-soft); border-color: color-mix(in srgb, var(--ow-accent) 34%, transparent); }
+.investigation-rail-item[aria-current="page"] .investigation-rail-facts { color: var(--ow-text-secondary); }
+/* Source and related entity are on the Record panel too; below the wide header they are the
+   two chips that push the meta row onto a third line. Owner/lifecycle/severity stay. */
+@media (max-width: 1100px) { .incident-header-extra { display: none; } }
 .investigation-rail-head { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .investigation-rail-title { flex: 1; font-size: var(--ow-type-meta); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .investigation-rail-facts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--ow-type-label); color: var(--ow-text-muted); }
@@ -3432,8 +3460,8 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 
 /* The identity cell's second line: os/arch and the generation that produced the
    sample. §2.2 demotes both to inline secondary rather than spending a column. */
-.ow-entity-id { font-size: var(--ow-type-label); color: var(--ow-text-muted); }
-.ow-entity-state { display: inline-flex; align-items: center; gap: 4px; }
+.ow-entity-id { font-size: var(--ow-type-label); color: var(--ow-text-muted); min-width: 0; overflow-wrap: anywhere; }
+.ow-entity-state { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .ow-entity-fact { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
 
 /* A reading the source could not give. Not a dashed box: §2.7 allows one dashed
@@ -3648,4 +3676,11 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
      allows. The extra touch slack comes from padding (12px a side, above), which brings the
      real target to 40 + the row's own padding without inventing a third control height. */
   .ow-boundary > summary, .ow-trust-legend > summary { min-height: var(--ow-control-md); }
+}
+
+/* The generic <=768 panel head forces one line for title+action. The history window is a
+   three-way control, not an action: it takes its own line so a phone never clips "24h". */
+@media (max-width: 768px) {
+  .ow-history-head { flex-wrap: wrap; }
+  .ow-history-head > .ow-window-switch { flex: 1 1 100%; }
 }

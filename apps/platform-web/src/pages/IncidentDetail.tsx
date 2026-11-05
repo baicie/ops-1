@@ -229,6 +229,12 @@ export function IncidentDetailPage() {
   // dead code (incidents.ts:321-331).
   const evidenceStatus = view.evidenceError instanceof ApiError ? view.evidenceError.status : null;
   const evidenceState = evidencePanelState(view.evidence, Boolean(view.evidenceError), evidenceStatus);
+  // A refused or failed evidence read is UNKNOWN, not NO_DATA: NO_DATA would claim the set is
+  // empty. Only a loading read is NO_DATA; a read that answered with zero rows is a real 0.
+  const evidenceKpiState: 'ready' | 'noData' | 'unknown' =
+    evidenceState === 'present' || evidenceState === 'missing'
+      ? 'ready'
+      : evidenceState === 'loading' ? 'noData' : 'unknown';
   const verdictState = verdictPanelState(incident);
   // Resolved against the rows this page actually holds, so an id from a previous read cannot
   // resurrect a row that is no longer in the list.
@@ -275,13 +281,22 @@ export function IncidentDetailPage() {
       <PageHeader
         eyebrow={t('incidents.eyebrow')}
         title={incident.title}
-        description={(
-          <span className="job-subtitle">
+        description={t('incidents.detail.headerMeta', {
+          started: ageMessage(locale, incident.startedAt),
+          updated: ageMessage(locale, incident.updatedAt),
+        })}
+        meta={(
+          <>
             <span data-testid="incident-detail-status"><Status code={incident.status} /></span>
             <span data-testid="incident-detail-severity"><Status code={incident.severity} /></span>
-            <span className="tag" data-testid="incident-detail-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
-            {incident.relatedEntity ? <span className="muted" data-testid="incident-detail-related">{incident.relatedEntity}</span> : null}
-          </span>
+            {/* Ownership is a header fact: it decides who may write, so burying it in the
+                Record panel made the reader open a supporting panel before acting. */}
+            <span className="tag" data-testid="incident-header-owner" data-owner={incident.owner} title={incident.owner}>
+              {t('incidents.detail.ownerChip', { owner: ownerLabel })}
+            </span>
+            <span className="tag incident-header-extra" data-testid="incident-detail-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
+            {incident.relatedEntity ? <span className="muted mono small incident-header-extra" data-testid="incident-detail-related">{incident.relatedEntity}</span> : null}
+          </>
         )}
         actions={<><Button variant="secondary" data-testid="incident-refresh" onClick={retry}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{backLink}</>}
       />
@@ -317,16 +332,30 @@ export function IncidentDetailPage() {
           {
             id: 'analysis',
             label: t('incidents.pane.analysis'),
-            count: view.evidence ? evidence.length : null,
             content: (
               <>
-                <section className="summary-grid incident-kpis">
-                        <MetricCard label={t('table.status')} value={<Status code={incident.status} />} showSampled={false} />
-                        <MetricCard label={t('table.severity')} value={<Status code={incident.severity} />} showSampled={false} />
-                        <MetricCard label={t('table.evidence')} value={<span data-testid="incident-detail-evidence-count">{evidence.length}</span>} state={view.evidence ? 'ready' : 'noData'} showSampled={false} metricId="incidentEvidence" />
-                        <MetricCard label={t('table.updated')} value={<span title={incident.updatedAt}>{ageMessage(locale, incident.updatedAt)}</span>} showSampled={false} />
+                <section className="summary-grid incident-kpis" data-region="kpi">
+                        <MetricCard label={t('table.evidence')} value={<span data-testid="incident-detail-evidence-count">{evidence.length}</span>} state={evidenceKpiState} showSampled={false} metricId="incidentEvidence" />
+                        <MetricCard
+                          label={t('incidents.kpi.verified')}
+                          value={<span className="ow-tnum">{verifiedCount}</span>}
+                          denominator={evidence.length > 0 ? evidence.length : undefined}
+                          state={evidence.length === 0 ? 'noData' : evidenceKpiState}
+                          detail={t('incidents.kpi.verified.detail')}
+                          showSampled={false}
+                          metricId="incidentVerified"
+                        />
+                        <MetricCard label={t('incidents.kpi.timeline')} value={<span className="ow-tnum">{facts.length}</span>} detail={t('incidents.kpi.timeline.detail')} showSampled={false} metricId="incidentTimeline" />
+                        <MetricCard
+                          label={t('incidents.kpi.audit')}
+                          value={trail.state === 'ready' ? <span className="ow-tnum">{trail.events.length}</span> : undefined}
+                          state={trail.state === 'ready' ? 'ready' : trail.state === 'loading' ? 'noData' : 'unknown'}
+                          detail={t('incidents.kpi.audit.detail')}
+                          showSampled={false}
+                          metricId="incidentAudit"
+                        />
                       </section>
-                <section className="panel" data-testid="incident-timeline">
+                <section className="panel" data-testid="incident-timeline" data-region="timeline">
                         <div className="panel-head">
                           <div>
                             <h2>{t('incidents.timeline.title')}</h2>
@@ -373,39 +402,8 @@ export function IncidentDetailPage() {
                           ))}
                         </ol>
                       </section>
-                <InvestigationPanel
-                          incidentId={incident.id}
-                          canOperate={capabilities.canAddEvidence}
-                        />
-                <section className="panel" data-testid="incident-audit" data-audit-state={trail.state}>
-                        <div className="panel-head">
-                          <div>
-                            <h2>{t('incidents.audit.title')}</h2>
-                            <p>{t('incidents.audit.description')}</p>
-                          </div>
-                        </div>
-                        {trail.state === 'loading' ? (
-                          <p className="muted small pad" aria-busy="true" data-testid="incident-audit-loading">{t('aria.loading')}</p>
-                        ) : trail.state === 'unavailable' ? (
-                          <div className="pad" data-testid="incident-audit-unavailable">
-                            <p className="muted small">{t('incidents.audit.unavailable')}</p>
-                            <Button variant="secondary" onClick={retry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
-                          </div>
-                        ) : trail.events.length === 0 ? (
-                          <p className="muted small pad" data-testid="incident-audit-empty">{t('incidents.audit.empty')}</p>
-                        ) : (
-                          <ol className="timeline pad" data-testid="incident-audit-list">
-                            {trail.events.map((event) => (
-                              <AuditRow key={event.id} event={event} directory={directory} />
-                            ))}
-                          </ol>
-                        )}
-                        {trail.truncated ? (
-                          <p className="muted small pad" data-testid="incident-audit-truncated">{t('incidents.audit.truncated')}</p>
-                        ) : null}
-                      </section>
 
-                <section className="panel ow-incident-evidence" data-testid="incident-evidence" data-evidence-state={evidenceState}>
+                <section className="panel ow-incident-evidence" data-testid="incident-evidence" data-evidence-state={evidenceState} data-region="evidence">
                   <div className="panel-head">
                     <div>
                       <h2>{t('incidents.workspace.evidence')}</h2>
@@ -634,6 +632,11 @@ export function IncidentDetailPage() {
                     />
                   )}
                 </section>
+                <InvestigationPanel
+                  incidentId={incident.id}
+                  canOperate={capabilities.canAddEvidence}
+                  className="ow-ai-panel"
+                />
               </>
             ),
           },
@@ -659,7 +662,7 @@ export function IncidentDetailPage() {
                     </div>
                   </section>
                 ) : null}
-                <section className="panel" data-testid="incident-verdict" data-verdict-state={verdictState}>
+                <section className="panel ow-verdict-panel" data-testid="incident-verdict" data-verdict-state={verdictState} data-region="verdict">
                         <div className="panel-head">
                           <div>
                             <h2>{t('incidents.verdict.title')}</h2>
@@ -725,7 +728,7 @@ export function IncidentDetailPage() {
                             form is not on screen. */}
                         {verdictState === 'open' ? <p className="muted small pad">{t('incidents.verdict.onlyTwo')}</p> : null}
                       </section>
-                <section className="panel" data-testid="incident-lifecycle" data-lifecycle-state={closureState}>
+                <section className="panel" data-testid="incident-lifecycle" data-lifecycle-state={closureState} data-region="lifecycle">
                         <div className="panel-head">
                           <div>
                             <h2>{t('incidents.close.title')}</h2>
@@ -769,7 +772,34 @@ export function IncidentDetailPage() {
                           <p className="muted small pad" data-testid="incident-transfer-blocked">{t(capabilities.transferBlockedReason)}</p>
                         ) : null}
                       </section>
-                <section className="panel" data-testid="incident-identity">
+                <section className="panel" data-testid="incident-audit" data-region="audit" data-audit-state={trail.state}>
+                        <div className="panel-head">
+                          <div>
+                            <h2>{t('incidents.audit.title')}</h2>
+                            <p>{t('incidents.audit.description')}</p>
+                          </div>
+                        </div>
+                        {trail.state === 'loading' ? (
+                          <p className="muted small pad" aria-busy="true" data-testid="incident-audit-loading">{t('aria.loading')}</p>
+                        ) : trail.state === 'unavailable' ? (
+                          <div className="pad" data-testid="incident-audit-unavailable">
+                            <p className="muted small">{t('incidents.audit.unavailable')}</p>
+                            <Button variant="secondary" onClick={retry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>
+                          </div>
+                        ) : trail.events.length === 0 ? (
+                          <p className="muted small pad" data-testid="incident-audit-empty">{t('incidents.audit.empty')}</p>
+                        ) : (
+                          <ol className="timeline pad" data-testid="incident-audit-list">
+                            {trail.events.map((event) => (
+                              <AuditRow key={event.id} event={event} directory={directory} />
+                            ))}
+                          </ol>
+                        )}
+                        {trail.truncated ? (
+                          <p className="muted small pad" data-testid="incident-audit-truncated">{t('incidents.audit.truncated')}</p>
+                        ) : null}
+                      </section>
+                <section className="panel" data-testid="incident-identity" data-region="identity">
                         <div className="panel-head"><div><h2>{t('table.details')}</h2></div></div>
                         <div className="kv-grid">
                           <KV label={t('table.incident')} mono>{<LongId value={incident.id} label={t('table.copyIdentifier')} testId="incident-id" />}</KV>
@@ -835,7 +865,7 @@ function IncidentRail({ currentId }: { currentId: string }) {
   };
 
   return (
-    <section className="panel investigation-rail" data-testid="investigation-rail" data-rail-state={error ? 'unavailable' : items ? 'ready' : 'loading'}>
+    <section className="panel investigation-rail" data-region="rail" data-testid="investigation-rail" data-rail-state={error ? 'unavailable' : items ? 'ready' : 'loading'}>
       <div className="panel-head">
         <div>
           <h2>{t('incidents.rail.title')}</h2>
