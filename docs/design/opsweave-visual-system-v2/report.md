@@ -94,12 +94,12 @@
 1. **Stale KPI 与 `?state=stale` 不是同一集合**：KPI 用 `sampleIsStale`（120s），筛选用 kernel `stale`；Kernel 心跳阈值 25s，一个 30s 未心跳的 DEGRADED 节点在 KPI 为 0、筛选却列出。现在 `FleetSummary.staleRows` 与 `filterRows('stale')` 共用 `node.stale || state==='stale' || sampleIsStale`；card 值、最旧采样时间、筛选三者同源。新增测试覆盖 kernel-stale + fresh sample 与 READY + old sample。
 2. **失败的 history 渲染成 0 samples / newest never**：`collection` 只看 `history`/`series`，`history.failed` 时仍输出。现在 `history.failed` 直接返回 null，只有 panel 的失败提示。
 
-**P2（已处理）**
+**P2（已处理；其中一项的“已修复”声明在 DS-V1-2.1 复核中被证明不准确，见下）**
 - **attention 桶与数字不闭合**：改为每行只落一个 reason 桶（unreachable/revoked/unknown 优先；noSample 次之；reporting 的 degraded/stale-state/stale-sample 三选一）；桶之和 = attention。新增断言；DEGRADED+无采样的行只计 noSample。
 - **“stale”两种定义混用**：attention 里写 “stale state”，独立卡片写 “Stale rows”（kernel stale / state stale / old sample），不再用同一个词表示两个集合。
 - **Stale 卡在空舰队用 NO_DATA**：空舰队统一 UNKNOWN；有行但都没有样本时才 NO_DATA。
 - **Reporting 卡在 CPU 不可读时丢掉 memory peak**：新增 memory-only 分支，峰值不再从页面消失。
-- **Incident verified KPI 把 403/失败读成 NO_DATA**：`evidenceState` 映射为 ready/noData/unknown；0 行证据时 verified 显示 NO_DATA，不显示 0/0。
+- **Incident verified KPI 把 403/失败读成 NO_DATA**：本批最初只把 `evidenceKpiState` 用在 Evidence 卡；Verified 卡仍写着 `evidence.length === 0 ? 'noData' : ...`，因此 403/503 且零行时仍显示 NO_DATA。DS-V1-2.1 已在真实浏览器复现（`tests/ui/incident-evidence-kpi.spec.ts` 在旧代码上失败），并让两张卡共用 `incidentEvidenceKpiStates(evidenceState, rows)`；成功零行仍是 Evidence 0 + Verified NO_DATA。详见 [ds-v1-2-1-review.md](ds-v1-2-1-review.md)。
 - **KPI 与 header 重复 Started/Updated**：KPI 改为 Evidence / Kernel verified / Timeline entries / Audit entries；时间只在 header，调查计数进入 KPI。
 - **1440 内部滚动无 affordance**：桌面 pane 强制细滚动条（`scrollbar-width` + `::-webkit-scrollbar`），证据/AI 在 fold 下可见可发现。
 - **移动端 tab 语义**：analysis 不再挂 evidence 计数；detail tab 从 “Evidence” 改为 “Decision/裁定”；idle 文案指向 Investigation tab。
@@ -127,6 +127,7 @@
 - 本地确定性 harness：**PASS**，102 tests（100 passed / 2 skipped），11.2 min；acceptance **195/0**；`workbench regression gate -> PASS`；exit 0。两条 skip 是 Docker/Studio 依赖。
 - 第一次 GitHub Actions acceptance（run 41972550193）：browser suite **99 passed / 1 failed / 2 skipped**。唯一失败是 `workbench-a11y` 在 768 的 trust chip：`SOURCE_ATTESTED` #0f8a5f on #e6f6ef = 3.89:1，`UNVERIFIED` #a86400 on #fff4df = 4.29:1。修复为 `.ow-trust[data-trust-tone=ok|warn]` 使用 `--ow-ok-ink` / `--ow-warning-ink`；本地 a11y 3/3（含 5 条 evidence 的固定 incident）通过。
 - **重跑（代码 HEAD `0a6430a`）：11/11 checks PASS** —— acceptance 10m45s（browser 100 passed / 2 skipped，8.8m；`workbench regression gate -> PASS`）、golden-path 17m25s、runtime-golden-path 17m28s、rust、web、web-unit、quality-faults、legacy-regression、contracts、artifact-budget、spec-coverage。
+- **文档 HEAD `c04bc50`：11/11 checks PASS** —— acceptance 13m39s、golden-path 17m9s、runtime-golden-path 17m29s、legacy-regression 6m26s、rust 2m51s，其余 6 项通过。DS-V1-2.1 的复核、反事实与最新 CI 见 [ds-v1-2-1-review.md](ds-v1-2-1-review.md)。
 
 ## 8. 剩余项
 

@@ -71,3 +71,7 @@ node scripts/check-workbench-metrics.mjs artifacts/ui/visual-v2/after \
 - 全量 staging / Docker 依赖套件：本机 Docker 不可用，**NOT_RUN**。
 - 虚拟键盘遮挡：**NOT_RUN**（只断言 footer/controls 在视口内）。
 - 像素级 visual diff：**NOT_RUN**，用 JSON 结构基线替代，原因见 report §5。
+
+## 6. DS-V1-2.1 审查收口
+
+见 [ds-v1-2-1-review.md](ds-v1-2-1-review.md)：Evidence KPI 403/503 复现与修复、Workbench gate 12 个反事实、axe 全目标违规与 analysis/rail/decision 扫描、rail chip 1.63:1 对比度修复、Stack 合并预检与最终 CI。
