@@ -206,7 +206,7 @@ Kernel：
 
 **真实 Zabbix**：`NOT_RUN`，socket 测试使用本地 `UPSTREAM_ZABBIX_FIXTURE`，不声称真实响应形状已验证。
 
-**截图**：UI 分支未捕获 1440/1024/768/390 × light/dark × en/zh 矩阵；Playwright 用例覆盖 390 与默认视口的功能路径，但不替代视觉矩阵。
+**截图**：UI 分支捕获了 8 个组合（1440/1024/768/390 × light/dark × en/zh-CN）到 `artifacts/ui/g13-collect/`，作为证据目录不提交；Playwright 同时断言弹窗与页面均无横向溢出。完整 16 组合矩阵仍未覆盖。
 
 ## 10. CI
 
@@ -219,7 +219,7 @@ Kernel：
 | Verdict | 状态 | 依据 |
 |---|---|---|
 | `SOURCE_PERSISTENCE_READY` | **PASS** | 8 个真实 PostgreSQL 测试：重启保留、凭据引用、并发/重复、DB 不可用、多 Workspace、迁移 checksum |
-| `CONNECTOR_RUNTIME_READY` | **PASS（本地/镜像）** | 20 个真实 socket 测试；OCI 镜像 digest 固定、非 root、健康 200、无存储 fail closed。未通过真实 Node Runtime 部署，见下 |
+| `CONNECTOR_RUNTIME_READY` | **PARTIAL** | 20 个真实 socket 测试；OCI 镜像 digest 固定、非 root、健康 200、无存储 fail closed。生产实例拿不到 Zabbix/Adapter secret，且未通过真实 Node Runtime 部署 |
 | `SOURCE_EVIDENCE_READY` | **PARTIAL** | `g13a_evidence_roundtrip.mjs` 真实进程通过：字节→验签→存储→读回一致；但独立审查确认 A+B 成员可把 B 的采集写入 A 的 Incident（attestation 未绑定 workspace），该 P1 未关闭 |
 | `AUTHORIZATION_READY` | **PARTIAL** | 插件侧工作区/角色/签名/伪造测试通过；Gateway 注入路径只有单元测试，未在三进程链路中实测 |
 | `UI_GOLDEN_PATH_READY` | **PARTIAL** | 13 单测 + 4 浏览器测试（含 390）；后端为 stub；视觉矩阵未跑 |
