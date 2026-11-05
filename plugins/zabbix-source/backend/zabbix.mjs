@@ -840,11 +840,9 @@ export function buildEvidence(result, maxBytes = EVIDENCE_CONTENT_MAX_BYTES) {
   }
 
   const requestedSamples = base.series.reduce((sum, entry) => sum + (entry.samples?.length || 0), 0);
-  let sampleCap = Math.max(1, ...base.series.map((entry) => entry.samples?.length || 0));
-  let droppedSeries = 0;
-  let best = null;
-  for (let attempt = 0; attempt < 64; attempt += 1) {
-    const kept = base.series.slice(0, Math.max(0, base.series.length - droppedSeries));
+
+  const buildSnapshot = (keepSeries, sampleCap) => {
+    const kept = base.series.slice(0, keepSeries);
     const reduced = {
       ...base,
       // A bounded snapshot is not a complete observation, and the signed bytes
@@ -860,23 +858,55 @@ export function buildEvidence(result, maxBytes = EVIDENCE_CONTENT_MAX_BYTES) {
       reason: 'CONTENT_LIMIT',
       requestedSamples,
       returnedSamples,
-      droppedSeries,
+      droppedSeries: base.series.length - kept.length,
     };
     const body = canonical({ ...reduced, snapshot });
-    best = { body, snapshot };
-    if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
-    if (sampleCap > 1) {
-      sampleCap = Math.max(1, Math.floor(sampleCap / 2));
-    } else if (droppedSeries < base.series.length) {
-      droppedSeries += 1;
+    return { body, snapshot, bytes: Buffer.byteLength(body, 'utf8') };
+  };
+
+  // Phase 1: keep every series, shrink samples per series. Binary search, not a
+  // fixed iteration budget: with 500 series a one-drop-per-attempt loop ran out
+  // of attempts long before the body fit, and returned 131 KB for a 64 KiB
+  // contract (the Kernel then refused it).
+  const maxCap = Math.max(1, ...base.series.map((entry) => entry.samples?.length || 0));
+  let low = 1;
+  let high = maxCap;
+  let chosen = null;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const attempt = buildSnapshot(base.series.length, mid);
+    if (attempt.bytes <= maxBytes) {
+      chosen = attempt;
+      low = mid + 1;
     } else {
-      break;
+      high = mid - 1;
     }
   }
+
+  // Phase 2: one sample per series is still too large, so drop whole series.
+  // Dropping a series is recorded; its samples are never claimed as returned.
+  if (!chosen) {
+    low = 0;
+    high = base.series.length;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const attempt = buildSnapshot(mid, 1);
+      if (attempt.bytes <= maxBytes) {
+        chosen = attempt;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+  }
+
+  // An empty-series snapshot is metadata only and always fits; this is the last
+  // resort that keeps the contract's byte bound even for a pathological input.
+  if (!chosen) chosen = buildSnapshot(0, 1);
   return {
-    body: best.body,
-    contentRef: digestOf(best.body),
-    snapshot: best.snapshot,
+    body: chosen.body,
+    contentRef: digestOf(chosen.body),
+    snapshot: chosen.snapshot,
     outcome: 'PARTIAL',
   };
 }

@@ -31,6 +31,7 @@ import {
   redact,
   resolveBudget,
   signAttestation,
+  statusFromProbe,
 } from './zabbix.mjs';
 import {
   SourceConflictError,
@@ -137,6 +138,13 @@ export function createPlugin(options) {
     return who;
   }
 
+  function requireUuidPath(value, code) {
+    if (!UUID_RE.test(value)) {
+      throw Object.assign(new Error('the path id is not a UUID'), { status: 404, code });
+    }
+    return value.toLowerCase();
+  }
+
   function requireScope(who, scope) {
     if (!hasScope(who, scope)) {
       throw Object.assign(new Error(`this endpoint requires ${scope}`), { status: 403, code: 'FORBIDDEN' });
@@ -173,6 +181,41 @@ export function createPlugin(options) {
     } catch {
       return null;
     }
+  }
+
+  const BUDGET_BOUNDS = {
+    maxWindowSeconds: [60, 86400],
+    maxItems: [1, 500],
+    maxSamplesPerItem: [1, 5000],
+    requestTimeoutMs: [500, 60000],
+    maxConcurrency: [1, 8],
+  };
+
+  function validateBudget(input) {
+    if (input === undefined || input === null) return;
+    if (typeof input !== 'object' || Array.isArray(input)) {
+      throw Object.assign(new Error('budget must be an object'), { status: 400, code: 'INVALID_BUDGET' });
+    }
+    for (const [key, [min, max]] of Object.entries(BUDGET_BOUNDS)) {
+      if (input[key] === undefined) continue;
+      const value = input[key];
+      if (!Number.isInteger(value) || value < min || value > max) {
+        throw Object.assign(
+          new Error(`${key} must be an integer between ${min} and ${max}`),
+          { status: 400, code: 'INVALID_BUDGET' },
+        );
+      }
+    }
+  }
+
+  /** A per-request budget may narrow the source's configured budget, never widen it. */
+  function effectiveBudget(sourceBudget, requestBudget) {
+    const requested = resolveBudget(requestBudget).budget;
+    const bounded = {};
+    for (const key of Object.keys(requested)) {
+      bounded[key] = Math.min(requested[key], sourceBudget?.[key] ?? requested[key]);
+    }
+    return bounded;
   }
 
   function validateSourceBody(body, { requireWorkspace }) {
@@ -218,7 +261,7 @@ export function createPlugin(options) {
     }
     let workspaceId;
     if (requireWorkspace) {
-      workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+      workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId.toLowerCase() : '';
       if (!UUID_RE.test(workspaceId)) {
         throw Object.assign(new Error('workspaceId is required and must be a UUID'), {
           status: 400,
@@ -232,18 +275,8 @@ export function createPlugin(options) {
       credential: { kind: credential.kind, ref: credential.ref },
       workspaceId,
       verifyTls: body.verifyTls !== false,
-      budget: resolveBudget(body.budget).budget,
+      budget: (validateBudget(body.budget), resolveBudget(body.budget).budget),
     };
-  }
-
-  function probeStatus(source, result) {
-    // Only a probe moves status, and it records what it saw. A TIMEOUT leaves
-    // the source DEGRADED rather than UNAVAILABLE: a slow endpoint is not a
-    // down endpoint, and inferring "stopped" from silence is forbidden.
-    if (result.outcome === 'OK') return source.verify_tls ? 'READY' : 'DEGRADED';
-    if (result.outcome === 'UNAVAILABLE') return 'UNAVAILABLE';
-    if (result.outcome === 'TIMEOUT') return 'DEGRADED';
-    return 'UNVERIFIED';
   }
 
   async function handle(req, res) {
@@ -315,7 +348,7 @@ export function createPlugin(options) {
       const actorId = requireUser(who);
       const body = await readJson(req);
       const parsed = validateSourceBody(body, { requireWorkspace: false });
-      const row = await store.updateSource(sourceMatch[1], who.workspaces, parsed, actorId);
+      const row = await store.updateSource(requireUuidPath(sourceMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces, parsed, actorId);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       return send(res, 200, sourceView(row), id);
     }
@@ -324,7 +357,7 @@ export function createPlugin(options) {
     if (probeMatch && req.method === 'POST') {
       requireScope(who, 'telemetry.source.write');
       const actorId = requireUser(who);
-      const row = await store.getSource(probeMatch[1], who.workspaces);
+      const row = await store.getSource(requireUuidPath(probeMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       // A probe that cannot resolve its secret still runs, so it reports
       // UNAUTHORIZED rather than a local configuration error the operator
@@ -336,7 +369,7 @@ export function createPlugin(options) {
         budget: row.budget,
         secret: resolveSecretQuietly(row.credential_ref),
       });
-      const updated = await store.recordProbe(row.source_id, who.workspaces, result, probeStatus(row, result), actorId);
+      const updated = await store.recordProbe(row.source_id, who.workspaces, result, statusFromProbe(result, { verifyTls: row.verify_tls }), actorId);
       if (!updated) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       return send(res, 200, result, id);
     }
@@ -344,7 +377,7 @@ export function createPlugin(options) {
     const hostsMatch = path.match(/^\/sources\/([^/]+)\/hosts$/);
     if (hostsMatch && req.method === 'GET') {
       requireScope(who, 'telemetry.source.read');
-      const row = await store.getSource(hostsMatch[1], who.workspaces);
+      const row = await store.getSource(requireUuidPath(hostsMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       const result = await listHosts({
         sourceId: row.source_id,
@@ -359,7 +392,7 @@ export function createPlugin(options) {
     const itemsMatch = path.match(/^\/sources\/([^/]+)\/items$/);
     if (itemsMatch && req.method === 'GET') {
       requireScope(who, 'telemetry.source.read');
-      const row = await store.getSource(itemsMatch[1], who.workspaces);
+      const row = await store.getSource(requireUuidPath(itemsMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       const result = await listItems(
         {
@@ -376,13 +409,20 @@ export function createPlugin(options) {
 
     const collectMatch = path.match(/^\/sources\/([^/]+)\/collect$/);
     if (collectMatch && req.method === 'POST') {
-      requireScope(who, 'telemetry.source.read');
+      // collect writes a retained collection and spends outbound budget, so a
+      // read-only viewer cannot drive it (and cannot evict another operator's
+      // un-attested collection through the retention cap).
+      requireScope(who, 'telemetry.source.write');
       // collect persists a collection for attestation; a workload has no
       // principal and therefore no attributable evidence.
       const actorId = requireUser(who);
-      const row = await store.getSource(collectMatch[1], who.workspaces);
+      const row = await store.getSource(requireUuidPath(collectMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       const body = await readJson(req);
+      validateBudget(body.budget);
+      const itemIds = Array.isArray(body.itemIds)
+        ? body.itemIds.filter((value) => typeof value === 'string' && value.length > 0 && value.length <= 64)
+        : [];
       const result = await collect({
         source: {
           sourceId: row.source_id,
@@ -391,9 +431,9 @@ export function createPlugin(options) {
           budget: row.budget,
           secret: resolveSecret(row.credential_ref),
         },
-        itemIds: Array.isArray(body.itemIds) ? body.itemIds : [],
+        itemIds,
         window: body.window,
-        budget: body.budget,
+        budget: effectiveBudget(row.budget, body.budget),
       });
       const bodyBytes = evidenceBodyOf(result);
       await store.saveCollection({
@@ -414,7 +454,7 @@ export function createPlugin(options) {
     if (attestMatch && req.method === 'POST') {
       requireScope(who, 'telemetry.source.write');
       requireUser(who);
-      const collection = await store.getCollection(attestMatch[1], who.workspaces);
+      const collection = await store.getCollection(requireUuidPath(attestMatch[1], 'COLLECTION_NOT_FOUND'), who.workspaces);
       if (!collection) {
         throw Object.assign(new Error('no such collection, or it is no longer retained'), {
           status: 404,
@@ -431,7 +471,7 @@ export function createPlugin(options) {
         );
       }
       const body = await readJson(req);
-      const incidentId = typeof body.incidentId === 'string' ? body.incidentId : '';
+      const incidentId = typeof body.incidentId === 'string' ? body.incidentId.toLowerCase() : '';
       if (!UUID_RE.test(incidentId)) {
         throw Object.assign(new Error('incidentId must be a UUID'), { status: 400, code: 'INVALID_REQUEST' });
       }

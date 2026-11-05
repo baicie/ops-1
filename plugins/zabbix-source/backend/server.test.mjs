@@ -395,10 +395,11 @@ test('collection bytes and the attestation digest are the same bytes', async () 
 
 test('a collection over the 64 KiB bound is a PARTIAL snapshot, not a truncated lie', async () => {
   const upstream = await startFakeZabbix();
-  // 400 samples of a long text-ish value make the canonical body exceed 64 KiB.
-  upstream.state.history = Array.from({ length: 400 }, (_, index) => ({
+  // Deterministically over the bound: 2000 samples with six-digit values make
+  // the canonical body ~170 KB before truncation.
+  upstream.state.history = Array.from({ length: 2000 }, (_, index) => ({
     clock: 1793500000 + index,
-    value: String(1000 + index / 10),
+    value: String(100000 + index),
     ns: 0,
   }));
   const { plugin, base } = await startPlugin();
@@ -411,20 +412,14 @@ test('a collection over the 64 KiB bound is a PARTIAL snapshot, not a truncated 
       body: {
         itemIds: ['10401'],
         window: { from: '2026-11-01T02:00:00Z', to: '2026-11-01T03:00:00Z' },
-        budget: { maxSamplesPerItem: 400 },
+        budget: { maxSamplesPerItem: 2000 },
       },
     });
     assert.equal(collected.status, 200);
-    if (collected.body.snapshot) {
-      assert.equal(collected.body.outcome, 'PARTIAL');
-      assert.equal(collected.body.snapshot.truncated, true);
-      assert.equal(collected.body.snapshot.reason, 'CONTENT_LIMIT');
-      assert.ok(collected.body.snapshot.returnedSamples < collected.body.snapshot.requestedSamples);
-    } else {
-      // If the fixture did not exceed the bound, the complete body still has to
-      // be honest about its size; the digest/attestation test covers the match.
-      assert.equal(collected.body.outcome, 'OK');
-    }
+    assert.equal(collected.body.outcome, 'PARTIAL');
+    assert.equal(collected.body.snapshot?.truncated, true, 'the fixture must exceed the 64 KiB bound');
+    assert.equal(collected.body.snapshot.reason, 'CONTENT_LIMIT');
+    assert.ok(collected.body.snapshot.returnedSamples < collected.body.snapshot.requestedSamples);
     const attested = await call(base, `/api/zabbix-source/collections/${collected.body.collectionId}/attestation`, {
       method: 'POST',
       headers,
@@ -503,6 +498,50 @@ test('an attestation is refused when no adapter credential is configured', async
     });
     assert.equal(attested.status, 503);
     assert.equal(attested.body.code, 'EVIDENCE_ADAPTER_NOT_CONFIGURED');
+  } finally {
+    await plugin.close();
+    await upstream.close();
+  }
+});
+
+test('a viewer cannot spend the collection budget or write a retained collection', async () => {
+  const upstream = await startFakeZabbix();
+  const { plugin, base } = await startPlugin();
+  try {
+    const sourceId = (await createSource(base, upstream)).body.sourceId;
+    const viewer = { 'x-opsweave-user-context': userContext({ role: 'viewer' }) };
+    const collected = await call(base, `/api/zabbix-source/sources/${sourceId}/collect`, {
+      method: 'POST',
+      headers: viewer,
+      body: { itemIds: ['10401'], window: { from: '2026-11-01T02:00:00Z', to: '2026-11-01T03:00:00Z' } },
+    });
+    assert.equal(collected.status, 403);
+    assert.equal(collected.body.code, 'FORBIDDEN');
+  } finally {
+    await plugin.close();
+    await upstream.close();
+  }
+});
+
+test('changing the endpoint invalidates READY and the stale probe', async () => {
+  const upstream = await startFakeZabbix();
+  const { plugin, base } = await startPlugin();
+  try {
+    const created = await createSource(base, upstream);
+    const headers = { 'x-opsweave-user-context': userContext() };
+    await call(base, `/api/zabbix-source/sources/${created.body.sourceId}/probe`, { method: 'POST', headers });
+    const updated = await call(base, `/api/zabbix-source/sources/${created.body.sourceId}`, {
+      method: 'PUT',
+      headers,
+      body: {
+        name: 'renamed',
+        endpoint: 'http://127.0.0.1:18099/api_jsonrpc.php',
+        credential: { kind: 'api-token', ref: 'secretref:zabbix/main' },
+      },
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.status, 'UNVERIFIED');
+    assert.equal(updated.body.lastProbe, undefined);
   } finally {
     await plugin.close();
     await upstream.close();

@@ -388,11 +388,11 @@ paths:
                 incidentId: { type: string, format: uuid }
                 kind:
                   type: string
-                  enum: [METRIC_SNAPSHOT, QUERY_RESULT]
+                  enum: [METRIC_SNAPSHOT]
                   description: |
-                    Must match the kind sent to the Kernel. The signature covers
-                    it, so a mismatch fails verification rather than being
-                    accepted under the wrong kind.
+                    This plugin produces metric snapshots only. The signature
+                    covers the kind, so a mismatch fails verification rather
+                    than being accepted under the wrong kind.
       responses:
         '200':
           description: Attestation envelope to forward to the Kernel
@@ -401,19 +401,21 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [attestation, evidence]
+                required: [evidence, outcome]
                 properties:
-                  attestation:
-                    $ref: '../schema/zabbix-source.v1.schema.json#/$defs/EvidenceAttestation'
+                  outcome:
+                    $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionOutcome'
                   evidence:
                     type: object
                     additionalProperties: false
-                    required: [kind, source, collectedAt, contentRef, content]
+                    required: [kind, source, collectedAt, contentRef, content, attestation]
                     properties:
                       kind: { type: string }
                       source: { type: string }
                       collectedAt: { type: string, format: date-time }
                       contentRef: { type: string }
+                      attestation:
+                        $ref: '../schema/zabbix-source.v1.schema.json#/$defs/EvidenceAttestation'
                       content:
                         type: object
                         additionalProperties: false

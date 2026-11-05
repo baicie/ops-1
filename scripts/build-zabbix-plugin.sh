@@ -44,7 +44,7 @@ PY
 }
 
 CAP="$(cap_digest "plugins/$NAME/manifest.template.json")"
-BUILD="$(build_digest plugins/$NAME/backend/zabbix.mjs plugins/$NAME/backend/server.mjs plugins/$NAME/backend/storage.mjs plugins/$NAME/backend/identity.mjs)"
+BUILD="$(build_digest plugins/$NAME/backend/zabbix.mjs plugins/$NAME/backend/server.mjs plugins/$NAME/backend/storage.mjs plugins/$NAME/backend/identity.mjs plugins/$NAME/backend/package-lock.json plugins/$NAME/backend/Dockerfile)"
 BASE="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null | tr -d '\n' || true)"
 if [ -z "$BASE" ]; then
   docker pull node:22-bookworm-slim >/dev/null
@@ -75,9 +75,10 @@ python3 scripts/assemble_plugin.py \
 ./target/debug/opsctl bundle --dir "/tmp/$NAME-bundle" --out "dist/plugins/$NAME-$VERSION.plugin.zip" --key keys/publisher.key >/dev/null
 ls -lh "dist/plugins/$NAME-$VERSION.plugin.zip"
 python3 - "/tmp/$NAME-bundle/manifest.json" <<'PY'
-import json, sys
+import json, os, sys
 m = json.load(open(sys.argv[1]))
-assert m['backend']['imageRef'].startswith('localhost:5001/'), m['backend']['imageRef']
+registry = os.environ.get('OPSWEAVE_REGISTRY', 'localhost:5001').rstrip('/')
+assert m['backend']['imageRef'].startswith(registry + '/'), m['backend']['imageRef']
 assert m['backend']['imageRef'].split('@sha256:')[1] != '0' * 64, m['backend']['imageRef']
 print('manifest imageRef:', m['backend']['imageRef'])
 PY

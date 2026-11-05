@@ -177,10 +177,10 @@ Kernel：
 | 检查 | 结果 |
 |---|---|
 | `node --test plugins/zabbix-source/backend/zabbix.test.mjs` | PASS — 26/26 |
-| `node --test .../server.test.mjs`（真实端口 + 真实 HTTP upstream fixture） | PASS — 18/18 |
+| `node --test .../server.test.mjs`（真实端口 + 真实 HTTP upstream fixture） | PASS — 20/20 |
 | `node --test .../storage.test.mjs`（真实 PostgreSQL，`OPSWEAVE_REQUIRE_PLUGIN_DATABASE=1`） | PASS — 8/8 |
-| `npm test`（三套合计，真实库） | PASS — 52/52，0 skipped |
-| `cargo test -p opsweave-kernel --bin opsweave-kernel incidents::tests::`（真实 PostgreSQL） | PASS — 58/58，含新增 byte-for-byte + 错误摘要拒绝 |
+| `npm test`（三套合计，真实库） | PASS — 55/55，0 skipped |
+| `cargo test -p opsweave-kernel --bin opsweave-kernel incidents::tests::`（真实 PostgreSQL） | PASS — 59/59，含 byte-for-byte、错误摘要拒绝、无字节 attestation 拒绝 |
 | `cargo test ... a_user_context_is_bound_to_one_plugin_key` | PASS |
 | `python3 tests/contract/validate_contracts.py` | PASS — 16 schemas / 6 examples，含新增负向检查 |
 | `cargo clippy -p opsweave-kernel --all-targets -- -D warnings` | PASS |
@@ -219,12 +219,32 @@ Kernel：
 | Verdict | 状态 | 依据 |
 |---|---|---|
 | `SOURCE_PERSISTENCE_READY` | **PASS** | 8 个真实 PostgreSQL 测试：重启保留、凭据引用、并发/重复、DB 不可用、多 Workspace、迁移 checksum |
-| `CONNECTOR_RUNTIME_READY` | **PASS（本地/镜像）** | 18 个真实 socket 测试；OCI 镜像 digest 固定、非 root、健康 200、无存储 fail closed。未通过真实 Node Runtime 部署，见下 |
-| `SOURCE_EVIDENCE_READY` | **PASS（plugin↔Kernel）** | `g13a_evidence_roundtrip.mjs` 真实进程：字节→验签→存储→读回一致；Gateway/Node 链路另计 |
+| `CONNECTOR_RUNTIME_READY` | **PASS（本地/镜像）** | 20 个真实 socket 测试；OCI 镜像 digest 固定、非 root、健康 200、无存储 fail closed。未通过真实 Node Runtime 部署，见下 |
+| `SOURCE_EVIDENCE_READY` | **PARTIAL** | `g13a_evidence_roundtrip.mjs` 真实进程通过：字节→验签→存储→读回一致；但独立审查确认 A+B 成员可把 B 的采集写入 A 的 Incident（attestation 未绑定 workspace），该 P1 未关闭 |
 | `AUTHORIZATION_READY` | **PARTIAL** | 插件侧工作区/角色/签名/伪造测试通过；Gateway 注入路径只有单元测试，未在三进程链路中实测 |
 | `UI_GOLDEN_PATH_READY` | **PARTIAL** | 13 单测 + 4 浏览器测试（含 390）；后端为 stub；视觉矩阵未跑 |
 | `OCI_DEPLOYMENT_READY` | **PARTIAL** | 镜像构建/推送/digest/非 root/健康已验证；未部署到真实 Node Runtime |
 | `REAL_ZABBIX_VERIFIED` | **NOT_RUN** | 无真实实例；不以 fixture 冒充 |
+
+## 11.1 独立审查
+
+两路独立 reviewer（后端/插件、UI）对 `cdb6e5b` 与 `82a175d` 逐行复核，未发现 P0。已在本轮修复：
+
+- `buildEvidence()` 的 64 次迭代上限会在 500 series 时返回 131 KB，超过 64 KiB 且被 Kernel 拒绝；改为两阶段二分（样本数、series 数），并新增 500 series 与 500×0 的单测；socket 截断用例改为确定性超限。
+- Viewer 可以 POST `/collect`（读 scope），能消耗出站预算并挤掉他人的未签名 collection；改为要求 `telemetry.source.write`，新增测试。
+- `PUT /sources/{id}` 修改端点/凭据/TLS 后仍保留 `READY` 与旧 `lastProbe`；现在连接参数变化即回到 `UNVERIFIED` 并清空探活，新增测试。
+- Kernel 接受“有 attestation、无 content”的 Legacy 引用并记录 `SOURCE_ATTESTED`；现在要求 attested 证据必须携带 content，并新增拒绝测试；replay 测试改为携带相同字节。
+- Gateway 未转发 `no-store`，Cookie 响应可能被中间缓存；现在强制 `cache-control: no-store` 与 `vary: cookie`。
+- Gateway 复制了 `DataScope` 的成员查询；改为调用 `DataScope::resolve`。
+- `/collect` 忽略 source 预算且预算可低于 schema 最小值；现在请求预算只能收窄 source 预算，并在边界校验整数/范围。路径 UUID、`workspaceId`、`incidentId` 统一小写化并在边界校验。
+- 契约与实际响应不一致：attestation 响应的 `evidence.attestation`、`outcome`、kind 枚举、错误码、`maxSamplesPerItem` 默认值已对齐；create+audit 改为同一事务；npm lock 改用官方 registry。
+
+仍未关闭（P1，不能以 PASS 掩盖）：
+
+1. **跨 Workspace 证据归属**：attestation 元组不含 `workspaceId`，Kernel 只校验 Incident scope。A+B 成员可把 B 的采集写入 A 的 Incident。修复需要 attestation v2（签名绑定 workspaceId）并让 Kernel 对照 `incidents.workspace_id`；本轮未实现，verdict 因此为 PARTIAL。
+2. **生产 Secret 交付**：插件进程需要 `OPSWEAVE_ZABBIX_SECRETS` 与 `OPSWEAVE_EVIDENCE_ADAPTER_SECRET`，但 Kernel 的实例环境不注入它们，manifest 也没有 secret mount。真实容器部署下 probe 成功（`apiinfo.version` 不需要认证），hosts/items/collect 会 422，attestation 503。必须先实现插件 secret store 或按插件配置的 adapter，且不能把 Kernel 共享密钥下发给所有插件。
+3. **Gateway 端到端**：`x-opsweave-user-context` 的注入/转发只有 Kernel 单测与插件侧验证，未在三进程链路中实测；真实 Node 部署也未跑。
+4. **探活语义**：`apiinfo.version` 不需要凭据，probe 的 `UNAUTHORIZED` 分支在真实 HTTP 下不可达；`basic` 凭据被接受但 RPC 只发 Bearer。需要决定是改探活为认证调用，还是把状态改名为 REACHABLE 并移除 basic。
 
 ## 12. 风险与下一阶段
 

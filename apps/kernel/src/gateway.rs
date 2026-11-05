@@ -1,6 +1,7 @@
 use crate::auth::AuthUser;
 use crate::capabilities::user_context_token;
 use crate::error::{AppError, AppResult};
+use crate::scope::DataScope;
 use crate::state::AppState;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -74,12 +75,10 @@ pub async fn proxy(
     // client claimed role Y". Only the Kernel may answer that, and it answers
     // from the membership table at the moment of the call - not from a header
     // the request brought with it (G10 R1).
-    let workspace_ids: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT workspace_id FROM kernel.business_workspace_members WHERE user_id=$1 ORDER BY workspace_id",
-    )
-    .bind(auth.user_id)
-    .fetch_all(&state.db)
-    .await?;
+    // One definition of membership: DataScope owns the workspace/row rule, and
+    // a second copy here could drift from the endpoints the plugin's data will
+    // be read through.
+    let workspace_ids = DataScope::resolve(&state.db, &auth).await?.workspaces;
     let user_context = user_context_token(
         &state,
         &first.plugin_id,
@@ -192,6 +191,15 @@ pub async fn proxy(
                         out.headers_mut().insert(header::CONTENT_TYPE, value);
                     }
                 }
+                // The plugin marks its responses no-store; without forwarding
+                // that (or setting it here) an intermediary could cache a
+                // cookie-authenticated response and serve it to another account.
+                out.headers_mut().insert(
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("no-store"),
+                );
+                out.headers_mut()
+                    .insert(header::VARY, header::HeaderValue::from_static("Cookie"));
                 out.headers_mut().insert(
                     "x-opsweave-request-id",
                     header::HeaderValue::from_str(&request_id)

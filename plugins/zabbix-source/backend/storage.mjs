@@ -194,19 +194,30 @@ export class PostgresStore {
   }
 
   async createSource({ sourceId, workspaceId, createdBy, name, endpoint, credential, verifyTls, budget }) {
+    const client = await this.pool.connect();
     try {
-      const result = await this.#query(
+      await client.query('BEGIN');
+      const result = await client.query(
         `INSERT INTO zabbix_sources
            (source_id,workspace_id,created_by,name,endpoint,credential_kind,credential_ref,verify_tls,status,budget)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'UNVERIFIED',$9::jsonb)
          RETURNING *`,
         [sourceId, workspaceId, createdBy, name, endpoint, credential.kind, credential.ref, verifyTls, JSON.stringify(budget)],
       );
-      await this.#audit(sourceId, workspaceId, createdBy, 'CREATE', { name, endpoint });
+      // The row and its audit record commit together: a source that exists with
+      // no audit trail is a change nobody can account for.
+      await client.query(
+        'INSERT INTO zabbix_source_audit (source_id,workspace_id,actor_id,action,detail) VALUES ($1,$2,$3,$4,$5::jsonb)',
+        [sourceId, workspaceId, createdBy, 'CREATE', JSON.stringify({ name, endpoint, credentialKind: credential.kind, verifyTls, budget })],
+      );
+      await client.query('COMMIT');
       return result.rows[0];
     } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
       if (error && error.code === '23505') throw new SourceConflictError();
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -223,9 +234,20 @@ export class PostgresStore {
         return null;
       }
       const result = await client.query(
+        // Changing where or how the source connects invalidates whatever the
+        // previous probe observed: carrying READY (and its lastProbe) over to a
+        // new endpoint would present an unverified configuration as healthy.
+        // Name and budget changes do not change reachability.
         `UPDATE zabbix_sources SET
            name=$2, endpoint=$3, credential_kind=$4, credential_ref=$5,
-           verify_tls=$6, budget=$7::jsonb, updated_at=now()
+           verify_tls=$6, budget=$7::jsonb,
+           status=CASE WHEN endpoint<>$3 OR credential_kind<>$4
+                            OR credential_ref<>$5 OR verify_tls<>$6
+                       THEN 'UNVERIFIED' ELSE status END,
+           last_probe=CASE WHEN endpoint<>$3 OR credential_kind<>$4
+                                OR credential_ref<>$5 OR verify_tls<>$6
+                           THEN NULL ELSE last_probe END,
+           updated_at=now()
          WHERE source_id=$1 RETURNING *`,
         [sourceId, patch.name, patch.endpoint, patch.credential.kind, patch.credential.ref, patch.verifyTls, JSON.stringify(patch.budget)],
       );
@@ -387,6 +409,11 @@ export class MemoryStore {
         throw new SourceConflictError();
       }
     }
+    const connectionChanged =
+      row.endpoint !== patch.endpoint ||
+      row.credential_kind !== patch.credential.kind ||
+      row.credential_ref !== patch.credential.ref ||
+      row.verify_tls !== patch.verifyTls;
     Object.assign(row, {
       name: patch.name,
       endpoint: patch.endpoint,
@@ -394,6 +421,7 @@ export class MemoryStore {
       credential_ref: patch.credential.ref,
       verify_tls: patch.verifyTls,
       budget: patch.budget,
+      ...(connectionChanged ? { status: 'UNVERIFIED', last_probe: null } : {}),
       updated_at: new Date(),
     });
     this.audit.push({ source_id: sourceId, workspace_id: row.workspace_id, actor_id: actorId, action: 'UPDATE', detail: { name: patch.name } });
