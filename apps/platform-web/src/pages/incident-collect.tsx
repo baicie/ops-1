@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Modal } from '../components/Ui';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
+import { Status } from '../components/app/status';
 import { badgeVariantForTone } from '../components/status-tone';
 import { ageMessage } from '../lib/age';
 import { useT, type Locale } from '../i18n';
@@ -264,6 +265,7 @@ export function CollectEvidenceDialog({
   }, [sourceId, hostId]);
 
   const state = collectState({ sourceStatus, collection, submit, cancelled, now });
+  const selectedSource = sources.find((source) => source.sourceId === sourceId) ?? null;
 
   const toggleItem = (itemId: string) => {
     setSelectedItems((current) => {
@@ -363,9 +365,15 @@ export function CollectEvidenceDialog({
               <select value={sourceId} onChange={(event) => setSourceId(event.target.value)} data-testid="incident-collect-source">
                 <option value="">{t('incidents.collect.sourcePlaceholder')}</option>
                 {sources.map((source) => (
-                  <option key={source.sourceId} value={source.sourceId}>{source.name} · {source.status}</option>
+                  <option key={source.sourceId} value={source.sourceId}>{source.name}</option>
                 ))}
               </select>
+              {selectedSource ? (
+                <p className="row" data-testid="incident-collect-source-status">
+                  <Status code={selectedSource.status} />
+                  {selectedSource.lastProbe ? <span className="muted small">{selectedSource.lastProbe.outcome}</span> : null}
+                </p>
+              ) : null}
             </label>
 
             <label className="field">
