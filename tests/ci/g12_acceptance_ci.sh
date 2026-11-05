@@ -170,7 +170,8 @@ if (cd tests/ui && V3_CHANNEL="${V3_CHANNEL:-chromium}" WORKBENCH_MODE=after pnp
      sources-audit.spec.ts \
      metric-card-matrix.spec.ts \
      workbench-matrix.spec.ts \
-     workbench-a11y.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
+     workbench-a11y.spec.ts \
+     incident-evidence-kpi.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
   echo "######## browser suite -> PASS"
   if node scripts/check-workbench-metrics.mjs artifacts/ui/visual-v2/after docs/design/opsweave-visual-system-v2/workbench-baseline.json; then
     echo "######## workbench regression gate -> PASS"
@@ -180,6 +181,18 @@ if (cd tests/ui && V3_CHANNEL="${V3_CHANNEL:-chromium}" WORKBENCH_MODE=after pnp
   fi
 else
   echo "######## browser suite -> FAIL (see $LOG_DIR/playwright.log)"
+  rc=1
+fi
+
+echo
+echo "######## workbench gate counterfactuals"
+# The metrics gate is only evidence if removing a label, a compact page, or an overflow value
+# turns it red. These run without a kernel or artifacts, so they belong in the deterministic
+# job even when the browser suite above already failed.
+if node --test scripts/check-workbench-metrics.test.mjs 2>&1 | tee "$LOG_DIR/workbench-gate-tests.log"; then
+  echo "######## workbench gate counterfactuals -> PASS"
+else
+  echo "######## workbench gate counterfactuals -> FAIL (see $LOG_DIR/workbench-gate-tests.log)"
   rc=1
 fi
 
