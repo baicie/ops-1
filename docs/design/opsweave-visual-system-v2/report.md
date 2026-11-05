@@ -2,8 +2,8 @@
 
 - 日期：2026-11-05
 - 状态：**实现完成，独立审查与最新 CI 见 §6 / §7**
-- 基线：`design/opsweave-visual-system-v1@e8d1cbf`（PR #34）。本地 `origin/main` 仍为 `775a1e2`，不包含 #34；本会话开始时 GitHub 网络不可达，无法确认远端是否已合并，因此按任务允许的路径创建 **Stacked Draft PR**，未合并 #34。
-- 分支：`design/opsweave-ds-v1-2`
+- 基线：`design/opsweave-visual-system-v1@e8d1cbf`（PR #34）。本会话开始时 GitHub 网络不可达；网络恢复后确认 **PR #34 仍是 OPEN、未合并**，因此按任务允许的路径创建 **Stacked Draft PR #35**（base `design/opsweave-visual-system-v1`），未合并 #34。
+- 分支：`design/opsweave-ds-v1-2`；Draft PR [#35](https://github.com/baicie/ops-1/pull/35)
 - 决策：[ADR-017](../../adr/ADR-017-visual-system-v1.md)（视觉系统权威）、`page-template.md`、`token-table.md`
 
 ## 1. 目标与边界
@@ -59,6 +59,7 @@
 - 选中 rail 行的 muted facts 4.47:1 → secondary（7:1+）。
 - account 按钮在手机隐藏姓名后没有 accessible name → 增加 `sr-only` 账号菜单标签，同时不触发 label-content-name-mismatch。
 - 历史窗口不再用没有 TabsContent 的 Tabs；`aria-controls` 不再悬空。
+- 证据 trust chip 的 `ok`/`warn` 文本从 `--ow-ok`/`--ow-warn` 改为 `--ow-ok-ink`/`--ow-warning-ink`（CI 在 768 抓到 3.89/4.29；本地 3/3 复测通过）。
 - 键盘焦点环、24px 最小目标、axe WCAG 2.0/2.1/2.2 A+AA 在 1440/1024/768/390 扫描，见 §5。
 
 ## 5. 门禁与证据
@@ -124,7 +125,8 @@
 ## 7. CI
 
 - 本地确定性 harness：**PASS**，102 tests（100 passed / 2 skipped），11.2 min；acceptance **195/0**；`workbench regression gate -> PASS`；exit 0。两条 skip 是 Docker/Studio 依赖。
-- 最新 HEAD 的 GitHub Actions：见 PR checks 与 evidence index；提交后回填。
+- 第一次 GitHub Actions acceptance（run 41972550193）：browser suite **99 passed / 1 failed / 2 skipped**。唯一失败是 `workbench-a11y` 在 768 的 trust chip：`SOURCE_ATTESTED` #0f8a5f on #e6f6ef = 3.89:1，`UNVERIFIED` #a86400 on #fff4df = 4.29:1。修复为 `.ow-trust[data-trust-tone=ok|warn]` 使用 `--ow-ok-ink` / `--ow-warning-ink`；本地 a11y 3/3（含 5 条 evidence 的固定 incident）通过。
+- **重跑（代码 HEAD `0a6430a`）：11/11 checks PASS** —— acceptance 10m45s（browser 100 passed / 2 skipped，8.8m；`workbench regression gate -> PASS`）、golden-path 17m25s、runtime-golden-path 17m28s、rust、web、web-unit、quality-faults、legacy-regression、contracts、artifact-budget、spec-coverage。
 
 ## 8. 剩余项
 

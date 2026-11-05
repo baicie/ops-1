@@ -14,7 +14,7 @@ WORKBENCH_MODE=after OPSWEAVE_URL=http://127.0.0.1:18291 \
 
 - 4 视口（1440/1024/768/390）× 2 主题 × 2 语言 × 3 页面 = 48 张，另 768/390 的 incident detail tab 各一张。
 - 产物（未跟踪，`artifacts/ui/visual-v2/after/`）：`observability__*`、`observability-entity__*`、`incident__*`、`incident-detail-tab__*`，以及每组合 `_metrics_<label>.json`。
-- 对照：`artifacts/ui/visual-v2/before/`（同一 fixture/seed、同一浏览器、旧代码）。
+- 对照：`artifacts/ui/visual-v2/before/`。该目录由 `e8d1cbf` 的 `apps/platform-web` 源码单独构建旧 dist 后捕获，不是改标签的当前 build；before/after 固定同一个 seed incident `192cd642…`（5 条 evidence）。以 KPI identity（before 的 `obs-peak-cpu` / `obs-peak-memory` vs after 的 `obs-attention` / `obs-stale`）和 metrics `mode` 双重核对。
 - 断言：页面非 loading、无 pageerror、无横向溢出；指标 JSON 记录 regions、KPI 列数/身份、tab 模型、header 高度。
 
 ## 2. 可访问性
@@ -62,7 +62,9 @@ node scripts/check-workbench-metrics.mjs artifacts/ui/visual-v2/after \
 | `metric-card-matrix.spec.ts` | 2/2；incident 12/12 |
 | `check-spec-coverage` | 37 covered / 22 explicit-skip / 0 unreferenced（workbench specs COVERED ← g12-acceptance） |
 | `check-tracked-png-budget` | PASS；408 files / 65.97 MB（预算未提高） |
-| 完整 `g12_acceptance_ci.sh` | **PASS** — 102 tests（100 passed / 2 skipped），11.2 min；acceptance 195/0；workbench gate PASS；exit 0 |
+| 完整 `g12_acceptance_ci.sh`（本地） | **PASS** — 102 tests（100 passed / 2 skipped），11.2 min；acceptance 195/0；workbench gate PASS；exit 0 |
+| GitHub acceptance 第一次 | **FAIL** — 99 passed / 1 failed / 2 skipped；`workbench-a11y` 768 的 trust chip 对比度 3.89/4.29；已改为 ink tokens |
+| GitHub checks（代码 HEAD `0a6430a`） | **11/11 PASS** — acceptance 10m45s（browser 100 passed / 2 skipped，8.8m；workbench gate PASS）、golden 17m25s、runtime 17m28s，其余 8 项通过 |
 
 ## 5. 未运行
 
