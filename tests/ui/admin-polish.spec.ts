@@ -346,8 +346,13 @@ test('a filter is answered by the Kernel, not by the browser', async ({ page }) 
   await page.getByRole('option', { name: 'Node', exact: true }).click();
   const audit = await auditResponse;
   expect(audit.status(), 'the subject filter is one audit query').toBe(200);
-  const events = await audit.json();
-  expect(Array.isArray(events)).toBe(true);
+  // The audit route answers { events, scope }; the scope is what lets the page distinguish
+  // "nothing recorded" from "your role cannot read this kind". The old bare-array assertion
+  // predates that response shape and was failing on every deployment.
+  const auditBody = await audit.json();
+  expect(Array.isArray(auditBody.events), 'the audit response carries an events array').toBe(true);
+  expect(auditBody.scope, 'the audit response carries the scope it was read under').toBeTruthy();
+  const events = auditBody.events;
   expect(events.every((event: any) => event.subjectType === 'node'), 'the server answered for that subject only').toBe(true);
   // The number on screen must be the number the Kernel just returned; the exact pluralisation is
   // a copy detail that differs by locale, and pinning it made this pass locally and fail on a

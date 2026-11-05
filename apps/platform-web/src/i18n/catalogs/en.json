@@ -1295,6 +1295,7 @@
   "pluginDetail.deployModal.selectorHint": "Comma-separated key=value pairs",
   "pluginDetail.deployModal.title": "Deploy {name}",
   "pluginDetail.deployModal.versionHint": "A deployment is desired state; READY is only claimed after every replica reports readiness.",
+  "pluginDetail.description": "Versions, deployments, capabilities and audit history for this plugin.",
   "pluginDetail.deployment.cpuMemory": "CPU / memory",
   "pluginDetail.deployment.fieldId": "Deployment ID",
   "pluginDetail.deployment.fieldReason": "Reason",

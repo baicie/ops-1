@@ -344,12 +344,13 @@ test('overview: a warning attention item renders the ATTENTION indicator, not a 
   // Overview.tsx:22 maps warning -> the ATTENTION indicator, and :145 labels it with severity copy.
   await expect(row.locator('.status-indicator').first()).toHaveAttribute('data-indicator', 'attention');
   await expect(row.locator('.status-indicator-label').first()).toHaveText(copy('overview.severity.warning'));
-  // The page localizes a recognized Kernel sentence (lib/kernel-messages.ts:36). `stale.title`
-  // is the raw sentence, so asserting it here would require the page to stop localizing; the
-  // detail below is deliberately unrecognized by DETAIL_RULES and therefore stays verbatim.
+  // The kernel sends the stable title "Node node-1 heartbeat is stale"; Overview maps known
+  // kernel messages through the catalog, so the rendered title is the localized one.
   await expect(row.locator('.attention-item-copy strong')).toHaveText(copy('kernel.attention.nodeStale.title', { node: 'node-1' }));
+  // This injected detail does not match a known kernel-message pattern, so the page keeps the
+  // kernel's sentence verbatim and appends the source marker. Assert both, rather than
+  // pretending an unrecognised sentence was localized.
   await expect(row.locator('.attention-item-copy p')).toContainText(stale.detail);
-  // An unrecognized sentence is printed verbatim, and the row says where it came from.
   await expect(row.locator('.attention-item-copy p .server-source')).toHaveText(copy('ui.textSource.kernel'));
 
   // The panel count is the array length, and the list really replaced the empty state.
