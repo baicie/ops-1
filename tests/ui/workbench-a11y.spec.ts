@@ -10,6 +10,8 @@ import { NODES, installFixtures, login, firstIncidentId } from './support/workbe
  * visual matrix uses, so a state that only exists in the matrix (DEGRADED, no sample, stale)
  * is also scanned here rather than a healthy-only page passing for the whole surface.
  */
+const FIXED_INCIDENT = process.env.WORKBENCH_INCIDENT_ID || '';
+
 const TARGETS = [
   '.page-actions button',
   '.page-actions a',
@@ -101,7 +103,7 @@ test('workbench accessibility at 1440 light en', async ({ browser }) => {
   await axe(page, 'observability entity 1440 light en');
   await targets(page, 'observability entity 1440 light en');
 
-  const incidentId = await firstIncidentId(page);
+  const incidentId = FIXED_INCIDENT || await firstIncidentId(page);
   expect(incidentId).not.toBe('');
   await page.goto(`/app/incidents/${incidentId}`);
   await page.waitForSelector('[data-testid=incident-timeline]');
@@ -135,7 +137,7 @@ test('workbench accessibility at 390 dark zh-CN', async ({ browser }) => {
   await axe(page, 'observability entity 390 dark zh-CN');
   await targets(page, 'observability entity 390 dark zh-CN');
 
-  const incidentId = await firstIncidentId(page);
+  const incidentId = FIXED_INCIDENT || await firstIncidentId(page);
   expect(incidentId).not.toBe('');
   await page.goto(`/app/incidents/${incidentId}`);
   await page.waitForSelector('[data-testid=incident-timeline]');
@@ -166,7 +168,7 @@ test('workbench accessibility at the tablet widths', async ({ browser }) => {
     await axe(page, 'observability ' + label);
     await targets(page, 'observability ' + label);
 
-    const incidentId = await firstIncidentId(page);
+    const incidentId = FIXED_INCIDENT || await firstIncidentId(page);
     expect(incidentId).not.toBe('');
     await page.goto(`/app/incidents/${incidentId}`);
     await page.waitForSelector('[data-testid=incident-timeline]');

@@ -3546,7 +3546,7 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    one level that IS provenance, so it takes the green tick the product reserves for a
    fact the server established. */
 .ow-trust[data-trust-tone="ok"] {
-  color: var(--ow-ok); background: var(--ow-ok-soft);
+  color: var(--ow-ok-ink); background: var(--ow-ok-soft);
   border-color: color-mix(in srgb, var(--ow-ok) 40%, transparent);
 }
 /* neutral = a person asserting in their own name. Weaker, and not a warning. */
@@ -3556,7 +3556,7 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 }
 /* warn = nothing was verified for this row. */
 .ow-trust[data-trust-tone="warn"] {
-  color: var(--ow-warn); background: var(--ow-warn-soft);
+  color: var(--ow-warning-ink); background: var(--ow-warn-soft);
   border-color: color-mix(in srgb, var(--ow-warn) 40%, transparent);
   border-style: dashed;
 }
