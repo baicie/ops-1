@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canSave, collectState, type CollectionResult, type CollectStateInput } from './incident-collect';
+import { availabilityKey, canSave, collectState, outcomeKey, type CollectionResult, type CollectStateInput } from './incident-collect';
 
 const NOW = Date.parse('2026-11-06T10:00:00Z');
 
@@ -38,8 +38,8 @@ describe('collectState', () => {
     expect(collectState(input({ sourceStatus: 'loading' }))).toBe('loading');
   });
 
-  it('reports empty when no source is registered', () => {
-    expect(collectState(input({ sourceStatus: 'empty' }))).toBe('empty');
+  it('reports noSources when no source is registered', () => {
+    expect(collectState(input({ sourceStatus: 'empty' }))).toBe('noSources');
   });
 
   it('reports forbidden separately from unavailable', () => {
@@ -59,7 +59,7 @@ describe('collectState', () => {
     expect(collectState(input({ collection: collection({ outcome: 'NO_DATA' }) }))).toBe('noData');
     expect(collectState(input({ collection: collection({ outcome: 'TIMEOUT' }) }))).toBe('timeout');
     expect(collectState(input({ collection: collection({ outcome: 'UNAVAILABLE' }) }))).toBe('unavailable');
-    expect(collectState(input({ collection: collection({ outcome: 'UNKNOWN' }) }))).toBe('unavailable');
+    expect(collectState(input({ collection: collection({ outcome: 'UNKNOWN' }) }))).toBe('unknown');
   });
 
   it('marks a partial collection partial even when samples exist', () => {
@@ -93,5 +93,23 @@ describe('canSave', () => {
       expect(canSave(collection({ outcome }))).toBe(false);
     }
     expect(canSave(null)).toBe(false);
+  });
+});
+
+describe('wire values are mapped to catalog keys, never rendered raw', () => {
+  it('maps every collection outcome', () => {
+    expect(outcomeKey('OK')).toBe('incidents.collect.outcome.ok');
+    expect(outcomeKey('EMPTY')).toBe('incidents.collect.outcome.empty');
+    expect(outcomeKey('NO_DATA')).toBe('incidents.collect.outcome.noData');
+    expect(outcomeKey('PARTIAL')).toBe('incidents.collect.outcome.partial');
+    expect(outcomeKey('UNKNOWN')).toBe('incidents.collect.outcome.unknown');
+    expect(outcomeKey('UNAVAILABLE')).toBe('incidents.collect.outcome.unavailable');
+    expect(outcomeKey('TIMEOUT')).toBe('incidents.collect.outcome.timeout');
+  });
+
+  it('maps host availability, including the never-checked case', () => {
+    expect(availabilityKey('AVAILABLE')).toBe('incidents.collect.availability.available');
+    expect(availabilityKey('UNAVAILABLE')).toBe('incidents.collect.availability.unavailable');
+    expect(availabilityKey('UNKNOWN')).toBe('incidents.collect.availability.unknown');
   });
 });

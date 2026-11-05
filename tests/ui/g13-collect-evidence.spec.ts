@@ -57,18 +57,20 @@ function collection(outcome = 'OK') {
   };
 }
 
-async function stubWorld(page: Page, options: { collectOutcome?: string; sourcesStatus?: number } = {}) {
+async function stubWorld(page: Page, options: { collectOutcome?: string; sourcesStatus?: number; delaySaveMs?: number } = {}) {
   let saved = false;
   let postedEvidence: unknown = null;
+  let postedAttestation: unknown = null;
   await page.route(`**/api/v1/incidents/${INCIDENT_ID}`, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify(incident),
   }));
-  await page.route(`**/api/v1/incidents/${INCIDENT_ID}/evidence`, (route) => {
+  await page.route(`**/api/v1/incidents/${INCIDENT_ID}/evidence`, async (route) => {
     if (route.request().method() === 'POST') {
       postedEvidence = route.request().postDataJSON();
       saved = true;
+      if (options.delaySaveMs) await new Promise((resolve) => setTimeout(resolve, options.delaySaveMs));
       return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: '99999999-9999-4999-8999-999999999999' }) });
     }
     return route.fulfill({
@@ -108,19 +110,37 @@ async function stubWorld(page: Page, options: { collectOutcome?: string; sources
   await page.route(`**/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/sources/${SOURCE_ID}/hosts`, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ outcome: 'OK', items: [{ hostId: '10084', name: 'web-01', available: 'AVAILABLE' }], clamped: false, truncated: 0 }),
+    body: JSON.stringify({
+      outcome: 'OK',
+      items: [
+        { hostId: '10084', name: 'web-01', available: 'AVAILABLE' },
+        { hostId: '10085', name: 'db-01', available: 'UNKNOWN' },
+      ],
+      clamped: false,
+      truncated: 0,
+    }),
   }));
-  await page.route(`**/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/sources/${SOURCE_ID}/items?hostId=10084`, (route) => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ outcome: 'OK', items: [{ itemId: '10401', key: 'system.cpu.util', name: 'CPU utilization', unit: '%', valueType: 'FLOAT' }], clamped: false, truncated: 0 }),
-  }));
+  await page.route(`**/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/sources/${SOURCE_ID}/items?hostId=*`, (route) => {
+    const hostId = new URL(route.request().url()).searchParams.get('hostId');
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        outcome: 'OK',
+        items: [{ itemId: hostId === '10085' ? '10402' : '10401', key: 'system.cpu.util', name: 'CPU utilization', unit: '%', valueType: 'FLOAT' }],
+        clamped: false,
+        truncated: 0,
+      }),
+    });
+  });
   await page.route(`**/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/sources/${SOURCE_ID}/collect`, (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify(collection(options.collectOutcome ?? 'OK')),
   }));
-  await page.route('**/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/collections/*/attestation', (route) => route.fulfill({
+  await page.route('**/api/v1/gateway/opsweave.zabbix-source/api/zabbix-source/collections/*/attestation', (route) => {
+    postedAttestation = route.request().postDataJSON();
+    return route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
@@ -134,8 +154,9 @@ async function stubWorld(page: Page, options: { collectOutcome?: string; sources
       },
       outcome: 'OK',
     }),
-  }));
-  return { posted: () => postedEvidence };
+  });
+  });
+  return { posted: () => postedEvidence, attested: () => postedAttestation };
 }
 
 async function openDialog(page: Page) {
@@ -158,6 +179,7 @@ test('collect and save are separate steps, and the posted bytes are the signed b
 
   // Nothing is saved by collecting.
   await page.getByTestId('incident-collect-run').click();
+  expect(world.posted(), 'collect must not write evidence').toBeNull();
   await expect(page.getByTestId('incident-collect-result')).toHaveAttribute('data-outcome', 'OK');
   await expect(page.getByTestId('incident-collect-content-ref')).toHaveText(CONTENT_REF);
 
@@ -170,6 +192,9 @@ test('collect and save are separate steps, and the posted bytes are the signed b
     attestation: { signature: string };
     kind: string;
   };
+  const attestationRequest = world.attested() as { incidentId: string; kind: string };
+  expect(attestationRequest.incidentId).toBe(INCIDENT_ID);
+  expect(attestationRequest.kind).toBe('METRIC_SNAPSHOT');
   expect(posted.kind).toBe('METRIC_SNAPSHOT');
   expect(posted.content.contentType).toBe('application/json');
   expect(posted.content.body).toBe(CONTENT_BODY);
@@ -263,3 +288,31 @@ for (const combo of MATRIX) {
     await page.screenshot({ path: path.join(out, `collect-${combo.width}-${combo.theme}-${combo.locale}.png`), fullPage: true });
   });
 }
+
+test('changing the host drops the previous result instead of leaving it saveable', async ({ page }) => {
+  await stubWorld(page);
+  await openDialog(page);
+  await page.getByTestId('incident-collect-source').selectOption(SOURCE_ID);
+  await page.getByTestId('incident-collect-host').selectOption('10084');
+  await page.getByTestId('incident-collect-item-10401').check();
+  await page.getByTestId('incident-collect-run').click();
+  await expect(page.getByTestId('incident-collect-result')).toBeVisible();
+
+  await page.getByTestId('incident-collect-host').selectOption('10085');
+  await expect(page.getByTestId('incident-collect-result')).toHaveCount(0);
+  await expect(page.getByTestId('incident-collect-save')).toBeDisabled();
+});
+
+test('a save in flight cannot be dismissed, and reports saved only after the write', async ({ page }) => {
+  await stubWorld(page, { delaySaveMs: 800 });
+  await openDialog(page);
+  await page.getByTestId('incident-collect-source').selectOption(SOURCE_ID);
+  await page.getByTestId('incident-collect-host').selectOption('10084');
+  await page.getByTestId('incident-collect-item-10401').check();
+  await page.getByTestId('incident-collect-run').click();
+  await page.getByTestId('incident-collect-save').click();
+  await expect(page.getByTestId('incident-collect-cancel')).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('incident-collect')).toBeVisible();
+  await expect(page.getByTestId('incident-collect-saved')).toBeVisible();
+});

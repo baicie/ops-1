@@ -6,7 +6,7 @@ import { Button } from '../components/ui/button';
 import { Status } from '../components/app/status';
 import { badgeVariantForTone } from '../components/status-tone';
 import { ageMessage } from '../lib/age';
-import { useT, type Locale } from '../i18n';
+import { useI18n, useT } from '../i18n';
 
 /**
  * G13-A: collect real telemetry from a registered source and save it as evidence.
@@ -97,11 +97,13 @@ export type CollectState =
   | 'initial'
   | 'loading'
   | 'ready'
+  | 'noSources'
   | 'empty'
   | 'noData'
   | 'partial'
   | 'timeout'
   | 'unavailable'
+  | 'unknown'
   | 'forbidden'
   | 'stale'
   | 'submitPending'
@@ -131,11 +133,11 @@ export function collectState(input: CollectStateInput): CollectState {
   if (input.sourceStatus === 'forbidden') return 'forbidden';
   if (input.sourceStatus === 'loading') return 'loading';
   if (input.sourceStatus === 'unavailable') return 'unavailable';
-  if (input.sourceStatus === 'empty') return 'empty';
+  if (input.sourceStatus === 'empty') return 'noSources';
   if (input.collection) {
     if (input.collection.outcome === 'UNAVAILABLE') return 'unavailable';
     if (input.collection.outcome === 'TIMEOUT') return 'timeout';
-    if (input.collection.outcome === 'UNKNOWN') return 'unavailable';
+    if (input.collection.outcome === 'UNKNOWN') return 'unknown';
     if (input.collection.outcome === 'NO_DATA') return 'noData';
     if (input.collection.outcome === 'EMPTY') return 'empty';
     if (input.collection.outcome === 'PARTIAL') return 'partial';
@@ -152,6 +154,43 @@ export function canSave(collection: CollectionResult | null): boolean {
     collection &&
       ['OK', 'EMPTY', 'NO_DATA', 'PARTIAL'].includes(collection.outcome),
   );
+}
+
+
+/** Wire outcomes rendered as catalog copy; never as raw enum text (rules/06). */
+export type OutcomeKey =
+  | 'incidents.collect.outcome.ok'
+  | 'incidents.collect.outcome.empty'
+  | 'incidents.collect.outcome.noData'
+  | 'incidents.collect.outcome.partial'
+  | 'incidents.collect.outcome.unknown'
+  | 'incidents.collect.outcome.unavailable'
+  | 'incidents.collect.outcome.timeout';
+
+export function outcomeKey(outcome: string): OutcomeKey {
+  switch (outcome) {
+    case 'OK': return 'incidents.collect.outcome.ok';
+    case 'EMPTY': return 'incidents.collect.outcome.empty';
+    case 'NO_DATA': return 'incidents.collect.outcome.noData';
+    case 'PARTIAL': return 'incidents.collect.outcome.partial';
+    case 'UNKNOWN': return 'incidents.collect.outcome.unknown';
+    case 'UNAVAILABLE': return 'incidents.collect.outcome.unavailable';
+    case 'TIMEOUT': return 'incidents.collect.outcome.timeout';
+    default: return 'incidents.collect.outcome.unknown';
+  }
+}
+
+export type AvailabilityKey =
+  | 'incidents.collect.availability.available'
+  | 'incidents.collect.availability.unavailable'
+  | 'incidents.collect.availability.unknown';
+
+export function availabilityKey(availability: string): AvailabilityKey {
+  switch (availability) {
+    case 'AVAILABLE': return 'incidents.collect.availability.available';
+    case 'UNAVAILABLE': return 'incidents.collect.availability.unavailable';
+    default: return 'incidents.collect.availability.unknown';
+  }
 }
 
 function sampleCount(result: CollectionResult): number {
@@ -185,34 +224,48 @@ export function CollectEvidenceDialog({
   onSaved: () => void;
 }) {
   const t = useT();
-  const locale: Locale = document.documentElement.lang === 'zh-CN' ? 'zh-CN' : 'en';
+  const { locale } = useI18n();
   const [sourceStatus, setSourceStatus] = React.useState<CollectSourceStatus>('idle');
   const [sources, setSources] = React.useState<CollectSource[]>([]);
   const [sourceId, setSourceId] = React.useState('');
   const [hosts, setHosts] = React.useState<CollectHost[]>([]);
-  const [hostsLoading, setHostsLoading] = React.useState(false);
+  const [hostState, setHostState] = React.useState<CollectSourceStatus>('idle');
   const [hostId, setHostId] = React.useState('');
   const [items, setItems] = React.useState<CollectItem[]>([]);
-  const [itemsLoading, setItemsLoading] = React.useState(false);
+  const [itemState, setItemState] = React.useState<CollectSourceStatus>('idle');
   const [selectedItems, setSelectedItems] = React.useState<string[]>([]);
   const [windowPreset, setWindowPreset] = React.useState('1h');
   const [collection, setCollection] = React.useState<CollectionResult | null>(null);
+  // What produced the shown collection. Saving always uses the collection's own
+  // bytes, but a reader must be able to see that the form now selects something
+  // else than the result on screen.
+  const [collectedFrom, setCollectedFrom] = React.useState<string | null>(null);
   const [collecting, setCollecting] = React.useState(false);
+  const [collectError, setCollectError] = React.useState('');
   const [submit, setSubmit] = React.useState<'idle' | 'pending' | 'conflict' | 'saved'>('idle');
   const [cancelled, setCancelled] = React.useState(false);
   const [errorText, setErrorText] = React.useState('');
   const [now, setNow] = React.useState(Date.now());
+  // A response that arrives after a selector change or a close must not land on
+  // the new selection or on the previous incident.
+  const generation = React.useRef(0);
+  const alive = React.useRef(true);
+  React.useEffect(() => () => { alive.current = false; }, []);
 
   React.useEffect(() => {
     if (!open) return;
     setCancelled(false);
     setSubmit('idle');
     setCollection(null);
+    setCollectedFrom(null);
+    setCollectError('');
     setErrorText('');
     setSelectedItems([]);
     setHostId('');
     setHosts([]);
+    setHostState('idle');
     setItems([]);
+    setItemState('idle');
     setSourceId('');
     setSourceStatus('loading');
     let live = true;
@@ -238,29 +291,56 @@ export function CollectEvidenceDialog({
 
   React.useEffect(() => {
     if (!sourceId) return;
+    generation.current += 1;
+    setCollection(null);
+    setCollectedFrom(null);
+    setCollectError('');
     let live = true;
-    setHostsLoading(true);
+    setHostState('loading');
     setHosts([]);
     setHostId('');
+    setItemState('idle');
     setItems([]);
     setSelectedItems([]);
     api.gatewayGet<{ items: CollectHost[] }>(PLUGIN_ID, `${PLUGIN_BASE}/sources/${sourceId}/hosts`)
-      .then((result) => { if (live) setHosts(result.items ?? []); })
-      .catch(() => { if (live) setHosts([]); })
-      .finally(() => { if (live) setHostsLoading(false); });
+      .then((result) => {
+        if (!live) return;
+        const rows = result.items ?? [];
+        setHosts(rows);
+        setHostState(rows.length === 0 ? 'empty' : 'ready');
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        const { status } = errorCodeOf(error);
+        setHosts([]);
+        setHostState(status === 403 ? 'forbidden' : 'unavailable');
+      });
     return () => { live = false; };
   }, [sourceId]);
 
   React.useEffect(() => {
     if (!sourceId || !hostId) return;
+    generation.current += 1;
+    setCollection(null);
+    setCollectedFrom(null);
+    setCollectError('');
     let live = true;
-    setItemsLoading(true);
+    setItemState('loading');
     setItems([]);
     setSelectedItems([]);
     api.gatewayGet<{ items: CollectItem[] }>(PLUGIN_ID, `${PLUGIN_BASE}/sources/${sourceId}/items?hostId=${encodeURIComponent(hostId)}`)
-      .then((result) => { if (live) setItems(result.items ?? []); })
-      .catch(() => { if (live) setItems([]); })
-      .finally(() => { if (live) setItemsLoading(false); });
+      .then((result) => {
+        if (!live) return;
+        const rows = result.items ?? [];
+        setItems(rows);
+        setItemState(rows.length === 0 ? 'empty' : 'ready');
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        const { status } = errorCodeOf(error);
+        setItems([]);
+        setItemState(status === 403 ? 'forbidden' : 'unavailable');
+      });
     return () => { live = false; };
   }, [sourceId, hostId]);
 
@@ -275,11 +355,19 @@ export function CollectEvidenceDialog({
     });
   };
 
+  const windowLabel = windowPreset === '24h'
+    ? t('incidents.collect.window24h')
+    : windowPreset === '6h'
+      ? t('incidents.collect.window6h')
+      : t('incidents.collect.window1h');
+
   const collectNow = async () => {
     if (!sourceId || selectedItems.length === 0 || collecting) return;
+    const seq = ++generation.current;
+    const requestedSource = sources.find((source) => source.sourceId === sourceId)?.name ?? sourceId;
     setCollecting(true);
+    setCollectError('');
     setErrorText('');
-    setCollection(null);
     setSubmit('idle');
     try {
       const result = await api.gatewayPost<CollectionResult>(
@@ -287,53 +375,76 @@ export function CollectEvidenceDialog({
         `${PLUGIN_BASE}/sources/${sourceId}/collect`,
         { itemIds: selectedItems, window: windowFrom(windowPreset) },
       );
+      // A response for an older selection (or an unmounted dialog) is dropped;
+      // it must not appear under the source the reader switched to.
+      if (seq !== generation.current || !alive.current) return;
       setCollection(result);
+      setCollectedFrom(`${requestedSource} · ${windowLabel}`);
     } catch (error: unknown) {
+      if (seq !== generation.current || !alive.current) return;
       const { status } = errorCodeOf(error);
-      setSourceStatus(status === 403 ? 'forbidden' : 'unavailable');
-      setErrorText(t('incidents.collect.errors.collect'));
+      if (status === 403) setSourceStatus('forbidden');
+      else setCollectError(t('incidents.collect.errors.collect'));
     } finally {
-      setCollecting(false);
+      if (seq === generation.current && alive.current) setCollecting(false);
     }
   };
 
   const saveEvidence = async () => {
     if (!collection || !canSave(collection) || submit === 'pending') return;
+    const targetIncident = incidentId;
     setSubmit('pending');
     setErrorText('');
     try {
       const attestation = await api.gatewayPost<AttestationResponse>(
         PLUGIN_ID,
         `${PLUGIN_BASE}/collections/${collection.collectionId}/attestation`,
-        { incidentId, kind: 'METRIC_SNAPSHOT' },
+        { incidentId: targetIncident, kind: 'METRIC_SNAPSHOT' },
       );
-      await api.post(`/api/v1/incidents/${encodeURIComponent(incidentId)}/evidence`, {
+      // A base plugin without the content-binding contract would return a ref
+      // and no bytes. Posting that would store a Legacy row while this dialog
+      // promised the Kernel verified the bytes, so refuse instead of guessing.
+      const body = attestation.evidence?.content?.body;
+      if (typeof body !== 'string' || body.length === 0) {
+        throw Object.assign(new Error('the plugin returned no evidence bytes'), {
+          status: 502,
+          code: 'PLUGIN_CONTENT_MISSING',
+        });
+      }
+      await api.post(`/api/v1/incidents/${encodeURIComponent(targetIncident)}/evidence`, {
         kind: attestation.evidence.kind,
         source: attestation.evidence.source,
         collectedAt: attestation.evidence.collectedAt,
         contentRef: attestation.evidence.contentRef,
-        content: attestation.evidence.content,
+        content: { contentType: attestation.evidence.content.contentType, body },
         attestation: attestation.evidence.attestation,
       });
+      if (!alive.current) return;
       setSubmit('saved');
-      onSaved();
+      // A toast/refresh failure is not an evidence failure: the row is stored.
+      try { onSaved(); } catch { /* the page re-reads on its own schedule */ }
     } catch (error: unknown) {
-      const { status } = errorCodeOf(error);
-      if (status === 409) {
+      if (!alive.current) return;
+      const { status, code } = errorCodeOf(error);
+      if (status === 409 && (code ?? '').startsWith('INCIDENT_')) {
         setSubmit('conflict');
       } else {
         setSubmit('idle');
-        setErrorText(t('incidents.collect.errors.save'));
+        setErrorText(
+          code === 'PLUGIN_CONTENT_MISSING'
+            ? t('incidents.collect.errors.contract')
+            : t('incidents.collect.errors.save'),
+        );
       }
     }
   };
 
   const footer = (
     <div className="flex flex-wrap gap-2" data-testid="incident-collect-actions">
-      <Button variant="secondary" onClick={() => { setCancelled(true); onClose(); }} data-testid="incident-collect-cancel">
+      <Button variant="secondary" onClick={() => { setCancelled(true); onClose(); }} disabled={submit === 'pending'} data-testid="incident-collect-cancel">
         {t('action.cancel')}
       </Button>
-      <Button variant="secondary" onClick={collectNow} disabled={!sourceId || selectedItems.length === 0 || collecting} data-testid="incident-collect-run">
+      <Button variant="secondary" onClick={collectNow} disabled={!sourceId || selectedItems.length === 0 || collecting || submit === 'pending'} data-testid="incident-collect-run">
         {collecting ? t('incidents.collect.collecting') : t('incidents.collect.run')}
       </Button>
       <Button onClick={saveEvidence} disabled={!canSave(collection) || submit === 'pending'} data-testid="incident-collect-save">
@@ -343,10 +454,8 @@ export function CollectEvidenceDialog({
   );
 
   return (
-    <Modal open={open} onClose={onClose} title={t('incidents.collect.title')} size="large" footer={footer}>
+    <Modal open={open} onClose={onClose} title={t('incidents.collect.title')} description={t('incidents.collect.description')} size="large" footer={footer} dismissible={submit !== 'pending'}>
       <div className="page-stack" data-testid="incident-collect" data-collect-state={state}>
-        <p className="muted small">{t('incidents.collect.description')}</p>
-
         {state === 'loading' ? <p className="muted small" aria-busy="true" data-testid="incident-collect-loading">{t('aria.loading')}</p> : null}
         {state === 'forbidden' ? (
           <p className="notice-bar" data-testid="incident-collect-forbidden">{t('incidents.collect.forbidden')}</p>
@@ -354,8 +463,11 @@ export function CollectEvidenceDialog({
         {state === 'unavailable' ? (
           <p className="notice-bar" data-testid="incident-collect-unavailable">{t('incidents.collect.unavailable')}</p>
         ) : null}
-        {state === 'empty' ? (
+        {state === 'noSources' ? (
           <p className="muted small" data-testid="incident-collect-empty">{t('incidents.collect.emptySources')}</p>
+        ) : null}
+        {state === 'unknown' ? (
+          <p className="notice-bar" role="status" data-testid="incident-collect-unknown">{t('incidents.collect.unknown')}</p>
         ) : null}
 
         {sourceStatus === 'ready' ? (
@@ -368,27 +480,32 @@ export function CollectEvidenceDialog({
                   <option key={source.sourceId} value={source.sourceId}>{source.name}</option>
                 ))}
               </select>
-              {selectedSource ? (
-                <p className="row" data-testid="incident-collect-source-status">
-                  <Status code={selectedSource.status} />
-                  {selectedSource.lastProbe ? <span className="muted small">{selectedSource.lastProbe.outcome}</span> : null}
-                </p>
-              ) : null}
             </label>
+            {selectedSource ? (
+              <p className="flex items-center gap-2" data-testid="incident-collect-source-status">
+                <Status code={selectedSource.status} />
+              </p>
+            ) : null}
 
             <label className="field">
               <span>{t('incidents.collect.host')}</span>
-              <select value={hostId} onChange={(event) => setHostId(event.target.value)} disabled={!sourceId || hostsLoading} data-testid="incident-collect-host">
-                <option value="">{hostsLoading ? t('aria.loading') : t('incidents.collect.hostPlaceholder')}</option>
+              <select value={hostId} onChange={(event) => setHostId(event.target.value)} disabled={!sourceId || hostState === 'loading'} data-testid="incident-collect-host">
+                <option value="">{hostState === 'loading' ? t('aria.loading') : t('incidents.collect.hostPlaceholder')}</option>
                 {hosts.map((host) => (
-                  <option key={host.hostId} value={host.hostId}>{host.name} · {host.available}</option>
+                  <option key={host.hostId} value={host.hostId}>{host.name} · {t(availabilityKey(host.available))}</option>
                 ))}
               </select>
+              {hostState === 'forbidden' ? <p className="notice-bar" role="alert" data-testid="incident-collect-hosts-forbidden">{t('incidents.collect.hostsForbidden')}</p> : null}
+              {hostState === 'unavailable' ? <p className="notice-bar" role="alert" data-testid="incident-collect-hosts-unavailable">{t('incidents.collect.hostsUnavailable')}</p> : null}
             </label>
 
             <div className="field" role="group" aria-label={t('incidents.collect.items')} data-testid="incident-collect-items">
               <span>{t('incidents.collect.itemsHint', { count: ITEM_LIMIT })}</span>
-              {itemsLoading ? <p className="muted small" aria-busy="true">{t('aria.loading')}</p> : items.length === 0 ? (
+              {itemState === 'loading' ? <p className="muted small" aria-busy="true">{t('aria.loading')}</p> : itemState === 'forbidden' ? (
+                <p className="notice-bar" role="alert" data-testid="incident-collect-items-forbidden">{t('incidents.collect.itemsForbidden')}</p>
+              ) : itemState === 'unavailable' ? (
+                <p className="notice-bar" role="alert" data-testid="incident-collect-items-unavailable">{t('incidents.collect.itemsUnavailable')}</p>
+              ) : hostId && itemState === 'empty' ? (
                 <p className="muted small" data-testid="incident-collect-items-empty">{t('incidents.collect.noItems')}</p>
               ) : (
                 <div className="flex flex-col gap-2 min-w-0" data-testid="incident-collect-item-list">
@@ -430,19 +547,22 @@ export function CollectEvidenceDialog({
         ) : null}
 
         {collection ? (
-          <section className="panel pad" data-testid="incident-collect-result" data-outcome={collection.outcome}>
+          <section className="panel pad" role="status" aria-live="polite" data-testid="incident-collect-result" data-outcome={collection.outcome}>
             <div className="row">
               <Badge
                 variant={badgeVariantForTone(
                   collection.outcome === 'OK' ? 'ok' : collection.outcome === 'PARTIAL' ? 'warn' : collection.outcome === 'EMPTY' ? 'info' : 'danger',
                 )}
                 data-testid="incident-collect-outcome"
-              >{collection.outcome}</Badge>
+              >{t(outcomeKey(collection.outcome))}</Badge>
               <span className="muted small" data-testid="incident-collect-observed">
                 {ageMessage(locale, collection.observedAt) || collection.observedAt}
               </span>
               {state === 'stale' ? <Badge variant={badgeVariantForTone('warn')} data-testid="incident-collect-stale">{t('incidents.collect.stale')}</Badge> : null}
             </div>
+            {collectedFrom ? (
+              <p className="muted small" data-testid="incident-collect-collected-from">{t('incidents.collect.collectedFrom', { source: collectedFrom })}</p>
+            ) : null}
             <p className="muted small">
               {t('incidents.collect.counts', {
                 requested: collection.requestedItems,
@@ -475,12 +595,13 @@ export function CollectEvidenceDialog({
         ) : null}
 
         {state === 'submitConflict' ? (
-          <p className="notice-bar" data-testid="incident-collect-conflict">{t('incidents.collect.conflict')}</p>
+          <p className="notice-bar" role="alert" data-testid="incident-collect-conflict">{t('incidents.collect.conflict')}</p>
         ) : null}
         {state === 'saved' ? (
-          <p className="notice-bar" data-testid="incident-collect-saved">{t('incidents.collect.saved')}</p>
+          <p className="notice-bar" role="status" data-testid="incident-collect-saved">{t('incidents.collect.saved')}</p>
         ) : null}
-        {errorText ? <p className="notice-bar" data-testid="incident-collect-error">{errorText}</p> : null}
+        {collectError ? <p className="notice-bar" role="alert" data-testid="incident-collect-collect-error">{collectError}</p> : null}
+        {errorText ? <p className="notice-bar" role="alert" data-testid="incident-collect-error">{errorText}</p> : null}
       </div>
     </Modal>
   );
