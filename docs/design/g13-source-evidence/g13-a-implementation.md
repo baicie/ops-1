@@ -177,9 +177,9 @@ Kernel：
 | 检查 | 结果 |
 |---|---|
 | `node --test plugins/zabbix-source/backend/zabbix.test.mjs` | PASS — 26/26 |
-| `node --test .../server.test.mjs`（真实端口 + 真实 HTTP upstream fixture） | PASS — 17/17 |
+| `node --test .../server.test.mjs`（真实端口 + 真实 HTTP upstream fixture） | PASS — 18/18 |
 | `node --test .../storage.test.mjs`（真实 PostgreSQL，`OPSWEAVE_REQUIRE_PLUGIN_DATABASE=1`） | PASS — 8/8 |
-| `npm test`（三套合计，真实库） | PASS — 51/51，0 skipped |
+| `npm test`（三套合计，真实库） | PASS — 52/52，0 skipped |
 | `cargo test -p opsweave-kernel --bin opsweave-kernel incidents::tests::`（真实 PostgreSQL） | PASS — 58/58，含新增 byte-for-byte + 错误摘要拒绝 |
 | `cargo test ... a_user_context_is_bound_to_one_plugin_key` | PASS |
 | `python3 tests/contract/validate_contracts.py` | PASS — 16 schemas / 6 examples，含新增负向检查 |
@@ -215,7 +215,7 @@ Kernel：
 | Verdict | 状态 | 依据 |
 |---|---|---|
 | `SOURCE_PERSISTENCE_READY` | **PASS** | 8 个真实 PostgreSQL 测试：重启保留、凭据引用、并发/重复、DB 不可用、多 Workspace、迁移 checksum |
-| `CONNECTOR_RUNTIME_READY` | **PASS（本地/镜像）** | 17 个真实 socket 测试；OCI 镜像 digest 固定、非 root、健康 200、无存储 fail closed。未通过真实 Node Runtime 部署，见下 |
+| `CONNECTOR_RUNTIME_READY` | **PASS（本地/镜像）** | 18 个真实 socket 测试；OCI 镜像 digest 固定、非 root、健康 200、无存储 fail closed。未通过真实 Node Runtime 部署，见下 |
 | `SOURCE_EVIDENCE_READY` | **PARTIAL** | 插件字节+签名、Kernel 摘要+验签+存储分别有真实测试；同一进程的跨进程 Golden Path 未跑 |
 | `AUTHORIZATION_READY` | **PARTIAL** | 插件侧工作区/角色/签名/伪造测试通过；Gateway 注入路径只有单元测试，未在三进程链路中实测 |
 | `UI_GOLDEN_PATH_READY` | **PARTIAL** | 13 单测 + 4 浏览器测试（含 390）；后端为 stub；视觉矩阵未跑 |

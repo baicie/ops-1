@@ -509,6 +509,33 @@ test('an attestation is refused when no adapter credential is configured', async
   }
 });
 
+test('a TIMEOUT collection cannot be attested as a measurement', async () => {
+  const { plugin, base, store } = await startPlugin();
+  try {
+    const collectionId = crypto.randomUUID();
+    await store.saveCollection({
+      collectionId,
+      sourceId: crypto.randomUUID(),
+      workspaceId: WORKSPACE_A,
+      createdBy: USER_ID,
+      outcome: 'TIMEOUT',
+      contentRef: 'sha256:' + '1'.repeat(64),
+      body: '{"outcome":"TIMEOUT"}',
+      observedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const response = await call(base, `/api/zabbix-source/collections/${collectionId}/attestation`, {
+      method: 'POST',
+      headers: { 'x-opsweave-user-context': userContext() },
+      body: { incidentId: INCIDENT_ID, kind: 'METRIC_SNAPSHOT' },
+    });
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'ZBX_COLLECTION_NOT_ATTESTABLE');
+  } finally {
+    await plugin.close();
+  }
+});
+
 test('source update is audited, scoped and conflict-checked', async () => {
   const upstream = await startFakeZabbix();
   const { plugin, base, store } = await startPlugin();

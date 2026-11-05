@@ -442,7 +442,8 @@ paths:
         '409':
           description: |
             The collection cannot carry an attestation (no adapter secret is
-            configured, or its outcome is UNAVAILABLE/UNKNOWN).
+            configured, or its outcome is UNAVAILABLE, UNKNOWN or TIMEOUT: none
+            of those obtained an answer that could be signed as a measurement).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

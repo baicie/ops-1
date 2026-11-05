@@ -442,7 +442,9 @@ export function createPlugin(options) {
           code: 'INVALID_REQUEST',
         });
       }
-      if (collection.outcome === 'UNAVAILABLE' || collection.outcome === 'UNKNOWN') {
+      // TIMEOUT is not a measurement either: the deadline passed before an
+      // answer, so signing it would dress "we do not know" as an observation.
+      if (['UNAVAILABLE', 'UNKNOWN', 'TIMEOUT'].includes(collection.outcome)) {
         throw Object.assign(
           new Error('a collection that never obtained data cannot be attested as a measurement'),
           { status: 409, code: 'ZBX_COLLECTION_NOT_ATTESTABLE' },
