@@ -191,7 +191,7 @@ Kernel：
 | `scripts/build-zabbix-plugin.sh` | PASS — image `sha256:924d59e0…`, User `65532:65532`, signed bundle |
 | 容器 `/livez` `/readyz` | 200/200；`/runtime-info` storage.mode=memory |
 | 无存储启动容器 | exit 1，拒绝以内存注册表启动 |
-| `node tests/ci/g13a_evidence_roundtrip.mjs`（真实 Kernel 进程 + 真实插件进程 + 真实 PostgreSQL + 本地 HTTP fixture） | PASS — 插件签名字节 → Kernel 验签 `SOURCE_ATTESTED` → 读回逐字节一致；跨 Workspace 列表为空/404；插件重启后 source 与 collection 仍可用 |
+| `node tests/ci/g13a_evidence_roundtrip.mjs`（真实 Kernel 进程 + 真实插件进程 + 真实 PostgreSQL + 本地 HTTP fixture） | PASS — 插件签名字节 → Kernel 验签 `SOURCE_ATTESTED` → 读回逐字节一致；Investigation Runner 的 `TEST_FIXTURE` 读取并引用该 evidence；人工 Verdict 单独写入 `CONFIRMED`；跨 Workspace 列表为空/404；插件重启后 source 与 collection 仍可用 |
 | PR #38 CI | 见 §10（提交时 pending） |
 
 **跨进程证据闭环**：已运行 `tests/ci/g13a_evidence_roundtrip.mjs` 并通过——真实 Kernel 进程、真实插件进程、真实 PostgreSQL、真实 HTTP。插件产生的字节被 Kernel 以 `SOURCE_ATTESTED` 写入，内容端点读回逐字节一致；插件重启后 source 与 collection 仍可用；Workspace 越权列表为空、探活 404。上游是 `UPSTREAM_ZABBIX_FIXTURE`。
@@ -200,7 +200,7 @@ Kernel：
 - Kernel Gateway 的身份注入/转发只有单测（`user_context_token`）与插件侧验证，未在三进程链路中实测；
 - 真实 Node Runtime 拉取 image 并启动容器；
 - 适配器密钥送达插件的机制（当前 Kernel 只向实例注入 context key、DB URL、allowlist，不注入 adapter secret；生产需要插件 secret store，尚未实现）；
-- 调查器 provider 编排。
+- 真实模型 provider（本轮用 `TEST_FIXTURE`，不声称 REAL_MODEL_E2E）。
 
 这些是下一阶段的首要工作，不能把跨进程闭环当作完整 Gateway/Node 路径通过。
 

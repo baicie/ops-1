@@ -257,6 +257,47 @@ async function main() {
   if (list.status !== 200 || !list.body.items.some((row) => row.id === evidenceId)) throw new Error('evidence row missing from the list');
   log('Kernel served identical bytes and lists the row');
 
+  // The existing Investigator, driven by its deterministic fixture provider, must
+  // read the stored row. This is an AI hypothesis, not a verdict; the human
+  // verdict is written separately below.
+  const started = await api('POST', `/api/v1/incidents/${incidentId}/investigations`, {
+    idempotencyKey: crypto.randomUUID(),
+    scenario: 'AUTO',
+  });
+  if (![200, 201, 202].includes(started.status)) {
+    throw new Error(`investigation start failed: ${started.status} ${started.text}`);
+  }
+  let run = started.body;
+  const runId = run.runId ?? run.run_id;
+  for (let attempt = 0; attempt < 60 && run.status === 'RUNNING'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const polled = await api('GET', `/api/v1/incidents/${incidentId}/investigations/${runId}`);
+    if (polled.status !== 200) throw new Error(`investigation read failed: ${polled.status} ${polled.text}`);
+    run = polled.body;
+  }
+  if (run.status === 'RUNNING') throw new Error('investigation did not finish within 15s');
+  if (run.adapter !== 'TEST_FIXTURE' || run.synthetic !== true || run.isHumanVerdict !== false) {
+    throw new Error('the fixture provider was not labelled TEST_FIXTURE / synthetic / not a verdict');
+  }
+  const read = (run.toolInvocations ?? []).some((entry) =>
+    entry.outcome === 'OK' && (entry.evidenceRefs ?? []).includes(evidenceId),
+  );
+  const cited = (run.hypotheses ?? []).some((hypothesis) =>
+    (hypothesis.supportingEvidence ?? []).concat(hypothesis.contradictingEvidence ?? [])
+      .some((citation) => citation.evidenceId === evidenceId),
+  );
+  if (!read || !cited) throw new Error(`the investigator did not read and cite evidence ${evidenceId}`);
+  log('Investigator (TEST_FIXTURE) read and cited the evidence row');
+
+  const verdict = await api('POST', `/api/v1/incidents/${incidentId}/verdict`, {
+    verdict: 'CONFIRMED',
+    rationale: 'the signed telemetry snapshot shows the CPU saturation recorded at the incident start',
+  });
+  if (verdict.status !== 201) throw new Error(`human verdict failed: ${verdict.status} ${verdict.text}`);
+  const concluded = await api('GET', `/api/v1/incidents/${incidentId}`);
+  if (concluded.body.humanVerdict?.verdict !== 'CONFIRMED') throw new Error('human verdict was not recorded');
+  log('human verdict CONFIRMED written separately from the AI hypothesis');
+
   // A workspace outside the signed scope cannot see or use the source.
   const other = await api('POST', '/api/v1/business-workspaces', { key: `g13a-b-${process.pid}`, name: 'G13-A other' });
   const otherWorkspace = other.body.workspaceId;
