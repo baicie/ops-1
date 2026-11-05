@@ -191,14 +191,18 @@ Kernel：
 | `scripts/build-zabbix-plugin.sh` | PASS — image `sha256:924d59e0…`, User `65532:65532`, signed bundle |
 | 容器 `/livez` `/readyz` | 200/200；`/runtime-info` storage.mode=memory |
 | 无存储启动容器 | exit 1，拒绝以内存注册表启动 |
+| `node tests/ci/g13a_evidence_roundtrip.mjs`（真实 Kernel 进程 + 真实插件进程 + 真实 PostgreSQL + 本地 HTTP fixture） | PASS — 插件签名字节 → Kernel 验签 `SOURCE_ATTESTED` → 读回逐字节一致；跨 Workspace 列表为空/404；插件重启后 source 与 collection 仍可用 |
 | PR #38 CI | 见 §10（提交时 pending） |
 
-**Golden Path（真实 Gateway + 真实 Node + 容器）**：`NOT_RUN`。原因不是代码未备，而是本轮时间用于把插件、Kernel、UI、OCI 四条链路各自跑通；完整编排需要：
-- 真实 Node Runtime 拉取 image；
+**跨进程证据闭环**：已运行 `tests/ci/g13a_evidence_roundtrip.mjs` 并通过——真实 Kernel 进程、真实插件进程、真实 PostgreSQL、真实 HTTP。插件产生的字节被 Kernel 以 `SOURCE_ATTESTED` 写入，内容端点读回逐字节一致；插件重启后 source 与 collection 仍可用；Workspace 越权列表为空、探活 404。上游是 `UPSTREAM_ZABBIX_FIXTURE`。
+
+**完整 Golden Path（真实 Gateway + 真实 Node + 容器）**：`NOT_RUN`。剩余缺口：
+- Kernel Gateway 的身份注入/转发只有单测（`user_context_token`）与插件侧验证，未在三进程链路中实测；
+- 真实 Node Runtime 拉取 image 并启动容器；
 - 适配器密钥送达插件的机制（当前 Kernel 只向实例注入 context key、DB URL、allowlist，不注入 adapter secret；生产需要插件 secret store，尚未实现）；
 - 调查器 provider 编排。
 
-这两项是下一阶段的首要工作，不能把分解测试当作端到端通过。
+这些是下一阶段的首要工作，不能把跨进程闭环当作完整 Gateway/Node 路径通过。
 
 **真实 Zabbix**：`NOT_RUN`，socket 测试使用本地 `UPSTREAM_ZABBIX_FIXTURE`，不声称真实响应形状已验证。
 
@@ -216,7 +220,7 @@ Kernel：
 |---|---|---|
 | `SOURCE_PERSISTENCE_READY` | **PASS** | 8 个真实 PostgreSQL 测试：重启保留、凭据引用、并发/重复、DB 不可用、多 Workspace、迁移 checksum |
 | `CONNECTOR_RUNTIME_READY` | **PASS（本地/镜像）** | 18 个真实 socket 测试；OCI 镜像 digest 固定、非 root、健康 200、无存储 fail closed。未通过真实 Node Runtime 部署，见下 |
-| `SOURCE_EVIDENCE_READY` | **PARTIAL** | 插件字节+签名、Kernel 摘要+验签+存储分别有真实测试；同一进程的跨进程 Golden Path 未跑 |
+| `SOURCE_EVIDENCE_READY` | **PASS（plugin↔Kernel）** | `g13a_evidence_roundtrip.mjs` 真实进程：字节→验签→存储→读回一致；Gateway/Node 链路另计 |
 | `AUTHORIZATION_READY` | **PARTIAL** | 插件侧工作区/角色/签名/伪造测试通过；Gateway 注入路径只有单元测试，未在三进程链路中实测 |
 | `UI_GOLDEN_PATH_READY` | **PARTIAL** | 13 单测 + 4 浏览器测试（含 390）；后端为 stub；视觉矩阵未跑 |
 | `OCI_DEPLOYMENT_READY` | **PARTIAL** | 镜像构建/推送/digest/非 root/健康已验证；未部署到真实 Node Runtime |
