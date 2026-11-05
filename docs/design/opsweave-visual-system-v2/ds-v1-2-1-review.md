@@ -4,7 +4,7 @@
 - 目标 PR：[#35](https://github.com/baicie/ops-1/pull/35)（Draft，base `design/opsweave-visual-system-v1`）
 - 基线：#34 `e8d1cbf`（PR #34 Open / Ready / 未合并）
 - 本文件所在分支：`design/opsweave-ds-v1-2`
-- 结论：**PARTIAL**（本地实现与反事实已完成；GitHub Actions 最终结论见 §6，PR 仍为 Draft）
+- 结论：**READY_TO_MARK_READY**（PR #35 代码/文档 11/11；stack merge 仍待 #34 合并方式与 staging baseline 决策，见 §5）
 
 ## 1. 结论摘要
 
@@ -102,7 +102,7 @@ Received: "noData"
 当前状态（只读核对）：
 
 - #34：base `main`，head `e8d1cbf`，`OPEN`、Ready、`MERGEABLE`/`CLEAN`，18 个提交。
-- #35：Draft，base `design/opsweave-visual-system-v1`，head 为本轮交付提交（代码 HEAD `8f4791c`）；c04bc50 的 11/11 checks 是旧提交结果，最终提交需重新确认。
+- #35：Draft，base `design/opsweave-visual-system-v1`，head 为本轮交付提交（代码 HEAD `8f4791c`，文档 HEAD `dea1c10`）；c04bc50 的 11/11 是旧提交结果。
 - 本轮没有改 base、没有 merge、没有 force push。
 
 ### 5.1 #34 使用 Merge Commit
@@ -116,9 +116,9 @@ squash 后 main 的新提交不包含 `e8d1cbf` 祖先，merge-base 回到 `775a
 本地模拟（`git merge --squash e8d1cbf` 生成临时 squash commit，再 `git rebase --onto <squash> e8d1cbf`）：
 
 - rebase **7/7 提交成功，无冲突**；
-- rebase 后树与 `c04bc50` **完全一致**（`git diff` 为空）；
+- rebase 后树与最终 HEAD **完全一致**（`git diff` 为空）；
 - diff 回到本 PR 独有改动（最终树 33 个文件 / 2618 insertions / 155 deletions）；
-- rebase 后树与最终 HEAD **完全一致**；7 个提交全部重放，SHA 全部更新。
+- 7 个提交全部重放，SHA 全部更新。
 
 因此 squash 场景需要 `rebase --onto main e8d1cbf`（或 cherry-pick 本 PR 的 7 个提交）。这会重写 7 个提交 SHA，推送需要 force push；**本轮未获授权，未执行**。
 
@@ -130,7 +130,7 @@ squash 后 main 的新提交不包含 `e8d1cbf` 祖先，merge-base 回到 `775a
 - `staging-preview.yml` 在 push 到 `main` 时部署到单一 staging host。分别合并 #34、#35 会触发两次 main push/部署；concurrency group `deploy` 会取消在途的旧部署，但已完成的 #34 部署可能短暂成为线上版本。
 - **当前 staging baseline 是红的**：main `775a1e2` 的最新 staging-preview run `41808971270` 结论 failure；deploy job 成功，`smoke the preview` 失败。另 #34 修改 `.github/workflows/staging-preview.yml:1093`，给 `check-ui-metrics` 加了 `--manifest docs/design/ui-visual-v3/spec/route-manifest.json`，这是 PR CI 不会执行的更严格 staging 门禁。合并 #34 前应先确认 staging metrics 基线，或用 `verify_only` 对当前 staging 做一次认证；不要把 PR 的 11/11 当成 staging readiness。
 - 两个 PR 的 diff 都没有 `apps/kernel`、`contracts`、`.sql` 或 migration 文件；部署仍会变更共享 staging host 的镜像与进程，因此本轮**没有**触发它。
-- PR #35 描述中 “When #34 merges, retarget this PR to main; no commits need to move.” 只对 Merge Commit 成立；Squash/Rebase Merge 后必须按 §5.2 重放。合并方式决定后应更新描述，避免公开的错误指令。
+- PR #35 描述已按两种合并路径更新：Merge Commit 直接 retarget；Squash/Rebase Merge 按 §5.2 重放；并注明 retarget 不会自动触发 workflow。
 
 ### 5.4 独立复核回填
 
@@ -145,7 +145,7 @@ squash 后 main 的新提交不包含 `e8d1cbf` 祖先，merge-base 回到 `775a
 | D1 | Squash 后直接 retarget 存在 15 个冲突路径（14 content + 1 add/add）；“merge main 进 #35”不是干净替代 | §5.2 已写明冲突路径，并保留 rebase --onto 为唯一干净路径（需 force-push 授权） |
 | D2 | retarget/ready 不触发 workflow；plain rerun 仍用旧 base | §5.1/§5.3 已区分 Merge Commit 同树证据与 Squash 新 SHA 的 CI 要求 |
 | D3 | main 当前 staging baseline 红；#34 给 staging metrics 加 `--manifest` | §5.3 已记录 run `41808971270` 的 smoke 失败与合并前 verify_only 建议 |
-| D4 | PR #35 描述仍写 “no commits need to move” | 记录在 §5.3；合并方式决定后更新描述 |
+| D4 | PR #35 描述仍写 “no commits need to move” | 已更新 PR #35 描述，区分 Merge Commit 与 Squash/Rebase Merge 两条路径 |
 | D5 | 预检数字绑定 c04bc50，最终 HEAD 已变化 | §5 已按最终 HEAD 重算（105/7780/1622 direct retarget；33/2618/155 rebase 后）；合并机制结论不变 |
 
 ## 6. E — 最终验证
@@ -165,7 +165,7 @@ squash 后 main 的新提交不包含 `e8d1cbf` 祖先，merge-base 回到 `775a
 | `incident-evidence-kpi.spec.ts` | PASS — 7/7 |
 | G11/G12 lifecycle | PASS（完整 harness 内） |
 | `bash tests/ci/g12_acceptance_ci.sh` | PASS — 109 tests（107/2），9.8m；acceptance 195/0；exit 0 |
-| GitHub Actions 最新 HEAD | 见下方 CI 回填 |
+| GitHub Actions 最新 HEAD | **PASS — 11/11**（`dea1c10`） |
 
 最终完整 harness（提交前的同一棵树）：
 
@@ -175,10 +175,13 @@ acceptance 195 / 0；workbench regression gate -> PASS
 workbench gate counterfactuals -> PASS（14/14）；exit 0
 ```
 
-GitHub Actions（本文件提交后的 HEAD）：
+GitHub Actions（代码+文档 HEAD `dea1c10`）：
 
 ```text
-（待回填；代码 HEAD 8f4791c 的 11 项在交付时确认）
+PASS — 11/11 checks
+acceptance 14m53s；golden-path 17m4s；runtime-golden-path 17m49s
+legacy-regression 6m5s；rust 2m2s；web 47s；web-unit 48s
+quality-faults 40s；contracts 12s；artifact-budget 9s；spec-coverage 10s
 ```
 
 ## 7. 剩余项
@@ -199,4 +202,4 @@ GitHub Actions（本文件提交后的 HEAD）：
 
 ## 8. 结论
 
-**PARTIAL**：实现、反事实、本地门禁和独立复核已完成；GitHub Actions 最终 11 项与 PR base 决策仍需回填。满足后可将本文件改为 **READY_TO_MARK_READY**，但本轮**不**转 Ready、不 Merge、不 Tag、不 Release、不 Deploy。
+**READY_TO_MARK_READY**：实现、反事实、本地门禁、独立复核和最新 HEAD 的 11 项 checks 已完成。Stack merge 仍是 **PARTIAL**：需要先决定 #34 的合并方式（Squash 场景需 force-push 授权）、确认 staging baseline 转绿；本报告为文档更新提交，不改变代码。本轮**不**转 Ready、不 Merge、不 Tag、不 Release、不 Deploy。
