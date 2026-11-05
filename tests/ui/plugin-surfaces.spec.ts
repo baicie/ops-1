@@ -119,12 +119,16 @@ async function harness(page: Page, grant: 'admin' | 'viewer'): Promise<Harness> 
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'warning') warnings.push(message.text()); });
 
-  await page.route('**/api/v1/auth/me', async (route) => {
+  const patchGrant = async (route: import('@playwright/test').Route) => {
     const response = await route.fetch();
     const body = await response.json();
     body.access = grant === 'admin' ? ADMIN_GRANT : VIEWER_GRANT;
     await route.fulfill({ response, json: body });
-  });
+  };
+  await page.route('**/api/v1/auth/me', patchGrant);
+  // The login response carries the grant since the R4 session change; a stub that patches
+  // only /auth/me no longer controls what the session is rendered with.
+  await page.route('**/api/v1/auth/login', patchGrant);
   await page.route('**/api/v1/extensions', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(PAYLOAD) });
   });
@@ -150,6 +154,12 @@ async function switchSurface(page: Page, target: 'admin' | 'workspace') {
   await page.getByTestId(`surface-switch-${target}`).click();
   await expect(page.locator('.user-menu')).toHaveCount(0);
 }
+
+test.afterEach(async ({ page }) => {
+  // The app keeps polling during teardown; without this an in-flight /auth/me fetch fails
+  // with "route.fetch: Test ended" and marks an otherwise passing test red.
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
 
 test.describe.configure({ mode: 'serial' });
 

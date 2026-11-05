@@ -29,12 +29,17 @@ test.afterEach(async ({ page }) => {
 });
 
 async function stubGrant(page: Page, grant: Grant) {
-  await page.route('**/api/v1/auth/me', async (route) => {
+  // Since the R4 session change the login body carries the grant too. Patching only
+  // /auth/me leaves the real admin grant in the session, so the workspace-only case was
+  // asserting the host's admin redirect instead of the grant under test.
+  const patch = async (route: import('@playwright/test').Route) => {
     const response = await route.fetch();
     const body = await response.json();
     body.access = grant === 'admin' ? ADMIN_GRANT : WORKSPACE_GRANT;
     await route.fulfill({ response, json: body });
-  });
+  };
+  await page.route('**/api/v1/auth/me', patch);
+  await page.route('**/api/v1/auth/login', patch);
 }
 
 async function signIn(page: Page) {

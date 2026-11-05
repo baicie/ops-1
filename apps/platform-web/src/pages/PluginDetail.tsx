@@ -246,6 +246,7 @@ export function PluginDetailPage() {
       <PageHeader
         eyebrow={(data.publisher || t('pluginDetail.unknownPublisher')) + ' · ' + (data.isSystem ? t('pluginDetail.systemPlugin') : t('pluginDetail.trustedPackage'))}
         title={<span className="title-with-status">{data.name}{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}</span>}
+        description={t('pluginDetail.description')}
         meta={
           <div className="detail-meta">
             <InstallationStatus state={data.state} />
