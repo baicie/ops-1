@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { login } from './support/workbench-fixtures';
 
@@ -140,6 +142,7 @@ async function openDialog(page: Page) {
   await login(page);
   await page.goto(`/app/incidents/${INCIDENT_ID}`);
   await expect(page.getByTestId('incident-evidence')).toBeVisible();
+  await page.evaluate(() => { (window as unknown as { __beforeDoc: number }).__beforeDoc = document.documentElement.scrollWidth; });
   await page.getByTestId('incident-collect-open').click();
   await expect(page.getByTestId('incident-collect')).toBeVisible();
 }
@@ -209,3 +212,54 @@ test('a phone can open, collect and save from the evidence panel', async ({ page
   await page.getByTestId('incident-collect-save').click();
   await expect(page.getByTestId('incident-collect-saved')).toBeVisible();
 });
+
+const MATRIX = [
+  { width: 1440, height: 900, theme: 'light', locale: 'en' },
+  { width: 1440, height: 900, theme: 'dark', locale: 'zh-CN' },
+  { width: 1024, height: 900, theme: 'light', locale: 'zh-CN' },
+  { width: 1024, height: 900, theme: 'dark', locale: 'en' },
+  { width: 768, height: 900, theme: 'dark', locale: 'en' },
+  { width: 390, height: 844, theme: 'light', locale: 'zh-CN' },
+  { width: 390, height: 844, theme: 'dark', locale: 'en' },
+  { width: 390, height: 844, theme: 'light', locale: 'en' },
+];
+
+for (const combo of MATRIX) {
+  test(`collect dialog at ${combo.width}/${combo.theme}/${combo.locale}`, async ({ page }) => {
+    await page.setViewportSize({ width: combo.width, height: combo.height });
+    await page.addInitScript(([theme, locale]) => {
+      localStorage.setItem('opsweave-theme', theme as string);
+      localStorage.setItem('opsweave-locale', locale as string);
+    }, [combo.theme, combo.locale]);
+    await stubWorld(page);
+    await openDialog(page);
+    await page.getByTestId('incident-collect-source').selectOption(SOURCE_ID);
+    await page.getByTestId('incident-collect-host').selectOption('10084');
+    await page.getByTestId('incident-collect-item-10401').check();
+    await page.getByTestId('incident-collect-run').click();
+    await expect(page.getByTestId('incident-collect-result')).toBeVisible();
+    const metrics = await page.evaluate(() => ({
+      doc: document.documentElement.scrollWidth,
+      body: document.body.scrollWidth,
+      iw: window.innerWidth,
+      wide: [...document.querySelectorAll('body *')]
+        .filter((el) => el.scrollWidth > el.clientWidth + 1)
+        .filter((el) => ![...el.children].some((child) => child.scrollWidth > child.clientWidth + 1))
+        .slice(0, 12)
+        .map((el) => `${el.tagName}.${(el as HTMLElement).className} sw=${el.scrollWidth} cw=${el.clientWidth} text=${(el.textContent || '').slice(0, 60)}`),
+    }));
+    const overflow = metrics.doc > metrics.iw;
+    const offenders = overflow
+      ? await page.evaluate(() => [...document.querySelectorAll('body *')]
+          .map((el) => ({ el, rect: el.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.right > window.innerWidth + 1)
+          .slice(0, 8)
+          .map(({ el, rect }) => `${el.tagName}.${(el as HTMLElement).className} right=${Math.round(rect.right)} text=${(el.textContent || '').slice(0, 40)}`))
+      : [];
+    const beforeDoc = await page.evaluate(() => (window as unknown as { __beforeDoc: number }).__beforeDoc);
+    expect(overflow, `the dialog must not scroll sideways: before=${beforeDoc} ${JSON.stringify(metrics)} ${offenders.join(' | ')}`).toBe(false);
+    const out = path.resolve('../../artifacts/ui/g13-collect');
+    fs.mkdirSync(out, { recursive: true });
+    await page.screenshot({ path: path.join(out, `collect-${combo.width}-${combo.theme}-${combo.locale}.png`), fullPage: true });
+  });
+}

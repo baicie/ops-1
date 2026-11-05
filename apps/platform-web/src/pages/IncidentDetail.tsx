@@ -409,12 +409,12 @@ export function IncidentDetailPage() {
 
                 <section className="panel ow-incident-evidence" data-testid="incident-evidence" data-evidence-state={evidenceState} data-region="evidence">
                   <div className="panel-head">
-                    <div>
+                    <div className="min-w-0">
                       <h2>{t('incidents.workspace.evidence')}</h2>
                       <p>{t('incidents.detail.evidence.description')}</p>
                     </div>
                     {capabilities.canAddEvidence && incident.status !== 'CLOSED' ? (
-                      <div className="panel-actions">
+                      <div className="flex flex-none items-center">
                         <Button variant="secondary" onClick={() => setCollectOpen(true)} data-testid="incident-collect-open">
                           <Icon name="upload" size={15} /> {t('incidents.collect.open')}
                         </Button>

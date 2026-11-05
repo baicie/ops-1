@@ -329,7 +329,7 @@ export function CollectEvidenceDialog({
   };
 
   const footer = (
-    <div className="row" data-testid="incident-collect-actions">
+    <div className="flex flex-wrap gap-2" data-testid="incident-collect-actions">
       <Button variant="secondary" onClick={() => { setCancelled(true); onClose(); }} data-testid="incident-collect-cancel">
         {t('action.cancel')}
       </Button>
@@ -391,17 +391,22 @@ export function CollectEvidenceDialog({
               {itemsLoading ? <p className="muted small" aria-busy="true">{t('aria.loading')}</p> : items.length === 0 ? (
                 <p className="muted small" data-testid="incident-collect-items-empty">{t('incidents.collect.noItems')}</p>
               ) : (
-                <div className="stack" data-testid="incident-collect-item-list">
+                <div className="flex flex-col gap-2 min-w-0" data-testid="incident-collect-item-list">
                   {items.map((item) => (
-                    <label key={item.itemId} className="row">
+                    <label key={item.itemId} className="flex items-center gap-2 min-w-0">
                       <input
                         type="checkbox"
+                        className="row-check"
                         checked={selectedItems.includes(item.itemId)}
-                        disabled={!selectedItems.includes(item.itemId) && selectedItems.length >= ITEM_LIMIT}
+                        disabled={
+                          item.valueType === 'TEXT' ||
+                          item.valueType === 'UNSUPPORTED' ||
+                          (!selectedItems.includes(item.itemId) && selectedItems.length >= ITEM_LIMIT)
+                        }
                         onChange={() => toggleItem(item.itemId)}
                         data-testid={`incident-collect-item-${item.itemId}`}
                       />
-                      <span>{item.name || item.key}{item.unit ? ` · ${item.unit}` : ''}</span>
+                      <span className="min-w-0 break-words">{item.name || item.key}{item.unit ? ` · ${item.unit}` : ''}</span>
                       {item.valueType === 'TEXT' || item.valueType === 'UNSUPPORTED' ? (
                         <Badge variant={badgeVariantForTone('warn')}>{t('incidents.collect.unsupportedItem')}</Badge>
                       ) : null}
@@ -420,7 +425,7 @@ export function CollectEvidenceDialog({
               </select>
             </label>
 
-            <p className="muted small" data-testid="incident-collect-target">{t('incidents.collect.target', { id: incidentId })}</p>
+            <p className="muted small break-words" data-testid="incident-collect-target">{t('incidents.collect.target', { id: incidentId })}</p>
           </>
         ) : null}
 
@@ -459,7 +464,7 @@ export function CollectEvidenceDialog({
                 })}
               </p>
             ) : null}
-            <p className="muted small mono" data-testid="incident-collect-content-ref">{collection.contentRef}</p>
+            <p className="muted small" data-testid="incident-collect-content-ref"><code data-long-token>{collection.contentRef}</code></p>
             {collection.outcome === 'EMPTY' ? <p className="muted small">{t('incidents.collect.emptyWindow')}</p> : null}
             {collection.outcome === 'NO_DATA' ? <p className="muted small">{t('incidents.collect.noData')}</p> : null}
             {collection.outcome === 'TIMEOUT' ? <p className="muted small" data-testid="incident-collect-timeout">{t('incidents.collect.timeout')}</p> : null}
