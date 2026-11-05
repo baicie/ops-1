@@ -1,0 +1,67 @@
+name: staging-readonly-diagnose
+
+# Read-only host diagnosis. This workflow never deploys, restarts, writes data or changes
+# firewall/service state. It exists so the runner->host failure can be attributed from the host
+# side without borrowing the deploy path.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: staging
+    env:
+      STAGING_HOST: ${{ secrets.STAGING_HOST }}
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_PORT: ${{ secrets.STAGING_PORT }}
+      STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+      STAGING_HOST_KEY: ${{ secrets.STAGING_HOST_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare strict SSH context
+        run: bash scripts/ci-ssh-setup.sh
+
+      - name: Read-only host status
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/staging-diagnose
+          {
+            echo "== host status (deploy-staging.sh --status; read-only) =="
+            ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'bash -s' <<'REMOTE' || true
+          set -u
+          echo "-- status --"
+          sudo -n /srv/opsweave-staging/bin/deploy-staging.sh --status --json 2>&1 || true
+          echo "-- compose containers --"
+          sudo -n docker ps --filter label=com.docker.compose.project=opsweave-staging --format '{{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1 || true
+          echo "-- listeners 3000/18080/8080/8888/9090 --"
+          sudo -n ss -ltnp 2>&1 | grep -E ':(3000|18080|8080|8888|9090)\b' || true
+          echo "-- local livez 3000 --"
+          curl -sS -D - --max-time 10 http://127.0.0.1:3000/livez 2>&1 || true
+          echo "-- local readyz 3000 --"
+          curl -sS -D - --max-time 10 http://127.0.0.1:3000/readyz 2>&1 || true
+          echo "-- local version 3000 --"
+          curl -sS -D - --max-time 10 http://127.0.0.1:3000/api/v1/version 2>&1 || true
+          echo "-- local livez 18080 --"
+          curl -sS -D - --max-time 10 http://127.0.0.1:18080/livez 2>&1 || true
+          echo "-- kernel logs (last 80) --"
+          k=$(sudo -n docker ps -q --filter label=com.docker.compose.project=opsweave-staging --filter label=com.docker.compose.service=kernel | head -1)
+          if [ -n "$k" ]; then sudo -n docker logs --tail 80 "$k" 2>&1 || true; else echo "no kernel container"; fi
+          REMOTE
+          } 2>&1 | tee artifacts/staging-diagnose/host.txt
+
+      - name: Upload diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-readonly-diagnose
+          path: artifacts/staging-diagnose/
+          if-no-files-found: warn
