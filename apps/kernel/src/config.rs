@@ -38,6 +38,19 @@ pub struct Config {
     /// endpoint and never written to the database - only the adapter id is stored
     /// on the evidence row it vouched for.
     pub evidence_adapters: HashMap<String, String>,
+    /// Per-plugin secret material, keyed by plugin id and then by the
+    /// `secretref:` handle the plugin stores. The Kernel hands a plugin only its
+    /// own map; the global map never reaches an instance environment.
+    ///
+    /// Delivery is an environment variable, which is visible to the container
+    /// process and to anyone who can `docker inspect`. That is a weaker boundary
+    /// than a dedicated secret store; the threat model is recorded in
+    /// docs/design/g13-source-evidence/g13-a1-security-runtime-closure.md.
+    pub plugin_secrets: HashMap<String, HashMap<String, String>>,
+    /// Which plugin may receive which evidence adapter's signing key. An adapter
+    /// with no entry is not delivered to any plugin, so a collector cannot sign
+    /// as an adapter nobody assigned it.
+    pub evidence_adapter_plugins: HashMap<String, String>,
     /// Which provider an investigation uses when its request names none. The default
     /// is the deterministic test fixture, because shipping a default that pointed at a
     /// paid model would spend money nobody asked to spend.
@@ -123,6 +136,11 @@ impl Config {
             trusted_proxy_ips: env_list("OPSWEAVE_TRUSTED_PROXY_IPS", ""),
             evidence_adapters: parse_evidence_adapters(&env_string(
                 "OPSWEAVE_EVIDENCE_ADAPTERS",
+                "",
+            )),
+            plugin_secrets: parse_plugin_secrets(&env_string("OPSWEAVE_PLUGIN_SECRETS", "")),
+            evidence_adapter_plugins: parse_adapter_plugins(&env_string(
+                "OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS",
                 "",
             )),
             investigation_default_provider: env_string(
@@ -282,6 +300,51 @@ pub fn parse_admin_surface_roles(raw: &str) -> Vec<Role> {
 /// because the fail-safe direction here is "fewer adapters than configured",
 /// never "the Kernel refuses to start". Dropping an adapter can only lose an
 /// attestation capability; it can never grant one.
+/// `{"plugin.id":{"secretref:name":"value"}}`
+///
+/// Malformed input yields an empty map: a plugin then fails its own credential
+/// resolution and refuses to collect, which is the safe direction. It is never
+/// log-ed, returned by an endpoint, or written to the database.
+pub fn parse_plugin_secrets(raw: &str) -> HashMap<String, HashMap<String, String>> {
+    if raw.trim().is_empty() {
+        return HashMap::new();
+    }
+    match serde_json::from_str(raw) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            tracing::warn!(error = %error, "OPSWEAVE_PLUGIN_SECRETS is not valid JSON; no plugin secrets were loaded");
+            HashMap::new()
+        }
+    }
+}
+
+/// `adapterId:pluginId,adapterId2:pluginId2`
+pub fn parse_adapter_plugins(raw: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let Some((adapter, plugin)) = entry.split_once(':') else {
+            tracing::warn!("OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS entry has no ':' separator; ignored");
+            continue;
+        };
+        let (adapter, plugin) = (adapter.trim(), plugin.trim());
+        if adapter.is_empty() || plugin.is_empty() {
+            tracing::warn!("OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS entry is empty; ignored");
+            continue;
+        }
+        if map
+            .insert(adapter.to_string(), plugin.to_string())
+            .is_some()
+        {
+            tracing::warn!(adapter, "OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS declares this adapter twice; the last entry wins");
+        }
+    }
+    map
+}
+
 pub fn parse_evidence_adapters(raw: &str) -> HashMap<String, String> {
     let mut adapters = HashMap::new();
     for entry in raw.split(',') {
@@ -367,8 +430,8 @@ fn env_i64(key: &str, default: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_admin_surface_roles, parse_build_sha, parse_build_time, parse_environment,
-        Environment,
+        parse_adapter_plugins, parse_admin_surface_roles, parse_build_sha, parse_build_time,
+        parse_environment, parse_plugin_secrets, Environment,
     };
     use opsweave_contracts::Role;
 
@@ -465,5 +528,21 @@ mod tests {
             parse_admin_surface_roles("viewer"),
             vec![Role::Viewer, Role::Admin]
         );
+    }
+
+    #[test]
+    fn plugin_secrets_are_parsed_and_malformed_input_fails_closed() {
+        let parsed = parse_plugin_secrets(r#"{"a.plugin":{"secretref:db":"value"}}"#);
+        assert_eq!(parsed["a.plugin"]["secretref:db"], "value");
+        assert!(parse_plugin_secrets("{not json").is_empty());
+        assert!(parse_plugin_secrets("").is_empty());
+    }
+
+    #[test]
+    fn adapter_plugin_assignments_are_explicit() {
+        let parsed = parse_adapter_plugins("zabbix-main:a.plugin,other:b.plugin");
+        assert_eq!(parsed["zabbix-main"], "a.plugin");
+        assert_eq!(parsed["other"], "b.plugin");
+        assert!(parse_adapter_plugins("broken").is_empty());
     }
 }

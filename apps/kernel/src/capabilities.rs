@@ -419,6 +419,42 @@ pub async fn refresh_workload_token(
     Ok(Json(WorkloadTokenResponse { token, expires_at }))
 }
 
+/// The secret-bearing part of an instance environment.
+///
+/// Pure so it can be tested without a database: the isolation rule is that a
+/// plugin receives exactly its own secret map and, if one adapter is assigned to
+/// it, exactly that adapter's signing key. A plugin with no assignment receives
+/// no adapter credential; a plugin with two assignments receives neither, which
+/// is a configuration error that fails closed rather than picking one.
+pub(crate) fn secret_environment(
+    plugin_secrets: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    adapter_plugins: &std::collections::HashMap<String, String>,
+    adapters: &std::collections::HashMap<String, String>,
+    plugin_id: &str,
+) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    if let Some(secrets) = plugin_secrets.get(plugin_id) {
+        if let Ok(encoded) = serde_json::to_string(secrets) {
+            env.insert("OPSWEAVE_PLUGIN_SECRETS".into(), encoded);
+        }
+    }
+    let assigned: Vec<&String> = adapter_plugins
+        .iter()
+        .filter(|(_, plugin)| plugin.as_str() == plugin_id)
+        .map(|(adapter, _)| adapter)
+        .collect();
+    if assigned.len() == 1 {
+        let adapter_id = assigned[0];
+        if let Some(secret) = adapters.get(adapter_id) {
+            env.insert("OPSWEAVE_EVIDENCE_ADAPTER_ID".into(), adapter_id.clone());
+            env.insert("OPSWEAVE_EVIDENCE_ADAPTER_SECRET".into(), secret.clone());
+        }
+    } else if assigned.len() > 1 {
+        tracing::warn!(plugin = %plugin_id, "more than one evidence adapter is assigned to this plugin; none is delivered");
+    }
+    env
+}
+
 pub async fn instance_environment(
     State(state): State<AppState>,
     Path((node_id, instance_id)): Path<(Uuid, Uuid)>,
@@ -466,6 +502,12 @@ pub async fn instance_environment(
     {
         env.insert("OPSWEAVE_PLUGIN_DATABASE_URL".into(), credential);
     }
+    env.extend(secret_environment(
+        &state.config.plugin_secrets,
+        &state.config.evidence_adapter_plugins,
+        &state.config.evidence_adapters,
+        &plugin_id,
+    ));
     if let Ok(manifest) = serde_json::from_value::<ManifestV11>(manifest_value) {
         let mut tokens = serde_json::Map::new();
         for required in &manifest.requires {
@@ -1095,6 +1137,48 @@ mod tests {
         assert!(
             super::verify_claims_with_key(key, std::str::from_utf8(&tampered).unwrap()).is_err()
         );
+    }
+
+    #[test]
+    fn a_plugin_receives_only_its_own_secrets_and_adapter() {
+        use std::collections::HashMap;
+        let mut plugin_secrets = HashMap::new();
+        plugin_secrets.insert(
+            "a.plugin".to_string(),
+            HashMap::from([("secretref:a".to_string(), "value-a".to_string())]),
+        );
+        plugin_secrets.insert(
+            "b.plugin".to_string(),
+            HashMap::from([("secretref:b".to_string(), "value-b".to_string())]),
+        );
+        let adapter_plugins = HashMap::from([("zabbix-main".to_string(), "a.plugin".to_string())]);
+        let adapters = HashMap::from([
+            ("zabbix-main".to_string(), "adapter-secret-a".to_string()),
+            ("other".to_string(), "adapter-secret-b".to_string()),
+        ]);
+
+        let a = super::secret_environment(&plugin_secrets, &adapter_plugins, &adapters, "a.plugin");
+        assert!(a["OPSWEAVE_PLUGIN_SECRETS"].contains("value-a"));
+        assert!(!a["OPSWEAVE_PLUGIN_SECRETS"].contains("value-b"));
+        assert_eq!(a["OPSWEAVE_EVIDENCE_ADAPTER_ID"], "zabbix-main");
+        assert_eq!(a["OPSWEAVE_EVIDENCE_ADAPTER_SECRET"], "adapter-secret-a");
+        assert!(!a.values().any(|value| value.contains("adapter-secret-b")));
+
+        let b = super::secret_environment(&plugin_secrets, &adapter_plugins, &adapters, "b.plugin");
+        assert!(b["OPSWEAVE_PLUGIN_SECRETS"].contains("value-b"));
+        assert!(!b["OPSWEAVE_PLUGIN_SECRETS"].contains("value-a"));
+        assert!(!b.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_ID"));
+        assert!(!b.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_SECRET"));
+
+        // Two assignments are a configuration error: deliver neither rather than
+        // silently choosing one.
+        let doubled = HashMap::from([
+            ("zabbix-main".to_string(), "a.plugin".to_string()),
+            ("other".to_string(), "a.plugin".to_string()),
+        ]);
+        let a2 = super::secret_environment(&plugin_secrets, &doubled, &adapters, "a.plugin");
+        assert!(!a2.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_ID"));
+        assert!(!a2.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_SECRET"));
     }
 
     #[test]

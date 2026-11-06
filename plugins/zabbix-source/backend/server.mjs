@@ -62,6 +62,24 @@ function parseSecretMap(raw) {
   }
 }
 
+/**
+ * Which secret source this instance was given.
+ *
+ * The Kernel delivers a plugin only its own `OPSWEAVE_PLUGIN_SECRETS` map; the
+ * `OPSWEAVE_ZABBIX_SECRETS` fallback exists for a developer running the backend
+ * directly. The mode is reported by /runtime-info (never the values), so an
+ * operator can tell a deployed instance from a local one.
+ */
+export function secretConfiguration(env = process.env) {
+  if (env.OPSWEAVE_PLUGIN_SECRETS) {
+    return { mode: 'plugin', secrets: parseSecretMap(env.OPSWEAVE_PLUGIN_SECRETS) };
+  }
+  if (env.OPSWEAVE_ZABBIX_SECRETS) {
+    return { mode: 'dev', secrets: parseSecretMap(env.OPSWEAVE_ZABBIX_SECRETS) };
+  }
+  return { mode: 'none', secrets: {} };
+}
+
 function rid(req) {
   const value = req.headers['x-opsweave-request-id'];
   return typeof value === 'string' && value.length <= 128 ? value : crypto.randomUUID();
@@ -91,6 +109,7 @@ export function createPlugin(options) {
   const adapterId = options.adapterId || '';
   const adapterSecret = options.adapterSecret || '';
   const secretMap = options.secretMap || {};
+  const secretMode = options.secretMode || 'none';
   const capabilityDigest = options.capabilityDigest || DEFAULTS.capabilityDigest;
   const buildDigest = options.buildDigest || DEFAULTS.buildDigest;
   const logger = options.logger || console;
@@ -304,6 +323,7 @@ export function createPlugin(options) {
         // needs: without it, evidence silently arrives as UNVERIFIED.
         attestation: { adapterId: adapterId || null, configured: Boolean(adapterId && adapterSecret) },
         storage: { mode: store.mode },
+        secrets: { mode: secretMode, configured: Object.keys(secretMap).length > 0 },
         budgetCeiling: BUDGET_CEILING,
       }, id);
     }
@@ -492,6 +512,9 @@ export function createPlugin(options) {
       }
       const envelope = signAttestation({
         adapterId,
+        // From the persisted row, never from the request body: a caller cannot
+        // choose which workspace its collection is signed for.
+        workspaceId: collection.workspace_id,
         secret: adapterSecret,
         incidentId,
         kind,
@@ -580,7 +603,8 @@ export async function startServer(env = process.env) {
     buildDigest: env.OPSWEAVE_BUILD_DIGEST,
     adapterId: env.OPSWEAVE_EVIDENCE_ADAPTER_ID || '',
     adapterSecret: env.OPSWEAVE_EVIDENCE_ADAPTER_SECRET || '',
-    secretMap: parseSecretMap(env.OPSWEAVE_ZABBIX_SECRETS),
+    secretMap: secretConfiguration(env).secrets,
+    secretMode: secretConfiguration(env).mode,
     store,
     verifyIdentity,
   });

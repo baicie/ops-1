@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 // before the dynamic import so the module-level constant sees it.
 process.env.OPSWEAVE_ALLOW_LOOPBACK_SOURCE = '1';
 
-const { createPlugin } = await import('./server.mjs');
+const { createPlugin, secretConfiguration } = await import('./server.mjs');
 const { MemoryStore } = await import('./storage.mjs');
 const { createIdentityResolver, signContext } = await import('./identity.mjs');
 const { attestationPayload } = await import('./zabbix.mjs');
@@ -362,7 +362,9 @@ test('collection bytes and the attestation digest are the same bytes', async () 
     const attested = await call(base, `/api/zabbix-source/collections/${collected.body.collectionId}/attestation`, {
       method: 'POST',
       headers,
-      body: { incidentId: INCIDENT_ID, kind: 'METRIC_SNAPSHOT' },
+      // A body workspaceId is not a trust input: the signature must name the
+      // persisted collection's workspace, not this one.
+      body: { incidentId: INCIDENT_ID, kind: 'METRIC_SNAPSHOT', workspaceId: WORKSPACE_B },
     });
     assert.equal(attested.status, 200);
     const { evidence } = attested.body;
@@ -371,8 +373,10 @@ test('collection bytes and the attestation digest are the same bytes', async () 
     const digest = 'sha256:' + crypto.createHash('sha256').update(evidence.content.body, 'utf8').digest('hex');
     assert.equal(digest, evidence.contentRef, 'the signed digest covers the exact submitted bytes');
 
+    assert.equal(evidence.attestation.workspaceId, WORKSPACE_A);
     const payload = attestationPayload({
       adapterId: ADAPTER_ID,
+      workspaceId: evidence.attestation.workspaceId,
       incidentId: INCIDENT_ID,
       kind: 'METRIC_SNAPSHOT',
       source: evidence.source,
@@ -654,6 +658,29 @@ test('a forged user context under a different key is refused', async () => {
       headers: { 'x-opsweave-user-context': forged },
     });
     assert.equal(response.status, 401);
+  } finally {
+    await plugin.close();
+  }
+});
+
+test('the plugin reads the Kernel-delivered secret map first and never reports values', async () => {
+  const pluginSecrets = secretConfiguration({
+    OPSWEAVE_PLUGIN_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'plugin-token' }),
+    OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
+  });
+  assert.equal(pluginSecrets.mode, 'plugin');
+  assert.equal(pluginSecrets.secrets['secretref:zabbix/main'], 'plugin-token');
+
+  const dev = secretConfiguration({ OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }) });
+  assert.equal(dev.mode, 'dev');
+  assert.equal(secretConfiguration({}).mode, 'none');
+
+  const { plugin, base } = await startPlugin();
+  try {
+    const info = await call(base, '/_opsweave/runtime-info');
+    assert.equal(info.status, 200);
+    assert.equal(info.body.secrets.mode, 'none');
+    assert.equal(JSON.stringify(info.body).includes('fixture-token'), false);
   } finally {
     await plugin.close();
   }

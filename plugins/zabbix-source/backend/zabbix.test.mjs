@@ -66,7 +66,8 @@ test('the signed payload is byte-identical to the Kernel golden vector', () => {
   // changes key order, casing or timestamp precision, one of the two tests
   // fails instead of every signature failing silently in production.
   const expected =
-    '{"v":"opsweave-evidence-attestation-v1","adapterId":"zabbix-main",' +
+    '{"v":"opsweave-evidence-attestation-v2","adapterId":"zabbix-main",' +
+    '"workspaceId":"00000000-0000-4000-8000-000000000001",' +
     '"incidentId":"b17265e7-3ac8-4877-bad4-40c4d2df4a87",' +
     '"kind":"METRIC_SNAPSHOT","source":"zabbix:probe",' +
     '"collectedAtUnix":1793423844,"contentRef":"sha256:probe-1",' +
@@ -74,6 +75,7 @@ test('the signed payload is byte-identical to the Kernel golden vector', () => {
 
   const actual = attestationPayload({
     adapterId: 'zabbix-main',
+    workspaceId: '00000000-0000-4000-8000-000000000001',
     incidentId: 'b17265e7-3ac8-4877-bad4-40c4d2df4a87',
     kind: 'METRIC_SNAPSHOT',
     source: 'zabbix:probe',
@@ -89,6 +91,7 @@ test('the signature verifies under the Kernel algorithm and breaks on any edit',
   const secret = 'adapter-secret';
   const tuple = {
     adapterId: 'zabbix-main',
+    workspaceId: '00000000-0000-4000-8000-000000000001',
     secret,
     incidentId: 'b17265e7-3ac8-4877-bad4-40c4d2df4a87',
     kind: 'METRIC_SNAPSHOT',
@@ -115,11 +118,27 @@ test('the signature verifies under the Kernel algorithm and breaks on any edit',
     .update(attestationPayload({ ...tuple, contentRef: 'sha256:probe-2' }))
     .digest('base64url');
   assert.notEqual(moved, envelope.signature);
+
+  // The workspace is inside the signed bytes: signing the same row for another
+  // workspace changes the signature, so a caller cannot move it across the
+  // business boundary.
+  const otherWorkspace = crypto
+    .createHmac('sha256', secret)
+    .update(attestationPayload({ ...tuple, workspaceId: '00000000-0000-4000-8000-000000000002' }))
+    .digest('base64url');
+  assert.notEqual(otherWorkspace, envelope.signature);
+  assert.equal(envelope.workspaceId, '00000000-0000-4000-8000-000000000001');
+
+  assert.throws(
+    () => signAttestation({ ...tuple, workspaceId: '' }),
+    (error) => error.code === 'ZABBIX_WORKSPACE_REQUIRED',
+    'a collection without a workspace cannot be signed',
+  );
 });
 
 test('an unconfigured adapter cannot sign at all', () => {
   assert.throws(
-    () => signAttestation({ adapterId: '', secret: '', incidentId: 'x', kind: 'METRIC_SNAPSHOT', source: 's', collectedAt: WINDOW.to, contentRef: 'sha256:x', issuedAt: WINDOW.to }),
+    () => signAttestation({ adapterId: '', workspaceId: '00000000-0000-4000-8000-000000000001', secret: '', incidentId: 'x', kind: 'METRIC_SNAPSHOT', source: 's', collectedAt: WINDOW.to, contentRef: 'sha256:x', issuedAt: WINDOW.to }),
     (error) => error.code === 'ZABBIX_ADAPTER_UNCONFIGURED',
   );
 });
