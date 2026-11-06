@@ -54,6 +54,7 @@ details={sourceId,nativeId,triggerState,deduplicated:false,late,incidentId}
 
 - `telemetry_events::`：3/3（幂等键稳定性、摘要不匹配拒绝、重复 Event 只建 1 个 Incident 且 RESOLVED 不建单，含真实 PostgreSQL）。
 - 完整 Kernel 套件 **217/217**；clippy `-D warnings` 通过。
+- 首轮 CI 暴露：0028 先插入 `opsweave-automation`，而 `seed_admin` 以“users 表非空”判断是否创建管理员，导致所有 E2E 登录 401。已改为排除该服务身份后计数；本地重建 Kernel + 空库验证登录 200，两个用户都存在。
 
 ## 7. 下一步（切片 4）
 
