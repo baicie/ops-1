@@ -171,7 +171,8 @@ if (cd tests/ui && V3_CHANNEL="${V3_CHANNEL:-chromium}" WORKBENCH_MODE=after pnp
      metric-card-matrix.spec.ts \
      workbench-matrix.spec.ts \
      workbench-a11y.spec.ts \
-     incident-evidence-kpi.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
+     incident-evidence-kpi.spec.ts \
+     g13-collect-evidence.spec.ts) 2>&1 | tee "$LOG_DIR/playwright.log"; then
   echo "######## browser suite -> PASS"
   if node scripts/check-workbench-metrics.mjs artifacts/ui/visual-v2/after docs/design/opsweave-visual-system-v2/workbench-baseline.json; then
     echo "######## workbench regression gate -> PASS"
