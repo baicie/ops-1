@@ -344,7 +344,7 @@ test('probe records what it saw and promotes the source only on OK', async () =>
     const list = await call(base, '/api/zabbix-source/sources', {
       headers: { 'x-opsweave-user-context': userContext() },
     });
-    assert.equal(list.body.items[0].status, 'READY');
+    assert.equal(list.body.items[0].status, 'DEGRADED', 'plaintext HTTP is reachable but not TLS-verified');
     assert.equal(list.body.items[0].lastProbe.outcome, 'OK');
   } finally {
     await plugin.close();

@@ -19,7 +19,7 @@ process.env.OPSWEAVE_ALLOW_LOOPBACK_SOURCE = '1';
 const { createPlugin } = await import('../../plugins/zabbix-source/backend/server.mjs');
 const { MemoryStore } = await import('../../plugins/zabbix-source/backend/storage.mjs');
 const { createIdentityResolver, signContext } = await import('../../plugins/zabbix-source/backend/identity.mjs');
-const { normalizeEndpoint } = await import('../../plugins/zabbix-source/backend/credential-binding.mjs');
+const { normalizeEndpoint, parseCredentialBindings } = await import('../../plugins/zabbix-source/backend/credential-binding.mjs');
 
 const PLUGIN_ID = 'opsweave.zabbix-source';
 const KEY = 'c2'.repeat(32);
@@ -155,6 +155,18 @@ test('an endpoint swap cannot send the workspace token to an attacker', async ()
     const historical = await call(base, `/api/zabbix-source/sources/${sourceId}/hosts`);
     assert.equal(historical.status, 422);
     assert.equal(historical.body.code, 'ZBX_CREDENTIAL_ENDPOINT_MISMATCH');
+    const probe = await call(base, `/api/zabbix-source/sources/${sourceId}/probe`, { method: 'POST' });
+    assert.equal(probe.status, 422);
+    assert.equal(probe.body.code, 'ZBX_CREDENTIAL_ENDPOINT_MISMATCH');
+    const items = await call(base, `/api/zabbix-source/sources/${sourceId}/items?hostId=10084`);
+    assert.equal(items.status, 422);
+    assert.equal(items.body.code, 'ZBX_CREDENTIAL_ENDPOINT_MISMATCH');
+    const collect = await call(base, `/api/zabbix-source/sources/${sourceId}/collect`, {
+      method: 'POST',
+      body: { itemIds: ['10401'], window: { from: '2026-11-01T00:00:00Z', to: '2026-11-01T01:00:00Z' } },
+    });
+    assert.equal(collect.status, 422);
+    assert.equal(collect.body.code, 'ZBX_CREDENTIAL_ENDPOINT_MISMATCH');
     assert.deepEqual(attacker.state.authorizations, []);
   } finally {
     await plugin.close();
@@ -280,13 +292,41 @@ test('a basic credential without user:password is refused', async () => {
       method: 'POST',
       body: { workspaceId: WORKSPACE, name: 'basic', endpoint, credential: { kind: 'basic', ref: REF } },
     });
-    assert.equal(created.status, 201);
-    const hosts = await call(base, `/api/zabbix-source/sources/${created.body.sourceId}/hosts`);
-    assert.equal(hosts.status, 422);
-    assert.equal(hosts.body.code, 'ZBX_BASIC_CREDENTIAL_INVALID');
+    assert.equal(created.status, 422);
+    assert.equal(created.body.code, 'ZBX_BASIC_CREDENTIAL_INVALID');
     assert.deepEqual(approved.state.authorizations, []);
   } finally {
     await plugin.close();
     await approved.close();
   }
+});
+
+
+test('endpoint normalization is exact and rejects credential-bearing URLs', () => {
+  assert.equal(normalizeEndpoint('HTTPS://Zabbix.Example:443/api_jsonrpc.php'), 'https://zabbix.example/api_jsonrpc.php');
+  assert.equal(normalizeEndpoint('http://host:80/api'), 'http://host/api');
+  assert.equal(normalizeEndpoint('http://host:8080/api'), 'http://host:8080/api');
+  assert.equal(normalizeEndpoint('https://host/Path/To/Api'), 'https://host/Path/To/Api');
+  for (const bad of [
+    'https://host/api?x=1',
+    'https://host/api#frag',
+    'https://user:pw@host/api',
+    'ftp://host/api',
+  ]) {
+    assert.equal(normalizeEndpoint(bad), null, bad);
+  }
+});
+
+test('the binding parser accepts the Kernel slice and the full map, and drops unsafe entries', () => {
+  const workspace = '00000000-0000-4000-8000-000000000001';
+  const slice = JSON.stringify({ [workspace]: { [REF]: { endpoint: 'https://zabbix.example/api_jsonrpc.php', tls: 'VERIFY' } } });
+  const full = JSON.stringify({ [PLUGIN_ID]: JSON.parse(slice) });
+  for (const raw of [slice, full]) {
+    const parsed = parseCredentialBindings(raw, PLUGIN_ID);
+    assert.equal(parsed[workspace][REF].endpoint, 'https://zabbix.example/api_jsonrpc.php');
+  }
+  const unsafe = JSON.stringify({ [workspace]: { [REF]: { endpoint: 'https://user:pw@host/api', tls: 'VERIFY' } } });
+  assert.deepEqual(parseCredentialBindings(unsafe, PLUGIN_ID), {});
+  const badTls = JSON.stringify({ [workspace]: { [REF]: { endpoint: 'https://host/api', tls: 'NONE' } } });
+  assert.deepEqual(parseCredentialBindings(badTls, PLUGIN_ID), {});
 });

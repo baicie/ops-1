@@ -462,6 +462,9 @@ export function createPlugin(options) {
         allowInsecureEndpoints,
         allowUnbound: allowUnboundCredentials,
       });
+      // Validate the value shape at write time: a `basic` ref that is not
+      // user:password is refused here, not stored and failed later.
+      resolveSecret(parsed.workspaceId, parsed.credential.ref, parsed.credential.kind);
       const row = await store.createSource({
         sourceId: crypto.randomUUID(),
         workspaceId: parsed.workspaceId,
@@ -499,6 +502,7 @@ export function createPlugin(options) {
         allowInsecureEndpoints,
         allowUnbound: allowUnboundCredentials,
       });
+      resolveSecret(current.workspace_id, parsed.credential.ref, parsed.credential.kind);
       const row = await store.updateSource(sourceId, who.workspaces, parsed, actorId);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       return send(res, 200, sourceView(row), id);
@@ -522,7 +526,7 @@ export function createPlugin(options) {
         secret: resolveSecretQuietly(row.workspace_id, row.credential_ref, row.credential_kind),
         credentialKind: row.credential_kind,
       });
-      const updated = await store.recordProbe(row.source_id, who.workspaces, result, statusFromProbe(result, { verifyTls: row.verify_tls }), actorId);
+      const updated = await store.recordProbe(row.source_id, who.workspaces, result, statusFromProbe(result, { verifyTls: row.verify_tls, endpoint: row.endpoint }), actorId);
       if (!updated) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       return send(res, 200, result, id);
     }

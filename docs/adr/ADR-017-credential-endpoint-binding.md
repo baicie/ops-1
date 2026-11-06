@@ -43,7 +43,7 @@ pluginId + workspaceId + secretRef + approvedEndpoint + tlsPolicy
   - Source 创建、更新：绑定必须存在且 endpoint/TLS 匹配；
   - probe、hosts、items、collect：每次出站前重新检查**已持久化**的 source；绑定被删除/修改后，历史 Source fail closed；
   - attestation 不出站，不解析凭据；evidence 的信任仍由 v2 签名与 Kernel 验证决定。
-- `basic`：实现真正的 HTTP Basic（`Authorization: Basic base64(user:password)`），secret 必须是 `user:password`；否则 422 `ZBX_BASIC_CREDENTIAL_INVALID`。声明 basic 却发 Bearer 被禁止。
+- `basic`：实现真正的 HTTP Basic（`Authorization: Basic base64(user:password)`），secret 必须是 `user:password`，创建/更新时就校验，否则 422 `ZBX_BASIC_CREDENTIAL_INVALID`。声明 basic 却发 Bearer 被禁止。
 - 错误码（稳定、可本地化）：
   - 422 `ZBX_CREDENTIAL_BINDING_REQUIRED`
   - 422 `ZBX_CREDENTIAL_ENDPOINT_MISMATCH`
@@ -55,14 +55,14 @@ pluginId + workspaceId + secretRef + approvedEndpoint + tlsPolicy
 ## 3. 生命周期与轮换
 
 - 新增/修改绑定 → 更新 Kernel 配置并重启 Kernel；插件实例在下一次启动时获得新绑定。
-- 绑定移除/收紧 → 旧实例在内存中仍有旧绑定，但其出站检查使用实例内绑定；**替换实例**（disable→deploy 或新版本）才保证旧绑定失效。Kernel 不接受未绑定的新写入/新实例。
+- 绑定移除/收紧 → 旧实例在内存中仍有旧绑定；Kernel **不代理** Source 创建/更新/读取，不能替插件拒绝“未绑定的新写入”。只有**替换实例**（disable→deploy 或新版本）才保证旧绑定失效。收紧后在替换前仍存在旧绑定窗口，必须按事故处置对待。
 - Zabbix Token 轮换：更新 `OPSWEAVE_PLUGIN_SECRETS`，替换实例；旧实例在替换前仍持有旧 Token（env 固定于容器创建）。轮换窗口已记录；不得用“Node 重启”冒充刷新，因为 Node 会收养已有容器。
 - Adapter 撤销：移除/轮换 `OPSWEAVE_EVIDENCE_ADAPTERS` 中的密钥并替换实例；仅删除 adapter→plugin 映射只停止注入，不撤销已持有密钥的实例。
 - 历史 Source：绑定上线后，没有绑定或 endpoint 不匹配的行在 probe/hosts/items/collect 上 fail closed；不会自动改写数据库行。
 
 ## 4. 迁移与回滚
 
-- 迁移：先部署 binding 配置（Kernel），再部署 A.2 插件；否则 A.2 插件对未绑定的 Source fail closed（可见的 422，不是静默放行）。
+- 迁移：先部署 A.2 插件（对未绑定的 Source fail closed：可见 422，不泄漏），再发布 binding 配置并替换实例。若先只发布 bindings 而仍运行 A.1 插件，A.1 忽略 bindings，endpoint-swap 漏洞在迁移窗口内仍然存在；该窗口必须用维护/禁用 Source 写入或 Token 轮换来关闭。
 - 回滚到 A.1 插件会**重新打开** endpoint-swap 攻击面；回滚必须同时禁用 Source 写入/采集或保持绑定感知插件。文档和交付报告必须写明这一点。
 - 配置错误（JSON 坏、endpoint 非法、tls 非枚举）→ 空 map / 丢弃条目，fail closed；不回退到“无绑定即允许”。
 
@@ -74,6 +74,7 @@ pluginId + workspaceId + secretRef + approvedEndpoint + tlsPolicy
 | Secret/绑定通过 env 交付，主机可见 | 与 ADR-016 相同的威胁模型；独立 Secret Store 仍是后续项 |
 | 旧实例在替换前持有旧绑定/旧 Token | 明确窗口；Kernel 只接受当前绑定/密钥的新写入 |
 | 一个插件服务多个 Workspace | 绑定按 Workspace 切片；进程内仍能看到本插件所有 Workspace 的绑定/Secret（逻辑隔离，不是进程隔离） |
+| 绑定/Secret 通过 Docker `--env` 交付 | 错误上下文、日志与 deployment `last_error` 不得包含 env 值；Node 已对 `--env` 值做 redaction，并有单测；超出 8 KiB 的 env 会被丢弃并告警（插件 fail closed） |
 
 ## 6. 验收
 

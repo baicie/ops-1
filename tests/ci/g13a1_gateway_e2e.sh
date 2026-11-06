@@ -177,7 +177,7 @@ SECRETS_JSON="$(python3 - "$WORKSPACE_A" "$WORKSPACE_B" "$ZABBIX_TOKEN" <<'JSON'
 import json, sys
 a, b, token = sys.argv[1:4]
 print(json.dumps({"opsweave.zabbix-source": {
-    a: {"secretref:zabbix/main": token},
+    a: {"secretref:zabbix/main": token, "secretref:test/attacker": "attacker-probe-token"},
     b: {"secretref:zabbix/main": token},
 }}))
 JSON
@@ -186,8 +186,12 @@ BINDINGS_JSON="$(python3 - "$WORKSPACE_A" "$WORKSPACE_B" "$PLUGIN_HOST" <<'JSON'
 import json, sys
 a, b, host = sys.argv[1:4]
 endpoint = f"http://{host}:18090/api_jsonrpc.php"
+attacker = f"http://{host}:18091/api_jsonrpc.php"
 print(json.dumps({"opsweave.zabbix-source": {
-    a: {"secretref:zabbix/main": {"endpoint": endpoint, "tls": "TEST_PLAINTEXT"}},
+    a: {
+        "secretref:zabbix/main": {"endpoint": endpoint, "tls": "TEST_PLAINTEXT"},
+        "secretref:test/attacker": {"endpoint": attacker, "tls": "TEST_PLAINTEXT"},
+    },
     b: {"secretref:zabbix/main": {"endpoint": endpoint, "tls": "TEST_PLAINTEXT"}},
 }}))
 JSON
@@ -251,13 +255,37 @@ code="$(gateway POST /api/zabbix-source/sources "$GW_SOURCE")"
 SOURCE_ID="$(json "d['sourceId']" < /tmp/g13a1-body.json)"
 ok "source ${SOURCE_ID} in workspace ${WORKSPACE_A}"
 
+# Positive control: a test-only ref bound to the attacker receiver proves the
+# container can reach it, so a later "0 credentials" is meaningful rather than
+# vacuous. It sends a dummy token, never the workspace's real one.
+GW_ATTACKER_SOURCE="$(python3 - "$WORKSPACE_A" "$PLUGIN_HOST" "$ATTACKER_PORT" <<'PY'
+import json, sys
+print(json.dumps({
+  "workspaceId": sys.argv[1],
+  "name": "attacker-positive-control",
+  "endpoint": f"http://{sys.argv[2]}:{sys.argv[3]}/api_jsonrpc.php",
+  "credential": {"kind": "api-token", "ref": "secretref:test/attacker"},
+}))
+PY
+)"
+code="$(gateway POST /api/zabbix-source/sources "$GW_ATTACKER_SOURCE")"
+[ "$code" = "201" ] || { echo "positive-control source failed: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
+CONTROL_SOURCE="$(json "d['sourceId']" < /tmp/g13a1-body.json)"
+: > "$ATTACKER_LOG"
+code="$(gateway GET "/api/zabbix-source/sources/${CONTROL_SOURCE}/hosts")"
+[ "$code" = "200" ] || { echo "positive-control hosts failed: $code"; exit 1; }
+grep -Fq "Bearer attacker-probe-token" "$ATTACKER_LOG" || { echo "attacker receiver was not reachable from the plugin container"; exit 1; }
+: > "$ATTACKER_LOG"
+ok "attacker receiver is reachable from the plugin container (dummy token only)"
+
 step "credential endpoint attack through the Gateway"
 ATTACK_ENDPOINT="http://${PLUGIN_HOST}:${ATTACKER_PORT}/api_jsonrpc.php"
+: > "$ATTACKER_LOG"
 code="$(gateway PUT "/api/zabbix-source/sources/${SOURCE_ID}" "{\"name\":\"zabbix-main\",\"endpoint\":\"${ATTACK_ENDPOINT}\",\"credential\":{\"kind\":\"api-token\",\"ref\":\"secretref:zabbix/main\"}}")"
 [ "$code" = "422" ] && [ "$(json "d['code']" < /tmp/g13a1-body.json)" = "ZBX_CREDENTIAL_ENDPOINT_MISMATCH" ] || { echo "PUT endpoint swap was not refused: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
 code="$(gateway POST /api/zabbix-source/sources "{\"workspaceId\":\"${WORKSPACE_A}\",\"name\":\"attacker-source\",\"endpoint\":\"${ATTACK_ENDPOINT}\",\"credential\":{\"kind\":\"api-token\",\"ref\":\"secretref:zabbix/main\"}}")"
 [ "$code" = "422" ] && [ "$(json "d['code']" < /tmp/g13a1-body.json)" = "ZBX_CREDENTIAL_ENDPOINT_MISMATCH" ] || { echo "attacker-endpoint source was not refused: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
-: > "$ATTACKER_LOG"
+[ ! -s "$ATTACKER_LOG" ] || { echo "a refused attack call leaked a credential: $(cat "$ATTACKER_LOG")"; exit 1; }
 code="$(gateway GET "/api/zabbix-source/sources/${SOURCE_ID}/hosts")"
 [ "$code" = "200" ] || { echo "approved hosts failed after the refused swap: $code"; exit 1; }
 [ ! -s "$ATTACKER_LOG" ] || { echo "the attacker receiver saw a credential: $(cat "$ATTACKER_LOG")"; exit 1; }
@@ -407,7 +435,10 @@ ok "human verdict CONFIRMED written separately from the AI hypothesis"
 step "a historical source fails closed on the read path"
 SCHEMA="$(psql "$DB_URL" -tAc "select schema_name from kernel.plugin_storage_bindings where plugin_id='opsweave.zabbix-source'")"
 [ -n "$SCHEMA" ] || { echo "plugin storage schema not found"; exit 1; }
-psql "$DB_URL" -v ON_ERROR_STOP=1 -c "update ${SCHEMA}.zabbix_sources set endpoint='${ATTACK_ENDPOINT}' where source_id='${SOURCE_ID}'" >/dev/null
+# A distinct path: the positive-control source already owns /api_jsonrpc.php
+# on the attacker host in this workspace, and (workspace_id,endpoint) is unique.
+HISTORICAL_ENDPOINT="http://${PLUGIN_HOST}:${ATTACKER_PORT}/historical"
+psql "$DB_URL" -v ON_ERROR_STOP=1 -c "update ${SCHEMA}.zabbix_sources set endpoint='${HISTORICAL_ENDPOINT}' where source_id='${SOURCE_ID}'" >/dev/null
 : > "$ATTACKER_LOG"
 code="$(gateway GET "/api/zabbix-source/sources/${SOURCE_ID}/hosts")"
 [ "$code" = "422" ] && [ "$(json "d['code']" < /tmp/g13a1-body.json)" = "ZBX_CREDENTIAL_ENDPOINT_MISMATCH" ] || { echo "historical endpoint was not refused: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
@@ -426,7 +457,7 @@ for _ in $(seq 1 120); do
 done
 [ "${code:-}" = "200" ] || { echo "gateway did not recover after plugin restart"; exit 1; }
 COUNT="$(json "len(d['items'])" < /tmp/g13a1-body.json)"
-[ "$COUNT" = "2" ] || { echo "sources after restart: ${COUNT}"; exit 1; }
+[ "$COUNT" = "3" ] || { echo "sources after restart: ${COUNT}"; exit 1; }
 ok "plugin restart: both sources still listed"
 
 stop_kernel

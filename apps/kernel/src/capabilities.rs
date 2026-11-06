@@ -1235,19 +1235,34 @@ mod tests {
     #[test]
     fn credential_bindings_are_metadata_for_exactly_one_plugin() {
         use std::collections::HashMap;
-        let bindings = HashMap::from([(
-            "a.plugin".to_string(),
-            HashMap::from([(
-                "00000000-0000-4000-8000-00000000000a".to_string(),
+        let bindings = HashMap::from([
+            (
+                "a.plugin".to_string(),
                 HashMap::from([(
-                    "secretref:a".to_string(),
-                    crate::config::CredentialBinding {
-                        endpoint: "https://zabbix.example/api_jsonrpc.php".to_string(),
-                        tls: "VERIFY".to_string(),
-                    },
+                    "00000000-0000-4000-8000-00000000000a".to_string(),
+                    HashMap::from([(
+                        "secretref:a".to_string(),
+                        crate::config::CredentialBinding {
+                            endpoint: "https://zabbix.example/api_jsonrpc.php".to_string(),
+                            tls: "VERIFY".to_string(),
+                        },
+                    )]),
                 )]),
-            )]),
-        )]);
+            ),
+            (
+                "b.plugin".to_string(),
+                HashMap::from([(
+                    "00000000-0000-4000-8000-00000000000b".to_string(),
+                    HashMap::from([(
+                        "secretref:b".to_string(),
+                        crate::config::CredentialBinding {
+                            endpoint: "https://b.example/api_jsonrpc.php".to_string(),
+                            tls: "VERIFY".to_string(),
+                        },
+                    )]),
+                )]),
+            ),
+        ]);
         let a = super::secret_environment(
             &HashMap::new(),
             &HashMap::new(),
@@ -1259,6 +1274,10 @@ mod tests {
         let encoded = &a["OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS"];
         assert!(encoded.contains("https://zabbix.example/api_jsonrpc.php"));
         assert!(!encoded.contains("secretref:b"));
+        assert!(
+            !encoded.contains("b.example"),
+            "another plugin's binding must not be injected"
+        );
         assert_eq!(a["OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS"], "1");
 
         let b = super::secret_environment(
@@ -1269,7 +1288,10 @@ mod tests {
             false,
             "b.plugin",
         );
-        assert!(!b.contains_key("OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS"));
+        let b_encoded = &b["OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS"];
+        assert!(b_encoded.contains("b.example"));
+        assert!(!b_encoded.contains("a.example"));
+        assert!(!b_encoded.contains("secretref:a"));
         assert!(!b.contains_key("OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS"));
     }
 

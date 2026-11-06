@@ -412,11 +412,16 @@ function probeOutcome(code) {
  * `verifyTls: false` caps the status at DEGRADED even on a clean probe: the
  * endpoint answered, but not under a setting that proves who answered.
  */
-export function statusFromProbe(probeResult, { verifyTls = true } = {}) {
+export function statusFromProbe(probeResult, { verifyTls = true, endpoint = '' } = {}) {
   if (!probeResult) return 'UNVERIFIED';
   switch (probeResult.outcome) {
-    case 'OK':
-      return verifyTls ? 'READY' : 'DEGRADED';
+    case 'OK': {
+      // READY means "TLS was verified". A plaintext endpoint admitted by an
+      // explicit TEST_PLAINTEXT binding is reachable but not TLS-verified, so it
+      // is DEGRADED even when verifyTls defaults to true.
+      const secure = (endpoint === '' || endpoint.startsWith('https://')) && verifyTls;
+      return secure ? 'READY' : 'DEGRADED';
+    }
     case 'UNAVAILABLE':
       return 'UNAVAILABLE';
     case 'TIMEOUT':

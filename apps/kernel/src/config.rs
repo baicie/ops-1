@@ -356,15 +356,75 @@ pub fn parse_credential_bindings(
     if raw.trim().is_empty() {
         return HashMap::new();
     }
-    match serde_json::from_str(raw) {
-        Ok(parsed) => parsed,
+    let value: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(value) => value,
         Err(error) => {
             tracing::warn!(error = %error, "OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS is not valid; no credential bindings were loaded");
-            HashMap::new()
+            return HashMap::new();
+        }
+    };
+    let Some(plugins) = value.as_object() else {
+        return HashMap::new();
+    };
+    let mut out = HashMap::new();
+    for (plugin, workspaces) in plugins {
+        let Some(workspaces) = workspaces.as_object() else {
+            continue;
+        };
+        let mut per_workspace = HashMap::new();
+        for (workspace, refs) in workspaces {
+            if uuid::Uuid::parse_str(workspace).is_err() {
+                continue;
+            }
+            let Some(refs) = refs.as_object() else {
+                continue;
+            };
+            let mut per_ref = HashMap::new();
+            for (reference, binding) in refs {
+                if !reference.starts_with("secretref:") {
+                    continue;
+                }
+                let (Some(endpoint), Some(tls)) = (
+                    binding.get("endpoint").and_then(|value| value.as_str()),
+                    binding.get("tls").and_then(|value| value.as_str()),
+                ) else {
+                    continue;
+                };
+                if !matches!(tls, "VERIFY" | "TEST_PLAINTEXT") {
+                    continue;
+                }
+                // Reject what the plugin would reject anyway: a binding that
+                // carries userinfo/query/fragment is not an endpoint this
+                // Kernel should inject into an environment.
+                let Ok(url) = url::Url::parse(endpoint) else {
+                    continue;
+                };
+                if !matches!(url.scheme(), "http" | "https")
+                    || !url.username().is_empty()
+                    || url.password().is_some()
+                    || url.query().is_some()
+                    || url.fragment().is_some()
+                {
+                    continue;
+                }
+                per_ref.insert(
+                    reference.clone(),
+                    CredentialBinding {
+                        endpoint: endpoint.to_string(),
+                        tls: tls.to_string(),
+                    },
+                );
+            }
+            if !per_ref.is_empty() {
+                per_workspace.insert(workspace.to_lowercase(), per_ref);
+            }
+        }
+        if !per_workspace.is_empty() {
+            out.insert(plugin.clone(), per_workspace);
         }
     }
+    out
 }
-
 pub fn parse_adapter_plugins(raw: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for entry in raw.split(',') {
@@ -601,6 +661,10 @@ mod tests {
             "https://zabbix.example/api_jsonrpc.php"
         );
         assert!(parse_credential_bindings("{not json").is_empty());
+        let userinfo = r#"{"a.plugin":{"00000000-0000-4000-8000-00000000000a":{"secretref:a":{"endpoint":"https://user:pw@zabbix.example/api_jsonrpc.php","tls":"VERIFY"}}}}"#;
+        assert!(parse_credential_bindings(userinfo).is_empty());
+        let bad_tls = r#"{"a.plugin":{"00000000-0000-4000-8000-00000000000a":{"secretref:a":{"endpoint":"https://zabbix.example/api_jsonrpc.php","tls":"INSECURE"}}}}"#;
+        assert!(parse_credential_bindings(bad_tls).is_empty());
     }
 
     #[test]

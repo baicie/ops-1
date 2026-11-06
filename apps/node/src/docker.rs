@@ -4,6 +4,43 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
+/// A command line safe to put in an error, log or deployment status.
+///
+/// `docker create` carries plugin secrets through `--env`, and the error context
+/// used to join every argument, so a create failure wrote
+/// `OPSWEAVE_PLUGIN_SECRETS=<token>` into the Node log, the instance status and
+/// the Kernel's `last_error`. Values are never logged: every `--env` value is
+/// redacted, and a secret-shaped `KEY=VALUE` is redacted even without the flag.
+fn redacted_command(args: &[&str]) -> String {
+    let mut out = Vec::with_capacity(args.len());
+    let mut redact_next = false;
+    for arg in args {
+        if redact_next {
+            out.push("[redacted]".to_string());
+            redact_next = false;
+            continue;
+        }
+        if *arg == "--env" || *arg == "--build-arg" {
+            out.push((*arg).to_string());
+            redact_next = true;
+            continue;
+        }
+        if let Some((key, _)) = arg.split_once('=') {
+            let key_upper = key.to_ascii_uppercase();
+            if key_upper.starts_with("OPSWEAVE_")
+                && (key_upper.contains("SECRET")
+                    || key_upper.contains("TOKEN")
+                    || key_upper.contains("PASSWORD"))
+            {
+                out.push(format!("{key}=[redacted]"));
+                continue;
+            }
+        }
+        out.push((*arg).to_string());
+    }
+    out.join(" ")
+}
+
 #[derive(Debug, Clone)]
 pub struct DockerAdapter {
     pub binary: String,
@@ -61,8 +98,13 @@ impl DockerAdapter {
             self.command().args(args).output(),
         )
         .await
-        .with_context(|| format!("docker {} timed out after {seconds}s", args.join(" ")))?
-        .with_context(|| format!("run docker {}", args.join(" ")))?;
+        .with_context(|| {
+            format!(
+                "docker {} timed out after {seconds}s",
+                redacted_command(args)
+            )
+        })?
+        .with_context(|| format!("run docker {}", redacted_command(args)))?;
         if !output.status.success() {
             return Err(anyhow!(
                 "docker {} failed: {}",
@@ -256,6 +298,14 @@ impl DockerAdapter {
             if !key.is_empty() && key.len() <= 128 && value.len() <= 8192 {
                 args.push("--env".to_string());
                 args.push(format!("{key}={value}"));
+            } else {
+                // A dropped entry is not a warning the plugin can recover from:
+                // it will fail closed. Say so (the key is metadata; the value is
+                // never logged) instead of silently starting under-provisioned.
+                tracing::warn!(
+                    key = %key,
+                    "plugin env entry is too large or has an invalid key and was not passed to the container"
+                );
             }
         }
         if let Some(token_file) = token_file {
@@ -385,7 +435,23 @@ mod tests {
 
 #[cfg(test)]
 mod run_tests {
-    use super::DockerAdapter;
+    use super::{redacted_command, DockerAdapter};
+
+    #[test]
+    fn docker_error_context_never_contains_env_values() {
+        let args = [
+            "create",
+            "--env",
+            "OPSWEAVE_PLUGIN_SECRETS={\"ws\":{\"secretref:x\":\"super-secret-token\"}}",
+            "--env",
+            "OPSWEAVE_INSTANCE_ID=123",
+            "image",
+        ];
+        let redacted = redacted_command(&args);
+        assert!(!redacted.contains("super-secret-token"));
+        assert!(!redacted.contains("OPSWEAVE_INSTANCE_ID=123"));
+        assert!(redacted.contains("--env [redacted]"));
+    }
     #[tokio::test]
     async fn list_managed_simple_command() {
         let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into());
