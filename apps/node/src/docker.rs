@@ -1,8 +1,20 @@
 use anyhow::{anyhow, Context};
 use opsweave_contracts::DesiredWorkload;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::process::{Child, Command};
+
+/// Environment entries are passed as individual `docker create --env` argv
+/// elements. Keep each one well below Linux's 128 KiB single-argument limit
+/// while leaving room for multi-workspace secret/binding maps. Above these
+/// limits the deployment fails with `NODE_PLUGIN_ENV_TOO_LARGE`; an instance
+/// never starts with part of its configuration silently missing.
+const MAX_ENV_ENTRY_BYTES: usize = 32 * 1024;
+const MAX_ENV_TOTAL_BYTES: usize = 256 * 1024;
+/// Docker stderr is untrusted input. It is kept for diagnosis, but secret
+/// values from the command line are masked and the remainder is bounded.
+const MAX_STDERR_CHARS: usize = 4096;
 
 /// A command line safe to put in an error, log or deployment status.
 ///
@@ -39,6 +51,138 @@ fn redacted_command(args: &[&str]) -> String {
         out.push((*arg).to_string());
     }
     out.join(" ")
+}
+
+/// Values that must never be echoed from Docker's stderr.
+///
+/// Every `--env`/`--build-arg` value is collected (plus secret-shaped
+/// `KEY=VALUE` arguments outside those flags), and JSON containers are walked
+/// so an individual token is masked even when stderr quotes only that token.
+/// Values shorter than 8 bytes are skipped because masking e.g. `1` would
+/// destroy diagnostics; such a value has too little entropy to be a useful
+/// secret on its own.
+fn sensitive_values(args: &[&str]) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut capture_next = false;
+    for arg in args {
+        if capture_next {
+            let value = arg.split_once('=').map(|(_, value)| value).unwrap_or(arg);
+            collect_secret_text(value, &mut values);
+            capture_next = false;
+            continue;
+        }
+        if *arg == "--env" || *arg == "--build-arg" {
+            capture_next = true;
+            continue;
+        }
+        if let Some((key, value)) = arg.split_once('=') {
+            if is_secret_key(key) {
+                collect_secret_text(value, &mut values);
+            }
+        }
+    }
+    values.retain(|value| value.len() >= 8);
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    values.dedup();
+    values
+}
+
+fn is_secret_key(key: &str) -> bool {
+    let key = key.to_ascii_uppercase();
+    key.starts_with("OPSWEAVE_")
+        && (key.contains("SECRET")
+            || key.contains("TOKEN")
+            || key.contains("PASSWORD")
+            || key.contains("CREDENTIAL")
+            || key.ends_with("DATABASE_URL"))
+}
+
+fn collect_secret_text(value: &str, out: &mut Vec<String>) {
+    if value.len() >= 8 {
+        out.push(value.to_string());
+    }
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(value) {
+        collect_json_strings(&parsed, out);
+    }
+}
+
+fn collect_json_strings(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) if text.len() >= 8 => out.push(text.clone()),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_strings(item, out);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                collect_json_strings(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn redact_sensitive(text: &str, values: &[String]) -> String {
+    let mut redacted = text.to_string();
+    for value in values {
+        redacted = redacted.replace(value.as_str(), "[redacted]");
+    }
+    redacted
+}
+
+fn bounded(text: &str) -> String {
+    if text.chars().count() <= MAX_STDERR_CHARS {
+        return text.to_string();
+    }
+    let mut truncated: String = text.chars().take(MAX_STDERR_CHARS).collect();
+    truncated.push_str("…[truncated]");
+    truncated
+}
+
+fn docker_failure(
+    args: &[&str],
+    status: &std::process::ExitStatus,
+    stderr: &[u8],
+) -> anyhow::Error {
+    let action = args.first().copied().unwrap_or("command");
+    let exit = status
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "signal".to_string());
+    let detail = redact_sensitive(
+        String::from_utf8_lossy(stderr).trim(),
+        &sensitive_values(args),
+    );
+    let detail = bounded(&detail);
+    if detail.is_empty() {
+        return anyhow!("docker {action} failed (exit {exit}): no stderr");
+    }
+    anyhow!("docker {action} failed (exit {exit}): {detail}")
+}
+
+fn validate_env_budget(extra_env: &BTreeMap<String, String>) -> anyhow::Result<()> {
+    let mut total = 0usize;
+    for (key, value) in extra_env {
+        if key.is_empty() || key.len() > 128 {
+            return Err(anyhow!(
+                "NODE_PLUGIN_ENV_INVALID_KEY: env key {key:?} is empty or longer than 128 bytes"
+            ));
+        }
+        total = total.saturating_add(key.len() + value.len());
+        if value.len() > MAX_ENV_ENTRY_BYTES {
+            return Err(anyhow!(
+                "NODE_PLUGIN_ENV_TOO_LARGE: {key} is {} bytes, the per-entry limit is {MAX_ENV_ENTRY_BYTES} bytes; the instance was not started because it would run without this configuration",
+                value.len()
+            ));
+        }
+    }
+    if total > MAX_ENV_TOTAL_BYTES {
+        return Err(anyhow!(
+            "NODE_PLUGIN_ENV_TOO_LARGE: environment totals {total} bytes, the limit is {MAX_ENV_TOTAL_BYTES} bytes; the instance was not started"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +226,7 @@ impl DockerAdapter {
         if !output.status.success() {
             return Err(anyhow!(
                 "docker engine is unavailable: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
+                bounded(String::from_utf8_lossy(&output.stderr).trim())
             ));
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -106,11 +250,7 @@ impl DockerAdapter {
         })?
         .with_context(|| format!("run docker {}", redacted_command(args)))?;
         if !output.status.success() {
-            return Err(anyhow!(
-                "docker {} failed: {}",
-                args.first().unwrap_or(&""),
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+            return Err(docker_failure(args, &output.status, &output.stderr));
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
@@ -166,7 +306,7 @@ impl DockerAdapter {
             if lower.contains("no such object") || lower.contains("no such container") {
                 return Ok(None);
             }
-            return Err(anyhow!("docker inspect failed: {}", stderr.trim()));
+            return Err(anyhow!("docker inspect failed: {}", bounded(stderr.trim())));
         }
         let raw = String::from_utf8_lossy(&output.stdout);
         let mut parts = raw.trim().split('|');
@@ -234,6 +374,7 @@ impl DockerAdapter {
         extra_env: &std::collections::BTreeMap<String, String>,
         token_file: Option<&Path>,
     ) -> anyhow::Result<String> {
+        validate_env_budget(extra_env)?;
         let name = container_name(node_id, workload.instance_id);
         self.remove_if_exists(&name).await;
         let cpu = format!("{:.3}", workload.resources.cpu_millis as f64 / 1000.0);
@@ -295,18 +436,8 @@ impl DockerAdapter {
             env_version.clone(),
         ];
         for (key, value) in extra_env {
-            if !key.is_empty() && key.len() <= 128 && value.len() <= 8192 {
-                args.push("--env".to_string());
-                args.push(format!("{key}={value}"));
-            } else {
-                // A dropped entry is not a warning the plugin can recover from:
-                // it will fail closed. Say so (the key is metadata; the value is
-                // never logged) instead of silently starting under-provisioned.
-                tracing::warn!(
-                    key = %key,
-                    "plugin env entry is too large or has an invalid key and was not passed to the container"
-                );
-            }
+            args.push("--env".to_string());
+            args.push(format!("{key}={value}"));
         }
         if let Some(token_file) = token_file {
             let token_dir = token_file
@@ -405,10 +536,41 @@ pub fn container_name(node_id: uuid::Uuid, instance_id: uuid::Uuid) -> String {
     format!("opsweave-{node_id}-{instance_id}")
 }
 
+/// A test that writes an executable script and runs it immediately can race a
+/// sibling test's `fork`/`exec`: on Linux the fresh inode stays writable in the
+/// forked child until it execs, and `execve` then fails with ETXTBSY. This is a
+/// harness race, not product behaviour; the product never retries Docker. The
+/// retry is bounded, and only that OS error is retried.
+#[cfg(test)]
+fn is_text_file_busy(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains("Text file busy"))
+}
+
+#[cfg(test)]
+async fn retry_exec_busy<T, F, Fut>(mut op: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let mut attempts = 0u32;
+    loop {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(error) if attempts < 20 && is_text_file_busy(&error) => {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
-    use super::DockerAdapter;
+    use super::{retry_exec_busy, DockerAdapter};
 
     #[tokio::test]
     async fn stop_and_remove_reports_a_surviving_container() {
@@ -428,14 +590,22 @@ mod tests {
             script.to_string_lossy().into_owned(),
             "unix://unused".into(),
         );
-        let error = adapter.stop_and_remove("surviving").await.unwrap_err();
-        assert!(error.to_string().contains("still running"));
+        let error = retry_exec_busy(|| adapter.stop_and_remove("surviving"))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("still running"),
+            "unexpected stop/remove error: {error:#}"
+        );
     }
 }
 
 #[cfg(test)]
 mod run_tests {
-    use super::{redacted_command, DockerAdapter};
+    use super::{
+        redacted_command, retry_exec_busy, validate_env_budget, DockerAdapter, MAX_ENV_ENTRY_BYTES,
+    };
+    use std::collections::BTreeMap;
 
     #[test]
     fn docker_error_context_never_contains_env_values() {
@@ -453,10 +623,104 @@ mod run_tests {
         assert!(redacted.contains("--env [redacted]"));
     }
     #[tokio::test]
+    async fn docker_create_stderr_is_redacted_before_it_reaches_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("docker");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+case "$1" in
+  create)
+    echo 'daemon: invalid env OPSWEAVE_PLUGIN_SECRETS={"ws":{"secretref:zabbix/main":"super-secret-token"}}' >&2
+    echo 'daemon: adapter key adapter-signing-secret-value rejected' >&2
+    exit 125
+    ;;
+  *) exit 0 ;;
+esac
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let adapter = DockerAdapter::new(
+            script.to_string_lossy().into_owned(),
+            "unix://unused".into(),
+        );
+        let args = [
+            "create",
+            "--env",
+            "OPSWEAVE_PLUGIN_SECRETS={\"ws\":{\"secretref:zabbix/main\":\"super-secret-token\"}}",
+            "--env",
+            "OPSWEAVE_EVIDENCE_ADAPTERS={\"zabbix\":\"adapter-signing-secret-value\"}",
+            "image",
+        ];
+        let error = format!(
+            "{:#}",
+            retry_exec_busy(|| adapter.run_with_timeout(&args, 5))
+                .await
+                .unwrap_err()
+        );
+        assert!(!error.contains("super-secret-token"), "{error}");
+        assert!(!error.contains("adapter-signing-secret-value"), "{error}");
+        assert!(error.contains("docker create failed"), "{error}");
+        assert!(error.contains("125"), "{error}");
+        assert!(
+            error.contains("invalid env"),
+            "diagnostics were destroyed: {error}"
+        );
+        assert!(error.contains("[redacted]"), "{error}");
+    }
+
+    #[test]
+    fn one_oversized_env_entry_fails_the_deployment() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "OPSWEAVE_PLUGIN_SECRETS".to_string(),
+            format!("super-secret-token-{}", "x".repeat(MAX_ENV_ENTRY_BYTES)),
+        );
+        let error = validate_env_budget(&env).unwrap_err().to_string();
+        assert!(error.contains("NODE_PLUGIN_ENV_TOO_LARGE"), "{error}");
+        assert!(error.contains("OPSWEAVE_PLUGIN_SECRETS"), "{error}");
+        assert!(!error.contains("super-secret-token"), "{error}");
+    }
+
+    #[test]
+    fn total_env_budget_fails_instead_of_dropping_entries() {
+        let mut env = BTreeMap::new();
+        for index in 0..9 {
+            env.insert(format!("ENTRY_{index}"), "x".repeat(30 * 1024));
+        }
+        let error = validate_env_budget(&env).unwrap_err().to_string();
+        assert!(error.contains("NODE_PLUGIN_ENV_TOO_LARGE"), "{error}");
+        assert!(error.contains("totals"), "{error}");
+    }
+
+    #[test]
+    fn valid_env_and_invalid_keys_are_distinguished() {
+        let mut env = BTreeMap::new();
+        env.insert(
+            "OPSWEAVE_PLUGIN_SECRETS".to_string(),
+            "{\"a\":\"b\"}".to_string(),
+        );
+        assert!(validate_env_budget(&env).is_ok());
+
+        let mut invalid = BTreeMap::new();
+        invalid.insert(String::new(), "value".to_string());
+        let error = validate_env_budget(&invalid).unwrap_err().to_string();
+        assert!(error.contains("NODE_PLUGIN_ENV_INVALID_KEY"), "{error}");
+    }
+
+    #[tokio::test]
     async fn list_managed_simple_command() {
         let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into());
+        // The timeout exists to catch a hang, not to measure latency: 2s was
+        // flaky on loaded CI runners where fork/exec of the fake binary can
+        // take longer than the assertion budget.
         let result = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
+            std::time::Duration::from_secs(15),
             adapter.list_managed(uuid::Uuid::new_v4()),
         )
         .await
@@ -467,7 +731,7 @@ mod run_tests {
     #[tokio::test]
     async fn run_simple_command() {
         let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into());
-        let result = tokio::time::timeout(std::time::Duration::from_secs(2), adapter.run(&["x"]))
+        let result = tokio::time::timeout(std::time::Duration::from_secs(15), adapter.run(&["x"]))
             .await
             .expect("inner run hung");
         assert!(result.is_ok());
