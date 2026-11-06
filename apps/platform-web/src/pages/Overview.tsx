@@ -18,13 +18,14 @@ import { statusForCode } from '../components/status-tone';
 import { auditEmptyKind } from '../lib/audit-scope';
 import { localizeAttentionDetail, localizeAttentionTitle } from '../lib/kernel-messages';
 import { isUnconfigured } from '../lib/platform-status';
+import { eventLabelKey } from './overview-events';
 
 /** Only the fields this view reads; /api/v1/diagnostics is a plain object payload. */
 interface DiagnosticsView {
   kernel: { version: string; database: string; uptimeSeconds: number };
 }
 
-const SEVERITY_STATE: Record<string, IndicatorState> = { critical: 'error', warning: 'attention', info: 'notConfigured' };
+const SEVERITY_STATE: Record<string, IndicatorState> = { critical: 'error', warning: 'attention', info: 'info' };
 
 /** Severity is its own vocabulary: an INFO notice is not a permission wall. */
 const SEVERITY_LABEL: Record<string, MessageKey> = {
@@ -50,41 +51,6 @@ const SETUP_STEPS: Array<{ step: MessageKey; detail: MessageKey }> = [
   { step: 'overview.setup.step2', detail: 'overview.setup.step2.detail' },
   { step: 'overview.setup.step3', detail: 'overview.setup.step3.detail' },
 ];
-
-/**
- * Audit rows read as sentences, so the known event vocabulary gets a label.
- *
- * "Known" means the codes the kernel actually writes into kernel.audit_events (grep of
- * apps/kernel/src), not the six this table happened to start with: `plugin.activated` is what a
- * plugin activation writes, and it reached the console as a raw dot-path in a mono font while
- * `pipeline.draft_created` beside it read "Draft created".
- */
-const EVENT_LABELS: Record<string, MessageKey> = {
-  'pipeline.created': 'event.pipeline.created',
-  'pipeline.draft_created': 'event.pipeline.draftCreated',
-  'pipeline.draft_updated': 'event.pipeline.draftUpdated',
-  'pipeline.draft_published': 'event.pipeline.draftPublished',
-  'pipeline.revision_published': 'event.pipeline.revisionPublished',
-  'pipeline.job_completed': 'event.pipeline.jobCompleted',
-  'pipeline.job_failed': 'event.pipeline.jobFailed',
-  'pipeline.job_terminalized': 'event.pipeline.jobTerminalized',
-  'plugin.activated': 'event.plugin.activated',
-  'plugin.staged': 'event.plugin.staged',
-  'plugin.disabled': 'event.plugin.disabled',
-  'plugin.uninstalled': 'event.plugin.uninstalled',
-  'plugin.rejected': 'event.plugin.rejected',
-  'deployment.created': 'event.deployment.created',
-  'node.enrolled': 'event.node.enrolled',
-  'node.revoked': 'event.node.revoked',
-  'node.enrollment_token.created': 'event.node.enrollmentTokenCreated',
-  'publisher.added': 'event.publisher.added',
-  'publisher.revoked': 'event.publisher.revoked',
-  'user.created': 'event.user.created',
-  'user.updated': 'event.user.updated',
-  'capability.granted': 'event.capability.granted',
-  'capability.revoked': 'event.capability.revoked',
-  'capability.service_invoke': 'event.capability.serviceInvoke',
-};
 
 /**
  * A data source has three outcomes, and only one of them is a verdict about the source.
@@ -161,36 +127,78 @@ export function OverviewPage() {
   const unconfigured = isUnconfigured(data);
 
   const criticalCount = data ? data.attention.filter((item) => item.severity === 'critical').length : 0;
-  // The band says one thing. Its three children (state, headline, when) are the same three
-  // facts the old banner carried, minus the card frame and the icon bubble.
-  //
-  // The healthy branch is the one V5 left repeating itself: the chip read "READY", the headline
-  // read "Platform is ready" and the line under it said "every desired replica is READY", while
-  // the topbar pill already said "Platform ready" - one verdict, four times. The chip carries
-  // the word (the rule v5-acceptance pins: the chip states it, the headline explains it), so the
-  // headline now states the grounds no other line on the page states.
+  /**
+   * The Kernel's health code and the counts this page prints are two facts that can disagree.
+   *
+   * `Overview.health` is derived from the attention list (apps/kernel/src/plugins.rs:647-653), so a
+   * node heartbeating as DEGRADED - or a desired replica that is not READY - is not an attention
+   * row, and the code can still read READY. The page used to print "every desired replica is
+   * ready" in that case, which is exactly the contradiction the visual-system brief forbids. The
+   * band therefore presents a reconciled verdict: READY is only shown when the counts it stands
+   * on are all ready. The Kernel's own code stays visible in `data-kernel-health`; no API field is
+   * reinterpreted and no payload is rewritten.
+   */
+  const nodesAllReady = data ? data.nodesTotal === 0 || data.nodesReady === data.nodesTotal : true;
+  const instancesAllReady = data ? data.instancesTotal === 0 || data.instancesReady === data.instancesTotal : true;
+  const countsDegraded = !nodesAllReady || !instancesAllReady;
+  const presentedHealth = !data
+    ? 'UNKNOWN'
+    : unconfigured
+      ? 'NOT_CONFIGURED'
+      : data.health === 'READY' && countsDegraded
+        ? 'DEGRADED'
+        : data.health;
+  const bandTone = unconfigured
+    ? 'neutral'
+    : presentedHealth === 'READY'
+      ? 'ok'
+      : presentedHealth === 'DEGRADED'
+        ? 'danger'
+        : presentedHealth === 'ATTENTION'
+          ? 'warn'
+          : 'neutral';
+  const countsDetail = data
+    ? !nodesAllReady
+      ? t('overview.module.nodes.detail', { ready: data.nodesReady, total: data.nodesTotal })
+      : !instancesAllReady
+        ? t('overview.module.runtime.detail', { ready: data.instancesReady, total: data.instancesTotal, deployments: data.activeDeployments })
+        : null
+    : null;
+  // The headline states the grounds the chip's word does not: why the verdict is what it is.
   const healthHeadline = !data
     ? ''
     : unconfigured
       ? t('overview.setup.headline')
-      : data.health === 'READY'
-      ? t('overview.health.allClearDetail')
-      : data.health === 'DEGRADED'
-        ? t(criticalCount === 1 ? 'overview.health.criticalIssue' : 'overview.health.criticalIssues', { count: criticalCount })
-        : t('overview.health.attention');
+      : presentedHealth === 'READY'
+        ? t('overview.health.allClearDetail')
+        : presentedHealth === 'DEGRADED'
+          ? data.health === 'READY'
+            ? t('overview.health.countsConflict')
+            : criticalCount > 0
+              ? t(criticalCount === 1 ? 'overview.health.criticalIssue' : 'overview.health.criticalIssues', { count: criticalCount })
+              : t('overview.health.degraded')
+          : presentedHealth === 'ATTENTION'
+            ? t('overview.health.attention')
+            : t('overview.health.unknown');
   // Which state the chip draws, and whether it must print a wire code: a code this build does
   // not map is the one case where the verbatim token is the honest label (status-indicator.ts).
-  const bandState = unconfigured ? 'notConfigured' : indicatorStateForCode(data?.health);
-  const bandCode = !unconfigured && bandState === 'unknown' ? data?.health ?? undefined : undefined;
-  // The detail line is rendered only where it adds a fact: the setup instructions, or the first
-  // open issue. Under a headline that already states the grounds it was that sentence twice.
+  const bandState = unconfigured ? 'notConfigured' : indicatorStateForCode(presentedHealth);
+  const bandCode = !unconfigured && bandState === 'unknown' ? presentedHealth : undefined;
+  // The detail line is rendered only where it adds a fact: the setup instructions, the first
+  // mismatch between the verdict and its counts, or the first open issue.
+  const attentionDetail = data && data.attention.length ? localizeAttentionDetail(data.attention[0].detail, t) : null;
   const healthDetail = !data
     ? null
     : unconfigured
       ? t('overview.health.notConfiguredDetail')
-      : data.attention.length
-        ? localizeAttentionDetail(data.attention[0].detail, t).text
-        : null;
+      : countsDetail
+        ? countsDetail
+        : attentionDetail
+          ? attentionDetail.text
+          : presentedHealth === 'UNKNOWN'
+            ? t('overview.health.unknownDetail')
+            : null;
+  const healthDetailFromKernel = !countsDetail && attentionDetail?.source === 'kernel';
   const days = data ? groupEventsByDay(data.recentEvents) : [];
   /**
    * Why the feed is empty, when it is. This read names no subject type, so the kernel drops
@@ -223,13 +231,14 @@ export function OverviewPage() {
       >
         {data ? (
           <>
-            {/* Layer 1 - the verdict, then the counts. One observation stamp covers both:
-                four modules each printing their own copy of it was four copies of one fact. */}
+            {/* Layer 1 - the verdict, then the counts. The observation stamps live in the
+                source line under the strip: one per source, so neither is copied onto four cards. */}
             <div className="status-summary">
               <section
-                className={`health-band tone-${unconfigured ? 'neutral' : data.health === 'READY' ? 'ok' : data.health === 'DEGRADED' ? 'danger' : 'warn'}`}
+                className={`health-band tone-${bandTone}`}
                 aria-label={t('overview.health.aria')}
-                data-health={unconfigured ? 'NOT_CONFIGURED' : data.health}
+                data-health={presentedHealth}
+                data-kernel-health={data.health}
               >
                 <div className="health-band-state">
                   {/* No label prop: a state this mapping knows prints its own localized word.
@@ -240,10 +249,9 @@ export function OverviewPage() {
                 </div>
                 <div className="health-band-copy">
                   <h2>{healthHeadline}</h2>
-                  {healthDetail ? <p>{healthDetail}</p> : null}
+                  {healthDetail ? <p>{healthDetail}{healthDetailFromKernel ? <span className="server-source">{t('ui.textSource.kernel')}</span> : null}</p> : null}
                 </div>
-                <div className="health-band-side" data-testid="overview-observed">
-                  <span title={observedAt ?? undefined}>{observedAt ? t('ui.observedAt', { at: formatDate(observedAt) }) : t('ui.notObserved')}</span>
+                <div className="health-band-side">
                   {/* A verdict with no verb is a status snapshot. The band now hands the
                       operator the destination of the first thing that needs doing, instead of
                       an in-page anchor to a list they still have to read. */}
@@ -299,6 +307,16 @@ export function OverviewPage() {
                     href="/admin/plugins"
                   />
                 </div>
+                <p className="stat-note ow-source-line" data-testid="overview-sources" aria-label={t('overview.sources.aria')}>
+                  <span data-source="overview" data-testid="overview-observed" data-observed-at={observedAt ?? ''} data-source-state={overviewSource}>
+                    {observedAt ? t('overview.sources.overview', { at: formatDate(observedAt) }) : t('overview.sources.overviewPending')}
+                  </span>
+                  {isAdmin ? (
+                    <span data-source="diagnostics" data-observed-at={diagnostics.observedAt ?? ''} data-source-state={kernelSource}>
+                      {diagnostics.observedAt ? t('overview.sources.diagnostics', { at: formatDate(diagnostics.observedAt) }) : t('overview.sources.diagnosticsPending')}
+                    </span>
+                  ) : null}
+                </p>
               </section>
             </div>
 
@@ -419,12 +437,13 @@ export function OverviewPage() {
                         <li className="event-day" aria-hidden="true">{dayLabel(t, day.key)}</li>
                         {day.rows.map((row) => {
                           const quiet = QUIET_RESULTS.has(row.result.toUpperCase());
+                          const labelKey = eventLabelKey(row.eventType);
                           const inner = (
                             <>
                               <span className="event-time"><TimeAgo value={row.at} /></span>
                               <span className="event-body">
                                 <span className="event-title">
-                                  <strong className={EVENT_LABELS[row.eventType] ? undefined : 'mono'}>{EVENT_LABELS[row.eventType] ? t(EVENT_LABELS[row.eventType]) : row.eventType}</strong>
+                                  <strong className={labelKey ? undefined : 'mono'}>{labelKey ? t(labelKey) : row.eventType}</strong>
                                   {row.count > 1 ? <span className="event-count" title={t('overview.events.repeated', { count: row.count })}>×{row.count}</span> : null}
                                   {!quiet ? (
                                     <span className="event-result">
@@ -441,7 +460,7 @@ export function OverviewPage() {
                             </>
                           );
                           return (
-                            <li key={row.key} data-event={row.eventType}>
+                            <li key={row.key} data-event={row.eventType} data-event-known={labelKey ? 'true' : 'false'}>
                               {row.href ? <Link className="event-row" to={row.href}>{inner}</Link> : <div className="event-row">{inner}</div>}
                             </li>
                           );

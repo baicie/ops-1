@@ -118,9 +118,9 @@ describe('controls: two heights plus a touch floor (token-table R3)', () => {
   it('authors no interactive control height off the two tiers', () => {
     // The gate's own decoration list: a dot, a brand mark or an icon ring is sized art, not a
     // control, and its height is not a tier. Everything else in 24..48px must read a token.
-    const DECORATION = ['.avatar', '.brand-', '.empty-icon', '.error-icon', '.skeleton', '.progress',
+    const DECORATION = ['.avatar', '.brand-', '.empty-icon', '.skeleton', '.progress',
       '.attention-icon', '.entity-icon', '.investigation-slot-mark', '.dot', '.bar', '.track',
-      '.spinner', '.glyph', '.rail', '.swatch', '.chart', '.timeline', '.hairline', '.metric-value',
+      '.spinner', '.glyph', '.rail', '.swatch', '.chart', '.timeline', '.hairline',
       '.node-summary', '.node-type-icon', '.event-marker', '.step-index', '.row-action',
       '.setup-step-num', '.status-entity', '.ow-metric-value', '.ow-filter-fade', '.toast',
       '.nav-link', 'thead th'];

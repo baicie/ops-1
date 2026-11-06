@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth';
 import { canEnterSurface, surfaceEntryPath, type Surface } from '../../surface';
 import { Icon } from '../../components/Icons';
-import { PageHeader } from '../../components/Ui';
+import { PageHeader } from '../../components/app/page-header';
 import { Avatar } from '../../components/app/avatar';
 import { Button, buttonVariants } from '../../components/ui/button';
 import { SUPPORTED_LOCALES, useI18n } from '../../i18n';

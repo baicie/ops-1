@@ -18,6 +18,8 @@
  *      is exit 2: a gate that quietly invents its own number is worse than no gate at all.
  *
  *   node scripts/check-ui-metrics.mjs artifacts/ui/visual-v3/audit
+ *   node scripts/check-ui-metrics.mjs --manifest route-manifest.json artifacts/staging-preview/metrics
+ *   node scripts/check-ui-metrics.mjs --matrix matrix-manifest.json artifacts/ui/observability/metrics
  *   node scripts/check-ui-metrics.mjs --template artifacts/ui/visual-v3/audit
  *
  * Exit: 0 every assertion passed; 1 at least one violation; 2 the gate could not run (no input,
@@ -29,7 +31,25 @@ import { join, relative, resolve } from 'node:path';
 const ROOT = process.cwd();
 const SPEC = resolve(ROOT, process.env.UI_METRICS_SPEC || 'docs/design/ui-visual-v3/spec/table-spec.md');
 const argv = process.argv.slice(2);
-const inputs = argv.filter((a) => !a.startsWith('--'));
+function takeFlag(name) {
+  const index = argv.indexOf('--' + name);
+  if (index === -1) return { index: -1, value: null };
+  const value = argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    console.error('check-ui-metrics: --' + name + ' needs a path. A gate that treats a missing expectation file as "nothing expected" is the pass-by-default bug this flag exists to close.');
+    process.exit(2);
+  }
+  return { index, value };
+}
+const manifestFlag = takeFlag('manifest');
+const manifestPath = manifestFlag.value;
+const matrixFlag = takeFlag('matrix');
+const matrixPath = matrixFlag.value;
+if (manifestPath && matrixPath) {
+  console.error('check-ui-metrics: --manifest and --matrix answer different questions and index different route lists. Run them as two commands.');
+  process.exit(2);
+}
+const inputs = argv.filter((a, i) => !a.startsWith('--') && (manifestFlag.index === -1 || i !== manifestFlag.index + 1) && (matrixFlag.index === -1 || i !== matrixFlag.index + 1));
 const withTemplate = argv.includes('--template');
 
 /* ── thresholds: parsed from the spec, never retyped ───────────────────────── */
@@ -151,6 +171,13 @@ const CARD_CLIPPED_MAX = 0;
 
 const CODES = [
   'page-errored',
+  'page-map-empty',
+  'measurement-format',
+  'config-unmeasured',
+  'route-missing',
+  'route-unknown',
+  'matrix-missing',
+  'matrix-duplicate',
   'overflow-unmeasured',
   'overflow>0',
   'identity-unmeasured',
@@ -309,14 +336,165 @@ console.log(
 );
 console.log('  cardClipped = ' + CARD_CLIPPED_MAX + ' @<768 (§2.5 "the disambiguator · age is never ellipsised")');
 
+/**
+ * A manifest is the list of routes this audit owns. It is matched per artifact, not across the
+ * union of artifacts: one `_metrics_<label>.json` is one pass (viewport × theme × locale), and a
+ * pass that silently dropped a route has not measured that route even if another pass did.
+ *
+ * Matching is on the route part of `"<route> @<viewport>"`, because the detail routes carry an id
+ * (`/admin/nodes/:id`) that changes every run. A measured route the manifest does not name is a
+ * FAIL too: a typo in the harness would otherwise add a page nobody asked for and hide the one
+ * that disappeared.
+ */
+let manifest = null;
+if (manifestPath) {
+  const path = resolve(ROOT, manifestPath);
+  if (!existsSync(path)) {
+    console.error('check-ui-metrics: cannot read the route manifest ' + manifestPath);
+    process.exit(2);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (cause) {
+    console.error('check-ui-metrics: the route manifest ' + manifestPath + ' is not valid JSON: ' + cause.message);
+    process.exit(2);
+  }
+  const routes = Array.isArray(doc.routes) ? doc.routes : [];
+  if (routes.length === 0) {
+    console.error('check-ui-metrics: the route manifest ' + manifestPath + ' declares no routes; an empty manifest asserts nothing');
+    process.exit(2);
+  }
+  try {
+    manifest = routes.map((route, index) => {
+      if (typeof route.match !== 'string') throw new Error('route #' + index + ' has no `match` pattern');
+      return { key: route.key || route.match, re: new RegExp(route.match) };
+    });
+  } catch (cause) {
+    console.error('check-ui-metrics: cannot compile the route manifest ' + manifestPath + ': ' + cause.message);
+    process.exit(2);
+  }
+  console.log('check-ui-metrics: route manifest ' + relative(ROOT, path) + ' (' + manifest.length + ' routes)');
+}
+
+/**
+ * The execution matrix, declared rather than inferred.
+ *
+ * The route manifest answers "which routes"; it cannot answer "was every viewport × theme ×
+ * locale actually run", because an artifact name is not a promise. This manifest names all four
+ * axes, and the gate builds the expected set and checks it by membership. File count is never
+ * used as evidence: three files that all measured 1440-light-en would satisfy a count and fail
+ * this.
+ */
+let matrix = null;
+if (matrixPath) {
+  const path = resolve(ROOT, matrixPath);
+  if (!existsSync(path)) {
+    console.error('check-ui-metrics: cannot read the matrix manifest ' + matrixPath);
+    process.exit(2);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (cause) {
+    console.error('check-ui-metrics: the matrix manifest ' + matrixPath + ' is not valid JSON: ' + cause.message);
+    process.exit(2);
+  }
+  try {
+    const routes = Array.isArray(doc.routes) ? doc.routes : [];
+    const viewports = Array.isArray(doc.viewports) ? doc.viewports : [];
+    const themes = Array.isArray(doc.themes) ? doc.themes : [];
+    const locales = Array.isArray(doc.locales) ? doc.locales : [];
+    if (!routes.length || !viewports.length || !themes.length || !locales.length) {
+      throw new Error('routes, viewports, themes and locales must each be non-empty');
+    }
+    matrix = {
+      routes: routes.map((route, index) => {
+        if (typeof route.match !== 'string') throw new Error('route #' + index + ' has no `match` pattern');
+        return { key: route.key || route.match, re: new RegExp(route.match) };
+      }),
+      viewports: viewports.map((value) => {
+        if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('viewport ' + JSON.stringify(value) + ' is not a number');
+        return value;
+      }),
+      themes: themes.map((value) => {
+        if (typeof value !== 'string' || !value) throw new Error('theme ' + JSON.stringify(value) + ' is not a string');
+        return value;
+      }),
+      locales: locales.map((value) => {
+        if (typeof value !== 'string' || !value) throw new Error('locale ' + JSON.stringify(value) + ' is not a string');
+        return value;
+      }),
+    };
+  } catch (cause) {
+    console.error('check-ui-metrics: cannot read the matrix manifest ' + matrixPath + ': ' + cause.message);
+    process.exit(2);
+  }
+  const expected = matrix.routes.length * matrix.viewports.length * matrix.themes.length * matrix.locales.length;
+  console.log('check-ui-metrics: matrix manifest ' + relative(ROOT, path) +
+    ' (' + matrix.routes.length + ' routes × ' + matrix.viewports.length + ' viewports × ' +
+    matrix.themes.length + ' themes × ' + matrix.locales.length + ' locales = ' + expected + ' combinations)');
+}
+
+/** A malformed artifact is a named FAIL, not an uncaught stack trace. */
+function parseArtifact(file) {
+  try {
+    const doc = JSON.parse(readFileSync(file, 'utf8'));
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error('the artifact is not an object');
+    if (!doc.pages || typeof doc.pages !== 'object' || Array.isArray(doc.pages)) throw new Error('`pages` is not an object');
+    return { doc };
+  } catch (cause) {
+    return { error: cause.message };
+  }
+}
+
+const matrixSeen = new Map();
+
 let failures = 0;
 let pages = 0;
 for (const file of files) {
-  const doc = JSON.parse(readFileSync(file, 'utf8'));
+  const parsed = parseArtifact(file);
+  if (parsed.error) {
+    console.log('FAIL  ' + 'measurement-format'.padEnd(26) + relative(ROOT, file) + '  ' + parsed.error);
+    tally['measurement-format'] += 1;
+    failures += 1;
+    continue;
+  }
+  const doc = parsed.doc;
   const label = (doc.config && doc.config.label) || relative(ROOT, file);
-  const pageMap = doc.pages || {};
+  const pageMap = doc.pages;
+  const entries = Object.entries(pageMap);
   let localFailures = 0;
-  for (const [route, m] of Object.entries(pageMap)) {
+  const theme = doc.config && doc.config.theme;
+  const locale = doc.config && doc.config.locale;
+  // Every artifact names the pass it measured. Without these two fields a file is only a
+  // filename: `r390-light-zh.json` is a convention, not evidence of what the browser used.
+  if (typeof theme !== 'string' || !theme || typeof locale !== 'string' || !locale) {
+    console.log('FAIL  ' + 'config-unmeasured'.padEnd(26) + label + '  config.theme/locale must name the pass it measured');
+    tally['config-unmeasured'] += 1;
+    localFailures += 1;
+  }
+  const routeRules = matrix ? matrix.routes : manifest;
+  // The original fail-open: `{"pages":{}}` looped zero times, printed `ok ... pages=0` and exited 0.
+  // A pass that measured nothing is the loudest failure this gate has, not a green run.
+  if (entries.length === 0) {
+    console.log('FAIL  ' + 'page-map-empty'.padEnd(26) + label + '  the artifact records no page measurement; a run that measured nothing is a FAIL');
+    tally['page-map-empty'] += 1;
+    localFailures += 1;
+  }
+  const routesSeen = new Set();
+  for (const [route, m] of entries) {
+    if (routeRules) {
+      const pathPart = route.replace(/\s*@\d+$/, '');
+      const matched = routeRules.findIndex((entry) => entry.re.test(pathPart));
+      if (matched === -1) {
+        console.log('FAIL  ' + 'route-unknown'.padEnd(26) + label + '  ' + route + '  not named by the route manifest');
+        tally['route-unknown'] += 1;
+        localFailures += 1;
+      } else {
+        routesSeen.add(matched);
+      }
+    }
     // A route the harness recorded as failed is an unmeasured page, and an unmeasured page is a
     // FAIL - the same rule as a missing field, one level up. Silence here would let a route drop
     // out of the audit without changing the verdict.
@@ -327,9 +505,33 @@ for (const file of files) {
       continue;
     }
     pages += 1;
+    if (matrix && typeof theme === 'string' && typeof locale === 'string') {
+      const width = m.viewport && typeof m.viewport.w === 'number' ? m.viewport.w : null;
+      const pathPart = route.replace(/\s*@\d+$/, '');
+      const routeIndex = matrix.routes.findIndex((entry) => entry.re.test(pathPart));
+      if (width !== null && routeIndex !== -1) {
+        const combo = routeIndex + '|' + width + '|' + theme + '|' + locale;
+        if (matrixSeen.has(combo)) {
+          console.log('FAIL  ' + 'matrix-duplicate'.padEnd(26) + label + '  ' + route +
+            '  already measured by ' + matrixSeen.get(combo));
+          tally['matrix-duplicate'] += 1;
+          localFailures += 1;
+        } else {
+          matrixSeen.set(combo, label);
+        }
+      }
+    }
     for (const violation of violationsFor(m)) {
       console.log('FAIL  ' + violation.code.padEnd(26) + label + '  ' + route + '  ' + violation.detail);
       tally[violation.code] += 1;
+      localFailures += 1;
+    }
+  }
+  if (manifest) {
+    for (const [index, entry] of manifest.entries()) {
+      if (routesSeen.has(index)) continue;
+      console.log('FAIL  ' + 'route-missing'.padEnd(26) + label + '  ' + entry.key + '  declared by the manifest, never measured');
+      tally['route-missing'] += 1;
       localFailures += 1;
     }
   }
@@ -337,11 +539,33 @@ for (const file of files) {
   failures += localFailures;
 }
 
+if (matrix) {
+  let missing = 0;
+  for (const [routeIndex, route] of matrix.routes.entries()) {
+    for (const width of matrix.viewports) {
+      for (const theme of matrix.themes) {
+        for (const locale of matrix.locales) {
+          const combo = routeIndex + '|' + width + '|' + theme + '|' + locale;
+          if (matrixSeen.has(combo)) continue;
+          console.log('FAIL  ' + 'matrix-missing'.padEnd(26) + 'manifest  ' + route.key + ' @' + width + ' ' + theme + ' ' + locale + '  never measured');
+          tally['matrix-missing'] += 1;
+          failures += 1;
+          missing += 1;
+        }
+      }
+    }
+  }
+  const expected = matrix.routes.length * matrix.viewports.length * matrix.themes.length * matrix.locales.length;
+  console.log((missing ? 'FAIL  ' : 'ok    ') + 'matrix  ' + (expected - missing) + '/' + expected + ' combinations measured');
+}
+
 /* ── rule 2: template geometry, also fail closed ───────────────────────────── */
 
 if (withTemplate) {
   for (const file of files) {
-    const doc = JSON.parse(readFileSync(file, 'utf8'));
+    const parsed = parseArtifact(file);
+    if (parsed.error) continue; // reported once by the §4.2 run above
+    const doc = parsed.doc;
     const label = (doc.config && doc.config.label) || relative(ROOT, file);
     const shape = (doc.config && doc.config.template) || {};
     const missing = ['headerHeight', 'firstBlockY', 'controlRow'].filter((k) => !(k in shape));
@@ -372,6 +596,6 @@ console.log('');
 const fired = CODES.filter((code) => tally[code] > 0);
 console.log('  by assertion: ' + (fired.length ? fired.map((code) => code + ' ' + tally[code]).join(' | ') : 'none fired'));
 console.log(failures === 0
-  ? 'check-ui-metrics: PASS (' + pages + ' page measurements, 9 §4.2 assertions each + §2.5 card clipping)'
+  ? 'check-ui-metrics: PASS (' + pages + ' page measurements, 9 §4.2 assertions each + §2.5 card clipping' + (manifest ? ', ' + manifest.length + '-route manifest' : '') + ')'
   : 'check-ui-metrics: FAIL (' + failures + ' violation(s) across ' + pages + ' page measurements)');
 process.exit(failures === 0 ? 0 : 1);

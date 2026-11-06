@@ -7,7 +7,8 @@ import { Badge } from '../components/ui/badge';
 import { Button, buttonVariants } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { STATUS_MAP, badgeVariantForTone, glyphForTone } from '../components/status-tone';
-import { ErrorState, Field, KV, Progress, useToast } from '../components/Ui';
+import { Field, KV, Progress, useToast } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, UnknownValue } from '../components/app/status-indicator';
 import { shortDigest } from '../format';
@@ -203,7 +204,7 @@ export function InstallWizardPage() {
             <p>{file ? t('install.dropzone.uploading', { size: (file.size / 1024).toFixed(1) }) : t('install.dropzone.hint')}</p>
             {busy && <div className="spinner-label"><span className="spinner" /> {t('install.dropzone.verifying')}</div>}
           </div>
-          {error && <ErrorState error={error} />}
+          {error && <AsyncBoundary loading={false} error={error} hasData={false} report={false}>{null}</AsyncBoundary>}
           <div className="callout"><Icon name="access" size={16} /><p>{t('install.uploadNote')}</p></div>
         </section>
       )}

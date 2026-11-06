@@ -1141,7 +1141,19 @@ test.afterAll(() => {
   for (const [label, pageMap] of Object.entries(pages)) {
     fs.writeFileSync(
       path.join(OUT, '_metrics_' + label + '.json'),
-      JSON.stringify({ config: { label, theme: 'light', mode: MODE, baseURL: BASE, data: 'fixtures' }, pages: pageMap }, null, 1),
+      JSON.stringify({
+        config: {
+          label,
+          // Derive the pass from its label instead of hard-coding light: a dark run used to be
+          // recorded as light, and the matrix gate now reads these two fields.
+          theme: label.includes('-dark-') ? 'dark' : 'light',
+          locale: label.endsWith('-zh') ? 'zh-CN' : 'en',
+          mode: MODE,
+          baseURL: BASE,
+          data: 'fixtures',
+        },
+        pages: pageMap,
+      }, null, 1),
     );
   }
   fs.writeFileSync(path.join(OUT, '_report.json'), JSON.stringify(report, null, 1));

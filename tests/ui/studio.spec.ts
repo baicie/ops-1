@@ -89,7 +89,7 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await page.screenshot({ path: path.join(OUT, 'pipeline-validated.png'), fullPage: true });
   await page.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
-  await expect(page.locator('.metric-value').first()).not.toHaveText('r1');
+  await expect(page.locator('.ow-metric-value').first()).not.toHaveText('r1');
   await page.screenshot({ path: path.join(OUT, 'pipeline-published.png'), fullPage: true });
 });
 
@@ -101,7 +101,7 @@ test('submit a published revision and open real job detail', async ({ page }) =>
   await page.getByRole('button', { name: 'Submit job' }).click();
   await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]+/);
   await expect(page.getByRole('heading', { name: 'Lifecycle' })).toBeVisible();
-  await expect(page.locator('.metric-value').first()).toContainText(/Succeeded|SUCCEEDED/i, { timeout: 30_000 });
+  await expect(page.locator('.ow-metric-value').first()).toContainText(/Succeeded|SUCCEEDED/i, { timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Result' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'job-detail.png'), fullPage: true });

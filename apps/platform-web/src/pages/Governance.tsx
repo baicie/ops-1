@@ -9,7 +9,8 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from '../component
 import { EmptyState } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
-import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
+import { StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
+import { MetricCard } from '../components/app/metric-card';
 import { useI18n, useT } from '../i18n';
 import { formatDate } from '../format';
 import { IdentityCell, StackCell, StatusPill, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
@@ -89,13 +90,14 @@ export function GovernancePage() {
       skeletonRows={5}
       onRetry={() => { void load(); void reloadNodes(); }}
     >
-      {/* .metric-grid never had a rule in styles.css, so these cards stacked full width at
-          every viewport. The grid lives here now, where this page's layout belongs. */}
-      <div className="metric-grid grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.datasets')}</span><strong>{Number.isFinite(summary?.datasetCount) ? summary!.datasetCount : <UnknownValue detail={t('ui.unknown.detail')} />}</strong><span className="text-sm text-muted-foreground">{t('governance.metric.datasets.detail')}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.qualityPassed')}</span><strong>{quality ? quality.passed : <UnknownValue detail={t('ui.unknown.detail')} />}</strong><span className="text-sm text-muted-foreground">{quality ? t('governance.metric.qualityPassed.detail', { failed: quality.failed, errored: quality.error, unknown: quality.unknown, pending: quality.pending }) : t('ui.notObserved')}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.lineageBatches')}</span><strong>{Number.isFinite(summary?.lineageWindowCount) ? summary!.lineageWindowCount : <UnknownValue detail={t('ui.unknown.detail')} />}</strong>{/* The window is the server's answer; a missing one is UNKNOWN, never a "24h" of our own. */}<span className="text-sm text-muted-foreground">{summary?.lineageWindow ? t('governance.metric.lineageBatches.detail', { window: summary.lineageWindow }) : <UnknownValue detail={t('ui.unknown.detail')} />}</span></div>
-        <div className="panel metric-card"><span className="metric-label">{t('governance.metric.nodesReady')}</span><strong>{nodes ? ready : <UnknownValue detail={t('ui.unknown.detail')} />}</strong><span className="text-sm text-muted-foreground">{nodes ? t('governance.metric.nodesReady.detail', { unreachable, enrolled: nodeList.length }) : t('ui.notObserved')}</span></div>
+      {/* One KPI band rule for every page: .metric-grid is 4 / 2 / 1 columns with the 16px gap.
+          The old Tailwind column utilities here were dead - styles.css loads after Tailwind. */}
+      <div className="metric-grid">
+        <MetricCard label={t('governance.metric.datasets')} value={Number.isFinite(summary?.datasetCount) ? summary!.datasetCount : undefined} state={Number.isFinite(summary?.datasetCount) ? 'ready' : 'unknown'} detail={t('governance.metric.datasets.detail')} showSampled={false} />
+        <MetricCard label={t('governance.metric.qualityPassed')} value={quality ? quality.passed : undefined} state={quality ? 'ready' : 'unknown'} detail={quality ? t('governance.metric.qualityPassed.detail', { failed: quality.failed, errored: quality.error, unknown: quality.unknown, pending: quality.pending }) : t('ui.notObserved')} showSampled={false} />
+        {/* The window is the server's answer; a missing one is UNKNOWN, never a "24h" of our own. */}
+        <MetricCard label={t('governance.metric.lineageBatches')} value={Number.isFinite(summary?.lineageWindowCount) ? summary!.lineageWindowCount : undefined} state={Number.isFinite(summary?.lineageWindowCount) ? 'ready' : 'unknown'} detail={summary?.lineageWindow ? t('governance.metric.lineageBatches.detail', { window: summary.lineageWindow }) : t('ui.notObserved')} showSampled={false} />
+        <MetricCard label={t('governance.metric.nodesReady')} value={nodes ? ready : undefined} state={nodes ? 'ready' : 'unknown'} detail={nodes ? t('governance.metric.nodesReady.detail', { unreachable, enrolled: nodeList.length }) : t('ui.notObserved')} showSampled={false} />
       </div>
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>{t('governance.quality.title')}</h2><p>{t('governance.quality.description')}</p></div><Link className="text-link" to="/admin/ext/trusted-team/data-catalog">{t('governance.quality.openCatalog')}</Link></div>

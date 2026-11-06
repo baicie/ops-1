@@ -1,56 +1,10 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { Icon } from './Icons';
-import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
+import { Dialog } from './ui/dialog';
+import { DialogFrame } from './app/dialog-frame';
 import { Label } from './ui/label';
 import { useI18n, useT } from '../i18n';
 import { ageMessage } from '../lib/age';
-import { STATUS_MAP, glyphForTone } from './status-tone';
-import { Button } from './ui/button';
-import type { MessageKey } from '../i18n';
-
-export function PageHeader({
-  title,
-  description,
-  actions,
-  eyebrow,
-}: {
-  title: React.ReactNode;
-  description?: React.ReactNode;
-  actions?: React.ReactNode;
-  eyebrow?: string;
-}) {
-  return (
-    <header className="page-header">
-      <div className="page-header-copy">
-        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <h1>{title}</h1>
-        {description && <p className="page-description">{description}</p>}
-      </div>
-      {actions && <div className="page-actions">{actions}</div>}
-    </header>
-  );
-}
-
-// The wire code -> tone/label contract lives in status-tone.ts so the shadcn Badge in the
-// migrated pages and this legacy pill can never disagree about it.
-
-export function StatusBadge({ status, label }: { status: string; label?: string }) {
-  const t = useT();
-  const code = status?.toUpperCase();
-  const known = code ? STATUS_MAP[code] : undefined;
-  const tone = known?.tone || 'unknown';
-  const glyph = glyphForTone(tone);
-  // A code this mapping does not know is protocol data, not copy: render it verbatim
-  // (only a missing code becomes a localized "Unknown"). data-status keeps the value
-  // machine-readable so selectors never depend on localized text.
-  const text = label || (known ? t(known.labelKey) : status || t('status.unknown'));
-  return (
-    <span className={`status status-${tone}`} data-status={code || undefined}>
-      <Icon name={glyph} size={12} />
-      {text}
-    </span>
-  );
-}
 
 export function EmptyState({
   icon = 'inbox',
@@ -69,20 +23,6 @@ export function EmptyState({
       <h3>{title}</h3>
       {description && <p>{description}</p>}
       {action && <div className="empty-action">{action}</div>}
-    </div>
-  );
-}
-
-export function ErrorState({ error, onRetry }: { error: Error | null; onRetry?: () => void }) {
-  const t = useT();
-  return (
-    <div className="error-state" role="alert">
-      <div className="error-icon"><Icon name="warning" size={22} /></div>
-      <div>
-        <h3>{t('error.loadTitle')}</h3>
-        <p>{error?.message || t('error.unknown')}</p>
-        {onRetry && <Button variant="secondary" onClick={onRetry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>}
-      </div>
     </div>
   );
 }
@@ -132,55 +72,6 @@ export function CopyButton({ value, label, testId }: { value?: string | null; la
   );
 }
 
-/**
- * The one dialog body both exports below render. The Radix dialog primitive owns what the
- * hand-written version scripted by hand — Escape, overlay click, focus trap, focus restore and
- * scroll lock — while the markup keeps the pre-migration .modal* structure and insets, so the
- * pages that only pass open/onClose/title keep rendering exactly what they rendered before.
- */
-function DialogShell({
-  open,
-  onClose,
-  title,
-  size = 'medium',
-  footer,
-  testId,
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  size?: 'small' | 'medium' | 'large';
-  footer?: React.ReactNode;
-  testId?: string;
-  children: React.ReactNode;
-}) {
-  const t = useT();
-  return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent
-        // p-0/gap-0: .modal-head, .modal-body and .modal-foot already carry the insets, and
-        // .modal-body stays the only scroll container of the box.
-        className={`modal modal-${size} gap-0 overflow-y-hidden p-0`}
-        // Nothing renders a dialog description, so the primitive must not point at one.
-        aria-describedby={undefined}
-        // Radix hides the rest of the page from assistive technology instead of marking the
-        // layer modal; the exported contract has always spelled out aria-modal, so keep it.
-        aria-modal="true"
-        data-testid={testId}
-      >
-        <div className="modal-head">
-          {/* font-bold/leading-normal keep the h2 the primitive would otherwise restyle. */}
-          <DialogTitle className="font-bold leading-normal">{title}</DialogTitle>
-          <button className="icon-btn" onClick={onClose} aria-label={t('aria.closeDialog')}><Icon name="close" /></button>
-        </div>
-        <div className="modal-body">{children}</div>
-        {footer && <div className="modal-foot">{footer}</div>}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function Modal({
   open,
   onClose,
@@ -197,9 +88,9 @@ export function Modal({
   size?: 'small' | 'medium' | 'large';
 }) {
   return (
-    <DialogShell open={open} onClose={onClose} title={title} size={size} footer={footer}>
-      {children}
-    </DialogShell>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogFrame title={title} size={size} footer={footer}>{children}</DialogFrame>
+    </Dialog>
   );
 }
 

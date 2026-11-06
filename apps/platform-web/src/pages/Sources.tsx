@@ -290,7 +290,9 @@ export function SourcesPage() {
     trust: visible.map((connector) => connector.trust),
     reach: visible.map((connector) => connector.reach),
     replicas: visible.map((connector) =>
-      connector.readyInstances === null ? '' : `${connector.readyInstances}/${connector.totalInstances ?? 0}`),
+      connector.readyInstances === null || connector.totalInstances === null
+        ? ''
+        : `${connector.readyInstances}/${connector.totalInstances}`),
   });
 
   /**
@@ -320,6 +322,19 @@ export function SourcesPage() {
    * screenshot caught it: four cards reading 0 under a panel that said the read had failed.
    */
   const unanswered = !data && Boolean(error);
+
+  /**
+   * The sheet is opened from a row menu item, and that item unmounts with the menu. Radix then
+   * restores focus to an element that no longer exists, which lands on <body>; return it to the
+   * row's action trigger instead. The query is scoped by the row's stable data-connector value.
+   */
+  const restoreRowFocus = React.useCallback((pluginId: string) => {
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-connector="${CSS.escape(pluginId)}"] [data-testid="row-actions"]`)
+        ?.focus();
+    });
+  }, []);
 
   function connectorActions(connector: Connector): RowAction[] {
     const actions: RowAction[] = [
@@ -570,7 +585,14 @@ export function SourcesPage() {
                             detail={
                               connector.readyInstances === null
                                 ? undefined
-                                : `${connector.readyInstances}/${connector.totalInstances ?? 0}`
+                                : (
+                                  <>
+                                    {connector.readyInstances} /{' '}
+                                    {connector.totalInstances === null
+                                      ? <NoData detail={t('ui.noData.detail')} />
+                                      : connector.totalInstances}
+                                  </>
+                                )
                             }
                           />
                         ) : (
@@ -671,11 +693,17 @@ export function SourcesPage() {
 
       <ConnectorDetailSheet
         connector={detail}
-        onClose={() => setDetail(null)}
+        onClose={() => { if (detail) restoreRowFocus(detail.pluginId); setDetail(null); }}
+        // Detail hands over to config; focus stays in the new sheet until it closes, then the
+        // row that opened the chain gets it back.
         onConfigure={(connector) => { setDetail(null); setConfigure(connector); }}
         grantsWithheld={grantsWithheld}
       />
-      <ConnectorConfigSheet connector={configure} canOperate={canOperate} onClose={() => setConfigure(null)} />
+      <ConnectorConfigSheet
+        connector={configure}
+        canOperate={canOperate}
+        onClose={() => { if (configure) restoreRowFocus(configure.pluginId); setConfigure(null); }}
+      />
     </div>
   );
 }
@@ -739,9 +767,16 @@ function ConnectorDetailSheet({
             <li>
               <span>{t('table.instances')}</span>
               <span>
-                {connector.readyInstances === null
-                  ? t('state.noData')
-                  : `${connector.readyInstances} / ${connector.totalInstances ?? 0}`}
+                {connector.readyInstances === null ? (
+                  t('state.noData')
+                ) : (
+                  <>
+                    {connector.readyInstances} /{' '}
+                    {connector.totalInstances === null
+                      ? <NoData detail={t('ui.noData.detail')} />
+                      : connector.totalInstances}
+                  </>
+                )}
               </span>
             </li>
           </ul>

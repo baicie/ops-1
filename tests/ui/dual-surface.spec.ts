@@ -279,7 +279,7 @@ test('the workspace states what is missing instead of inventing business data', 
   await expect(notYet).toHaveAttribute('data-capability', 'reports');
   expect((await page.getByTestId('surface-not-yet-status').textContent())?.trim().length ?? 0).toBeGreaterThan(0);
   // No fabricated list, table or metric anywhere on the page.
-  await expect(page.locator('table, [data-testid="metric-card"], .metric-card')).toHaveCount(0);
+  await expect(page.locator('table, [data-testid="metric-card"], [data-metric-card], .ow-metric')).toHaveCount(0);
 });
 
 test('a workspace-only account never sees the console entry', async ({ page }) => {

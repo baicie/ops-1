@@ -3,7 +3,9 @@ import { ApiError } from '../../api';
 import { useT } from '../../i18n';
 import { Icon } from '../Icons';
 import { Button } from '../ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Dialog } from '../ui/dialog';
+import { AsyncErrorMessage } from './async-boundary';
+import { DialogFrame } from './dialog-frame';
 
 /**
  * The one confirmation surface for an irreversible or privilege-changing action (docs/04 §4.4
@@ -64,28 +66,20 @@ export function ConfirmAction({
     }
   }
 
-  const apiError = error instanceof ApiError ? error : null;
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onClose(); }}>
-      <DialogContent
+      <DialogFrame
+        title={title}
+        description={description}
+        size="small"
         closeLabel={t('aria.closeDialog')}
-        aria-describedby={undefined}
-        className="max-w-[480px]"
+        // A write in flight is not a state the reader can cancel by dismissing the surface: the
+        // request is already out. The close control stays visible but disabled, and Escape /
+        // overlay dismissal are suppressed by the same flag.
+        dismissible={!pending}
         data-testid="confirm-dialog"
         data-confirm-state={pending ? 'pending' : error ? 'error' : 'idle'}
-      >
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-        <div className="text-[var(--ow-text-secondary)] leading-relaxed">{description}</div>
-        {error ? (
-          <div className="inline-error" role="alert" data-confirm-error>
-            <Icon name="warning" size={16} />
-            <div>
-              <p>{error.message || t('error.unknown')}</p>
-              {apiError ? <p className="mono text-sm">{t('ui.error.code')}: {apiError.code}</p> : null}
-            </div>
-          </div>
-        ) : null}
-        <DialogFooter>
+        footer={<>
           <Button variant="secondary" onClick={onClose} disabled={pending} data-confirm-cancel>{t('action.cancel')}</Button>
           <Button
             variant={danger ? 'destructive' : 'default'}
@@ -96,8 +90,15 @@ export function ConfirmAction({
           >
             {pending ? t('action.working') : error ? t('action.retry') : confirmLabel ?? t('action.confirm')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
+        </>}
+      >
+        {error ? (
+          <div className="inline-error" role="alert" data-confirm-error>
+            <Icon name="warning" size={16} />
+            <div><AsyncErrorMessage error={error} /></div>
+          </div>
+        ) : null}
+      </DialogFrame>
     </Dialog>
   );
 }

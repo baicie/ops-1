@@ -18,6 +18,7 @@
     "ow-node-g",
     "ow-node-h",
     "ow-node-k",
+    "ow-node-n",
     "ow-node-f",
     "ow-node-a",
     "ow-node-m",
@@ -30,14 +31,14 @@
     "p50": 42,
     "p95": 42,
     "max": 42,
-    "n": 13
+    "n": 14
    },
    "columns": 4,
    "distinctRatio": [
     1,
-    0.38,
-    0.69,
-    0.69
+    0.43,
+    0.71,
+    0.64
    ],
    "columnLabels": [
     "节点",
@@ -46,10 +47,10 @@
     "实例"
    ],
    "tableRowCounts": [
-    13
+    14
    ],
    "duplicateRunMax": 0,
-   "rows": 13,
+   "rows": 14,
    "noDataPerTable": 0,
    "viewport": {
     "w": 1440,
@@ -68,7 +69,7 @@
       "heights": [
        40,
        40,
-       19
+       21
       ]
      }
     ]
@@ -145,6 +146,7 @@
     "ow-node-g",
     "ow-node-h",
     "ow-node-k",
+    "ow-node-n",
     "ow-node-f",
     "ow-node-a",
     "ow-node-m",
@@ -157,14 +159,14 @@
     "p50": 42,
     "p95": 42,
     "max": 42,
-    "n": 13
+    "n": 14
    },
    "columns": 4,
    "distinctRatio": [
     1,
-    0.38,
-    0.69,
-    0.69
+    0.43,
+    0.71,
+    0.64
    ],
    "columnLabels": [
     "节点",
@@ -173,10 +175,10 @@
     "实例"
    ],
    "tableRowCounts": [
-    13
+    14
    ],
    "duplicateRunMax": 0,
-   "rows": 13,
+   "rows": 14,
    "noDataPerTable": 0,
    "viewport": {
     "w": 1024,
@@ -195,7 +197,7 @@
       "heights": [
        40,
        40,
-       19
+       21
       ]
      }
     ]
@@ -272,6 +274,7 @@
     "ow-node-g",
     "ow-node-h",
     "ow-node-k",
+    "ow-node-n",
     "ow-node-f",
     "ow-node-a",
     "ow-node-m",
@@ -281,17 +284,17 @@
     "ow-node-e"
    ],
    "rowHeight": {
-    "p50": 105.8,
-    "p95": 108.8,
-    "max": 108.8,
-    "n": 13
+    "p50": 120.6,
+    "p95": 120.6,
+    "max": 120.6,
+    "n": 14
    },
    "columns": 4,
    "distinctRatio": [
     1,
-    0.38,
-    0.69,
-    0.69
+    0.43,
+    0.71,
+    0.64
    ],
    "columnLabels": [
     "节点",
@@ -300,10 +303,10 @@
     "实例"
    ],
    "tableRowCounts": [
-    13
+    14
    ],
    "duplicateRunMax": 0,
-   "rows": 13,
+   "rows": 14,
    "noDataPerTable": 0,
    "viewport": {
     "w": 390,
@@ -343,6 +346,12 @@
     },
     {
      "key": "ow-node-k",
+     "clipped": false,
+     "width": 349,
+     "facts": 3
+    },
+    {
+     "key": "ow-node-n",
      "clipped": false,
      "width": 349,
      "facts": 3
@@ -391,17 +400,17 @@
     }
    ],
    "template": {
-    "headerHeight": 116,
+    "headerHeight": 150,
     "headerTop": 68,
-    "firstBlockY": 208,
+    "firstBlockY": 242,
     "stackGap": "24px",
     "controlRow": [
      {
       "selector": ".toolbar",
       "heights": [
-       40,
-       40,
-       19
+       44,
+       44,
+       21
       ]
      }
     ]
@@ -421,9 +430,9 @@
     "node.enrolled"
    ],
    "rowHeight": {
-    "p50": 57,
-    "p95": 58,
-    "max": 58,
+    "p50": 58.4,
+    "p95": 58.8,
+    "max": 58.8,
     "n": 6
    },
    "columns": 4,
@@ -496,9 +505,9 @@
     }
    ],
    "template": {
-    "headerHeight": 116,
+    "headerHeight": 126,
     "headerTop": 68,
-    "firstBlockY": 208,
+    "firstBlockY": 218,
     "stackGap": "24px",
     "controlRow": []
    }

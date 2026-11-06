@@ -5,7 +5,8 @@ import { api } from './api';
 import { useAuth } from './auth';
 import type { AccessInfo, Surface } from './surface';
 import type { ContributionRejection, Extension } from './types';
-import { EmptyState, ErrorState, Skeleton } from './components/Ui';
+import { EmptyState, Skeleton } from './components/Ui';
+import { AsyncBoundary } from './components/app/async-boundary';
 import { Icon } from './components/Icons';
 import { SidebarGroup } from './components/app/sidebar';
 import { useT } from './i18n';
@@ -428,7 +429,7 @@ export function ExtensionRoute({ surface }: { surface: Surface }) {
   const { access } = useAuth();
   const { accepted, rejected, serverRejections, loaded, loading, error } = useExtensions();
   if (loading) return <Skeleton rows={5} />;
-  if (error) return <ErrorState error={error} />;
+  if (error) return <AsyncBoundary loading={false} error={error} hasData={false}>{null}</AsyncBoundary>;
 
   const match = deepest(
     visibleContributions(accepted, access, surface).filter((contribution) => contribution.kind === 'route.page'),
@@ -463,8 +464,7 @@ export function ExtensionRoute({ surface }: { surface: Surface }) {
   if (loadedExtension.error) {
     return (
       <div className="extension-error">
-        <ErrorState error={new Error(loadedExtension.error)} />
-        <p className="muted">{t('extensions.error.isolationNote')}</p>
+        <AsyncBoundary loading={false} error={new Error(loadedExtension.error)} hasData={false} source="plugin">{null}</AsyncBoundary>
       </div>
     );
   }
@@ -480,7 +480,7 @@ class ExtensionBoundary extends React.Component<{ children: React.ReactNode }, {
   static getDerivedStateFromError(error: Error) { return { error }; }
   render() {
     if (this.state.error) {
-      return <ErrorState error={this.state.error} onRetry={() => this.setState({ error: null })} />;
+      return <AsyncBoundary loading={false} error={this.state.error} hasData={false} source="plugin" onRetry={() => this.setState({ error: null })}>{null}</AsyncBoundary>;
     }
     return this.props.children;
   }

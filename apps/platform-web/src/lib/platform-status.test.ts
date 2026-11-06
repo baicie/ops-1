@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { deriveVerdict, isUnconfigured, verdictDotState, type PlatformSnapshot } from './platform-status';
+import { afterEach, describe, expect, it } from 'vitest';
+import { clearBodyState, deriveVerdict, isUnconfigured, readPlatformSnapshot, reportBodyState, resetBodyState, verdictDotState, type PlatformSnapshot } from './platform-status';
 import type { Overview } from '../types';
 
 /**
@@ -57,6 +57,11 @@ describe('platform verdict', () => {
     expect(deriveVerdict(state({ overview: overview(), body: 'attention' }))).toBe('attention');
   });
 
+  it('keeps a degraded kernel above a local plugin failure', () => {
+    // A plugin error is attention; it must not repaint a DEGRADED platform as merely attention.
+    expect(deriveVerdict(state({ overview: overview({ health: 'DEGRADED' }), body: 'attention' }))).toBe('degraded');
+  });
+
   it('says UNKNOWN before any source settled, not READY', () => {
     expect(deriveVerdict(state())).toBe('unknown');
   });
@@ -66,5 +71,46 @@ describe('platform verdict', () => {
     for (const verdict of ['unknown', 'attention', 'degraded', 'not-configured', 'unavailable', 'forbidden'] as const) {
       expect(verdictDotState(verdict)).not.toBe('READY');
     }
+  });
+});
+
+describe('body state ownership', () => {
+  afterEach(() => {
+    clearBodyState('a');
+    clearBodyState('b');
+    resetBodyState();
+  });
+
+  it('lets a recovered boundary withdraw its own claim', () => {
+    reportBodyState('unavailable', 'a');
+    expect(readPlatformSnapshot().body).toBe('unavailable');
+    clearBodyState('a');
+    expect(readPlatformSnapshot().body).toBe('ready');
+  });
+
+  it('never lets one boundary clear another boundary error', () => {
+    reportBodyState('forbidden', 'a');
+    reportBodyState('unavailable', 'b');
+    expect(readPlatformSnapshot().body).toBe('forbidden');
+    clearBodyState('b');
+    expect(readPlatformSnapshot().body).toBe('forbidden');
+    clearBodyState('a');
+    expect(readPlatformSnapshot().body).toBe('ready');
+  });
+
+  it('shows the most severe live claim, not the last one reported', () => {
+    reportBodyState('unavailable', 'a');
+    reportBodyState('attention', 'b');
+    expect(readPlatformSnapshot().body).toBe('unavailable');
+  });
+
+  it('releases every claim on a route change', () => {
+    reportBodyState('unavailable', 'a');
+    reportBodyState('attention', 'b');
+    resetBodyState();
+    expect(readPlatformSnapshot().body).toBe('ready');
+    // A stale clear after the reset cannot resurrect the old claim.
+    clearBodyState('a');
+    expect(readPlatformSnapshot().body).toBe('ready');
   });
 });

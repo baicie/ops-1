@@ -8,12 +8,24 @@ Written against HEAD `7fd0c99` (`feat/ui-visual-excellence-v3`); every gate outp
 prove today” and in each file's §4 was re-run at HEAD `1f1feeb`. Every number in the three files was produced
 by a command whose output is quoted next to it, and every rule has a gate that can fail a build.
 
+> **Visual System V1 (2026-11-04).** [ADR-017](../../../adr/ADR-017-visual-system-v1.md) amends this spec:
+> `page-template.md` gains Pattern A/B/C/D plus a route→pattern registry (Pattern B stays the default);
+> `token-table.md` keeps 11/13/15/26 with named exceptions for the 20→26 title clamp and the 21px metric
+> figure; DS-V1-1 removed the 12px tier and DS-V1-1b renamed the four tokens to label/meta/body/title.
+> `check-ui-metrics.mjs --manifest route-manifest.json` now fails a pass that measured nothing
+> (`page-map-empty`) or lost a route (`route-missing`). The census and gate transcripts below are historical (HEAD
+> `7fd0c99`/`1f1feeb`); the measured state at `775a1e2`, the DS-V1-1 record and the remaining rename work are
+> in [`docs/design/opsweave-visual-system-v1/ds-v1-1.md`](../../opsweave-visual-system-v1/ds-v1-1.md). This
+> spec remains normative until the migration steps land; the ADR wins only where it names an explicit exception.
+
 | file | answers | gate |
 |---|---|---|
 | `token-table.md` | **what a value is**: 3 radii, 4 type tiers, 2 control heights, 2 button sizes, and why *that* value | `check-ui-tokens.mjs` (R1–R4) |
 | `page-template.md` | **where it goes**: one page template, header 80px, first block at y=160, one KPI band, one control height per row | `check-ui-metrics.mjs --template` |
 | `table-spec.md` | **how a row behaves**: identity cell, column degradation, 40px rows, collapse runs, 390 cards, overflow | `check-ui-metrics.mjs` |
 | `machine-language-rules.md` | **what the machine may say**: NO_DATA budget, `:lang(en)` casing, `Intl` units, destructive colour | `check-ui-tokens.mjs` (R5–R7) |
+| `route-manifest.json` | **which routes the audit owns**: 10 patterns, detail routes matched by shape | `check-ui-metrics.mjs --manifest` |
+| `matrix-manifest.json` | **which executions the audit owns**: 2 routes × 1440/1024/390 × light/dark × en/zh-CN | `check-ui-metrics.mjs --matrix` |
 
 ## Execution order
 

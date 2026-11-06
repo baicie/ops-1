@@ -1,8 +1,8 @@
 {
   "radius-tier": 0,
   "control-tier": 0,
-  "type-tier": 6,
-  "one-header": 3,
+  "type-tier": 0,
+  "one-header": 0,
   "uppercase-guard": 0,
   "format-locale": 0,
   "spacing-token-literal": 52,

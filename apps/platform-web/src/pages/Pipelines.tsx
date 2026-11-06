@@ -12,17 +12,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { EmptyState, TimeAgo } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
-import { NoData } from '../components/app/status-indicator';
+import { MetricCard } from '../components/app/metric-card';
 import { useDocumentTitle } from '../hooks';
-import { getPipelineExecutionOrder } from '../studio/ir/topology';
-import { useT } from '../i18n';
+import { getPipelineExecutionOrder, type TopologyStatus } from '../studio/ir/topology';
+import { useT, type MessageKey } from '../i18n';
 import { cn } from '../lib/utils';
 import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
- * The revision panels show a fixed copy line, not a status code StatusPill could localize — so
- * the pill is painted here through the same shared tone map instead of growing a second label
- * vocabulary. The wire text stays verbatim; only the tone comes from STATUS_MAP, so a revision
+ * The revision pill paints through the shared tone map, and its label comes from the same
+ * STATUS_MAP entry the rest of the shell uses. The raw wire code stays in `data-status`, so a
+ * reader of the DOM can still see exactly what the Kernel sent. (The old comment here said the
+ * wire text stayed verbatim, which meant a zh-CN page printed "PUBLISHED" in English.)
+ *
+ * A revision
  * the shell cannot classify is painted neutral instead of borrowing the "ok" colour.
  */
 function TonePill({ tone, label, className }: { tone: StatusTone; label: string; className?: string }) {
@@ -35,15 +38,31 @@ function TonePill({ tone, label, className }: { tone: StatusTone; label: string;
 }
 
 function RevisionPill({ status }: { status: string }) {
+  const t = useT();
   const code = (status || '').toUpperCase();
-  const tone = (code && STATUS_MAP[code]?.tone) || 'unknown';
+  const entry = STATUS_MAP[code] ?? null;
+  const tone = entry?.tone || 'unknown';
   return (
     <Badge variant={badgeVariantForTone(tone)} data-status={code || undefined}>
       <Icon name={glyphForTone(tone)} size={12} />
-      {status}
+      {entry ? t(entry.labelKey) : status}
     </Badge>
   );
 }
+
+/**
+ * Topology diagnostics are produced by the client analyzer in English. The stable status code is
+ * the machine token; the sentence the reader acts on is localized here. The analyzer's raw
+ * detail is kept behind a disclosure and attributed, never used as the primary sentence.
+ */
+const TOPOLOGY_MESSAGE: Record<Exclude<TopologyStatus, 'VALID'>, MessageKey> = {
+  CYCLE: 'pipelines.topology.diagnostic.cycle',
+  DISCONNECTED: 'pipelines.topology.diagnostic.disconnected',
+  INVALID_EDGE: 'pipelines.topology.diagnostic.invalidEdge',
+  MULTIPLE_SINKS: 'pipelines.topology.diagnostic.multipleSinks',
+  MULTIPLE_SOURCES: 'pipelines.topology.diagnostic.multipleSources',
+  NON_LINEAR: 'pipelines.topology.diagnostic.nonLinear',
+};
 
 export function PipelinesPage() {
   const t = useT();
@@ -162,7 +181,23 @@ function NodeSummary({ definition }: { definition: PipelineDefinition }) {
   };
   const execution = getPipelineExecutionOrder(definition);
   if (execution.topologyStatus !== 'VALID') {
-    return <div className="inline-error" role="alert"><strong>{execution.topologyStatus}</strong><span>{execution.diagnostics.join(' · ') || t('pipelines.topology.notLinear')}</span></div>;
+    return (
+      <div className="inline-error topology-notice" role="alert" data-topology={execution.topologyStatus}>
+        <div>
+          <strong>{execution.topologyStatus}</strong>
+          <span>{t(TOPOLOGY_MESSAGE[execution.topologyStatus])}</span>
+          {execution.diagnostics.length > 0 ? (
+            <details className="topology-detail">
+              <summary>{t('pipelines.topology.diagnostics')}</summary>
+              <p className="server-quote" data-testid="analyzer-message" data-source="analyzer">
+                <span className="server-source">{t('ui.textSource.analyzer')}</span>
+                {execution.diagnostics.join(' · ')}
+              </p>
+            </details>
+          ) : null}
+        </div>
+      </div>
+    );
   }
   return (
     <div className="pipeline-flow" aria-label={t('pipelines.topology.aria')}>
@@ -233,11 +268,12 @@ export function PipelineDetailPage() {
         primary={<Link className={buttonVariants()} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link>}
       />
       <section className="summary-grid pipeline-stats">
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRevision')}</span><strong className="metric-value">r{detail.latestRevision}</strong></div>
+        <MetricCard label={t('pipelines.metric.latestRevision')} value={`r${detail.latestRevision}`} showSampled={false} />
         {/* A missing published definition is NO_DATA; printing 0 nodes would claim a real count of zero. */}
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.nodes')}</span><strong className="metric-value">{latest ? latest.definition.nodes.length : <NoData detail={t('ui.noData.detail')} />}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.latestRun')}</span><strong className="metric-value small">{jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')}</strong></div>
-        <div className="panel metric-card"><span className="metric-label">{t('pipelines.metric.updated')}</span><strong className="metric-value small">{latest?.publishedAt ? <TimeAgo value={latest.publishedAt} /> : <NoData detail={t('ui.noData.detail')} />}</strong></div>
+        <MetricCard label={t('pipelines.metric.nodes')} value={latest ? latest.definition.nodes.length : undefined} state={latest ? 'ready' : 'noData'} showSampled={false} />
+        {/* An unloaded job list is not "no runs": noRuns is only a fact once the list answered. */}
+        <MetricCard label={t('pipelines.metric.latestRun')} value={jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')} state={jobs ? 'ready' : 'noData'} size="small" showSampled={false} />
+        <MetricCard label={t('pipelines.metric.updated')} value={latest?.publishedAt ? <TimeAgo value={latest.publishedAt} /> : undefined} state={latest?.publishedAt ? 'ready' : 'noData'} size="small" showSampled={false} />
       </section>
       {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>{t('pipelines.latestRevision.title')}</h2>{/* The 64-char digest is unbreakable text: at 390 it forced a 122px page-level
               horizontal overflow on this panel before (the same markup pre-dated the migration).

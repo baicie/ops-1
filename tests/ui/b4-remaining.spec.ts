@@ -109,9 +109,9 @@ function probe(page: Page) {
     /* ── 3. the job detail title and the cards under it ────────────────────────── */
     const h1 = document.querySelector('[data-testid=page-header] h1') as HTMLElement | null;
     const h1Text = (h1?.textContent || '').trim();
-    const cards = Array.from(document.querySelectorAll('.job-stats .metric-card')).map((card) => ({
-      label: (card.querySelector('.metric-label')?.textContent || '').trim(),
-      value: (card.querySelector('.metric-value')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    const cards = Array.from(document.querySelectorAll('.job-stats .ow-metric')).map((card) => ({
+      label: (card.querySelector('.ow-metric-label')?.textContent || '').trim(),
+      value: (card.querySelector('.ow-metric-value')?.textContent || '').replace(/\s+/g, ' ').trim(),
       box: rect(card),
     }));
     const duplicate = h1Text ? {
@@ -119,7 +119,7 @@ function probe(page: Page) {
       h1TextCountOnPage: document.body.innerText.split(h1Text).length - 1,
       h1Box: rect(h1),
       cardsWithH1Text: cards.filter((c) => c.value.includes(h1Text) || c.label.includes(h1Text)),
-      cardsWithH1TextOld: Array.from(document.querySelectorAll('.metric-card')).filter((el) => (el.textContent || '').includes(h1Text)).map((el) => ({ text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60), top: rect(el)?.top })),
+      cardsWithH1TextOld: Array.from(document.querySelectorAll('.ow-metric')).filter((el) => (el.textContent || '').includes(h1Text)).map((el) => ({ text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60), top: rect(el)?.top })),
     } : null;
 
     /* ── 2. the deployment block in the rail ──────────────────────────────────── */
@@ -165,9 +165,9 @@ function probe(page: Page) {
       readyCounts: { platformReady: count('Platform ready'), upperReady: count('READY'), platformIsReady: count('Platform is ready'), anyReady: (flat.match(/ready/gi) || []).length },
       instances,
       duplicate,
-      jobCards: Array.from(document.querySelectorAll('.job-stats .metric-card')).map((card) => ({
-        label: (card.querySelector('.metric-label')?.textContent || '').trim(),
-        value: (card.querySelector('.metric-value')?.textContent || '').replace(/\s+/g, ' ').trim(),
+      jobCards: Array.from(document.querySelectorAll('.job-stats .ow-metric')).map((card) => ({
+        label: (card.querySelector('.ow-metric-label')?.textContent || '').trim(),
+        value: (card.querySelector('.ow-metric-value')?.textContent || '').replace(/\s+/g, ' ').trim(),
         top: Math.round(card.getBoundingClientRect().top),
       })),
       sidebar: side,

@@ -63,6 +63,9 @@ export const STATUS_MAP: Record<string, StatusEntry> = {
   // instead of inventing a ninth colour for "not started yet".
   QUEUED: { tone: 'warn', state: 'attention', labelKey: 'status.queued' },
   STAGED: { tone: 'warn', state: 'attention', labelKey: 'status.staged' },
+  // Pipeline revisions: a draft is not a bad state, and a published revision is the normal one.
+  DRAFT: { tone: 'neutral', state: 'notConfigured', labelKey: 'status.draft' },
+  PUBLISHED: { tone: 'ok', state: 'ready', labelKey: 'status.published' },
   AVAILABLE: { tone: 'neutral', state: 'notConfigured', labelKey: 'status.available' },
   DISABLED: { tone: 'neutral', state: 'notConfigured', labelKey: 'status.disabled' },
   UNINSTALLED: { tone: 'neutral', state: 'notConfigured', labelKey: 'status.uninstalled' },
@@ -111,7 +114,7 @@ export function statusForCode(code?: string | null): StatusEntry | undefined {
 }
 
 /**
- * `StatusBadge` glyph for a tone. Colour never carries the meaning alone: every tone has its
+ * The status renderer's glyph for a tone. Colour never carries the meaning alone: every tone has its
  * own glyph, and UNKNOWN is the only one that draws a question-like arrow next to a dashed
  * border, so "success" and "unknown" separate in shape as well as in hue.
  */

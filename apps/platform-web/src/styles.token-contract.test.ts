@@ -26,13 +26,17 @@ describe('styles.css token contract', () => {
     expect(css).not.toContain('9.5px');
   });
 
-  it('keeps the reading baseline at 14px and the dense step below it', () => {
-    expect(css).toMatch(/--ow-type-base: 14px;/);
-    expect(css).toMatch(/--ow-type-sm: 12px;/);
-    // table-spec §2.3 / token-table T3 name the two tiers a table row is made of: the
-    // 11px qualifier line and the 13px value line. Those are label/meta, not xs/row.
+  it('implements the four job tiers and the named title clamp', () => {
+    // ADR-017 §D5 and the DS-V1-1b rename: four tokens, one value each. The title is the
+    // one clamp: 26px maximum, a measured 20px floor at 390, carried as a named gate
+    // exception rather than a budget finding.
     expect(css).toMatch(/--ow-type-label: 11px;/);
     expect(css).toMatch(/--ow-type-meta: 13px;/);
+    expect(css).toMatch(/--ow-type-body: 15px;/);
+    expect(css).toMatch(/--ow-type-title: clamp\(20px, 2\.1vw, 26px\);/);
+    // The metric figure is a named display exception, not a fifth tier: at 26 the KPI zeros
+    // measured louder than the health verdict. The four job tiers are label/meta/body/title.
+    expect(css).toMatch(/--ow-type-metric: 21px;/);
   });
 
   it('leaves .truncate and .block to Tailwind', () => {

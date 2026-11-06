@@ -25,7 +25,10 @@ export type IndicatorState =
   | 'partial'
   | 'loading'
   | 'forbidden'
-  | 'conflict';
+  | 'conflict'
+  // A severity word, not a health state: an INFO notice is neither "needs attention" nor
+  // "not configured", and borrowing either glyph made the chip contradict its own label.
+  | 'info';
 
 const LABEL_KEYS: Record<IndicatorState, MessageKey> = {
   ready: 'state.ready',
@@ -47,6 +50,7 @@ const LABEL_KEYS: Record<IndicatorState, MessageKey> = {
   error: 'state.error',
   forbidden: 'state.forbidden',
   conflict: 'state.conflict',
+  info: 'state.info',
   notConfigured: 'state.notConfigured',
 };
 
@@ -70,6 +74,7 @@ const GLYPHS: Record<IndicatorState, string> = {
   error: 'warning',
   forbidden: 'access',
   conflict: 'copy',
+  info: 'info',
   // An empty outline, not a sliders/equals pair: "not set up" must not read as "adjusted".
   notConfigured: 'circleDashed',
 };

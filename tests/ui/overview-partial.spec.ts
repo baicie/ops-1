@@ -110,6 +110,13 @@ test('overview: with both sources answering there is no PARTIAL notice', async (
   await expect(page.locator(PARTIAL_NOTICE)).toHaveCount(0);
   await expect(page.locator('[data-testid="overview-modules"] ' + PARTIAL_NOTICE)).toHaveCount(0);
 
+  // The source line under the strip states each source's own observation time once.
+  await expect(page.locator('[data-testid="overview-sources"] [data-source="overview"]'))
+    .toHaveAttribute('data-source-state', 'answered');
+  await expect(page.locator('[data-testid="overview-sources"] [data-source="diagnostics"]'))
+    .toHaveAttribute('data-source-state', 'answered');
+  await expect(page.locator('[data-testid="overview-observed"]')).not.toBeEmpty();
+
   await page.screenshot({ path: path.join(OUT, 'state-overview-no-partial.png'), fullPage: true });
 });
 
@@ -144,6 +151,10 @@ test('overview: a source that does not answer raises PARTIAL naming the half ans
   await expect(notice.locator('.status-indicator-label')).toHaveText(copy('state.partial'));
   await expect(notice.locator('.notice-detail')).toHaveText(copy('ui.partial.sources', counted));
   await expect(page.locator('[data-testid="overview-modules"] ' + PARTIAL_NOTICE)).toHaveCount(1);
+  // The source line marks the half that settled without an answer; it does not inherit the
+  // overview source's "answered" state.
+  await expect(page.locator('[data-testid="overview-sources"] [data-source="diagnostics"]'))
+    .toHaveAttribute('data-source-state', 'missing');
 
   // Only the diagnostics source failed: the kernel module degrades to UNKNOWN with its reason,
   // while the overview payload still paints the strip and the metrics.
@@ -188,6 +199,11 @@ test('overview: a healthy load never flashes PARTIAL while a source is still bei
     await page.waitForTimeout(100);
   }
 
+  // A source still being asked is "pending", not "missing": the source line must not turn a
+  // request in flight into a verdict about its answer.
+  await expect(page.locator('[data-testid="overview-sources"] [data-source="diagnostics"]'))
+    .toHaveAttribute('data-source-state', 'pending');
+
   // Captured before the release: the artifact has to show the state under test - the Kernel card
   // still LOADING with no PARTIAL notice - not the settled page it turns into.
   await page.screenshot({ path: path.join(OUT, 'state-overview-first-frame-no-partial.png'), fullPage: true });
@@ -218,6 +234,8 @@ test('overview: a source that answers 200 with an empty body is still MISSING', 
 
   const counted = sourceCount({ overview: true, diagnostics: false });
   await expect(notice.locator('.notice-detail')).toHaveText(copy('ui.partial.sources', counted));
+  await expect(page.locator('[data-testid="overview-sources"] [data-source="diagnostics"]'))
+    .toHaveAttribute('data-source-state', 'missing');
 
   // And the module card agrees that the source settled without answering: UNKNOWN with no
   // observation time, not a LOADING spinner the page would show forever.
@@ -347,4 +365,52 @@ test('overview: a warning attention item renders the ATTENTION indicator, not a 
   await expect(band.locator('a[href="#attention"]')).toHaveCount(1);
 
   await page.screenshot({ path: path.join(OUT, 'state-overview-attention.png'), fullPage: true });
+});
+
+test('overview: a READY attention verdict cannot contradict non-ready counts', async ({ page }) => {
+  await login(page);
+
+  // The Kernel derives HEALTH from the attention list, not from the ready counts
+  // (apps/kernel/src/plugins.rs:647-653). A node heartbeating as DEGRADED, or a desired replica
+  // that is not READY, is therefore invisible to `health`, while nodesReady/instancesReady
+  // already count it. The band used to print "every desired replica is ready" over exactly those
+  // counts. Rewrite the real exchange: every field is the Kernel's except the four counts and the
+  // verdict, so the test is about the page's reconciliation, not a fabricated payload.
+  let realHealth = '';
+  await page.route('**/api/v1/overview', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    realHealth = String(body.health ?? '');
+    await route.fulfill({
+      response,
+      json: {
+        ...body,
+        health: 'READY',
+        attention: [],
+        nodesTotal: 1,
+        nodesReady: 0,
+        instancesTotal: 1,
+        instancesReady: 0,
+      },
+    });
+  });
+
+  await page.goto('/admin/overview');
+  await expect(page.locator('[data-async-state="ready"]').first()).toBeVisible();
+
+  expect(realHealth, 'the live overview answer was replaced by the READY fixture').not.toBe('READY');
+
+  const band = page.locator('section.health-band');
+  await expect(band).toHaveAttribute('data-kernel-health', 'READY');
+  await expect(band).toHaveAttribute('data-health', 'DEGRADED');
+  await expect(band.locator('h2')).toHaveText(copy('overview.health.countsConflict'));
+  // The detail names the first mismatch from the same counts the module ledger uses.
+  await expect(band.locator('p')).toHaveText(copy('overview.module.nodes.detail', { ready: 0, total: 1 }));
+  await expect(band.locator('h2')).not.toHaveText(copy('overview.health.allClearDetail'));
+
+  // The module ledger states the same fact, so the band and the rows cannot disagree.
+  await expect(page.locator(NODES_MODULE)).toHaveAttribute('data-indicator', 'degraded');
+  await expect(page.locator(RUNTIME_MODULE)).toHaveAttribute('data-indicator', 'degraded');
+
+  await page.screenshot({ path: path.join(OUT, 'state-overview-counts-conflict.png'), fullPage: true });
 });

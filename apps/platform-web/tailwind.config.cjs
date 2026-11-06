@@ -72,12 +72,14 @@ module.exports = {
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
       },
+      // The four job tiers live in styles.css; these keys only expose the same values to
+      // utilities. `text-xs` used to resolve to an undeclared --ow-type-xs and is removed
+      // rather than left as a silent inheritance bug (ADR-017 §D5).
       fontSize: {
-        xs: token('ow-type-xs'),
-        sm: token('ow-type-sm'),
-        base: token('ow-type-base'),
-        lg: token('ow-type-lg'),
-        xl: token('ow-type-xl'),
+        sm: token('ow-type-meta'),
+        base: token('ow-type-body'),
+        lg: token('ow-type-body'),
+        xl: token('ow-type-title'),
       },
     },
   },

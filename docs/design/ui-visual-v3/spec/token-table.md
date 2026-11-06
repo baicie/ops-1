@@ -4,6 +4,15 @@ Status: **normative**. Applies to `apps/platform-web/src`. Machine gate: `script
 Supersedes nothing; there is no earlier token spec. `docs/design/ui-visual-v3/visual-audit.md` records
 what the last six review rounds found; it is evidence, not a rule.
 
+> **Visual System V1 note (2026-11-04).** The census in §1 and the gate transcript in §4 were produced at
+> earlier HEADs. At `775a1e2` (before DS-V1-1) the ratchet printed `radius-tier 0/0`, `control-tier 0/0`,
+> `type-tier 6/6`, `one-header 3/3`, `uppercase-guard 0/0`, `format-locale 0/0`; after DS-V1-1 it prints
+> 0/0 for all six rules. [ADR-017](../../../adr/ADR-017-visual-system-v1.md) §D5 decided the 11/13/15/26
+> target, the 20→26 title clamp as a named exception, and the value-first migration. DS-V1-1 landed the
+> values, removed the 12px tier, and left the t-shirt rename for DS-V1-1b. Do not read the historical
+> numbers above as the current state; the measured state and evidence are under
+> `docs/design/opsweave-visual-system-v1/`.
+
 Every number below was produced by a command shown in §1 or §4. Numbers marked `[audit]` come from the
 committed measurement artifacts under `artifacts/ui/visual-v3/` (captured 2026-10-29 against the deployed
 build); numbers marked `[src]` are a census of HEAD `7fd0c99`; `[gate]` is the gate's own output.
@@ -122,8 +131,18 @@ utility in TSX. `rounded-full` is `9999px` and is allowed; `rounded-none` is `0`
 | `--ow-type-body` | **15px** | reading copy, dialog body, form labels | one 2px step above `meta` — 15.4%, just over the ~10% threshold at which a size change is read as hierarchy rather than as noise; CJK has no ascender/descender cue, so a 13→14 step (7.7%) reads as a rendering accident. 14 and 16 both disappear into this tier. |
 | `--ow-type-title` | **26px** | `h1`, one value at every viewport | 26px is what the current clamp already resolves to on desktop, so **no desktop pixel moves**; it removes the 20.0 / 21.5 / 26 spread the clamp produces across 390/1024/1440, and 26 = 15 × 1.73 keeps the title two clear steps above body. |
 
+**V1 implementation note (2026-11-04, DS-V1-1b).** ADR-017 §D5 took the values-first route and
+DS-V1-1b completed the rename: the tree declares exactly `--ow-type-label: 11px`,
+`--ow-type-meta: 13px`, `--ow-type-body: 15px`, `--ow-type-title: clamp(20px, 2.1vw, 26px)`.
+`--ow-type-metric: 21px` and `--ow-type-hero: clamp(30px,4vw,44px)` (login only) are named
+display exceptions: at 26 the KPI zeros measured louder than the health verdict and pushed the
+first screen down. The title clamp and the metric figure are exemptions in
+`check-ui-tokens.mjs` (title: 26px maximum, a measured 20px floor at 390). The InstallWizard
+readiness figure moved to the title clamp.
+
 **Deleted**: `--ow-type-xs`, `--ow-type-sm`, `--ow-type-row`, `--ow-type-base`, `--ow-type-lg`,
-`--ow-type-xl`, `--ow-type-metric`, `--ow-type-hero`, and the `.94em` on `code`.
+`--ow-type-xl`, and the `.94em` on `code`. `--ow-type-metric` and `--ow-type-hero` are not
+deleted; they are the two documented exceptions above.
 
 **Documented exception**: `--ow-type-hero: clamp(30px,4vw,44px)` survives **only** on `/login` and the 403
 surface — two single-block screens with no page header, no table and no toolbar (2 declarations). They are

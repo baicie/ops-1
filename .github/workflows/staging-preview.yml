@@ -1087,7 +1087,10 @@ jobs:
           set -euo pipefail
           # ls first: when the audit step died, this log says so instead of leaving a bare exit 1.
           ls -la artifacts/staging-preview/metrics
-          node scripts/check-ui-metrics.mjs artifacts/staging-preview/metrics
+          # The manifest is the list of routes this audit owns. Without it a pass that measured
+          # nothing (or lost a route) was indistinguishable from a pass that measured everything;
+          # with it, a dropped route fails the job by name.
+          node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/staging-preview/metrics
 
       # A slow run and a failed run are different evidence, and the step outcome alone cannot tell
       # them apart: core "failure" after 180 s is a stall, core "success" after 19 min is a slow path

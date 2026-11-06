@@ -147,12 +147,12 @@ test('a pipeline without a published revision says NO_DATA instead of counting z
   }));
   await page.route(/\/api\/v1\/jobs\?/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [], nextCursor: null }) }));
   await page.goto('/admin/pipelines/' + PIPELINE_ID);
-  const stats = page.locator('.pipeline-stats .metric-card');
+  const stats = page.locator('.pipeline-stats .ow-metric');
   await expect(stats).toHaveCount(4);
-  const nodes = stats.nth(1).locator('.metric-value');
+  const nodes = stats.nth(1).locator('.ow-metric-value');
   await expect(nodes.locator('.value-token')).toHaveAttribute('data-value', 'NO_DATA');
   expect(await nodes.innerText(), 'a missing count is never rendered as a number').not.toMatch(/\d/);
-  const updated = stats.nth(3).locator('.metric-value');
+  const updated = stats.nth(3).locator('.ow-metric-value');
   await expect(updated.locator('.value-token')).toHaveAttribute('data-value', 'NO_DATA');
   await page.screenshot({ path: path.join(OUT, 'state-pipelines-no-data.png'), fullPage: true });
 });

@@ -175,19 +175,21 @@ and the run is 1/17 of the page instead of 9/25. Expanding is one click and is n
 ### 2.5 The 390 card: two lines, and the first line is the key (R5)
 
 ```
-┌ card 70.8px ─────────────────────────────────────┐
+┌ card 72.2px ─────────────────────────────────────┐
 │ host-metrics · 1285            Succeeded   [⋯]   │  line 1: identity 15.6 · badge 20.4 · trigger 32
-│ r7 · Attempts 1/3 · 1800.0 s · 18h ago           │  line 2: qualifier + facts, 16.8
+│ r7 · Attempts 1/3 · 1800.0 s · 18h ago           │  line 2: qualifier + facts, 18.2
 └──────────────────────────────────────────────────┘
 ```
 
-Two lines, not five. Measured on this tree at 390 (`_metrics_r390-light-en.json`, `/admin/jobs`, 14 cards):
+Two lines, not five. The derivation below is at the V1 meta tier (13px; ADR-017 §D5). The
+`_metrics_r390-light-en.json` artifact was captured before that value change, when line 2 was 16.8px
+and the card was 70.8px; the gate reads `cardFactCount` and `clipped`, not this height.
 
 ```
-70.8 = 6     padding-top
+72.2 = 6     padding-top
      + 38    line 1   the ⋯ trigger is the tallest item on it (identity 15.6, badge 20.4)
      +  3    row-gap  the line-break pseudo-element, `.ow-card-2l::before` in styles.css
-     + 16.8  line 2   12 × 1.4, one line at the meta tier
+     + 18.2  line 2   13 × 1.4, one line at the meta tier
      +  6    padding-bottom
      +  1    border-bottom
 ```
@@ -217,13 +219,14 @@ Two lines, not five. Measured on this tree at 390 (`_metrics_r390-light-en.json`
 What keeps the name reachable: the cell keeps `data-label` (the one machine handle that survives, and what
 the harness counts), the value keeps the heading in a `title` tooltip, and the desktop `thead` keeps it at
 every width above 768. The trade is **144.6px per card** — the five-line measurement this rule replaced —
-against 70.8px.
+against 72.2px at the V1 meta tier.
 
-**Per page, measured** (`_metrics_r390-light-en.json`, 2026-10-31). Three pages opt into the two-line row:
+**Per page, measured before the V1 meta-tier change** (`_metrics_r390-light-en.json`, 2026-10-31). Three
+pages opt into the two-line row:
 
 | route | lines | card height | note |
 |---|---|---|---|
-| `/admin/jobs` | 2 | 66.8 – 70.8 | the arithmetic above, closed |
+| `/admin/jobs` | 2 | 66.8 – 70.8 | pre-V1; the V1 derivation is 72.2 |
 | `/admin/plugins` | 2 | 77.1 – 92.4 | line 1 carries an extra fact cell |
 | `/admin/nodes` | 3 | 90.6 – 104.8 | a fact wraps: `cardLines.tops` 597 / 617, 31.2 = 2 × 15.6 |
 

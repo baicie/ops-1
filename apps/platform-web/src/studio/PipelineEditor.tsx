@@ -3,7 +3,9 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError, newIdempotencyKey } from '../api';
 import type { PipelineDetail, PipelineDraft, PipelinePreview, PipelineRevision, PipelineValidation } from '../types';
 import { Icon } from '../components/Icons';
-import { ErrorState, Skeleton } from '../components/Ui';
+import { EmptyState, Skeleton } from '../components/Ui';
+import { AsyncBoundary } from '../components/app/async-boundary';
+import { Button } from '../components/ui/button';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, UnknownValue } from '../components/app/status-indicator';
@@ -134,8 +136,8 @@ export function PipelineEditorPage() {
   // while the definition is loading, refused, or missing.
   const headerFallback = <PageHeader eyebrow={t('studio.eyebrow')} title={pipelineId} description={t('studio.description')} />;
   if (loading) return <div className="page-stack studio-page">{headerFallback}<Skeleton rows={8} /></div>;
-  if (error) return <div className="page-stack studio-page">{headerFallback}<ErrorState error={error} onRetry={() => void load(draftParam)} /></div>;
-  if (!detail || !graph) return <div className="page-stack studio-page">{headerFallback}<ErrorState error={new Error(t('studio.error.noData'))} onRetry={() => void load(draftParam)} /></div>;
+  if (error) return <div className="page-stack studio-page">{headerFallback}<AsyncBoundary loading={false} error={error} hasData={false} onRetry={() => void load(draftParam)}>{null}</AsyncBoundary></div>;
+  if (!detail || !graph) return <div className="page-stack studio-page">{headerFallback}<EmptyState icon="ops" title={t('studio.error.noData')} action={<Button variant="secondary" onClick={() => void load(draftParam)}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>} /></div>;
   const published = detail.latest as PipelineRevision | null | undefined;
   const definition = fromGraph(draft?.definition || published?.definition || ({} as never), graph);
   const dirty = irKey(definition) !== baseline;

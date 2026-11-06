@@ -238,6 +238,8 @@ export function AccessPage() {
         <section className="panel table-panel">
           <div className="panel-head"><div><h2>{t('access.users.title')}</h2><p>{t('access.users.description')}</p></div><Button variant="secondary" onClick={() => { setUserError(null); setUserOpen(true); }}><Icon name="plus" size={15} /> {t('access.users.add')}</Button></div>
           <AsyncBoundary
+            // Section boundary: the users table is one panel of Access, not the page body.
+            report={false}
             loading={usersLoading}
             error={usersError}
             hasData={Boolean(users)}
@@ -280,6 +282,9 @@ export function AccessPage() {
       <section className="panel table-panel">
         <div className="panel-head"><div><h2>{t('access.publishers.title')}</h2><p>{t('access.publishers.description')}</p></div></div>
         <AsyncBoundary
+          // Section boundary: a publisher-list refusal is stated in place, not as a platform
+          // verdict over the rest of the page.
+          report={false}
           loading={loading}
           error={error}
           hasData={Boolean(data)}

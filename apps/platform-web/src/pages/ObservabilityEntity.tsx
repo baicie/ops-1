@@ -15,6 +15,7 @@ import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, UnknownValue, indicatorStateForCode } from '../components/app/status-indicator';
 import { formatBytes } from '../format';
 import { ageMessage } from '../lib/age';
+import { apiFailureCopy } from '../lib/kernel-messages';
 import {
   IdentityCell,
   StackCell,
@@ -41,6 +42,7 @@ import {
   resolutionFor,
   sampleIsStale,
   segmentPath,
+  stateCanReport,
   type HistorySample,
   type HistoryWindowHours,
   type MetricKey,
@@ -205,13 +207,23 @@ export function ObservabilityEntityPage() {
     () => api.get<NodeView>(`/api/v1/nodes/${nodeId}`),
     POLL_MS,
   );
-  const { data: instances } = useObservedPolling(
+  const {
+    data: instances,
+    error: instancesError,
+    loading: instancesLoading,
+    reload: reloadInstances,
+  } = useObservedPolling(
     () => api.get<InstanceView[]>(`/api/v1/nodes/${nodeId}/instances`),
     POLL_MS,
   );
   // The audit log is not polled: an event that already happened does not change, and a 10s
   // poll on an append-only log is traffic for nothing. It reloads with the node.
-  const { data: events } = useObservedPolling(
+  const {
+    data: events,
+    error: eventsError,
+    loading: eventsLoading,
+    reload: reloadEvents,
+  } = useObservedPolling(
     () => api.get<AuditEvent[]>(`/api/v1/audit?subjectType=node&subjectId=${nodeId}&limit=40`),
     0,
   );
@@ -237,6 +249,14 @@ export function ObservabilityEntityPage() {
   useDocumentTitle(node?.name || t('observabilityEntity.title'));
 
   const state = node ? entityState(node) : 'unknown';
+  // The stored replica counts are not an observation of the node: an unreachable node still
+  // carries the numbers from when it was last seen. The KPI follows the same state gate as the
+  // readings and says UNKNOWN rather than printing "0 of 0".
+  const instancesReportable = node
+    ? stateCanReport(state)
+      && typeof node.instancesReady === 'number'
+      && typeof node.instancesTotal === 'number'
+    : false;
   const readings = React.useMemo(() => (node ? nodeReadings(node) : null), [node]);
   const snapshot = node?.resourceSnapshot ?? null;
   const snapshotStale = sampleIsStale(snapshot?.sampledAt);
@@ -321,6 +341,14 @@ export function ObservabilityEntityPage() {
                 title={t('observability.notice.unreachable.title')}
                 detail={t('observabilityEntity.notice.unreachable.detail')}
               />
+            ) : state === 'degraded' ? (
+              <div data-testid="observability-entity-degraded">
+                <NoticeBar
+                  state="degraded"
+                  title={t('observability.notice.degraded.title')}
+                  detail={t('observabilityEntity.notice.degraded.detail')}
+                />
+              </div>
             ) : snapshotStale ? (
               <NoticeBar
                 state="stale"
@@ -355,9 +383,10 @@ export function ObservabilityEntityPage() {
               <MetricCard
                 metricId="obs-entity-instances"
                 label={t('observabilityEntity.instances.title')}
-                value={<span className="ow-tnum">{node.instancesReady}</span>}
-                denominator={node.instancesTotal}
-                detail={t('observabilityEntity.instances.detail')}
+                value={instancesReportable ? <span className="ow-tnum">{node.instancesReady}</span> : undefined}
+                denominator={instancesReportable ? node.instancesTotal : undefined}
+                state={instancesReportable ? 'ready' : 'unknown'}
+                detail={instancesReportable ? t('observabilityEntity.instances.detail') : t('observabilityEntity.instances.unavailable')}
                 showSampled={false}
               />
             </section>
@@ -403,14 +432,27 @@ export function ObservabilityEntityPage() {
                   <p>{t('observabilityEntity.instances.description')}</p>
                 </div>
               </div>
-              {!instances?.length ? (
+              {instancesLoading && !instances ? (
+                <p className="muted small pad" aria-busy="true" data-testid="observability-instances-loading">{t('aria.loading')}</p>
+              ) : instancesError && !instances?.length ? (
+                <div className="pad" data-testid="observability-instances-unavailable">
+                  <p><strong>{t('observabilityEntity.instances.unavailable.title')}</strong></p>
+                  <p className="muted small">{t('observabilityEntity.instances.unavailable.description')}</p>
+                  <p className="muted small">{apiFailureCopy(instancesError, t).reason}</p>
+                  <Button variant="secondary" onClick={() => void reloadInstances()}>{t('action.retry')}</Button>
+                </div>
+              ) : !instances?.length ? (
                 <EmptyState
                   icon="box"
                   title={t('observabilityEntity.instances.empty.title')}
                   description={t('observabilityEntity.instances.empty.description')}
                 />
               ) : (
-                <Table className={stackTable}>
+                <>
+                  {instancesError ? (
+                    <p className="muted small pad" data-testid="observability-instances-stale">{apiFailureCopy(instancesError, t).reason}</p>
+                  ) : null}
+                  <Table className={stackTable}>
                   <TableHeader className={stackHead}>
                     <TableRow className="hover:bg-transparent">
                       <TableHead>{t('table.instance')}</TableHead>
@@ -452,6 +494,7 @@ export function ObservabilityEntityPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </>
               )}
             </section>
 
@@ -463,14 +506,27 @@ export function ObservabilityEntityPage() {
                   <p>{t('observabilityEntity.events.description')}</p>
                 </div>
               </div>
-              {!runs.length ? (
+              {eventsLoading && !events ? (
+                <p className="muted small pad" aria-busy="true" data-testid="observability-events-loading">{t('aria.loading')}</p>
+              ) : eventsError && !runs.length ? (
+                <div className="pad" data-testid="observability-events-unavailable">
+                  <p><strong>{t('observabilityEntity.events.unavailable.title')}</strong></p>
+                  <p className="muted small">{t('observabilityEntity.events.unavailable.description')}</p>
+                  <p className="muted small">{apiFailureCopy(eventsError, t).reason}</p>
+                  <Button variant="secondary" onClick={() => void reloadEvents()}>{t('action.retry')}</Button>
+                </div>
+              ) : !runs.length ? (
                 <EmptyState
                   icon="activity"
                   title={t('observabilityEntity.events.empty.title')}
                   description={t('observabilityEntity.events.empty.description')}
                 />
               ) : (
-                <Table className={stackTable}>
+                <>
+                  {eventsError ? (
+                    <p className="muted small pad" data-testid="observability-events-stale">{apiFailureCopy(eventsError, t).reason}</p>
+                  ) : null}
+                  <Table className={stackTable}>
                   <TableHeader className={stackHead}>
                     <TableRow className="hover:bg-transparent">
                       <TableHead>{t('table.event')}</TableHead>
@@ -511,6 +567,7 @@ export function ObservabilityEntityPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </>
               )}
             </section>
           </>

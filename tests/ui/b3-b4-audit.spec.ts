@@ -182,9 +182,9 @@ function probe(page: Page) {
     const svgCharts = Array.from(document.querySelectorAll('.main-content svg')).filter((s) => s.closest('.panel, section') && s.getAttribute('role') === 'img');
     const chartText = svgCharts.map((s) => Array.from(s.querySelectorAll('text')).map((t) => t.textContent));
 
-    const metricCards = Array.from(document.querySelectorAll('.metric-card')).map((card) => ({
-      label: (card.querySelector('.metric-label')?.textContent || '').trim(),
-      value: (card.querySelector('.metric-value')?.textContent || '').trim(),
+    const metricCards = Array.from(document.querySelectorAll('.ow-metric')).map((card) => ({
+      label: (card.querySelector('.ow-metric-label')?.textContent || '').trim(),
+      value: (card.querySelector('.ow-metric-value')?.textContent || '').trim(),
     }));
 
     const sidebarMeta = document.querySelector('.sidebar-meta-block') as HTMLElement | null;
@@ -258,7 +258,7 @@ function probe(page: Page) {
     const duplicateHits = h1Text ? {
       h1: h1Text,
       countOnPage: (document.body.innerText.split(h1Text).length - 1),
-      cards: Array.from(document.querySelectorAll('.metric-card, .ow-metric, .panel-head')).map((el) => ({
+      cards: Array.from(document.querySelectorAll('.ow-metric, .panel-head')).map((el) => ({
         text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80),
         top: Math.round(el.getBoundingClientRect().top),
       })).filter((c) => c.text.includes(h1Text)),

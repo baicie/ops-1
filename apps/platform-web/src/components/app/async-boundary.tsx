@@ -2,7 +2,7 @@ import * as React from 'react';
 import { ApiError } from '../../api';
 import { usePolling } from '../../hooks';
 import { apiFailureCopy } from '../../lib/kernel-messages';
-import { reportBodyState, type BodyState } from '../../lib/platform-status';
+import { clearBodyState, reportBodyState, type BodyState } from '../../lib/platform-status';
 import { useT } from '../../i18n';
 import { Icon } from '../Icons';
 import { Button } from '../ui/button';
@@ -72,6 +72,8 @@ export function AsyncBoundary({
   emptyState,
   onRetry,
   skeletonRows = 5,
+  report = true,
+  source = 'kernel',
   children,
 }: {
   loading: boolean;
@@ -81,21 +83,36 @@ export function AsyncBoundary({
   emptyState?: React.ReactNode;
   onRetry?: () => void;
   skeletonRows?: number;
+  /**
+   * Whether this boundary owns the whole body. A page boundary reports the chrome state; an
+   * inline section (a failed upload inside a still-usable wizard) must not make the topbar
+   * claim the platform is unavailable.
+   */
+  report?: boolean;
+  /**
+   * Who produced the untranslated sentence. The Kernel's message is attributed as the Kernel's;
+   * a remote extension's message is attributed as the plugin's. Never silently relabelled.
+   */
+  source?: 'kernel' | 'plugin';
   children: React.ReactNode;
 }) {
   const t = useT();
   const state = classify(error);
-  // The chrome reads this: a body that says "did not answer" or "403" must not sit under a
-  // topbar and a rail that still advertise READY (lib/platform-status).
+  // Each boundary owns its claim: it releases it on unmount, so a plugin that recovers cannot
+  // leave the chrome saying "unavailable". A plugin failure is attention, not unavailable -
+  // the Kernel answered; one isolated extension did not.
+  const owner = React.useId();
   const bodyState: BodyState =
     state === 'forbidden' ? 'forbidden'
       : state === 'conflict' ? 'attention'
-        : state === 'error' ? 'unavailable'
+        : state === 'error' ? (source === 'plugin' ? 'attention' : 'unavailable')
           : isEmpty ? 'empty'
             : 'ready';
   React.useEffect(() => {
-    reportBodyState(bodyState);
-  }, [bodyState]);
+    if (!report) return;
+    reportBodyState(bodyState, owner);
+    return () => clearBodyState(owner);
+  }, [bodyState, report, owner]);
 
   if (loading && !hasData) {
     return (
@@ -131,26 +148,12 @@ export function AsyncBoundary({
   }
 
   if (state === 'error') {
-    const apiError = error instanceof ApiError ? error : null;
-    // The sentence printed to the reader is the client's own; the Kernel's English message is
-    // attributed beside it, never substituted for it (AGENTS.md 前端与国际化).
-    const failure = apiFailureCopy(error, t);
     return (
       <div data-async-state="error">
         <StatePanel state="error">
           <StatusIndicator state="error" />
           <h2>{t('error.loadTitle')}</h2>
-          <p>{failure.reason}</p>
-          <div className="async-panel-meta">
-            {apiError ? <span className="mono">{t('ui.error.code')}: {apiError.code}</span> : null}
-            {apiError?.requestId ? <span className="mono">{t('ui.error.requestId')}: {apiError.requestId}</span> : null}
-          </div>
-          {failure.kernelMessage ? (
-            <p className="server-quote" data-testid="server-message" data-source="kernel">
-              <span className="server-source">{t('ui.textSource.kernel')}</span>
-              {failure.kernelMessage}
-            </p>
-          ) : null}
+          <AsyncErrorMessage error={error as Error} source={source} />
           {onRetry ? <Button variant="secondary" onClick={onRetry}><Icon name="refresh" size={15} /> {t('action.retry')}</Button> : null}
         </StatePanel>
       </div>
@@ -162,6 +165,36 @@ export function AsyncBoundary({
   }
 
   return <div data-async-state="ready">{children}</div>;
+}
+
+/**
+ * The failure paragraph every error surface prints, with no panel of its own.
+ *
+ * The sentence the reader acts on is the client's; the Kernel's (or a plugin's) own English
+ * message is attributed beside it, never substituted for it (AGENTS.md 前端与国际化). Extracted
+ * so an inline failure (a rejected confirmation, a failed upload) says exactly what a full-page
+ * boundary says instead of printing `error.message` raw.
+ */
+export function AsyncErrorMessage({ error, source = 'kernel' }: { error: Error; source?: 'kernel' | 'plugin' }) {
+  const t = useT();
+  const apiError = error instanceof ApiError ? error : null;
+  const failure = apiFailureCopy(error, t);
+  const plugin = source === 'plugin';
+  return (
+    <>
+      <p>{plugin ? t('extensions.error.isolationNote') : failure.reason}</p>
+      <div className="async-panel-meta">
+        {apiError ? <span className="mono">{t('ui.error.code')}: {apiError.code}</span> : null}
+        {apiError?.requestId ? <span className="mono">{t('ui.error.requestId')}: {apiError.requestId}</span> : null}
+      </div>
+      {failure.kernelMessage ? (
+        <p className="server-quote" data-testid="server-message" data-source={source}>
+          <span className="server-source">{t(plugin ? 'ui.textSource.plugin' : 'ui.textSource.kernel')}</span>
+          {failure.kernelMessage}
+        </p>
+      ) : null}
+    </>
+  );
 }
 
 /**

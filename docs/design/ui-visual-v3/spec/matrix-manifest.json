@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "The execution matrix the observability fixture must cover: 2 routes x 1440/1024/390 x light/dark x en/zh-CN = 24 measured combinations. check-ui-metrics --matrix fails a pass that is missing a combination or measures one twice; file count is never used as evidence. The tracked artifacts under artifacts/ui/observability/metrics are this manifest's reference run.",
+  "routes": [
+    { "key": "observability", "match": "^/app/observability$" },
+    { "key": "observability-node", "match": "^/app/observability/nodes/[^/]+$" }
+  ],
+  "viewports": [1440, 1024, 390],
+  "themes": ["light", "dark"],
+  "locales": ["en", "zh-CN"]
+}
