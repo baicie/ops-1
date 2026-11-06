@@ -139,8 +139,10 @@ Kernel 配置（环境变量，部署时注入）：
 6. 插件签名 v2（workspace 来自 collection）；
 7. 浏览器点击 Collect → Save，Kernel 验签/摘要/workspace，写入 `SOURCE_ATTESTED`；
 8. 浏览器列表出现新行；A/B 跨 Workspace 写入被 403；
-9. 重启插件容器、重启 Kernel，Source 与 Evidence 仍可读；
-10. 容器安全检查（非 root、read-only rootfs、CPU/Memory/PID 限制、无 docker.sock、无明文 token 日志）。
+9. （浏览器保存后）Investigation Runner 的 `TEST_FIXTURE` 读取并引用 Gateway 写入的 evidence；
+10. 人工 `CONFIRMED` Verdict 单独写入，不改变 AI 假设；
+11. 重启插件容器、重启 Kernel，Source 与 Evidence 仍可读；
+12. 容器安全检查（非 root、read-only rootfs、CPU/Memory/PID 限制、无 docker.sock、无明文 token 日志）。
 
 Probe 使用未认证的 `apiinfo.version`，不证明凭据；凭据交付由 `hosts`/`items`/`collect` 的认证请求证明。Fixture 不证明真实 Zabbix 响应形状；脚本每次输出都标注 fixture。
 
@@ -222,7 +224,7 @@ Probe 使用未认证的 `apiinfo.version`，不证明凭据；凭据交付由 `
 |---|---|---|
 | `WORKSPACE_ATTESTATION_V2` | **PASS** | v2 golden vector（Rust/Node 同字节）、跨 Workspace 真实拒绝、tamper/incident/v1 测试、Kernel 权威 workspace 比较 |
 | `PLUGIN_SECRET_PROVISIONING` | **PASS（env 交付，威胁模型已记录）** | 真实 Node/OCI 容器拿到 Kernel 注入的 per-workspace secret 与 adapter key；A 的 Source 不能借用 B 的 ref（422）；fixture 要求 token；隔离/多分配 fail closed 单测；日志无明文 |
-| `GATEWAY_NODE_E2E` | **PASS** | 真实 Gateway → Node → OCI 容器 → fixture；浏览器 1440/1024/390 Collect+Save；重启恢复 |
+| `GATEWAY_NODE_E2E` | **PASS** | 真实 Gateway → Node → OCI 容器 → fixture；浏览器 1440/1024/390 Collect+Save；TEST_FIXTURE 调查器引用 Evidence；人工 Verdict；重启恢复 |
 | `SOURCE_EVIDENCE_INTEGRITY` | **PASS** | 字节→摘要→验签→存储→读回一致；错误摘要/跨 workspace/v1 拒绝 |
 | `UI_INTEGRATION` | **PASS** | #39 无需修改；真实栈浏览器用例 2/2；不填 trust/workspace |
 | `REAL_ZABBIX_VERIFIED` | **NOT_RUN** | 只有本地 fixture，不能替代真实实例 |

@@ -330,6 +330,39 @@ else
   fi
 fi
 
+step "investigator and human verdict"
+STARTED="$(api POST "/api/v1/incidents/${INCIDENT_ID}/investigations" "{\"idempotencyKey\":\"g13a1-$(date +%s)-$$\",\"scenario\":\"AUTO\"}")"
+case "$STARTED" in 200|201|202) ;; *) echo "investigation start failed: $STARTED $(cat /tmp/g13a1-body.json)"; exit 1;; esac
+RUN_ID="$(json "d['runId']" < /tmp/g13a1-body.json)"
+for _ in $(seq 1 60); do
+  RUN_STATUS="$(json "d['status']" < /tmp/g13a1-body.json)"
+  [ "$RUN_STATUS" = "RUNNING" ] || break
+  sleep 0.25
+  api GET "/api/v1/incidents/${INCIDENT_ID}/investigations/${RUN_ID}" >/dev/null
+done
+RUN_STATUS="$(json "d['status']" < /tmp/g13a1-body.json)"
+ADAPTER="$(json "d['adapter']" < /tmp/g13a1-body.json)"
+SYNTHETIC="$(json "d['synthetic']" < /tmp/g13a1-body.json)"
+[ "$RUN_STATUS" != "RUNNING" ] && [ "$ADAPTER" = "TEST_FIXTURE" ] && [ "$SYNTHETIC" = "True" ] || { echo "investigator was not the labelled TEST_FIXTURE: status=$RUN_STATUS adapter=$ADAPTER synthetic=$SYNTHETIC"; exit 1; }
+python3 - "$EVIDENCE_ID" <<'PY2'
+import json, sys
+d = json.load(open('/tmp/g13a1-body.json'))
+eid = sys.argv[1]
+cited = any(
+    c.get('evidenceId') == eid
+    for h in d.get('hypotheses') or []
+    for c in (h.get('supportingEvidence') or []) + (h.get('contradictingEvidence') or [])
+)
+assert cited, f'investigator did not cite {eid}'
+PY2
+ok "Investigator (TEST_FIXTURE) read and cited ${EVIDENCE_ID}"
+
+VERDICT="$(api POST "/api/v1/incidents/${INCIDENT_ID}/verdict" '{"verdict":"CONFIRMED","rationale":"the signed telemetry snapshot shows the CPU saturation recorded at the incident start"}')"
+[ "$VERDICT" = "201" ] || { echo "human verdict failed: $VERDICT $(cat /tmp/g13a1-body.json)"; exit 1; }
+api GET "/api/v1/incidents/${INCIDENT_ID}" >/dev/null
+[ "$(json "d['humanVerdict']['verdict']" < /tmp/g13a1-body.json)" = "CONFIRMED" ] || { echo "human verdict was not recorded"; exit 1; }
+ok "human verdict CONFIRMED written separately from the AI hypothesis"
+
 step "plugin and Kernel restart"
 PLUGIN_CID="$(docker ps -q --filter "label=opsweave.node-id=$NODE_ID" --filter label=opsweave.plugin-id=opsweave.zabbix-source | head -n1)"
 [ -n "$PLUGIN_CID" ] || { echo "plugin container not found"; exit 1; }
