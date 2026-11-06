@@ -105,6 +105,31 @@ paths:
       responses:
         '200': {description: Node observation including stale status}
         '404': {description: Not found in caller scope}
+  /telemetry/sources:
+    get:
+      summary: Admin view of the Kernel-owned automation source registry
+      description: >
+        Metadata only: sourceId, workspaceId, pluginId, secretRef, the endpoint
+        and TLS policy copied from the A.2 credential binding, and a state of
+        READY, DISABLED or INVALID with a stable invalidReason. No secret value
+        is ever returned. The registry is written only by deployment
+        configuration at Kernel start (OPSWEAVE_AUTOMATION_SOURCES); no plugin
+        or operator endpoint can enrol a source. B1 slice 2 may issue automation
+        principals only for READY rows.
+      responses:
+        '200':
+          description: The registry, ordered by workspace and source
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources]
+                properties:
+                  sources:
+                    type: array
+                    items: {$ref: '#/components/schemas/TelemetrySource'}
+        '401': {description: Not authenticated}
+        '403': {description: Requires the admin role}
   /instances/{instanceId}/logs/live:
     get:
       summary: SSE tail of one authorized instance
@@ -144,3 +169,25 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+  schemas:
+    TelemetrySource:
+      type: object
+      additionalProperties: false
+      required: [sourceId, workspaceId, pluginId, secretRef, state, updatedAt]
+      properties:
+        sourceId: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        pluginId: {type: string}
+        secretRef: {type: string, pattern: '^secretref:'}
+        endpoint: {type: [string, 'null']}
+        tlsPolicy: {type: [string, 'null'], enum: [VERIFY, TEST_PLAINTEXT, null]}
+        state: {type: string, enum: [READY, DISABLED, INVALID]}
+        invalidReason:
+          type: [string, 'null']
+          enum:
+            - CREDENTIAL_BINDING_MISSING
+            - ENDPOINT_NOT_HTTPS
+            - INSECURE_ENDPOINT_FORBIDDEN
+            - SOURCE_ID_REASSIGNED
+            - null
+        updatedAt: {type: string, format: date-time}
