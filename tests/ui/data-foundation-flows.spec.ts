@@ -6,7 +6,11 @@ const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 const FIXTURE = process.env.OPSWEAVE_UI_FIXTURE || 'http://127.0.0.1:18090/hosts.json';
 const OUT = path.resolve('../../artifacts/ui/data-foundation');
-test.describe.configure({ mode: 'serial' });
+// This is one long serial business flow (catalog, schema revision, connector,
+// run, quality, lineage, governance). 60s was not enough on loaded CI runners,
+// where the flow reached the quality screenshot exactly as the test budget
+// expired. The budget is raised; no retries are added.
+test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -76,6 +80,9 @@ test('Catalog + Integration real UI business flow', async ({ page }) => {
   await expect(page.getByTestId('integration-quality')).toContainText('"total": 2');
   await runRow.getByRole('button', { name: 'Lineage' }).click();
   await expect(page.getByTestId('integration-lineage')).toContainText('sourceBatchKey');
+  // The quality panel stays mounted when lineage opens; assert that explicitly
+  // so a real regression fails here instead of inside a screenshot timeout.
+  await expect(page.getByTestId('integration-quality')).toBeVisible();
   await page.getByTestId('integration-quality').screenshot({ path: path.join(OUT, 'integration-quality-flow.png') });
   await page.getByTestId('integration-lineage').screenshot({ path: path.join(OUT, 'integration-lineage-flow.png') });
 
