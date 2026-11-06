@@ -110,7 +110,24 @@ facts: {"swappedStatus":200,"hostsStatus":200,"leaked":["Bearer g13a2-secret-tok
 
 ### 4.4 CI
 
-（待最终运行填入。）
+HEAD `e45f9a4` 的最终运行：**15/15 jobs PASS**（`contracts` 由 push/pull_request 等多触发器重复 3 次，均为 PASS）。
+
+| Job | 结果 | 运行 |
+|---|---|---|
+| `rust` | PASS 2m51s | [42180291649](https://github.com/baicie/ops-1/actions/runs/42180291649/job/127768079158) |
+| `web` | PASS 32s | [42180291649](https://github.com/baicie/ops-1/actions/runs/42180291649/job/127768079098) |
+| `web-unit` | PASS 16s | [42180291649](https://github.com/baicie/ops-1/actions/runs/42180291649/job/127768079091) |
+| `zabbix-plugin` | PASS 24s | [42180291649](https://github.com/baicie/ops-1/actions/runs/42180291649/job/127768079197) |
+| `g13a-roundtrip` | PASS 1m39s | [42180291649](https://github.com/baicie/ops-1/actions/runs/42180291649/job/127768079043) |
+| `g13a1-gateway` | PASS 3m30s | [42180291649](https://github.com/baicie/ops-1/actions/runs/42180291649/job/127768079010) |
+| `contracts` / `spec-coverage` / `artifact-budget` | PASS | [42180291649](https://github.com/baicie/ops-1/actions/runs/42180291649) |
+| `acceptance` | PASS 16m32s | [42180291602](https://github.com/baicie/ops-1/actions/runs/42180291602/job/127768078436) |
+| `golden-path` | PASS 17m28s | [42180291653](https://github.com/baicie/ops-1/actions/runs/42180291653/job/127768078943) |
+| `legacy-regression` | PASS 5m56s | [42180291653](https://github.com/baicie/ops-1/actions/runs/42180291653/job/127768078775) |
+| `runtime-golden-path` | PASS（attempt 2） | [42180291593 attempt 2](https://github.com/baicie/ops-1/actions/runs/42180291593/job/127776794623) |
+| `quality-faults` | PASS 35s | [42180291821](https://github.com/baicie/ops-1/actions/runs/42180291821/job/127768079393) |
+
+说明：`runtime-golden-path` 的 attempt 1 因既有 Node 单测 `docker::tests::stop_and_remove_reports_a_surviving_container`（断言错误消息含 `"still running"`）失败；同一测试在同一 SHA 的 `rust` job 中通过，属并发/时序相关的既有 flake，与 A.2 改动无交集。rerun 后通过。该 flake 未修复，已列入残余风险；**CI 绿色不等于安全证明**，安全结论以 §4.1–4.3 的攻击复现与真实栈证据为准。
 
 ## 5. Merge Preflight
 
@@ -149,12 +166,23 @@ facts: {"swappedStatus":200,"hostsStatus":200,"leaked":["Bearer g13a2-secret-tok
 | `WORKSPACE_SECRET_ISOLATION` | **PASS** | A.1 的 per-workspace ref 测试 + A.2 binding 按 workspace 切片；A 用 B 的 ref 422；插件只收到自己的绑定 |
 | `SECRET_ROTATION_REVOCATION` | **PARTIAL** | 替换实例的语义已验证/文档化；无在线 Secret Store/轮换后台；旧实例窗口仍在 |
 | `WORKSPACE_ATTESTATION_V2` | **PASS** | A.1 的 v2 签名、v1 拒绝、跨 Workspace 拒绝、tamper/replay 回归保持通过 |
-| `GATEWAY_NODE_OCI_E2E` | **PASS（本地真实栈）** | 真实 Gateway→Node→OCI→fixture，攻击矩阵 + 浏览器 + Investigator + Verdict + 重启 + 容器安全；最终 CI 结果见下 |
+| `GATEWAY_NODE_OCI_E2E` | **PASS（本地真实栈）** | 真实 Gateway→Node→OCI→fixture，攻击矩阵 + 浏览器 + Investigator + Verdict + 重启 + 容器安全；CI 15/15（§4.4） |
 | `SOURCE_EVIDENCE_INTEGRITY` | **PASS** | 字节→摘要→验签→存储→读回一致；错误摘要/跨 workspace/v1 拒绝回归 |
 | `REAL_ZABBIX_VERIFIED` | **NOT_RUN** | 无真实 Zabbix 实例；fixture 不作为真实响应形状证据 |
 | `PRODUCTION_SECRET_READY` | **PARTIAL** | 环境变量交付 + 静态绑定；不是独立 Secret Store；轮换需替换实例 |
 | `INTEGRATION_READY` | **PARTIAL** | 真实栈安全矩阵通过；真实 Zabbix 与生产 Secret Store 未接入 |
 
-## 7. 下一阶段
+## 7. Next Stage：G13-B 方案（提案，未实现）
 
-G13-B：Trigger/Event → `source + nativeId` 去重 → Incident → 时间窗采集 → Evidence → Investigation → Human Verdict；不自动关闭 Incident，不让 AI 替代 Verdict。安全门禁（本 PR 的绑定、TLS、Secret 生命周期）关闭前不进入生产。
+目标：把“人工点击采集”升级为 Trigger/Event 驱动的 Incident 流水线，且 **AI 只产出假设，Verdict 始终由人写入**。
+
+1. **契约面**（先改契约再编码）
+   - `POST /v1/sources/{id}/events:ingest`：插件推送规范化 Event（`nativeId`、`sourceId`、`workspaceId`、`occurredAt`、`observedAt`、`severity`、`payloadDigest`），Gateway 代表可信身份，拒绝自报 workspace。
+   - Incident 增加 `dedupKey = sha256(workspaceId + sourceId + nativeId)` 的唯一约束；重复 Event 只追加观测，不新建 Incident。
+   - 状态机：`OPEN → INVESTIGATING → AWAITING_VERDICT → CLOSED`；禁止自动 `CLOSED`。
+2. **触发与时间窗**：Trigger 规则（阈值/去重窗口/静默期）属于业务插件，不写入 Kernel；时间窗采集复用 A.1 的 `collect` 与 v2 Attestation，窗口边界、超时、预算写入契约。
+3. **权限**：新增 `telemetry.event.ingest`（插件凭证）与 `incident.verdict.write`（人）；Event 不得成为绕过 `telemetry.source.write` 的写入口；绑定检查沿用 A.2（Event 不解析凭据）。
+4. **证据链**：每个 Incident 只接受其 Workspace 的 Evidence（v2 签名 + Incident 绑定）；Investigator 只能“引用/建议”，Verifier 与 Human Verdict 分离，保留 A.1 的 TEST_FIXTURE 边界。
+5. **UI**：Incident 时间线（Event → Evidence → Investigation → Verdict）在 1440/1024/390 与 en/zh-CN 下验收；拒绝、过期、轮换中不可用三态复用本 PR 的错误码文案。
+6. **门禁**：本 PR 的 `CREDENTIAL_ENDPOINT_BOUNDARY` 必须为 PASS，`SECRET_ROTATION_REVOCATION`/`PRODUCTION_SECRET_READY` 的窗口必须有处置方案；真实 Zabbix 与独立 Secret Store 仍是 G13-B 进入生产的前置，不以 CI 绿色替代。
+7. **非目标**：自动关闭 Incident、自动改配置、跨 Workspace 关联、通用工作流引擎（DAG）。
