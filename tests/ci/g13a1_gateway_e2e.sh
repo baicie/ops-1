@@ -24,6 +24,14 @@ PULL_REGISTRY="${OPSWEAVE_PULL_REGISTRY:-localhost:5001}"
 ADAPTER_ID="zabbix-main"
 ADAPTER_SECRET="g13a1-adapter-secret"
 ZABBIX_TOKEN="fixture-token"
+APPROVED_ENDPOINT="http://${PLUGIN_HOST}:18090/api_jsonrpc.php"
+ATTACKER_PORT=18091
+ATTACKER_LOG=/tmp/g13a1-attacker-auth.log
+# The developer shell may export an HTTP proxy; every call here is loopback or
+# the Docker bridge, and a proxy turning a local receiver into a 502 would make
+# the attack matrix unreadable. Keep local traffic direct.
+export no_proxy="127.0.0.1,localhost,${PLUGIN_HOST}"
+export NO_PROXY="$no_proxy"
 PG_CONTAINER="opsweave-g13a1-pg"
 NODE_STATE="$(mktemp -d /tmp/opsweave-g13a1-node.XXXXXX)"
 OPSCTL_HOME="$(mktemp -d /tmp/opsweave-g13a1-home.XXXXXX)"
@@ -68,8 +76,9 @@ gateway() { # method plugin-path [body] -> status; body in /tmp/g13a1-body.json
   api "$1" "/api/v1/gateway/opsweave.zabbix-source$2" "${3:-}"
 }
 
-start_kernel() { # $1 = workspace-scoped OPSWEAVE_PLUGIN_SECRETS JSON
+start_kernel() { # $1 = workspace-scoped OPSWEAVE_PLUGIN_SECRETS JSON, $2 = credential bindings JSON
   local secrets="$1"
+  local bindings="$2"
   env \
     DATABASE_URL="$DB_URL" \
     OPSWEAVE_BIND=0.0.0.0:18185 \
@@ -86,6 +95,8 @@ start_kernel() { # $1 = workspace-scoped OPSWEAVE_PLUGIN_SECRETS JSON
     OPSWEAVE_EVIDENCE_ADAPTERS="${ADAPTER_ID}:${ADAPTER_SECRET}" \
     OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS="${ADAPTER_ID}:opsweave.zabbix-source" \
     OPSWEAVE_PLUGIN_SECRETS="$secrets" \
+    OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS="$bindings" \
+    OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS=1 \
     OPSWEAVE_PLUGIN_DB_HOST="$PLUGIN_HOST" \
     OPSWEAVE_PLUGIN_KERNEL_URL="http://${PLUGIN_HOST}:18185" \
     OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS="$PLUGIN_HOST" \
@@ -137,8 +148,16 @@ sleep 1
 curl -fsS -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","method":"apiinfo.version","id":1}' "http://127.0.0.1:18090/" >/dev/null
 ok "fixture answers apiinfo.version"
 
+: > "$ATTACKER_LOG"
+python3 tests/fixtures/zabbix_attacker_receiver.py "$ATTACKER_PORT" "$ATTACKER_LOG" >/tmp/g13a1-attacker.log 2>&1 &
+PIDS+=($!)
+sleep 1
+curl -fsS -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","method":"host.get","id":1}' "http://127.0.0.1:${ATTACKER_PORT}/" >/dev/null
+: > "$ATTACKER_LOG"
+ok "attacker receiver is listening (and its auth log is empty)"
+
 step "Kernel (bootstrap pass) and workspaces"
-start_kernel '{}'
+start_kernel '{}' '{}'
 ok "Kernel ready and admin session acquired"
 
 # Plugin secrets are keyed by workspace, so the workspace ids must exist before
@@ -163,9 +182,19 @@ print(json.dumps({"opsweave.zabbix-source": {
 }}))
 JSON
 )"
+BINDINGS_JSON="$(python3 - "$WORKSPACE_A" "$WORKSPACE_B" "$PLUGIN_HOST" <<'JSON'
+import json, sys
+a, b, host = sys.argv[1:4]
+endpoint = f"http://{host}:18090/api_jsonrpc.php"
+print(json.dumps({"opsweave.zabbix-source": {
+    a: {"secretref:zabbix/main": {"endpoint": endpoint, "tls": "TEST_PLAINTEXT"}},
+    b: {"secretref:zabbix/main": {"endpoint": endpoint, "tls": "TEST_PLAINTEXT"}},
+}}))
+JSON
+)"
 step "restart Kernel with workspace-scoped plugin secrets"
 stop_kernel
-start_kernel "$SECRETS_JSON"
+start_kernel "$SECRETS_JSON" "$BINDINGS_JSON"
 ok "Kernel restarted with workspace-scoped secrets"
 
 step "real Node runtime"
@@ -221,6 +250,18 @@ code="$(gateway POST /api/zabbix-source/sources "$GW_SOURCE")"
 [ "$code" = "201" ] || { echo "source create failed: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
 SOURCE_ID="$(json "d['sourceId']" < /tmp/g13a1-body.json)"
 ok "source ${SOURCE_ID} in workspace ${WORKSPACE_A}"
+
+step "credential endpoint attack through the Gateway"
+ATTACK_ENDPOINT="http://${PLUGIN_HOST}:${ATTACKER_PORT}/api_jsonrpc.php"
+code="$(gateway PUT "/api/zabbix-source/sources/${SOURCE_ID}" "{\"name\":\"zabbix-main\",\"endpoint\":\"${ATTACK_ENDPOINT}\",\"credential\":{\"kind\":\"api-token\",\"ref\":\"secretref:zabbix/main\"}}")"
+[ "$code" = "422" ] && [ "$(json "d['code']" < /tmp/g13a1-body.json)" = "ZBX_CREDENTIAL_ENDPOINT_MISMATCH" ] || { echo "PUT endpoint swap was not refused: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
+code="$(gateway POST /api/zabbix-source/sources "{\"workspaceId\":\"${WORKSPACE_A}\",\"name\":\"attacker-source\",\"endpoint\":\"${ATTACK_ENDPOINT}\",\"credential\":{\"kind\":\"api-token\",\"ref\":\"secretref:zabbix/main\"}}")"
+[ "$code" = "422" ] && [ "$(json "d['code']" < /tmp/g13a1-body.json)" = "ZBX_CREDENTIAL_ENDPOINT_MISMATCH" ] || { echo "attacker-endpoint source was not refused: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
+: > "$ATTACKER_LOG"
+code="$(gateway GET "/api/zabbix-source/sources/${SOURCE_ID}/hosts")"
+[ "$code" = "200" ] || { echo "approved hosts failed after the refused swap: $code"; exit 1; }
+[ ! -s "$ATTACKER_LOG" ] || { echo "the attacker receiver saw a credential: $(cat "$ATTACKER_LOG")"; exit 1; }
+ok "endpoint swap and attacker-endpoint create refused; attacker received 0 credentials"
 
 code="$(gateway POST "/api/zabbix-source/sources/${SOURCE_ID}/probe")"
 [ "$code" = "200" ] && [ "$(json "d['outcome']" < /tmp/g13a1-body.json)" = "OK" ] || { echo "probe failed: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
@@ -363,6 +404,17 @@ api GET "/api/v1/incidents/${INCIDENT_ID}" >/dev/null
 [ "$(json "d['humanVerdict']['verdict']" < /tmp/g13a1-body.json)" = "CONFIRMED" ] || { echo "human verdict was not recorded"; exit 1; }
 ok "human verdict CONFIRMED written separately from the AI hypothesis"
 
+step "a historical source fails closed on the read path"
+SCHEMA="$(psql "$DB_URL" -tAc "select schema_name from kernel.plugin_storage_bindings where plugin_id='opsweave.zabbix-source'")"
+[ -n "$SCHEMA" ] || { echo "plugin storage schema not found"; exit 1; }
+psql "$DB_URL" -v ON_ERROR_STOP=1 -c "update ${SCHEMA}.zabbix_sources set endpoint='${ATTACK_ENDPOINT}' where source_id='${SOURCE_ID}'" >/dev/null
+: > "$ATTACKER_LOG"
+code="$(gateway GET "/api/zabbix-source/sources/${SOURCE_ID}/hosts")"
+[ "$code" = "422" ] && [ "$(json "d['code']" < /tmp/g13a1-body.json)" = "ZBX_CREDENTIAL_ENDPOINT_MISMATCH" ] || { echo "historical endpoint was not refused: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
+[ ! -s "$ATTACKER_LOG" ] || { echo "the historical source leaked a credential: $(cat "$ATTACKER_LOG")"; exit 1; }
+psql "$DB_URL" -v ON_ERROR_STOP=1 -c "update ${SCHEMA}.zabbix_sources set endpoint='${APPROVED_ENDPOINT}' where source_id='${SOURCE_ID}'" >/dev/null
+ok "historical source with an unapproved endpoint is refused before the secret is resolved"
+
 step "plugin and Kernel restart"
 PLUGIN_CID="$(docker ps -q --filter "label=opsweave.node-id=$NODE_ID" --filter label=opsweave.plugin-id=opsweave.zabbix-source | head -n1)"
 [ -n "$PLUGIN_CID" ] || { echo "plugin container not found"; exit 1; }
@@ -378,7 +430,7 @@ COUNT="$(json "len(d['items'])" < /tmp/g13a1-body.json)"
 ok "plugin restart: both sources still listed"
 
 stop_kernel
-start_kernel "$SECRETS_JSON"
+start_kernel "$SECRETS_JSON" "$BINDINGS_JSON"
 for _ in $(seq 1 120); do
   code="$(gateway GET /api/zabbix-source/sources)"
   [ "$code" = "200" ] && break

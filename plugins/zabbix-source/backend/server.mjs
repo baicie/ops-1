@@ -40,6 +40,7 @@ import {
   sourceView,
 } from './storage.mjs';
 import { createIdentityResolver, hasScope, workspaceAllowed } from './identity.mjs';
+import { assertCredentialBinding, parseCredentialBindings } from './credential-binding.mjs';
 
 const DEFAULTS = {
   pluginId: 'opsweave.zabbix-source',
@@ -137,6 +138,14 @@ export function createPlugin(options) {
   // the flat form is never selected when the plugin runs as a deployment.
   const secretMap = options.secretMap || {};
   const workspaceSecretMap = options.workspaceSecretMap || null;
+  // Endpoint bindings are metadata, not secrets: they say where a ref may be
+  // sent. The Kernel delivers this plugin's slice; a deployment with no binding
+  // cannot use any credential.
+  const credentialBindings = options.credentialBindings || {};
+  const allowInsecureEndpoints = options.allowInsecureEndpoints === true;
+  // Developer-only escape hatch for the flat development secret map. The
+  // deployment path never sets it.
+  const allowUnboundCredentials = options.allowUnboundCredentials === true;
   const secretMode = options.secretMode || (workspaceSecretMap ? 'workspace' : 'none');
   const capabilityDigest = options.capabilityDigest || DEFAULTS.capabilityDigest;
   const buildDigest = options.buildDigest || DEFAULTS.buildDigest;
@@ -228,8 +237,20 @@ export function createPlugin(options) {
     return Boolean(secretMap[ref]);
   }
 
+  function enforceSourceBinding(row) {
+    assertCredentialBinding({
+      bindings: credentialBindings,
+      workspaceId: row.workspace_id,
+      ref: row.credential_ref,
+      endpoint: row.endpoint,
+      verifyTls: row.verify_tls,
+      allowInsecureEndpoints,
+      allowUnbound: allowUnboundCredentials,
+    });
+  }
+
   /** Resolve a secretref for ONE workspace, for the duration of one call. */
-  function resolveSecret(workspaceId, ref) {
+  function resolveSecret(workspaceId, ref, credentialKind = 'api-token') {
     const value = workspaceSecretMap
       ? workspaceSecretMap[workspaceId]?.[ref]
       : secretMap[ref];
@@ -239,12 +260,18 @@ export function createPlugin(options) {
         { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
       );
     }
+    if (credentialKind === 'basic' && !value.includes(':')) {
+      throw Object.assign(
+        new Error('a basic credential must resolve to user:password'),
+        { status: 422, code: 'ZBX_BASIC_CREDENTIAL_INVALID' },
+      );
+    }
     return value;
   }
 
-  function resolveSecretQuietly(workspaceId, ref) {
+  function resolveSecretQuietly(workspaceId, ref, credentialKind = 'api-token') {
     try {
-      return resolveSecret(workspaceId, ref);
+      return resolveSecret(workspaceId, ref, credentialKind);
     } catch {
       return null;
     }
@@ -421,6 +448,15 @@ export function createPlugin(options) {
           { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
         );
       }
+      assertCredentialBinding({
+        bindings: credentialBindings,
+        workspaceId: parsed.workspaceId,
+        ref: parsed.credential.ref,
+        endpoint: parsed.endpoint,
+        verifyTls: parsed.verifyTls,
+        allowInsecureEndpoints,
+        allowUnbound: allowUnboundCredentials,
+      });
       const row = await store.createSource({
         sourceId: crypto.randomUUID(),
         workspaceId: parsed.workspaceId,
@@ -449,6 +485,15 @@ export function createPlugin(options) {
           { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
         );
       }
+      assertCredentialBinding({
+        bindings: credentialBindings,
+        workspaceId: current.workspace_id,
+        ref: parsed.credential.ref,
+        endpoint: parsed.endpoint,
+        verifyTls: parsed.verifyTls,
+        allowInsecureEndpoints,
+        allowUnbound: allowUnboundCredentials,
+      });
       const row = await store.updateSource(sourceId, who.workspaces, parsed, actorId);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       return send(res, 200, sourceView(row), id);
@@ -460,6 +505,7 @@ export function createPlugin(options) {
       const actorId = requireUser(who);
       const row = await store.getSource(requireUuidPath(probeMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      enforceSourceBinding(row);
       // A probe that cannot resolve its secret still runs, so it reports
       // UNAUTHORIZED rather than a local configuration error the operator
       // cannot distinguish from a bad token.
@@ -468,7 +514,8 @@ export function createPlugin(options) {
         endpoint: row.endpoint,
         verifyTls: row.verify_tls,
         budget: row.budget,
-        secret: resolveSecretQuietly(row.workspace_id, row.credential_ref),
+        secret: resolveSecretQuietly(row.workspace_id, row.credential_ref, row.credential_kind),
+        credentialKind: row.credential_kind,
       });
       const updated = await store.recordProbe(row.source_id, who.workspaces, result, statusFromProbe(result, { verifyTls: row.verify_tls }), actorId);
       if (!updated) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
@@ -480,12 +527,14 @@ export function createPlugin(options) {
       requireScope(who, 'telemetry.source.read');
       const row = await store.getSource(requireUuidPath(hostsMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      enforceSourceBinding(row);
       const result = await listHosts({
         sourceId: row.source_id,
         endpoint: row.endpoint,
         verifyTls: row.verify_tls,
         budget: row.budget,
-        secret: resolveSecret(row.workspace_id, row.credential_ref),
+        secret: resolveSecret(row.workspace_id, row.credential_ref, row.credential_kind),
+        credentialKind: row.credential_kind,
       });
       return send(res, 200, result, id);
     }
@@ -495,13 +544,15 @@ export function createPlugin(options) {
       requireScope(who, 'telemetry.source.read');
       const row = await store.getSource(requireUuidPath(itemsMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      enforceSourceBinding(row);
       const result = await listItems(
         {
           sourceId: row.source_id,
           endpoint: row.endpoint,
           verifyTls: row.verify_tls,
           budget: row.budget,
-          secret: resolveSecret(row.workspace_id, row.credential_ref),
+          secret: resolveSecret(row.workspace_id, row.credential_ref, row.credential_kind),
+        credentialKind: row.credential_kind,
         },
         url.searchParams.get('hostId'),
       );
@@ -519,6 +570,7 @@ export function createPlugin(options) {
       const actorId = requireUser(who);
       const row = await store.getSource(requireUuidPath(collectMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      enforceSourceBinding(row);
       const body = await readJson(req);
       validateBudget(body.budget);
       const itemIds = Array.isArray(body.itemIds)
@@ -530,7 +582,8 @@ export function createPlugin(options) {
           endpoint: row.endpoint,
           verifyTls: row.verify_tls,
           budget: row.budget,
-          secret: resolveSecret(row.workspace_id, row.credential_ref),
+          secret: resolveSecret(row.workspace_id, row.credential_ref, row.credential_kind),
+        credentialKind: row.credential_kind,
         },
         itemIds,
         window: body.window,
@@ -688,6 +741,9 @@ export async function startServer(env = process.env) {
     secretMap: secrets.secrets,
     workspaceSecretMap: secrets.workspaceSecrets,
     secretMode: secrets.mode,
+    credentialBindings: parseCredentialBindings(env.OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS || '', pluginId),
+    allowInsecureEndpoints: env.OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS === '1',
+    allowUnboundCredentials: secrets.mode === 'dev',
     store,
     verifyIdentity,
   });

@@ -120,6 +120,9 @@ async function startPlugin({ store = new MemoryStore(), adapter = true, workspac
     adapterSecret: adapter ? ADAPTER_SECRET : '',
     secretMap: workspaceSecretMap ? {} : { 'secretref:zabbix/main': 'fixture-token' },
     workspaceSecretMap,
+    // These socket tests exercise storage/identity semantics; the production
+    // endpoint-binding matrix lives in tests/ci/g13a2_endpoint_attack.test.mjs.
+    allowUnboundCredentials: true,
   });
   await new Promise((resolve) => plugin.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${plugin.server.address().port}`;

@@ -233,7 +233,7 @@ export async function assertEndpoint(raw) {
  * reply that arrived but could not be parsed, because the three lead to
  * different outcomes (TIMEOUT / UNAVAILABLE / UNKNOWN).
  */
-export async function rpc({ endpoint, method, params, secret, timeoutMs, verifyTls = true, transport }) {
+export async function rpc({ endpoint, method, params, secret, credentialKind = 'api-token', timeoutMs, verifyTls = true, transport }) {
   if (transport) {
     // Test seam: the HTTP layer is replaced, the semantics below are not.
     return transport({ endpoint, method, params, timeoutMs });
@@ -246,7 +246,13 @@ export async function rpc({ endpoint, method, params, secret, timeoutMs, verifyT
     accept: 'application/json',
   };
   // apiinfo.version is the one method Zabbix refuses when authenticated.
-  if (secret && method !== 'apiinfo.version') headers.authorization = `Bearer ${secret}`;
+  // `basic` means HTTP Basic over the resolved `user:password` value; claiming
+  // basic and sending Bearer is not an option.
+  if (secret && method !== 'apiinfo.version') {
+    headers.authorization = credentialKind === 'basic'
+      ? `Basic ${Buffer.from(secret, 'utf8').toString('base64')}`
+      : `Bearer ${secret}`;
+  }
 
   const client = url.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
@@ -545,6 +551,7 @@ async function collectOne({ source, itemId, window, timeFrom, timeTill, budget, 
         limit: budget.maxSamplesPerItem + 1,
       },
       secret: source.secret,
+      credentialKind: source.credentialKind || 'api-token',
       timeoutMs: budget.requestTimeoutMs,
       verifyTls: source.verifyTls !== false,
       transport,
@@ -714,6 +721,7 @@ async function inventory({ source, method, params, budget, transport, project })
       method,
       params: { ...params, output: 'extend', limit: limit + 1 },
       secret: source.secret,
+      credentialKind: source.credentialKind || 'api-token',
       timeoutMs: budget.requestTimeoutMs,
       verifyTls: source.verifyTls !== false,
       transport,
