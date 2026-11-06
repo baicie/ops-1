@@ -24,6 +24,8 @@
 
 ## 切片 2 — Automation Principal 签发/验证
 
+> 实施状态（2026-11-06）：**签发/验证已完成**，无 Event/collect 接入。详见 [b1-slice-2.md](b1-slice-2.md)。
+
 1. `/internal/v1/automation/principals`：实例身份 + live generation + source 注册表 + 预算。
 2. extractor `AutomationPrincipal`；jti 单次、过期、撤销、节点换代。
 3. 审计 actor `AUTOMATION`。
