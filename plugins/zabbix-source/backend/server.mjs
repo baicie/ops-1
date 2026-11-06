@@ -312,6 +312,19 @@ export function createPlugin(options) {
     if (url.pathname === '/_opsweave/health/startup') {
       return send(res, 200, { status: 'started' }, id);
     }
+    // The Node runtime's supervisor probes this standard path before it marks an
+    // instance READY. Without it the plugin deploys as DEGRADED forever, even
+    // though every business endpoint works - which is exactly what the first
+    // real Gateway run found.
+    if (url.pathname === '/_opsweave/runtime/v1/info') {
+      return send(res, 200, {
+        pluginId,
+        version,
+        runtimeProtocol: 'http-json-v1',
+        capabilityDigest,
+        buildDigest,
+      }, id);
+    }
     if (url.pathname === '/_opsweave/runtime-info') {
       return send(res, 200, {
         pluginId,

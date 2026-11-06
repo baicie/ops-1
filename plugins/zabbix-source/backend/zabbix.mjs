@@ -263,8 +263,21 @@ export async function rpc({ endpoint, method, params, secret, timeoutMs, verifyT
         headers,
         timeout: timeoutMs,
         rejectUnauthorized: verifyTls,
-        lookup: (_hostname, _options, callback) =>
-          callback(null, addresses[0].address, addresses[0].family === 6 ? 6 : 4),
+        lookup: (_hostname, options, callback) => {
+          // Node 22's autoSelectFamily asks lookup for the whole address list
+          // (`options.all`) and expects an array of {address, family}. Returning
+          // a single string here produced ERR_INVALID_IP_ADDRESS for every
+          // DNS-named endpoint - the container could reach host.docker.internal
+          // with fetch but not through this client.
+          if (options && options.all) {
+            callback(null, addresses.map((entry) => ({
+              address: entry.address,
+              family: entry.family === 6 ? 6 : 4,
+            })));
+            return;
+          }
+          callback(null, addresses[0].address, addresses[0].family === 6 ? 6 : 4);
+        },
       },
       (response) => {
         const status = response.statusCode || 0;
