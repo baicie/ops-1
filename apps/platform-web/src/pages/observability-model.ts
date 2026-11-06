@@ -183,6 +183,26 @@ export interface FleetSummary {
   notObservable: number;
   /** Nodes whose newest sample is older than {@link SAMPLE_STALE_AFTER_MS}. */
   staleSamples: number;
+  /** Rows the `stale` filter would list: kernel-stale, state-stale, or a stale sample. */
+  staleRows: number;
+  /** The oldest sample among stale rows, for the card's "since when" line. */
+  oldestStaleSampleAt: string | null;
+  /**
+   * Rows whose state needs a reader: unreachable, revoked, unknown, degraded, stale, or
+   * reachable with no sample. One count, because the operator's first question is "what needs
+   * me", not "how many buckets do you have".
+   */
+  attention: number;
+  /** The state buckets behind `attention`, so the card can name them. */
+  degraded: number;
+  staleStates: number;
+  /** Reporting rows whose state is otherwise healthy but whose newest sample is stale. */
+  staleReadySamples: number;
+  unreachable: number;
+  revoked: number;
+  unknown: number;
+  /** The oldest sample among rows that can report; the freshness card's evidence. */
+  oldestReportingSampleAt: string | null;
   /** Highest CPU utilisation among reporting nodes, with the node it belongs to. */
   peakCpu: { value: number; nodeId: string; nodeName: string; observedAt: string } | null;
   /** Highest memory utilisation among reporting nodes. */
@@ -198,19 +218,56 @@ export function summarise(nodes: NodeView[], now = Date.now()): FleetSummary {
     noSample: 0,
     notObservable: 0,
     staleSamples: 0,
+    staleRows: 0,
+    oldestStaleSampleAt: null,
+    attention: 0,
+    degraded: 0,
+    staleStates: 0,
+    staleReadySamples: 0,
+    unreachable: 0,
+    revoked: 0,
+    unknown: 0,
+    oldestReportingSampleAt: null,
     peakCpu: null,
     peakMemory: null,
     observedAt: newestObservation(nodes),
   };
   for (const node of nodes) {
     const state = entityState(node);
-    if (!stateCanReport(state)) { summary.notObservable += 1; continue; }
+    const at = node.resourceSnapshot?.sampledAt;
+    const staleSample = sampleIsStale(at, now);
+    const rowIsStale = node.stale || state === 'stale' || staleSample;
+    if (rowIsStale) {
+      summary.staleRows += 1;
+      if (at && (!summary.oldestStaleSampleAt || Date.parse(at) < Date.parse(summary.oldestStaleSampleAt))) {
+        summary.oldestStaleSampleAt = at;
+      }
+    }
+    if (!stateCanReport(state)) {
+      if (state === 'unreachable') summary.unreachable += 1;
+      else if (state === 'revoked') summary.revoked += 1;
+      else summary.unknown += 1;
+      summary.notObservable += 1;
+      summary.attention += 1;
+      continue;
+    }
     const readings = nodeReadings(node);
     const any = METRIC_KEYS.some((key) => readings[key].kind === 'reading');
-    if (!any) { summary.noSample += 1; continue; }
+    if (!any) {
+      summary.noSample += 1;
+      summary.attention += 1;
+      continue;
+    }
     summary.reporting += 1;
-    const at = node.resourceSnapshot?.sampledAt;
-    if (sampleIsStale(at, now)) summary.staleSamples += 1;
+    if (staleSample) summary.staleSamples += 1;
+    // Exactly one reason bucket per attention row: a degraded/stale state owns the row; a
+    // healthy state with an old sample is the stale bucket. The buckets then sum to `attention`.
+    if (state === 'degraded') { summary.degraded += 1; summary.attention += 1; }
+    else if (state === 'stale') { summary.staleStates += 1; summary.attention += 1; }
+    else if (staleSample) { summary.staleReadySamples += 1; summary.attention += 1; }
+    if (at && (!summary.oldestReportingSampleAt || Date.parse(at) < Date.parse(summary.oldestReportingSampleAt))) {
+      summary.oldestReportingSampleAt = at;
+    }
     const cpu = readings.cpu;
     if (cpu.kind === 'reading' && (!summary.peakCpu || cpu.value > summary.peakCpu.value)) {
       summary.peakCpu = { value: cpu.value, nodeId: node.id, nodeName: node.name, observedAt: cpu.observedAt };
@@ -242,6 +299,7 @@ export interface EntityRow {
   instances: { ready: number; total: number } | null;
   /** The sample's own timestamp, never the time the page rendered. */
   observedAt: string | null;
+  /** The newest sample is older than the sample-staleness window. */
   stale: boolean;
 }
 
@@ -305,12 +363,13 @@ export function sortRows(rows: EntityRow[]): EntityRow[] {
     || left.node.name.localeCompare(right.node.name));
 }
 
-export type EntityFilter = 'all' | 'attention' | 'reporting' | 'unobservable';
+export type EntityFilter = 'all' | 'attention' | 'reporting' | 'stale' | 'unobservable';
 
 export function filterRows(rows: EntityRow[], filter: EntityFilter): EntityRow[] {
   if (filter === 'all') return rows;
   if (filter === 'attention') return rows.filter((row) => rowSeverity(row) >= 1);
   if (filter === 'reporting') return rows.filter((row) => rowSeverity(row) <= 1 && rowLoad(row) >= 0);
+  if (filter === 'stale') return rows.filter((row) => row.node.stale || row.stale || row.state === 'stale');
   return rows.filter((row) => rowSeverity(row) >= 2);
 }
 

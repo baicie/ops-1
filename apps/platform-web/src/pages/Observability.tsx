@@ -15,6 +15,7 @@ import { MetricCard } from '../components/app/metric-card';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, UnknownValue } from '../components/app/status-indicator';
 import { formatBytes } from '../format';
+import { ageMessage } from '../lib/age';
 import { apiFailureCopy } from '../lib/kernel-messages';
 import {
   IdentityCell,
@@ -39,6 +40,7 @@ import {
   filterRows,
   loadColumnEarnsWidth,
   sortRows,
+  stateCanReport,
   summarise,
   type EntityFilter,
   type EntityRow,
@@ -69,7 +71,7 @@ import {
 /** Poll cadence. The kernel's own heartbeat is 5s, so a faster poll would only re-read one row. */
 const POLL_MS = 5000;
 
-const FILTERS: readonly EntityFilter[] = ['all', 'attention', 'reporting', 'unobservable'];
+const FILTERS: readonly EntityFilter[] = ['all', 'attention', 'reporting', 'stale', 'unobservable'];
 
 /**
  * The filter named by the URL, or `all`.
@@ -214,52 +216,94 @@ export function ObservabilityPage() {
           NO_DATA disappear into an average. */}
       <section className="metric-grid" aria-label={t('observability.kpi.aria')} data-region="kpi">
         <MetricCard
+          metricId="obs-attention"
+          label={t('observability.kpi.attention')}
+          value={<span className="ow-tnum">{summary.attention}</span>}
+          state={summary.total === 0 ? 'unknown' : 'ready'}
+          detail={summary.total === 0
+            ? t('observability.kpi.reporting.none')
+            : [
+              summary.degraded ? t('observability.kpi.attention.degraded', { count: summary.degraded }) : null,
+              (summary.staleStates + summary.staleReadySamples) ? t('observability.kpi.attention.stale', { count: summary.staleStates + summary.staleReadySamples }) : null,
+              summary.unreachable ? t('observability.kpi.attention.unreachable', { count: summary.unreachable }) : null,
+              summary.unknown ? t('observability.kpi.attention.unknown', { count: summary.unknown }) : null,
+              summary.revoked ? t('observability.kpi.attention.revoked', { count: summary.revoked }) : null,
+              summary.noSample ? t('observability.kpi.attention.noSample', { count: summary.noSample }) : null,
+            ].filter(Boolean).join(' · ') || t('observability.kpi.attention.none')}
+          href="/app/observability?state=attention"
+          showSampled={false}
+        />
+        <MetricCard
           metricId="obs-reporting"
           label={t('observability.kpi.reporting')}
           value={<span className="ow-tnum">{summary.reporting}</span>}
-          // A fleet of zero is not "0 of 0 reporting": there is nothing to report on. The card
-          // says UNKNOWN with the reason, the same rule the other three cards already follow.
           denominator={summary.total === 0 ? undefined : summary.total}
           state={summary.total === 0 ? 'unknown' : 'ready'}
-          detail={summary.total === 0 ? t('observability.kpi.reporting.none') : t('observability.kpi.reporting.detail')}
+          // The peak belongs to the reporting population, not to a fifth card: it is the
+          // follow-up question after "who answered", not a separate fleet verdict.
+          detail={summary.total === 0
+            ? t('observability.kpi.reporting.none')
+            : summary.peakCpu
+              ? (summary.peakMemory
+                ? t('observability.kpi.reporting.peaks', {
+                  cpu: percent(locale, summary.peakCpu.value),
+                  node: summary.peakCpu.nodeName,
+                  memory: percent(locale, summary.peakMemory.value),
+                })
+                : t('observability.kpi.reporting.peakCpu', {
+                  cpu: percent(locale, summary.peakCpu.value),
+                  node: summary.peakCpu.nodeName,
+                }))
+              : summary.peakMemory
+                ? t('observability.kpi.reporting.peakMemory', {
+                  memory: percent(locale, summary.peakMemory.value),
+                  node: summary.peakMemory.nodeName,
+                })
+                : t('observability.kpi.reporting.detail')}
           sampledAt={summary.observedAt}
           href="/app/observability?state=reporting"
         />
         <MetricCard
+          metricId="obs-stale"
+          label={t('observability.kpi.stale')}
+          value={<span className="ow-tnum">{summary.staleRows}</span>}
+          // A fleet with no rows at all is UNKNOWN; a fleet whose rows are only unreachable
+          // still has a real stale-row count if the kernel marked them stale.
+          state={summary.total === 0 ? 'unknown' : (summary.staleRows > 0 || summary.reporting > 0 ? 'ready' : 'noData')}
+          detail={summary.total === 0
+            ? t('observability.kpi.reporting.none')
+            : summary.staleRows > 0
+              ? t('observability.kpi.stale.oldest', {
+                at: summary.oldestStaleSampleAt ? ageMessage(locale, summary.oldestStaleSampleAt) : '',
+              })
+              : summary.reporting === 0
+                ? t('observability.kpi.stale.none')
+                : t('observability.kpi.stale.current')}
+          href="/app/observability?state=stale"
+          showSampled={false}
+        />
+        <MetricCard
           metricId="obs-unobservable"
           label={t('observability.kpi.unobservable')}
-          // A fleet with nothing to hide reads 0 here, and that 0 IS an observation: we asked
-          // every node and every one answered. It is not the same as `state: unknown`, which is
-          // what the card shows when there is no fleet to ask.
           value={<span className="ow-tnum">{summary.notObservable + summary.noSample}</span>}
           state={summary.total === 0 ? 'unknown' : 'ready'}
           detail={t('observability.kpi.unobservable.detail', {
             unreachable: summary.notObservable,
             noSample: summary.noSample,
           })}
+          href="/app/observability?state=unobservable"
           showSampled={false}
         />
-        <MetricCard
-          metricId="obs-peak-cpu"
-          label={t('observability.kpi.peakCpu')}
-          value={summary.peakCpu ? percent(locale, summary.peakCpu.value) : undefined}
-          // No reporting node means no peak to show, and the card says so with the token
-          // instead of printing 0% — which would read as an idle fleet.
-          state={summary.peakCpu ? 'ready' : 'noData'}
-          detail={summary.peakCpu ? summary.peakCpu.nodeName : t('observability.kpi.peak.none')}
-          sampledAt={summary.peakCpu?.observedAt ?? null}
-          href={summary.peakCpu ? `/app/observability/nodes/${summary.peakCpu.nodeId}` : undefined}
-        />
-        <MetricCard
-          metricId="obs-peak-memory"
-          label={t('observability.kpi.peakMemory')}
-          value={summary.peakMemory ? percent(locale, summary.peakMemory.value) : undefined}
-          state={summary.peakMemory ? 'ready' : 'noData'}
-          detail={summary.peakMemory ? summary.peakMemory.nodeName : t('observability.kpi.peak.none')}
-          sampledAt={summary.peakMemory?.observedAt ?? null}
-          href={summary.peakMemory ? `/app/observability/nodes/${summary.peakMemory.nodeId}` : undefined}
-        />
       </section>
+
+      {/* Where the numbers came from and how old the newest one is. The cards above each carry
+          a verdict; this line carries the source and the clock, which is what makes the verdict
+          checkable rather than authoritative. */}
+      <p className="stat-note" data-testid="observability-freshness" data-observed-at={summary.observedAt ?? ''} data-stale-samples={summary.staleSamples}>
+        {summary.observedAt
+          ? t('observability.freshness', { at: ageMessage(locale, summary.observedAt), seconds: POLL_MS / 1000 })
+          : t('observability.freshness.none')}
+      </p>
 
       {/* §2.4: one row, one control height. Every control here is the 40px tier. */}
       <section className="toolbar" data-testid="observability-filters">
@@ -289,6 +333,7 @@ export function ObservabilityPage() {
             <SelectItem value="all">{t('observability.filter.all')}</SelectItem>
             <SelectItem value="attention">{t('observability.filter.attention')}</SelectItem>
             <SelectItem value="reporting">{t('observability.filter.reporting')}</SelectItem>
+            <SelectItem value="stale">{t('observability.filter.stale')}</SelectItem>
             <SelectItem value="unobservable">{t('observability.filter.unobservable')}</SelectItem>
           </SelectContent>
         </Select>
@@ -419,6 +464,10 @@ export function ObservabilityPage() {
                               rides beside the state instead of replacing it. */}
                           {row.stale && row.state !== 'unreachable' && row.state !== 'revoked' ? (
                             <span className="ow-cell-meta">{t('observability.cell.staleSample')}</span>
+                          ) : stateCanReport(row.state) && !METRIC_KEYS.some((key) => row.readings[key].kind === 'reading') ? (
+                            // Reachable but silent: the state chip is Ready because the node
+                            // answered, and the missing sample is the reliability fact beside it.
+                            <span className="ow-cell-meta" data-reading="noSample">{t('observability.cell.noSample')}</span>
                           ) : null}
                         </div>
                       </StackCell>

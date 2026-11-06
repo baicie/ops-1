@@ -8,6 +8,7 @@
     "test:headed": "playwright test --headed"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.56.0",
     "@types/node": "^22.15.0"
   }

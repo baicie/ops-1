@@ -1,0 +1,330 @@
+{
+  "version": 1,
+  "description": "Curated DS-V1-2 regressions: region order, KPI identity/columns, tab model, overflow. Times and copy are deliberately not stored.",
+  "labels": {
+    "r1440-light-en": {
+      "pages": {
+        "/app/observability": {
+          "regions": [
+            "kpi",
+            "fleet",
+            "scope"
+          ],
+          "gridColumns": 4,
+          "cardIds": [
+            "obs-attention",
+            "obs-reporting",
+            "obs-stale",
+            "obs-unobservable"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 80
+        },
+        "/app/observability/nodes/:id": {
+          "regions": [
+            "current",
+            "history",
+            "instances",
+            "events"
+          ],
+          "gridColumns": 4,
+          "cardIds": [
+            "obs-entity-cpu",
+            "obs-entity-memory",
+            "obs-entity-filesystem",
+            "obs-entity-instances"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 80
+        },
+        "/app/incidents/:id": {
+          "regions": [
+            "rail",
+            "kpi",
+            "timeline",
+            "evidence",
+            "ai",
+            "verdict",
+            "lifecycle",
+            "audit",
+            "identity"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "incidentEvidence",
+            "incidentVerified",
+            "incidentTimeline",
+            "incidentAudit"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 139
+        }
+      }
+    },
+    "r1024-dark-zh-CN": {
+      "pages": {
+        "/app/observability": {
+          "regions": [
+            "kpi",
+            "fleet",
+            "scope"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "obs-attention",
+            "obs-reporting",
+            "obs-stale",
+            "obs-unobservable"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 80
+        },
+        "/app/observability/nodes/:id": {
+          "regions": [
+            "current",
+            "history",
+            "instances",
+            "events"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "obs-entity-cpu",
+            "obs-entity-memory",
+            "obs-entity-filesystem",
+            "obs-entity-instances"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 80
+        },
+        "/app/incidents/:id": {
+          "regions": [
+            "rail",
+            "kpi",
+            "timeline",
+            "evidence",
+            "ai",
+            "verdict",
+            "lifecycle",
+            "audit",
+            "identity"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "incidentEvidence",
+            "incidentVerified",
+            "incidentTimeline",
+            "incidentAudit"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 100
+        }
+      }
+    },
+    "r768-light-zh-CN": {
+      "pages": {
+        "/app/observability": {
+          "regions": [
+            "kpi",
+            "fleet",
+            "scope"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "obs-attention",
+            "obs-reporting",
+            "obs-stale",
+            "obs-unobservable"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 122
+        },
+        "/app/observability/nodes/:id": {
+          "regions": [
+            "current",
+            "history",
+            "instances",
+            "events"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "obs-entity-cpu",
+            "obs-entity-memory",
+            "obs-entity-filesystem",
+            "obs-entity-instances"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 122
+        },
+        "/app/incidents/:id": {
+          "regions": [
+            "rail",
+            "kpi",
+            "timeline",
+            "evidence",
+            "ai",
+            "verdict",
+            "lifecycle",
+            "audit",
+            "identity"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "incidentEvidence",
+            "incidentVerified",
+            "incidentTimeline",
+            "incidentAudit"
+          ],
+          "tabs": [
+            "investigation-tab-rail",
+            "investigation-tab-analysis",
+            "investigation-tab-detail"
+          ],
+          "visiblePane": "analysis",
+          "overflow": -15,
+          "headerHeight": 180
+        },
+        "/app/incidents/:id detail-tab": {
+          "regions": [
+            "rail",
+            "kpi",
+            "timeline",
+            "evidence",
+            "ai",
+            "verdict",
+            "lifecycle",
+            "audit",
+            "identity"
+          ],
+          "gridColumns": null,
+          "cardIds": [
+            "incidentEvidence",
+            "incidentVerified",
+            "incidentTimeline",
+            "incidentAudit"
+          ],
+          "tabs": [
+            "investigation-tab-rail",
+            "investigation-tab-analysis",
+            "investigation-tab-detail"
+          ],
+          "visiblePane": "detail",
+          "overflow": -15,
+          "headerHeight": 180
+        }
+      }
+    },
+    "r390-dark-en": {
+      "pages": {
+        "/app/observability": {
+          "regions": [
+            "kpi",
+            "fleet",
+            "scope"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "obs-attention",
+            "obs-reporting",
+            "obs-stale",
+            "obs-unobservable"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 146
+        },
+        "/app/observability/nodes/:id": {
+          "regions": [
+            "current",
+            "history",
+            "instances",
+            "events"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "obs-entity-cpu",
+            "obs-entity-memory",
+            "obs-entity-filesystem",
+            "obs-entity-instances"
+          ],
+          "tabs": [],
+          "visiblePane": null,
+          "overflow": -15,
+          "headerHeight": 123
+        },
+        "/app/incidents/:id": {
+          "regions": [
+            "rail",
+            "kpi",
+            "timeline",
+            "evidence",
+            "ai",
+            "verdict",
+            "lifecycle",
+            "audit",
+            "identity"
+          ],
+          "gridColumns": 2,
+          "cardIds": [
+            "incidentEvidence",
+            "incidentVerified",
+            "incidentTimeline",
+            "incidentAudit"
+          ],
+          "tabs": [
+            "investigation-tab-rail",
+            "investigation-tab-analysis",
+            "investigation-tab-detail"
+          ],
+          "visiblePane": "analysis",
+          "overflow": -15,
+          "headerHeight": 255
+        },
+        "/app/incidents/:id detail-tab": {
+          "regions": [
+            "rail",
+            "kpi",
+            "timeline",
+            "evidence",
+            "ai",
+            "verdict",
+            "lifecycle",
+            "audit",
+            "identity"
+          ],
+          "gridColumns": null,
+          "cardIds": [
+            "incidentEvidence",
+            "incidentVerified",
+            "incidentTimeline",
+            "incidentAudit"
+          ],
+          "tabs": [
+            "investigation-tab-rail",
+            "investigation-tab-analysis",
+            "investigation-tab-detail"
+          ],
+          "visiblePane": "detail",
+          "overflow": -15,
+          "headerHeight": 255
+        }
+      }
+    }
+  }
+}

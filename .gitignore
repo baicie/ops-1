@@ -224,3 +224,4 @@ artifacts/g12d/
 
 # Visual System V1 baseline matrices are local evidence; promote individual images deliberately.
 artifacts/ui/visual-v1/
+artifacts/ui/visual-v2/
