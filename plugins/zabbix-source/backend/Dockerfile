@@ -5,11 +5,10 @@ ARG CAPABILITY_DIGEST
 ARG BUILD_DIGEST
 WORKDIR /app
 COPY package.json package-lock.json ./
-# No runtime dependencies: the plugin speaks Zabbix JSON-RPC over the Node
-# standard library, so there is nothing to install and nothing to audit. `npm ci`
-# still runs so a future dependency cannot slip in unlocked (rules/09).
+# The plugin's only runtime dependency is `pg`, used to reach the
+# Kernel-provisioned plugin schema. npm ci keeps it locked (rules/09).
 RUN npm ci --omit=dev --no-audit --no-fund
-COPY zabbix.mjs server.mjs ./
+COPY zabbix.mjs server.mjs storage.mjs identity.mjs ./
 ENV NODE_ENV=production \
     PORT=8080 \
     OPSWEAVE_PLUGIN_ID=opsweave.zabbix-source \
