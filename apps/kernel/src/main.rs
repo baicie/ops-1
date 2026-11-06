@@ -24,6 +24,7 @@ mod scope;
 mod state;
 mod static_site;
 mod storage;
+mod telemetry_events;
 mod telemetry_sources;
 mod users;
 mod workspaces;
