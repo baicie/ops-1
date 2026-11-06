@@ -221,13 +221,18 @@
       "type": "object",
       "description": "What this plugin presents to the Kernel so a collection becomes SOURCE_ATTESTED evidence. The signed bytes are fixed by incident-v1.yaml (components.schemas.Attestation) and reproduced here field for field; a field this envelope does not cover cannot influence the trust the Kernel records (ADR-015).",
       "additionalProperties": false,
-      "required": ["adapterId", "issuedAt", "signature"],
+      "required": ["adapterId", "workspaceId", "issuedAt", "signature"],
       "properties": {
         "adapterId": {
           "type": "string",
           "minLength": 1,
           "maxLength": 100,
           "description": "The adapter identity the Kernel was configured with. An id the Kernel does not know is refused with EVIDENCE_ADAPTER_UNKNOWN - never downgraded to UNVERIFIED."
+        },
+        "workspaceId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workspace the collection belongs to, taken by the plugin from its persisted collection row (never from the request). It is part of the signed payload; the Kernel compares it with the incident's workspace."
         },
         "issuedAt": {
           "type": "string",
@@ -237,7 +242,7 @@
         "signature": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{43}$",
-          "description": "base64url, unpadded, HMAC-SHA256 over the canonical attestation payload: {\"v\":\"opsweave-evidence-attestation-v1\",\"adapterId\":...,\"incidentId\":...,\"kind\":...,\"source\":...,\"collectedAtUnix\":...,\"contentRef\":...,\"issuedAtUnix\":...} with exactly that key order."
+          "description": "base64url, unpadded, HMAC-SHA256 over the canonical attestation payload: {\"v\":\"opsweave-evidence-attestation-v2\",\"adapterId\":...,\"workspaceId\":...,\"incidentId\":...,\"kind\":...,\"source\":...,\"collectedAtUnix\":...,\"contentRef\":...,\"issuedAtUnix\":...} with exactly that key order."
         }
       }
     }

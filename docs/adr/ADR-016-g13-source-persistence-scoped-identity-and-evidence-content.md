@@ -49,7 +49,7 @@ ADR-015 把证据信任交给 Kernel 校验，并让 Zabbix 成为独立插件�
   - 生成有界快照（先按每 series 样本上限收缩，再按顺序丢弃尾部 series），记录 `originalBytes`、`maxBytes`、`requestedSamples`、`returnedSamples`、`droppedSeries`、`reason=CONTENT_LIMIT`；
   - `outcome` 变为 `PARTIAL`；
   - 签名只覆盖实际快照，不宣称包含全部原始数据。
-- `/collections/{id}/attestation` 的响应新增 `evidence.content = {contentType:"application/json", body}`，body 与 `contentRef` 逐字节一致。调用方把 `attestation` 与 `content` 一起 POST 到 Kernel 的 evidence 端点；Kernel 自行计算摘要、验签、保存字节。插件与 UI 都不能填写 `verifiedTrust`。
+- `/collections/{id}/attestation` 的响应新增 `evidence.content = {contentType:"application/json", body}`，body 与 `contentRef` 逐字节一致；attestation 升级为 v2，签名覆盖 Collection 行中的 `workspaceId`，Kernel 与 Incident 的 workspace 比较后才写入（ADR-015 §5.1）。调用方把 `attestation` 与 `content` 一起 POST 到 Kernel 的 evidence 端点；Kernel 自行计算摘要、验签、保存字节。插件与 UI 都不能填写 `verifiedTrust`。
 - 采集结果只在插件内保留有界时间；签名响应可重放同一 collectionId（同一字节、同一 digest），Kernel 的唯一约束会把它折叠为同一行。
 
 ### 2.4 契约修正

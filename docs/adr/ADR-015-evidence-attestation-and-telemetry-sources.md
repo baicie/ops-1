@@ -103,6 +103,24 @@ C1 + C3 是最强约束：**信任等级是判决的地基**。地基可自报�
 
 采集结果经 `contentRef`（canonical JSON 的 sha256）摘要后签名，再写入 incident 证据。摘要在 key 顺序变化下稳定、在 outcome 变化时改变：**签名覆盖的是「这次采集得到了什么结论」，而不仅是「有一次采集」**。插件侧 `attestationPayload()` 与 Kernel 侧 `attestation_payload()` 产出逐字节相同的载荷，两侧各自硬编码同一条 golden vector 断言（`plugins/zabbix-source/backend/zabbix.test.mjs` 测试 1 与 `incidents.rs` 的 `attestation_payload_matches_the_published_golden_vector`）——任一侧改了键序、大小写或时间精度，都会有一个测试失败，而不是生产环境里所有签名静默失效。
 
+### 5.1 G13-A.1：签名绑定 Workspace（v2）
+
+v1 签名覆盖 `(adapterId, incidentId, kind, source, collectedAt, contentRef, issuedAt)`，不覆盖 Workspace。一个同时属于 A、B 的调用方可以把 B 的采集签名到 A 的 Incident，Kernel 只能看到 Incident 的 scope，无法发现来源 workspace 不同。
+
+v2 在签名载荷中加入 `workspaceId`，位于 `adapterId` 与 `incidentId` 之间：
+
+```
+{"v":"opsweave-evidence-attestation-v2","adapterId":...,"workspaceId":...,
+ "incidentId":...,"kind":...,"source":...,"collectedAtUnix":...,
+ "contentRef":...,"issuedAtUnix":...}
+```
+
+- 插件从**持久化的 Collection 行**读取 workspace，不接受请求体中的 workspace 值。
+- Kernel 用 `attestation.workspaceId` 构造 v2 载荷验签，再从可信 Incident 记录读取 `workspace_id` 并要求两者相等；不等返回 403 `EVIDENCE_WORKSPACE_MISMATCH`，整个写入回滚，不降级为 `OPERATOR_ASSERTED`。
+- 改动 `attestation.workspaceId` 会导致验签失败；改动 `incidentId`/`contentRef` 同理。
+- v1 新写入一律拒绝：验签失败后若 v1 载荷可验证，返回 401 `EVIDENCE_ATTESTATION_VERSION_UNSUPPORTED`。没有“全局 v1 兼容开关”；历史行保持写入时的信任等级，不被静默改写。
+- 若未来其他旧适配器必须保留 v1，只能在 Kernel 侧为其提供可信的 workspace 约束并单独审查，不能重新开放无约束写入。
+
 ## 6. 影响与风险
 
 | 风险 | 处理 |

@@ -639,27 +639,43 @@ components:
     Attestation:
       type: object
       additionalProperties: false
-      required: [adapterId, issuedAt, signature]
+      required: [adapterId, workspaceId, issuedAt, signature]
       description: >
-        Proof a configured source adapter vouches for one evidence row.
+        Proof a configured source adapter vouches for one evidence row in one
+        business workspace.
 
         The signed bytes are the UTF-8 encoding of this JSON object, serialized
         with exactly this key order and no whitespace (serde_json::to_string of
         the claims struct in apps/kernel/src/incidents.rs):
 
-          {"v":"opsweave-evidence-attestation-v1","adapterId":...,
-           "incidentId":...,"kind":...,"source":...,
+          {"v":"opsweave-evidence-attestation-v2","adapterId":...,
+           "workspaceId":...,"incidentId":...,"kind":...,"source":...,
            "collectedAtUnix":...,"contentRef":...,"issuedAtUnix":...}
 
-        where incidentId is the lowercase hyphenated UUID, collectedAtUnix and
-        issuedAtUnix are the integer seconds of collectedAt and issuedAt, and
-        signature is base64url without padding (HMAC-SHA256 keyed by that
-        adapter's secret from OPSWEAVE_EVIDENCE_ADAPTERS). Signing the tuple, and
-        not just the adapter id, is what stops a genuine attestation being moved
-        onto different evidence. issuedAt is bounded to ±300s so a captured
-        attestation cannot be replayed later.
+        where workspaceId and incidentId are lowercase hyphenated UUIDs,
+        collectedAtUnix and issuedAtUnix are the integer seconds of collectedAt
+        and issuedAt, and signature is base64url without padding (HMAC-SHA256
+        keyed by that adapter's secret from OPSWEAVE_EVIDENCE_ADAPTERS). Signing
+        the tuple, and not just the adapter id, is what stops a genuine
+        attestation being moved onto different evidence. issuedAt is bounded to
+        ±300s so a captured attestation cannot be replayed later.
+
+        The plugin takes workspaceId from its persisted collection, never from a
+        request body. The Kernel verifies the signature over the supplied value
+        and then compares it with the incident's own workspace; a mismatch is
+        EVIDENCE_WORKSPACE_MISMATCH and writes nothing. A v1 signature, which
+        cannot bind a workspace, is recognised and refused with
+        EVIDENCE_ATTESTATION_VERSION_UNSUPPORTED; historical rows keep the trust
+        recorded when they were written.
       properties:
         adapterId: {type: string, minLength: 1, maxLength: 100}
+        workspaceId:
+          type: string
+          format: uuid
+          description: >
+            The workspace the adapter signed for, covered by the signature. It is
+            compared with the incident's authoritative workspace; it is never the
+            authorization input itself.
         issuedAt: {type: string, format: date-time}
         signature:
           type: string

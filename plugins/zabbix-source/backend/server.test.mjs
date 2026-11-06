@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 // before the dynamic import so the module-level constant sees it.
 process.env.OPSWEAVE_ALLOW_LOOPBACK_SOURCE = '1';
 
-const { createPlugin } = await import('./server.mjs');
+const { createPlugin, secretConfiguration } = await import('./server.mjs');
 const { MemoryStore } = await import('./storage.mjs');
 const { createIdentityResolver, signContext } = await import('./identity.mjs');
 const { attestationPayload } = await import('./zabbix.mjs');
@@ -112,13 +112,14 @@ function workloadContext({ scopes = ['telemetry.source.read'], workspaces = [WOR
   });
 }
 
-async function startPlugin({ store = new MemoryStore(), adapter = true } = {}) {
+async function startPlugin({ store = new MemoryStore(), adapter = true, workspaceSecretMap = null } = {}) {
   const plugin = createPlugin({
     store,
     verifyIdentity: createIdentityResolver({ contextKeyHex: KEY_HEX, pluginId: PLUGIN_ID }),
     adapterId: adapter ? ADAPTER_ID : '',
     adapterSecret: adapter ? ADAPTER_SECRET : '',
-    secretMap: { 'secretref:zabbix/main': 'fixture-token' },
+    secretMap: workspaceSecretMap ? {} : { 'secretref:zabbix/main': 'fixture-token' },
+    workspaceSecretMap,
   });
   await new Promise((resolve) => plugin.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${plugin.server.address().port}`;
@@ -169,6 +170,20 @@ test('the server starts and serves health, runtime info and the storage mode', a
     assert.equal(info.body.pluginId, PLUGIN_ID);
     assert.equal(info.body.storage.mode, 'memory');
     assert.equal(info.body.attestation.configured, true);
+  } finally {
+    await plugin.close();
+  }
+});
+
+test('the Node runtime info endpoint carries the fields the supervisor checks', async () => {
+  const { plugin, base } = await startPlugin();
+  try {
+    const info = await call(base, '/_opsweave/runtime/v1/info');
+    assert.equal(info.status, 200);
+    assert.equal(info.body.pluginId, PLUGIN_ID);
+    assert.equal(info.body.runtimeProtocol, 'http-json-v1');
+    assert.equal(typeof info.body.capabilityDigest, 'string');
+    assert.equal(typeof info.body.buildDigest, 'string');
   } finally {
     await plugin.close();
   }
@@ -286,6 +301,27 @@ test('a duplicate source in one workspace is a conflict, not a silent overwrite'
   }
 });
 
+test('a DNS-named endpoint is reachable (autoSelectFamily lookup)', async () => {
+  const upstream = await startFakeZabbix();
+  const port = new URL(upstream.url).port;
+  const { plugin, base } = await startPlugin();
+  try {
+    const created = await createSource(base, upstream, {
+      endpoint: `http://localhost:${port}/api_jsonrpc.php`,
+    });
+    assert.equal(created.status, 201);
+    const probed = await call(base, `/api/zabbix-source/sources/${created.body.sourceId}/probe`, {
+      method: 'POST',
+      headers: { 'x-opsweave-user-context': userContext() },
+    });
+    assert.equal(probed.status, 200);
+    assert.equal(probed.body.outcome, 'OK');
+  } finally {
+    await plugin.close();
+    await upstream.close();
+  }
+});
+
 test('probe records what it saw and promotes the source only on OK', async () => {
   const upstream = await startFakeZabbix();
   const { plugin, base } = await startPlugin();
@@ -362,7 +398,9 @@ test('collection bytes and the attestation digest are the same bytes', async () 
     const attested = await call(base, `/api/zabbix-source/collections/${collected.body.collectionId}/attestation`, {
       method: 'POST',
       headers,
-      body: { incidentId: INCIDENT_ID, kind: 'METRIC_SNAPSHOT' },
+      // A body workspaceId is not a trust input: the signature must name the
+      // persisted collection's workspace, not this one.
+      body: { incidentId: INCIDENT_ID, kind: 'METRIC_SNAPSHOT', workspaceId: WORKSPACE_B },
     });
     assert.equal(attested.status, 200);
     const { evidence } = attested.body;
@@ -371,8 +409,10 @@ test('collection bytes and the attestation digest are the same bytes', async () 
     const digest = 'sha256:' + crypto.createHash('sha256').update(evidence.content.body, 'utf8').digest('hex');
     assert.equal(digest, evidence.contentRef, 'the signed digest covers the exact submitted bytes');
 
+    assert.equal(evidence.attestation.workspaceId, WORKSPACE_A);
     const payload = attestationPayload({
       adapterId: ADAPTER_ID,
+      workspaceId: evidence.attestation.workspaceId,
       incidentId: INCIDENT_ID,
       kind: 'METRIC_SNAPSHOT',
       source: evidence.source,
@@ -498,6 +538,51 @@ test('an attestation is refused when no adapter credential is configured', async
     });
     assert.equal(attested.status, 503);
     assert.equal(attested.body.code, 'EVIDENCE_ADAPTER_NOT_CONFIGURED');
+  } finally {
+    await plugin.close();
+    await upstream.close();
+  }
+});
+
+test('a source cannot borrow a credential configured for another workspace', async () => {
+  const upstream = await startFakeZabbix();
+  const { plugin, base } = await startPlugin({
+    workspaceSecretMap: {
+      [WORKSPACE_A]: { 'secretref:zabbix/a': 'token-a' },
+      [WORKSPACE_B]: { 'secretref:zabbix/b': 'token-b' },
+    },
+  });
+  try {
+    const borrowed = await createSource(base, upstream, {
+      workspaceId: WORKSPACE_A,
+      credential: { kind: 'api-token', ref: 'secretref:zabbix/b' },
+    });
+    assert.equal(borrowed.status, 422);
+    assert.equal(borrowed.body.code, 'CREDENTIAL_UNRESOLVED');
+
+    const a = await createSource(base, upstream, {
+      workspaceId: WORKSPACE_A,
+      credential: { kind: 'api-token', ref: 'secretref:zabbix/a' },
+    });
+    assert.equal(a.status, 201);
+    const b = await call(base, '/api/zabbix-source/sources', {
+      method: 'POST',
+      headers: { 'x-opsweave-user-context': userContext({ workspaces: [WORKSPACE_B] }) },
+      body: {
+        workspaceId: WORKSPACE_B,
+        name: 'zabbix-b',
+        endpoint: upstream.url,
+        credential: { kind: 'api-token', ref: 'secretref:zabbix/b' },
+      },
+    });
+    assert.equal(b.status, 201);
+
+    const headersA = { 'x-opsweave-user-context': userContext({ workspaces: [WORKSPACE_A] }) };
+    const headersB = { 'x-opsweave-user-context': userContext({ workspaces: [WORKSPACE_B] }) };
+    await call(base, `/api/zabbix-source/sources/${a.body.sourceId}/hosts`, { headers: headersA });
+    await call(base, `/api/zabbix-source/sources/${b.body.sourceId}/hosts`, { headers: headersB });
+    const auth = upstream.state.calls.filter((entry) => entry.method === 'host.get').map((entry) => entry.authorization);
+    assert.deepEqual(auth, ['Bearer token-a', 'Bearer token-b']);
   } finally {
     await plugin.close();
     await upstream.close();
@@ -654,6 +739,43 @@ test('a forged user context under a different key is refused', async () => {
       headers: { 'x-opsweave-user-context': forged },
     });
     assert.equal(response.status, 401);
+  } finally {
+    await plugin.close();
+  }
+});
+
+test('the plugin reads the Kernel-delivered secret map first and never reports values', async () => {
+  const workspace = '00000000-0000-4000-8000-000000000001';
+  const pluginSecrets = secretConfiguration({
+    OPSWEAVE_PLUGIN_SECRETS: JSON.stringify({ [workspace]: { 'secretref:zabbix/main': 'plugin-token' } }),
+    OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
+  });
+  assert.equal(pluginSecrets.mode, 'workspace');
+  assert.equal(pluginSecrets.workspaceSecrets[workspace]['secretref:zabbix/main'], 'plugin-token');
+  assert.equal(JSON.stringify(pluginSecrets.workspaceSecrets).includes('dev-token'), false);
+
+  // The old flat shape is the P0 shape; it must not become a working map.
+  const flat = secretConfiguration({
+    OPSWEAVE_PLUGIN_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'flat-token' }),
+  });
+  assert.equal(flat.mode, 'workspace');
+  assert.equal(Object.keys(flat.workspaceSecrets).length, 0);
+
+  const dev = secretConfiguration({
+    NODE_ENV: 'test',
+    OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
+  });
+  assert.equal(dev.mode, 'dev');
+  assert.equal(secretConfiguration({}).mode, 'none');
+  // A production process never takes the developer fallback.
+  assert.equal(secretConfiguration({ NODE_ENV: 'production', OPSWEAVE_ZABBIX_SECRETS: '{"secretref:x":"y"}' }).mode, 'none');
+
+  const { plugin, base } = await startPlugin();
+  try {
+    const info = await call(base, '/_opsweave/runtime-info');
+    assert.equal(info.status, 200);
+    assert.equal(info.body.secrets.mode, 'none');
+    assert.equal(JSON.stringify(info.body).includes('fixture-token'), false);
   } finally {
     await plugin.close();
   }
