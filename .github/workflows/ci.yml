@@ -195,17 +195,15 @@ jobs:
       - run: npm ci --prefix plugins/zabbix-source/backend
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
-      - name: build the UI under test from the #39 stack branch
+      - name: build the UI under test from this commit
         run: |
           set -euo pipefail
-          git fetch origin feat/g13-a-collect-ui
-          # Pin the #39 commit under test: the branch may advance, and this job
-          # certifies one exact UI head, not whatever it points at today.
-          UI_SHA=81d1765455f9dc9f4fe9fb8836cea9151f75253f
-          git branch -f feat/g13-a-collect-ui "$UI_SHA"
-          git worktree add /tmp/g13a1-ui "$UI_SHA"
-          (cd /tmp/g13a1-ui && pnpm install --frozen-lockfile && pnpm --filter @opsweave/platform-web build)
-          cp -R /tmp/g13a1-ui/apps/platform-web/dist /tmp/g13a1-ui-dist
+          # The browser must come from the same tree as the Kernel, Node and
+          # plugin. The old job pinned #39's SHA, so a green run said nothing
+          # about the UI merged into main.
+          pnpm --filter @opsweave/platform-web build
+          rm -rf /tmp/g13a1-ui-dist
+          cp -R apps/platform-web/dist /tmp/g13a1-ui-dist
       - name: local registry
         run: |
           set -euo pipefail

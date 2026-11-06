@@ -37,6 +37,10 @@ pub fn build(state: AppState) -> Router {
         // which build it serves before anyone signs in. The payload is a closed
         // set of five fields, so it cannot become an environment dump.
         .route("/api/v1/version", get(version))
+        // Automation Event ingest authenticates its own `owa1` principal; the
+        // session/csrf middleware would reject a Node/plugin automation caller
+        // before the handler can verify the token.
+        .route("/api/v1/telemetry/events", post(telemetry_events::ingest))
         .route(
             "/api/v1/auth/login",
             post(auth::login).layer(DefaultBodyLimit::max(64 * 1024)),
@@ -212,7 +216,6 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/telemetry/sources",
             get(telemetry_sources::list_sources),
         )
-        .route("/api/v1/telemetry/events", post(telemetry_events::ingest))
         .route(
             "/api/v1/automation-principals/{principal_id}/revoke",
             post(automation::revoke_handler),

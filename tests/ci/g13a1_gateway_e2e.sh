@@ -76,9 +76,10 @@ gateway() { # method plugin-path [body] -> status; body in /tmp/g13a1-body.json
   api "$1" "/api/v1/gateway/opsweave.zabbix-source$2" "${3:-}"
 }
 
-start_kernel() { # $1 = workspace-scoped OPSWEAVE_PLUGIN_SECRETS JSON, $2 = credential bindings JSON
+start_kernel() { # $1 = plugin secrets JSON, $2 = credential bindings JSON, $3 = automation sources JSON (optional)
   local secrets="$1"
   local bindings="$2"
+  local automation="${3:-}"
   env \
     DATABASE_URL="$DB_URL" \
     OPSWEAVE_BIND=0.0.0.0:18185 \
@@ -96,6 +97,7 @@ start_kernel() { # $1 = workspace-scoped OPSWEAVE_PLUGIN_SECRETS JSON, $2 = cred
     OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS="${ADAPTER_ID}:opsweave.zabbix-source" \
     OPSWEAVE_PLUGIN_SECRETS="$secrets" \
     OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS="$bindings" \
+    OPSWEAVE_AUTOMATION_SOURCES="$automation" \
     OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS=1 \
     OPSWEAVE_PLUGIN_DB_HOST="$PLUGIN_HOST" \
     OPSWEAVE_PLUGIN_KERNEL_URL="http://${PLUGIN_HOST}:18185" \
@@ -117,8 +119,8 @@ stop_kernel() {
 }
 
 [ -f /tmp/g13a1-ui-dist/index.html ] || {
-  echo "missing /tmp/g13a1-ui-dist. Build it from the #39 branch:"
-  echo "  git switch feat/g13-a-collect-ui && pnpm --filter @opsweave/platform-web build && cp -R apps/platform-web/dist /tmp/g13a1-ui-dist"
+  echo "missing /tmp/g13a1-ui-dist. Build the UI from the commit under test:"
+  echo "  pnpm --filter @opsweave/platform-web build && rm -rf /tmp/g13a1-ui-dist && cp -R apps/platform-web/dist /tmp/g13a1-ui-dist"
   exit 2
 }
 command -v docker >/dev/null || { echo "docker is required"; exit 2; }
@@ -255,6 +257,30 @@ code="$(gateway POST /api/zabbix-source/sources "$GW_SOURCE")"
 SOURCE_ID="$(json "d['sourceId']" < /tmp/g13a1-body.json)"
 ok "source ${SOURCE_ID} in workspace ${WORKSPACE_A}"
 
+# The Kernel-owned automation registry is configuration, not a plugin report.
+# It is installed by restarting the Kernel with the source id the Gateway just
+# created; the Node keeps its container, so the plugin's A.2 bindings are
+# unchanged.
+AUTOMATION_JSON="$(python3 - "$WORKSPACE_A" "$SOURCE_ID" <<'PY'
+import json, sys
+print(json.dumps({"opsweave.zabbix-source": {sys.argv[1]: {sys.argv[2]: {
+  "secretRef": "secretref:zabbix/main",
+  "state": "READY",
+  "itemIds": ["10401"],
+  "windowSeconds": 300,
+}}}}))
+PY
+)"
+stop_kernel
+start_kernel "$SECRETS_JSON" "$BINDINGS_JSON" "$AUTOMATION_JSON"
+for _ in $(seq 1 60); do
+  code="$(gateway GET /api/zabbix-source/sources)"
+  [ "$code" = "200" ] && break
+  sleep 1
+done
+[ "${code:-}" = "200" ] || { echo "gateway did not recover after automation registry restart: $code"; exit 1; }
+ok "Kernel restarted with the source registry (item 10401, 300s window)"
+
 # Positive control: a test-only ref bound to the attacker receiver proves the
 # container can reach it, so a later "0 credentials" is meaningful rather than
 # vacuous. It sends a dummy token, never the workspace's real one.
@@ -343,6 +369,82 @@ assert hashlib.sha256(served).hexdigest() == sent['contentRef'].split(':', 1)[1]
 assert served.decode() == sent['content']['body'], 'served bytes differ from the signed body'
 PY
 ok "evidence ${EVIDENCE_ID} SOURCE_ATTESTED, bytes read back identical"
+
+step "automation: Event -> collect -> attestation -> Evidence"
+INSTANCE_ID="$(docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -tAc \
+  "SELECT i.id FROM kernel.plugin_instances i JOIN kernel.plugin_deployments d ON d.id=i.deployment_id WHERE d.plugin_id='opsweave.zabbix-source' AND i.state='READY' ORDER BY i.created_at LIMIT 1" | tr -d '[:space:]')"
+[ -n "$INSTANCE_ID" ] || { echo "cannot identify the plugin instance"; exit 1; }
+NODE_CREDENTIAL="$(python3 -c "import json;print(json.load(open('$NODE_STATE/node-identity.json'))['credential'])")"
+PRINCIPAL_BODY="$(python3 - "$INSTANCE_ID" "$SOURCE_ID" <<'PY'
+import json, sys
+print(json.dumps({"instanceId": sys.argv[1], "sourceId": sys.argv[2],
+  "allowedOps": ["EVENT_INGEST", "SOURCE_COLLECT", "EVIDENCE_APPEND"]}))
+PY
+)"
+code="$(curl -sS -o /tmp/g13a1-principal.json -w '%{http_code}' -X POST \
+  "$URL/internal/v1/nodes/${NODE_ID}/automation-principals" \
+  -H "Authorization: Bearer ${NODE_CREDENTIAL}" -H 'content-type: application/json' \
+  --data-binary "$PRINCIPAL_BODY")"
+[ "$code" = "200" ] || { echo "automation principal failed: $code $(cat /tmp/g13a1-principal.json)"; exit 1; }
+AUTOMATION_TOKEN="$(python3 -c 'import json;print(json.load(open("/tmp/g13a1-principal.json"))["token"])')"
+ok "automation principal issued for ${INSTANCE_ID}"
+
+python3 - "$WORKSPACE_A" "$SOURCE_ID" <<'PY'
+import datetime, hashlib, json, sys
+workspace, source = sys.argv[1:3]
+now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+occurred = now - datetime.timedelta(seconds=60)
+payload = {"trigger": "CPU high", "host": "web-01"}
+canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+digest = "sha256:" + hashlib.sha256(canonical).hexdigest()
+stamp = occurred.strftime("%Y-%m-%dT%H:%M:%SZ")
+body = {
+  "nativeId": "g13b1-auto-1",
+  "sourceId": source,
+  "workspaceId": workspace,
+  "occurredAt": stamp,
+  "observedAt": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+  "severity": "MAJOR",
+  "triggerState": "PROBLEM",
+  "payloadDigest": digest,
+  "payload": payload,
+}
+key = "sha256:" + hashlib.sha256(
+    f"{workspace}|{source}|{body['nativeId']}|{body['triggerState']}|{stamp}".encode()
+).hexdigest()
+open("/tmp/g13a1-event.json", "w").write(json.dumps(body))
+open("/tmp/g13a1-event.key", "w").write(key + "\n")
+PY
+EVENT_KEY="$(cat /tmp/g13a1-event.key)"
+code="$(curl -sS -o /tmp/g13a1-body.json -w '%{http_code}' -X POST "$URL/api/v1/telemetry/events" \
+  -H "Authorization: Bearer ${AUTOMATION_TOKEN}" -H "Idempotency-Key: ${EVENT_KEY}" \
+  -H 'content-type: application/json' --data-binary @/tmp/g13a1-event.json)"
+[ "$code" = "202" ] || { echo "event ingest failed: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
+AUTO_STATUS="$(json "d['automation']['status']" < /tmp/g13a1-body.json)"
+AUTO_INCIDENT="$(json "d['incidentId']" < /tmp/g13a1-body.json)"
+AUTO_EVIDENCE="$(json "d['automation']['evidenceId']" < /tmp/g13a1-body.json)"
+[ "$AUTO_STATUS" = "COLLECTED" ] || { echo "automation did not collect: $(cat /tmp/g13a1-body.json)"; exit 1; }
+[ -n "$AUTO_INCIDENT" ] && [ -n "$AUTO_EVIDENCE" ] || { echo "event returned no incident/evidence"; exit 1; }
+ok "PROBLEM event ${AUTO_INCIDENT} collected into evidence ${AUTO_EVIDENCE}"
+
+api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null
+AUTO_TRUST="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['verifiedTrust'] for e in d.get('items', d) if e['id']=='${AUTO_EVIDENCE}'))")"
+AUTO_REF="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['contentRef'] for e in d.get('items', d) if e['id']=='${AUTO_EVIDENCE}'))")"
+[ "$AUTO_TRUST" = "SOURCE_ATTESTED" ] || { echo "automation evidence trust=${AUTO_TRUST}"; exit 1; }
+curl -sS -H "Authorization: Bearer ${TOKEN}" -o /tmp/g13a1-auto-content \
+  "$URL/api/v1/incidents/${AUTO_INCIDENT}/evidence/${AUTO_EVIDENCE}/content"
+GOT_REF="sha256:$(shasum -a 256 /tmp/g13a1-auto-content | awk '{print $1}')"
+[ "$GOT_REF" = "$AUTO_REF" ] || { echo "automation evidence bytes differ: ${GOT_REF} != ${AUTO_REF}"; exit 1; }
+ok "automation evidence is SOURCE_ATTESTED and byte-identical"
+
+BEFORE_COUNT="$(api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null; python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(len(d.get('items', d)))")"
+code="$(curl -sS -o /tmp/g13a1-body.json -w '%{http_code}' -X POST "$URL/api/v1/telemetry/events" \
+  -H "Authorization: Bearer ${AUTOMATION_TOKEN}" -H "Idempotency-Key: ${EVENT_KEY}" \
+  -H 'content-type: application/json' --data-binary @/tmp/g13a1-event.json)"
+[ "$code" = "200" ] || { echo "duplicate event was not idempotent: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
+AFTER_COUNT="$(api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null; python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(len(d.get('items', d)))")"
+[ "$BEFORE_COUNT" = "$AFTER_COUNT" ] || { echo "duplicate event added evidence: ${BEFORE_COUNT} -> ${AFTER_COUNT}"; exit 1; }
+ok "duplicate event is idempotent and adds no evidence"
 
 step "A/B workspace boundary through the Gateway"
 GW_SOURCE_B="$(python3 - "$WORKSPACE_B" "$PLUGIN_HOST" <<'PY'
