@@ -324,10 +324,39 @@ export function evidencePanelState(
   status?: number | null,
 ): EvidencePanelState {
   if (status === 403) return 'forbidden';
-  if (failed && !rows) return 'unavailable';
+  // A failed refresh with rows is a stale snapshot and stays `present`: the page names the
+  // failure in IncidentStale and keeps showing what it actually read. A failed refresh whose
+  // previous answer was empty has nothing to show, so it is `unavailable`, not `missing` -
+  // `missing` would claim the latest read succeeded and found zero rows.
+  if (failed) return rows && rows.length > 0 ? 'present' : 'unavailable';
   if (!rows) return 'loading';
   if (rows.length === 0) return 'missing';
   return 'present';
+}
+
+export type IncidentKpiState = 'ready' | 'noData' | 'unknown';
+
+/**
+ * The two Evidence KPI cards read the panel state, never the row count alone.
+ *
+ * A failed initial read leaves `evidence` as an empty array in the page, so `rows === 0` cannot
+ * decide the state: a 403/503 has zero rows too, and painting that as NO_DATA claims the kernel
+ * answered with an empty set. The panel state is the only fact that distinguishes the two.
+ *
+ * `missing` is the one successful empty read. Evidence is a real 0 (the kernel answered), while
+ * Kernel verified has no denominator and stays NO_DATA - not 0/0, and not a fabricated ratio.
+ */
+export function incidentEvidenceKpiStates(
+  panel: EvidencePanelState,
+  rows: number,
+): { evidence: IncidentKpiState; verified: IncidentKpiState } {
+  const evidence: IncidentKpiState = panel === 'present' || panel === 'missing'
+    ? 'ready'
+    : panel === 'loading' ? 'noData' : 'unknown';
+  const verified: IncidentKpiState = evidence === 'unknown'
+    ? 'unknown'
+    : panel === 'loading' || rows === 0 ? 'noData' : 'ready';
+  return { evidence, verified };
 }
 
 export type VerdictPanelState = 'recorded' | 'open' | 'sealed';

@@ -7,7 +7,6 @@ import type { AuditEvent, InstanceView, NodeView } from '../types';
 import { Icon } from '../components/Icons';
 import { Button, buttonVariants } from '../components/ui/button';
 import { Table, TableBody, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { CopyButton, EmptyState } from '../components/Ui';
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { MetricCard } from '../components/app/metric-card';
@@ -265,6 +264,24 @@ export function ObservabilityEntityPage() {
     if (!history || !windowBounds) return null;
     return METRIC_KEYS.map((metric) => buildSeries(history.samples, metric, windowBounds, maxGapFor(hours)));
   }, [history, windowBounds, hours]);
+  // One collection summary for the whole panel: how many samples this window holds, how many
+  // breaks the plots will show, and when the newest reading arrived. The per-plot notes still
+  // carry each metric's own missing count; this line is the scope the reader checks first.
+  const collection = React.useMemo(() => {
+    // A failed read is not an empty history: the panel below says it failed, and this line
+    // must not say "0 samples / newest never" above it.
+    if (!history || history.failed || !series) return null;
+    const newest = series
+      .map((entry) => entry.newest?.at ?? null)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null;
+    return {
+      samples: history.samples.length,
+      gaps: series.length ? Math.max(...series.map((entry) => entry.gaps)) : 0,
+      newest,
+    };
+  }, [history, series]);
 
   const runs = React.useMemo(() => foldEvents(events || []), [events]);
 
@@ -328,6 +345,22 @@ export function ObservabilityEntityPage() {
                 <CopyButton value={node.id} label={t('observabilityEntity.copyId')} />
               </span>
             </section>
+            {collection ? (
+              <p
+                className="stat-note"
+                data-testid="observability-entity-freshness"
+                data-window={hours}
+                data-samples={collection.samples}
+                data-gaps={collection.gaps}
+              >
+                {t('observabilityEntity.freshness', {
+                  hours,
+                  samples: collection.samples,
+                  gaps: collection.gaps,
+                  at: collection.newest ? ageMessage(locale, collection.newest) : t('time.never'),
+                })}
+              </p>
+            ) : null}
 
             {state === 'revoked' ? (
               <NoticeBar
@@ -392,21 +425,29 @@ export function ObservabilityEntityPage() {
             </section>
 
             {/* The series. One panel, three plots, one window control. */}
-            <section className="panel" data-testid="observability-history" aria-labelledby="ow-history">
-              <div className="panel-head">
+            <section className="panel" data-testid="observability-history" data-region="history" aria-labelledby="ow-history">
+              <div className="panel-head ow-history-head">
                 <div>
                   <h2 id="ow-history">{t('observabilityEntity.history.title')}</h2>
                   <p>{t('observabilityEntity.history.description')}</p>
                 </div>
-                <Tabs value={String(hours)} onValueChange={(value: string) => setHours(Number(value) as HistoryWindowHours)}>
-                  <TabsList aria-label={t('observabilityEntity.history.windowAria')}>
-                    {HISTORY_WINDOWS.map((option) => (
-                      <TabsTrigger key={option} value={String(option)}>
-                        {t('observabilityEntity.history.window', { hours: option })}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                </Tabs>
+                {/* These are window filters over ONE panel, not tabs over several panels. Radix
+                    Tabs would emit aria-controls for a TabsContent that this page never renders,
+                    which axe correctly flags as an invalid reference; a pressed-button group
+                    states the same choice without inventing hidden panels. */}
+                <div className="ow-window-switch" role="group" aria-label={t('observabilityEntity.history.windowAria')}>
+                  {HISTORY_WINDOWS.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      aria-pressed={hours === option}
+                      data-window={option}
+                      onClick={() => setHours(option)}
+                    >
+                      {t('observabilityEntity.history.window', { hours: option })}
+                    </button>
+                  ))}
+                </div>
               </div>
               {history === null ? (
                 <p className="stat-note ow-series-pending" role="status">{t('observabilityEntity.history.loading')}</p>
@@ -425,7 +466,7 @@ export function ObservabilityEntityPage() {
             </section>
 
             {/* Secondary panel 1 of 2: what runs here. */}
-            <section className="panel table-panel" data-testid="observability-instances" aria-labelledby="ow-instances">
+            <section className="panel table-panel" data-testid="observability-instances" data-region="instances" aria-labelledby="ow-instances">
               <div className="panel-head">
                 <div>
                   <h2 id="ow-instances">{t('observabilityEntity.instances.title')}</h2>
@@ -499,7 +540,7 @@ export function ObservabilityEntityPage() {
             </section>
 
             {/* Secondary panel 2 of 2: what happened to it. §2.4 folds a run of >= 3. */}
-            <section className="panel table-panel" data-testid="observability-events" aria-labelledby="ow-events">
+            <section className="panel table-panel" data-testid="observability-events" data-region="events" aria-labelledby="ow-events">
               <div className="panel-head">
                 <div>
                   <h2 id="ow-events">{t('observabilityEntity.events.title')}</h2>
