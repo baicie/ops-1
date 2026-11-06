@@ -8,6 +8,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 REGISTRY="${OPSWEAVE_REGISTRY:-localhost:5001}"
+# Where a Node runtime will pull the image from. Docker Desktop reaches a host
+# registry as host.docker.internal; on Linux it is usually 172.17.0.1. The
+# registry stores repositories host-agnostically, so the push host and the pull
+# host may differ while the digest is the same.
+MANIFEST_PREFIX="${OPSWEAVE_MANIFEST_PREFIX:-$REGISTRY}"
 VERSION="${OPSWEAVE_ZABBIX_VERSION:-0.0.1}"
 NAME="zabbix-source"
 
@@ -71,13 +76,13 @@ python3 scripts/assemble_plugin.py \
   --template "plugins/$NAME/manifest.template.json" \
   --out "/tmp/$NAME-bundle" \
   --version "$VERSION" \
-  --image-ref "$DIGEST" >/dev/null
+  --image-ref "${MANIFEST_PREFIX}/opsweave/$NAME@${DIGEST#*@}" >/dev/null
 ./target/debug/opsctl bundle --dir "/tmp/$NAME-bundle" --out "dist/plugins/$NAME-$VERSION.plugin.zip" --key keys/publisher.key >/dev/null
 ls -lh "dist/plugins/$NAME-$VERSION.plugin.zip"
 python3 - "/tmp/$NAME-bundle/manifest.json" <<'PY'
 import json, os, sys
 m = json.load(open(sys.argv[1]))
-registry = os.environ.get('OPSWEAVE_REGISTRY', 'localhost:5001').rstrip('/')
+registry = os.environ.get('OPSWEAVE_MANIFEST_PREFIX', os.environ.get('OPSWEAVE_REGISTRY', 'localhost:5001')).rstrip('/')
 assert m['backend']['imageRef'].startswith(registry + '/'), m['backend']['imageRef']
 assert m['backend']['imageRef'].split('@sha256:')[1] != '0' * 64, m['backend']['imageRef']
 print('manifest imageRef:', m['backend']['imageRef'])

@@ -174,6 +174,20 @@ test('the server starts and serves health, runtime info and the storage mode', a
   }
 });
 
+test('the Node runtime info endpoint carries the fields the supervisor checks', async () => {
+  const { plugin, base } = await startPlugin();
+  try {
+    const info = await call(base, '/_opsweave/runtime/v1/info');
+    assert.equal(info.status, 200);
+    assert.equal(info.body.pluginId, PLUGIN_ID);
+    assert.equal(info.body.runtimeProtocol, 'http-json-v1');
+    assert.equal(typeof info.body.capabilityDigest, 'string');
+    assert.equal(typeof info.body.buildDigest, 'string');
+  } finally {
+    await plugin.close();
+  }
+});
+
 test('an unsigned role header is not an identity', async () => {
   const { plugin, base } = await startPlugin();
   try {
@@ -280,6 +294,27 @@ test('a duplicate source in one workspace is a conflict, not a silent overwrite'
     const duplicate = await createSource(base, upstream, { name: 'second-name' });
     assert.equal(duplicate.status, 409);
     assert.equal(duplicate.body.code, 'ZBX_SOURCE_CONFLICT');
+  } finally {
+    await plugin.close();
+    await upstream.close();
+  }
+});
+
+test('a DNS-named endpoint is reachable (autoSelectFamily lookup)', async () => {
+  const upstream = await startFakeZabbix();
+  const port = new URL(upstream.url).port;
+  const { plugin, base } = await startPlugin();
+  try {
+    const created = await createSource(base, upstream, {
+      endpoint: `http://localhost:${port}/api_jsonrpc.php`,
+    });
+    assert.equal(created.status, 201);
+    const probed = await call(base, `/api/zabbix-source/sources/${created.body.sourceId}/probe`, {
+      method: 'POST',
+      headers: { 'x-opsweave-user-context': userContext() },
+    });
+    assert.equal(probed.status, 200);
+    assert.equal(probed.body.outcome, 'OK');
   } finally {
     await plugin.close();
     await upstream.close();
