@@ -16,10 +16,10 @@
 | #39 | `feat/g13-a-collect-ui` | `81d1765` | Draft |
 | #40 | `feat/g13-a1-workspace-attestation` | `b2d635b` | Open（非 Draft） |
 | #41 | `feat/g13-a2-credential-binding` | `64b7286` | Draft，15/15 CI |
-| A.3 | `feat/g13-a3-integration-closure` | 见 PR #43 | Draft |
-| 集成 | `integration/g13-a3` | `75bf356`（代码树） | 仅门禁，不合并 |
+| A.3 | `feat/g13-a3-integration-closure` | `1f8ffa5`（代码 `a9d869d`） | Draft，PR #43 |
+| 集成 | `integration/g13-a3` | `60edf51` | 仅门禁，不合并（PR #42） |
 
-A.3 代码提交：`7e42394`（Docker stderr redaction、env budget fail-closed、flake 处理）。A.3 只新增/修改：
+A.3 代码提交：`a9d869d`（Docker stderr redaction、env budget fail-closed、flake 处理）；文档 `1f8ffa5`。A.3 只新增/修改：
 
 - `apps/node/src/docker.rs`
 - `tests/ui/data-foundation-flows.spec.ts`
@@ -71,11 +71,11 @@ Endpoint Swap、Cross-Workspace SecretRef、Historical Source、TLS、Basic、SS
 - `tests/ui/overview-partial.spec.ts` **自动合并成功**。以 #39 的父提交 #35 为 merge base，只有 #39 的增量应用在已含 #38/#36 的树上；合并结果同时保留 #36 的本地化标题断言与 #35/#39 的视觉/工作台断言。预检阶段报告的 `#38+#39` / `#40+#39` 冲突是“分支尖端直接对比”的产物，不代表按正确顺序集成仍冲突。
 - 无其他冲突；`git merge-tree` 与真实合并一致。
 
-### 3.2 门禁矩阵（集成树 `75bf356`，PR #42）
+### 3.2 门禁矩阵（集成树 `60edf51`，PR #42）
 
 | 门禁 | 结果 |
 |---|---|
-| CI 全套（rust/web/web-unit/zabbix-plugin/g13a-roundtrip/g13a1-gateway/acceptance/golden-path/runtime-golden-path/legacy/quality/contracts/spec/artifact） | 见 §5 |
+| CI 全套（rust/web/web-unit/zabbix-plugin/g13a-roundtrip/g13a1-gateway/acceptance/golden-path/runtime-golden-path/legacy/quality/contracts/spec/artifact） | **16/16 PASS**（§5） |
 | 本地 Kernel/Node/Plugin/contracts | 205 / 18 / 59 / PASS |
 | 真实 Gateway/Node/OCI | A.2 证据 + 集成树 CI 的 `g13a1-gateway` |
 | G12 acceptance / G13 roundtrip | 集成树 CI |
@@ -83,7 +83,7 @@ Endpoint Swap、Cross-Workspace SecretRef、Historical Source、TLS、Basic、SS
 
 ### 3.3 Flake 处理
 
-1. **`stop_and_remove_reports_a_surviving_container`**：CI attempt 1 失败于断言（0.2s 内，非超时）；本地全套连续 30 次、单测 40 次均无法复现。已做：断言输出实际错误、`/usr/bin/true` 两个简单命令测试的 2s 延迟预算改为 15s（避免 fork/exec 在负载下被误判为挂起）。**未加测试重试**；根因未能复现，保留为残余风险，若再次出现日志会带具体错误。
+1. **`stop_and_remove_reports_a_surviving_container`**：集成树首次运行时，新增的假 Docker stderr 测试在同一机制上失败，日志只显示 spawn 上下文 `run docker create ...`；这暴露了根因——测试写出可执行脚本后立刻执行，和兄弟测试的 fork/exec 竞争，Linux 在继承的写描述符关闭前返回 **ETXTBSY**，错误在 `inspect` 处变成 spawn 失败，自然不含 `"still running"`。修复：假 Docker 测试**只对 ETXTBSY** 做有界重试（20×25 ms），断言打印完整错误链；产品代码不重试 Docker。本地全套 30 次、单测 40 次通过；集成树重跑验证。2s 延迟预算改为 15s 是独立的诊断修正（fork/exec 负载下不应被误判为挂起）。
 2. **`data-foundation-flows.spec.ts:79`**：根因是**整条串行业务流的 60s 测试预算耗尽**（日志在 60s 处报 `Test timeout of 60000ms exceeded`，截图只是最后一步），不是元素选择器错误。修复：该文件 `test.describe.configure({timeout: 120_000})`，并在截图前显式 `toBeVisible()`，使真实回归在可见性断言处失败而不是在超时里。未删除测试、未加无限重试。
 
 ### 3.4 Merge 策略差异
@@ -128,7 +128,24 @@ Endpoint Swap、Cross-Workspace SecretRef、Historical Source、TLS、Basic、SS
 
 ## 5. CI / Test Matrix
 
-（集成树 PR #42 运行结果在本文件提交时填入；若失败项为既有 flake，重跑并记录，不掩盖。）
+最终代码树：**集成 `60edf51` 16/16 PASS**；**A.3 `1f8ffa5` 15/15 PASS**（`contracts` 多触发器重复）。两套均为首次重跑即全绿，无失败项需要再次重跑。
+
+| 门禁 | 集成树 `60edf51` | A.3 `1f8ffa5` |
+|---|---|---|
+| `rust`（fmt/test/clippy） | PASS | PASS |
+| `web`（typecheck/build/i18n/tokens） | PASS | PASS |
+| `web-unit` | PASS | PASS |
+| `zabbix-plugin`（59 + storage） | PASS | PASS |
+| `g13a-roundtrip` | PASS | PASS |
+| `g13a1-gateway`（真实 Gateway/Node/OCI + 攻击矩阵） | PASS | PASS |
+| `acceptance`（G12） | PASS | PASS |
+| `golden-path` / `legacy-regression` | PASS / PASS | PASS / PASS |
+| `runtime-golden-path` | PASS | PASS |
+| `quality-faults` / `contracts` / `spec-coverage` / `artifact-budget` | PASS | PASS |
+
+- 集成树检查页：<https://github.com/baicie/ops-1/pull/42/checks>
+- A.3 检查页：<https://github.com/baicie/ops-1/pull/43/checks>
+- 首次集成运行 `75bf356` **失败**：`rust` 与 `runtime-golden-path` 均因 `clippy::unnecessary_sort_by` 编译失败；新增的 Docker stderr 测试同时暴露 ETXTBSY（见 §3.3）。修复为 `a9d869d` 后重跑 `60edf51` 全绿。这正好证明“集成树门禁”比逐 PR CI 更能发现栈内组合问题。
 
 ## 6. Verdicts
 
@@ -137,8 +154,8 @@ Endpoint Swap、Cross-Workspace SecretRef、Historical Source、TLS、Basic、SS
 | `G13_A2_SECURITY_REGRESSION` | **PASS** | 59 plugin/attack、205 Kernel、18 Node、contracts；攻击矩阵未放宽 |
 | `DOCKER_ERROR_REDACTION` | **PASS** | 假 CLI stderr 含 token/Adapter 密钥；错误中 0 泄漏，保留 action/exit/诊断 |
 | `SECRET_DELIVERY_LIMITS` | **PASS（边界明确）** | 32 KiB/条、256 KiB 总量；超限 `NODE_PLUGIN_ENV_TOO_LARGE`；不再静默启动 |
-| `STACK_INTEGRATION` | 见 §5 | 集成树 `75bf356`；overview-partial 自动合并保留双方断言 |
-| `CI_RELIABILITY` | **PARTIAL** | flake 2 已根因修复；flake 1 未能复现（30×全套 + 40×单测），已加诊断与放宽误判超时 |
+| `STACK_INTEGRATION` | **PASS** | 集成树 `60edf51` 16/16；overview-partial 自动合并保留双方断言 |
+| `CI_RELIABILITY` | **PASS（残余窗口已记录）** | 两个 flake 均已定位并修复；集成树与 A.3 两套全量 CI 首次重跑全绿 |
 | `AUTOMATION_IDENTITY_CONTRACT` | **PASS（契约冻结）** | ADR-018 + 权限矩阵；未实现，不声称运行时验证 |
 | `EVENT_DEDUP_CONTRACT` | **PASS（契约冻结）** | ADR-019 + schema/OpenAPI；迁移未执行 |
 | `INCIDENT_LIFECYCLE_COMPATIBILITY` | **PASS（契约冻结）** | 不引入 AWAITING_VERDICT；现有门禁不变 |
@@ -149,6 +166,6 @@ Endpoint Swap、Cross-Workspace SecretRef、Historical Source、TLS、Basic、SS
 
 1. Docker stderr 红队测试使用假 CLI；真实 Docker daemon 回显 Secret 未被证实，修复是防御性。
 2. 8 KiB→32 KiB 只是把静默降级改为显式失败；多 Workspace 规模仍受 env 交付限制，Secret Broker 未实现。
-3. Flake 1 根因未复现；若再发，当前断言会输出具体错误，但仍可能再次红灯。
-4. 集成树尚未包含 A.3 文档提交（文档不影响门禁）；最终代码 SHA 以 A.3 PR 为准。
+3. Flake 1 的 ETXTBSY 窗口只能靠测试侧重试缩小，不能从 Linux 语义上消除；若再发，断言会输出完整错误链。
+4. 集成树 `60edf51` 是最终**代码** SHA；A.3 之后的报告修订只改文档，不再改变门禁结论。
 5. `REAL_ZABBIX_VERIFIED=NOT_RUN`、`PRODUCTION_SECRET_READY=PARTIAL` 继续有效；CI 绿色不是安全证明。

@@ -59,7 +59,7 @@ audience: "opsweave-kernel"
 Automation **可以**：
 
 - 对绑定 source 发起有界 collect；
-- 为本次 Event 对应的 Incident 追加 Evidence（必须带 v2 attestation 与内容摘要）；
+- 为本次 Event 对应的、处于 `OPEN/INVESTIGATING` 的 Incident 追加 Evidence（必须带 v2 attestation 与内容摘要）；`CONCLUDED/CLOSED` 一律拒绝；
 - 在 Event 首次落地时创建 Incident（`source=AUTOMATION`，见 ADR-019）。
 
 Automation **不可以**：

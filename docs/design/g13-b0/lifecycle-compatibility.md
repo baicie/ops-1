@@ -33,7 +33,7 @@ OPEN --(first evidence)--> INVESTIGATING --(Human Verdict)--> CONCLUDED --(Close
 |---|---|---|---|
 | Event ingest | Automation | 无（仅事件） | 不创建 Incident，直到 `PROBLEM` |
 | 创建 Incident | Automation（由 PROBLEM Event） | `OPEN` | `origin=AUTOMATION`，owner 为不可登录服务用户 |
-| 追加 Evidence | Automation（本 source 的 Incident） | `OPEN → INVESTIGATING`（首条） | 必须带 v2 attestation + content；payload 不算 Evidence |
+| 追加 Evidence | Automation（本 source 的 Incident） | `OPEN → INVESTIGATING`（首条） | 必须带 v2 attestation + content；payload 不算 Evidence；Automation 对 `CONCLUDED/CLOSED` 拒绝 |
 | 启动 Investigation | User 或 Automation（受预算） | 不变 | 只写 hypotheses；不能写 verdict |
 | Human Verdict | **仅 User** | `CONCLUDED` | Automation 403 `AUTOMATION_VERDICT_FORBIDDEN` |
 | Close | **仅 User** | `CLOSED` | Automation 403 `AUTOMATION_CLOSE_FORBIDDEN` |
@@ -45,7 +45,7 @@ OPEN --(first evidence)--> INVESTIGATING --(Human Verdict)--> CONCLUDED --(Close
 - `RESOLVED` 不改变 Incident 状态；它是时间线事实，等待人工 Verdict/Close。
 - 乱序/延迟 Event 不触发状态迁移；`late=true` 只影响展示与排序。
 - 已 `CONCLUDED/CLOSED` 的 Incident 收到新 `PROBLEM`：不重开，新建 Incident 并写 `recurrence_of`；旧单保留冻结的 Evidence 集。
-- Automation 的 Evidence 追加遵循同一规则：CLOSED 拒绝（`INCIDENT_CLOSED`），CONCLUDED 也拒绝新增 Evidence（现有冻结语义在 B1 复核并保持）。
+- Automation 的 Evidence 追加：`CLOSED` 拒绝（`INCIDENT_CLOSED`）；B1 对 Automation **也拒绝** `CONCLUDED`（`INCIDENT_CONCLUDED`），避免自动证据改变已作结论的事实集。该限制只作用于 Automation，不改变现有用户端点（其 `CONCLUDED` 行为保持现状）；Verdict 已冻结其考虑过的 Evidence 集。
 
 ## 5. UI 兼容
 
