@@ -225,6 +225,7 @@ pub async fn ingest(
                 &principal,
                 incident_id,
                 req.source_id,
+                req.occurred_at,
             )
             .await
             {

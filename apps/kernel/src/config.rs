@@ -366,6 +366,10 @@ pub struct AutomationSource {
     pub plugin_id: String,
     pub secret_ref: String,
     pub state: String,
+    /// Trusted item selection for automatic collection. Empty is allowed at
+    /// registration, but automation refuses to collect until it is configured.
+    pub item_ids: Vec<String>,
+    pub window_seconds: u32,
 }
 
 /// `{"plugin.id":{"<workspace-uuid>":{"secretref:name":{"endpoint":"https://...","tls":"VERIFY"}}}}`
@@ -499,6 +503,44 @@ pub fn parse_automation_sources(raw: &str) -> Vec<AutomationSource> {
                 if !secret_ref.starts_with("secretref:") || !matches!(state, "READY" | "DISABLED") {
                     continue;
                 }
+                let item_ids = match entry.get("itemIds") {
+                    None => Vec::new(),
+                    Some(serde_json::Value::Array(items)) => {
+                        let mut parsed = Vec::with_capacity(items.len());
+                        let mut valid = items.len() <= 32;
+                        for item in items {
+                            match item.as_str() {
+                                Some(value)
+                                    if !value.is_empty()
+                                        && value.len() <= 64
+                                        && !value.chars().any(char::is_whitespace) =>
+                                {
+                                    parsed.push(value.to_string())
+                                }
+                                _ => {
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if !valid {
+                            tracing::warn!(source_id = %source_id, "automation itemIds are invalid; source skipped");
+                            continue;
+                        }
+                        parsed
+                    }
+                    Some(_) => continue,
+                };
+                let window_seconds = match entry.get("windowSeconds") {
+                    None => 300,
+                    Some(value) => match value.as_u64() {
+                        Some(seconds) if (30..=3600).contains(&seconds) => seconds as u32,
+                        _ => {
+                            tracing::warn!(source_id = %source_id, "automation windowSeconds is invalid; source skipped");
+                            continue;
+                        }
+                    },
+                };
                 if !seen.insert(source_id) {
                     tracing::warn!(
                         source_id = %source_id,
@@ -512,6 +554,8 @@ pub fn parse_automation_sources(raw: &str) -> Vec<AutomationSource> {
                     plugin_id: plugin_id.to_string(),
                     secret_ref: secret_ref.to_string(),
                     state: state.to_string(),
+                    item_ids,
+                    window_seconds,
                 });
             }
         }
@@ -768,13 +812,15 @@ mod tests {
         let source = "00000000-0000-4000-8000-0000000000b1";
         // Not a UUID on purpose: the parser must skip it, not panic.
         let raw = format!(
-            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"secretref:zabbix/main","state":"READY"}},"not-a-uuid":{{"secretRef":"secretref:x","state":"READY"}}}}}}}}"#
+            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"secretref:zabbix/main","state":"READY","itemIds":["10401","10402"],"windowSeconds":600}},"not-a-uuid":{{"secretRef":"secretref:x","state":"READY"}}}}}}}}"#
         );
         let parsed = parse_automation_sources(&raw);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].plugin_id, "zabbix-source");
         assert_eq!(parsed[0].secret_ref, "secretref:zabbix/main");
         assert_eq!(parsed[0].state, "READY");
+        assert_eq!(parsed[0].item_ids, vec!["10401", "10402"]);
+        assert_eq!(parsed[0].window_seconds, 600);
         assert_eq!(parsed[0].source_id.to_string(), source);
 
         let bad_ref = format!(
@@ -786,6 +832,16 @@ mod tests {
         );
         assert!(parse_automation_sources(&bad_state).is_empty());
         assert!(parse_automation_sources("{not json").is_empty());
+        let bad_items = format!(
+            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"secretref:x","state":"READY","itemIds":[]}}}}}}}}"#
+        );
+        // An explicit empty list is allowed at registration; automation refuses
+        // to collect until items are configured, so the entry is not dropped.
+        assert_eq!(parse_automation_sources(&bad_items).len(), 1);
+        let bad_window = format!(
+            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"secretref:x","state":"READY","windowSeconds":5}}}}}}}}"#
+        );
+        assert!(parse_automation_sources(&bad_window).is_empty());
 
         let other_workspace = "00000000-0000-4000-8000-00000000000b";
         let duplicate = format!(
