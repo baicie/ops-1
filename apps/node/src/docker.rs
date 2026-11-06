@@ -82,7 +82,7 @@ fn sensitive_values(args: &[&str]) -> Vec<String> {
         }
     }
     values.retain(|value| value.len() >= 8);
-    values.sort_by(|a, b| b.len().cmp(&a.len()));
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
     values.dedup();
     values
 }
@@ -536,10 +536,41 @@ pub fn container_name(node_id: uuid::Uuid, instance_id: uuid::Uuid) -> String {
     format!("opsweave-{node_id}-{instance_id}")
 }
 
+/// A test that writes an executable script and runs it immediately can race a
+/// sibling test's `fork`/`exec`: on Linux the fresh inode stays writable in the
+/// forked child until it execs, and `execve` then fails with ETXTBSY. This is a
+/// harness race, not product behaviour; the product never retries Docker. The
+/// retry is bounded, and only that OS error is retried.
+#[cfg(test)]
+fn is_text_file_busy(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains("Text file busy"))
+}
+
+#[cfg(test)]
+async fn retry_exec_busy<T, F, Fut>(mut op: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let mut attempts = 0u32;
+    loop {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(error) if attempts < 20 && is_text_file_busy(&error) => {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
-    use super::DockerAdapter;
+    use super::{retry_exec_busy, DockerAdapter};
 
     #[tokio::test]
     async fn stop_and_remove_reports_a_surviving_container() {
@@ -559,17 +590,21 @@ mod tests {
             script.to_string_lossy().into_owned(),
             "unix://unused".into(),
         );
-        let error = adapter.stop_and_remove("surviving").await.unwrap_err();
+        let error = retry_exec_busy(|| adapter.stop_and_remove("surviving"))
+            .await
+            .unwrap_err();
         assert!(
-            error.to_string().contains("still running"),
-            "unexpected stop/remove error: {error}"
+            format!("{error:#}").contains("still running"),
+            "unexpected stop/remove error: {error:#}"
         );
     }
 }
 
 #[cfg(test)]
 mod run_tests {
-    use super::{redacted_command, validate_env_budget, DockerAdapter, MAX_ENV_ENTRY_BYTES};
+    use super::{
+        redacted_command, retry_exec_busy, validate_env_budget, DockerAdapter, MAX_ENV_ENTRY_BYTES,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -622,11 +657,12 @@ esac
             "OPSWEAVE_EVIDENCE_ADAPTERS={\"zabbix\":\"adapter-signing-secret-value\"}",
             "image",
         ];
-        let error = adapter
-            .run_with_timeout(&args, 5)
-            .await
-            .unwrap_err()
-            .to_string();
+        let error = format!(
+            "{:#}",
+            retry_exec_busy(|| adapter.run_with_timeout(&args, 5))
+                .await
+                .unwrap_err()
+        );
         assert!(!error.contains("super-secret-token"), "{error}");
         assert!(!error.contains("adapter-signing-secret-value"), "{error}");
         assert!(error.contains("docker create failed"), "{error}");
