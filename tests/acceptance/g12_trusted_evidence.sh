@@ -55,17 +55,18 @@ login() {
 }
 
 # The canonical bytes an adapter signs: fixed key order, no whitespace, integer seconds.
-attest() { # adapter_id secret incident_id kind source collected_at_iso content_ref issued_epoch
+attest() { # adapter_id secret incident_id kind source collected_at_iso content_ref workspace_id issued_epoch
   python3 - "$@" <<'PY'
 import base64, hashlib, hmac, json, sys
 from datetime import datetime, timezone
-adapter_id, secret, incident_id, kind, source, collected_at, content_ref, issued_epoch = sys.argv[1:9]
+adapter_id, secret, incident_id, kind, source, collected_at, content_ref, workspace_id, issued_epoch = sys.argv[1:10]
 # UTC-explicit: a naive datetime is read as local time, and the unix second would
 # then be off by the host offset - which looks exactly like a forged signature.
 collected = datetime.strptime(collected_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 claims = {
-  "v": "opsweave-evidence-attestation-v1",
+  "v": "opsweave-evidence-attestation-v2",
   "adapterId": adapter_id,
+  "workspaceId": workspace_id,
   "incidentId": incident_id,
   "kind": kind,
   "source": source,
@@ -120,6 +121,16 @@ STATUS="$(call "$OP_JAR" "$OP_CSRF" POST /api/v1/incidents \
 check 201 "$STATUS" "operator creates an incident"
 INC="$(last "['id']")"
 echo "   incident: $INC"
+# The incident was filed by an account granted the legacy business workspace
+# (lib/workspace_grant.sh). Use the DB when the harness provides it, otherwise
+# the documented legacy constant; a v2 signature must name this workspace.
+if [ -n "${OPSWEAVE_DATABASE_URL:-}" ]; then
+  WORKSPACE_ID="$(psql "$OPSWEAVE_DATABASE_URL" -tAc "SELECT workspace_id FROM kernel.incidents WHERE incident_id='$INC'")"
+else
+  WORKSPACE_ID="00000000-0000-4000-8000-000000000001"
+fi
+[ -n "$WORKSPACE_ID" ] || { echo "cannot establish the incident workspace"; exit 2; }
+echo "   workspace: $WORKSPACE_ID"
 
 # One clock read, so the ISO second and the signed unix second cannot disagree
 # across a boundary.
@@ -178,8 +189,18 @@ check "FORBIDDEN" "$(last "['code']")" "N8 refusal code"
 echo
 echo '######## A1 - what each role actually gets ########'
 
+# G13-A: an attested row must carry the bytes the Kernel digests. These two
+# bodies are the exact content for the signed references below; the hash is
+# computed here, not guessed, so the Kernel's derived ref matches the signature.
+sha_ref() { python3 -c 'import hashlib,sys;print("sha256:"+hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$1"; }
+ATTEST_BODY='g12 attested snapshot bytes'
+ATTEST_REF="$(sha_ref "$ATTEST_BODY")"
+NOTE_BODY='operator note the replay must not upgrade'
+NOTE_REF="$(sha_ref "$NOTE_BODY")"
+
+
 STATUS="$(call "$OP_JAR" "$OP_CSRF" POST "/api/v1/incidents/$INC/evidence" \
-  "{\"kind\":\"OPERATOR_NOTE\",\"source\":\"operator:g12\",\"collectedAt\":\"$NOW\",\"contentRef\":\"note:operator-$RUN\"}")"
+  "{\"kind\":\"OPERATOR_NOTE\",\"source\":\"operator:g12\",\"collectedAt\":\"$NOW\",\"contentRef\":\"$NOTE_REF\",\"content\":{\"contentType\":\"text/plain\",\"body\":\"$NOTE_BODY\"}}")"
 check 201 "$STATUS" "P1 an operator appends a row"
 check "OPERATOR_ASSERTED" "$(last "['verifiedTrust']")" "P1 verifiedTrust for an operator row"
 check "OPERATOR_ASSERTED" "$(last "['claimedTrust']")" "P1 claimedTrust default"
@@ -192,25 +213,35 @@ check 201 "$STATUS" "P2 an admin appends a row with an explicit claim"
 check "UNVERIFIED" "$(last "['verifiedTrust']")" "P2 the claim is not upgraded"
 check "NONE" "$(last "['verificationMethod']")" "P2 nothing was verified"
 
-SIG="$(attest "$ADAPTER_ID" "$ADAPTER_SECRET" "$INC" METRIC_SNAPSHOT "zabbix:$ADAPTER_ID" "$NOW" "sha256:attested-$RUN" "$NOW_EPOCH")"
+SIG="$(attest "$ADAPTER_ID" "$ADAPTER_SECRET" "$INC" METRIC_SNAPSHOT "zabbix:$ADAPTER_ID" "$NOW" "$ATTEST_REF" "$WORKSPACE_ID" "$NOW_EPOCH")"
 STATUS="$(call "$OP_JAR" "$OP_CSRF" POST "/api/v1/incidents/$INC/evidence" \
-  "{\"kind\":\"METRIC_SNAPSHOT\",\"source\":\"zabbix:$ADAPTER_ID\",\"collectedAt\":\"$NOW\",\"contentRef\":\"sha256:attested-$RUN\",\"attestation\":{\"adapterId\":\"$ADAPTER_ID\",\"issuedAt\":\"$NOW\",\"signature\":\"$SIG\"}}")"
+  "{\"kind\":\"METRIC_SNAPSHOT\",\"source\":\"zabbix:$ADAPTER_ID\",\"collectedAt\":\"$NOW\",\"contentRef\":\"$ATTEST_REF\",\"content\":{\"contentType\":\"text/plain\",\"body\":\"$ATTEST_BODY\"},\"attestation\":{\"adapterId\":\"$ADAPTER_ID\",\"workspaceId\":\"$WORKSPACE_ID\",\"issuedAt\":\"$NOW\",\"signature\":\"$SIG\"}}")"
 check 201 "$STATUS" "P3 a correctly signed attestation is accepted"
 check "SOURCE_ATTESTED" "$(last "['verifiedTrust']")" "P3 verifiedTrust is attested"
 check "SOURCE_ADAPTER" "$(last "['verificationMethod']")" "P3 verification method"
 check "$ADAPTER_ID" "$(last "['verifierIdentity']")" "P3 the adapter identity is recorded"
 
+# G13-A.1: a genuine signature that names another workspace cannot be filed on
+# this incident. The body carries the signed value, so the refusal is the named
+# mismatch, not a generic invalid signature.
+OTHER_WORKSPACE="00000000-0000-4000-8000-0000000000ff"
+SIG_OTHER="$(attest "$ADAPTER_ID" "$ADAPTER_SECRET" "$INC" METRIC_SNAPSHOT "zabbix:$ADAPTER_ID" "$NOW" "$ATTEST_REF" "$OTHER_WORKSPACE" "$NOW_EPOCH")"
 STATUS="$(call "$OP_JAR" "$OP_CSRF" POST "/api/v1/incidents/$INC/evidence" \
-  "{\"kind\":\"METRIC_SNAPSHOT\",\"source\":\"zabbix:$ADAPTER_ID\",\"collectedAt\":\"$NOW\",\"contentRef\":\"sha256:attested-$RUN\",\"attestation\":{\"adapterId\":\"$ADAPTER_ID\",\"issuedAt\":\"$NOW\",\"signature\":\"$SIG\"}}")"
+  "{\"kind\":\"METRIC_SNAPSHOT\",\"source\":\"zabbix:$ADAPTER_ID\",\"collectedAt\":\"$NOW\",\"contentRef\":\"$ATTEST_REF\",\"content\":{\"contentType\":\"text/plain\",\"body\":\"$ATTEST_BODY\"},\"attestation\":{\"adapterId\":\"$ADAPTER_ID\",\"workspaceId\":\"$OTHER_WORKSPACE\",\"issuedAt\":\"$NOW\",\"signature\":\"$SIG_OTHER\"}}")"
+check 403 "$STATUS" "P3b a signature for another workspace is refused"
+check "EVIDENCE_WORKSPACE_MISMATCH" "$(last "['code']")" "P3b refusal is the named workspace mismatch"
+
+STATUS="$(call "$OP_JAR" "$OP_CSRF" POST "/api/v1/incidents/$INC/evidence" \
+  "{\"kind\":\"METRIC_SNAPSHOT\",\"source\":\"zabbix:$ADAPTER_ID\",\"collectedAt\":\"$NOW\",\"contentRef\":\"$ATTEST_REF\",\"content\":{\"contentType\":\"text/plain\",\"body\":\"$ATTEST_BODY\"},\"attestation\":{\"adapterId\":\"$ADAPTER_ID\",\"workspaceId\":\"$WORKSPACE_ID\",\"issuedAt\":\"$NOW\",\"signature\":\"$SIG\"}}")"
 check 200 "$STATUS" "P4 replaying the attested tuple is an idempotent 200"
 check "SOURCE_ADAPTER" "$(last "['verificationMethod']")" "P4 the replay answers with the stored row"
 
 # A *valid* attestation, correctly signed over the already-settled tuple. The
 # signature verifies (so this is not P3's refusal path) and the insert still
 # hits the natural key, so the stored row comes back untouched.
-SIG="$(attest "$ADAPTER_ID" "$ADAPTER_SECRET" "$INC" OPERATOR_NOTE "operator:g12" "$NOW" "note:operator-$RUN" "$NOW_EPOCH")"
+SIG="$(attest "$ADAPTER_ID" "$ADAPTER_SECRET" "$INC" OPERATOR_NOTE "operator:g12" "$NOW" "$NOTE_REF" "$WORKSPACE_ID" "$NOW_EPOCH")"
 STATUS="$(call "$OP_JAR" "$OP_CSRF" POST "/api/v1/incidents/$INC/evidence" \
-  "{\"kind\":\"OPERATOR_NOTE\",\"source\":\"operator:g12\",\"collectedAt\":\"$NOW\",\"contentRef\":\"note:operator-$RUN\",\"attestation\":{\"adapterId\":\"$ADAPTER_ID\",\"issuedAt\":\"$NOW\",\"signature\":\"$SIG\"}}")"
+  "{\"kind\":\"OPERATOR_NOTE\",\"source\":\"operator:g12\",\"collectedAt\":\"$NOW\",\"contentRef\":\"$NOTE_REF\",\"content\":{\"contentType\":\"text/plain\",\"body\":\"$NOTE_BODY\"},\"attestation\":{\"adapterId\":\"$ADAPTER_ID\",\"workspaceId\":\"$WORKSPACE_ID\",\"issuedAt\":\"$NOW\",\"signature\":\"$SIG\"}}")"
 check 200 "$STATUS" "P5 a valid attestation replayed onto a settled tuple is an idempotent 200"
 check "OPERATOR_ASSERTED" "$(last "['verifiedTrust']")" "P5 a replay cannot upgrade the settled row to attested"
 check "OPERATOR_IDENTITY" "$(last "['verificationMethod']")" "P5 the settled row keeps its verification"

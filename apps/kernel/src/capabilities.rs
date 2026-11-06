@@ -419,6 +419,64 @@ pub async fn refresh_workload_token(
     Ok(Json(WorkloadTokenResponse { token, expires_at }))
 }
 
+/// The secret-bearing part of an instance environment.
+///
+/// Pure so it can be tested without a database: the isolation rule is that a
+/// plugin receives exactly its own secret map and, if one adapter is assigned to
+/// it, exactly that adapter's signing key. A plugin with no assignment receives
+/// no adapter credential; a plugin with two assignments receives neither, which
+/// is a configuration error that fails closed rather than picking one.
+pub(crate) fn secret_environment(
+    plugin_secrets: &std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    >,
+    adapter_plugins: &std::collections::HashMap<String, String>,
+    adapters: &std::collections::HashMap<String, String>,
+    credential_bindings: &std::collections::HashMap<
+        String,
+        std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, crate::config::CredentialBinding>,
+        >,
+    >,
+    allow_insecure_source_endpoints: bool,
+    plugin_id: &str,
+) -> std::collections::BTreeMap<String, String> {
+    let mut env = std::collections::BTreeMap::new();
+    if let Some(secrets) = plugin_secrets.get(plugin_id) {
+        if let Ok(encoded) = serde_json::to_string(secrets) {
+            env.insert("OPSWEAVE_PLUGIN_SECRETS".into(), encoded);
+        }
+    }
+    if let Some(bindings) = credential_bindings.get(plugin_id) {
+        if let Ok(encoded) = serde_json::to_string(bindings) {
+            env.insert("OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS".into(), encoded);
+        }
+    }
+    if allow_insecure_source_endpoints {
+        env.insert(
+            "OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS".into(),
+            "1".into(),
+        );
+    }
+    let assigned: Vec<&String> = adapter_plugins
+        .iter()
+        .filter(|(_, plugin)| plugin.as_str() == plugin_id)
+        .map(|(adapter, _)| adapter)
+        .collect();
+    if assigned.len() == 1 {
+        let adapter_id = assigned[0];
+        if let Some(secret) = adapters.get(adapter_id) {
+            env.insert("OPSWEAVE_EVIDENCE_ADAPTER_ID".into(), adapter_id.clone());
+            env.insert("OPSWEAVE_EVIDENCE_ADAPTER_SECRET".into(), secret.clone());
+        }
+    } else if assigned.len() > 1 {
+        tracing::warn!(plugin = %plugin_id, "more than one evidence adapter is assigned to this plugin; none is delivered");
+    }
+    env
+}
+
 pub async fn instance_environment(
     State(state): State<AppState>,
     Path((node_id, instance_id)): Path<(Uuid, Uuid)>,
@@ -466,6 +524,14 @@ pub async fn instance_environment(
     {
         env.insert("OPSWEAVE_PLUGIN_DATABASE_URL".into(), credential);
     }
+    env.extend(secret_environment(
+        &state.config.plugin_secrets,
+        &state.config.evidence_adapter_plugins,
+        &state.config.evidence_adapters,
+        &state.config.plugin_credential_bindings,
+        state.config.allow_insecure_source_endpoints,
+        &plugin_id,
+    ));
     if let Ok(manifest) = serde_json::from_value::<ManifestV11>(manifest_value) {
         let mut tokens = serde_json::Map::new();
         for required in &manifest.requires {
@@ -881,15 +947,64 @@ fn context_key(state: &AppState, plugin_id: &str) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
-fn sign_claims_with_key(key: &[u8], claims: &WorkloadClaims) -> AppResult<String> {
+fn sign_payload_with_key<T: Serialize>(key: &[u8], prefix: &str, claims: &T) -> AppResult<String> {
     let payload = serde_json::to_vec(claims).map_err(AppError::from)?;
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
     let mut mac = HmacSha256::new_from_slice(key)
-        .map_err(|_| AppError::internal("workload signing key is invalid"))?;
+        .map_err(|_| AppError::internal("context signing key is invalid"))?;
     mac.update(encoded.as_bytes());
     let signature =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    Ok(format!("{TOKEN_PREFIX}.{encoded}.{signature}"))
+    Ok(format!("{prefix}.{encoded}.{signature}"))
+}
+
+fn sign_claims_with_key(key: &[u8], claims: &WorkloadClaims) -> AppResult<String> {
+    sign_payload_with_key(key, TOKEN_PREFIX, claims)
+}
+
+const USER_TOKEN_PREFIX: &str = "owu1";
+const USER_CONTEXT_TTL_SECONDS: i64 = 120;
+
+/// What the Gateway tells a plugin about a user request.
+///
+/// It carries the Kernel's authoritative answer to "which business workspaces
+/// may this caller enter" at the instant of the call, instead of leaving the
+/// plugin to trust a workspace id from the request body. The token is bound to
+/// one plugin by the key it is signed with, so a plugin cannot replay it at a
+/// sibling.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UserContextClaims<'a> {
+    v: u8,
+    user_id: Uuid,
+    role: &'a str,
+    plugin_id: &'a str,
+    workspace_ids: Vec<Uuid>,
+    issued_at: i64,
+    expires_at: i64,
+    request_id: &'a str,
+}
+
+pub(crate) fn user_context_token(
+    state: &AppState,
+    plugin_id: &str,
+    user_id: Uuid,
+    role: &str,
+    workspace_ids: Vec<Uuid>,
+    request_id: &str,
+) -> AppResult<String> {
+    let issued_at = Utc::now().timestamp();
+    let claims = UserContextClaims {
+        v: 1,
+        user_id,
+        role,
+        plugin_id,
+        workspace_ids,
+        issued_at,
+        expires_at: issued_at + USER_CONTEXT_TTL_SECONDS,
+        request_id,
+    };
+    sign_payload_with_key(&context_key(state, plugin_id), USER_TOKEN_PREFIX, &claims)
 }
 
 fn sign_claims(state: &AppState, claims: &WorkloadClaims) -> AppResult<String> {
@@ -1045,6 +1160,180 @@ mod tests {
         tampered[last] = if tampered[last] == b'a' { b'b' } else { b'a' };
         assert!(
             super::verify_claims_with_key(key, std::str::from_utf8(&tampered).unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn a_plugin_receives_only_its_own_secrets_and_adapter() {
+        use std::collections::HashMap;
+        let mut plugin_secrets = HashMap::new();
+        plugin_secrets.insert(
+            "a.plugin".to_string(),
+            HashMap::from([(
+                "00000000-0000-4000-8000-00000000000a".to_string(),
+                HashMap::from([("secretref:a".to_string(), "value-a".to_string())]),
+            )]),
+        );
+        plugin_secrets.insert(
+            "b.plugin".to_string(),
+            HashMap::from([(
+                "00000000-0000-4000-8000-00000000000b".to_string(),
+                HashMap::from([("secretref:b".to_string(), "value-b".to_string())]),
+            )]),
+        );
+        let adapter_plugins = HashMap::from([("zabbix-main".to_string(), "a.plugin".to_string())]);
+        let adapters = HashMap::from([
+            ("zabbix-main".to_string(), "adapter-secret-a".to_string()),
+            ("other".to_string(), "adapter-secret-b".to_string()),
+        ]);
+
+        let a = super::secret_environment(
+            &plugin_secrets,
+            &adapter_plugins,
+            &adapters,
+            &std::collections::HashMap::new(),
+            false,
+            "a.plugin",
+        );
+        assert!(a["OPSWEAVE_PLUGIN_SECRETS"].contains("value-a"));
+        assert!(!a["OPSWEAVE_PLUGIN_SECRETS"].contains("value-b"));
+        assert_eq!(a["OPSWEAVE_EVIDENCE_ADAPTER_ID"], "zabbix-main");
+        assert_eq!(a["OPSWEAVE_EVIDENCE_ADAPTER_SECRET"], "adapter-secret-a");
+        assert!(!a.values().any(|value| value.contains("adapter-secret-b")));
+
+        let b = super::secret_environment(
+            &plugin_secrets,
+            &adapter_plugins,
+            &adapters,
+            &std::collections::HashMap::new(),
+            false,
+            "b.plugin",
+        );
+        assert!(b["OPSWEAVE_PLUGIN_SECRETS"].contains("value-b"));
+        assert!(!b["OPSWEAVE_PLUGIN_SECRETS"].contains("value-a"));
+        assert!(!b.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_ID"));
+        assert!(!b.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_SECRET"));
+
+        // Two assignments are a configuration error: deliver neither rather than
+        // silently choosing one.
+        let doubled = HashMap::from([
+            ("zabbix-main".to_string(), "a.plugin".to_string()),
+            ("other".to_string(), "a.plugin".to_string()),
+        ]);
+        let a2 = super::secret_environment(
+            &plugin_secrets,
+            &doubled,
+            &adapters,
+            &std::collections::HashMap::new(),
+            false,
+            "a.plugin",
+        );
+        assert!(!a2.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_ID"));
+        assert!(!a2.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_SECRET"));
+    }
+
+    #[test]
+    fn credential_bindings_are_metadata_for_exactly_one_plugin() {
+        use std::collections::HashMap;
+        let bindings = HashMap::from([
+            (
+                "a.plugin".to_string(),
+                HashMap::from([(
+                    "00000000-0000-4000-8000-00000000000a".to_string(),
+                    HashMap::from([(
+                        "secretref:a".to_string(),
+                        crate::config::CredentialBinding {
+                            endpoint: "https://zabbix.example/api_jsonrpc.php".to_string(),
+                            tls: "VERIFY".to_string(),
+                        },
+                    )]),
+                )]),
+            ),
+            (
+                "b.plugin".to_string(),
+                HashMap::from([(
+                    "00000000-0000-4000-8000-00000000000b".to_string(),
+                    HashMap::from([(
+                        "secretref:b".to_string(),
+                        crate::config::CredentialBinding {
+                            endpoint: "https://b.example/api_jsonrpc.php".to_string(),
+                            tls: "VERIFY".to_string(),
+                        },
+                    )]),
+                )]),
+            ),
+        ]);
+        let a = super::secret_environment(
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &bindings,
+            true,
+            "a.plugin",
+        );
+        let encoded = &a["OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS"];
+        assert!(encoded.contains("https://zabbix.example/api_jsonrpc.php"));
+        assert!(!encoded.contains("secretref:b"));
+        assert!(
+            !encoded.contains("b.example"),
+            "another plugin's binding must not be injected"
+        );
+        assert_eq!(a["OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS"], "1");
+
+        let b = super::secret_environment(
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &bindings,
+            false,
+            "b.plugin",
+        );
+        let b_encoded = &b["OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS"];
+        assert!(b_encoded.contains("b.example"));
+        assert!(!b_encoded.contains("a.example"));
+        assert!(!b_encoded.contains("secretref:a"));
+        assert!(!b.contains_key("OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS"));
+    }
+
+    #[test]
+    fn a_user_context_is_bound_to_one_plugin_key() {
+        use base64::Engine;
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        let key = [7u8; 32];
+        let claims = super::UserContextClaims {
+            v: 1,
+            user_id: uuid::Uuid::nil(),
+            role: "operator",
+            plugin_id: "opsweave.zabbix-source",
+            workspace_ids: vec![uuid::Uuid::nil()],
+            issued_at: 1,
+            expires_at: 2,
+            request_id: "request-1",
+        };
+        let token = super::sign_payload_with_key(&key, super::USER_TOKEN_PREFIX, &claims).unwrap();
+        let mut parts = token.split('.');
+        assert_eq!(parts.next(), Some("owu1"));
+        let encoded = parts.next().expect("payload");
+        let signature = parts.next().expect("signature");
+        assert!(parts.next().is_none());
+
+        let mut mac = Hmac::<Sha256>::new_from_slice(&key).unwrap();
+        mac.update(encoded.as_bytes());
+        let expected =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        assert_eq!(
+            signature, expected,
+            "the signature covers the encoded claims"
+        );
+
+        let mut other = Hmac::<Sha256>::new_from_slice(&[8u8; 32]).unwrap();
+        other.update(encoded.as_bytes());
+        let wrong =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(other.finalize().into_bytes());
+        assert_ne!(
+            signature, wrong,
+            "another plugin's key cannot produce this token"
         );
     }
 }

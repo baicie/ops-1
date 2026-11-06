@@ -4,7 +4,9 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "test": "node --test zabbix.test.mjs server.test.mjs"
+    "test": "node --test zabbix.test.mjs server.test.mjs storage.test.mjs"
   },
-  "dependencies": {}
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
 }

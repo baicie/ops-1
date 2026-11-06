@@ -1,0 +1,119 @@
+openapi: 3.1.0
+info:
+  title: OpsWeave Telemetry Event v1
+  version: 1.0.0
+  description: |
+    Automation Event ingest (G13-B0 contract freeze). This is not implemented
+    until G13-B1; the schema and error codes are frozen here so the migration,
+    identity and UI slices can be reviewed first.
+
+    The Kernel, not the plugin, is authoritative for workspaceId: it resolves
+    sourceId in its registry. Event payload is not Evidence; Evidence still
+    requires collect -> attestation v2 -> Kernel content digest.
+servers:
+  - url: /
+paths:
+  /api/v1/telemetry/events:
+    post:
+      summary: Ingest one normalized Event
+      description: |
+        Requires an Automation Principal (`owa1`) with EVENT_INGEST in
+        allowedOps. The Idempotency-Key header must equal the recomputed
+        hash(workspaceId | sourceId | nativeId | triggerState | occurredAt).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../schema/telemetry-event.v1.schema.json'
+      responses:
+        '202':
+          description: New event recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eventId, incidentId, deduplicated]
+                properties:
+                  eventId: {type: string, format: uuid}
+                  incidentId: {type: [string, 'null'], format: uuid}
+                  deduplicated: {type: boolean, enum: [false]}
+                  automation: {$ref: '#/components/schemas/AutomationRun'}
+        '200':
+          description: Idempotent retry returned the original identifiers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eventId, incidentId, deduplicated]
+                properties:
+                  eventId: {type: string, format: uuid}
+                  incidentId: {type: [string, 'null'], format: uuid}
+                  deduplicated: {type: boolean, enum: [true]}
+                  automation: {$ref: '#/components/schemas/AutomationRun'}
+        '401':
+          description: Missing, invalid, expired or stale automation principal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '403':
+          description: Source not registered for this principal/workspace
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Replay or idempotency conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: Invalid payload, digest, or time
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '429':
+          description: Automation budget exhausted
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+components:
+  schemas:
+    AutomationRun:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {type: string, enum: [COLLECTED, FAILED]}
+        collectionId: {type: [string, 'null'], format: uuid}
+        evidenceId: {type: [string, 'null'], format: uuid}
+        code:
+          type: [string, 'null']
+          description: Stable failure code when status is FAILED; never an upstream body.
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - EVENT_SIGNATURE_INVALID
+            - EVENT_PRINCIPAL_KIND_UNSUPPORTED
+            - AUTOMATION_PRINCIPAL_INVALID
+            - AUTOMATION_PRINCIPAL_EXPIRED
+            - AUTOMATION_INSTANCE_STALE
+            - AUTOMATION_REPLAY
+            - AUTOMATION_BUDGET_EXHAUSTED
+            - EVENT_SOURCE_FORBIDDEN
+            - EVENT_WORKSPACE_MISMATCH
+            - EVENT_IDEMPOTENCY_CONFLICT
+            - EVENT_DIGEST_MISMATCH
+            - EVENT_PAYLOAD_INVALID
+            - EVENT_PAYLOAD_TOO_LARGE
+            - EVENT_TIME_INVALID
+            - EVENT_STORE_UNAVAILABLE
+        message: {type: string}

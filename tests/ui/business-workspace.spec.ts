@@ -29,12 +29,17 @@ test.afterEach(async ({ page }) => {
 });
 
 async function stubGrant(page: Page, grant: Grant) {
-  await page.route('**/api/v1/auth/me', async (route) => {
+  // Since the R4 session change the login body carries the grant too. Patching only
+  // /auth/me leaves the real admin grant in the session, so the workspace-only case was
+  // asserting the host's admin redirect instead of the grant under test.
+  const patch = async (route: import('@playwright/test').Route) => {
     const response = await route.fetch();
     const body = await response.json();
     body.access = grant === 'admin' ? ADMIN_GRANT : WORKSPACE_GRANT;
     await route.fulfill({ response, json: body });
-  });
+  };
+  await page.route('**/api/v1/auth/me', patch);
+  await page.route('**/api/v1/auth/login', patch);
 }
 
 async function signIn(page: Page) {
@@ -214,6 +219,12 @@ test('/app/incidents renders the real list and its boundary, never a sample or a
   // be missing. A page that shows real records owes the reader that much.
   const boundary = page.getByTestId('incidents-boundary');
   await expect(boundary).toBeVisible();
+  // The page keeps the six statements behind a disclosure, so the collapsed innerText is only the
+  // summary. Open it and measure the text a reader can actually read; the old assertion measured
+  // the summary and passed only while the panel happened to render expanded.
+  await boundary.locator('summary').click();
+  await expect(boundary.locator('details')).toHaveAttribute('open', '');
+  await expect(page.getByTestId('incidents-boundary-collectors')).toBeVisible();
   expect((await boundary.innerText()).length).toBeGreaterThan(160);
 
   // The three filters are the ones the list endpoint implements, and they are controls.

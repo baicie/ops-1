@@ -58,7 +58,11 @@ const VERDICT_VALUES: &[&str] = &["CONFIRMED", "REFUTED", "INCONCLUSIVE"];
 /// signature captured off the wire cannot be reused indefinitely.
 const ATTESTATION_MAX_SKEW_SECONDS: i64 = 300;
 /// The version tag inside every signed payload. Adding a field means a new tag.
-const ATTESTATION_VERSION: &str = "opsweave-evidence-attestation-v1";
+/// G13-A.1: the signed workspace is part of the tuple. A v1 signature cannot
+/// name a workspace, so it cannot authorize a new write; historical rows keep
+/// the trust they were stored with and are never rewritten.
+const ATTESTATION_VERSION: &str = "opsweave-evidence-attestation-v2";
+const ATTESTATION_VERSION_V1: &str = "opsweave-evidence-attestation-v1";
 /// What the content read path selects out of kernel.incident_evidence_content:
 /// (content type, body, verified byte length, recorded digest, retention horizon).
 /// pub(crate) so the investigator's read_evidence selects through the same alias: the
@@ -243,6 +247,13 @@ pub struct EvidenceContentRequest {
 pub struct AttestationRequest {
     /// Which configured adapter is speaking. Also recorded as verifierIdentity.
     pub adapter_id: String,
+    /// G13-A.1 (v2): the workspace the adapter signed for, taken by the plugin
+    /// from its persisted collection - never from the browser. It is covered by
+    /// the signature; the Kernel then compares it with the incident's
+    /// authoritative workspace. Absent means a v1 envelope, refused for new
+    /// writes.
+    #[serde(default)]
+    pub workspace_id: Option<Uuid>,
     /// When the adapter signed. Bounded by ATTESTATION_MAX_SKEW_SECONDS.
     pub issued_at: DateTime<Utc>,
     /// base64url (no padding) HMAC-SHA256 over attestation_payload.
@@ -655,6 +666,90 @@ pub async fn append_evidence(
         StatusCode::OK
     };
     Ok((status, Json(evidence)))
+}
+
+/// The automation path into the same evidence writer. The caller has already
+/// authenticated an `owa1` principal and verified that the incident belongs to
+/// its workspace; this function re-checks the incident status because an
+/// automation may not add evidence to a concluded/closed record.
+pub(crate) async fn append_automation_evidence(
+    state: &AppState,
+    principal_id: Uuid,
+    workspace_id: Uuid,
+    incident_id: Uuid,
+    evidence: serde_json::Value,
+) -> AppResult<Uuid> {
+    let row: Option<(Uuid, String)> =
+        sqlx::query_as("SELECT workspace_id, status FROM kernel.incidents WHERE incident_id=$1")
+            .bind(incident_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let Some((incident_workspace, status)) = row else {
+        return Err(incident_not_found());
+    };
+    if incident_workspace != workspace_id {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "AUTOMATION_INCIDENT_FORBIDDEN",
+            "the incident does not belong to this automation workspace",
+        ));
+    }
+    match status.as_str() {
+        "OPEN" | "INVESTIGATING" => {}
+        "CONCLUDED" => {
+            return Err(AppError::conflict(
+                "INCIDENT_ALREADY_CONCLUDED",
+                "an automation may not add evidence after a human verdict",
+            ))
+        }
+        _ => {
+            return Err(AppError::conflict(
+                "INCIDENT_CLOSED",
+                "this incident is closed and accepts no new evidence",
+            ))
+        }
+    }
+    let payload: CreateEvidenceRequest = serde_json::from_value(evidence).map_err(|error| {
+        AppError::bad_request(format!("automation evidence is not valid: {error}"))
+    })?;
+    // `submitted_by` must reference a real kernel.users row; the non-login
+    // service user satisfies that FK. The audit actor remains the principal.
+    let caller = DataScope::for_automation(
+        Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).expect("service user id"),
+        workspace_id,
+    );
+    let (_, view) = insert_evidence_as(
+        &state.db,
+        &state.config.evidence_adapters,
+        caller,
+        "AUTOMATION",
+        principal_id,
+        incident_id,
+        payload,
+    )
+    .await?;
+    Ok(view.evidence_id)
+}
+
+/// Add the automation Event to the incident's existing audit timeline. This is
+/// what lets the current UI show Event -> Evidence -> Hypothesis -> Human
+/// Verdict without a second timeline screen.
+pub(crate) async fn audit_automation_event(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    principal_id: Uuid,
+    incident_id: Uuid,
+    details: serde_json::Value,
+) -> AppResult<()> {
+    audit_in_tx_as(
+        tx,
+        "INCIDENT_AUTOMATION_EVENT",
+        "AUTOMATION",
+        principal_id,
+        incident_id,
+        "AUTOMATION_EVENT",
+        details,
+    )
+    .await
 }
 
 pub async fn list_evidence(
@@ -1122,6 +1217,22 @@ async fn insert_evidence(
     incident_id: Uuid,
     payload: CreateEvidenceRequest,
 ) -> AppResult<(bool, EvidenceView)> {
+    let actor_id = caller.user_id;
+    insert_evidence_as(db, adapters, caller, "USER", actor_id, incident_id, payload).await
+}
+
+/// The shared writer behind the user endpoint and the automation path. The
+/// actor type is chosen by the caller of this function (an authenticated route),
+/// never by evidence content.
+async fn insert_evidence_as(
+    db: &PgPool,
+    adapters: &HashMap<String, String>,
+    caller: DataScope,
+    actor_type: &'static str,
+    actor_id: Uuid,
+    incident_id: Uuid,
+    payload: CreateEvidenceRequest,
+) -> AppResult<(bool, EvidenceView)> {
     let kind = closed_set(&payload.kind, EVIDENCE_KINDS, "kind")?;
     let source = bounded(&payload.source, "source", 2, 200)?;
     check_collected_at(payload.collected_at)?;
@@ -1151,14 +1262,29 @@ async fn insert_evidence(
     // G12 A1: the trust of this row is decided here, before any SQL runs, and
     // nothing in the request body can set verified_trust except a signature the
     // Kernel can check. The pre-0017 body field is refused, not migrated.
+    let workspace_id = incident_workspace(db, caller.clone(), incident_id).await?;
     let tuple = EvidenceTuple {
         incident_id,
+        workspace_id,
         kind: &kind,
         source: &source,
         collected_at: payload.collected_at,
         content_ref: &content_ref,
     };
     let trust = resolve_evidence_trust(adapters, &tuple, &payload)?;
+
+    // G13-A: an attestation is a statement about bytes the Kernel will store and
+    // re-check. Accepting a Legacy contentRef alongside it would record
+    // SOURCE_ATTESTED for a digest no stored content backs - the signature would
+    // vouch for something the Kernel never saw. The refusal is after signature
+    // verification so a forged attestation still gets its named 401 first.
+    if payload.attestation.is_some() && content.is_none() {
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "EVIDENCE_ATTESTATION_REQUIRES_CONTENT",
+            "an attested evidence row must carry content: the Kernel verifies the signature over a digest it derives from the stored bytes, not one the caller supplied",
+        ));
+    }
 
     let status = incident_status(db, caller.clone(), incident_id).await?;
     if status == "CLOSED" {
@@ -1276,10 +1402,11 @@ async fn insert_evidence(
     .bind(incident_id)
     .execute(&mut *tx)
     .await?;
-    audit_in_tx(
+    audit_in_tx_as(
         &mut tx,
         "INCIDENT_EVIDENCE_ADDED",
-        caller.user_id,
+        actor_type,
+        actor_id,
         incident_id,
         "ADD_EVIDENCE",
         serde_json::json!({
@@ -1856,6 +1983,25 @@ pub(crate) async fn incident_status(
     .ok_or_else(incident_not_found)
 }
 
+/// The incident's workspace, read through the same predicate as every other
+/// incident read. This is the authoritative value the attestation must match;
+/// the request body never supplies it.
+async fn incident_workspace(db: &PgPool, caller: DataScope, incident_id: Uuid) -> AppResult<Uuid> {
+    let predicate = caller.row_predicate("i", 2, 3, 4);
+    sqlx::query_scalar(&format!(
+        "SELECT workspace_id FROM kernel.incidents i
+          WHERE i.incident_id=$1 AND {}",
+        predicate.sql()
+    ))
+    .bind(incident_id)
+    .bind(&caller.workspaces)
+    .bind(predicate.all_rows())
+    .bind(caller.user_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(incident_not_found)
+}
+
 async fn query_evidence_row(db: &PgPool, evidence_id: Uuid) -> AppResult<EvidenceView> {
     sqlx::query_as::<_, EvidenceView>(&format!("{EVIDENCE_SELECT} WHERE e.evidence_id=$1"))
         .bind(evidence_id)
@@ -1883,8 +2029,11 @@ async fn query_evidence_row(db: &PgPool, evidence_id: Uuid) -> AppResult<Evidenc
 /// One struct rather than a run of &str parameters, because both the signer and
 /// the verifier have to cover every field, and a loose argument list is exactly
 /// how one of them gets a field the other forgets.
+#[derive(Clone, Copy)]
 struct EvidenceTuple<'a> {
     incident_id: Uuid,
+    /// The incident's workspace, read by the Kernel from the trusted record.
+    workspace_id: Uuid,
     kind: &'a str,
     source: &'a str,
     collected_at: DateTime<Utc>,
@@ -1988,21 +2137,56 @@ fn verify_attestation(
             ),
         ));
     }
-    let payload = attestation_payload(adapter_id, tuple, attestation.issued_at)?;
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .map_err(|_| AppError::internal("evidence adapter secret is not a usable HMAC key"))?;
-    mac.update(payload.as_bytes());
-    use base64::Engine;
-    let expected =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    if !constant_time_eq(expected.as_bytes(), attestation.signature.trim().as_bytes()) {
+    let matches = |payload: &str| -> bool {
+        let Ok(mut mac) = HmacSha256::new_from_slice(secret.as_bytes()) else {
+            return false;
+        };
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let expected =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        constant_time_eq(expected.as_bytes(), attestation.signature.trim().as_bytes())
+    };
+
+    // v2: the workspace in the envelope is signed. Construct the payload with
+    // that value, verify the signature, and only then compare it with the
+    // incident's authoritative workspace. A caller that edits the field breaks
+    // the signature; a plugin that honestly signed another workspace gets a
+    // named refusal rather than a row in the wrong business scope.
+    if let Some(signed_workspace) = attestation.workspace_id {
+        let signed = EvidenceTuple {
+            workspace_id: signed_workspace,
+            ..*tuple
+        };
+        let payload = attestation_payload(adapter_id, &signed, attestation.issued_at)?;
+        if matches(&payload) {
+            if signed_workspace != tuple.workspace_id {
+                return Err(AppError::new(
+                    StatusCode::FORBIDDEN,
+                    "EVIDENCE_WORKSPACE_MISMATCH",
+                    "the adapter signed this evidence for a different workspace than the incident's; the row is refused rather than filed across the business boundary",
+                ));
+            }
+            return Ok(());
+        }
+    }
+
+    // A valid v1 signature is recognised so the refusal names the reason. v1
+    // does not bind a workspace, so it cannot authorize a new write; the
+    // historical rows it produced keep their stored trust and are untouched.
+    let v1 = attestation_payload_v1(adapter_id, tuple, attestation.issued_at)?;
+    if matches(&v1) {
         return Err(AppError::new(
             StatusCode::UNAUTHORIZED,
-            "EVIDENCE_ATTESTATION_INVALID",
-            "the attestation signature does not cover this evidence tuple under this adapter's secret",
+            "EVIDENCE_ATTESTATION_VERSION_UNSUPPORTED",
+            "this is a valid v1 attestation, but v1 does not bind a workspace and is no longer accepted for new evidence; historical rows are unchanged and adapters must sign v2",
         ));
     }
-    Ok(())
+    Err(AppError::new(
+        StatusCode::UNAUTHORIZED,
+        "EVIDENCE_ATTESTATION_INVALID",
+        "the attestation signature does not cover this evidence tuple under this adapter's secret",
+    ))
 }
 
 /// The exact bytes an adapter signs.
@@ -2022,6 +2206,7 @@ fn verify_attestation(
 struct AttestationClaims<'a> {
     v: &'a str,
     adapter_id: &'a str,
+    workspace_id: String,
     incident_id: String,
     kind: &'a str,
     source: &'a str,
@@ -2037,6 +2222,41 @@ fn attestation_payload(
 ) -> AppResult<String> {
     serde_json::to_string(&AttestationClaims {
         v: ATTESTATION_VERSION,
+        adapter_id,
+        workspace_id: tuple.workspace_id.to_string(),
+        incident_id: tuple.incident_id.to_string(),
+        kind: tuple.kind,
+        source: tuple.source,
+        collected_at_unix: tuple.collected_at.timestamp(),
+        content_ref: tuple.content_ref,
+        issued_at_unix: issued_at.timestamp(),
+    })
+    .map_err(AppError::internal)
+}
+
+/// The v1 payload, kept only so a v1 envelope can be recognised and refused with
+/// a named error instead of a generic "invalid signature". No new write is
+/// authorized by this format.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AttestationClaimsV1<'a> {
+    v: &'a str,
+    adapter_id: &'a str,
+    incident_id: String,
+    kind: &'a str,
+    source: &'a str,
+    collected_at_unix: i64,
+    content_ref: &'a str,
+    issued_at_unix: i64,
+}
+
+fn attestation_payload_v1(
+    adapter_id: &str,
+    tuple: &EvidenceTuple<'_>,
+    issued_at: DateTime<Utc>,
+) -> AppResult<String> {
+    serde_json::to_string(&AttestationClaimsV1 {
+        v: ATTESTATION_VERSION_V1,
         adapter_id,
         incident_id: tuple.incident_id.to_string(),
         kind: tuple.kind,
@@ -2372,15 +2592,37 @@ async fn audit_in_tx(
     action: &str,
     details: serde_json::Value,
 ) -> AppResult<()> {
+    audit_in_tx_as(
+        tx,
+        event_type,
+        "USER",
+        actor_id,
+        incident_id,
+        action,
+        details,
+    )
+    .await
+}
+
+async fn audit_in_tx_as(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_type: &str,
+    actor_type: &str,
+    actor_id: Uuid,
+    incident_id: Uuid,
+    action: &str,
+    details: serde_json::Value,
+) -> AppResult<()> {
     sqlx::query(
         r#"
         INSERT INTO kernel.audit_events
           (id, event_type, actor_type, actor_id, subject_type, subject_id, action, result, details, request_id, occurred_at)
-        VALUES ($1,$2,'USER',$3,'INCIDENT',$4,$5,'ACCEPTED',$6,NULL,$7)
+        VALUES ($1,$2,$3,$4,'INCIDENT',$5,$6,'ACCEPTED',$7,NULL,$8)
         "#,
     )
     .bind(Uuid::new_v4())
     .bind(event_type)
+    .bind(actor_type)
     .bind(actor_id.to_string())
     .bind(incident_id.to_string())
     .bind(action)
@@ -2791,6 +3033,7 @@ mod tests {
     ) -> EvidenceTuple<'a> {
         EvidenceTuple {
             incident_id,
+            workspace_id: scope::legacy_workspace(),
             kind,
             source,
             collected_at,
@@ -2821,6 +3064,7 @@ mod tests {
             claimed_trust: None,
             attestation: Some(AttestationRequest {
                 adapter_id: adapter_id.to_string(),
+                workspace_id: Some(bound.workspace_id),
                 issued_at,
                 signature,
             }),
@@ -2848,6 +3092,35 @@ mod tests {
             .with_timezone(&Utc);
         assert_eq!(
             attestation_payload("zabbix-main", &bound, issued_at).unwrap(),
+            concat!(
+                r#"{"v":"opsweave-evidence-attestation-v2","adapterId":"zabbix-main","#,
+                r#""workspaceId":"00000000-0000-4000-8000-000000000001","#,
+                r#""incidentId":"b17265e7-3ac8-4877-bad4-40c4d2df4a87","#,
+                r#""kind":"METRIC_SNAPSHOT","source":"zabbix:probe","#,
+                r#""collectedAtUnix":1793423844,"contentRef":"sha256:probe-1","#,
+                r#""issuedAtUnix":1793423844}"#
+            )
+        );
+    }
+
+    /// The historical v1 payload is still reproducible byte for byte. It is used
+    /// only to recognise and refuse a v1 envelope with a named error.
+    #[test]
+    fn the_v1_payload_is_recognised_but_only_for_refusal() {
+        let bound = tuple(
+            Uuid::parse_str("b17265e7-3ac8-4877-bad4-40c4d2df4a87").unwrap(),
+            "METRIC_SNAPSHOT",
+            "zabbix:probe",
+            "sha256:probe-1",
+            DateTime::parse_from_rfc3339("2026-10-31T05:17:24Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        let issued_at = DateTime::parse_from_rfc3339("2026-10-31T05:17:24Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            attestation_payload_v1("zabbix-main", &bound, issued_at).unwrap(),
             concat!(
                 r#"{"v":"opsweave-evidence-attestation-v1","adapterId":"zabbix-main","#,
                 r#""incidentId":"b17265e7-3ac8-4877-bad4-40c4d2df4a87","#,
@@ -5036,18 +5309,23 @@ mod tests {
 
         let collected_at = Utc::now();
         let issued_at = Utc::now();
-        let payload = attested_request(
-            &tuple(
-                incident.id,
-                "METRIC_SNAPSHOT",
-                "zabbix",
-                "sha256:attested-1",
-                collected_at,
-            ),
-            ADAPTER_ID,
-            ADAPTER_SECRET,
-            issued_at,
+        let body = "{\"outcome\":\"OK\"}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix",
+            &content_ref,
+            collected_at,
         );
+        let mut payload = attested_request(&bound, ADAPTER_ID, ADAPTER_SECRET, issued_at);
+        // Since G13-A an attestation must point at bytes the Kernel will store
+        // and re-digest; the reference alone is no longer enough.
+        payload.content_ref = Some(content_ref.clone());
+        payload.content = Some(EvidenceContentRequest {
+            content_type: "application/json".to_string(),
+            body: body.to_string(),
+        });
         let (created, row) =
             insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
                 .await
@@ -5062,6 +5340,411 @@ mod tests {
         // different questions and are stored separately.
         assert_eq!(row.claimed_trust, "OPERATOR_ASSERTED");
 
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// G13-A: the plugin's exact bytes and its signature meet in one write.
+    ///
+    /// The signature covers a `contentRef`; the Kernel derives that ref from the
+    /// bytes it is about to store and refuses a mismatch. This test proves the
+    /// three facts line up in one transaction - the signature verifies, the
+    /// stored bytes are byte-identical, and a ref that does not describe those
+    /// bytes writes nothing.
+    #[tokio::test]
+    async fn a_plugin_signed_snapshot_is_stored_byte_for_byte_and_attested() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("signed snapshot", None),
+        )
+        .await
+        .unwrap();
+
+        // Multi-byte content and a non-trivial key order: the digest is over the
+        // bytes, not over a re-serialized object.
+        let body = r#"{"outcome":"OK","observedAt":"2026-11-01T03:00:00Z","requestedItems":1,"series":[{"itemId":"10401","samples":[{"occurredAt":"2026-11-01T02:30:00Z","value":17.5}],"unit":"%"}]}"#;
+        let digest = digest_of(body.as_bytes());
+        let content_ref = format!("sha256:{digest}");
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+
+        let mut payload = content_request("application/json", body);
+        payload.content_ref = Some(content_ref.clone());
+        payload.source = "zabbix:source-1".to_string();
+        payload.collected_at = collected_at;
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-1",
+            &content_ref,
+            collected_at,
+        );
+        payload.attestation =
+            attested_request(&bound, ADAPTER_ID, ADAPTER_SECRET, issued_at).attestation;
+
+        let (created, row) =
+            insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
+                .await
+                .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
+        assert_eq!(row.verification_method, "SOURCE_ADAPTER");
+        assert_eq!(row.content_ref, content_ref);
+        assert_eq!(row.content_status, "STORED");
+
+        let (stored, stored_digest, stored_bytes): (Vec<u8>, String, i32) = sqlx::query_as(
+            "SELECT body, sha256, content_bytes FROM kernel.incident_evidence_content WHERE evidence_id=$1",
+        )
+        .bind(row.evidence_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored,
+            body.as_bytes(),
+            "the Kernel stored exactly the submitted bytes"
+        );
+        assert_eq!(stored_digest, digest);
+        assert_eq!(stored_bytes, body.len() as i32);
+
+        // The same bytes with a ref that does not describe them: the signature
+        // can verify (it signs that wrong ref) and the write still must fail,
+        // because the digest check is independent of the signature.
+        let mut mismatched = content_request("application/json", body);
+        let wrong_ref = format!("sha256:{}", "0".repeat(64));
+        mismatched.content_ref = Some(wrong_ref.clone());
+        mismatched.source = "zabbix:source-1".to_string();
+        mismatched.collected_at = collected_at;
+        let wrong_bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-1",
+            &wrong_ref,
+            collected_at,
+        );
+        mismatched.attestation =
+            attested_request(&wrong_bound, ADAPTER_ID, ADAPTER_SECRET, issued_at).attestation;
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, mismatched)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_REF_CONFLICT");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1, "a refused write leaves no second row");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// An attestation with no bytes has nothing for the Kernel to digest, so it
+    /// is refused even though the signature itself is valid.
+    #[tokio::test]
+    async fn an_attestation_without_content_is_refused() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("attested without bytes", None),
+        )
+        .await
+        .unwrap();
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let payload = attested_request(
+            &tuple(
+                incident.id,
+                "METRIC_SNAPSHOT",
+                "zabbix",
+                "sha256:no-bytes",
+                collected_at,
+            ),
+            ADAPTER_ID,
+            ADAPTER_SECRET,
+            issued_at,
+        );
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_REQUIRES_CONTENT");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0, "a refused attestation writes nothing");
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// G13-A.1: a v2 envelope signed for workspace B cannot be filed on an
+    /// incident in workspace A, even by a caller who belongs to both.
+    #[tokio::test]
+    async fn an_attestation_signed_for_another_workspace_is_refused() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("workspace mismatch", None),
+        )
+        .await
+        .unwrap();
+        let body = "{}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let other_workspace = Uuid::new_v4();
+        let signed = EvidenceTuple {
+            workspace_id: other_workspace,
+            ..tuple(
+                incident.id,
+                "METRIC_SNAPSHOT",
+                "zabbix:source-b",
+                &content_ref,
+                collected_at,
+            )
+        };
+        let payload = attestation_payload(ADAPTER_ID, &signed, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(ADAPTER_SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        let mut request = content_request("application/json", body);
+        request.content_ref = Some(content_ref.clone());
+        request.source = "zabbix:source-b".to_string();
+        request.collected_at = collected_at;
+        request.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: Some(other_workspace),
+            issued_at,
+            signature,
+        });
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_WORKSPACE_MISMATCH");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0, "a cross-workspace write leaves no row");
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// The workspace field is inside the signature: changing it after signing
+    /// must fail verification, not be compared as a claim.
+    #[tokio::test]
+    async fn a_tampered_workspace_field_is_refused() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("tampered workspace", None),
+        )
+        .await
+        .unwrap();
+        let body = "{}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-a",
+            &content_ref,
+            collected_at,
+        );
+        let payload = attestation_payload(ADAPTER_ID, &bound, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(ADAPTER_SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        // Positive control: the same tuple with the signed workspace is
+        // accepted, so the refusal below is about the tamper, not a verifier
+        // that rejects everything.
+        let mut valid = content_request("application/json", body);
+        valid.content_ref = Some(content_ref.clone());
+        valid.source = "zabbix:source-a".to_string();
+        valid.collected_at = collected_at;
+        valid.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: Some(scope::legacy_workspace()),
+            issued_at,
+            signature: signature.clone(),
+        });
+        let (created, row) = insert_evidence(&pool, &adapters(), caller(user), incident.id, valid)
+            .await
+            .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
+
+        let mut request = content_request("application/json", body);
+        request.content_ref = Some(content_ref.clone());
+        request.source = "zabbix:source-a".to_string();
+        request.collected_at = collected_at;
+        request.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            // Signed for the incident's workspace, then moved to another.
+            workspace_id: Some(Uuid::new_v4()),
+            issued_at,
+            signature,
+        });
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_INVALID");
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// Signing one incident's tuple cannot be replayed onto another incident.
+    #[tokio::test]
+    async fn an_attestation_for_another_incident_is_refused() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, first) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("signed incident", None),
+        )
+        .await
+        .unwrap();
+        let (_, second) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("target incident", None),
+        )
+        .await
+        .unwrap();
+        let body = "{}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let bound = tuple(
+            first.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-a",
+            &content_ref,
+            collected_at,
+        );
+        let payload = attestation_payload(ADAPTER_ID, &bound, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(ADAPTER_SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        // Positive control: the envelope is accepted on the incident it was
+        // signed for.
+        let mut valid = content_request("application/json", body);
+        valid.content_ref = Some(content_ref.clone());
+        valid.source = "zabbix:source-a".to_string();
+        valid.collected_at = collected_at;
+        valid.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: Some(scope::legacy_workspace()),
+            issued_at,
+            signature: signature.clone(),
+        });
+        let (created, row) = insert_evidence(&pool, &adapters(), caller(user), first.id, valid)
+            .await
+            .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
+
+        let mut request = content_request("application/json", body);
+        request.content_ref = Some(content_ref.clone());
+        request.source = "zabbix:source-a".to_string();
+        request.collected_at = collected_at;
+        request.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: Some(scope::legacy_workspace()),
+            issued_at,
+            signature,
+        });
+        let error = insert_evidence(&pool, &adapters(), caller(user), second.id, request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_INVALID");
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// A valid v1 signature is recognised but cannot authorize a new write.
+    #[tokio::test]
+    async fn a_v1_attestation_is_refused_for_new_evidence() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) =
+            insert_incident(&pool, caller(user), incident_request("v1 envelope", None))
+                .await
+                .unwrap();
+        let body = "{}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-a",
+            &content_ref,
+            collected_at,
+        );
+        let payload = attestation_payload_v1(ADAPTER_ID, &bound, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(ADAPTER_SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        let mut request = content_request("application/json", body);
+        request.content_ref = Some(content_ref.clone());
+        request.source = "zabbix:source-a".to_string();
+        request.collected_at = collected_at;
+        request.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: None,
+            issued_at,
+            signature,
+        });
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_VERSION_UNSUPPORTED");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0, "a v1 envelope writes nothing");
         cleanup(&pool, &[user]).await;
     }
 
@@ -5204,7 +5887,7 @@ mod tests {
             &no_adapters(),
             caller(user),
             incident.id,
-            evidence_request("sha256:settled"),
+            content_request("application/json", "{}"),
         )
         .await
         .unwrap();
@@ -5212,18 +5895,25 @@ mod tests {
         assert_eq!(first.verified_trust, "OPERATOR_ASSERTED");
 
         let issued_at = Utc::now();
-        let upgrade = attested_request(
+        let mut upgrade = attested_request(
             &tuple(
                 incident.id,
                 "METRIC_SNAPSHOT",
                 "prometheus",
-                "sha256:settled",
+                &first.content_ref,
                 first.collected_at,
             ),
             ADAPTER_ID,
             ADAPTER_SECRET,
             issued_at,
         );
+        // The replay carries the same bytes, so the tuple is identical and the
+        // attestation has content for the Kernel to verify.
+        upgrade.content_ref = Some(first.content_ref.clone());
+        upgrade.content = Some(EvidenceContentRequest {
+            content_type: "application/json".to_string(),
+            body: "{}".to_string(),
+        });
         let (created_again, second) =
             insert_evidence(&pool, &adapters(), caller(user), incident.id, upgrade)
                 .await

@@ -221,6 +221,36 @@ def main() -> int:
         literal_secret["credential"] = {"kind": "api-token", "ref": "4f8a2c1e-token"}
         if source_validator.is_valid(literal_secret):
             FAILURES.append("zabbix accepted a literal credential instead of a secretref")
+        # A source without its owning workspace has no authorization boundary.
+        no_workspace = load(CONTRACTS / "examples" / "zabbix-source.json")
+        del no_workspace["workspaceId"]
+        if source_validator.is_valid(no_workspace):
+            FAILURES.append("zabbix accepted a source with no workspaceId")
+
+        collection_validator = zabbix_validator("CollectionResult")
+        collection = load(CONTRACTS / "examples" / "zabbix-collection.json")
+        for error in collection_validator.iter_errors(collection):
+            FAILURES.append(f"zabbix rejected the honest collection example: {error.message}")
+        # `clamped` is the list of what was clamped, not a boolean: the old
+        # boolean schema is what let the runtime array and the contract drift.
+        boolean_clamped = load(CONTRACTS / "examples" / "zabbix-collection.json")
+        boolean_clamped["clamped"] = True
+        if collection_validator.is_valid(boolean_clamped):
+            FAILURES.append("zabbix accepted the old boolean `clamped` shape")
+        # A truncated snapshot labelled OK is the PARTIAL-as-OK defect in schema form.
+        truncated_ok = load(CONTRACTS / "examples" / "zabbix-collection.json")
+        truncated_ok["outcome"] = "OK"
+        truncated_ok["snapshot"] = {
+            "maxBytes": 65536,
+            "originalBytes": 70000,
+            "truncated": True,
+            "reason": "CONTENT_LIMIT",
+            "requestedSamples": 400,
+            "returnedSamples": 300,
+            "droppedSeries": 0,
+        }
+        if collection_validator.is_valid(truncated_ok):
+            FAILURES.append("zabbix accepted a truncated snapshot labelled OK")
 
     # OpenAPI contract presence and operation IDs are part of the executable
     # contract discovery test even without a full OpenAPI resolver.

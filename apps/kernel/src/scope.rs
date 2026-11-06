@@ -142,6 +142,18 @@ impl DataScope {
         }
     }
 
+    /// The scope of an automation principal: exactly one workspace the Kernel
+    /// resolved from its own source registry, never a caller-supplied list.
+    /// `user_id` carries the principal id only so audit/ownership columns have a
+    /// stable non-user identifier; it is not a `kernel.users` row.
+    pub(crate) fn for_automation(principal_id: Uuid, workspace_id: Uuid) -> Self {
+        Self {
+            user_id: principal_id,
+            workspaces: vec![workspace_id],
+            rows: RowRule::AllRows,
+        }
+    }
+
     pub(crate) fn sees_every_row(&self) -> bool {
         self.rows == RowRule::AllRows
     }

@@ -433,9 +433,17 @@ pub async fn seed_admin(state: &AppState) -> anyhow::Result<()> {
             "OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL is set but OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD is not"
         );
     };
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM kernel.users")
-        .fetch_one(&state.db)
-        .await?;
+    // Migration 0028 inserts the non-login `opsweave-automation` service user
+    // before this runs. Counting every row would therefore make a fresh
+    // deployment believe an administrator already exists and skip the
+    // bootstrap, leaving no way to sign in. Service identities do not count as
+    // an existing human account.
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM kernel.users
+          WHERE id <> '00000000-0000-4000-8000-0000000000a1'",
+    )
+    .fetch_one(&state.db)
+    .await?;
     if count > 0 {
         return Ok(());
     }

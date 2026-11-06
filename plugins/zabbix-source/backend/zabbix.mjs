@@ -42,7 +42,7 @@ export const BUDGET_DEFAULT = Object.freeze({
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 /** The signed-payload version tag. Must match the Kernel's ATTESTATION_VERSION. */
-export const ATTESTATION_VERSION = 'opsweave-evidence-attestation-v1';
+export const ATTESTATION_VERSION = 'opsweave-evidence-attestation-v2';
 
 const ALLOW_LOOPBACK = process.env.OPSWEAVE_ALLOW_LOOPBACK_SOURCE === '1';
 const ALLOWED_PRIVATE_HOSTS = new Set(
@@ -233,7 +233,7 @@ export async function assertEndpoint(raw) {
  * reply that arrived but could not be parsed, because the three lead to
  * different outcomes (TIMEOUT / UNAVAILABLE / UNKNOWN).
  */
-export async function rpc({ endpoint, method, params, secret, timeoutMs, verifyTls = true, transport }) {
+export async function rpc({ endpoint, method, params, secret, credentialKind = 'api-token', timeoutMs, verifyTls = true, transport }) {
   if (transport) {
     // Test seam: the HTTP layer is replaced, the semantics below are not.
     return transport({ endpoint, method, params, timeoutMs });
@@ -246,7 +246,13 @@ export async function rpc({ endpoint, method, params, secret, timeoutMs, verifyT
     accept: 'application/json',
   };
   // apiinfo.version is the one method Zabbix refuses when authenticated.
-  if (secret && method !== 'apiinfo.version') headers.authorization = `Bearer ${secret}`;
+  // `basic` means HTTP Basic over the resolved `user:password` value; claiming
+  // basic and sending Bearer is not an option.
+  if (secret && method !== 'apiinfo.version') {
+    headers.authorization = credentialKind === 'basic'
+      ? `Basic ${Buffer.from(secret, 'utf8').toString('base64')}`
+      : `Bearer ${secret}`;
+  }
 
   const client = url.protocol === 'https:' ? https : http;
   return new Promise((resolve, reject) => {
@@ -263,8 +269,21 @@ export async function rpc({ endpoint, method, params, secret, timeoutMs, verifyT
         headers,
         timeout: timeoutMs,
         rejectUnauthorized: verifyTls,
-        lookup: (_hostname, _options, callback) =>
-          callback(null, addresses[0].address, addresses[0].family === 6 ? 6 : 4),
+        lookup: (_hostname, options, callback) => {
+          // Node 22's autoSelectFamily asks lookup for the whole address list
+          // (`options.all`) and expects an array of {address, family}. Returning
+          // a single string here produced ERR_INVALID_IP_ADDRESS for every
+          // DNS-named endpoint - the container could reach host.docker.internal
+          // with fetch but not through this client.
+          if (options && options.all) {
+            callback(null, addresses.map((entry) => ({
+              address: entry.address,
+              family: entry.family === 6 ? 6 : 4,
+            })));
+            return;
+          }
+          callback(null, addresses[0].address, addresses[0].family === 6 ? 6 : 4);
+        },
       },
       (response) => {
         const status = response.statusCode || 0;
@@ -393,11 +412,16 @@ function probeOutcome(code) {
  * `verifyTls: false` caps the status at DEGRADED even on a clean probe: the
  * endpoint answered, but not under a setting that proves who answered.
  */
-export function statusFromProbe(probeResult, { verifyTls = true } = {}) {
+export function statusFromProbe(probeResult, { verifyTls = true, endpoint = '' } = {}) {
   if (!probeResult) return 'UNVERIFIED';
   switch (probeResult.outcome) {
-    case 'OK':
-      return verifyTls ? 'READY' : 'DEGRADED';
+    case 'OK': {
+      // READY means "TLS was verified". A plaintext endpoint admitted by an
+      // explicit TEST_PLAINTEXT binding is reachable but not TLS-verified, so it
+      // is DEGRADED even when verifyTls defaults to true.
+      const secure = (endpoint === '' || endpoint.startsWith('https://')) && verifyTls;
+      return secure ? 'READY' : 'DEGRADED';
+    }
     case 'UNAVAILABLE':
       return 'UNAVAILABLE';
     case 'TIMEOUT':
@@ -478,6 +502,7 @@ export async function collect({ source, itemIds, window: requested, budget: requ
   });
 
   const result = {
+    collectionId: crypto.randomUUID(),
     sourceId: source.sourceId,
     outcome,
     requestedItems,
@@ -487,8 +512,32 @@ export async function collect({ source, itemIds, window: requested, budget: requ
     budget,
     observedAt,
   };
-  result.contentRef = contentRef(result);
+  // Build the exact evidence bytes once. When the collection exceeds the
+  // Kernel's 64 KiB content bound the snapshot is bounded, the outcome becomes
+  // PARTIAL, and `snapshot` records what was left out; the digest is taken over
+  // the snapshot bytes the caller will actually submit.
+  const evidence = buildEvidence(result);
+  result.outcome = evidence.outcome;
+  if (evidence.snapshot) result.snapshot = evidence.snapshot;
+  result.contentRef = evidence.contentRef;
+  // Non-enumerable: the HTTP response stays the contract's CollectionResult,
+  // while the server can persist the exact bytes this digest was taken over
+  // without recomputing them (recomputation after the outcome became PARTIAL
+  // would produce different bytes and break the digest).
+  Object.defineProperty(result, 'evidenceBody', {
+    value: evidence.body,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
   return result;
+}
+
+/** The exact bytes stored for a collection, if this result came from collect().
+ *  A result reconstructed from the database carries its body separately. */
+export function evidenceBodyOf(result) {
+  if (typeof result?.evidenceBody === 'string') return result.evidenceBody;
+  return buildEvidence(result).body;
 }
 
 async function collectOne({ source, itemId, window, timeFrom, timeTill, budget, transport }) {
@@ -507,6 +556,7 @@ async function collectOne({ source, itemId, window, timeFrom, timeTill, budget, 
         limit: budget.maxSamplesPerItem + 1,
       },
       secret: source.secret,
+      credentialKind: source.credentialKind || 'api-token',
       timeoutMs: budget.requestTimeoutMs,
       verifyTls: source.verifyTls !== false,
       transport,
@@ -676,6 +726,7 @@ async function inventory({ source, method, params, budget, transport, project })
       method,
       params: { ...params, output: 'extend', limit: limit + 1 },
       secret: source.secret,
+      credentialKind: source.credentialKind || 'api-token',
       timeoutMs: budget.requestTimeoutMs,
       verifyTls: source.verifyTls !== false,
       transport,
@@ -764,14 +815,13 @@ export function canonical(value) {
   return JSON.stringify(value === undefined ? null : value);
 }
 
-/**
- * The digest the evidence row points at.
- *
- * Covers the samples and the outcome together, so a collection cannot be
- * re-labelled OK while keeping the digest of a PARTIAL one.
- */
-export function contentRef(result) {
-  const covered = {
+/** The Kernel stores at most this many bytes of evidence content. The plugin
+ *  builds its snapshot to the same bound rather than letting the Kernel refuse
+ *  a collection the operator already paid for. */
+export const EVIDENCE_CONTENT_MAX_BYTES = 65536;
+
+function coveredOf(result) {
+  return {
     sourceId: result.sourceId,
     outcome: result.outcome,
     requestedItems: result.requestedItems,
@@ -781,7 +831,120 @@ export function contentRef(result) {
     observedAt: result.observedAt,
     series: result.series,
   };
-  return 'sha256:' + crypto.createHash('sha256').update(canonical(covered)).digest('hex');
+}
+
+function digestOf(body) {
+  return 'sha256:' + crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+}
+
+/**
+ * The exact bytes that become Kernel evidence content.
+ *
+ * When the canonical collection body fits in 65536 bytes it is submitted whole.
+ * When it does not, this returns a deterministic bounded snapshot: samples are
+ * reduced first, then trailing series are dropped, and `snapshot` records what
+ * was left out. A truncated snapshot is PARTIAL by construction - the returned
+ * `outcome` is PARTIAL and the signed bytes say so, so a reader can never
+ * mistake the snapshot for the complete window (rules/05).
+ *
+ * The body is built here, once, and the digest is taken over exactly these
+ * bytes. The Kernel re-derives the digest from the stored body; if the two ever
+ * differ it refuses the write (EVIDENCE_CONTENT_REF_CONFLICT) instead of
+ * storing bytes the signature did not cover.
+ */
+export function buildEvidence(result, maxBytes = EVIDENCE_CONTENT_MAX_BYTES) {
+  const base = coveredOf(result);
+  const originalBody = canonical(base);
+  const originalBytes = Buffer.byteLength(originalBody, 'utf8');
+  if (originalBytes <= maxBytes) {
+    return {
+      body: originalBody,
+      contentRef: digestOf(originalBody),
+      snapshot: null,
+      outcome: result.outcome,
+    };
+  }
+
+  const requestedSamples = base.series.reduce((sum, entry) => sum + (entry.samples?.length || 0), 0);
+
+  const buildSnapshot = (keepSeries, sampleCap) => {
+    const kept = base.series.slice(0, keepSeries);
+    const reduced = {
+      ...base,
+      // A bounded snapshot is not a complete observation, and the signed bytes
+      // must say PARTIAL even when every item answered.
+      outcome: 'PARTIAL',
+      series: kept.map((entry) => ({ ...entry, samples: (entry.samples || []).slice(0, sampleCap) })),
+    };
+    const returnedSamples = reduced.series.reduce((sum, entry) => sum + entry.samples.length, 0);
+    const snapshot = {
+      maxBytes,
+      originalBytes,
+      truncated: true,
+      reason: 'CONTENT_LIMIT',
+      requestedSamples,
+      returnedSamples,
+      droppedSeries: base.series.length - kept.length,
+    };
+    const body = canonical({ ...reduced, snapshot });
+    return { body, snapshot, bytes: Buffer.byteLength(body, 'utf8') };
+  };
+
+  // Phase 1: keep every series, shrink samples per series. Binary search, not a
+  // fixed iteration budget: with 500 series a one-drop-per-attempt loop ran out
+  // of attempts long before the body fit, and returned 131 KB for a 64 KiB
+  // contract (the Kernel then refused it).
+  const maxCap = Math.max(1, ...base.series.map((entry) => entry.samples?.length || 0));
+  let low = 1;
+  let high = maxCap;
+  let chosen = null;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const attempt = buildSnapshot(base.series.length, mid);
+    if (attempt.bytes <= maxBytes) {
+      chosen = attempt;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  // Phase 2: one sample per series is still too large, so drop whole series.
+  // Dropping a series is recorded; its samples are never claimed as returned.
+  if (!chosen) {
+    low = 0;
+    high = base.series.length;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const attempt = buildSnapshot(mid, 1);
+      if (attempt.bytes <= maxBytes) {
+        chosen = attempt;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+  }
+
+  // An empty-series snapshot is metadata only and always fits; this is the last
+  // resort that keeps the contract's byte bound even for a pathological input.
+  if (!chosen) chosen = buildSnapshot(0, 1);
+  return {
+    body: chosen.body,
+    contentRef: digestOf(chosen.body),
+    snapshot: chosen.snapshot,
+    outcome: 'PARTIAL',
+  };
+}
+
+/**
+ * The digest the evidence row points at.
+ *
+ * Covers the samples and the outcome together, so a collection cannot be
+ * re-labelled OK while keeping the digest of a PARTIAL one.
+ */
+export function contentRef(result) {
+  return buildEvidence(result).contentRef;
 }
 
 /**
@@ -793,10 +956,14 @@ export function contentRef(result) {
  * this plugin's tests are the same string, which is what stops the two sides
  * drifting into a state where every signature silently fails.
  */
-export function attestationPayload({ adapterId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
+export function attestationPayload({ adapterId, workspaceId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
   return JSON.stringify({
     v: ATTESTATION_VERSION,
     adapterId,
+    // G13-A.1: the workspace is signed. It comes from the persisted collection
+    // and the Kernel checks it against the incident's own record; it is never
+    // taken from a request body.
+    workspaceId,
     incidentId,
     kind,
     source,
@@ -812,13 +979,16 @@ export function attestationPayload({ adapterId, incidentId, kind, source, collec
  * The secret is the adapter's own, shared only with the Kernel. It never leaves
  * this function and is not part of the returned envelope.
  */
-export function signAttestation({ adapterId, secret, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
+export function signAttestation({ adapterId, workspaceId, secret, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
   if (!adapterId || !secret) {
     throw badRequest('ZABBIX_ADAPTER_UNCONFIGURED', 'no adapter identity is configured, so this collection cannot be attested');
   }
-  const payload = attestationPayload({ adapterId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt });
+  if (typeof workspaceId !== 'string' || !workspaceId) {
+    throw badRequest('ZABBIX_WORKSPACE_REQUIRED', 'a collection without a workspace cannot be signed');
+  }
+  const payload = attestationPayload({ adapterId, workspaceId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt });
   const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
-  return { adapterId, issuedAt: new Date(issuedAt).toISOString(), signature };
+  return { adapterId, workspaceId, issuedAt: new Date(issuedAt).toISOString(), signature };
 }
 
 // ---------------------------------------------------------------------------

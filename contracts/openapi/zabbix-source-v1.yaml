@@ -72,6 +72,7 @@ paths:
                       $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ZabbixSource'
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
     post:
       operationId: createZabbixSource
       summary: Register a Zabbix endpoint
@@ -90,12 +91,28 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [name, endpoint, credential]
+              required: [name, endpoint, credential, workspaceId]
               properties:
                 name: { type: string, minLength: 2, maxLength: 120 }
-                endpoint: { type: string, format: uri, maxLength: 500 }
+                endpoint:
+                  type: string
+                  format: uri
+                  maxLength: 500
+                  description: |
+                    Must exactly match the endpoint approved for this credential
+                    reference in this workspace (scheme/host lowercased, default
+                    port dropped, no query or fragment). An endpoint the binding
+                    does not name is refused with ZBX_CREDENTIAL_ENDPOINT_MISMATCH,
+                    even when the credential reference itself is valid.
                 credential:
                   $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CredentialReference'
+                workspaceId:
+                  type: string
+                  format: uuid
+                  description: |
+                    The business workspace that owns this source. Must be one the
+                    signed caller context names; membership is decided by the
+                    Kernel, never by this request alone. Immutable after creation.
                 verifyTls: { type: boolean, default: true }
                 budget:
                   $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionBudget'
@@ -107,8 +124,57 @@ paths:
               schema:
                 $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ZabbixSource'
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: |
+            A source with this endpoint already exists in the workspace
+            (`ZBX_SOURCE_CONFLICT`). Registration is idempotent by observation
+            only: a duplicate is refused instead of silently replacing the
+            credential reference of the existing source.
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+  /sources/{sourceId}:
+    put:
+      operationId: updateZabbixSource
+      summary: Update a source's configuration
+      description: |
+        Changes the name, endpoint, credential reference, TLS decision or budget
+        of a source the caller's signed workspace scope contains. `workspaceId`
+        is immutable: moving a source between workspaces would silently change
+        who can collect from it. Every accepted update writes an audit row; a
+        rejected request writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, endpoint, credential]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                endpoint: { type: string, format: uri, maxLength: 500 }
+                credential:
+                  $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CredentialReference'
+                verifyTls: { type: boolean, default: true }
+                budget:
+                  $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionBudget'
+      responses:
+        '200':
+          description: Updated source
+          content:
+            application/json:
+              schema:
+                $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ZabbixSource'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/StorageUnavailable' }
+    parameters:
+      - $ref: '#/components/parameters/SourceId'
   /sources/{sourceId}/probe:
     post:
       operationId: probeZabbixSource
@@ -121,7 +187,8 @@ paths:
         the endpoint may be perfectly healthy and slow, and the two are different
         operational facts.
 
-        A failed probe is a 200 carrying a failure outcome, not an HTTP error:
+        A failed probe is a 200 carrying a failure outcome, not an HTTP error
+        (the one exception is a credential-binding policy refusal):
         "the endpoint is unreachable" is a successful observation about Zabbix,
         and a reader needs it as queryable evidence (rules/05 Gate).
       responses:
@@ -233,6 +300,7 @@ paths:
                   clamped: { type: boolean }
                   truncated: { type: ['integer', 'null'], minimum: 0 }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -288,6 +356,7 @@ paths:
               schema:
                 $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionResult'
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -333,11 +402,11 @@ paths:
                 incidentId: { type: string, format: uuid }
                 kind:
                   type: string
-                  enum: [METRIC_SNAPSHOT, QUERY_RESULT]
+                  enum: [METRIC_SNAPSHOT]
                   description: |
-                    Must match the kind sent to the Kernel. The signature covers
-                    it, so a mismatch fails verification rather than being
-                    accepted under the wrong kind.
+                    This plugin produces metric snapshots only. The signature
+                    covers the kind, so a mismatch fails verification rather
+                    than being accepted under the wrong kind.
       responses:
         '200':
           description: Attestation envelope to forward to the Kernel
@@ -346,30 +415,52 @@ paths:
               schema:
                 type: object
                 additionalProperties: false
-                required: [attestation, evidence]
+                required: [evidence, outcome]
                 properties:
-                  attestation:
-                    $ref: '../schema/zabbix-source.v1.schema.json#/$defs/EvidenceAttestation'
+                  outcome:
+                    $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionOutcome'
                   evidence:
                     type: object
                     additionalProperties: false
-                    required: [kind, source, collectedAt, contentRef]
+                    required: [kind, source, collectedAt, contentRef, content, attestation]
                     properties:
                       kind: { type: string }
                       source: { type: string }
                       collectedAt: { type: string, format: date-time }
                       contentRef: { type: string }
+                      attestation:
+                        $ref: '../schema/zabbix-source.v1.schema.json#/$defs/EvidenceAttestation'
+                      content:
+                        type: object
+                        additionalProperties: false
+                        required: [contentType, body]
+                        properties:
+                          contentType: { type: string, const: application/json }
+                          body:
+                            type: string
+                            maxLength: 65536
+                            description: |
+                              The exact UTF-8 bytes the Kernel must store, as
+                              canonical JSON. Its sha256 is `contentRef`; the
+                              Kernel recomputes it over the stored bytes and
+                              refuses a mismatch (EVIDENCE_CONTENT_REF_CONFLICT).
+                              When the collection exceeded the 64 KiB bound this
+                              is the bounded snapshot, and `snapshot.truncated`
+                              on the collection says what was left out.
                     description: |
                       The exact tuple the signature covers. Posting a different
-                      tuple to the Kernel fails verification there.
+                      tuple to the Kernel fails verification there; posting
+                      different bytes fails the digest check.
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
           description: |
             The collection cannot carry an attestation (no adapter secret is
-            configured, or its outcome is UNAVAILABLE/UNKNOWN).
+            configured, or its outcome is UNAVAILABLE, UNKNOWN or TIMEOUT: none
+            of those obtained an answer that could be signed as a measurement).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -409,7 +500,11 @@ components:
             ZBX_CREDENTIAL_NOT_A_REFERENCE, ZBX_ENDPOINT_REJECTED,
             ZBX_SSRF_BLOCKED, ZBX_SOURCE_UNREACHABLE, ZBX_SOURCE_TIMEOUT,
             ZBX_UNAUTHORIZED_AT_SOURCE, ZBX_BUDGET_EXCEEDED,
-            ZBX_COLLECTION_NOT_ATTESTABLE, ZBX_ADAPTER_NOT_CONFIGURED.
+            ZBX_COLLECTION_NOT_ATTESTABLE, ZBX_ADAPTER_NOT_CONFIGURED,
+            ZBX_SOURCE_CONFLICT, ZBX_STORAGE_UNAVAILABLE,
+            ZBX_IDENTITY_UNVERIFIED, ZBX_WORKSPACE_REQUIRED,
+            ZBX_CREDENTIAL_BINDING_REQUIRED, ZBX_CREDENTIAL_ENDPOINT_MISMATCH,
+            ZBX_INSECURE_ENDPOINT_FORBIDDEN, ZBX_BASIC_CREDENTIAL_INVALID.
         message:
           type: string
           description: |
@@ -443,6 +538,18 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: |
+        The credential reference is valid but may not be used here: no approved
+        endpoint binding for this workspace, an endpoint that does not exactly
+        match the binding, a plaintext/disabled-TLS endpoint without the
+        deployment's explicit test switch, or a basic credential that is not
+        user:password. Stable codes: ZBX_CREDENTIAL_BINDING_REQUIRED,
+        ZBX_CREDENTIAL_ENDPOINT_MISMATCH, ZBX_INSECURE_ENDPOINT_FORBIDDEN,
+        ZBX_BASIC_CREDENTIAL_INVALID.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     NotFound:
       description: Source or collection not found in this caller's scope
       content:
@@ -459,6 +566,15 @@ components:
       description: |
         The deadline passed. For a read this means the outcome is UNKNOWN rather
         than empty; the caller must not infer that no data exists.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    StorageUnavailable:
+      description: |
+        The plugin cannot reach its own workspace-scoped PostgreSQL schema. The
+        request is refused rather than answered from memory: a source registry
+        that silently fell back to process memory would forget every configured
+        credential reference on restart (ZBX_STORAGE_UNAVAILABLE).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

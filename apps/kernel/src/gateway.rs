@@ -1,5 +1,7 @@
 use crate::auth::AuthUser;
+use crate::capabilities::user_context_token;
 use crate::error::{AppError, AppResult};
+use crate::scope::DataScope;
 use crate::state::AppState;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
@@ -69,6 +71,22 @@ pub async fn proxy(
         ));
     }
     let request_id = Uuid::new_v4().to_string();
+    // The plugin must be able to tell "this is user X with role Y" from "the
+    // client claimed role Y". Only the Kernel may answer that, and it answers
+    // from the membership table at the moment of the call - not from a header
+    // the request brought with it (G10 R1).
+    // One definition of membership: DataScope owns the workspace/row rule, and
+    // a second copy here could drift from the endpoints the plugin's data will
+    // be read through.
+    let workspace_ids = DataScope::resolve(&state.db, &auth).await?.workspaces;
+    let user_context = user_context_token(
+        &state,
+        &first.plugin_id,
+        auth.user_id,
+        &auth.role.to_string(),
+        workspace_ids,
+        &request_id,
+    )?;
     let attempts = if method == Method::GET || method == Method::HEAD {
         routes.len().max(2)
     } else {
@@ -112,6 +130,7 @@ pub async fn proxy(
             )
             .header("x-opsweave-user-id", auth.user_id.to_string())
             .header("x-opsweave-user-role", auth.role.to_string())
+            .header("x-opsweave-user-context", &user_context)
             .timeout(Duration::from_secs(
                 state.config.request_timeout_seconds.max(1),
             ));
@@ -172,6 +191,15 @@ pub async fn proxy(
                         out.headers_mut().insert(header::CONTENT_TYPE, value);
                     }
                 }
+                // The plugin marks its responses no-store; without forwarding
+                // that (or setting it here) an intermediary could cache a
+                // cookie-authenticated response and serve it to another account.
+                out.headers_mut().insert(
+                    header::CACHE_CONTROL,
+                    header::HeaderValue::from_static("no-store"),
+                );
+                out.headers_mut()
+                    .insert(header::VARY, header::HeaderValue::from_static("Cookie"));
                 out.headers_mut().insert(
                     "x-opsweave-request-id",
                     header::HeaderValue::from_str(&request_id)

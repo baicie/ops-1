@@ -1,5 +1,7 @@
 # Zabbix 遥测源 + 证据认证：实现状态与风险清单
 
+> 2026-11-06：attestation 已升级为 v2（签名绑定 workspace），v1 仅作为历史行与拒绝识别的记录；当前实现与 golden vector 见 [G13-A.1](../g13-source-evidence/g13-a1-security-runtime-closure.md)。
+
 - 日期：2026-11-01
 - 分支：`claude/zabbix-connector-attested-evidence-7106ce`（基线 `c6cb34f`）
 - 相关：[ADR-015](../../adr/ADR-015-evidence-attestation-and-telemetry-sources.md)、`contracts/openapi/zabbix-source-v1.yaml`、`contracts/schema/zabbix-source.v1.schema.json`

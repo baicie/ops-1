@@ -14,8 +14,10 @@ import crypto from 'node:crypto';
 
 import {
   BUDGET_CEILING,
+  EVIDENCE_CONTENT_MAX_BYTES,
   assertEndpoint,
   attestationPayload,
+  buildEvidence,
   collect,
   collectionOutcome,
   contentRef,
@@ -64,7 +66,8 @@ test('the signed payload is byte-identical to the Kernel golden vector', () => {
   // changes key order, casing or timestamp precision, one of the two tests
   // fails instead of every signature failing silently in production.
   const expected =
-    '{"v":"opsweave-evidence-attestation-v1","adapterId":"zabbix-main",' +
+    '{"v":"opsweave-evidence-attestation-v2","adapterId":"zabbix-main",' +
+    '"workspaceId":"00000000-0000-4000-8000-000000000001",' +
     '"incidentId":"b17265e7-3ac8-4877-bad4-40c4d2df4a87",' +
     '"kind":"METRIC_SNAPSHOT","source":"zabbix:probe",' +
     '"collectedAtUnix":1793423844,"contentRef":"sha256:probe-1",' +
@@ -72,6 +75,7 @@ test('the signed payload is byte-identical to the Kernel golden vector', () => {
 
   const actual = attestationPayload({
     adapterId: 'zabbix-main',
+    workspaceId: '00000000-0000-4000-8000-000000000001',
     incidentId: 'b17265e7-3ac8-4877-bad4-40c4d2df4a87',
     kind: 'METRIC_SNAPSHOT',
     source: 'zabbix:probe',
@@ -87,6 +91,7 @@ test('the signature verifies under the Kernel algorithm and breaks on any edit',
   const secret = 'adapter-secret';
   const tuple = {
     adapterId: 'zabbix-main',
+    workspaceId: '00000000-0000-4000-8000-000000000001',
     secret,
     incidentId: 'b17265e7-3ac8-4877-bad4-40c4d2df4a87',
     kind: 'METRIC_SNAPSHOT',
@@ -113,11 +118,27 @@ test('the signature verifies under the Kernel algorithm and breaks on any edit',
     .update(attestationPayload({ ...tuple, contentRef: 'sha256:probe-2' }))
     .digest('base64url');
   assert.notEqual(moved, envelope.signature);
+
+  // The workspace is inside the signed bytes: signing the same row for another
+  // workspace changes the signature, so a caller cannot move it across the
+  // business boundary.
+  const otherWorkspace = crypto
+    .createHmac('sha256', secret)
+    .update(attestationPayload({ ...tuple, workspaceId: '00000000-0000-4000-8000-000000000002' }))
+    .digest('base64url');
+  assert.notEqual(otherWorkspace, envelope.signature);
+  assert.equal(envelope.workspaceId, '00000000-0000-4000-8000-000000000001');
+
+  assert.throws(
+    () => signAttestation({ ...tuple, workspaceId: '' }),
+    (error) => error.code === 'ZABBIX_WORKSPACE_REQUIRED',
+    'a collection without a workspace cannot be signed',
+  );
 });
 
 test('an unconfigured adapter cannot sign at all', () => {
   assert.throws(
-    () => signAttestation({ adapterId: '', secret: '', incidentId: 'x', kind: 'METRIC_SNAPSHOT', source: 's', collectedAt: WINDOW.to, contentRef: 'sha256:x', issuedAt: WINDOW.to }),
+    () => signAttestation({ adapterId: '', workspaceId: '00000000-0000-4000-8000-000000000001', secret: '', incidentId: 'x', kind: 'METRIC_SNAPSHOT', source: 's', collectedAt: WINDOW.to, contentRef: 'sha256:x', issuedAt: WINDOW.to }),
     (error) => error.code === 'ZABBIX_ADAPTER_UNCONFIGURED',
   );
 });
@@ -599,4 +620,48 @@ test('the outbound guard refuses loopback, private, metadata and credential URLs
   // A public literal still resolves, so the guard is a filter and not a wall.
   const allowed = await assertEndpoint('https://8.8.8.8/api_jsonrpc.php');
   assert.equal(allowed.url.hostname, '8.8.8.8');
+});
+
+
+test('a 500-series collection is bounded to 64 KiB, not by an iteration budget', () => {
+  const samples = (count) => Array.from({ length: count }, (_, index) => ({
+    occurredAt: '2026-11-01T00:30:00Z',
+    value: index,
+    absenceReason: null,
+  }));
+  const series = Array.from({ length: 500 }, (_, index) => ({
+    itemId: String(10000 + index),
+    hostId: '10084',
+    key: `system.metric.${index}`,
+    unit: '%',
+    outcome: 'OK',
+    requestedWindow: WINDOW,
+    coveredWindow: WINDOW,
+    samples: samples(5),
+  }));
+  const result = {
+    sourceId: SOURCE.sourceId,
+    outcome: 'OK',
+    requestedItems: 500,
+    answeredItems: 500,
+    clamped: [],
+    series,
+    budget: { maxWindowSeconds: 3600, maxItems: 500, maxSamplesPerItem: 5000, requestTimeoutMs: 30000, maxConcurrency: 4 },
+    observedAt: '2026-11-01T01:00:00Z',
+  };
+  const evidence = buildEvidence(result);
+  assert.equal(evidence.outcome, 'PARTIAL');
+  assert.ok(evidence.snapshot, 'an over-bound collection must carry a snapshot');
+  assert.ok(
+    Buffer.byteLength(evidence.body, 'utf8') <= EVIDENCE_CONTENT_MAX_BYTES,
+    `body is ${Buffer.byteLength(evidence.body, 'utf8')} bytes, over the 64 KiB bound`,
+  );
+  assert.ok(evidence.snapshot.returnedSamples < evidence.snapshot.requestedSamples);
+  assert.equal(evidence.snapshot.requestedSamples, 2500);
+  assert.match(evidence.contentRef, /^sha256:[0-9a-f]{64}$/);
+
+  // The pathological shape that used to overflow the hardest: 500 series with
+  // no samples at all. Metadata alone must still fit.
+  const empty = buildEvidence({ ...result, series: series.map((entry) => ({ ...entry, samples: [] })) });
+  assert.ok(Buffer.byteLength(empty.body, 'utf8') <= EVIDENCE_CONTENT_MAX_BYTES);
 });

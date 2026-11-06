@@ -1,5 +1,6 @@
 use crate::assets;
 use crate::auth::{self, AuthUser};
+use crate::automation;
 use crate::capabilities;
 use crate::deployments;
 use crate::diagnostics;
@@ -16,6 +17,8 @@ use crate::publishers;
 use crate::state::AppState;
 use crate::static_site;
 use crate::storage;
+use crate::telemetry_events;
+use crate::telemetry_sources;
 use crate::users;
 use crate::workspaces;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -49,6 +52,10 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/internal/v1/nodes/{node_id}/workload-token",
             post(capabilities::issue_workload_token),
+        )
+        .route(
+            "/internal/v1/nodes/{node_id}/automation-principals",
+            post(automation::issue_handler),
         )
         .route(
             "/internal/v1/workload-tokens/refresh",
@@ -200,6 +207,15 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/api/v1/plugin-storage/{plugin_id}",
             get(storage::get_binding).post(storage::ensure_binding),
+        )
+        .route(
+            "/api/v1/telemetry/sources",
+            get(telemetry_sources::list_sources),
+        )
+        .route("/api/v1/telemetry/events", post(telemetry_events::ingest))
+        .route(
+            "/api/v1/automation-principals/{principal_id}/revoke",
+            post(automation::revoke_handler),
         )
         .route(
             "/api/v1/plugin-storage/{plugin_id}/migrations",

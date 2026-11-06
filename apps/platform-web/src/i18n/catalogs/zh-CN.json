@@ -1344,6 +1344,7 @@
   "pluginDetail.deployModal.selectorHint": "以逗号分隔的 key=value 对",
   "pluginDetail.deployModal.title": "部署 {name}",
   "pluginDetail.deployModal.versionHint": "部署只写入期望状态；只有每个副本都上报就绪后才会声明 就绪。",
+  "pluginDetail.description": "该插件的版本、部署、能力与审计历史。",
   "pluginDetail.deployment.cpuMemory": "CPU / 内存",
   "pluginDetail.deployment.fieldId": "部署 ID",
   "pluginDetail.deployment.fieldReason": "原因",

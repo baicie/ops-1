@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsweave.local/contracts/schema/telemetry-event.v1.schema.json",
+  "title": "OpsWeave Telemetry Event v1",
+  "description": "A normalized automation Event. The workspace is authoritative only when the Kernel resolves sourceId in its registry; the body value is a consistency check. payloadDigest covers the canonical payload bytes and never makes the payload Evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "nativeId",
+    "sourceId",
+    "workspaceId",
+    "occurredAt",
+    "observedAt",
+    "severity",
+    "triggerState",
+    "payloadDigest",
+    "payload"
+  ],
+  "properties": {
+    "nativeId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Stable upstream Trigger/Event identifier (for Zabbix, the eventid)."
+    },
+    "sourceId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Telemetry source registered by the Kernel; determines workspace and plugin."
+    },
+    "workspaceId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Must match the Kernel registry; a mismatch is rejected, never trusted."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the upstream event happened. Out-of-order values are allowed and marked late."
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the plugin observed the event; used for latency bounds, not identity."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["CRITICAL", "MAJOR", "MINOR", "WARNING", "INFO"]
+    },
+    "triggerState": {
+      "type": "string",
+      "enum": ["PROBLEM", "RESOLVED"]
+    },
+    "payloadDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of canonical UTF-8 payload JSON (sorted keys, no whitespace); the Kernel recomputes it."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Bounded upstream fields used for display and digest only; never stored as Evidence.",
+      "maxProperties": 64
+    },
+    "recurrenceOf": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Set only by the Kernel when a new PROBLEM follows a closed incident."
+    }
+  }
+}

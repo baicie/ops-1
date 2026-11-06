@@ -1,6 +1,8 @@
 mod assets;
 mod audit;
 mod auth;
+mod automation;
+mod automation_flow;
 mod capabilities;
 mod config;
 mod db;
@@ -23,6 +25,8 @@ mod scope;
 mod state;
 mod static_site;
 mod storage;
+mod telemetry_events;
+mod telemetry_sources;
 mod users;
 mod workspaces;
 
@@ -56,6 +60,14 @@ async fn main() -> anyhow::Result<()> {
     let cursor_secret = db::load_or_create_cursor_secret(&pool).await?;
     let state = state::AppState::new(config.clone(), pool, cursor_secret)?;
     db::init(&state).await?;
+    telemetry_sources::sync(
+        &state.db,
+        &state.config.automation_sources,
+        &state.config.plugin_credential_bindings,
+        state.config.allow_insecure_source_endpoints,
+    )
+    .await
+    .context("reconcile the telemetry source registry")?;
     deployments::spawn_reconciler(state.clone());
     nodes::spawn_resource_retention(state.clone());
 
