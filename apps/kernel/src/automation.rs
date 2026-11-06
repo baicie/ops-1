@@ -506,6 +506,22 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Au
             "the principal was revoked",
         ));
     }
+    if claims.expires_at <= claims.issued_at
+        || claims.expires_at - claims.issued_at > MAX_TTL_SECONDS
+    {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "AUTOMATION_PRINCIPAL_INVALID",
+            "the token lifetime is outside the allowed window",
+        ));
+    }
+    if row.expires_at <= Utc::now() {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "AUTOMATION_PRINCIPAL_EXPIRED",
+            "the stored principal has expired",
+        ));
+    }
     if row.jti != claims.jti
         || row.plugin_id != claims.plugin_id
         || row.instance_id != claims.instance_id
@@ -514,6 +530,11 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Au
         || row.workspace_id != claims.workspace_id
         || row.source_id != claims.source_id
         || row.allowed_ops != claims.allowed_ops
+        || row.issued_at.timestamp() != claims.issued_at
+        || row.expires_at.timestamp() != claims.expires_at
+        || row.event_id != claims.event_id
+        || row.incident_id != claims.incident_id
+        || row.budget != claims.budget
     {
         return Err(AppError::new(
             StatusCode::UNAUTHORIZED,
@@ -757,6 +778,65 @@ mod tests {
         let disabled = authenticate(&state, &headers).await.unwrap_err();
         assert_eq!(disabled.code, "AUTOMATION_SOURCE_NOT_READY", "{disabled:?}");
 
+        cleanup(&pool, node.id, instance_id, source_id).await;
+    }
+
+    #[tokio::test]
+    async fn forged_claims_with_the_shared_key_are_refused_by_the_stored_row() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let state = crate::state::AppState::new(
+            crate::config::Config::from_env(),
+            pool.clone(),
+            b"automation-test-cursor".to_vec(),
+        )
+        .unwrap();
+        let (node, instance_id, source_id, _) = seed(&pool).await;
+        let issued = issue(
+            &state,
+            &node,
+            IssueAutomationPrincipalRequest {
+                instance_id,
+                source_id,
+                allowed_ops: vec!["EVENT_INGEST".into()],
+                event_id: None,
+                incident_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        let (claims, _, _) = decode_payload(&issued.token).unwrap();
+        let check = |token: String| {
+            let mut headers = HeaderMap::new();
+            headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+            headers
+        };
+        // The per-plugin caller key is held by the plugin, so it can recompute
+        // this HMAC. The signature therefore cannot be the authority; every
+        // claim must match the Kernel's stored row.
+        let mut extended = claims.clone();
+        extended.expires_at += 3600;
+        let token = sign(&state, &extended).unwrap();
+        let error = authenticate(&state, &check(token)).await.unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_PRINCIPAL_INVALID", "{error:?}");
+
+        let mut richer = claims.clone();
+        richer.budget = json!({"collections": 9999});
+        let token = sign(&state, &richer).unwrap();
+        let error = authenticate(&state, &check(token)).await.unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_PRINCIPAL_INVALID", "{error:?}");
+
+        let mut rebound = claims.clone();
+        rebound.event_id = Some(Uuid::new_v4());
+        let token = sign(&state, &rebound).unwrap();
+        let error = authenticate(&state, &check(token)).await.unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_PRINCIPAL_INVALID", "{error:?}");
+
+        // Re-signing the unchanged claims is accepted: the rejection above is
+        // the row binding, not a broken signature.
+        let token = sign(&state, &claims).unwrap();
+        assert!(authenticate(&state, &check(token)).await.is_ok());
         cleanup(&pool, node.id, instance_id, source_id).await;
     }
 
