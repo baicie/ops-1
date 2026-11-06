@@ -63,9 +63,11 @@ ALTER TABLE kernel.incidents ADD COLUMN IF NOT EXISTS source_id uuid;
 ALTER TABLE kernel.incidents ADD COLUMN IF NOT EXISTS origin text
   CHECK (origin IS NULL OR origin IN ('USER','AUTOMATION'));
 -- 旧行保持 source_id IS NULL；不回填、不合并、不改写 native_id。
+-- 0028 起只约束活跃状态：CLOSED 是历史，复发是带 recurrence_of 的新行。
 CREATE UNIQUE INDEX IF NOT EXISTS incidents_workspace_source_native_idx
   ON kernel.incidents (workspace_id, source_id, native_id)
-  WHERE source_id IS NOT NULL AND native_id IS NOT NULL;
+  WHERE source_id IS NOT NULL AND native_id IS NOT NULL
+    AND status IN ('OPEN','INVESTIGATING','CONCLUDED');
 ```
 
 - **历史行**：`source_id IS NULL`，继续受旧索引保护；迁移不删除旧索引，避免历史行失去唯一性。查询层把 `source_id IS NULL` 解释为 legacy。

@@ -17,6 +17,7 @@ use crate::publishers;
 use crate::state::AppState;
 use crate::static_site;
 use crate::storage;
+use crate::telemetry_events;
 use crate::telemetry_sources;
 use crate::users;
 use crate::workspaces;
@@ -211,6 +212,7 @@ pub fn build(state: AppState) -> Router {
             "/api/v1/telemetry/sources",
             get(telemetry_sources::list_sources),
         )
+        .route("/api/v1/telemetry/events", post(telemetry_events::ingest))
         .route(
             "/api/v1/automation-principals/{principal_id}/revoke",
             post(automation::revoke_handler),

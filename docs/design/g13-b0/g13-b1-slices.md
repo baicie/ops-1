@@ -33,6 +33,8 @@
 
 ## 切片 3 — Event ingest 与 Incident 去重
 
+> 实施状态（2026-11-06）：**已实现**；自动 collect/Evidence 未接入。详见 [b1-slice-3.md](b1-slice-3.md)。
+
 1. `POST /api/v1/telemetry/events`：签名、幂等键、摘要、乱序、RESOLVED。
 2. `INSERT ... ON CONFLICT` 创建 Incident；`origin=AUTOMATION`；服务用户 owner。
 3. 测试：E1–E10，含 32 并发。
