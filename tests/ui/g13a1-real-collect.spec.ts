@@ -54,9 +54,10 @@ async function collectAndSave(page: import('@playwright/test').Page): Promise<nu
 test.skip(SKIP, SKIP as string);
 
 test('a real Gateway/Node/OCI plugin supplies a saveable collection', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   await collectAndSave(page);
   // The stored row must carry the Kernel's own verdict, not the submitter's claim.
-  const row = page.locator('[data-evidence-row]').last();
+  const row = page.locator('[data-evidence-row]').first();
   await expect(row).toHaveAttribute('data-trust', 'SOURCE_ATTESTED');
   await expect(row.locator('[data-testid="evidence-kernel-verified"]')).toBeVisible();
 });
@@ -66,4 +67,11 @@ test('the same flow completes at 390px', async ({ page }) => {
   await collectAndSave(page);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow, 'the phone layout must not scroll sideways').toBe(false);
+});
+
+test('the same flow completes at 1024px', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await collectAndSave(page);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  expect(overflow, 'the 1024 layout must not scroll sideways').toBe(false);
 });

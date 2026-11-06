@@ -41,10 +41,16 @@ step() { printf '\n######## %s ########\n' "$*"; }
 
 cleanup() {
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
-  # Only this golden path's plugin containers: a broad label filter would also
-  # remove the user's data plugins.
-  docker ps -aq --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' \
-    | awk '/zabbix-source/ {print $1}' | xargs -r docker rm -f >/dev/null 2>&1 || true
+  # Only this run's plugin containers: the node id is unique to this harness,
+  # so a user's zabbix-source instance is never touched. --quiet ignores
+  # --format, which is why the old form matched nothing.
+  if [ -n "${NODE_ID:-}" ]; then
+    docker ps --filter "label=opsweave.node-id=$NODE_ID" \
+      --filter label=opsweave.plugin-id=opsweave.zabbix-source \
+      --format '{{.ID}}' | while read -r id; do
+        docker rm -f "$id" >/dev/null 2>&1 || true
+      done
+  fi
   docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
   rm -rf "$NODE_STATE" "$OPSCTL_HOME"
 }
@@ -62,6 +68,43 @@ gateway() { # method plugin-path [body] -> status; body in /tmp/g13a1-body.json
   api "$1" "/api/v1/gateway/opsweave.zabbix-source$2" "${3:-}"
 }
 
+start_kernel() { # $1 = workspace-scoped OPSWEAVE_PLUGIN_SECRETS JSON
+  local secrets="$1"
+  env \
+    DATABASE_URL="$DB_URL" \
+    OPSWEAVE_BIND=0.0.0.0:18185 \
+    OPSWEAVE_PUBLIC_URL="$URL" \
+    OPSWEAVE_WEB_DIST=/tmp/g13a1-ui-dist \
+    OPSWEAVE_DATA_DIR=/tmp/g13a1-data \
+    OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
+    OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
+    OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin' \
+    OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \
+    OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$(cat keys/publisher.pub)" \
+    OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
+    OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost \
+    OPSWEAVE_EVIDENCE_ADAPTERS="${ADAPTER_ID}:${ADAPTER_SECRET}" \
+    OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS="${ADAPTER_ID}:opsweave.zabbix-source" \
+    OPSWEAVE_PLUGIN_SECRETS="$secrets" \
+    OPSWEAVE_PLUGIN_DB_HOST="$PLUGIN_HOST" \
+    OPSWEAVE_PLUGIN_KERNEL_URL="http://${PLUGIN_HOST}:18185" \
+    OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS="$PLUGIN_HOST" \
+    RUST_LOG=info ./target/debug/opsweave-kernel >>"$KERNEL_LOG" 2>&1 &
+  KERNEL_PID=$!
+  PIDS+=($KERNEL_PID)
+  for _ in $(seq 1 120); do curl -fsS "$URL/livez" >/dev/null 2>&1 && break; sleep 1; done
+  curl -fsS "$URL/livez" >/dev/null
+  ./target/debug/opsctl --url "$URL" login --email admin@opsweave.local --password 'OpsWeave!2026' >/dev/null
+  TOKEN="$(token)"
+  [ -n "$TOKEN" ] || { echo "login failed"; exit 1; }
+}
+
+stop_kernel() {
+  kill "$KERNEL_PID" 2>/dev/null || true
+  for _ in $(seq 1 50); do kill -0 "$KERNEL_PID" 2>/dev/null || break; sleep 0.2; done
+  for _ in $(seq 1 50); do curl -fsS "$URL/livez" >/dev/null 2>&1 || break; sleep 0.2; done
+}
+
 [ -f /tmp/g13a1-ui-dist/index.html ] || {
   echo "missing /tmp/g13a1-ui-dist. Build it from the #39 branch:"
   echo "  git switch feat/g13-a-collect-ui && pnpm --filter @opsweave/platform-web build && cp -R apps/platform-web/dist /tmp/g13a1-ui-dist"
@@ -69,6 +112,8 @@ gateway() { # method plugin-path [body] -> status; body in /tmp/g13a1-body.json
 }
 command -v docker >/dev/null || { echo "docker is required"; exit 2; }
 docker info >/dev/null 2>&1 || { echo "docker daemon is not running"; exit 2; }
+[ -f keys/publisher.pub ] || { echo "missing keys/publisher.pub; run ./target/debug/opsctl keygen --out-dir keys"; exit 2; }
+for _ in $(seq 1 30); do curl -fsS "http://${REGISTRY}/v2/" >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS "http://${REGISTRY}/v2/" >/dev/null || { echo "registry ${REGISTRY} is not reachable"; exit 2; }
 
 step "isolated PostgreSQL"
@@ -92,35 +137,36 @@ sleep 1
 curl -fsS -X POST -H 'content-type: application/json' -d '{"jsonrpc":"2.0","method":"apiinfo.version","id":1}' "http://127.0.0.1:18090/" >/dev/null
 ok "fixture answers apiinfo.version"
 
-step "Kernel with adapter assignment and per-plugin secrets"
-env \
-  DATABASE_URL="$DB_URL" \
-  OPSWEAVE_BIND=0.0.0.0:18185 \
-  OPSWEAVE_PUBLIC_URL="$URL" \
-  OPSWEAVE_WEB_DIST=/tmp/g13a1-ui-dist \
-  OPSWEAVE_DATA_DIR=/tmp/g13a1-data \
-  OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
-  OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
-  OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin' \
-  OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \
-  OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$(cat keys/publisher.pub)" \
-  OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
-  OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost \
-  OPSWEAVE_EVIDENCE_ADAPTERS="${ADAPTER_ID}:${ADAPTER_SECRET}" \
-  OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS="${ADAPTER_ID}:opsweave.zabbix-source" \
-  OPSWEAVE_PLUGIN_SECRETS="{\"opsweave.zabbix-source\":{\"secretref:zabbix/main\":\"${ZABBIX_TOKEN}\"}}" \
-  OPSWEAVE_PLUGIN_DB_HOST="$PLUGIN_HOST" \
-  OPSWEAVE_PLUGIN_KERNEL_URL="http://${PLUGIN_HOST}:18185" \
-  OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS="$PLUGIN_HOST" \
-  RUST_LOG=info ./target/debug/opsweave-kernel >"$KERNEL_LOG" 2>&1 &
-KERNEL_PID=$!
-PIDS+=($KERNEL_PID)
-for _ in $(seq 1 120); do curl -fsS "$URL/livez" >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS "$URL/livez" >/dev/null
-./target/debug/opsctl --url "$URL" login --email admin@opsweave.local --password 'OpsWeave!2026' >/dev/null
-TOKEN="$(token)"
-[ -n "$TOKEN" ] || { echo "login failed"; exit 1; }
+step "Kernel (bootstrap pass) and workspaces"
+start_kernel '{}'
 ok "Kernel ready and admin session acquired"
+
+# Plugin secrets are keyed by workspace, so the workspace ids must exist before
+# the Kernel process that will inject them starts. Create them now, then restart
+# the Kernel with the workspace-scoped map (the same map the restart step uses).
+api POST /api/v1/business-workspaces '{"key":"g13a1","name":"G13-A.1"}' >/dev/null
+WORKSPACE_A="$(json "d['workspaceId']" < /tmp/g13a1-body.json)"
+ADMIN_ID="$(api GET /api/v1/auth/me >/dev/null; json "d['user']['id']" < /tmp/g13a1-body.json)"
+api POST "/api/v1/business-workspaces/${WORKSPACE_A}/members" "{\"userId\":\"${ADMIN_ID}\"}" >/dev/null
+api POST /api/v1/business-workspaces '{"key":"g13a1-b","name":"G13-A.1 B"}' >/dev/null
+WORKSPACE_B="$(json "d['workspaceId']" < /tmp/g13a1-body.json)"
+api POST "/api/v1/business-workspaces/${WORKSPACE_B}/members" "{\"userId\":\"${ADMIN_ID}\"}" >/dev/null
+api POST /api/v1/incidents "{\"title\":\"g13a1 cpu saturation\",\"severity\":\"MAJOR\",\"source\":\"API\",\"startedAt\":\"2026-11-06T09:00:00Z\",\"workspaceId\":\"${WORKSPACE_A}\"}" >/dev/null
+INCIDENT_ID="$(json "d['id']" < /tmp/g13a1-body.json)"
+[ -n "$WORKSPACE_A" ] && [ -n "$WORKSPACE_B" ] && [ -n "$INCIDENT_ID" ] || { echo "workspace/incident creation failed"; exit 1; }
+SECRETS_JSON="$(python3 - "$WORKSPACE_A" "$WORKSPACE_B" "$ZABBIX_TOKEN" <<'JSON'
+import json, sys
+a, b, token = sys.argv[1:4]
+print(json.dumps({"opsweave.zabbix-source": {
+    a: {"secretref:zabbix/main": token},
+    b: {"secretref:zabbix/main": token},
+}}))
+JSON
+)"
+step "restart Kernel with workspace-scoped plugin secrets"
+stop_kernel
+start_kernel "$SECRETS_JSON"
+ok "Kernel restarted with workspace-scoped secrets"
 
 step "real Node runtime"
 NODE_TOKEN="$(./target/debug/opsctl --url "$URL" node-token --label node-a)"
@@ -143,7 +189,9 @@ for _ in $(seq 1 90); do
   sleep 1
 done
 [ "${ready:-0}" = "1" ] || { echo "node did not become READY"; exit 1; }
-ok "node READY"
+NODE_ID="$(python3 -c 'import json;d=json.load(open("/tmp/g13a1-body.json"));print(next((n["id"] for n in d if n.get("status")=="READY" and not n.get("stale")),""))')"
+[ -n "$NODE_ID" ] || { echo "cannot identify the enrolled node"; exit 1; }
+ok "node READY (${NODE_ID})"
 
 step "storage binding, install, deploy, activate"
 api POST /api/v1/plugin-storage/opsweave.zabbix-source >/dev/null || true
@@ -158,15 +206,7 @@ done
 [ "${code:-}" = "200" ] || { echo "gateway did not reach the plugin: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
 ok "plugin instance is reachable through the Gateway"
 
-step "workspace, incident and source through the Gateway"
-api POST /api/v1/business-workspaces '{"key":"g13a1","name":"G13-A.1"}' >/dev/null
-WORKSPACE_A="$(json "d['workspaceId']" < /tmp/g13a1-body.json)"
-ADMIN_ID="$(api GET /api/v1/auth/me >/dev/null; json "d['user']['id']" < /tmp/g13a1-body.json)"
-api POST "/api/v1/business-workspaces/${WORKSPACE_A}/members" "{\"userId\":\"${ADMIN_ID}\"}" >/dev/null
-api POST /api/v1/incidents "{\"title\":\"g13a1 cpu saturation\",\"severity\":\"MAJOR\",\"source\":\"API\",\"startedAt\":\"2026-11-06T09:00:00Z\",\"workspaceId\":\"${WORKSPACE_A}\"}" >/dev/null
-INCIDENT_ID="$(json "d['id']" < /tmp/g13a1-body.json)"
-[ -n "$WORKSPACE_A" ] && [ -n "$INCIDENT_ID" ] || { echo "workspace/incident creation failed"; exit 1; }
-
+step "source through the Gateway"
 GW_SOURCE="$(python3 - "$WORKSPACE_A" "$PLUGIN_HOST" <<'PY'
 import json, sys
 print(json.dumps({
@@ -184,7 +224,7 @@ ok "source ${SOURCE_ID} in workspace ${WORKSPACE_A}"
 
 code="$(gateway POST "/api/zabbix-source/sources/${SOURCE_ID}/probe")"
 [ "$code" = "200" ] && [ "$(json "d['outcome']" < /tmp/g13a1-body.json)" = "OK" ] || { echo "probe failed: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
-ok "probe OK through Gateway with the Kernel-delivered secret"
+ok "probe OK through Gateway (apiinfo.version is unauthenticated; the secret is proven by hosts/items/collect)"
 
 code="$(gateway GET "/api/zabbix-source/sources/${SOURCE_ID}/hosts")"
 [ "$code" = "200" ] || { echo "host list failed: $code"; exit 1; }
@@ -236,9 +276,6 @@ PY
 ok "evidence ${EVIDENCE_ID} SOURCE_ATTESTED, bytes read back identical"
 
 step "A/B workspace boundary through the Gateway"
-api POST /api/v1/business-workspaces '{"key":"g13a1-b","name":"G13-A.1 B"}' >/dev/null
-WORKSPACE_B="$(json "d['workspaceId']" < /tmp/g13a1-body.json)"
-api POST "/api/v1/business-workspaces/${WORKSPACE_B}/members" "{\"userId\":\"${ADMIN_ID}\"}" >/dev/null
 GW_SOURCE_B="$(python3 - "$WORKSPACE_B" "$PLUGIN_HOST" <<'PY'
 import json, sys
 print(json.dumps({"workspaceId": sys.argv[1], "name": "zabbix-b", "endpoint": f"http://{sys.argv[2]}:18090/api_jsonrpc.php", "credential": {"kind": "api-token", "ref": "secretref:zabbix/main"}}))
@@ -264,7 +301,9 @@ CODE_BODY="$(json "d['code']" < /tmp/g13a1-body.json)"
 ok "B collection to A incident refused (EVIDENCE_WORKSPACE_MISMATCH)"
 
 step "browser through the real stack"
+UI_RESULT="PASS"
 if [ "${G13A1_SKIP_UI:-0}" = "1" ]; then
+  UI_RESULT="SKIPPED"
   echo "SKIP browser step (G13A1_SKIP_UI=1); the UI is certified by the #39 browser suite, not by a green shell line"
 else
   # The A.1 branch does not carry the DS-V1-2 support file; the served dist is
@@ -292,7 +331,7 @@ else
 fi
 
 step "plugin and Kernel restart"
-PLUGIN_CID="$(docker ps -q --filter label=opsweave.plugin-id=opsweave.zabbix-source | head -n1)"
+PLUGIN_CID="$(docker ps -q --filter "label=opsweave.node-id=$NODE_ID" --filter label=opsweave.plugin-id=opsweave.zabbix-source | head -n1)"
 [ -n "$PLUGIN_CID" ] || { echo "plugin container not found"; exit 1; }
 docker restart "$PLUGIN_CID" >/dev/null
 for _ in $(seq 1 120); do
@@ -305,25 +344,8 @@ COUNT="$(json "len(d['items'])" < /tmp/g13a1-body.json)"
 [ "$COUNT" = "2" ] || { echo "sources after restart: ${COUNT}"; exit 1; }
 ok "plugin restart: both sources still listed"
 
-kill "$KERNEL_PID" 2>/dev/null || true
-sleep 2
-env \
-  DATABASE_URL="$DB_URL" OPSWEAVE_BIND=0.0.0.0:18185 OPSWEAVE_PUBLIC_URL="$URL" \
-  OPSWEAVE_WEB_DIST=/tmp/g13a1-ui-dist OPSWEAVE_DATA_DIR=/tmp/g13a1-data \
-  OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
-  OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin' OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \
-  OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$(cat keys/publisher.pub)" OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \
-  OPSWEAVE_ALLOWED_NODE_DATA_HOSTS=127.0.0.1,localhost \
-  OPSWEAVE_EVIDENCE_ADAPTERS="${ADAPTER_ID}:${ADAPTER_SECRET}" \
-  OPSWEAVE_EVIDENCE_ADAPTER_PLUGINS="${ADAPTER_ID}:opsweave.zabbix-source" \
-  OPSWEAVE_PLUGIN_SECRETS="{\"opsweave.zabbix-source\":{\"secretref:zabbix/main\":\"${ZABBIX_TOKEN}\"}}" \
-  OPSWEAVE_PLUGIN_DB_HOST="$PLUGIN_HOST" OPSWEAVE_PLUGIN_KERNEL_URL="http://${PLUGIN_HOST}:18185" \
-  OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS="$PLUGIN_HOST" RUST_LOG=info \
-  ./target/debug/opsweave-kernel >>"$KERNEL_LOG" 2>&1 &
-PIDS+=($!)
-for _ in $(seq 1 120); do curl -fsS "$URL/livez" >/dev/null 2>&1 && break; sleep 1; done
-./target/debug/opsctl --url "$URL" login --email admin@opsweave.local --password 'OpsWeave!2026' >/dev/null
-TOKEN="$(token)"
+stop_kernel
+start_kernel "$SECRETS_JSON"
 for _ in $(seq 1 120); do
   code="$(gateway GET /api/zabbix-source/sources)"
   [ "$code" = "200" ] && break
@@ -342,12 +364,14 @@ ok "Kernel restart: source and evidence still readable"
 step "container security"
 # The Kernel restart can make the Node recreate the container, so resolve the
 # current one by label instead of reusing the id captured before the restart.
-PLUGIN_CID="$(docker ps -q --filter label=opsweave.plugin-id=opsweave.zabbix-source | head -n1)"
+PLUGIN_CID="$(docker ps -q --filter "label=opsweave.node-id=$NODE_ID" --filter label=opsweave.plugin-id=opsweave.zabbix-source | head -n1)"
 [ -n "$PLUGIN_CID" ] || { echo "plugin container not found after restart"; exit 1; }
-INSPECT="$(docker inspect "$PLUGIN_CID")"
-python3 - "$INSPECT" "$DIGEST" <<'PY'
+INSPECT_FILE="$(mktemp)"
+chmod 600 "$INSPECT_FILE"
+docker inspect "$PLUGIN_CID" > "$INSPECT_FILE"
+python3 - "$INSPECT_FILE" "$DIGEST" <<'PY'
 import json, sys
-c = json.loads(sys.argv[1])[0]
+c = json.load(open(sys.argv[1]))[0]
 digest = sys.argv[2]
 assert c['Config'].get('User') in ('65532:65532', '65532'), c['Config'].get('User')
 assert c['HostConfig'].get('ReadonlyRootfs') is True, 'rootfs is not read-only'
@@ -367,8 +391,18 @@ print('security: user=%s readonly=%s memory=%s nanocpus=%s pids=%s image=%s' % (
     c['HostConfig'].get('Memory'), c['HostConfig'].get('NanoCpus'),
     c['HostConfig'].get('PidsLimit'), image.split('@sha256:')[1][:12]))
 PY
+for log in "$FIXTURE_LOG" "$KERNEL_LOG" "$NODE_LOG"; do
+  [ -f "$log" ] || bad "log missing: $log"
+done
+for secret in "$ZABBIX_TOKEN" "$ADAPTER_SECRET"; do
+  if grep -Fq "$secret" "$FIXTURE_LOG" "$KERNEL_LOG" "$NODE_LOG" 2>/dev/null; then
+    bad "a configured secret appears in Kernel/Node/fixture logs"
+  else
+    ok "no configured secret in Kernel/Node/fixture logs"
+  fi
+done
 if docker logs "$PLUGIN_CID" 2>&1 | grep -Fq "$ZABBIX_TOKEN"; then bad "the Zabbix token appears in container logs"; else ok "no Zabbix token in container logs"; fi
-if grep -Fq "$ADAPTER_SECRET" "$KERNEL_LOG" "$NODE_LOG" 2>/dev/null; then bad "adapter secret appears in Kernel/Node logs"; else ok "no adapter secret in Kernel/Node logs"; fi
+rm -f "$INSPECT_FILE"
 
 step "result"
-[ "$FAILED" = "0" ] && echo "G13-A.1 GATEWAY/NODE/OCI GOLDEN PATH: PASS (upstream=UPSTREAM_ZABBIX_FIXTURE, real_zabbix=NOT_RUN)" || { echo "G13-A.1 GOLDEN PATH: FAIL"; exit 1; }
+[ "$FAILED" = "0" ] && echo "G13-A.1 GATEWAY/NODE/OCI GOLDEN PATH: PASS (ui=${UI_RESULT:-NOT_RUN}, upstream=UPSTREAM_ZABBIX_FIXTURE, real_zabbix=NOT_RUN)" || { echo "G13-A.1 GOLDEN PATH: FAIL"; exit 1; }

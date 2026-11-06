@@ -5460,6 +5460,25 @@ mod tests {
         let signature =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
 
+        // Positive control: the same tuple with the signed workspace is
+        // accepted, so the refusal below is about the tamper, not a verifier
+        // that rejects everything.
+        let mut valid = content_request("application/json", body);
+        valid.content_ref = Some(content_ref.clone());
+        valid.source = "zabbix:source-a".to_string();
+        valid.collected_at = collected_at;
+        valid.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: Some(scope::legacy_workspace()),
+            issued_at,
+            signature: signature.clone(),
+        });
+        let (created, row) = insert_evidence(&pool, &adapters(), caller(user), incident.id, valid)
+            .await
+            .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
+
         let mut request = content_request("application/json", body);
         request.content_ref = Some(content_ref.clone());
         request.source = "zabbix:source-a".to_string();
@@ -5516,6 +5535,24 @@ mod tests {
         use base64::Engine;
         let signature =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        // Positive control: the envelope is accepted on the incident it was
+        // signed for.
+        let mut valid = content_request("application/json", body);
+        valid.content_ref = Some(content_ref.clone());
+        valid.source = "zabbix:source-a".to_string();
+        valid.collected_at = collected_at;
+        valid.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: Some(scope::legacy_workspace()),
+            issued_at,
+            signature: signature.clone(),
+        });
+        let (created, row) = insert_evidence(&pool, &adapters(), caller(user), first.id, valid)
+            .await
+            .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
 
         let mut request = content_request("application/json", body);
         request.content_ref = Some(content_ref.clone());

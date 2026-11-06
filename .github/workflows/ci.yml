@@ -171,8 +171,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OPSWEAVE_REGISTRY: 127.0.0.1:5001
-      OPSWEAVE_PULL_REGISTRY: 172.17.0.1:5001
-      PLUGIN_HOST: 172.17.0.1
+      # The Node process (on the host) pulls the image; only the plugin
+      # container needs the Docker bridge address for its DB/fixture calls.
+      OPSWEAVE_PULL_REGISTRY: 127.0.0.1:5001
+      OPSWEAVE_G13A1_PLUGIN_HOST: 172.17.0.1
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -188,11 +190,22 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin feat/g13-a-collect-ui
-          git branch -f feat/g13-a-collect-ui origin/feat/g13-a-collect-ui
-          git worktree add /tmp/g13a1-ui feat/g13-a-collect-ui
+          # Pin the #39 commit under test: the branch may advance, and this job
+          # certifies one exact UI head, not whatever it points at today.
+          UI_SHA=81d1765455f9dc9f4fe9fb8836cea9151f75253f
+          git branch -f feat/g13-a-collect-ui "$UI_SHA"
+          git worktree add /tmp/g13a1-ui "$UI_SHA"
           (cd /tmp/g13a1-ui && pnpm install --frozen-lockfile && pnpm --filter @opsweave/platform-web build)
           cp -R /tmp/g13a1-ui/apps/platform-web/dist /tmp/g13a1-ui-dist
-      - run: docker run -d --name opsweave-g13a1-registry -p 5001:5000 registry:2
+      - name: local registry
+        run: |
+          set -euo pipefail
+          docker run -d --name opsweave-g13a1-registry -p 5001:5000 registry:2
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:5001/v2/ >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5001/v2/ >/dev/null
       - name: browser -> Gateway -> Node -> OCI plugin -> fixture
         run: bash tests/ci/g13a1_gateway_e2e.sh
   # V3 brief §9: "截图不允许无上限提交 Git；仅保留精选基线，其余归档为 CI Artifact."

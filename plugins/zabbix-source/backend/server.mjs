@@ -70,14 +70,39 @@ function parseSecretMap(raw) {
  * directly. The mode is reported by /runtime-info (never the values), so an
  * operator can tell a deployed instance from a local one.
  */
+function parseWorkspaceSecretMap(raw) {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [workspaceId, refs] of Object.entries(parsed)) {
+      if (!UUID_RE.test(workspaceId) || !refs || typeof refs !== 'object' || Array.isArray(refs)) continue;
+      const inner = {};
+      for (const [ref, value] of Object.entries(refs)) {
+        if (typeof value === 'string' && value) inner[ref] = value;
+      }
+      if (Object.keys(inner).length > 0) out[workspaceId.toLowerCase()] = inner;
+    }
+    return out;
+  } catch {
+    // A malformed map is the same as none: refuse to resolve rather than guess.
+    return {};
+  }
+}
+
 export function secretConfiguration(env = process.env) {
   if (env.OPSWEAVE_PLUGIN_SECRETS) {
-    return { mode: 'plugin', secrets: parseSecretMap(env.OPSWEAVE_PLUGIN_SECRETS) };
+    // Production shape: {workspaceId: {secretref: value}}. A flat map is
+    // rejected (empty), because it is the shape that let one workspace borrow
+    // another workspace's credential.
+    return { mode: 'workspace', workspaceSecrets: parseWorkspaceSecretMap(env.OPSWEAVE_PLUGIN_SECRETS), secrets: {} };
   }
-  if (env.OPSWEAVE_ZABBIX_SECRETS) {
-    return { mode: 'dev', secrets: parseSecretMap(env.OPSWEAVE_ZABBIX_SECRETS) };
+  if (env.NODE_ENV !== 'production' && env.OPSWEAVE_ZABBIX_SECRETS) {
+    // Developer-only flat map; the Docker image sets NODE_ENV=production, so a
+    // deployment never takes this path.
+    return { mode: 'dev', workspaceSecrets: null, secrets: parseSecretMap(env.OPSWEAVE_ZABBIX_SECRETS) };
   }
-  return { mode: 'none', secrets: {} };
+  return { mode: 'none', workspaceSecrets: null, secrets: {} };
 }
 
 function rid(req) {
@@ -108,15 +133,26 @@ export function createPlugin(options) {
   const verifyIdentity = options.verifyIdentity;
   const adapterId = options.adapterId || '';
   const adapterSecret = options.adapterSecret || '';
+  // Development-only flat map. Production passes a map keyed by workspace;
+  // the flat form is never selected when the plugin runs as a deployment.
   const secretMap = options.secretMap || {};
-  const secretMode = options.secretMode || 'none';
+  const workspaceSecretMap = options.workspaceSecretMap || null;
+  const secretMode = options.secretMode || (workspaceSecretMap ? 'workspace' : 'none');
   const capabilityDigest = options.capabilityDigest || DEFAULTS.capabilityDigest;
   const buildDigest = options.buildDigest || DEFAULTS.buildDigest;
   const logger = options.logger || console;
   const state = { stopping: false };
 
   function knownSecrets() {
-    const values = Object.values(secretMap).filter((value) => typeof value === 'string');
+    const values = [];
+    for (const value of Object.values(secretMap)) {
+      if (typeof value === 'string') values.push(value);
+    }
+    for (const perWorkspace of Object.values(workspaceSecretMap || {})) {
+      for (const value of Object.values(perWorkspace || {})) {
+        if (typeof value === 'string') values.push(value);
+      }
+    }
     return adapterSecret ? [...values, adapterSecret] : values;
   }
 
@@ -182,21 +218,33 @@ export function createPlugin(options) {
     return who.userId;
   }
 
-  /** Resolve a secretref to its value, for the duration of one call. */
-  function resolveSecret(ref) {
-    const value = secretMap[ref];
+  /** Whether this workspace's ref exists. A ref from another workspace is not
+   *  a credential this source may use, even though the same plugin instance
+   *  can serve both workspaces. */
+  function secretAvailable(workspaceId, ref) {
+    if (workspaceSecretMap) {
+      return Boolean(workspaceSecretMap[workspaceId]?.[ref]);
+    }
+    return Boolean(secretMap[ref]);
+  }
+
+  /** Resolve a secretref for ONE workspace, for the duration of one call. */
+  function resolveSecret(workspaceId, ref) {
+    const value = workspaceSecretMap
+      ? workspaceSecretMap[workspaceId]?.[ref]
+      : secretMap[ref];
     if (typeof value !== 'string' || !value) {
       throw Object.assign(
-        new Error('the secret store has no value for this source credential reference'),
+        new Error('the secret store has no value for this source credential reference in this workspace'),
         { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
       );
     }
     return value;
   }
 
-  function resolveSecretQuietly(ref) {
+  function resolveSecretQuietly(workspaceId, ref) {
     try {
-      return resolveSecret(ref);
+      return resolveSecret(workspaceId, ref);
     } catch {
       return null;
     }
@@ -336,7 +384,12 @@ export function createPlugin(options) {
         // needs: without it, evidence silently arrives as UNVERIFIED.
         attestation: { adapterId: adapterId || null, configured: Boolean(adapterId && adapterSecret) },
         storage: { mode: store.mode },
-        secrets: { mode: secretMode, configured: Object.keys(secretMap).length > 0 },
+        secrets: {
+          mode: secretMode,
+          configured:
+            Object.keys(secretMap).length > 0 ||
+            Object.values(workspaceSecretMap || {}).some((refs) => Object.keys(refs || {}).length > 0),
+        },
         budgetCeiling: BUDGET_CEILING,
       }, id);
     }
@@ -362,6 +415,12 @@ export function createPlugin(options) {
           code: 'ZBX_WORKSPACE_FORBIDDEN',
         });
       }
+      if (!secretAvailable(parsed.workspaceId, parsed.credential.ref)) {
+        throw Object.assign(
+          new Error('this credential reference is not configured for this workspace; a source cannot borrow another workspace\'s secret'),
+          { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
+        );
+      }
       const row = await store.createSource({
         sourceId: crypto.randomUUID(),
         workspaceId: parsed.workspaceId,
@@ -381,7 +440,16 @@ export function createPlugin(options) {
       const actorId = requireUser(who);
       const body = await readJson(req);
       const parsed = validateSourceBody(body, { requireWorkspace: false });
-      const row = await store.updateSource(requireUuidPath(sourceMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces, parsed, actorId);
+      const sourceId = requireUuidPath(sourceMatch[1], 'SOURCE_NOT_FOUND');
+      const current = await store.getSource(sourceId, who.workspaces);
+      if (!current) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      if (!secretAvailable(current.workspace_id, parsed.credential.ref)) {
+        throw Object.assign(
+          new Error('this credential reference is not configured for this source\'s workspace'),
+          { status: 422, code: 'CREDENTIAL_UNRESOLVED' },
+        );
+      }
+      const row = await store.updateSource(sourceId, who.workspaces, parsed, actorId);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
       return send(res, 200, sourceView(row), id);
     }
@@ -400,7 +468,7 @@ export function createPlugin(options) {
         endpoint: row.endpoint,
         verifyTls: row.verify_tls,
         budget: row.budget,
-        secret: resolveSecretQuietly(row.credential_ref),
+        secret: resolveSecretQuietly(row.workspace_id, row.credential_ref),
       });
       const updated = await store.recordProbe(row.source_id, who.workspaces, result, statusFromProbe(result, { verifyTls: row.verify_tls }), actorId);
       if (!updated) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
@@ -417,7 +485,7 @@ export function createPlugin(options) {
         endpoint: row.endpoint,
         verifyTls: row.verify_tls,
         budget: row.budget,
-        secret: resolveSecret(row.credential_ref),
+        secret: resolveSecret(row.workspace_id, row.credential_ref),
       });
       return send(res, 200, result, id);
     }
@@ -433,7 +501,7 @@ export function createPlugin(options) {
           endpoint: row.endpoint,
           verifyTls: row.verify_tls,
           budget: row.budget,
-          secret: resolveSecret(row.credential_ref),
+          secret: resolveSecret(row.workspace_id, row.credential_ref),
         },
         url.searchParams.get('hostId'),
       );
@@ -462,7 +530,7 @@ export function createPlugin(options) {
           endpoint: row.endpoint,
           verifyTls: row.verify_tls,
           budget: row.budget,
-          secret: resolveSecret(row.credential_ref),
+          secret: resolveSecret(row.workspace_id, row.credential_ref),
         },
         itemIds,
         window: body.window,
@@ -609,6 +677,7 @@ export async function startServer(env = process.env) {
     contextKeyHex: env.OPSWEAVE_CALLER_CONTEXT_KEY || '',
     pluginId,
   });
+  const secrets = secretConfiguration(env);
   const plugin = createPlugin({
     pluginId,
     version: env.OPSWEAVE_PLUGIN_VERSION || DEFAULTS.version,
@@ -616,8 +685,9 @@ export async function startServer(env = process.env) {
     buildDigest: env.OPSWEAVE_BUILD_DIGEST,
     adapterId: env.OPSWEAVE_EVIDENCE_ADAPTER_ID || '',
     adapterSecret: env.OPSWEAVE_EVIDENCE_ADAPTER_SECRET || '',
-    secretMap: secretConfiguration(env).secrets,
-    secretMode: secretConfiguration(env).mode,
+    secretMap: secrets.secrets,
+    workspaceSecretMap: secrets.workspaceSecrets,
+    secretMode: secrets.mode,
     store,
     verifyIdentity,
   });

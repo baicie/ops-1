@@ -427,7 +427,10 @@ pub async fn refresh_workload_token(
 /// no adapter credential; a plugin with two assignments receives neither, which
 /// is a configuration error that fails closed rather than picking one.
 pub(crate) fn secret_environment(
-    plugin_secrets: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    plugin_secrets: &std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    >,
     adapter_plugins: &std::collections::HashMap<String, String>,
     adapters: &std::collections::HashMap<String, String>,
     plugin_id: &str,
@@ -1145,11 +1148,17 @@ mod tests {
         let mut plugin_secrets = HashMap::new();
         plugin_secrets.insert(
             "a.plugin".to_string(),
-            HashMap::from([("secretref:a".to_string(), "value-a".to_string())]),
+            HashMap::from([(
+                "00000000-0000-4000-8000-00000000000a".to_string(),
+                HashMap::from([("secretref:a".to_string(), "value-a".to_string())]),
+            )]),
         );
         plugin_secrets.insert(
             "b.plugin".to_string(),
-            HashMap::from([("secretref:b".to_string(), "value-b".to_string())]),
+            HashMap::from([(
+                "00000000-0000-4000-8000-00000000000b".to_string(),
+                HashMap::from([("secretref:b".to_string(), "value-b".to_string())]),
+            )]),
         );
         let adapter_plugins = HashMap::from([("zabbix-main".to_string(), "a.plugin".to_string())]);
         let adapters = HashMap::from([

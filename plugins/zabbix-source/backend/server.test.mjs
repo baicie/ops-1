@@ -112,13 +112,14 @@ function workloadContext({ scopes = ['telemetry.source.read'], workspaces = [WOR
   });
 }
 
-async function startPlugin({ store = new MemoryStore(), adapter = true } = {}) {
+async function startPlugin({ store = new MemoryStore(), adapter = true, workspaceSecretMap = null } = {}) {
   const plugin = createPlugin({
     store,
     verifyIdentity: createIdentityResolver({ contextKeyHex: KEY_HEX, pluginId: PLUGIN_ID }),
     adapterId: adapter ? ADAPTER_ID : '',
     adapterSecret: adapter ? ADAPTER_SECRET : '',
-    secretMap: { 'secretref:zabbix/main': 'fixture-token' },
+    secretMap: workspaceSecretMap ? {} : { 'secretref:zabbix/main': 'fixture-token' },
+    workspaceSecretMap,
   });
   await new Promise((resolve) => plugin.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${plugin.server.address().port}`;
@@ -543,6 +544,51 @@ test('an attestation is refused when no adapter credential is configured', async
   }
 });
 
+test('a source cannot borrow a credential configured for another workspace', async () => {
+  const upstream = await startFakeZabbix();
+  const { plugin, base } = await startPlugin({
+    workspaceSecretMap: {
+      [WORKSPACE_A]: { 'secretref:zabbix/a': 'token-a' },
+      [WORKSPACE_B]: { 'secretref:zabbix/b': 'token-b' },
+    },
+  });
+  try {
+    const borrowed = await createSource(base, upstream, {
+      workspaceId: WORKSPACE_A,
+      credential: { kind: 'api-token', ref: 'secretref:zabbix/b' },
+    });
+    assert.equal(borrowed.status, 422);
+    assert.equal(borrowed.body.code, 'CREDENTIAL_UNRESOLVED');
+
+    const a = await createSource(base, upstream, {
+      workspaceId: WORKSPACE_A,
+      credential: { kind: 'api-token', ref: 'secretref:zabbix/a' },
+    });
+    assert.equal(a.status, 201);
+    const b = await call(base, '/api/zabbix-source/sources', {
+      method: 'POST',
+      headers: { 'x-opsweave-user-context': userContext({ workspaces: [WORKSPACE_B] }) },
+      body: {
+        workspaceId: WORKSPACE_B,
+        name: 'zabbix-b',
+        endpoint: upstream.url,
+        credential: { kind: 'api-token', ref: 'secretref:zabbix/b' },
+      },
+    });
+    assert.equal(b.status, 201);
+
+    const headersA = { 'x-opsweave-user-context': userContext({ workspaces: [WORKSPACE_A] }) };
+    const headersB = { 'x-opsweave-user-context': userContext({ workspaces: [WORKSPACE_B] }) };
+    await call(base, `/api/zabbix-source/sources/${a.body.sourceId}/hosts`, { headers: headersA });
+    await call(base, `/api/zabbix-source/sources/${b.body.sourceId}/hosts`, { headers: headersB });
+    const auth = upstream.state.calls.filter((entry) => entry.method === 'host.get').map((entry) => entry.authorization);
+    assert.deepEqual(auth, ['Bearer token-a', 'Bearer token-b']);
+  } finally {
+    await plugin.close();
+    await upstream.close();
+  }
+});
+
 test('a viewer cannot spend the collection budget or write a retained collection', async () => {
   const upstream = await startFakeZabbix();
   const { plugin, base } = await startPlugin();
@@ -699,16 +745,30 @@ test('a forged user context under a different key is refused', async () => {
 });
 
 test('the plugin reads the Kernel-delivered secret map first and never reports values', async () => {
+  const workspace = '00000000-0000-4000-8000-000000000001';
   const pluginSecrets = secretConfiguration({
-    OPSWEAVE_PLUGIN_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'plugin-token' }),
+    OPSWEAVE_PLUGIN_SECRETS: JSON.stringify({ [workspace]: { 'secretref:zabbix/main': 'plugin-token' } }),
     OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
   });
-  assert.equal(pluginSecrets.mode, 'plugin');
-  assert.equal(pluginSecrets.secrets['secretref:zabbix/main'], 'plugin-token');
+  assert.equal(pluginSecrets.mode, 'workspace');
+  assert.equal(pluginSecrets.workspaceSecrets[workspace]['secretref:zabbix/main'], 'plugin-token');
+  assert.equal(JSON.stringify(pluginSecrets.workspaceSecrets).includes('dev-token'), false);
 
-  const dev = secretConfiguration({ OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }) });
+  // The old flat shape is the P0 shape; it must not become a working map.
+  const flat = secretConfiguration({
+    OPSWEAVE_PLUGIN_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'flat-token' }),
+  });
+  assert.equal(flat.mode, 'workspace');
+  assert.equal(Object.keys(flat.workspaceSecrets).length, 0);
+
+  const dev = secretConfiguration({
+    NODE_ENV: 'test',
+    OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
+  });
   assert.equal(dev.mode, 'dev');
   assert.equal(secretConfiguration({}).mode, 'none');
+  // A production process never takes the developer fallback.
+  assert.equal(secretConfiguration({ NODE_ENV: 'production', OPSWEAVE_ZABBIX_SECRETS: '{"secretref:x":"y"}' }).mode, 'none');
 
   const { plugin, base } = await startPlugin();
   try {

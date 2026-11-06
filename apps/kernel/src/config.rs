@@ -46,7 +46,7 @@ pub struct Config {
     /// process and to anyone who can `docker inspect`. That is a weaker boundary
     /// than a dedicated secret store; the threat model is recorded in
     /// docs/design/g13-source-evidence/g13-a1-security-runtime-closure.md.
-    pub plugin_secrets: HashMap<String, HashMap<String, String>>,
+    pub plugin_secrets: HashMap<String, HashMap<String, HashMap<String, String>>>,
     /// Which plugin may receive which evidence adapter's signing key. An adapter
     /// with no entry is not delivered to any plugin, so a collector cannot sign
     /// as an adapter nobody assigned it.
@@ -300,12 +300,16 @@ pub fn parse_admin_surface_roles(raw: &str) -> Vec<Role> {
 /// because the fail-safe direction here is "fewer adapters than configured",
 /// never "the Kernel refuses to start". Dropping an adapter can only lose an
 /// attestation capability; it can never grant one.
-/// `{"plugin.id":{"secretref:name":"value"}}`
+/// `{"plugin.id":{"<workspace-uuid>":{"secretref:name":"value"}}}`
 ///
-/// Malformed input yields an empty map: a plugin then fails its own credential
-/// resolution and refuses to collect, which is the safe direction. It is never
-/// log-ed, returned by an endpoint, or written to the database.
-pub fn parse_plugin_secrets(raw: &str) -> HashMap<String, HashMap<String, String>> {
+/// The workspace level is mandatory. A flat plugin→ref map let a source in
+/// workspace A name a ref that belonged to B, and the plugin would send B's
+/// token to A's endpoint: the credential crossed the boundary even though the
+/// evidence could not. Malformed or flat input yields an empty map (fail
+/// closed). It is never logged, returned to a user, or written to the database.
+pub fn parse_plugin_secrets(
+    raw: &str,
+) -> HashMap<String, HashMap<String, HashMap<String, String>>> {
     if raw.trim().is_empty() {
         return HashMap::new();
     }
@@ -532,8 +536,16 @@ mod tests {
 
     #[test]
     fn plugin_secrets_are_parsed_and_malformed_input_fails_closed() {
-        let parsed = parse_plugin_secrets(r#"{"a.plugin":{"secretref:db":"value"}}"#);
-        assert_eq!(parsed["a.plugin"]["secretref:db"], "value");
+        let parsed = parse_plugin_secrets(
+            r#"{"a.plugin":{"00000000-0000-4000-8000-00000000000a":{"secretref:db":"value"}}}"#,
+        );
+        assert_eq!(
+            parsed["a.plugin"]["00000000-0000-4000-8000-00000000000a"]["secretref:db"],
+            "value"
+        );
+        // A flat map is the P0 shape: one workspace could name another's ref.
+        // It must be rejected rather than silently accepted.
+        assert!(parse_plugin_secrets(r#"{"a.plugin":{"secretref:db":"value"}}"#).is_empty());
         assert!(parse_plugin_secrets("{not json").is_empty());
         assert!(parse_plugin_secrets("").is_empty());
     }
