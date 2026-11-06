@@ -534,7 +534,6 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Au
         || row.expires_at.timestamp() != claims.expires_at
         || row.event_id != claims.event_id
         || row.incident_id != claims.incident_id
-        || row.budget != claims.budget
     {
         return Err(AppError::new(
             StatusCode::UNAUTHORIZED,
@@ -821,11 +820,14 @@ mod tests {
         let error = authenticate(&state, &check(token)).await.unwrap_err();
         assert_eq!(error.code, "AUTOMATION_PRINCIPAL_INVALID", "{error:?}");
 
+        // Budget is deliberately NOT compared: it is mutable (every collection
+        // spends from it), so binding the token to it would break a legitimate
+        // retry. The execution path reads the database budget and never trusts
+        // the token's copy, so a forged budget grants nothing.
         let mut richer = claims.clone();
         richer.budget = json!({"collections": 9999});
         let token = sign(&state, &richer).unwrap();
-        let error = authenticate(&state, &check(token)).await.unwrap_err();
-        assert_eq!(error.code, "AUTOMATION_PRINCIPAL_INVALID", "{error:?}");
+        assert!(authenticate(&state, &check(token)).await.is_ok());
 
         let mut rebound = claims.clone();
         rebound.event_id = Some(Uuid::new_v4());
