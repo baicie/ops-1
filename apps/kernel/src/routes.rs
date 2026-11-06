@@ -16,6 +16,7 @@ use crate::publishers;
 use crate::state::AppState;
 use crate::static_site;
 use crate::storage;
+use crate::telemetry_sources;
 use crate::users;
 use crate::workspaces;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -200,6 +201,10 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/api/v1/plugin-storage/{plugin_id}",
             get(storage::get_binding).post(storage::ensure_binding),
+        )
+        .route(
+            "/api/v1/telemetry/sources",
+            get(telemetry_sources::list_sources),
         )
         .route(
             "/api/v1/plugin-storage/{plugin_id}/migrations",

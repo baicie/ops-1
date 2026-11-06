@@ -6,6 +6,8 @@
 
 ## 切片 0 — 契约与迁移（不启用）
 
+> 实施状态（2026-11-06）：**已完成**。迁移 `0026_g13b0_source_registry_and_event_identity.sql`；回滚语句在事务内 dry-run 通过；历史行不回填。
+
 1. `telemetry-event.v1` schema/OpenAPI 合入（本 B0 已冻结）。
 2. 迁移：`incidents.source_id`、`origin`、`recurrence_of`；`audit_events.actor_type` 增加 `AUTOMATION`；`automation_principals`、`telemetry_events` 表；部分唯一索引。
 3. 迁移测试：历史行不变、并发唯一、回滚脚本 dry-run。
@@ -13,7 +15,9 @@
 
 ## 切片 1 — Kernel source 注册表
 
-1. 注册表记录 `sourceId + workspaceId + pluginId + endpointDigest + state`，来源为部署配置/受控 API，不接受插件自报。
+> 实施状态（2026-11-06）：**已完成（未启用 Automation）**。配置 `OPSWEAVE_AUTOMATION_SOURCES` → `kernel.telemetry_sources`；`GET /api/v1/telemetry/sources` 只读；无签发/ingest 端点。详见 [b1-slice-0-1.md](b1-slice-0-1.md)。
+
+1. 注册表记录 `sourceId + workspaceId + pluginId + secretRef + endpoint/TLS + state`；endpoint/TLS 从 A.2 binding 复制，来源为部署配置，不接受插件自报。
 2. 与 A.2 binding 的一致性校验：注册表的 endpoint/TLS 必须与 binding 匹配，否则拒绝 READY。
 3. 测试：跨 Workspace、未注册、binding 收紧后 source 失效。
 - 退出：`AUTOMATION_SOURCE_NOT_REGISTERED` 路径可审计；无注册表时 automation 端点 404/关闭。

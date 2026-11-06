@@ -51,6 +51,13 @@ pub struct Config {
     /// not secret material: the plugin checks it before every outbound call.
     pub plugin_credential_bindings:
         HashMap<String, HashMap<String, HashMap<String, CredentialBinding>>>,
+    /// Sources enrolled for automation, from `OPSWEAVE_AUTOMATION_SOURCES`.
+    ///
+    /// The Kernel, not the plugin, decides which workspace a source belongs to.
+    /// Endpoint and TLS are NOT duplicated here: the registry copies them from
+    /// the matching credential binding at sync time, so the two cannot disagree.
+    /// This is metadata only and enables no endpoint; B1 slice 2 adds issuance.
+    pub automation_sources: Vec<AutomationSource>,
     /// Explicitly enables plaintext/disabled-TLS test endpoints. Production
     /// leaves this false; a binding with `tls: TEST_PLAINTEXT` is still required.
     pub allow_insecure_source_endpoints: bool,
@@ -148,6 +155,10 @@ impl Config {
             plugin_secrets: parse_plugin_secrets(&env_string("OPSWEAVE_PLUGIN_SECRETS", "")),
             plugin_credential_bindings: parse_credential_bindings(&env_string(
                 "OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS",
+                "",
+            )),
+            automation_sources: parse_automation_sources(&env_string(
+                "OPSWEAVE_AUTOMATION_SOURCES",
                 "",
             )),
             allow_insecure_source_endpoints: env_bool(
@@ -345,6 +356,18 @@ pub struct CredentialBinding {
     pub tls: String,
 }
 
+/// One source enrolled for automation. `state` is READY or DISABLED; a missing
+/// credential binding or an unsafe TLS policy turns it into INVALID in the
+/// registry rather than dropping it silently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutomationSource {
+    pub source_id: uuid::Uuid,
+    pub workspace_id: uuid::Uuid,
+    pub plugin_id: String,
+    pub secret_ref: String,
+    pub state: String,
+}
+
 /// `{"plugin.id":{"<workspace-uuid>":{"secretref:name":{"endpoint":"https://...","tls":"VERIFY"}}}}`
 ///
 /// Malformed input yields an empty map: the plugin then refuses to use any
@@ -425,6 +448,77 @@ pub fn parse_credential_bindings(
     }
     out
 }
+/// `{"<plugin>":{"<workspace-uuid>":{"<source-uuid>":{"secretRef":"secretref:x","state":"READY"}}}}`
+///
+/// The workspace is named by the Kernel's deployment configuration, not by the
+/// plugin at runtime. Malformed entries and duplicate source ids are dropped
+/// (fail closed); an unsafe or missing binding is not dropped here, it becomes
+/// INVALID in the registry so the misconfiguration is visible.
+pub fn parse_automation_sources(raw: &str) -> Vec<AutomationSource> {
+    if raw.trim().is_empty() {
+        return Vec::new();
+    }
+    let value: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(error = %error, "OPSWEAVE_AUTOMATION_SOURCES is not valid; no sources were enrolled");
+            return Vec::new();
+        }
+    };
+    let Some(plugins) = value.as_object() else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (plugin_id, workspaces) in plugins {
+        let plugin_id = plugin_id.trim();
+        if plugin_id.is_empty() || plugin_id.len() > 200 {
+            continue;
+        }
+        let Some(workspaces) = workspaces.as_object() else {
+            continue;
+        };
+        for (workspace, sources) in workspaces {
+            let Ok(workspace_id) = uuid::Uuid::parse_str(workspace) else {
+                continue;
+            };
+            let Some(sources) = sources.as_object() else {
+                continue;
+            };
+            for (source, entry) in sources {
+                let Ok(source_id) = uuid::Uuid::parse_str(source) else {
+                    continue;
+                };
+                let Some(secret_ref) = entry.get("secretRef").and_then(|value| value.as_str())
+                else {
+                    continue;
+                };
+                let Some(state) = entry.get("state").and_then(|value| value.as_str()) else {
+                    continue;
+                };
+                if !secret_ref.starts_with("secretref:") || !matches!(state, "READY" | "DISABLED") {
+                    continue;
+                }
+                if !seen.insert(source_id) {
+                    tracing::warn!(
+                        source_id = %source_id,
+                        "OPSWEAVE_AUTOMATION_SOURCES names the same source twice; keeping the first"
+                    );
+                    continue;
+                }
+                out.push(AutomationSource {
+                    source_id,
+                    workspace_id,
+                    plugin_id: plugin_id.to_string(),
+                    secret_ref: secret_ref.to_string(),
+                    state: state.to_string(),
+                });
+            }
+        }
+    }
+    out
+}
+
 pub fn parse_adapter_plugins(raw: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for entry in raw.split(',') {
@@ -536,8 +630,9 @@ fn env_i64(key: &str, default: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_adapter_plugins, parse_admin_surface_roles, parse_build_sha, parse_build_time,
-        parse_credential_bindings, parse_environment, parse_plugin_secrets, Environment,
+        parse_adapter_plugins, parse_admin_surface_roles, parse_automation_sources,
+        parse_build_sha, parse_build_time, parse_credential_bindings, parse_environment,
+        parse_plugin_secrets, Environment,
     };
     use opsweave_contracts::Role;
 
@@ -665,6 +760,38 @@ mod tests {
         assert!(parse_credential_bindings(userinfo).is_empty());
         let bad_tls = r#"{"a.plugin":{"00000000-0000-4000-8000-00000000000a":{"secretref:a":{"endpoint":"https://zabbix.example/api_jsonrpc.php","tls":"INSECURE"}}}}"#;
         assert!(parse_credential_bindings(bad_tls).is_empty());
+    }
+
+    #[test]
+    fn automation_sources_are_kernel_scoped_and_deduplicated() {
+        let workspace = "00000000-0000-4000-8000-00000000000a";
+        let source = "00000000-0000-4000-8000-0000000000b1";
+        // Not a UUID on purpose: the parser must skip it, not panic.
+        let raw = format!(
+            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"secretref:zabbix/main","state":"READY"}},"not-a-uuid":{{"secretRef":"secretref:x","state":"READY"}}}}}}}}"#
+        );
+        let parsed = parse_automation_sources(&raw);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].plugin_id, "zabbix-source");
+        assert_eq!(parsed[0].secret_ref, "secretref:zabbix/main");
+        assert_eq!(parsed[0].state, "READY");
+        assert_eq!(parsed[0].source_id.to_string(), source);
+
+        let bad_ref = format!(
+            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"plain","state":"READY"}}}}}}}}"#
+        );
+        assert!(parse_automation_sources(&bad_ref).is_empty());
+        let bad_state = format!(
+            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"secretref:x","state":"ACTIVE"}}}}}}}}"#
+        );
+        assert!(parse_automation_sources(&bad_state).is_empty());
+        assert!(parse_automation_sources("{not json").is_empty());
+
+        let other_workspace = "00000000-0000-4000-8000-00000000000b";
+        let duplicate = format!(
+            r#"{{"zabbix-source":{{"{workspace}":{{"{source}":{{"secretRef":"secretref:x","state":"READY"}}}},"{other_workspace}":{{"{source}":{{"secretRef":"secretref:y","state":"READY"}}}}}}}}"#
+        );
+        assert_eq!(parse_automation_sources(&duplicate).len(), 1);
     }
 
     #[test]
