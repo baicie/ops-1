@@ -232,6 +232,35 @@ export function createPlugin(options) {
     return who.userId;
   }
 
+  /** Collect/attestation actors: a user session or an automation principal.
+   *  A workload is still refused; it has no attributable principal. The
+   *  automation principal is bound to exactly one workspace+source+operation by
+   *  the Kernel's signature, never by the request body. */
+  function requireSourceActor(who, row, operation) {
+    if (who.kind === 'user' && UUID_RE.test(String(who.userId || ''))) {
+      if (!workspaceAllowed(who, row.workspace_id)) {
+        throw Object.assign(new Error('this source is outside the caller workspaces'), {
+          status: 403,
+          code: 'FORBIDDEN',
+        });
+      }
+      return who.userId;
+    }
+    if (
+      who.kind === 'automation' &&
+      who.workspaceId === row.workspace_id &&
+      who.sourceId === row.source_id &&
+      Array.isArray(who.ops) &&
+      who.ops.includes(operation)
+    ) {
+      return who.principalId;
+    }
+    throw Object.assign(new Error('this operation requires a user or an authorized automation principal'), {
+      status: 403,
+      code: 'ZBX_USER_REQUIRED',
+    });
+  }
+
   /** Whether this workspace's ref exists. A ref from another workspace is not
    *  a credential this source may use, even though the same plugin instance
    *  can serve both workspaces. */
@@ -574,11 +603,11 @@ export function createPlugin(options) {
       // read-only viewer cannot drive it (and cannot evict another operator's
       // un-attested collection through the retention cap).
       requireScope(who, 'telemetry.source.write');
-      // collect persists a collection for attestation; a workload has no
-      // principal and therefore no attributable evidence.
-      const actorId = requireUser(who);
       const row = await store.getSource(requireUuidPath(collectMatch[1], 'SOURCE_NOT_FOUND'), who.workspaces);
       if (!row) throw Object.assign(new Error('no such source'), { status: 404, code: 'SOURCE_NOT_FOUND' });
+      // collect persists a collection for attestation; a workload has no
+      // principal, a user and an automation principal do.
+      const actorId = requireSourceActor(who, row, 'SOURCE_COLLECT');
       enforceSourceBinding(row);
       const body = await readJson(req);
       validateBudget(body.budget);
@@ -616,7 +645,6 @@ export function createPlugin(options) {
     const attestMatch = path.match(/^\/collections\/([^/]+)\/attestation$/);
     if (attestMatch && req.method === 'POST') {
       requireScope(who, 'telemetry.source.write');
-      requireUser(who);
       const collection = await store.getCollection(requireUuidPath(attestMatch[1], 'COLLECTION_NOT_FOUND'), who.workspaces);
       if (!collection) {
         throw Object.assign(new Error('no such collection, or it is no longer retained'), {
@@ -624,6 +652,7 @@ export function createPlugin(options) {
           code: 'COLLECTION_NOT_FOUND',
         });
       }
+      requireSourceActor(who, collection, 'EVIDENCE_APPEND');
       if (!adapterId || !adapterSecret) {
         // Refused rather than returned unsigned: an unsigned envelope would be
         // stored as UNVERIFIED while looking like attested evidence to a caller

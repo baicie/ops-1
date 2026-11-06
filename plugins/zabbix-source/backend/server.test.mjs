@@ -112,6 +112,33 @@ function workloadContext({ scopes = ['telemetry.source.read'], workspaces = [WOR
   });
 }
 
+function automationContext({ sourceId, workspaceId = WORKSPACE_A, ops = ['SOURCE_COLLECT', 'EVIDENCE_APPEND'] } = {}) {
+  const now = Math.floor(Date.now() / 1000);
+  return signContext({
+    keyHex: KEY_HEX,
+    prefix: 'owa1',
+    payload: {
+      v: 1,
+      kind: 'automation',
+      principalId: crypto.randomUUID(),
+      pluginId: PLUGIN_ID,
+      instanceId: '44444444-4444-4444-8444-444444444444',
+      nodeId: '55555555-5555-4555-8555-555555555555',
+      nodeGeneration: 1,
+      workspaceId,
+      sourceId,
+      allowedOps: ops,
+      eventId: null,
+      incidentId: null,
+      budget: { collections: 8 },
+      issuedAt: now,
+      expiresAt: now + 60,
+      jti: crypto.randomUUID(),
+      audience: 'opsweave-kernel',
+    },
+  });
+}
+
 async function startPlugin({ store = new MemoryStore(), adapter = true, workspaceSecretMap = null } = {}) {
   const plugin = createPlugin({
     store,
@@ -519,6 +546,62 @@ test('a workload identity needs an explicit workspace grant and cannot write', a
 
     const write = await call(base, `/api/zabbix-source/sources/${sourceId}/probe`, { method: 'POST', headers: workload });
     assert.equal(write.status, 403);
+  } finally {
+    await plugin.close();
+    await upstream.close();
+  }
+});
+
+test('an automation principal can collect and attest only its own source', async () => {
+  const upstream = await startFakeZabbix();
+  const { plugin, base } = await startPlugin();
+  try {
+    const sourceId = (await createSource(base, upstream)).body.sourceId;
+    const automation = {
+      'x-opsweave-automation-context': automationContext({ sourceId }),
+    };
+    const collected = await call(base, `/api/zabbix-source/sources/${sourceId}/collect`, {
+      method: 'POST',
+      headers: automation,
+      body: { itemIds: ['10401'], window: { from: '2026-11-01T02:00:00Z', to: '2026-11-01T03:00:00Z' } },
+    });
+    assert.equal(collected.status, 200, collected.text);
+    const attested = await call(base, `/api/zabbix-source/collections/${collected.body.collectionId}/attestation`, {
+      method: 'POST',
+      headers: automation,
+      body: { incidentId: INCIDENT_ID },
+    });
+    assert.equal(attested.status, 200, attested.text);
+    assert.equal(attested.body.evidence.attestation.workspaceId, WORKSPACE_A);
+
+    // A principal bound to another source cannot drive this one.
+    const otherSource = {
+      'x-opsweave-automation-context': automationContext({
+        sourceId: '99999999-9999-4999-8999-999999999999',
+      }),
+    };
+    const wrongSource = await call(base, `/api/zabbix-source/sources/${sourceId}/collect`, {
+      method: 'POST',
+      headers: otherSource,
+      body: {},
+    });
+    assert.equal(wrongSource.status, 403);
+    assert.equal(wrongSource.body.code, 'ZBX_USER_REQUIRED');
+
+    // A collect-only principal cannot attest the collection.
+    const collectOnly = {
+      'x-opsweave-automation-context': automationContext({
+        sourceId,
+        ops: ['SOURCE_COLLECT'],
+      }),
+    };
+    const forbidden = await call(base, `/api/zabbix-source/collections/${collected.body.collectionId}/attestation`, {
+      method: 'POST',
+      headers: collectOnly,
+      body: { incidentId: INCIDENT_ID },
+    });
+    assert.equal(forbidden.status, 403);
+    assert.equal(forbidden.body.code, 'ZBX_USER_REQUIRED');
   } finally {
     await plugin.close();
     await upstream.close();

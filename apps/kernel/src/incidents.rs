@@ -668,6 +668,90 @@ pub async fn append_evidence(
     Ok((status, Json(evidence)))
 }
 
+/// The automation path into the same evidence writer. The caller has already
+/// authenticated an `owa1` principal and verified that the incident belongs to
+/// its workspace; this function re-checks the incident status because an
+/// automation may not add evidence to a concluded/closed record.
+pub(crate) async fn append_automation_evidence(
+    state: &AppState,
+    principal_id: Uuid,
+    workspace_id: Uuid,
+    incident_id: Uuid,
+    evidence: serde_json::Value,
+) -> AppResult<Uuid> {
+    let row: Option<(Uuid, String)> =
+        sqlx::query_as("SELECT workspace_id, status FROM kernel.incidents WHERE incident_id=$1")
+            .bind(incident_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let Some((incident_workspace, status)) = row else {
+        return Err(incident_not_found());
+    };
+    if incident_workspace != workspace_id {
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "AUTOMATION_INCIDENT_FORBIDDEN",
+            "the incident does not belong to this automation workspace",
+        ));
+    }
+    match status.as_str() {
+        "OPEN" | "INVESTIGATING" => {}
+        "CONCLUDED" => {
+            return Err(AppError::conflict(
+                "INCIDENT_ALREADY_CONCLUDED",
+                "an automation may not add evidence after a human verdict",
+            ))
+        }
+        _ => {
+            return Err(AppError::conflict(
+                "INCIDENT_CLOSED",
+                "this incident is closed and accepts no new evidence",
+            ))
+        }
+    }
+    let payload: CreateEvidenceRequest = serde_json::from_value(evidence).map_err(|error| {
+        AppError::bad_request(format!("automation evidence is not valid: {error}"))
+    })?;
+    // `submitted_by` must reference a real kernel.users row; the non-login
+    // service user satisfies that FK. The audit actor remains the principal.
+    let caller = DataScope::for_automation(
+        Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).expect("service user id"),
+        workspace_id,
+    );
+    let (_, view) = insert_evidence_as(
+        &state.db,
+        &state.config.evidence_adapters,
+        caller,
+        "AUTOMATION",
+        principal_id,
+        incident_id,
+        payload,
+    )
+    .await?;
+    Ok(view.evidence_id)
+}
+
+/// Add the automation Event to the incident's existing audit timeline. This is
+/// what lets the current UI show Event -> Evidence -> Hypothesis -> Human
+/// Verdict without a second timeline screen.
+pub(crate) async fn audit_automation_event(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    principal_id: Uuid,
+    incident_id: Uuid,
+    details: serde_json::Value,
+) -> AppResult<()> {
+    audit_in_tx_as(
+        tx,
+        "INCIDENT_AUTOMATION_EVENT",
+        "AUTOMATION",
+        principal_id,
+        incident_id,
+        "AUTOMATION_EVENT",
+        details,
+    )
+    .await
+}
+
 pub async fn list_evidence(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -1133,6 +1217,22 @@ async fn insert_evidence(
     incident_id: Uuid,
     payload: CreateEvidenceRequest,
 ) -> AppResult<(bool, EvidenceView)> {
+    let actor_id = caller.user_id;
+    insert_evidence_as(db, adapters, caller, "USER", actor_id, incident_id, payload).await
+}
+
+/// The shared writer behind the user endpoint and the automation path. The
+/// actor type is chosen by the caller of this function (an authenticated route),
+/// never by evidence content.
+async fn insert_evidence_as(
+    db: &PgPool,
+    adapters: &HashMap<String, String>,
+    caller: DataScope,
+    actor_type: &'static str,
+    actor_id: Uuid,
+    incident_id: Uuid,
+    payload: CreateEvidenceRequest,
+) -> AppResult<(bool, EvidenceView)> {
     let kind = closed_set(&payload.kind, EVIDENCE_KINDS, "kind")?;
     let source = bounded(&payload.source, "source", 2, 200)?;
     check_collected_at(payload.collected_at)?;
@@ -1302,10 +1402,11 @@ async fn insert_evidence(
     .bind(incident_id)
     .execute(&mut *tx)
     .await?;
-    audit_in_tx(
+    audit_in_tx_as(
         &mut tx,
         "INCIDENT_EVIDENCE_ADDED",
-        caller.user_id,
+        actor_type,
+        actor_id,
         incident_id,
         "ADD_EVIDENCE",
         serde_json::json!({
@@ -2491,15 +2592,37 @@ async fn audit_in_tx(
     action: &str,
     details: serde_json::Value,
 ) -> AppResult<()> {
+    audit_in_tx_as(
+        tx,
+        event_type,
+        "USER",
+        actor_id,
+        incident_id,
+        action,
+        details,
+    )
+    .await
+}
+
+async fn audit_in_tx_as(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event_type: &str,
+    actor_type: &str,
+    actor_id: Uuid,
+    incident_id: Uuid,
+    action: &str,
+    details: serde_json::Value,
+) -> AppResult<()> {
     sqlx::query(
         r#"
         INSERT INTO kernel.audit_events
           (id, event_type, actor_type, actor_id, subject_type, subject_id, action, result, details, request_id, occurred_at)
-        VALUES ($1,$2,'USER',$3,'INCIDENT',$4,$5,'ACCEPTED',$6,NULL,$7)
+        VALUES ($1,$2,$3,$4,'INCIDENT',$5,$6,'ACCEPTED',$7,NULL,$8)
         "#,
     )
     .bind(Uuid::new_v4())
     .bind(event_type)
+    .bind(actor_type)
     .bind(actor_id.to_string())
     .bind(incident_id.to_string())
     .bind(action)

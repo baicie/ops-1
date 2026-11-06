@@ -45,7 +45,7 @@ jti: uuid
 audience: "opsweave-kernel"
 ```
 
-签名密钥为 Kernel 的 automation signing key（独立于 `cursor_secret` 与 per-plugin caller key），按 `pluginId` 派生；插件只验证，不能签发。签发端点 `POST /internal/v1/automation/principals` 只接受：
+签名密钥与 per-plugin caller key 相同（`HMAC(cursor_secret, "caller-context:"+pluginId)`），插件已通过 `OPSWEAVE_CALLER_CONTEXT_KEY` 持有它，因此只增加验证能力、不增加签发能力；Kernel 仍是唯一签发者。签发端点 `POST /internal/v1/nodes/{node_id}/automation-principals` 由 Node control credential 调用，只接受：
 
 1. 由 Kernel 签发的 instance workload identity，且 `instanceId/nodeId/nodeGeneration` 与当前 live instance 一致；
 2. `sourceId` 在 Kernel 的 **telemetry source 注册表**中属于 `pluginId` 且 `state=READY`；

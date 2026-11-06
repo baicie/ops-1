@@ -49,6 +49,8 @@ pub struct EventResponse {
     pub event_id: Uuid,
     pub incident_id: Option<Uuid>,
     pub deduplicated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automation: Option<crate::automation_flow::AutomationRunView>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -193,6 +195,7 @@ pub async fn ingest(
                 event_id: existing.event_id,
                 incident_id: existing.incident_id,
                 deduplicated: true,
+                automation: None,
             }),
         ));
     }
@@ -207,14 +210,42 @@ pub async fn ingest(
                     event_id: existing.event_id,
                     incident_id: existing.incident_id,
                     deduplicated: true,
+                    automation: None,
                 }),
             ));
         }
         return Err(error);
     }
 
-    let outcome = store_event(&state.db, &principal, &req, &key).await?;
-    Ok((outcome.0, Json(outcome.1)))
+    let (status, mut response) = store_event(&state.db, &principal, &req, &key).await?;
+    if req.trigger_state == "PROBLEM" {
+        if let Some(incident_id) = response.incident_id {
+            match crate::automation_flow::collect_and_append(
+                &state,
+                &principal,
+                incident_id,
+                req.source_id,
+            )
+            .await
+            {
+                Ok(run) => response.automation = Some(run),
+                Err(error) => {
+                    crate::automation_flow::record_failure(
+                        &state,
+                        &principal,
+                        incident_id,
+                        req.source_id,
+                        &error,
+                    )
+                    .await;
+                    response.automation = Some(crate::automation_flow::AutomationRunView::failed(
+                        error.code,
+                    ));
+                }
+            }
+        }
+    }
+    Ok((status, Json(response)))
 }
 
 async fn find_event(
@@ -346,8 +377,25 @@ async fn store_event(
                 event_id: existing.event_id,
                 incident_id: existing.incident_id,
                 deduplicated: true,
+                automation: None,
             },
         ));
+    }
+
+    if let Some(incident_id) = incident_id {
+        crate::incidents::audit_automation_event(
+            &mut tx,
+            principal.principal_id(),
+            incident_id,
+            json!({
+                "eventId": event_id,
+                "nativeId": req.native_id.trim(),
+                "triggerState": req.trigger_state,
+                "severity": req.severity,
+                "late": late,
+            }),
+        )
+        .await?;
     }
 
     crate::audit::record_in_tx(
@@ -378,6 +426,7 @@ async fn store_event(
             event_id,
             incident_id,
             deduplicated: false,
+            automation: None,
         },
     ))
 }

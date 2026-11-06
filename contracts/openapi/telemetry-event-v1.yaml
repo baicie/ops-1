@@ -41,8 +41,9 @@ paths:
                 required: [eventId, incidentId, deduplicated]
                 properties:
                   eventId: {type: string, format: uuid}
-                  incidentId: {type: string, format: uuid}
+                  incidentId: {type: [string, 'null'], format: uuid}
                   deduplicated: {type: boolean, enum: [false]}
+                  automation: {$ref: '#/components/schemas/AutomationRun'}
         '200':
           description: Idempotent retry returned the original identifiers
           content:
@@ -52,8 +53,9 @@ paths:
                 required: [eventId, incidentId, deduplicated]
                 properties:
                   eventId: {type: string, format: uuid}
-                  incidentId: {type: string, format: uuid}
+                  incidentId: {type: [string, 'null'], format: uuid}
                   deduplicated: {type: boolean, enum: [true]}
+                  automation: {$ref: '#/components/schemas/AutomationRun'}
         '401':
           description: Missing, invalid, expired or stale automation principal
           content:
@@ -81,6 +83,17 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
 components:
   schemas:
+    AutomationRun:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {type: string, enum: [COLLECTED, FAILED]}
+        collectionId: {type: [string, 'null'], format: uuid}
+        evidenceId: {type: [string, 'null'], format: uuid}
+        code:
+          type: [string, 'null']
+          description: Stable failure code when status is FAILED; never an upstream body.
     Error:
       type: object
       required: [code, message]
