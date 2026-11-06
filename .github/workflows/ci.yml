@@ -161,6 +161,40 @@ jobs:
       - run: npm ci --prefix plugins/zabbix-source/backend
       - name: plugin bytes -> Kernel verification -> content read-back
         run: node tests/ci/g13a_evidence_roundtrip.mjs
+  # The decomposed and two-process suites cannot prove a deployed plugin. This
+  # job runs the production path: a real Kernel, a real Node runtime pulling the
+  # OCI image, the Kernel Gateway, a real PostgreSQL and the browser. It builds
+  # the UI under test from the #39 stack branch so the browser is the real
+  # collect dialog, not a fixture. Upstream Zabbix is a local fixture and the
+  # run says so; REAL_ZABBIX remains NOT_RUN.
+  g13a1-gateway:
+    runs-on: ubuntu-latest
+    env:
+      OPSWEAVE_REGISTRY: 127.0.0.1:5001
+      OPSWEAVE_PULL_REGISTRY: 172.17.0.1:5001
+      PLUGIN_HOST: 172.17.0.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
+      - run: ./target/debug/opsctl keygen --out-dir keys
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: npm ci --prefix plugins/zabbix-source/backend
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
+      - name: build the UI under test from the #39 stack branch
+        run: |
+          set -euo pipefail
+          git fetch origin feat/g13-a-collect-ui
+          git branch -f feat/g13-a-collect-ui origin/feat/g13-a-collect-ui
+          git worktree add /tmp/g13a1-ui feat/g13-a-collect-ui
+          (cd /tmp/g13a1-ui && pnpm install --frozen-lockfile && pnpm --filter @opsweave/platform-web build)
+          cp -R /tmp/g13a1-ui/apps/platform-web/dist /tmp/g13a1-ui-dist
+      - run: docker run -d --name opsweave-g13a1-registry -p 5001:5000 registry:2
+      - name: browser -> Gateway -> Node -> OCI plugin -> fixture
+        run: bash tests/ci/g13a1_gateway_e2e.sh
   # V3 brief §9: "截图不允许无上限提交 Git；仅保留精选基线，其余归档为 CI Artifact."
   # Nine runs of tests/ui/admin-polish.spec.ts accumulated 756 SHA-named screenshots (127.95 MB) of
   # the same seven admin pages because no job ever looked at what the index was carrying. The
