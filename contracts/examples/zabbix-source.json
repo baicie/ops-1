@@ -1,5 +1,6 @@
 {
   "sourceId": "9f1c4d2e-6b70-4a1f-9c33-2b8de4a51c07",
+  "workspaceId": "0b7e2f4a-1c9d-4e6b-8a3f-5d2c7e9b1a44",
   "name": "zabbix-main",
   "endpoint": "https://zabbix.example.invalid/api_jsonrpc.php",
   "credential": {"kind": "api-token", "ref": "secretref:zabbix/main/api-token"},

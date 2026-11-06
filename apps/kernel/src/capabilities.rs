@@ -881,15 +881,64 @@ fn context_key(state: &AppState, plugin_id: &str) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
-fn sign_claims_with_key(key: &[u8], claims: &WorkloadClaims) -> AppResult<String> {
+fn sign_payload_with_key<T: Serialize>(key: &[u8], prefix: &str, claims: &T) -> AppResult<String> {
     let payload = serde_json::to_vec(claims).map_err(AppError::from)?;
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
     let mut mac = HmacSha256::new_from_slice(key)
-        .map_err(|_| AppError::internal("workload signing key is invalid"))?;
+        .map_err(|_| AppError::internal("context signing key is invalid"))?;
     mac.update(encoded.as_bytes());
     let signature =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    Ok(format!("{TOKEN_PREFIX}.{encoded}.{signature}"))
+    Ok(format!("{prefix}.{encoded}.{signature}"))
+}
+
+fn sign_claims_with_key(key: &[u8], claims: &WorkloadClaims) -> AppResult<String> {
+    sign_payload_with_key(key, TOKEN_PREFIX, claims)
+}
+
+const USER_TOKEN_PREFIX: &str = "owu1";
+const USER_CONTEXT_TTL_SECONDS: i64 = 120;
+
+/// What the Gateway tells a plugin about a user request.
+///
+/// It carries the Kernel's authoritative answer to "which business workspaces
+/// may this caller enter" at the instant of the call, instead of leaving the
+/// plugin to trust a workspace id from the request body. The token is bound to
+/// one plugin by the key it is signed with, so a plugin cannot replay it at a
+/// sibling.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UserContextClaims<'a> {
+    v: u8,
+    user_id: Uuid,
+    role: &'a str,
+    plugin_id: &'a str,
+    workspace_ids: Vec<Uuid>,
+    issued_at: i64,
+    expires_at: i64,
+    request_id: &'a str,
+}
+
+pub(crate) fn user_context_token(
+    state: &AppState,
+    plugin_id: &str,
+    user_id: Uuid,
+    role: &str,
+    workspace_ids: Vec<Uuid>,
+    request_id: &str,
+) -> AppResult<String> {
+    let issued_at = Utc::now().timestamp();
+    let claims = UserContextClaims {
+        v: 1,
+        user_id,
+        role,
+        plugin_id,
+        workspace_ids,
+        issued_at,
+        expires_at: issued_at + USER_CONTEXT_TTL_SECONDS,
+        request_id,
+    };
+    sign_payload_with_key(&context_key(state, plugin_id), USER_TOKEN_PREFIX, &claims)
 }
 
 fn sign_claims(state: &AppState, claims: &WorkloadClaims) -> AppResult<String> {
@@ -1045,6 +1094,48 @@ mod tests {
         tampered[last] = if tampered[last] == b'a' { b'b' } else { b'a' };
         assert!(
             super::verify_claims_with_key(key, std::str::from_utf8(&tampered).unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn a_user_context_is_bound_to_one_plugin_key() {
+        use base64::Engine;
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        let key = [7u8; 32];
+        let claims = super::UserContextClaims {
+            v: 1,
+            user_id: uuid::Uuid::nil(),
+            role: "operator",
+            plugin_id: "opsweave.zabbix-source",
+            workspace_ids: vec![uuid::Uuid::nil()],
+            issued_at: 1,
+            expires_at: 2,
+            request_id: "request-1",
+        };
+        let token = super::sign_payload_with_key(&key, super::USER_TOKEN_PREFIX, &claims).unwrap();
+        let mut parts = token.split('.');
+        assert_eq!(parts.next(), Some("owu1"));
+        let encoded = parts.next().expect("payload");
+        let signature = parts.next().expect("signature");
+        assert!(parts.next().is_none());
+
+        let mut mac = Hmac::<Sha256>::new_from_slice(&key).unwrap();
+        mac.update(encoded.as_bytes());
+        let expected =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        assert_eq!(
+            signature, expected,
+            "the signature covers the encoded claims"
+        );
+
+        let mut other = Hmac::<Sha256>::new_from_slice(&[8u8; 32]).unwrap();
+        other.update(encoded.as_bytes());
+        let wrong =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(other.finalize().into_bytes());
+        assert_ne!(
+            signature, wrong,
+            "another plugin's key cannot produce this token"
         );
     }
 }

@@ -219,6 +219,12 @@ test('/app/incidents renders the real list and its boundary, never a sample or a
   // be missing. A page that shows real records owes the reader that much.
   const boundary = page.getByTestId('incidents-boundary');
   await expect(boundary).toBeVisible();
+  // The page keeps the six statements behind a disclosure, so the collapsed innerText is only the
+  // summary. Open it and measure the text a reader can actually read; the old assertion measured
+  // the summary and passed only while the panel happened to render expanded.
+  await boundary.locator('summary').click();
+  await expect(boundary.locator('details')).toHaveAttribute('open', '');
+  await expect(page.getByTestId('incidents-boundary-collectors')).toBeVisible();
   expect((await boundary.innerText()).length).toBeGreaterThan(160);
 
   // The three filters are the ones the list endpoint implements, and they are controls.

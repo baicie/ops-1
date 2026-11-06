@@ -14,8 +14,10 @@ import crypto from 'node:crypto';
 
 import {
   BUDGET_CEILING,
+  EVIDENCE_CONTENT_MAX_BYTES,
   assertEndpoint,
   attestationPayload,
+  buildEvidence,
   collect,
   collectionOutcome,
   contentRef,
@@ -599,4 +601,48 @@ test('the outbound guard refuses loopback, private, metadata and credential URLs
   // A public literal still resolves, so the guard is a filter and not a wall.
   const allowed = await assertEndpoint('https://8.8.8.8/api_jsonrpc.php');
   assert.equal(allowed.url.hostname, '8.8.8.8');
+});
+
+
+test('a 500-series collection is bounded to 64 KiB, not by an iteration budget', () => {
+  const samples = (count) => Array.from({ length: count }, (_, index) => ({
+    occurredAt: '2026-11-01T00:30:00Z',
+    value: index,
+    absenceReason: null,
+  }));
+  const series = Array.from({ length: 500 }, (_, index) => ({
+    itemId: String(10000 + index),
+    hostId: '10084',
+    key: `system.metric.${index}`,
+    unit: '%',
+    outcome: 'OK',
+    requestedWindow: WINDOW,
+    coveredWindow: WINDOW,
+    samples: samples(5),
+  }));
+  const result = {
+    sourceId: SOURCE.sourceId,
+    outcome: 'OK',
+    requestedItems: 500,
+    answeredItems: 500,
+    clamped: [],
+    series,
+    budget: { maxWindowSeconds: 3600, maxItems: 500, maxSamplesPerItem: 5000, requestTimeoutMs: 30000, maxConcurrency: 4 },
+    observedAt: '2026-11-01T01:00:00Z',
+  };
+  const evidence = buildEvidence(result);
+  assert.equal(evidence.outcome, 'PARTIAL');
+  assert.ok(evidence.snapshot, 'an over-bound collection must carry a snapshot');
+  assert.ok(
+    Buffer.byteLength(evidence.body, 'utf8') <= EVIDENCE_CONTENT_MAX_BYTES,
+    `body is ${Buffer.byteLength(evidence.body, 'utf8')} bytes, over the 64 KiB bound`,
+  );
+  assert.ok(evidence.snapshot.returnedSamples < evidence.snapshot.requestedSamples);
+  assert.equal(evidence.snapshot.requestedSamples, 2500);
+  assert.match(evidence.contentRef, /^sha256:[0-9a-f]{64}$/);
+
+  // The pathological shape that used to overflow the hardest: 500 series with
+  // no samples at all. Metadata alone must still fit.
+  const empty = buildEvidence({ ...result, series: series.map((entry) => ({ ...entry, samples: [] })) });
+  assert.ok(Buffer.byteLength(empty.body, 'utf8') <= EVIDENCE_CONTENT_MAX_BYTES);
 });

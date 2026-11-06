@@ -104,6 +104,71 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @opsweave/platform-web test
+  # The Zabbix plugin had no CI at all: package.json pointed at a server.test.mjs that did not
+  # exist, and node --check does not resolve imports, so the server could not be proven to start.
+  # This job binds a real socket and runs a real PostgreSQL, which is the only evidence that the
+  # plugin's routes and storage work outside one workstation. Real Zabbix remains NOT_RUN.
+  zabbix-plugin:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave_zabbix
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave_zabbix"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      OPSWEAVE_TEST_PLUGIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave_zabbix
+      # A persistence gate that skips when the database is missing is not a gate.
+      OPSWEAVE_REQUIRE_PLUGIN_DATABASE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --prefix plugins/zabbix-source/backend
+      - name: unit tests and the real HTTP socket suite
+        run: node --test plugins/zabbix-source/backend/zabbix.test.mjs plugins/zabbix-source/backend/server.test.mjs
+      - name: source and collection persistence against real PostgreSQL
+        run: node --test plugins/zabbix-source/backend/storage.test.mjs
+  # The decomposed suites cannot prove a round trip: two implementations of the
+  # same digest can both be wrong. This job starts a real Kernel, a real plugin
+  # process and a real PostgreSQL, and checks that the bytes the plugin signed
+  # are the bytes the Kernel verified, stored and served.
+  g13a-roundtrip:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      G13A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: cargo build --locked -p opsweave-kernel
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --prefix plugins/zabbix-source/backend
+      - name: plugin bytes -> Kernel verification -> content read-back
+        run: node tests/ci/g13a_evidence_roundtrip.mjs
   # V3 brief §9: "截图不允许无上限提交 Git；仅保留精选基线，其余归档为 CI Artifact."
   # Nine runs of tests/ui/admin-polish.spec.ts accumulated 756 SHA-named screenshots (127.95 MB) of
   # the same seven admin pages because no job ever looked at what the index was carrying. The

@@ -1160,6 +1160,19 @@ async fn insert_evidence(
     };
     let trust = resolve_evidence_trust(adapters, &tuple, &payload)?;
 
+    // G13-A: an attestation is a statement about bytes the Kernel will store and
+    // re-check. Accepting a Legacy contentRef alongside it would record
+    // SOURCE_ATTESTED for a digest no stored content backs - the signature would
+    // vouch for something the Kernel never saw. The refusal is after signature
+    // verification so a forged attestation still gets its named 401 first.
+    if payload.attestation.is_some() && content.is_none() {
+        return Err(AppError::new(
+            StatusCode::BAD_REQUEST,
+            "EVIDENCE_ATTESTATION_REQUIRES_CONTENT",
+            "an attested evidence row must carry content: the Kernel verifies the signature over a digest it derives from the stored bytes, not one the caller supplied",
+        ));
+    }
+
     let status = incident_status(db, caller.clone(), incident_id).await?;
     if status == "CLOSED" {
         return Err(AppError::conflict(
@@ -5036,18 +5049,23 @@ mod tests {
 
         let collected_at = Utc::now();
         let issued_at = Utc::now();
-        let payload = attested_request(
-            &tuple(
-                incident.id,
-                "METRIC_SNAPSHOT",
-                "zabbix",
-                "sha256:attested-1",
-                collected_at,
-            ),
-            ADAPTER_ID,
-            ADAPTER_SECRET,
-            issued_at,
+        let body = "{\"outcome\":\"OK\"}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix",
+            &content_ref,
+            collected_at,
         );
+        let mut payload = attested_request(&bound, ADAPTER_ID, ADAPTER_SECRET, issued_at);
+        // Since G13-A an attestation must point at bytes the Kernel will store
+        // and re-digest; the reference alone is no longer enough.
+        payload.content_ref = Some(content_ref.clone());
+        payload.content = Some(EvidenceContentRequest {
+            content_type: "application/json".to_string(),
+            body: body.to_string(),
+        });
         let (created, row) =
             insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
                 .await
@@ -5062,6 +5080,151 @@ mod tests {
         // different questions and are stored separately.
         assert_eq!(row.claimed_trust, "OPERATOR_ASSERTED");
 
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// G13-A: the plugin's exact bytes and its signature meet in one write.
+    ///
+    /// The signature covers a `contentRef`; the Kernel derives that ref from the
+    /// bytes it is about to store and refuses a mismatch. This test proves the
+    /// three facts line up in one transaction - the signature verifies, the
+    /// stored bytes are byte-identical, and a ref that does not describe those
+    /// bytes writes nothing.
+    #[tokio::test]
+    async fn a_plugin_signed_snapshot_is_stored_byte_for_byte_and_attested() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("signed snapshot", None),
+        )
+        .await
+        .unwrap();
+
+        // Multi-byte content and a non-trivial key order: the digest is over the
+        // bytes, not over a re-serialized object.
+        let body = r#"{"outcome":"OK","observedAt":"2026-11-01T03:00:00Z","requestedItems":1,"series":[{"itemId":"10401","samples":[{"occurredAt":"2026-11-01T02:30:00Z","value":17.5}],"unit":"%"}]}"#;
+        let digest = digest_of(body.as_bytes());
+        let content_ref = format!("sha256:{digest}");
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+
+        let mut payload = content_request("application/json", body);
+        payload.content_ref = Some(content_ref.clone());
+        payload.source = "zabbix:source-1".to_string();
+        payload.collected_at = collected_at;
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-1",
+            &content_ref,
+            collected_at,
+        );
+        payload.attestation =
+            attested_request(&bound, ADAPTER_ID, ADAPTER_SECRET, issued_at).attestation;
+
+        let (created, row) =
+            insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
+                .await
+                .unwrap();
+        assert!(created);
+        assert_eq!(row.verified_trust, "SOURCE_ATTESTED");
+        assert_eq!(row.verification_method, "SOURCE_ADAPTER");
+        assert_eq!(row.content_ref, content_ref);
+        assert_eq!(row.content_status, "STORED");
+
+        let (stored, stored_digest, stored_bytes): (Vec<u8>, String, i32) = sqlx::query_as(
+            "SELECT body, sha256, content_bytes FROM kernel.incident_evidence_content WHERE evidence_id=$1",
+        )
+        .bind(row.evidence_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored,
+            body.as_bytes(),
+            "the Kernel stored exactly the submitted bytes"
+        );
+        assert_eq!(stored_digest, digest);
+        assert_eq!(stored_bytes, body.len() as i32);
+
+        // The same bytes with a ref that does not describe them: the signature
+        // can verify (it signs that wrong ref) and the write still must fail,
+        // because the digest check is independent of the signature.
+        let mut mismatched = content_request("application/json", body);
+        let wrong_ref = format!("sha256:{}", "0".repeat(64));
+        mismatched.content_ref = Some(wrong_ref.clone());
+        mismatched.source = "zabbix:source-1".to_string();
+        mismatched.collected_at = collected_at;
+        let wrong_bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-1",
+            &wrong_ref,
+            collected_at,
+        );
+        mismatched.attestation =
+            attested_request(&wrong_bound, ADAPTER_ID, ADAPTER_SECRET, issued_at).attestation;
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, mismatched)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_CONTENT_REF_CONFLICT");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1, "a refused write leaves no second row");
+
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// An attestation with no bytes has nothing for the Kernel to digest, so it
+    /// is refused even though the signature itself is valid.
+    #[tokio::test]
+    async fn an_attestation_without_content_is_refused() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("attested without bytes", None),
+        )
+        .await
+        .unwrap();
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let payload = attested_request(
+            &tuple(
+                incident.id,
+                "METRIC_SNAPSHOT",
+                "zabbix",
+                "sha256:no-bytes",
+                collected_at,
+            ),
+            ADAPTER_ID,
+            ADAPTER_SECRET,
+            issued_at,
+        );
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, payload)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_REQUIRES_CONTENT");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(incident.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 0, "a refused attestation writes nothing");
         cleanup(&pool, &[user]).await;
     }
 
@@ -5204,7 +5367,7 @@ mod tests {
             &no_adapters(),
             caller(user),
             incident.id,
-            evidence_request("sha256:settled"),
+            content_request("application/json", "{}"),
         )
         .await
         .unwrap();
@@ -5212,18 +5375,25 @@ mod tests {
         assert_eq!(first.verified_trust, "OPERATOR_ASSERTED");
 
         let issued_at = Utc::now();
-        let upgrade = attested_request(
+        let mut upgrade = attested_request(
             &tuple(
                 incident.id,
                 "METRIC_SNAPSHOT",
                 "prometheus",
-                "sha256:settled",
+                &first.content_ref,
                 first.collected_at,
             ),
             ADAPTER_ID,
             ADAPTER_SECRET,
             issued_at,
         );
+        // The replay carries the same bytes, so the tuple is identical and the
+        // attestation has content for the Kernel to verify.
+        upgrade.content_ref = Some(first.content_ref.clone());
+        upgrade.content = Some(EvidenceContentRequest {
+            content_type: "application/json".to_string(),
+            body: "{}".to_string(),
+        });
         let (created_again, second) =
             insert_evidence(&pool, &adapters(), caller(user), incident.id, upgrade)
                 .await

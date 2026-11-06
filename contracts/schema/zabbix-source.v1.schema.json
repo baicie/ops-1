@@ -28,9 +28,14 @@
       "type": "object",
       "description": "One configured Zabbix endpoint. `status` is what the plugin last verified, not what the operator hopes: a source is UNVERIFIED until a probe succeeds, and it never silently becomes READY.",
       "additionalProperties": false,
-      "required": ["sourceId", "name", "endpoint", "credential", "status", "createdAt"],
+      "required": ["sourceId", "workspaceId", "name", "endpoint", "credential", "status", "createdAt"],
       "properties": {
         "sourceId": { "type": "string", "format": "uuid" },
+        "workspaceId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The business workspace that owns this source. Decided from the Kernel-signed caller context at creation and immutable afterwards; a source is visible only to callers whose signed scope contains this workspace."
+        },
         "name": { "type": "string", "minLength": 2, "maxLength": 120 },
         "endpoint": {
           "type": "string",
@@ -61,7 +66,7 @@
       "properties": {
         "maxWindowSeconds": { "type": "integer", "minimum": 60, "maximum": 86400, "default": 3600 },
         "maxItems": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100 },
-        "maxSamplesPerItem": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 500 },
+        "maxSamplesPerItem": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 1000 },
         "requestTimeoutMs": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 10000 },
         "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 8, "default": 2 }
       }
@@ -168,9 +173,10 @@
         "requestedItems": { "type": "integer", "minimum": 0 },
         "answeredItems": { "type": "integer", "minimum": 0 },
         "clamped": {
-          "type": "boolean",
-          "default": false,
-          "description": "True when a budget ceiling changed what was collected. A clamped collection is never reported as OK."
+          "type": "array",
+          "items": { "type": "string", "maxLength": 80 },
+          "default": [],
+          "description": "What a budget ceiling changed, named rather than reduced to a boolean: `budget.maxItems`, `budget.maxWindowSeconds`, `window`, `items`. A clamped collection is never reported as OK. An empty array means nothing was clamped."
         },
         "series": { "type": "array", "items": { "$ref": "#/$defs/ItemSeries" }, "maxItems": 500 },
         "budget": { "$ref": "#/$defs/CollectionBudget" },
@@ -179,8 +185,36 @@
         "contentRef": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "Content digest of the canonical collection body. This is the locator the Kernel stores on an evidence row and the exact string the attestation signature covers; the payload itself never enters the Kernel database (incident-v1.yaml)."
+          "description": "Content digest of the canonical evidence snapshot body. This is the locator the Kernel stores on an evidence row and the exact string the attestation signature covers; the exact bytes are returned by the attestation endpoint and stored by the Kernel (incident-v1.yaml)."
+        },
+        "snapshot": { "$ref": "#/$defs/EvidenceSnapshot" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["snapshot"],
+            "properties": { "snapshot": { "required": ["truncated"], "properties": { "truncated": { "const": true } } } }
+          },
+          "then": {
+            "properties": { "outcome": { "const": "PARTIAL" } },
+            "description": "A truncated evidence snapshot is PARTIAL by construction; the contract refuses a truncated body labelled OK."
+          }
         }
+      ]
+    },
+    "EvidenceSnapshot": {
+      "type": "object",
+      "description": "What was left out when a collection was reduced to fit the Kernel's 65536-byte evidence-content bound. Present only when truncation happened; absent means the bytes signed are the complete canonical collection body. A truncated snapshot is PARTIAL by construction and must never be presented as the full window.",
+      "additionalProperties": false,
+      "required": ["maxBytes", "originalBytes", "truncated", "reason", "requestedSamples", "returnedSamples", "droppedSeries"],
+      "properties": {
+        "maxBytes": { "type": "integer", "const": 65536 },
+        "originalBytes": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "reason": { "type": "string", "enum": ["CONTENT_LIMIT"] },
+        "requestedSamples": { "type": "integer", "minimum": 0 },
+        "returnedSamples": { "type": "integer", "minimum": 0 },
+        "droppedSeries": { "type": "integer", "minimum": 0 }
       }
     },
     "EvidenceAttestation": {
