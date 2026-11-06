@@ -98,9 +98,14 @@ export function secretConfiguration(env = process.env) {
     // another workspace's credential.
     return { mode: 'workspace', workspaceSecrets: parseWorkspaceSecretMap(env.OPSWEAVE_PLUGIN_SECRETS), secrets: {} };
   }
-  if (env.NODE_ENV !== 'production' && env.OPSWEAVE_ZABBIX_SECRETS) {
-    // Developer-only flat map; the Docker image sets NODE_ENV=production, so a
-    // deployment never takes this path.
+  if (
+    env.OPSWEAVE_ALLOW_DEV_SECRETS === '1' &&
+    env.NODE_ENV !== 'production' &&
+    env.OPSWEAVE_ZABBIX_SECRETS
+  ) {
+    // Developer-only flat map. The explicit flag is the primary condition:
+    // NODE_ENV alone is too easy to omit or override, and this mode drops the
+    // endpoint-binding requirement. A deployment never sets the flag.
     return { mode: 'dev', workspaceSecrets: null, secrets: parseSecretMap(env.OPSWEAVE_ZABBIX_SECRETS) };
   }
   return { mode: 'none', workspaceSecrets: null, secrets: {} };

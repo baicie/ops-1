@@ -60,6 +60,7 @@ attacker Authorization log -> ["Bearer g13a2-secret-token"]
 - `VERIFY`：https + `verifyTls !== false`；否则 403。
 - `TEST_PLAINTEXT`：http/关闭校验，但必须同时有部署显式 flag；flag 由 Kernel 注入，生产默认关闭。
 - `basic`：`Authorization: Basic base64(user:password)`；无冒号 → 422。`api-token` 仍是 Bearer。
+- 开发用的扁平 `OPSWEAVE_ZABBIX_SECRETS` 现在必须同时满足 `OPSWEAVE_ALLOW_DEV_SECRETS=1` 与 `NODE_ENV !== production`；NODE_ENV 不是唯一开关，未显式允许时无凭据（fail closed）。
 
 ### 3.3 生命周期
 

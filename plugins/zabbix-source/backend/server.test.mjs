@@ -766,9 +766,16 @@ test('the plugin reads the Kernel-delivered secret map first and never reports v
 
   const dev = secretConfiguration({
     NODE_ENV: 'test',
+    OPSWEAVE_ALLOW_DEV_SECRETS: '1',
     OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
   });
   assert.equal(dev.mode, 'dev');
+  // NODE_ENV alone is not a security switch: without the explicit flag the
+  // developer map is ignored and the process has no credentials (fail closed).
+  assert.equal(secretConfiguration({
+    NODE_ENV: 'test',
+    OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
+  }).mode, 'none');
   assert.equal(secretConfiguration({}).mode, 'none');
   // A production process never takes the developer fallback.
   assert.equal(secretConfiguration({ NODE_ENV: 'production', OPSWEAVE_ZABBIX_SECRETS: '{"secretref:x":"y"}' }).mode, 'none');
