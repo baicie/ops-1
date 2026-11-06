@@ -42,7 +42,7 @@ export const BUDGET_DEFAULT = Object.freeze({
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 /** The signed-payload version tag. Must match the Kernel's ATTESTATION_VERSION. */
-export const ATTESTATION_VERSION = 'opsweave-evidence-attestation-v1';
+export const ATTESTATION_VERSION = 'opsweave-evidence-attestation-v2';
 
 const ALLOW_LOOPBACK = process.env.OPSWEAVE_ALLOW_LOOPBACK_SOURCE === '1';
 const ALLOWED_PRIVATE_HOSTS = new Set(
@@ -263,8 +263,21 @@ export async function rpc({ endpoint, method, params, secret, timeoutMs, verifyT
         headers,
         timeout: timeoutMs,
         rejectUnauthorized: verifyTls,
-        lookup: (_hostname, _options, callback) =>
-          callback(null, addresses[0].address, addresses[0].family === 6 ? 6 : 4),
+        lookup: (_hostname, options, callback) => {
+          // Node 22's autoSelectFamily asks lookup for the whole address list
+          // (`options.all`) and expects an array of {address, family}. Returning
+          // a single string here produced ERR_INVALID_IP_ADDRESS for every
+          // DNS-named endpoint - the container could reach host.docker.internal
+          // with fetch but not through this client.
+          if (options && options.all) {
+            callback(null, addresses.map((entry) => ({
+              address: entry.address,
+              family: entry.family === 6 ? 6 : 4,
+            })));
+            return;
+          }
+          callback(null, addresses[0].address, addresses[0].family === 6 ? 6 : 4);
+        },
       },
       (response) => {
         const status = response.statusCode || 0;
@@ -930,10 +943,14 @@ export function contentRef(result) {
  * this plugin's tests are the same string, which is what stops the two sides
  * drifting into a state where every signature silently fails.
  */
-export function attestationPayload({ adapterId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
+export function attestationPayload({ adapterId, workspaceId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
   return JSON.stringify({
     v: ATTESTATION_VERSION,
     adapterId,
+    // G13-A.1: the workspace is signed. It comes from the persisted collection
+    // and the Kernel checks it against the incident's own record; it is never
+    // taken from a request body.
+    workspaceId,
     incidentId,
     kind,
     source,
@@ -949,13 +966,16 @@ export function attestationPayload({ adapterId, incidentId, kind, source, collec
  * The secret is the adapter's own, shared only with the Kernel. It never leaves
  * this function and is not part of the returned envelope.
  */
-export function signAttestation({ adapterId, secret, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
+export function signAttestation({ adapterId, workspaceId, secret, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt }) {
   if (!adapterId || !secret) {
     throw badRequest('ZABBIX_ADAPTER_UNCONFIGURED', 'no adapter identity is configured, so this collection cannot be attested');
   }
-  const payload = attestationPayload({ adapterId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt });
+  if (typeof workspaceId !== 'string' || !workspaceId) {
+    throw badRequest('ZABBIX_WORKSPACE_REQUIRED', 'a collection without a workspace cannot be signed');
+  }
+  const payload = attestationPayload({ adapterId, workspaceId, incidentId, kind, source, collectedAt, contentRef: ref, issuedAt });
   const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
-  return { adapterId, issuedAt: new Date(issuedAt).toISOString(), signature };
+  return { adapterId, workspaceId, issuedAt: new Date(issuedAt).toISOString(), signature };
 }
 
 // ---------------------------------------------------------------------------

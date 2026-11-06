@@ -298,15 +298,62 @@ async function main() {
   if (concluded.body.humanVerdict?.verdict !== 'CONFIRMED') throw new Error('human verdict was not recorded');
   log('human verdict CONFIRMED written separately from the AI hypothesis');
 
-  // A workspace outside the signed scope cannot see or use the source.
+  // G13-A.1: the same operator belongs to A and B. A source and collection in B
+  // must not become evidence on an A incident, even with a genuine signature.
   const other = await api('POST', '/api/v1/business-workspaces', { key: `g13a-b-${process.pid}`, name: 'G13-A other' });
   const otherWorkspace = other.body.workspaceId;
+  const otherMember = await api('POST', `/api/v1/business-workspaces/${otherWorkspace}/members`, { userId: adminId });
+  if (otherMember.status !== 201 && otherMember.status !== 200) throw new Error(`other membership failed: ${otherMember.status} ${otherMember.text}`);
   const contextB = userContext([otherWorkspace]);
+
+  const createdB = await pluginCall('POST', '/api/zabbix-source/sources', {
+    context: contextB,
+    body: {
+      workspaceId: otherWorkspace,
+      name: 'zabbix-b',
+      endpoint: 'http://127.0.0.1:18090/api_jsonrpc.php',
+      credential: { kind: 'api-token', ref: 'secretref:g13a/test' },
+    },
+  });
+  if (createdB.status !== 201) throw new Error(`workspace B source failed: ${createdB.status} ${createdB.text}`);
+  const collectedB = await pluginCall('POST', `/api/zabbix-source/sources/${createdB.body.sourceId}/collect`, {
+    context: contextB,
+    body: {
+      itemIds: ['10401'],
+      window: { from: new Date(Date.now() - 3600_000).toISOString(), to: new Date().toISOString() },
+    },
+  });
+  if (collectedB.status !== 200) throw new Error(`workspace B collection failed: ${collectedB.status} ${collectedB.text}`);
+  const attestedB = await pluginCall('POST', `/api/zabbix-source/collections/${collectedB.body.collectionId}/attestation`, {
+    context: contextB,
+    body: { incidentId, kind: 'METRIC_SNAPSHOT' },
+  });
+  if (attestedB.status !== 200) throw new Error(`workspace B attestation failed: ${attestedB.status} ${attestedB.text}`);
+  if (attestedB.body.evidence.attestation.workspaceId !== otherWorkspace) {
+    throw new Error('the plugin did not sign the collection workspace');
+  }
+  const cross = await api('POST', `/api/v1/incidents/${incidentId}/evidence`, {
+    kind: attestedB.body.evidence.kind,
+    source: attestedB.body.evidence.source,
+    collectedAt: attestedB.body.evidence.collectedAt,
+    contentRef: attestedB.body.evidence.contentRef,
+    content: attestedB.body.evidence.content,
+    attestation: attestedB.body.evidence.attestation,
+  });
+  if (cross.status !== 403 || cross.body.code !== 'EVIDENCE_WORKSPACE_MISMATCH') {
+    throw new Error(`cross-workspace evidence was not refused: ${cross.status} ${cross.text}`);
+  }
+  const afterCross = await api('GET', `/api/v1/incidents/${incidentId}/evidence`);
+  if (afterCross.body.items.length !== 1) throw new Error('a refused cross-workspace write left a row');
+  log('cross-workspace attestation refused (EVIDENCE_WORKSPACE_MISMATCH); A evidence unchanged');
+
   const hidden = await pluginCall('GET', '/api/zabbix-source/sources', { context: contextB });
-  if (hidden.status !== 200 || hidden.body.items.length !== 0) throw new Error('cross-workspace source list leaked a source');
+  if (hidden.status !== 200 || !hidden.body.items.every((item) => item.workspaceId === otherWorkspace)) {
+    throw new Error('workspace B list leaked a source from another workspace');
+  }
   const denied = await pluginCall('POST', `/api/zabbix-source/sources/${sourceId}/probe`, { context: contextB });
   if (denied.status !== 404) throw new Error(`cross-workspace probe returned ${denied.status}`);
-  log('cross-workspace list is empty and probe is 404');
+  log('cross-workspace list only shows B; probing A\'s source is 404');
 
   // Restart the plugin: sources and the collection survive because they are in PostgreSQL.
   plugin.kill('SIGTERM');
