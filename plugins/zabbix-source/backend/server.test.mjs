@@ -120,6 +120,9 @@ async function startPlugin({ store = new MemoryStore(), adapter = true, workspac
     adapterSecret: adapter ? ADAPTER_SECRET : '',
     secretMap: workspaceSecretMap ? {} : { 'secretref:zabbix/main': 'fixture-token' },
     workspaceSecretMap,
+    // These socket tests exercise storage/identity semantics; the production
+    // endpoint-binding matrix lives in tests/ci/g13a2_endpoint_attack.test.mjs.
+    allowUnboundCredentials: true,
   });
   await new Promise((resolve) => plugin.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${plugin.server.address().port}`;
@@ -341,7 +344,7 @@ test('probe records what it saw and promotes the source only on OK', async () =>
     const list = await call(base, '/api/zabbix-source/sources', {
       headers: { 'x-opsweave-user-context': userContext() },
     });
-    assert.equal(list.body.items[0].status, 'READY');
+    assert.equal(list.body.items[0].status, 'DEGRADED', 'plaintext HTTP is reachable but not TLS-verified');
     assert.equal(list.body.items[0].lastProbe.outcome, 'OK');
   } finally {
     await plugin.close();
@@ -763,9 +766,16 @@ test('the plugin reads the Kernel-delivered secret map first and never reports v
 
   const dev = secretConfiguration({
     NODE_ENV: 'test',
+    OPSWEAVE_ALLOW_DEV_SECRETS: '1',
     OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
   });
   assert.equal(dev.mode, 'dev');
+  // NODE_ENV alone is not a security switch: without the explicit flag the
+  // developer map is ignored and the process has no credentials (fail closed).
+  assert.equal(secretConfiguration({
+    NODE_ENV: 'test',
+    OPSWEAVE_ZABBIX_SECRETS: JSON.stringify({ 'secretref:zabbix/main': 'dev-token' }),
+  }).mode, 'none');
   assert.equal(secretConfiguration({}).mode, 'none');
   // A production process never takes the developer fallback.
   assert.equal(secretConfiguration({ NODE_ENV: 'production', OPSWEAVE_ZABBIX_SECRETS: '{"secretref:x":"y"}' }).mode, 'none');

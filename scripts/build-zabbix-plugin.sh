@@ -49,7 +49,7 @@ PY
 }
 
 CAP="$(cap_digest "plugins/$NAME/manifest.template.json")"
-BUILD="$(build_digest plugins/$NAME/backend/zabbix.mjs plugins/$NAME/backend/server.mjs plugins/$NAME/backend/storage.mjs plugins/$NAME/backend/identity.mjs plugins/$NAME/backend/package-lock.json plugins/$NAME/backend/Dockerfile)"
+BUILD="$(build_digest plugins/$NAME/backend/zabbix.mjs plugins/$NAME/backend/server.mjs plugins/$NAME/backend/storage.mjs plugins/$NAME/backend/identity.mjs plugins/$NAME/backend/credential-binding.mjs plugins/$NAME/backend/package-lock.json plugins/$NAME/backend/Dockerfile)"
 BASE="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null | tr -d '\n' || true)"
 if [ -z "$BASE" ]; then
   docker pull node:22-bookworm-slim >/dev/null

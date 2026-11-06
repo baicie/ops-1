@@ -13,7 +13,7 @@
         "kind": {
           "type": "string",
           "enum": ["api-token", "basic"],
-          "description": "api-token: a Zabbix API token sent in the Authorization header. basic: a user/password pair exchanged for a session token at probe time."
+          "description": "api-token: a Zabbix API token sent as `Authorization: Bearer`. basic: a `user:password` value sent as `Authorization: Basic base64(user:password)` on every request; the secret must contain a colon."
         },
         "ref": {
           "type": "string",
@@ -47,12 +47,12 @@
         "verifyTls": {
           "type": "boolean",
           "default": true,
-          "description": "Only an explicit operator decision may turn this off, and the source is then reported DEGRADED rather than READY."
+          "description": "Only a deployment credential binding with tls=TEST_PLAINTEXT may admit a disabled-TLS endpoint, and only with OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS=1; such a source is reported DEGRADED, never READY."
         },
         "status": {
           "type": "string",
           "enum": ["UNVERIFIED", "READY", "DEGRADED", "UNAVAILABLE"],
-          "description": "UNVERIFIED: never probed. READY: last probe answered and TLS was verified. DEGRADED: reachable under a weakened setting, or the last probe was PARTIAL. UNAVAILABLE: the last probe could not reach the endpoint. Heartbeat silence alone never promotes or demotes a source (AGENTS.md MUST NOT)."
+          "description": "UNVERIFIED: never probed. READY: last probe answered over verified https. DEGRADED: reachable over plaintext/disabled TLS, under a weakened setting, or the last probe was PARTIAL. UNAVAILABLE: the last probe could not reach the endpoint. Heartbeat silence alone never promotes or demotes a source (AGENTS.md MUST NOT)."
         },
         "lastProbe": { "$ref": "#/$defs/ProbeResult" },
         "budget": { "$ref": "#/$defs/CollectionBudget" },

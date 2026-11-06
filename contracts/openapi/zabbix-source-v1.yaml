@@ -94,7 +94,16 @@ paths:
               required: [name, endpoint, credential, workspaceId]
               properties:
                 name: { type: string, minLength: 2, maxLength: 120 }
-                endpoint: { type: string, format: uri, maxLength: 500 }
+                endpoint:
+                  type: string
+                  format: uri
+                  maxLength: 500
+                  description: |
+                    Must exactly match the endpoint approved for this credential
+                    reference in this workspace (scheme/host lowercased, default
+                    port dropped, no query or fragment). An endpoint the binding
+                    does not name is refused with ZBX_CREDENTIAL_ENDPOINT_MISMATCH,
+                    even when the credential reference itself is valid.
                 credential:
                   $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CredentialReference'
                 workspaceId:
@@ -115,6 +124,7 @@ paths:
               schema:
                 $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ZabbixSource'
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409':
@@ -158,6 +168,7 @@ paths:
               schema:
                 $ref: '../schema/zabbix-source.v1.schema.json#/$defs/ZabbixSource'
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -176,7 +187,8 @@ paths:
         the endpoint may be perfectly healthy and slow, and the two are different
         operational facts.
 
-        A failed probe is a 200 carrying a failure outcome, not an HTTP error:
+        A failed probe is a 200 carrying a failure outcome, not an HTTP error
+        (the one exception is a credential-binding policy refusal):
         "the endpoint is unreachable" is a successful observation about Zabbix,
         and a reader needs it as queryable evidence (rules/05 Gate).
       responses:
@@ -288,6 +300,7 @@ paths:
                   clamped: { type: boolean }
                   truncated: { type: ['integer', 'null'], minimum: 0 }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -343,6 +356,7 @@ paths:
               schema:
                 $ref: '../schema/zabbix-source.v1.schema.json#/$defs/CollectionResult'
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -438,6 +452,7 @@ paths:
                       tuple to the Kernel fails verification there; posting
                       different bytes fails the digest check.
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -487,7 +502,9 @@ components:
             ZBX_UNAUTHORIZED_AT_SOURCE, ZBX_BUDGET_EXCEEDED,
             ZBX_COLLECTION_NOT_ATTESTABLE, ZBX_ADAPTER_NOT_CONFIGURED,
             ZBX_SOURCE_CONFLICT, ZBX_STORAGE_UNAVAILABLE,
-            ZBX_IDENTITY_UNVERIFIED, ZBX_WORKSPACE_REQUIRED.
+            ZBX_IDENTITY_UNVERIFIED, ZBX_WORKSPACE_REQUIRED,
+            ZBX_CREDENTIAL_BINDING_REQUIRED, ZBX_CREDENTIAL_ENDPOINT_MISMATCH,
+            ZBX_INSECURE_ENDPOINT_FORBIDDEN, ZBX_BASIC_CREDENTIAL_INVALID.
         message:
           type: string
           description: |
@@ -518,6 +535,18 @@ components:
         Authenticated but not permitted. Decided by the Gateway and this plugin
         from the Kernel-issued identity, never from a tenant or subject the
         request claims for itself (rules/03, rules/10).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: |
+        The credential reference is valid but may not be used here: no approved
+        endpoint binding for this workspace, an endpoint that does not exactly
+        match the binding, a plaintext/disabled-TLS endpoint without the
+        deployment's explicit test switch, or a basic credential that is not
+        user:password. Stable codes: ZBX_CREDENTIAL_BINDING_REQUIRED,
+        ZBX_CREDENTIAL_ENDPOINT_MISMATCH, ZBX_INSECURE_ENDPOINT_FORBIDDEN,
+        ZBX_BASIC_CREDENTIAL_INVALID.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

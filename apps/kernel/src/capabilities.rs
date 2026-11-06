@@ -433,6 +433,14 @@ pub(crate) fn secret_environment(
     >,
     adapter_plugins: &std::collections::HashMap<String, String>,
     adapters: &std::collections::HashMap<String, String>,
+    credential_bindings: &std::collections::HashMap<
+        String,
+        std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, crate::config::CredentialBinding>,
+        >,
+    >,
+    allow_insecure_source_endpoints: bool,
     plugin_id: &str,
 ) -> std::collections::BTreeMap<String, String> {
     let mut env = std::collections::BTreeMap::new();
@@ -440,6 +448,17 @@ pub(crate) fn secret_environment(
         if let Ok(encoded) = serde_json::to_string(secrets) {
             env.insert("OPSWEAVE_PLUGIN_SECRETS".into(), encoded);
         }
+    }
+    if let Some(bindings) = credential_bindings.get(plugin_id) {
+        if let Ok(encoded) = serde_json::to_string(bindings) {
+            env.insert("OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS".into(), encoded);
+        }
+    }
+    if allow_insecure_source_endpoints {
+        env.insert(
+            "OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS".into(),
+            "1".into(),
+        );
     }
     let assigned: Vec<&String> = adapter_plugins
         .iter()
@@ -509,6 +528,8 @@ pub async fn instance_environment(
         &state.config.plugin_secrets,
         &state.config.evidence_adapter_plugins,
         &state.config.evidence_adapters,
+        &state.config.plugin_credential_bindings,
+        state.config.allow_insecure_source_endpoints,
         &plugin_id,
     ));
     if let Ok(manifest) = serde_json::from_value::<ManifestV11>(manifest_value) {
@@ -1166,14 +1187,28 @@ mod tests {
             ("other".to_string(), "adapter-secret-b".to_string()),
         ]);
 
-        let a = super::secret_environment(&plugin_secrets, &adapter_plugins, &adapters, "a.plugin");
+        let a = super::secret_environment(
+            &plugin_secrets,
+            &adapter_plugins,
+            &adapters,
+            &std::collections::HashMap::new(),
+            false,
+            "a.plugin",
+        );
         assert!(a["OPSWEAVE_PLUGIN_SECRETS"].contains("value-a"));
         assert!(!a["OPSWEAVE_PLUGIN_SECRETS"].contains("value-b"));
         assert_eq!(a["OPSWEAVE_EVIDENCE_ADAPTER_ID"], "zabbix-main");
         assert_eq!(a["OPSWEAVE_EVIDENCE_ADAPTER_SECRET"], "adapter-secret-a");
         assert!(!a.values().any(|value| value.contains("adapter-secret-b")));
 
-        let b = super::secret_environment(&plugin_secrets, &adapter_plugins, &adapters, "b.plugin");
+        let b = super::secret_environment(
+            &plugin_secrets,
+            &adapter_plugins,
+            &adapters,
+            &std::collections::HashMap::new(),
+            false,
+            "b.plugin",
+        );
         assert!(b["OPSWEAVE_PLUGIN_SECRETS"].contains("value-b"));
         assert!(!b["OPSWEAVE_PLUGIN_SECRETS"].contains("value-a"));
         assert!(!b.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_ID"));
@@ -1185,9 +1220,79 @@ mod tests {
             ("zabbix-main".to_string(), "a.plugin".to_string()),
             ("other".to_string(), "a.plugin".to_string()),
         ]);
-        let a2 = super::secret_environment(&plugin_secrets, &doubled, &adapters, "a.plugin");
+        let a2 = super::secret_environment(
+            &plugin_secrets,
+            &doubled,
+            &adapters,
+            &std::collections::HashMap::new(),
+            false,
+            "a.plugin",
+        );
         assert!(!a2.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_ID"));
         assert!(!a2.contains_key("OPSWEAVE_EVIDENCE_ADAPTER_SECRET"));
+    }
+
+    #[test]
+    fn credential_bindings_are_metadata_for_exactly_one_plugin() {
+        use std::collections::HashMap;
+        let bindings = HashMap::from([
+            (
+                "a.plugin".to_string(),
+                HashMap::from([(
+                    "00000000-0000-4000-8000-00000000000a".to_string(),
+                    HashMap::from([(
+                        "secretref:a".to_string(),
+                        crate::config::CredentialBinding {
+                            endpoint: "https://zabbix.example/api_jsonrpc.php".to_string(),
+                            tls: "VERIFY".to_string(),
+                        },
+                    )]),
+                )]),
+            ),
+            (
+                "b.plugin".to_string(),
+                HashMap::from([(
+                    "00000000-0000-4000-8000-00000000000b".to_string(),
+                    HashMap::from([(
+                        "secretref:b".to_string(),
+                        crate::config::CredentialBinding {
+                            endpoint: "https://b.example/api_jsonrpc.php".to_string(),
+                            tls: "VERIFY".to_string(),
+                        },
+                    )]),
+                )]),
+            ),
+        ]);
+        let a = super::secret_environment(
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &bindings,
+            true,
+            "a.plugin",
+        );
+        let encoded = &a["OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS"];
+        assert!(encoded.contains("https://zabbix.example/api_jsonrpc.php"));
+        assert!(!encoded.contains("secretref:b"));
+        assert!(
+            !encoded.contains("b.example"),
+            "another plugin's binding must not be injected"
+        );
+        assert_eq!(a["OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS"], "1");
+
+        let b = super::secret_environment(
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &bindings,
+            false,
+            "b.plugin",
+        );
+        let b_encoded = &b["OPSWEAVE_PLUGIN_CREDENTIAL_BINDINGS"];
+        assert!(b_encoded.contains("b.example"));
+        assert!(!b_encoded.contains("a.example"));
+        assert!(!b_encoded.contains("secretref:a"));
+        assert!(!b.contains_key("OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS"));
     }
 
     #[test]
