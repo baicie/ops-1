@@ -76,20 +76,24 @@ export function Modal({
   open,
   onClose,
   title,
+  description,
   children,
   footer,
   size = 'medium',
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  description?: React.ReactNode;
   children: React.ReactNode;
   footer?: React.ReactNode;
   size?: 'small' | 'medium' | 'large';
+  dismissible?: boolean;
 }) {
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogFrame title={title} size={size} footer={footer}>{children}</DialogFrame>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && dismissible) onClose(); }}>
+      <DialogFrame title={title} description={description} size={size} footer={footer} dismissible={dismissible}>{children}</DialogFrame>
     </Dialog>
   );
 }

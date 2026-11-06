@@ -68,6 +68,7 @@ import {
 } from '../incidents';
 import { IncidentFailureNotice, useUserDirectory } from './Incidents';
 import { TrustChip, TrustGap, TrustLegend, TrustSummary } from './incident-trust';
+import { CollectEvidenceDialog } from './incident-collect';
 import { IdentityCell, LongId, StackCell, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
@@ -114,8 +115,12 @@ export function IncidentDetailPage() {
   // Which evidence row's content is open. Null means "no panel", never "the previous incident's
   // row": the id is cleared whenever the route changes, so a panel cannot outlive its incident.
   const [openEvidenceId, setOpenEvidenceId] = React.useState<string | null>(null);
+  // G13-A: the collect dialog is bound to this incident. Closing it on a route
+  // change prevents collecting into the previous incident after a navigation.
+  const [collectOpen, setCollectOpen] = React.useState(false);
   React.useEffect(() => {
     setOpenEvidenceId(null);
+    setCollectOpen(false);
     // A route change is a new incident, so the workspace returns to the pane that shows it. Without
     // this, switching incidents from the rail on a phone left the reader on the rail: the list
     // updated and the incident did not, which reads as "the link did nothing".
@@ -404,10 +409,17 @@ export function IncidentDetailPage() {
 
                 <section className="panel ow-incident-evidence" data-testid="incident-evidence" data-evidence-state={evidenceState} data-region="evidence">
                   <div className="panel-head">
-                    <div>
+                    <div className="min-w-0">
                       <h2>{t('incidents.workspace.evidence')}</h2>
                       <p>{t('incidents.detail.evidence.description')}</p>
                     </div>
+                    {capabilities.canAddEvidence && incident.status !== 'CLOSED' ? (
+                      <div className="flex flex-none items-center">
+                        <Button variant="secondary" onClick={() => setCollectOpen(true)} data-testid="incident-collect-open">
+                          <Icon name="upload" size={15} /> {t('incidents.collect.open')}
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                   {/* The set's floor, directly under the panel head: a verdict rests on the weakest row, so
                       that is the fact a reader needs BEFORE scrolling the table, not after it. It is its own
@@ -630,6 +642,17 @@ export function IncidentDetailPage() {
                       }}
                     />
                   )}
+                  {capabilities.canAddEvidence && incident.status !== 'CLOSED' ? (
+                    <CollectEvidenceDialog
+                      open={collectOpen}
+                      incidentId={incident.id}
+                      onClose={() => setCollectOpen(false)}
+                      onSaved={() => {
+                        toast.push({ tone: 'ok', title: t('incidents.collect.saved') });
+                        retry();
+                      }}
+                    />
+                  ) : null}
                 </section>
                 <InvestigationPanel
                   incidentId={incident.id}
