@@ -5427,6 +5427,113 @@ mod tests {
         cleanup(&pool, &[user]).await;
     }
 
+    /// The workspace field is inside the signature: changing it after signing
+    /// must fail verification, not be compared as a claim.
+    #[tokio::test]
+    async fn a_tampered_workspace_field_is_refused() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, incident) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("tampered workspace", None),
+        )
+        .await
+        .unwrap();
+        let body = "{}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let bound = tuple(
+            incident.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-a",
+            &content_ref,
+            collected_at,
+        );
+        let payload = attestation_payload(ADAPTER_ID, &bound, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(ADAPTER_SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        let mut request = content_request("application/json", body);
+        request.content_ref = Some(content_ref.clone());
+        request.source = "zabbix:source-a".to_string();
+        request.collected_at = collected_at;
+        request.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            // Signed for the incident's workspace, then moved to another.
+            workspace_id: Some(Uuid::new_v4()),
+            issued_at,
+            signature,
+        });
+        let error = insert_evidence(&pool, &adapters(), caller(user), incident.id, request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_INVALID");
+        cleanup(&pool, &[user]).await;
+    }
+
+    /// Signing one incident's tuple cannot be replayed onto another incident.
+    #[tokio::test]
+    async fn an_attestation_for_another_incident_is_refused() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let user = seed_user(&pool, "operator").await;
+        let (_, first) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("signed incident", None),
+        )
+        .await
+        .unwrap();
+        let (_, second) = insert_incident(
+            &pool,
+            caller(user),
+            incident_request("target incident", None),
+        )
+        .await
+        .unwrap();
+        let body = "{}";
+        let content_ref = format!("sha256:{}", digest_of(body.as_bytes()));
+        let collected_at = Utc::now();
+        let issued_at = Utc::now();
+        let bound = tuple(
+            first.id,
+            "METRIC_SNAPSHOT",
+            "zabbix:source-a",
+            &content_ref,
+            collected_at,
+        );
+        let payload = attestation_payload(ADAPTER_ID, &bound, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(ADAPTER_SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+
+        let mut request = content_request("application/json", body);
+        request.content_ref = Some(content_ref.clone());
+        request.source = "zabbix:source-a".to_string();
+        request.collected_at = collected_at;
+        request.attestation = Some(AttestationRequest {
+            adapter_id: ADAPTER_ID.to_string(),
+            workspace_id: Some(scope::legacy_workspace()),
+            issued_at,
+            signature,
+        });
+        let error = insert_evidence(&pool, &adapters(), caller(user), second.id, request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "EVIDENCE_ATTESTATION_INVALID");
+        cleanup(&pool, &[user]).await;
+    }
+
     /// A valid v1 signature is recognised but cannot authorize a new write.
     #[tokio::test]
     async fn a_v1_attestation_is_refused_for_new_evidence() {
