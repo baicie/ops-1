@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 
 export const USER_CONTEXT_PREFIX = 'owu1';
 export const WORKLOAD_CONTEXT_PREFIX = 'oww1';
+export const AUTOMATION_CONTEXT_PREFIX = 'owa1';
 
 const ROLE_SCOPES = {
   admin: ['telemetry.source.read', 'telemetry.source.write'],
@@ -87,6 +88,34 @@ export function createIdentityResolver({ contextKeyHex, pluginId, now = () => Da
         scopes: scope,
         workspaces,
         requestId: user.requestId,
+      };
+    }
+
+    const automation = decodePayload(headers['x-opsweave-automation-context'], AUTOMATION_CONTEXT_PREFIX, key, pluginId, now);
+    if (automation) {
+      if (automation.kind !== 'automation') return null;
+      const ops = Array.isArray(automation.allowedOps)
+        ? automation.allowedOps.filter((value) => typeof value === 'string')
+        : [];
+      // The Kernel resolves the workspace/source and signs them into the token.
+      // The plugin does not accept either from the request body.
+      const workspaceId = String(automation.workspaceId || '');
+      const sourceId = String(automation.sourceId || '');
+      if (!workspaceId || !sourceId) return null;
+      const scopes = [];
+      if (ops.includes('SOURCE_COLLECT') || ops.includes('EVIDENCE_APPEND')) {
+        scopes.push('telemetry.source.write');
+      }
+      return {
+        kind: 'automation',
+        principalId: automation.principalId,
+        pluginId: automation.pluginId,
+        workspaceId,
+        sourceId,
+        ops,
+        scopes,
+        workspaces: [workspaceId],
+        requestId: automation.jti,
       };
     }
 

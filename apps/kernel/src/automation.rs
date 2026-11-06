@@ -41,9 +41,12 @@ pub const AUDIENCE: &str = "opsweave-kernel";
 const MAX_TTL_SECONDS: i64 = 300;
 const CLOCK_SKEW_SECONDS: i64 = 60;
 
+pub(crate) const AUTOMATION_USER_ID: &str = "00000000-0000-4000-8000-0000000000a1";
+
 const ALLOWED_OPS: &[&str] = &["EVENT_INGEST", "SOURCE_COLLECT", "EVIDENCE_APPEND"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AutomationClaims {
     pub v: u8,
     pub kind: String,
@@ -155,12 +158,21 @@ impl AutomationPrincipal {
     }
 }
 
+/// The same per-plugin key the instance receives as
+/// `OPSWEAVE_CALLER_CONTEXT_KEY` (`HMAC(cursor_secret, "caller-context:"+id)`).
+/// Reusing it lets the plugin verify `owa1` without receiving a second secret;
+/// the key is already scoped to that plugin, and the Kernel remains the only
+/// party that can mint a token carrying a workspace/source it did not resolve.
 fn signing_key(state: &AppState, plugin_id: &str) -> Vec<u8> {
     let mut mac =
         HmacSha256::new_from_slice(&state.cursor_secret).expect("HMAC accepts any key length");
-    mac.update(b"automation-principal:");
+    mac.update(b"caller-context:");
     mac.update(plugin_id.as_bytes());
     mac.finalize().into_bytes().to_vec()
+}
+
+pub(crate) fn sign_claims(state: &AppState, claims: &AutomationClaims) -> AppResult<String> {
+    sign(state, claims)
 }
 
 fn sign(state: &AppState, claims: &AutomationClaims) -> AppResult<String> {

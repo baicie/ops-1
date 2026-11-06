@@ -2,6 +2,7 @@ mod assets;
 mod audit;
 mod auth;
 mod automation;
+mod automation_flow;
 mod capabilities;
 mod config;
 mod db;

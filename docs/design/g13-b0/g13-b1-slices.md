@@ -33,7 +33,7 @@
 
 ## 切片 3 — Event ingest 与 Incident 去重
 
-> 实施状态（2026-11-06）：**已实现**；自动 collect/Evidence 未接入。详见 [b1-slice-3.md](b1-slice-3.md)。
+> 实施状态（2026-11-06）：**已实现** Event ingest/去重；自动 collect/Evidence 见切片 4。详见 [b1-slice-3.md](b1-slice-3.md)。
 
 1. `POST /api/v1/telemetry/events`：签名、幂等键、摘要、乱序、RESOLVED。
 2. `INSERT ... ON CONFLICT` 创建 Incident；`origin=AUTOMATION`；服务用户 owner。
@@ -42,12 +42,16 @@
 
 ## 切片 4 — 自动采集与 Evidence
 
+> 实施状态（2026-11-06）：**已实现** PROBLEM Event → collect → attestation → Evidence（插件接受 `owa1`；Kernel 经 Node proxy 编排）。详见 [b1-slice-4.md](b1-slice-4.md)。
+
 1. PROBLEM Event → 有界 collect（复用 A.2 binding、SSRF、预算）→ v2 attestation → append evidence。
 2. 失败语义：超时/失联/预算耗尽不产生部分 Evidence；旧凭据不静默成功。
 3. 测试：C1–C9 + 真实 Gateway/Node/OCI 栈。
 - 退出：E2E 黄金路径（TEST_FIXTURE）通过；攻击矩阵保持 0 泄漏。
 
 ## 切片 5 — Investigator 与人工 Verdict
+
+> 实施状态（2026-11-06）：**复用现有 UI**。Automation Event 写入 Incident audit timeline，Evidence 以 `SOURCE_ATTESTED` 展示；Investigator/人工 Verdict 不变。未新增 Automation 专用徽标/截图（残留）。
 
 1. Automation 只能启动 investigation（假设），不能写 verdict/close。
 2. UI 时间线：Event → Evidence → Hypothesis → Human Verdict；Automation 徽标。
