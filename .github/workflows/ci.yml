@@ -134,7 +134,7 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci --prefix plugins/zabbix-source/backend
       - name: unit tests and the real HTTP socket suite
-        run: node --test plugins/zabbix-source/backend/zabbix.test.mjs plugins/zabbix-source/backend/server.test.mjs
+        run: node --test plugins/zabbix-source/backend/zabbix.test.mjs plugins/zabbix-source/backend/server.test.mjs tests/ci/g13a2_endpoint_attack.test.mjs
       - name: source and collection persistence against real PostgreSQL
         run: node --test plugins/zabbix-source/backend/storage.test.mjs
   # The decomposed suites cannot prove a round trip: two implementations of the
@@ -186,6 +186,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
       - run: ./target/debug/opsctl keygen --out-dir keys
       - uses: pnpm/action-setup@v4

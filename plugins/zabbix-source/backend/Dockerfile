@@ -8,7 +8,7 @@ COPY package.json package-lock.json ./
 # The plugin's only runtime dependency is `pg`, used to reach the
 # Kernel-provisioned plugin schema. npm ci keeps it locked (rules/09).
 RUN npm ci --omit=dev --no-audit --no-fund
-COPY zabbix.mjs server.mjs storage.mjs identity.mjs ./
+COPY zabbix.mjs server.mjs storage.mjs identity.mjs credential-binding.mjs ./
 ENV NODE_ENV=production \
     PORT=8080 \
     OPSWEAVE_PLUGIN_ID=opsweave.zabbix-source \
