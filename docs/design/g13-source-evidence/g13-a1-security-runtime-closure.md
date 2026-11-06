@@ -173,6 +173,17 @@ Probe 使用未认证的 `apiinfo.version`，不证明凭据；凭据交付由 `
 - `g13a1-gateway`：真实 Kernel + Node + OCI + Gateway + fixture + 浏览器（UI dist 从 #39 构建）；上游 fixture，真实 Zabbix NOT_RUN；
 - `acceptance`：G12 旧脚本已更新为带 content 的 attestation。
 
+## 8.1 本轮 CI（PR #40，head `9af1c51`）
+
+15/15 PASS：
+
+- `acceptance` 6m36s（G12 v2 脚本）
+- `g13a1-gateway` 3m38s（真实 Gateway/Node/OCI + 浏览器 1440/1024/390）
+- `rust` 2m6s（203 tests，含 64 incident）
+- `g13a-roundtrip` 1m50s
+- `golden-path` 16m49s、`runtime-golden-path` 17m11s、`legacy-regression` 5m13s
+- `web`、`web-unit`、`zabbix-plugin`、`contracts` ×2、`spec-coverage`、`artifact-budget`、`quality-faults`
+
 ## 9. 独立审查
 
 独立 reviewer 针对 `99fd9b2..HEAD` 与未跟踪的 golden path 脚本逐行复核。独立 reviewer 发现并已修复：
