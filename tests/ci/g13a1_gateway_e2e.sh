@@ -428,8 +428,8 @@ AUTO_EVIDENCE="$(json "d['automation']['evidenceId']" < /tmp/g13a1-body.json)"
 ok "PROBLEM event ${AUTO_INCIDENT} collected into evidence ${AUTO_EVIDENCE}"
 
 api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null
-AUTO_TRUST="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['verifiedTrust'] for e in d if e['id']=='${AUTO_EVIDENCE}'))")"
-AUTO_REF="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['contentRef'] for e in d if e['id']=='${AUTO_EVIDENCE}'))")"
+AUTO_TRUST="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['verifiedTrust'] for e in d.get('items', d) if e['id']=='${AUTO_EVIDENCE}'))")"
+AUTO_REF="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['contentRef'] for e in d.get('items', d) if e['id']=='${AUTO_EVIDENCE}'))")"
 [ "$AUTO_TRUST" = "SOURCE_ATTESTED" ] || { echo "automation evidence trust=${AUTO_TRUST}"; exit 1; }
 curl -sS -H "Authorization: Bearer ${TOKEN}" -o /tmp/g13a1-auto-content \
   "$URL/api/v1/incidents/${AUTO_INCIDENT}/evidence/${AUTO_EVIDENCE}/content"
@@ -437,12 +437,12 @@ GOT_REF="sha256:$(shasum -a 256 /tmp/g13a1-auto-content | awk '{print $1}')"
 [ "$GOT_REF" = "$AUTO_REF" ] || { echo "automation evidence bytes differ: ${GOT_REF} != ${AUTO_REF}"; exit 1; }
 ok "automation evidence is SOURCE_ATTESTED and byte-identical"
 
-BEFORE_COUNT="$(api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null; python3 -c "import json;print(len(json.load(open('/tmp/g13a1-body.json'))))")"
+BEFORE_COUNT="$(api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null; python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(len(d.get('items', d)))")"
 code="$(curl -sS -o /tmp/g13a1-body.json -w '%{http_code}' -X POST "$URL/api/v1/telemetry/events" \
   -H "Authorization: Bearer ${AUTOMATION_TOKEN}" -H "Idempotency-Key: ${EVENT_KEY}" \
   -H 'content-type: application/json' --data-binary @/tmp/g13a1-event.json)"
 [ "$code" = "200" ] || { echo "duplicate event was not idempotent: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
-AFTER_COUNT="$(api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null; python3 -c "import json;print(len(json.load(open('/tmp/g13a1-body.json'))))")"
+AFTER_COUNT="$(api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null; python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(len(d.get('items', d)))")"
 [ "$BEFORE_COUNT" = "$AFTER_COUNT" ] || { echo "duplicate event added evidence: ${BEFORE_COUNT} -> ${AFTER_COUNT}"; exit 1; }
 ok "duplicate event is idempotent and adds no evidence"
 
