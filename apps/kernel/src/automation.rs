@@ -611,6 +611,64 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Au
     Ok(AutomationPrincipal { row, claims })
 }
 
+/// Load a principal for the durable worker. The job refers to the principal by
+/// id; the worker re-checks expiry/revocation and reconstructs the same claims
+/// the signed token carried, without keeping a bearer token in the database.
+pub async fn load_principal(
+    state: &AppState,
+    principal_id: Uuid,
+) -> AppResult<AutomationPrincipal> {
+    let row = sqlx::query_as::<_, PrincipalRow>(
+        "SELECT principal_id,plugin_id,instance_id,node_id,node_generation,workspace_id,source_id,
+                allowed_ops,event_id,incident_id,budget,issued_at,expires_at,jti,revoked_at
+           FROM kernel.automation_principals WHERE principal_id=$1",
+    )
+    .bind(principal_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| {
+        AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "AUTOMATION_PRINCIPAL_INVALID",
+            "the principal no longer exists",
+        )
+    })?;
+    if row.revoked_at.is_some() {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "AUTOMATION_PRINCIPAL_REVOKED",
+            "the principal was revoked",
+        ));
+    }
+    if row.expires_at <= Utc::now() {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "AUTOMATION_PRINCIPAL_EXPIRED",
+            "the stored principal has expired",
+        ));
+    }
+    let claims = AutomationClaims {
+        v: 1,
+        kind: "automation".into(),
+        principal_id: row.principal_id,
+        plugin_id: row.plugin_id.clone(),
+        instance_id: row.instance_id,
+        node_id: row.node_id,
+        node_generation: row.node_generation,
+        workspace_id: row.workspace_id,
+        source_id: row.source_id,
+        allowed_ops: row.allowed_ops.clone(),
+        event_id: row.event_id,
+        incident_id: row.incident_id,
+        budget: row.budget.clone(),
+        issued_at: row.issued_at.timestamp(),
+        expires_at: row.expires_at.timestamp(),
+        jti: row.jti,
+        audience: AUDIENCE.into(),
+    };
+    Ok(AutomationPrincipal { row, claims })
+}
+
 /// `POST /api/v1/automation-principals/{principal_id}/revoke` — admin only.
 pub async fn revoke_handler(
     State(state): State<AppState>,

@@ -422,15 +422,21 @@ code="$(curl -sS -o /tmp/g13a1-body.json -w '%{http_code}' -X POST "$URL/api/v1/
 [ "$code" = "202" ] || { echo "event ingest failed: $code $(cat /tmp/g13a1-body.json)"; exit 1; }
 AUTO_STATUS="$(json "d['automation']['status']" < /tmp/g13a1-body.json)"
 AUTO_INCIDENT="$(json "d['incidentId']" < /tmp/g13a1-body.json)"
-AUTO_EVIDENCE="$(json "d['automation']['evidenceId']" < /tmp/g13a1-body.json)"
-[ "$AUTO_STATUS" = "COLLECTED" ] || { echo "automation did not collect: $(cat /tmp/g13a1-body.json)"; exit 1; }
-[ -n "$AUTO_INCIDENT" ] && [ -n "$AUTO_EVIDENCE" ] || { echo "event returned no incident/evidence"; exit 1; }
-ok "PROBLEM event ${AUTO_INCIDENT} collected into evidence ${AUTO_EVIDENCE}"
+AUTO_JOB="$(json "d['automation']['jobId']" < /tmp/g13a1-body.json)"
+[ "$AUTO_STATUS" = "PENDING" ] || { echo "automation was not enqueued: $(cat /tmp/g13a1-body.json)"; exit 1; }
+[ -n "$AUTO_INCIDENT" ] && [ -n "$AUTO_JOB" ] || { echo "event returned no incident/job"; exit 1; }
+ok "PROBLEM event ${AUTO_INCIDENT} enqueued durable job ${AUTO_JOB}"
 
-api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null
-AUTO_TRUST="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['verifiedTrust'] for e in d.get('items', d) if e['id']=='${AUTO_EVIDENCE}'))")"
+AUTO_EVIDENCE=""
+for _ in $(seq 1 60); do
+  api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null
+  AUTO_EVIDENCE="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next((e['id'] for e in d.get('items', d) if e.get('verifiedTrust')=='SOURCE_ATTESTED'),''))")"
+  [ -n "$AUTO_EVIDENCE" ] && break
+  sleep 1
+done
+[ -n "$AUTO_EVIDENCE" ] || { echo "durable automation produced no attested evidence"; exit 1; }
 AUTO_REF="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(e['contentRef'] for e in d.get('items', d) if e['id']=='${AUTO_EVIDENCE}'))")"
-[ "$AUTO_TRUST" = "SOURCE_ATTESTED" ] || { echo "automation evidence trust=${AUTO_TRUST}"; exit 1; }
+ok "durable job ${AUTO_JOB} produced evidence ${AUTO_EVIDENCE}"
 curl -sS -H "Authorization: Bearer ${TOKEN}" -o /tmp/g13a1-auto-content \
   "$URL/api/v1/incidents/${AUTO_INCIDENT}/evidence/${AUTO_EVIDENCE}/content"
 GOT_REF="sha256:$(shasum -a 256 /tmp/g13a1-auto-content | awk '{print $1}')"

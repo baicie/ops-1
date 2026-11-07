@@ -3,6 +3,7 @@ mod audit;
 mod auth;
 mod automation;
 mod automation_flow;
+mod automation_worker;
 mod capabilities;
 mod config;
 mod db;
@@ -69,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
     .await
     .context("reconcile the telemetry source registry")?;
     deployments::spawn_reconciler(state.clone());
+    automation_worker::spawn(state.clone());
     nodes::spawn_resource_retention(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&config.bind)
