@@ -6,6 +6,7 @@ use crate::deployments;
 use crate::diagnostics;
 use crate::error::AppError;
 use crate::gateway;
+use crate::incident_claims;
 use crate::incidents;
 use crate::investigations;
 use crate::jobs;
@@ -273,6 +274,23 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/api/v1/incidents",
             get(incidents::list_incidents).post(incidents::create_incident),
+        )
+        // G13-B1.4: the workspace queue for automation incidents. An automation
+        // incident is owned by the non-login service user, which the operator
+        // row rule (owner = caller) can never match; this read and its atomic
+        // claim are the only way an operator acquires it. A viewer is refused by
+        // require_operator inside the handlers.
+        .route(
+            "/api/v1/incidents/claimable",
+            get(incident_claims::list_claimable),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/claim",
+            post(incident_claims::claim_incident),
+        )
+        .route(
+            "/api/v1/incidents/{incident_id}/release",
+            post(incident_claims::release_incident),
         )
         .route(
             "/api/v1/incidents/{incident_id}",

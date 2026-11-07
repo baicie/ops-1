@@ -60,6 +60,7 @@ import {
   stackTable,
 } from './table-kit';
 import { shortLocator } from '../lib/identity';
+import { IncidentClaimQueue } from './incident-claim-queue';
 
 /**
  * `/app/incidents` - the incident list (G11 D3).
@@ -356,6 +357,14 @@ export function IncidentsPage() {
             showSampled={false}
           />
         </section>
+      ) : null}
+
+      {/* G13-B1.4: the workspace queue of unclaimed automation incidents. Only a role the
+          kernel would accept for a claim renders the panel; a viewer sees nothing rather than
+          a button whose submit is refused. The page header and the queue share the same
+          membership-bounded workspace list, so a workspace name here is never a guess. */}
+      {user?.role === 'operator' || user?.role === 'admin' ? (
+        <IncidentClaimQueue workspaces={workspaceList.workspaces} refreshToken={reload} />
       ) : null}
 
       <section className="toolbar" data-testid="incident-filters">

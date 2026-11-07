@@ -11,6 +11,7 @@ mod deployments;
 mod diagnostics;
 mod error;
 mod gateway;
+mod incident_claims;
 mod incidents;
 mod investigations;
 mod jobs;

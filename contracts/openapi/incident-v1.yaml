@@ -206,6 +206,101 @@ paths:
               schema: {$ref: '#/components/schemas/IncidentList'}
         '400': {description: INVALID_REQUEST — unknown filter value or bad cursor}
         '401': {description: UNAUTHENTICATED}
+  /incidents/claimable:
+    get:
+      summary: The workspace queue of unclaimed automation incidents
+      description: >
+        G13-B1.4. An automation incident is created with owner = the non-login
+        automation service user, which the operator row rule (owner = caller)
+        can never match. This read is the one sanctioned second look at those
+        rows: membership in the incident's business workspace AND
+        origin=AUTOMATION AND the service owner AND status in (OPEN,
+        INVESTIGATING). It returns a minimal summary (no evidence, verdict or
+        timeline) and is never a general incident read. A viewer is refused with
+        403 before any row is read. An operator who is a member of two
+        workspaces sees both queues; a non-member sees neither.
+      responses:
+        '200':
+          description: Unclaimed automation incidents in the caller's workspaces, newest first
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ClaimableIncidentList'}
+        '401': {description: UNAUTHENTICATED}
+        '403': {description: FORBIDDEN — only an operator or admin may read the queue}
+  /incidents/{incidentId}/claim:
+    post:
+      summary: Claim an unclaimed automation incident (operator or admin)
+      description: >
+        The atomic ownership step. The row is read FOR UPDATE bounded by the
+        caller's workspace membership, then updated through a compare-and-set on
+        (owner, status, revision). Two operators claiming at once are serialized
+        by the row lock: exactly one commits, the other is answered 409
+        INCIDENT_CLAIM_TAKEN. A replay of the same successful claim (same caller)
+        answers 200 with the incident instead of a conflict. Only OPEN and
+        INVESTIGATING rows can be claimed; a CONCLUDED or CLOSED row answers 409
+        INCIDENT_CLAIM_NOT_AVAILABLE. A row that is not an automation incident,
+        or is outside the caller's workspaces, answers 404 exactly like an
+        absent row. The claimed incident is then an ordinary operator-owned
+        record: every existing evidence, verdict, close and handover rule applies
+        unchanged.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ClaimIncidentRequest'}
+      responses:
+        '200':
+          description: Claimed (or a replay of the claim that already succeeded)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Incident'}
+        '400': {description: INVALID_REQUEST — expectedRevision < 1 or unknown field}
+        '401': {description: UNAUTHENTICATED}
+        '403': {description: FORBIDDEN — viewer may not claim}
+        '404': {description: INCIDENT_NOT_FOUND — absent, another workspace, or not an automation incident}
+        '409':
+          description: >
+            INCIDENT_CLAIM_TAKEN (another operator holds it),
+            INCIDENT_CLAIM_CONFLICT (stale expectedRevision), or
+            INCIDENT_CLAIM_NOT_AVAILABLE (lifecycle already concluded/closed)
+        '500': {description: AUDIT_WRITE_FAILED — the claim and its audit row rolled back together}
+  /incidents/{incidentId}/release:
+    post:
+      summary: Return a claimed automation incident to the queue (owner only)
+      description: >
+        The inverse of a claim: owner returns to the automation service user and
+        the row reappears in GET /incidents/claimable. Only the current owner may
+        release (anyone else gets 404, because the operator read predicate no
+        longer shows it to them). Only origin=AUTOMATION rows in OPEN or
+        INVESTIGATING can be released; a person-filed incident is handed over
+        with POST /incidents/{id}/owner instead (409
+        INCIDENT_RELEASE_NOT_AUTOMATION), and a concluded or closed record is
+        history (409 INCIDENT_RELEASE_NOT_AVAILABLE). The answer is the release,
+        not the incident, because the caller loses read access when it succeeds.
+      parameters:
+        - {$ref: '#/components/parameters/incidentId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReleaseIncidentRequest'}
+      responses:
+        '200':
+          description: Released
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentRelease'}
+        '400': {description: INVALID_REQUEST — expectedRevision < 1 or unknown field}
+        '401': {description: UNAUTHENTICATED}
+        '403': {description: FORBIDDEN — viewer may not release}
+        '404': {description: INCIDENT_NOT_FOUND — not the owner, another workspace, or absent}
+        '409':
+          description: >
+            INCIDENT_RELEASE_NOT_AUTOMATION, INCIDENT_RELEASE_NOT_AVAILABLE,
+            INCIDENT_RELEASE_CONFLICT or INCIDENT_STATE_CONFLICT
+        '500': {description: AUDIT_WRITE_FAILED — the release and its audit row rolled back together}
   /incidents/{incidentId}:
     get:
       summary: One incident with derived evidenceRefs and humanVerdict
@@ -727,8 +822,8 @@ components:
       additionalProperties: false
       required:
         [id, title, severity, status, source, nativeId, relatedEntity,
-         startedAt, updatedAt, owner, ownerAssignedAt, revision, closedAt,
-         closedBy, closureNote, evidenceRefs, humanVerdict]
+         startedAt, updatedAt, owner, ownerAssignedAt, origin, claimable, revision,
+         closedAt, closedBy, closureNote, evidenceRefs, humanVerdict]
       properties:
         id: {type: string, format: uuid}
         title: {type: string}
@@ -748,6 +843,21 @@ components:
             incident that has never been handed over. A handover (POST
             /incidents/{id}/owner) moves owner and this instant together, so the
             two can never be read as disagreeing.
+        origin:
+          type: [string, 'null']
+          enum: [USER, AUTOMATION, null]
+          description: >
+            Who filed the record. USER for a person, AUTOMATION for an incident
+            the Event handler created, null for rows that predate migration 0026.
+            A source adapter's provenance is in `source`, not here.
+        claimable:
+          type: boolean
+          description: >
+            True exactly when this row is waiting in the workspace automation
+            queue: origin is AUTOMATION, the owner is still the non-login
+            automation service user, and status is OPEN or INVESTIGATING. Derived
+            by the kernel from the same fields POST /incidents/{id}/claim checks,
+            so an affordance built from it cannot outrun the authorization.
         revision:
           type: integer
           format: int64
@@ -788,6 +898,64 @@ components:
             - {$ref: '#/components/schemas/Verdict'}
             - {type: 'null'}
           description: Derived at read time from kernel.incident_verdicts
+    ClaimableIncident:
+      type: object
+      additionalProperties: false
+      required: [id, title, severity, status, nativeId, workspaceId, startedAt, updatedAt, revision]
+      description: >
+        The minimal summary an operator needs to decide whether to claim. It
+        deliberately carries no evidence ids, verdict, timeline or owner: the
+        queue's question is "what is this, how bad, how old, and which version am
+        I claiming".
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        severity: {$ref: '#/components/schemas/IncidentSeverity'}
+        status: {$ref: '#/components/schemas/IncidentStatus'}
+        nativeId: {type: [string, 'null']}
+        workspaceId: {type: string, format: uuid}
+        startedAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        revision: {type: integer, format: int64, minimum: 1}
+    ClaimableIncidentList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ClaimableIncident'}
+    ClaimIncidentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision]
+      properties:
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The revision the operator saw in the queue
+    ReleaseIncidentRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision]
+      properties:
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+    IncidentRelease:
+      type: object
+      additionalProperties: false
+      required: [incidentId, revision, releasedAt]
+      properties:
+        incidentId: {type: string, format: uuid}
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The incident's revision after the release
+        releasedAt: {type: string, format: date-time}
     IncidentList:
       type: object
       additionalProperties: false

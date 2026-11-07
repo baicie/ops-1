@@ -1,4 +1,5 @@
 import type { MessageKey } from './i18n';
+import { claimActions } from './incident-claims';
 import type { StatusTone } from './components/status-tone';
 import type { IncidentEvidence, IncidentList, IncidentTimelineEvent, IncidentVerdict, IncidentView, Role } from './types';
 
@@ -412,6 +413,10 @@ export function closurePanelState(incident: Pick<IncidentView, 'status'>): Closu
 }
 
 export interface IncidentCapabilities {
+  /** G13-B1.4: this row is in the workspace automation queue and may be claimed. */
+  canClaim: boolean;
+  /** G13-B1.4: this account owns a live automation incident and may return it to the queue. */
+  canRelease: boolean;
   canAddEvidence: boolean;
   canRecordVerdict: boolean;
   canClose: boolean;
@@ -425,7 +430,7 @@ export interface IncidentCapabilities {
 }
 
 export interface CapabilityInput {
-  incident: Pick<IncidentView, 'status' | 'owner' | 'humanVerdict'>;
+  incident: Pick<IncidentView, 'status' | 'owner' | 'humanVerdict' | 'origin' | 'claimable'>;
   userId: string | null;
   role: Role | null;
 }
@@ -474,7 +479,19 @@ export function incidentCapabilities({ incident, userId, role }: CapabilityInput
         ? 'incidents.close.blocked.closedTransfer'
         : null;
 
+  // Claim/release is derived in one place (incident-claims.ts) and reused here, so the
+  // detail page's affordance and the queue's decision cannot drift apart.
+  const claims = claimActions({
+    claimable: incident.claimable,
+    origin: incident.origin,
+    owner: incident.owner,
+    userId,
+    role,
+    status: incident.status,
+  });
   return {
+    canClaim: claims.canClaim,
+    canRelease: claims.canRelease,
     canAddEvidence: mayWrite && !closed,
     canRecordVerdict: mayWrite && !closed && !incident.humanVerdict,
     canClose: mayWrite && concludable,

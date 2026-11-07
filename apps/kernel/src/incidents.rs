@@ -422,6 +422,13 @@ pub struct IncidentView {
     /// When the current owner was assigned. Equal to createdAt for a row that has
     /// never been handed over.
     pub owner_assigned_at: DateTime<Utc>,
+    /// USER, AUTOMATION, or NULL for a row that predates the automation slices.
+    pub origin: Option<String>,
+    /// True when the row is waiting in the workspace automation queue: origin is
+    /// AUTOMATION, the owner is still the non-login service user, and the status
+    /// is OPEN or INVESTIGATING. Derived by the kernel from the same fields the
+    /// claim route checks, so the affordance cannot outrun the authorization.
+    pub claimable: bool,
     /// G12 C: the version every lifecycle write arbitrates on. Bumped by a status
     /// transition, a closure and a handover; a client that writes with a stale one is
     /// told so (409) instead of overwriting a decision it never saw.
@@ -526,6 +533,10 @@ struct IncidentRow {
     updated_at: DateTime<Utc>,
     owner: Uuid,
     owner_assigned_at: DateTime<Utc>,
+    /// USER, AUTOMATION, or NULL for a row that predates 0026. Exposed because
+    /// the detail page must know whether a row is an automation record before it
+    /// can offer claim/release; the kernel, not the browser, decides.
+    origin: Option<String>,
     revision: i64,
     closed_at: Option<DateTime<Utc>>,
     closed_by: Option<Uuid>,
@@ -541,7 +552,18 @@ struct IncidentRow {
 }
 
 impl IncidentRow {
+    /// Whether this row is waiting in the workspace automation queue: an
+    /// automation incident that no person has claimed and that is still live.
+    /// One definition, used by the detail/list payload and by the claim route's
+    /// own preconditions, so the button and the handler cannot disagree.
+    pub(crate) fn is_claimable(&self) -> bool {
+        self.origin.as_deref() == Some("AUTOMATION")
+            && self.owner.to_string() == crate::automation::AUTOMATION_USER_ID
+            && matches!(self.status.as_str(), "OPEN" | "INVESTIGATING")
+    }
+
     fn into_view(self) -> IncidentView {
+        let claimable = self.is_claimable();
         let human_verdict = match (
             self.verdict_value,
             self.verdict_rationale,
@@ -583,6 +605,8 @@ impl IncidentRow {
             updated_at: self.updated_at,
             owner: self.owner,
             owner_assigned_at: self.owner_assigned_at,
+            origin: self.origin.clone(),
+            claimable,
             revision: self.revision,
             closed_at: self.closed_at,
             closed_by: self.closed_by,
@@ -2516,7 +2540,7 @@ fn considered_set_digest(snapshot: &[(Uuid, String)]) -> String {
 const INCIDENT_SELECT: &str = r#"
 SELECT i.incident_id, i.title, i.severity, i.status, i.source,
        i.native_id, i.related_entity, i.started_at, i.updated_at, i.owner,
-       i.owner_assigned_at, i.revision, i.closed_at, i.closed_by, i.closure_note,
+       i.owner_assigned_at, i.origin, i.revision, i.closed_at, i.closed_by, i.closure_note,
        COALESCE((
          SELECT jsonb_agg(ref.evidence_id ORDER BY ref.collected_at DESC, ref.evidence_id DESC)
          FROM (
@@ -3258,6 +3282,7 @@ mod tests {
             updated_at: Utc::now(),
             owner: Uuid::new_v4(),
             owner_assigned_at: Utc::now(),
+            origin: Some("USER".into()),
             revision: 1,
             closed_at: None,
             closed_by: None,
