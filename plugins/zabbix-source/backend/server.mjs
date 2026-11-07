@@ -766,6 +766,7 @@ export async function startServer(env = process.env) {
   });
   const verifyIdentity = createIdentityResolver({
     contextKeyHex: env.OPSWEAVE_CALLER_CONTEXT_KEY || '',
+    automationPublicKeyHex: env.OPSWEAVE_AUTOMATION_PUBLIC_KEY || '',
     pluginId,
   });
   const secrets = secretConfiguration(env);

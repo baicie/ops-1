@@ -532,6 +532,12 @@ pub async fn instance_environment(
         state.config.allow_insecure_source_endpoints,
         &plugin_id,
     ));
+    // Public verification key only. The plugin cannot mint `owa2`; the private
+    // seed is derived from the Kernel cursor secret and never leaves the Kernel.
+    env.insert(
+        "OPSWEAVE_AUTOMATION_PUBLIC_KEY".into(),
+        crate::automation::public_key_hex(&state),
+    );
     if let Ok(manifest) = serde_json::from_value::<ManifestV11>(manifest_value) {
         let mut tokens = serde_json::Map::new();
         for required in &manifest.requires {
