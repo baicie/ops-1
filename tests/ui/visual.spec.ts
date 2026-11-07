@@ -62,7 +62,8 @@ test('core operator pages render and do not overflow at 1440', async ({ page }) 
 test('plugin detail and install wizard are usable', async ({ page }) => {
   await login(page);
   await page.goto('/plugins/dev.opsweave.hello');
-  await expect(page.getByRole('heading', { name: /Hello/ }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Plugin detail', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText(/Hello/);
   await expect(page.getByText('Artifact trust')).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'plugin-detail.png'), fullPage: true });
   await page.getByRole('tab', { name: /Deployments/ }).click();

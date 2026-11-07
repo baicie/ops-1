@@ -152,7 +152,8 @@ test('the admin creates an incident, it survives a reload, evidence is verifiabl
   concludedId = await createIncident(page, title);
   const detail = page.getByTestId('incident-detail');
   await expect(detail).toHaveAttribute('data-incident-id', concludedId);
-  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Incidents', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText(title);
   // The record says where it came from: a manual entry, because that is the only way this page writes.
   await expect(page.getByTestId('incident-detail-source')).toHaveAttribute('data-source', 'MANUAL');
   await expect(page.locator('[data-testid="incident-detail-status"] [data-status]')).toHaveAttribute('data-status', 'OPEN');
@@ -162,7 +163,8 @@ test('the admin creates an incident, it survives a reload, evidence is verifiabl
   // 2. Reload: the record is in the database, not in component state.
   await page.reload();
   await expect(detail).toHaveAttribute('data-incident-id', concludedId);
-  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Incidents', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText(title);
 
   // 3. Evidence whose source and content reference are read back as typed.
   const contentRef = 'sha256:g11-e2e-' + RUN + '-log-excerpt';
