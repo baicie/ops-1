@@ -23,11 +23,11 @@ G13-A 的写入路径全部建立在**人类会话**上：
 |---|---|---|---|---|
 | **User** | `owu1` user context | Kernel Gateway（用户会话） | 角色 + `business_workspace_members` | 业务写、Human Verdict、Close |
 | **Workload** | `oww1` workload context | Kernel（capability grant） | capability grant + instance 身份 | 仅 capability 声明的操作 |
-| **Automation** | `owa1` automation context | Kernel（仅内部端点） | Kernel 侧 source 注册表 + 触发器绑定 | 仅事件对应的 collect/evidence |
+| **Automation** | `owa2` automation context | Kernel（仅内部端点） | Kernel 侧 source 注册表 + 触发器绑定 | 仅事件对应的 collect/evidence |
 
 Automation **不是**一个更宽的角色，也不是 `AuthUser` 的变体。它是独立的 extractor（`AutomationPrincipal`），不实现 `require_operator`，不能进入任何接受 `AuthUser` 的 handler。
 
-### 2.1 Token claims（`owa1`）
+### 2.1 Token claims（`owa2`）
 
 ```
 v: 1
@@ -45,7 +45,7 @@ jti: uuid
 audience: "opsweave-kernel"
 ```
 
-签名密钥与 per-plugin caller key 相同（`HMAC(cursor_secret, "caller-context:"+pluginId)`），插件已通过 `OPSWEAVE_CALLER_CONTEXT_KEY` 持有它，因此只增加验证能力、不增加签发能力；Kernel 仍是唯一签发者。签发端点 `POST /internal/v1/nodes/{node_id}/automation-principals` 由 Node control credential 调用，只接受：
+签名使用 **Ed25519**：Kernel 从 cursor secret 派生私钥（`SHA-256("opsweave-automation-signing-v1" || cursor_secret)`），只把公钥 `OPSWEAVE_AUTOMATION_PUBLIC_KEY` 注入插件；插件持有的 caller-context HMAC key 不能生成 `owa2` 签名。Kernel 是唯一签名者。签发端点 `POST /internal/v1/nodes/{node_id}/automation-principals` 由 Node control credential 调用，只接受：
 
 1. 由 Kernel 签发的 instance workload identity，且 `instanceId/nodeId/nodeGeneration` 与当前 live instance 一致；
 2. `sourceId` 在 Kernel 的 **telemetry source 注册表**中属于 `pluginId` 且 `state=READY`；
@@ -96,7 +96,7 @@ details    = {eventId, sourceId, pluginId, instanceId, nodeId, operation, budget
 ## 3. 与现有身份的关系
 
 - User 与 Workload 的 token 格式不变；Automation 使用独立前缀，旧插件无法解析，旧 Kernel 也无法验证。
-- `oww1` 的 capability grant 不会自动产生 `owa1`；必须显式签发。
+- `oww1` 的 capability grant 不会自动产生 `owa2`；必须显式签发。
 - 插件现有的 role→scope 表（`identity.mjs`）不增加 automation 条目：插件没有“automation 用户”，只有 Kernel 签发的 principal。
 - 人类 Verdict 的 `decided_by` 仍为 `kernel.users.id`；Automation 没有可写的 verdict 路径。
 

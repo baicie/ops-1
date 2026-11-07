@@ -23,13 +23,39 @@ import crypto from 'node:crypto';
 
 export const USER_CONTEXT_PREFIX = 'owu1';
 export const WORKLOAD_CONTEXT_PREFIX = 'oww1';
-export const AUTOMATION_CONTEXT_PREFIX = 'owa1';
+export const AUTOMATION_CONTEXT_PREFIX = 'owa2';
 
 const ROLE_SCOPES = {
   admin: ['telemetry.source.read', 'telemetry.source.write'],
   operator: ['telemetry.source.read', 'telemetry.source.write'],
   viewer: ['telemetry.source.read'],
 };
+
+function decodeAutomation(token, publicKey, expectedPluginId, now) {
+  if (typeof token !== 'string' || !token || !publicKey) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] !== AUTOMATION_CONTEXT_PREFIX) return null;
+  const [, encoded, signature] = parts;
+  let valid;
+  try {
+    valid = crypto.verify(null, Buffer.from(encoded), publicKey, Buffer.from(signature, 'base64url'));
+  } catch {
+    return null;
+  }
+  if (!valid) return null;
+  let claims;
+  try {
+    claims = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!claims || claims.v !== 1 || claims.kind !== 'automation') return null;
+  if (expectedPluginId && claims.pluginId !== expectedPluginId) return null;
+  const nowSeconds = Math.floor(now() / 1000);
+  if (!Number.isFinite(claims.expiresAt) || claims.expiresAt <= nowSeconds) return null;
+  if (!Number.isFinite(claims.issuedAt) || claims.issuedAt > nowSeconds + 60) return null;
+  return claims;
+}
 
 function decodePayload(token, prefix, key, expectedPluginId, now) {
   if (typeof token !== 'string' || !token) return null;
@@ -66,10 +92,27 @@ function decodePayload(token, prefix, key, expectedPluginId, now) {
  * token can be checked, so every request is anonymous: refusing is the only
  * safe direction.
  */
-export function createIdentityResolver({ contextKeyHex, pluginId, now = () => Date.now() }) {
+export function createIdentityResolver({
+  contextKeyHex,
+  pluginId,
+  automationPublicKeyHex = '',
+  now = () => Date.now(),
+}) {
   const key = typeof contextKeyHex === 'string' && /^[0-9a-fA-F]{2,128}$/.test(contextKeyHex)
     ? Buffer.from(contextKeyHex, 'hex')
     : null;
+  // The Kernel sends only its Ed25519 public key. It cannot sign `owa2`.
+  const automationKey =
+    typeof automationPublicKeyHex === 'string' && /^[0-9a-fA-F]{64}$/.test(automationPublicKeyHex)
+      ? crypto.createPublicKey({
+          key: {
+            kty: 'OKP',
+            crv: 'Ed25519',
+            x: Buffer.from(automationPublicKeyHex, 'hex').toString('base64url'),
+          },
+          format: 'jwk',
+        })
+      : null;
 
   return function identity(headers) {
     if (!key) return null;
@@ -91,7 +134,12 @@ export function createIdentityResolver({ contextKeyHex, pluginId, now = () => Da
       };
     }
 
-    const automation = decodePayload(headers['x-opsweave-automation-context'], AUTOMATION_CONTEXT_PREFIX, key, pluginId, now);
+    const automation = decodeAutomation(
+      headers['x-opsweave-automation-context'],
+      automationKey,
+      pluginId,
+      now,
+    );
     if (automation) {
       if (automation.kind !== 'automation') return null;
       const ops = Array.isArray(automation.allowedOps)

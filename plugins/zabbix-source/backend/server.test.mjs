@@ -33,6 +33,11 @@ const USER_ID = '11111111-1111-4111-8111-111111111111';
 const WORKSPACE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const WORKSPACE_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const INCIDENT_ID = '33333333-3333-4333-8333-333333333333';
+const AUTOMATION_KEYS = crypto.generateKeyPairSync('ed25519');
+const AUTOMATION_PUBLIC_HEX = Buffer.from(
+  AUTOMATION_KEYS.publicKey.export({ format: 'jwk' }).x,
+  'base64url',
+).toString('hex');
 
 function startFakeZabbix() {
   const state = { calls: [], history: [{ clock: 1793500200, value: '17.5', ns: 0 }] };
@@ -114,10 +119,7 @@ function workloadContext({ scopes = ['telemetry.source.read'], workspaces = [WOR
 
 function automationContext({ sourceId, workspaceId = WORKSPACE_A, ops = ['SOURCE_COLLECT', 'EVIDENCE_APPEND'] } = {}) {
   const now = Math.floor(Date.now() / 1000);
-  return signContext({
-    keyHex: KEY_HEX,
-    prefix: 'owa1',
-    payload: {
+  const payload = {
       v: 1,
       kind: 'automation',
       principalId: crypto.randomUUID(),
@@ -135,14 +137,20 @@ function automationContext({ sourceId, workspaceId = WORKSPACE_A, ops = ['SOURCE
       expiresAt: now + 60,
       jti: crypto.randomUUID(),
       audience: 'opsweave-kernel',
-    },
-  });
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const signature = crypto.sign(null, Buffer.from(encoded), AUTOMATION_KEYS.privateKey);
+  return `owa2.${encoded}.${signature.toString('base64url')}`;
 }
 
 async function startPlugin({ store = new MemoryStore(), adapter = true, workspaceSecretMap = null } = {}) {
   const plugin = createPlugin({
     store,
-    verifyIdentity: createIdentityResolver({ contextKeyHex: KEY_HEX, pluginId: PLUGIN_ID }),
+    verifyIdentity: createIdentityResolver({
+      contextKeyHex: KEY_HEX,
+      pluginId: PLUGIN_ID,
+      automationPublicKeyHex: AUTOMATION_PUBLIC_HEX,
+    }),
     adapterId: adapter ? ADAPTER_ID : '',
     adapterSecret: adapter ? ADAPTER_SECRET : '',
     secretMap: workspaceSecretMap ? {} : { 'secretref:zabbix/main': 'fixture-token' },

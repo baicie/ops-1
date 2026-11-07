@@ -27,16 +27,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use base64::Engine;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use hmac::{Hmac, Mac};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-type HmacSha256 = Hmac<Sha256>;
-
-pub const TOKEN_PREFIX: &str = "owa1";
+pub const TOKEN_PREFIX: &str = "owa2";
 pub const AUDIENCE: &str = "opsweave-kernel";
 const MAX_TTL_SECONDS: i64 = 300;
 const CLOCK_SKEW_SECONDS: i64 = 60;
@@ -158,17 +156,19 @@ impl AutomationPrincipal {
     }
 }
 
-/// The same per-plugin key the instance receives as
-/// `OPSWEAVE_CALLER_CONTEXT_KEY` (`HMAC(cursor_secret, "caller-context:"+id)`).
-/// Reusing it lets the plugin verify `owa1` without receiving a second secret;
-/// the key is already scoped to that plugin, and the Kernel remains the only
-/// party that can mint a token carrying a workspace/source it did not resolve.
-fn signing_key(state: &AppState, plugin_id: &str) -> Vec<u8> {
-    let mut mac =
-        HmacSha256::new_from_slice(&state.cursor_secret).expect("HMAC accepts any key length");
-    mac.update(b"caller-context:");
-    mac.update(plugin_id.as_bytes());
-    mac.finalize().into_bytes().to_vec()
+/// Kernel-only Ed25519 signing key, deterministically derived from the cursor
+/// secret. The plugin receives only the public key; the caller-context HMAC key
+/// it already holds cannot produce an `owa2` signature.
+fn signing_key(state: &AppState) -> SigningKey {
+    let mut hasher = Sha256::new();
+    hasher.update(b"opsweave-automation-signing-v1");
+    hasher.update(state.cursor_secret.as_slice());
+    let seed: [u8; 32] = hasher.finalize().into();
+    SigningKey::from_bytes(&seed)
+}
+
+pub(crate) fn public_key_hex(state: &AppState) -> String {
+    hex::encode(signing_key(state).verifying_key().to_bytes())
 }
 
 pub(crate) fn sign_claims(state: &AppState, claims: &AutomationClaims) -> AppResult<String> {
@@ -178,11 +178,8 @@ pub(crate) fn sign_claims(state: &AppState, claims: &AutomationClaims) -> AppRes
 fn sign(state: &AppState, claims: &AutomationClaims) -> AppResult<String> {
     let payload = serde_json::to_vec(claims).map_err(AppError::from)?;
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
-    let mut mac = HmacSha256::new_from_slice(&signing_key(state, &claims.plugin_id))
-        .map_err(|_| AppError::internal("automation signing key is invalid"))?;
-    mac.update(encoded.as_bytes());
-    let signature =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+    let signature = signing_key(state).sign(encoded.as_bytes());
+    let signature = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.to_bytes());
     Ok(format!("{TOKEN_PREFIX}.{encoded}.{signature}"))
 }
 
@@ -232,12 +229,27 @@ fn verify(state: &AppState, token: &str) -> AppResult<AutomationClaims> {
             "invalid automation token version or audience",
         ));
     }
-    let mut mac = HmacSha256::new_from_slice(&signing_key(state, &claims.plugin_id))
-        .map_err(|_| AppError::internal("automation signing key is invalid"))?;
-    mac.update(encoded.as_bytes());
-    let expected =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-    if expected != signature {
+    let signature_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(&signature)
+        .map_err(|_| {
+            AppError::new(
+                StatusCode::UNAUTHORIZED,
+                "AUTOMATION_PRINCIPAL_INVALID",
+                "invalid automation token signature encoding",
+            )
+        })?;
+    let signature = Signature::from_slice(&signature_bytes).map_err(|_| {
+        AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "AUTOMATION_PRINCIPAL_INVALID",
+            "invalid automation token signature length",
+        )
+    })?;
+    if signing_key(state)
+        .verifying_key()
+        .verify(encoded.as_bytes(), &signature)
+        .is_err()
+    {
         return Err(AppError::new(
             StatusCode::UNAUTHORIZED,
             "AUTOMATION_PRINCIPAL_INVALID",
@@ -626,6 +638,7 @@ pub async fn revoke(state: &AppState, principal_id: Uuid) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hmac::{Hmac, Mac};
     use sqlx::postgres::PgConnectOptions;
     use sqlx::PgPool;
 
@@ -778,6 +791,58 @@ mod tests {
         assert_eq!(disabled.code, "AUTOMATION_SOURCE_NOT_READY", "{disabled:?}");
 
         cleanup(&pool, node.id, instance_id, source_id).await;
+    }
+
+    #[tokio::test]
+    async fn the_plugin_caller_key_cannot_forge_an_owa2_signature() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let state = crate::state::AppState::new(
+            crate::config::Config::from_env(),
+            pool,
+            b"automation-test-cursor".to_vec(),
+        )
+        .unwrap();
+        let now = Utc::now();
+        let claims = AutomationClaims {
+            v: 1,
+            kind: "automation".into(),
+            principal_id: Uuid::new_v4(),
+            plugin_id: "zabbix-source".into(),
+            instance_id: Uuid::new_v4(),
+            node_id: Uuid::new_v4(),
+            node_generation: 1,
+            workspace_id: Uuid::new_v4(),
+            source_id: Uuid::new_v4(),
+            allowed_ops: vec!["EVENT_INGEST".into()],
+            event_id: None,
+            incident_id: None,
+            budget: json!({}),
+            issued_at: now.timestamp(),
+            expires_at: (now + ChronoDuration::seconds(300)).timestamp(),
+            jti: Uuid::new_v4(),
+            audience: AUDIENCE.into(),
+        };
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::to_vec(&claims).unwrap());
+        let caller = Hmac::<Sha256>::new_from_slice(state.cursor_secret.as_slice())
+            .unwrap()
+            .chain_update(b"caller-context:")
+            .chain_update(b"zabbix-source")
+            .finalize()
+            .into_bytes();
+        let signature = Hmac::<Sha256>::new_from_slice(&caller)
+            .unwrap()
+            .chain_update(encoded.as_bytes())
+            .finalize()
+            .into_bytes();
+        let token = format!(
+            "owa2.{encoded}.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature)
+        );
+        let error = verify(&state, &token).unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_PRINCIPAL_INVALID", "{error:?}");
     }
 
     #[tokio::test]
