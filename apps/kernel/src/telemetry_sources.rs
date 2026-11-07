@@ -37,6 +37,8 @@ pub struct SourceRow {
     pub tls_policy: Option<String>,
     pub state: String,
     pub invalid_reason: Option<String>,
+    pub automation_item_ids: Vec<String>,
+    pub automation_window_seconds: i32,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -51,6 +53,8 @@ pub struct SourceView {
     tls_policy: Option<String>,
     state: String,
     invalid_reason: Option<String>,
+    automation_item_ids: Vec<String>,
+    automation_window_seconds: i32,
     updated_at: DateTime<Utc>,
 }
 
@@ -65,6 +69,8 @@ impl From<SourceRow> for SourceView {
             tls_policy: row.tls_policy,
             state: row.state,
             invalid_reason: row.invalid_reason,
+            automation_item_ids: row.automation_item_ids,
+            automation_window_seconds: row.automation_window_seconds,
             updated_at: row.updated_at,
         }
     }
@@ -86,7 +92,8 @@ pub async fn list_sources(
 ) -> AppResult<Json<SourceListView>> {
     auth.require_admin()?;
     let rows = sqlx::query_as::<_, SourceRow>(
-        "SELECT source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state,invalid_reason,updated_at
+        "SELECT source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state,invalid_reason,
+                automation_item_ids,automation_window_seconds,updated_at
            FROM kernel.telemetry_sources
           ORDER BY workspace_id, source_id",
     )
@@ -193,8 +200,9 @@ pub async fn sync(
 
         sqlx::query(
             "INSERT INTO kernel.telemetry_sources
-                 (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state,invalid_reason,updated_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
+                 (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state,invalid_reason,
+                  automation_item_ids,automation_window_seconds,updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())
              ON CONFLICT (source_id) DO UPDATE
                SET workspace_id=EXCLUDED.workspace_id,
                    plugin_id=EXCLUDED.plugin_id,
@@ -203,6 +211,8 @@ pub async fn sync(
                    tls_policy=EXCLUDED.tls_policy,
                    state=EXCLUDED.state,
                    invalid_reason=EXCLUDED.invalid_reason,
+                   automation_item_ids=EXCLUDED.automation_item_ids,
+                   automation_window_seconds=EXCLUDED.automation_window_seconds,
                    updated_at=now()",
         )
         .bind(source.source_id)
@@ -213,6 +223,8 @@ pub async fn sync(
         .bind(&tls)
         .bind(state)
         .bind(reason)
+        .bind(&source.item_ids)
+        .bind(source.window_seconds as i32)
         .execute(&mut *tx)
         .await?;
 
@@ -319,12 +331,15 @@ mod tests {
             plugin_id: "zabbix-source".into(),
             secret_ref: "secretref:zabbix/main".into(),
             state: state.into(),
+            item_ids: vec!["10401".into()],
+            window_seconds: 300,
         }
     }
 
     async fn row(pool: &PgPool, source_id: Uuid) -> SourceRow {
         sqlx::query_as::<_, SourceRow>(
-            "SELECT source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state,invalid_reason,updated_at
+            "SELECT source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state,invalid_reason,
+                    automation_item_ids,automation_window_seconds,updated_at
                FROM kernel.telemetry_sources WHERE source_id=$1",
         )
         .bind(source_id)
