@@ -351,7 +351,7 @@ pub async fn run_once(state: &AppState, worker: &str) -> anyhow::Result<bool> {
         .await?;
         return Ok(true);
     };
-    let principal = match automation::load_principal(state, job.principal_id).await {
+    let principal = match automation::load_principal_for_execution(state, job.principal_id).await {
         Ok(principal) => principal,
         Err(error) => {
             finish_error(state, &job, &error).await?;
@@ -496,6 +496,7 @@ mod fencing_tests {
 
     struct Fixture {
         source: Uuid,
+        node: Uuid,
         incident: Uuid,
         principal: Uuid,
         job: Uuid,
@@ -503,11 +504,22 @@ mod fencing_tests {
 
     async fn seed(pool: &PgPool) -> Fixture {
         let workspace = crate::scope::legacy_workspace();
+        let node = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.nodes
+                 (id,name,control_token_hash,data_token,generation,os,arch,status,last_seen_at,enrolled_at)
+             VALUES ($1,$2,'hash','data-token',1,'linux','arm64','READY',now(),now())",
+        )
+        .bind(node)
+        .bind(format!("fencing-node-{node}"))
+        .execute(pool)
+        .await
+        .unwrap();
         let source = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO kernel.telemetry_sources
-                 (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state)
-             VALUES ($1,$2,'zabbix-source','secretref:zabbix/main','https://zabbix.example/api_jsonrpc.php','VERIFY','READY')",
+                 (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state,automation_item_ids)
+             VALUES ($1,$2,'zabbix-source','secretref:zabbix/main','https://zabbix.example/api_jsonrpc.php','VERIFY','READY',ARRAY['12345'])",
         )
         .bind(source)
         .bind(workspace)
@@ -533,11 +545,11 @@ mod fencing_tests {
             "INSERT INTO kernel.automation_principals
                  (principal_id,plugin_id,instance_id,node_id,node_generation,workspace_id,source_id,
                   allowed_ops,event_id,incident_id,budget,issued_at,expires_at,jti)
-             VALUES ($1,'zabbix-source',$2,$3,1,$4,$5,$6,NULL,NULL,'{}'::jsonb,now(),now()+interval '300 seconds',$7)",
+             VALUES ($1,'zabbix-source',$2,$3,1,$4,$5,$6,NULL,NULL,jsonb_build_object('collections',8,'windowSeconds',300,'evidenceBytes',1048576),now(),now()+interval '300 seconds',$7)",
         )
         .bind(principal)
         .bind(Uuid::new_v4())
-        .bind(Uuid::new_v4())
+        .bind(node)
         .bind(workspace)
         .bind(source)
         .bind(vec!["SOURCE_COLLECT".to_string()])
@@ -578,6 +590,7 @@ mod fencing_tests {
         .unwrap();
         Fixture {
             source,
+            node,
             incident,
             principal,
             job,
@@ -610,6 +623,10 @@ mod fencing_tests {
             .await;
         let _ = sqlx::query("DELETE FROM kernel.telemetry_sources WHERE source_id=$1")
             .bind(fixture.source)
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.nodes WHERE id=$1")
+            .bind(fixture.node)
             .execute(pool)
             .await;
     }
@@ -1194,7 +1211,7 @@ mod fencing_tests {
             .await
             .unwrap()
             .expect("the expired attempt is claimable");
-        let principal = automation::load_principal(&state, fixture.principal)
+        let principal = automation::load_principal_for_execution(&state, fixture.principal)
             .await
             .unwrap();
         let run = automation_flow::collect_and_append(
@@ -1234,6 +1251,187 @@ mod fencing_tests {
             .bind(fixture.incident)
             .execute(&pool)
             .await;
+        cleanup(&pool, &fixture).await;
+    }
+
+    async fn last_error(pool: &PgPool, job: Uuid) -> (String, Option<String>) {
+        sqlx::query_as("SELECT status, last_error_code FROM kernel.automation_jobs WHERE job_id=$1")
+            .bind(job)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    /// The enqueue-time token TTL is not the task's lifetime. A job whose
+    /// principal expired while it sat in the queue still runs: the Kernel
+    /// re-validates the stored facts and mints a short credential for this
+    /// attempt. The unreachable route then produces a RETRYABLE outcome, not
+    /// AUTOMATION_PRINCIPAL_EXPIRED.
+    #[tokio::test]
+    async fn an_expired_principal_does_not_fail_a_persisted_job() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fixture = seed(&pool).await;
+        sqlx::query(
+            "UPDATE kernel.automation_principals
+                SET issued_at=now()-interval '2 hours', expires_at=now()-interval '1 hour'
+              WHERE principal_id=$1",
+        )
+        .bind(fixture.principal)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let state = state(pool.clone());
+        let job = claim_matching(&state, "expired-principal", Some(fixture.job), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let principal = automation::load_principal_for_execution(&state, fixture.principal)
+            .await
+            .expect("an expired enqueue token must not stop a persisted job");
+        let lifetime = principal.claims.expires_at - principal.claims.issued_at;
+        assert_eq!(
+            lifetime,
+            automation::EXECUTION_TTL_FOR_TEST,
+            "the execution credential is short-lived, not the enqueue token"
+        );
+        assert_eq!(
+            principal.claims.workspace_id,
+            crate::scope::legacy_workspace()
+        );
+        assert_eq!(principal.claims.source_id, fixture.source);
+        assert_eq!(
+            principal.claims.allowed_ops,
+            vec!["SOURCE_COLLECT".to_string()]
+        );
+
+        let failure = automation_flow::collect_and_append(
+            &state,
+            &principal,
+            fixture.incident,
+            fixture.source,
+            chrono::Utc::now(),
+            job.job_id,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            failure.code, "AUTOMATION_INSTANCE_UNAVAILABLE",
+            "the attempt reached the route check (retryable), not a principal expiry"
+        );
+        finish_error(&state, &job, &failure).await.unwrap();
+        assert_eq!(
+            last_error(&pool, fixture.job).await,
+            (
+                "RETRY_WAIT".into(),
+                Some("AUTOMATION_INSTANCE_UNAVAILABLE".into())
+            ),
+            "the task stays retryable; expiry is not a terminal reason"
+        );
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn a_revoked_principal_fails_the_job_final_with_its_reason() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fixture = seed(&pool).await;
+        sqlx::query(
+            "UPDATE kernel.automation_principals SET revoked_at=now() WHERE principal_id=$1",
+        )
+        .bind(fixture.principal)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let state = state(pool.clone());
+        let job = claim_matching(&state, "revoked-principal", Some(fixture.job), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let error = automation::load_principal_for_execution(&state, fixture.principal)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_PRINCIPAL_REVOKED");
+        finish_error(&state, &job, &error).await.unwrap();
+        assert_eq!(
+            last_error(&pool, fixture.job).await,
+            (
+                "FAILED_FINAL".into(),
+                Some("AUTOMATION_PRINCIPAL_REVOKED".into())
+            )
+        );
+        assert_eq!(
+            job_audit(&pool, fixture.job, "telemetry.automation.attempt_failed").await,
+            1
+        );
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn a_disabled_source_fails_the_job_final_with_its_reason() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fixture = seed(&pool).await;
+        sqlx::query("UPDATE kernel.telemetry_sources SET state='DISABLED' WHERE source_id=$1")
+            .bind(fixture.source)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let state = state(pool.clone());
+        let job = claim_matching(&state, "disabled-source", Some(fixture.job), None)
+            .await
+            .unwrap()
+            .unwrap();
+        let error = automation::load_principal_for_execution(&state, fixture.principal)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_SOURCE_NOT_READY");
+        finish_error(&state, &job, &error).await.unwrap();
+        assert_eq!(
+            last_error(&pool, fixture.job).await,
+            (
+                "FAILED_FINAL".into(),
+                Some("AUTOMATION_SOURCE_NOT_READY".into())
+            )
+        );
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn a_re_enrolled_node_fails_the_job_final_with_its_reason() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fixture = seed(&pool).await;
+        sqlx::query("UPDATE kernel.nodes SET generation=2 WHERE id=$1")
+            .bind(fixture.node)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let state = state(pool.clone());
+        let job = claim_matching(&state, "stale-node", Some(fixture.job), None)
+            .await
+            .unwrap()
+            .unwrap();
+        let error = automation::load_principal_for_execution(&state, fixture.principal)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_INSTANCE_STALE");
+        finish_error(&state, &job, &error).await.unwrap();
+        assert_eq!(
+            last_error(&pool, fixture.job).await,
+            (
+                "FAILED_FINAL".into(),
+                Some("AUTOMATION_INSTANCE_STALE".into())
+            )
+        );
         cleanup(&pool, &fixture).await;
     }
 

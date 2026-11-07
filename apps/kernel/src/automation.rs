@@ -37,6 +37,12 @@ use uuid::Uuid;
 pub const TOKEN_PREFIX: &str = "owa2";
 pub const AUDIENCE: &str = "opsweave-kernel";
 const MAX_TTL_SECONDS: i64 = 300;
+/// How long the credential minted for one execution is valid. The enqueue-time
+/// principal TTL (MAX_TTL_SECONDS) is a property of the token a plugin holds;
+/// a persisted job's execution must not inherit its expiry (ADR-G13-B1.7).
+const EXECUTION_TTL_SECONDS: i64 = 120;
+#[cfg(test)]
+pub(crate) const EXECUTION_TTL_FOR_TEST: i64 = EXECUTION_TTL_SECONDS;
 const CLOCK_SKEW_SECONDS: i64 = 60;
 
 pub(crate) const AUTOMATION_USER_ID: &str = "00000000-0000-4000-8000-0000000000a1";
@@ -554,19 +560,15 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Au
         ));
     }
 
-    let current_generation: Option<i64> = sqlx::query_scalar(
-        "SELECT generation FROM kernel.nodes WHERE id=$1 AND revoked_at IS NULL",
+    validate_node_and_source(
+        state,
+        claims.node_id,
+        claims.node_generation,
+        claims.workspace_id,
+        claims.source_id,
+        &claims.plugin_id,
     )
-    .bind(claims.node_id)
-    .fetch_optional(&state.db)
     .await?;
-    if current_generation != Some(claims.node_generation) {
-        return Err(AppError::new(
-            StatusCode::UNAUTHORIZED,
-            "AUTOMATION_INSTANCE_STALE",
-            "the node generation changed",
-        ));
-    }
 
     let live: Option<Uuid> = sqlx::query_scalar(
         r#"
@@ -588,33 +590,71 @@ pub async fn authenticate(state: &AppState, headers: &HeaderMap) -> AppResult<Au
         ));
     }
 
-    let source: Option<(String, Uuid, String)> = sqlx::query_as(
-        "SELECT state, workspace_id, plugin_id FROM kernel.telemetry_sources WHERE source_id=$1",
-    )
-    .bind(claims.source_id)
-    .fetch_optional(&state.db)
-    .await?;
-    match source {
-        Some((state_value, workspace_id, plugin_id))
-            if state_value == "READY"
-                && workspace_id == claims.workspace_id
-                && plugin_id == claims.plugin_id => {}
-        _ => {
-            return Err(AppError::new(
-                StatusCode::FORBIDDEN,
-                "AUTOMATION_SOURCE_NOT_READY",
-                "the source is no longer READY for this principal",
-            ))
-        }
-    }
-
     Ok(AutomationPrincipal { row, claims })
 }
 
-/// Load a principal for the durable worker. The job refers to the principal by
-/// id; the worker re-checks expiry/revocation and reconstructs the same claims
-/// the signed token carried, without keeping a bearer token in the database.
-pub async fn load_principal(
+/// The node generation and source facts every automation caller is checked
+/// against. One definition, used by the HTTP `authenticate` path and by the
+/// durable worker's per-execution re-validation, so the two cannot drift.
+async fn validate_node_and_source(
+    state: &AppState,
+    node_id: Uuid,
+    node_generation: i64,
+    workspace_id: Uuid,
+    source_id: Uuid,
+    plugin_id: &str,
+) -> AppResult<()> {
+    let current_generation: Option<i64> = sqlx::query_scalar(
+        "SELECT generation FROM kernel.nodes WHERE id=$1 AND revoked_at IS NULL",
+    )
+    .bind(node_id)
+    .fetch_optional(&state.db)
+    .await?;
+    if current_generation != Some(node_generation) {
+        return Err(AppError::new(
+            StatusCode::UNAUTHORIZED,
+            "AUTOMATION_INSTANCE_STALE",
+            "the node generation changed",
+        ));
+    }
+
+    let source: Option<(String, Uuid, String)> = sqlx::query_as(
+        "SELECT state, workspace_id, plugin_id FROM kernel.telemetry_sources WHERE source_id=$1",
+    )
+    .bind(source_id)
+    .fetch_optional(&state.db)
+    .await?;
+    match source {
+        Some((state_value, stored_workspace, stored_plugin))
+            if state_value == "READY"
+                && stored_workspace == workspace_id
+                && stored_plugin == plugin_id =>
+        {
+            Ok(())
+        }
+        _ => Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "AUTOMATION_SOURCE_NOT_READY",
+            "the source is no longer READY for this principal",
+        )),
+    }
+}
+
+/// Load a principal for the durable worker.
+///
+/// Task durability and credential lifetime are separate (ADR-G13-B1.7):
+///
+///   * the enqueue-time `expires_at` bounded the token a plugin held while the
+///     Event was fresh. It says nothing about whether the stored task is still
+///     authorized, so it is NOT a failure condition here;
+///   * revocation IS an authorization fact and stops new executions;
+///   * the source, workspace, plugin and node generation are re-read now, so a
+///     disabled source, a replaced plugin or a re-enrolled node produces an
+///     explicit terminal reason instead of an expired-token mystery;
+///   * the credential handed to the plugin for THIS execution is re-signed with
+///     a short lifetime. It never outlives the attempt, and it carries no
+///     authority the stored row did not have.
+pub async fn load_principal_for_execution(
     state: &AppState,
     principal_id: Uuid,
 ) -> AppResult<AutomationPrincipal> {
@@ -637,16 +677,20 @@ pub async fn load_principal(
         return Err(AppError::new(
             StatusCode::UNAUTHORIZED,
             "AUTOMATION_PRINCIPAL_REVOKED",
-            "the principal was revoked",
+            "the principal was revoked; no new execution may start",
         ));
     }
-    if row.expires_at <= Utc::now() {
-        return Err(AppError::new(
-            StatusCode::UNAUTHORIZED,
-            "AUTOMATION_PRINCIPAL_EXPIRED",
-            "the stored principal has expired",
-        ));
-    }
+    validate_node_and_source(
+        state,
+        row.node_id,
+        row.node_generation,
+        row.workspace_id,
+        row.source_id,
+        &row.plugin_id,
+    )
+    .await?;
+
+    let now = Utc::now();
     let claims = AutomationClaims {
         v: 1,
         kind: "automation".into(),
@@ -661,8 +705,11 @@ pub async fn load_principal(
         event_id: row.event_id,
         incident_id: row.incident_id,
         budget: row.budget.clone(),
-        issued_at: row.issued_at.timestamp(),
-        expires_at: row.expires_at.timestamp(),
+        // A fresh credential, same identity: the signature and the stored row
+        // both still name this principal, but the lifetime is the execution's,
+        // not the enqueue-time token's.
+        issued_at: now.timestamp(),
+        expires_at: (now + ChronoDuration::seconds(EXECUTION_TTL_SECONDS)).timestamp(),
         jti: row.jti,
         audience: AUDIENCE.into(),
     };
