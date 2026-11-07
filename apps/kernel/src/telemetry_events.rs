@@ -217,35 +217,7 @@ pub async fn ingest(
         return Err(error);
     }
 
-    let (status, mut response) = store_event(&state.db, &principal, &req, &key).await?;
-    if req.trigger_state == "PROBLEM" {
-        if let Some(incident_id) = response.incident_id {
-            match crate::automation_flow::collect_and_append(
-                &state,
-                &principal,
-                incident_id,
-                req.source_id,
-                req.occurred_at,
-            )
-            .await
-            {
-                Ok(run) => response.automation = Some(run),
-                Err(error) => {
-                    crate::automation_flow::record_failure(
-                        &state,
-                        &principal,
-                        incident_id,
-                        req.source_id,
-                        &error,
-                    )
-                    .await;
-                    response.automation = Some(crate::automation_flow::AutomationRunView::failed(
-                        error.code,
-                    ));
-                }
-            }
-        }
-    }
+    let (status, response) = store_event(&state.db, &principal, &req, &key).await?;
     Ok((status, Json(response)))
 }
 
@@ -383,6 +355,25 @@ async fn store_event(
         ));
     }
 
+    let mut job_id = None;
+    if let (Some(incident_id), "PROBLEM") = (incident_id, req.trigger_state.as_str()) {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.automation_jobs
+                 (job_id,event_id,incident_id,principal_id,source_id,status,max_attempts)
+             VALUES ($1,$2,$3,$4,$5,'PENDING',$6)",
+        )
+        .bind(id)
+        .bind(event_id)
+        .bind(incident_id)
+        .bind(principal.principal_id())
+        .bind(req.source_id)
+        .bind(crate::automation_worker::default_max_attempts())
+        .execute(&mut *tx)
+        .await?;
+        job_id = Some(id);
+    }
+
     if let Some(incident_id) = incident_id {
         crate::incidents::audit_automation_event(
             &mut tx,
@@ -427,7 +418,7 @@ async fn store_event(
             event_id,
             incident_id,
             deduplicated: false,
-            automation: None,
+            automation: job_id.map(crate::automation_flow::AutomationRunView::pending),
         },
     ))
 }
@@ -540,6 +531,29 @@ mod tests {
         .await
         .unwrap();
         let actor = principal();
+        sqlx::query(
+            "INSERT INTO kernel.automation_principals
+                 (principal_id,plugin_id,instance_id,node_id,node_generation,workspace_id,source_id,
+                  allowed_ops,event_id,incident_id,budget,issued_at,expires_at,jti)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        )
+        .bind(actor.row.principal_id)
+        .bind(&actor.row.plugin_id)
+        .bind(actor.row.instance_id)
+        .bind(actor.row.node_id)
+        .bind(actor.row.node_generation)
+        .bind(actor.row.workspace_id)
+        .bind(source_id)
+        .bind(&actor.row.allowed_ops)
+        .bind(actor.row.event_id)
+        .bind(actor.row.incident_id)
+        .bind(&actor.row.budget)
+        .bind(actor.row.issued_at)
+        .bind(actor.row.expires_at)
+        .bind(actor.row.jti)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         let mut req = request();
         req.workspace_id = workspace;
@@ -583,6 +597,14 @@ mod tests {
             .execute(&pool)
             .await;
         let _ = sqlx::query("DELETE FROM kernel.incidents WHERE source_id=$1")
+            .bind(source_id)
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.automation_jobs WHERE source_id=$1")
+            .bind(source_id)
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.automation_principals WHERE source_id=$1")
             .bind(source_id)
             .execute(&pool)
             .await;

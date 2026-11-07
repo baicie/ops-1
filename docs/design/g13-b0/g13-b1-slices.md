@@ -40,6 +40,8 @@
 3. 测试：E1–E10，含 32 并发。
 - 退出：同键只 1 个 Incident；跨 Workspace 同 nativeId 互不影响；历史行不合并。
 
+> 实施状态（2026-11-06）：切片 4 的同步版本曾被实现；B1.3 已改为 durable job（`PENDING` 响应 + Worker）。
+
 ## 切片 4 — 自动采集与 Evidence
 
 > 实施状态（2026-11-06）：**已实现** PROBLEM Event → collect → attestation → Evidence（插件接受 `owa1`；Kernel 经 Node proxy 编排）。详见 [b1-slice-4.md](b1-slice-4.md)。

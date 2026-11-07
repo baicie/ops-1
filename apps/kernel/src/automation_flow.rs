@@ -39,18 +39,20 @@ struct Route {
 #[serde(rename_all = "camelCase")]
 pub struct AutomationRunView {
     pub status: String,
+    pub job_id: Option<Uuid>,
     pub collection_id: Option<Uuid>,
     pub evidence_id: Option<Uuid>,
     pub code: Option<String>,
 }
 
 impl AutomationRunView {
-    pub(crate) fn failed(code: &str) -> Self {
+    pub(crate) fn pending(job_id: Uuid) -> Self {
         Self {
-            status: "FAILED".into(),
+            status: "PENDING".into(),
+            job_id: Some(job_id),
             collection_id: None,
             evidence_id: None,
-            code: Some(code.to_string()),
+            code: None,
         }
     }
 }
@@ -362,34 +364,11 @@ pub async fn collect_and_append(
     .await?;
     Ok(AutomationRunView {
         status: "COLLECTED".into(),
+        job_id: None,
         collection_id: Some(collection_id),
         evidence_id: Some(evidence_id),
         code: None,
     })
-}
-
-/// Record a failed attempt without leaking the upstream body. The Event itself
-/// stays accepted; the failure is visible in the audit trail and the response.
-pub async fn record_failure(
-    state: &AppState,
-    principal: &AutomationPrincipal,
-    incident_id: Uuid,
-    source_id: Uuid,
-    error: &AppError,
-) {
-    let _ = crate::audit::record(
-        &state.db,
-        "telemetry.automation.collection_failed",
-        "AUTOMATION",
-        &principal.principal_id().to_string(),
-        "INCIDENT",
-        &incident_id.to_string(),
-        "AUTOMATION_COLLECT",
-        "REJECTED",
-        json!({"sourceId": source_id, "code": error.code}),
-        None,
-    )
-    .await;
 }
 
 #[cfg(test)]

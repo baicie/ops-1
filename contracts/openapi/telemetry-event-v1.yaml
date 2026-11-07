@@ -88,7 +88,8 @@ components:
       additionalProperties: false
       required: [status]
       properties:
-        status: {type: string, enum: [COLLECTED, FAILED]}
+        status: {type: string, enum: [PENDING, COLLECTED, FAILED, RETRY_WAIT, FAILED_FINAL]}
+        jobId: {type: [string, 'null'], format: uuid}
         collectionId: {type: [string, 'null'], format: uuid}
         evidenceId: {type: [string, 'null'], format: uuid}
         code:
