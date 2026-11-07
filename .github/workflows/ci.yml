@@ -330,6 +330,55 @@ jobs:
           exit 1
       - name: committed evidence survives the crash window
         run: bash tests/acceptance/g13_b16_effect.sh
+  # G13-B1.7 part B: a persisted job survives the enqueue token's expiry, while
+  # revocation and a disabled source stop it with a stable terminal reason. The
+  # real Kernel worker loop is the system under test; no Node/Zabbix is used.
+  g13b17-principal:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave_b17
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave_b17"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      OPSWEAVE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave_b17
+      OPSWEAVE_URL: http://127.0.0.1:18243
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: cargo build --locked -p opsweave-kernel
+      - name: start the kernel (its worker loop is the system under test)
+        run: |
+          set -euo pipefail
+          rm -rf data-ci/g13b17 && mkdir -p data-ci/g13b17
+          export OPSWEAVE_BIND=127.0.0.1:18243
+          export OPSWEAVE_PUBLIC_URL="$OPSWEAVE_URL"
+          export DATABASE_URL="$OPSWEAVE_DATABASE_URL"
+          export OPSWEAVE_DATA_DIR="$PWD/data-ci/g13b17"
+          export OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local
+          export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026'
+          export OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin'
+          export RUST_LOG=info
+          nohup ./target/debug/opsweave-kernel > data-ci/g13b17/kernel.log 2>&1 &
+          for _ in $(seq 1 120); do
+            curl -fsS "$OPSWEAVE_URL/livez" >/dev/null 2>&1 && exit 0
+            sleep 0.5
+          done
+          echo "the kernel did not answer /livez" >&2
+          tail -60 data-ci/g13b17/kernel.log >&2
+          exit 1
+      - name: persisted jobs vs credential and authorization lifetime
+        run: bash tests/acceptance/g13_b17_principal.sh
   # V3 brief §9: "截图不允许无上限提交 Git；仅保留精选基线，其余归档为 CI Artifact."
   # Nine runs of tests/ui/admin-polish.spec.ts accumulated 756 SHA-named screenshots (127.95 MB) of
   # the same seven admin pages because no job ever looked at what the index was carrying. The

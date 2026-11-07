@@ -288,10 +288,17 @@ async fn store_event(
         } else {
             req.severity.as_str()
         };
-        sqlx::query(
+        // Two different Event keys for one nativeId can race here: both
+        // transactions read "no active incident" before either committed, and
+        // the partial unique index is the only arbiter. DO NOTHING (rather than
+        // a raw 23505) lets the loser re-read the winner's row and attach its
+        // Event to it - the Event is legitimate and must not be dropped.
+        let inserted: Option<Uuid> = sqlx::query_scalar(
             "INSERT INTO kernel.incidents
                  (incident_id,title,severity,status,source,native_id,started_at,owner,workspace_id,source_id,origin,recurrence_of)
-             VALUES ($1,$2,$3,'OPEN','ZABBIX',$4,$5,$6,$7,$8,'AUTOMATION',$9)",
+             VALUES ($1,$2,$3,'OPEN','ZABBIX',$4,$5,$6,$7,$8,'AUTOMATION',$9)
+             ON CONFLICT DO NOTHING
+             RETURNING incident_id",
         )
         .bind(id)
         .bind(title)
@@ -302,9 +309,37 @@ async fn store_event(
         .bind(req.workspace_id)
         .bind(req.source_id)
         .bind(recurrence)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
-        incident_id = Some(id);
+        incident_id = match inserted {
+            Some(id) => Some(id),
+            None => {
+                // The conflicting inserter committed before ON CONFLICT
+                // returned, so a fresh statement in this READ COMMITTED
+                // transaction sees it. If it does not, the conflict was not
+                // the active-incident key and the caller gets a stable code,
+                // never a raw database error.
+                let winner: Option<Uuid> = sqlx::query_scalar(
+                    "SELECT incident_id FROM kernel.incidents
+                      WHERE workspace_id=$1 AND source_id=$2 AND native_id=$3
+                        AND status IN ('OPEN','INVESTIGATING','CONCLUDED')
+                      ORDER BY created_at DESC LIMIT 1",
+                )
+                .bind(req.workspace_id)
+                .bind(req.source_id)
+                .bind(req.native_id.trim())
+                .fetch_optional(&mut *tx)
+                .await?;
+                let Some(winner) = winner else {
+                    tx.rollback().await?;
+                    return Err(AppError::conflict(
+                        "EVENT_INCIDENT_CONFLICT",
+                        "a concurrent Event changed this incident set; retry the same Idempotency-Key",
+                    ));
+                };
+                Some(winner)
+            }
+        };
     }
 
     let event_id = Uuid::new_v4();
@@ -803,6 +838,513 @@ mod tests {
             .await;
         let _ = sqlx::query("DELETE FROM kernel.users WHERE id=ANY($1)")
             .bind(&[operator, admin][..])
+            .execute(&pool)
+            .await;
+    }
+
+    /// A real source + principal fixture, with the actor's claims bound to the
+    /// same workspace/source the Event names. Returns (workspace, source, actor).
+    async fn seed_event_fixture(pool: &PgPool) -> (Uuid, Uuid, AutomationPrincipal) {
+        seed_event_fixture_in(pool, crate::scope::legacy_workspace()).await
+    }
+
+    async fn seed_event_fixture_in(
+        pool: &PgPool,
+        workspace: Uuid,
+    ) -> (Uuid, Uuid, AutomationPrincipal) {
+        let source_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.telemetry_sources
+                 (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state)
+             VALUES ($1,$2,'zabbix-source','secretref:zabbix/concurrency','https://zabbix.example/api_jsonrpc.php','VERIFY','READY')",
+        )
+        .bind(source_id)
+        .bind(workspace)
+        .execute(pool)
+        .await
+        .unwrap();
+        let mut actor = principal();
+        actor.row.workspace_id = workspace;
+        actor.row.source_id = source_id;
+        actor.claims.workspace_id = workspace;
+        actor.claims.source_id = source_id;
+        sqlx::query(
+            "INSERT INTO kernel.automation_principals
+                 (principal_id,plugin_id,instance_id,node_id,node_generation,workspace_id,source_id,
+                  allowed_ops,event_id,incident_id,budget,issued_at,expires_at,jti)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        )
+        .bind(actor.row.principal_id)
+        .bind(&actor.row.plugin_id)
+        .bind(actor.row.instance_id)
+        .bind(actor.row.node_id)
+        .bind(actor.row.node_generation)
+        .bind(actor.row.workspace_id)
+        .bind(actor.row.source_id)
+        .bind(&actor.row.allowed_ops)
+        .bind(actor.row.event_id)
+        .bind(actor.row.incident_id)
+        .bind(&actor.row.budget)
+        .bind(actor.row.issued_at)
+        .bind(actor.row.expires_at)
+        .bind(actor.row.jti)
+        .execute(pool)
+        .await
+        .unwrap();
+        (workspace, source_id, actor)
+    }
+
+    async fn cleanup_event_fixture(pool: &PgPool, source: Uuid, incident_ids: &[Uuid]) {
+        for incident in incident_ids {
+            let _ = sqlx::query(
+                "DELETE FROM kernel.audit_events WHERE subject_type='INCIDENT' AND subject_id=$1",
+            )
+            .bind(incident.to_string())
+            .execute(pool)
+            .await;
+        }
+        let _ = sqlx::query("DELETE FROM kernel.automation_jobs WHERE source_id=$1")
+            .bind(source)
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.telemetry_events WHERE source_id=$1")
+            .bind(source)
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.incidents WHERE source_id=$1")
+            .bind(source)
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.automation_principals WHERE source_id=$1")
+            .bind(source)
+            .execute(pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.telemetry_sources WHERE source_id=$1")
+            .bind(source)
+            .execute(pool)
+            .await;
+    }
+
+    fn event_request(
+        workspace: Uuid,
+        source: Uuid,
+        native: &str,
+        at: DateTime<Utc>,
+    ) -> EventRequest {
+        let mut req = request();
+        req.workspace_id = workspace;
+        req.source_id = source;
+        req.native_id = native.to_string();
+        req.occurred_at = at;
+        req.observed_at = at;
+        req.payload_digest = digest(&req.payload);
+        req
+    }
+
+    /// The pre-fix writer shape, reproduced: two transactions both read "no
+    /// active incident" and both INSERT without ON CONFLICT. The partial unique
+    /// index refuses the loser with SQLSTATE 23505, which the handler's `?`
+    /// maps through `From<sqlx::Error>` to INTERNAL (500). The fix below turns
+    /// that same conflict into "attach to the winner".
+    #[tokio::test]
+    async fn the_pre_fix_insert_shape_gives_the_loser_a_raw_unique_violation() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let (workspace, source, actor) = seed_event_fixture(&pool).await;
+        let native = format!("pre-fix-native-{}", Uuid::new_v4());
+        let service = Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap();
+        let mut first = pool.begin().await.unwrap();
+        let mut second = pool.begin().await.unwrap();
+        for tx in [&mut first, &mut second] {
+            let active: Option<Uuid> = sqlx::query_scalar(
+                "SELECT incident_id FROM kernel.incidents
+                  WHERE workspace_id=$1 AND source_id=$2 AND native_id=$3
+                    AND status IN ('OPEN','INVESTIGATING','CONCLUDED')",
+            )
+            .bind(workspace)
+            .bind(source)
+            .bind(&native)
+            .fetch_optional(&mut **tx)
+            .await
+            .unwrap();
+            assert!(
+                active.is_none(),
+                "both readers start from no active incident"
+            );
+        }
+        sqlx::query(
+            "INSERT INTO kernel.incidents
+               (incident_id,title,severity,status,source,native_id,started_at,owner,workspace_id,source_id,origin)
+             VALUES ($1,'pre-fix first','MAJOR','OPEN','ZABBIX',$2,now(),$3,$4,$5,'AUTOMATION')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(&native)
+        .bind(service)
+        .bind(workspace)
+        .bind(source)
+        .execute(&mut *first)
+        .await
+        .unwrap();
+        // The winner commits, as the real race does; the loser's INSERT then
+        // conflicts with the committed row.
+        first.commit().await.unwrap();
+        let error = sqlx::query(
+            "INSERT INTO kernel.incidents
+               (incident_id,title,severity,status,source,native_id,started_at,owner,workspace_id,source_id,origin)
+             VALUES ($1,'pre-fix second','MAJOR','OPEN','ZABBIX',$2,now(),$3,$4,$5,'AUTOMATION')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(&native)
+        .bind(service)
+        .bind(workspace)
+        .bind(source)
+        .execute(&mut *second)
+        .await
+        .unwrap_err();
+        match error {
+            sqlx::Error::Database(database) => {
+                assert_eq!(
+                    database.code().as_deref(),
+                    Some("23505"),
+                    "the loser hits the active-incident unique index"
+                );
+            }
+            other => panic!("expected a unique violation, got {other:?}"),
+        }
+        second.rollback().await.unwrap();
+        let _ = actor;
+        let incident: Uuid = sqlx::query_scalar(
+            "SELECT incident_id FROM kernel.incidents WHERE source_id=$1 AND native_id=$2",
+        )
+        .bind(source)
+        .bind(&native)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        cleanup_event_fixture(&pool, source, &[incident]).await;
+    }
+
+    /// 64 different Event keys for one nativeId, all at once. Every Event is
+    /// legitimate (a distinct state change/time), so none may be dropped and
+    /// none may answer with a raw unique-constraint error: exactly one Incident
+    /// is created and every Event is attached to it.
+    #[tokio::test]
+    async fn concurrent_distinct_event_keys_create_one_incident_and_keep_every_event() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let (workspace, source, actor) = seed_event_fixture(&pool).await;
+        let native = format!("concurrent-native-{}", Uuid::new_v4());
+        let base = Utc::now() - chrono::Duration::seconds(120);
+        let mut tasks = Vec::new();
+        for index in 0..64 {
+            let pool = pool.clone();
+            let actor = actor.clone();
+            let native = native.clone();
+            tasks.push(tokio::spawn(async move {
+                let req = event_request(
+                    workspace,
+                    source,
+                    &native,
+                    base + chrono::Duration::seconds(index),
+                );
+                let key = idempotency_key(&req);
+                store_event(&pool, &actor, &req, &key).await.map(|_| ())
+            }));
+        }
+        let mut incident_ids = std::collections::HashSet::new();
+        for task in tasks {
+            let outcome = task.await.unwrap();
+            match outcome {
+                Ok(()) => {}
+                Err(error) => panic!("an Event was refused: {error:?}"),
+            }
+        }
+        let incidents: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT incident_id FROM kernel.incidents WHERE source_id=$1 AND native_id=$2",
+        )
+        .bind(source)
+        .bind(&native)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        incident_ids.extend(incidents.iter().copied());
+        assert_eq!(incidents.len(), 1, "one nativeId, one active incident");
+        let events: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.telemetry_events WHERE source_id=$1 AND native_id=$2",
+        )
+        .bind(source)
+        .bind(&native)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(events, 64, "no legitimate Event was dropped");
+        let jobs: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.automation_jobs WHERE source_id=$1 AND incident_id=$2",
+        )
+        .bind(source)
+        .bind(incidents[0])
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(jobs, 64, "each accepted PROBLEM Event has one durable job");
+
+        cleanup_event_fixture(&pool, source, &incidents).await;
+    }
+
+    /// 16 requests with the SAME Idempotency-Key: one Event, one Incident, one
+    /// Job, and every retry is answered with the winner's identifiers.
+    #[tokio::test]
+    async fn concurrent_same_key_retries_answer_with_one_event() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let (workspace, source, actor) = seed_event_fixture(&pool).await;
+        let native = format!("same-key-native-{}", Uuid::new_v4());
+        let req = event_request(workspace, source, &native, Utc::now());
+        let key = idempotency_key(&req);
+        let mut tasks = Vec::new();
+        for _ in 0..16 {
+            let pool = pool.clone();
+            let actor = actor.clone();
+            let req = EventRequest {
+                native_id: req.native_id.clone(),
+                source_id: req.source_id,
+                workspace_id: req.workspace_id,
+                occurred_at: req.occurred_at,
+                observed_at: req.observed_at,
+                severity: req.severity.clone(),
+                trigger_state: req.trigger_state.clone(),
+                payload_digest: req.payload_digest.clone(),
+                payload: req.payload.clone(),
+            };
+            let key = key.clone();
+            tasks.push(tokio::spawn(async move {
+                store_event(&pool, &actor, &req, &key)
+                    .await
+                    .map(|(status, view)| {
+                        (status, view.event_id, view.incident_id, view.deduplicated)
+                    })
+            }));
+        }
+        let mut event_ids = std::collections::HashSet::new();
+        let mut incident_id = None;
+        let mut accepted = 0;
+        for task in tasks {
+            let (status, event, incident, deduplicated) = task.await.unwrap().unwrap();
+            if status == StatusCode::ACCEPTED {
+                accepted += 1;
+                assert!(!deduplicated);
+            } else {
+                assert!(deduplicated, "a retry must say it is a duplicate");
+            }
+            event_ids.insert(event);
+            if let Some(incident) = incident {
+                incident_id = Some(incident);
+            }
+        }
+        assert_eq!(accepted, 1, "one request created the Event");
+        assert_eq!(event_ids.len(), 1, "one Event id for one key");
+        let incident = incident_id.expect("the winner created an incident");
+        let events: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.telemetry_events WHERE source_id=$1 AND idempotency_key=$2",
+        )
+        .bind(source)
+        .bind(&key)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let jobs: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM kernel.automation_jobs WHERE incident_id=$1")
+                .bind(incident)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(events, 1);
+        assert_eq!(jobs, 1);
+
+        cleanup_event_fixture(&pool, source, &[incident]).await;
+    }
+
+    /// RESOLVED before PROBLEM: the RESOLVED Event has no incident to name, and
+    /// the later PROBLEM creates the incident without rewriting history.
+    #[tokio::test]
+    async fn resolved_before_problem_leaves_the_resolved_event_unlinked() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let (workspace, source, actor) = seed_event_fixture(&pool).await;
+        let native = format!("out-of-order-{}", Uuid::new_v4());
+        let mut resolved = event_request(workspace, source, &native, Utc::now());
+        resolved.trigger_state = "RESOLVED".into();
+        let resolved_key = idempotency_key(&resolved);
+        let (_, resolved_view) = store_event(&pool, &actor, &resolved, &resolved_key)
+            .await
+            .unwrap();
+        assert!(resolved_view.incident_id.is_none());
+
+        let problem = event_request(
+            workspace,
+            source,
+            &native,
+            Utc::now() + chrono::Duration::seconds(1),
+        );
+        let problem_key = idempotency_key(&problem);
+        let (_, problem_view) = store_event(&pool, &actor, &problem, &problem_key)
+            .await
+            .unwrap();
+        let incident = problem_view
+            .incident_id
+            .expect("PROBLEM creates the incident");
+
+        let stored_resolved: Option<Uuid> =
+            sqlx::query_scalar("SELECT incident_id FROM kernel.telemetry_events WHERE event_id=$1")
+                .bind(resolved_view.event_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            stored_resolved.is_none(),
+            "the out-of-order RESOLVED Event is not retroactively attached"
+        );
+
+        cleanup_event_fixture(&pool, source, &[incident]).await;
+    }
+
+    /// A new PROBLEM after a CLOSED incident is a recurrence row, not a second
+    /// active row and not a refusal.
+    #[tokio::test]
+    async fn a_new_problem_after_a_closed_incident_is_a_recurrence() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let (workspace, source, actor) = seed_event_fixture(&pool).await;
+        let native = format!("recurrence-{}", Uuid::new_v4());
+        let first = event_request(workspace, source, &native, Utc::now());
+        let (_, first_view) = store_event(&pool, &actor, &first, &idempotency_key(&first))
+            .await
+            .unwrap();
+        let first_incident = first_view.incident_id.unwrap();
+        let service = Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap();
+        sqlx::query(
+            "INSERT INTO kernel.incident_verdicts (incident_id,verdict,rationale,decided_by)
+             VALUES ($1,'CONFIRMED','fixture conclusion before closure',$2)",
+        )
+        .bind(first_incident)
+        .bind(service)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE kernel.incidents SET status='CONCLUDED' WHERE incident_id=$1")
+            .bind(first_incident)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE kernel.incidents
+                SET status='CLOSED', closed_at=now(), closed_by=$2,
+                    closure_note='fixture closure before recurrence', revision=revision+1
+              WHERE incident_id=$1",
+        )
+        .bind(first_incident)
+        .bind(service)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let second = event_request(
+            workspace,
+            source,
+            &native,
+            Utc::now() + chrono::Duration::seconds(2),
+        );
+        let (_, second_view) = store_event(&pool, &actor, &second, &idempotency_key(&second))
+            .await
+            .unwrap();
+        let second_incident = second_view
+            .incident_id
+            .expect("the recurrence is a new row");
+        assert_ne!(second_incident, first_incident);
+        let recurrence: Option<Uuid> =
+            sqlx::query_scalar("SELECT recurrence_of FROM kernel.incidents WHERE incident_id=$1")
+                .bind(second_incident)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(recurrence, Some(first_incident));
+        let active: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incidents
+              WHERE source_id=$1 AND native_id=$2 AND status IN ('OPEN','INVESTIGATING')",
+        )
+        .bind(source)
+        .bind(&native)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(active, 1);
+
+        cleanup_event_fixture(&pool, source, &[first_incident, second_incident]).await;
+    }
+
+    /// The same nativeId in two workspaces and in two sources is four different
+    /// incidents; nothing merges across either boundary.
+    #[tokio::test]
+    async fn native_id_identity_is_scoped_by_workspace_and_source() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let workspace_a = crate::scope::legacy_workspace();
+        let workspace_b = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.business_workspaces (workspace_id,key,name)
+             VALUES ($1,$2,'concurrency workspace B')",
+        )
+        .bind(workspace_b)
+        .bind(format!("concurrency-b-{workspace_b}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (_, source_a, actor_a) = seed_event_fixture_in(&pool, workspace_a).await;
+        let (_, source_b, actor_b) = seed_event_fixture_in(&pool, workspace_b).await;
+        let (_, source_c, actor_c) = seed_event_fixture_in(&pool, workspace_a).await;
+        let native = format!("scoped-native-{}", Uuid::new_v4());
+        let mut incidents = Vec::new();
+        for (workspace, source, actor) in [
+            (workspace_a, source_a, &actor_a),
+            (workspace_b, source_b, &actor_b),
+            // Same workspace, different source.
+            (workspace_a, source_c, &actor_c),
+        ] {
+            let req = event_request(workspace, source, &native, Utc::now());
+            let (_, view) = store_event(&pool, actor, &req, &idempotency_key(&req))
+                .await
+                .unwrap();
+            incidents.push(
+                view.incident_id
+                    .expect("each scope creates its own incident"),
+            );
+        }
+        assert_eq!(
+            incidents
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            3
+        );
+        let scoped: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM kernel.incidents WHERE native_id=$1")
+                .bind(&native)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(scoped, 3);
+
+        cleanup_event_fixture(&pool, source_a, &incidents).await;
+        cleanup_event_fixture(&pool, source_b, &[]).await;
+        cleanup_event_fixture(&pool, source_c, &[]).await;
+        let _ = sqlx::query("DELETE FROM kernel.business_workspaces WHERE workspace_id=$1")
+            .bind(workspace_b)
             .execute(&pool)
             .await;
     }
