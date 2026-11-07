@@ -39,6 +39,7 @@ PRINCIPAL_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 EVENT_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 JOB_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 EVIDENCE_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+NODE_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 NATIVE="b16-fixture-$RUN"
 CONTENT_REF="sha256:$(python3 -c 'import hashlib;print(hashlib.sha256(b"b16-committed").hexdigest())')"
 
@@ -46,6 +47,10 @@ echo "== kernel: $URL   run: $RUN"
 echo "== FIXTURE (not Zabbix): a PENDING job whose Evidence already committed"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q <<SQL || { echo "fixture insert failed"; exit 2; }
 BEGIN;
+INSERT INTO kernel.nodes
+  (id,name,control_token_hash,data_token,generation,os,arch,status,last_seen_at,enrolled_at)
+VALUES
+  ('$NODE_ID','b16-node-$RUN','hash','data-token',1,'linux','arm64','READY',now(),now());
 INSERT INTO kernel.telemetry_sources
   (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state)
 VALUES
@@ -61,7 +66,7 @@ INSERT INTO kernel.automation_principals
    allowed_ops,event_id,incident_id,budget,issued_at,expires_at,jti)
 VALUES
   ('$PRINCIPAL_ID','zabbix-source','$(python3 -c 'import uuid;print(uuid.uuid4())')',
-   '$(python3 -c 'import uuid;print(uuid.uuid4())')',1,'$WORKSPACE','$SOURCE_ID',
+   '$NODE_ID',1,'$WORKSPACE','$SOURCE_ID',
    ARRAY['SOURCE_COLLECT'],NULL,NULL,'{"windowSeconds":300,"evidenceBytes":1048576}'::jsonb,
    now(),now()+interval '5 minutes','$(python3 -c 'import uuid;print(uuid.uuid4())')');
 INSERT INTO kernel.telemetry_events
@@ -113,6 +118,7 @@ psql "$DATABASE_URL" -q -c "DELETE FROM kernel.telemetry_events WHERE event_id='
 psql "$DATABASE_URL" -q -c "DELETE FROM kernel.automation_principals WHERE principal_id='$PRINCIPAL_ID'" 2>/dev/null
 psql "$DATABASE_URL" -q -c "DELETE FROM kernel.incidents WHERE incident_id='$INCIDENT_ID'" 2>/dev/null
 psql "$DATABASE_URL" -q -c "DELETE FROM kernel.telemetry_sources WHERE source_id='$SOURCE_ID'" 2>/dev/null
+psql "$DATABASE_URL" -q -c "DELETE FROM kernel.nodes WHERE id='$NODE_ID'" 2>/dev/null
 
 echo
 printf 'g13_b16_effect: %d passed, %d failed\n' "$PASS" "$FAIL"
