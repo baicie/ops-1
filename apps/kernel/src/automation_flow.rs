@@ -43,6 +43,11 @@ pub struct AutomationRunView {
     pub collection_id: Option<Uuid>,
     pub evidence_id: Option<Uuid>,
     pub code: Option<String>,
+    /// True when this attempt found the job's Evidence already committed and
+    /// returned it without calling the plugin. It says nothing about whether the
+    /// external RPC ran zero times overall - an earlier attempt may have run it
+    /// before crashing.
+    pub recovered: bool,
 }
 
 impl AutomationRunView {
@@ -53,6 +58,7 @@ impl AutomationRunView {
             collection_id: None,
             evidence_id: None,
             code: None,
+            recovered: false,
         }
     }
 }
@@ -198,7 +204,23 @@ pub async fn collect_and_append(
     incident_id: Uuid,
     source_id: Uuid,
     occurred_at: chrono::DateTime<chrono::Utc>,
+    job_id: Uuid,
 ) -> AppResult<AutomationRunView> {
+    // Recovery before any RPC (ADR-G13-B1.6 §3.3): if this job's Evidence is
+    // already committed, the logical effect happened. Re-collecting would not
+    // add a fact - it would add a second measurement of the same event.
+    if let Some(evidence_id) =
+        crate::incidents::committed_automation_evidence(&state.db, job_id).await?
+    {
+        return Ok(AutomationRunView {
+            status: "COLLECTED".into(),
+            job_id: Some(job_id),
+            collection_id: None,
+            evidence_id: Some(evidence_id),
+            code: None,
+            recovered: true,
+        });
+    }
     // The Event never chooses items. The Kernel reads the trusted policy it
     // synced from deployment configuration; without items automation refuses
     // instead of producing an EMPTY collection nobody asked for.
@@ -360,14 +382,16 @@ pub async fn collect_and_append(
         principal.claims.workspace_id,
         incident_id,
         evidence,
+        job_id,
     )
     .await?;
     Ok(AutomationRunView {
         status: "COLLECTED".into(),
-        job_id: None,
+        job_id: Some(job_id),
         collection_id: Some(collection_id),
         evidence_id: Some(evidence_id),
         code: None,
+        recovered: false,
     })
 }
 
