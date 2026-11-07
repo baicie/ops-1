@@ -3692,3 +3692,42 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
   .ow-history-head { flex-wrap: wrap; }
   .ow-history-head > .ow-window-switch { flex: 1 1 100%; }
 }
+
+/* ── S2: /admin/jobs/:id ───────────────────────────────────────────────────────
+   The visual audit scored this route 2.4 and found it was the only route whose
+   whole page overflowed at 390 (scrollWidth 613 vs 375, caused by 64-hex ids in
+   an unbreakable <code>). The page title also named the pipeline, not the page,
+   so the user lost the "where am I" anchor after clicking a row. Keep long ids
+   copyable but make every one wrap; keep the attempts table inside its panel. */
+.job-detail .job-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.job-detail .job-pipeline {
+  color: var(--ow-text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.job-detail .job-short-id,
+.job-detail .detail-list code,
+.job-detail .kv-value,
+.job-detail .result-json {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.job-detail .table-panel {
+  max-width: 100%;
+  overflow-x: auto;
+}
+@media (max-width: 640px) {
+  .job-detail .detail-list li {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}

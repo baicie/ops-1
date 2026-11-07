@@ -261,8 +261,8 @@ export function JobDetailPage() {
   );
   const cancellable = ['QUEUED', 'CLAIMED', 'RUNNING'].includes(job.status);
   return (
-    <div className="page-stack">
-      <PageHeader eyebrow={t('jobs.eyebrow')} title={job.pipelineId} description={<span className="job-subtitle"><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId} data-testid="job-short-id">{t('jobs.runShortId', { id: identityDisambiguator(job.jobId) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
+    <div className="page-stack job-detail">
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={t('page.jobDetail')} description={<span className="job-subtitle"><strong className="job-pipeline">{job.pipelineId}</strong><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId} data-testid="job-short-id">{t('jobs.runShortId', { id: identityDisambiguator(job.jobId) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
       <section className="summary-grid job-stats">
         <MetricCard label={t('table.status')} value={<StatusPill status={job.status} />} showSampled={false} />
         <MetricCard label={t('jobs.metric.execution')} value={<span className="mono">{durationLabel(job)}</span>} showSampled={false} />
