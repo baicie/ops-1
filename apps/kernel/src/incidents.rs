@@ -7730,6 +7730,19 @@ mod effect_tests {
             .bind(fixture.incident)
             .execute(pool)
             .await;
+        // 0025 guards verdict deletion even for cleanup; state the exception the
+        // schema accepts so the incident can be removed and no fixture survives.
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL kernel.allow_verdict_removal = 'on'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id=$1")
+            .bind(fixture.incident)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
         let _ = sqlx::query(
             "DELETE FROM kernel.audit_events WHERE subject_type='INCIDENT' AND subject_id=$1",
         )
@@ -7752,10 +7765,11 @@ mod effect_tests {
             .bind(fixture.principal)
             .execute(pool)
             .await;
-        let _ = sqlx::query("DELETE FROM kernel.incidents WHERE incident_id=$1")
+        sqlx::query("DELETE FROM kernel.incidents WHERE incident_id=$1")
             .bind(fixture.incident)
             .execute(pool)
-            .await;
+            .await
+            .expect("test cleanup must remove the incident");
         let _ = sqlx::query("DELETE FROM kernel.telemetry_sources WHERE source_id=$1")
             .bind(fixture.source)
             .execute(pool)
@@ -8169,10 +8183,14 @@ mod effect_tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].1, None, "a human row carries no job binding");
 
-        let _ = sqlx::query("DELETE FROM kernel.users WHERE id=$1")
+        // The incident still references this account (`owner`), and evidence
+        // references it as `submitted_by`; remove the business rows first, then
+        // the account, so cleanup cannot silently leave the user behind.
+        cleanup(&pool, &fixture).await;
+        sqlx::query("DELETE FROM kernel.users WHERE id=$1")
             .bind(user)
             .execute(&pool)
-            .await;
-        cleanup(&pool, &fixture).await;
+            .await
+            .expect("test cleanup must remove the fixture account");
     }
 }
