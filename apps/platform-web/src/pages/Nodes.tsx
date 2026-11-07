@@ -453,8 +453,8 @@ export function NodeDetailPage() {
     <div className="page-stack">
       <PageHeader
         eyebrow={t('nodeDetail.eyebrow')}
-        title={data.name}
-        description={<><span className="mono">{data.id}</span> · {t('nodeDetail.generation', { generation: data.generation })} · {data.os}/{data.arch}</>}
+        title={t('nodeDetail.title')}
+        description={<span className="pipeline-identity"><strong>{data.name}</strong><span><span className="mono">{data.id}</span> · {t('nodeDetail.generation', { generation: data.generation })} · {data.os}/{data.arch}</span></span>}
         actions={<><Button variant="secondary" className="max-[768px]:flex-1" onClick={() => { void reload(); void reloadInstances(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{user?.role === 'admin' && <Button variant="destructive" className="max-[768px]:flex-1" onClick={() => setConfirm(true)}><Icon name="trash" size={15} /> {t('action.revoke')}</Button>}</>}
       />
       <div className="detail-meta"><StatusPill status={data.status} />{data.stale && <span className="meta-chip text-warning"><Icon name="warning" size={13} /> {t('nodeDetail.staleSince')} <TimeAgo value={data.lastSeenAt} /></span>}<span className="meta-chip"><Icon name="clock" size={13} /> {t('nodeDetail.enrolled', { at: formatDate(data.enrolledAt) })}</span><span className="meta-chip"><Icon name="server" size={13} /> {data.runtimeAdapterVersion || t('nodeDetail.adapterUnknown')}</span></div>

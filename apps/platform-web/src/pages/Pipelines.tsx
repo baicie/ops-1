@@ -262,8 +262,8 @@ export function PipelineDetailPage() {
     <div className="page-stack">
       <PageHeader
         eyebrow={t('pipelines.eyebrow')}
-        title={detail.name}
-        description={<span className="mono">{detail.pipelineId}</span>}
+        title={t('page.pipelineDetail')}
+        description={<span className="pipeline-identity"><strong>{detail.name}</strong><span className="mono">{detail.pipelineId}</span></span>}
         actions={<>{allPipelines}<Link className={buttonVariants({ variant: 'secondary' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/editor`}><Icon name="ops" size={15} /> {t('pipelines.action.openStudio')}</Link></>}
         primary={<Link className={buttonVariants()} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={15} /> {t('pipelines.action.run')}</Link>}
       />

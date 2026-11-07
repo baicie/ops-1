@@ -3736,3 +3736,16 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
     gap: 2px;
   }
 }
+
+/* One identity line under a page name: the entity is a fact, not the h1. This is the same
+   rule the audit asked for on /admin/jobs/:id, applied to pipeline detail, the studio and
+   node detail. Long ids wrap inside the line instead of widening the page. */
+.pipeline-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-width: 0;
+}
+.pipeline-identity > strong { color: var(--ow-text); font-weight: 600; overflow-wrap: anywhere; }
+.pipeline-identity > span { min-width: 0; overflow-wrap: anywhere; }

@@ -134,7 +134,7 @@ export function PipelineEditorPage() {
 
   // The shared header renders in every state: the page is still the editor for this pipeline
   // while the definition is loading, refused, or missing.
-  const headerFallback = <PageHeader eyebrow={t('studio.eyebrow')} title={pipelineId} description={t('studio.description')} />;
+  const headerFallback = <PageHeader eyebrow={t('studio.eyebrow')} title={t('studio.pageTitle')} description={<span className="pipeline-identity"><strong className="mono">{pipelineId}</strong><span>{t('studio.description')}</span></span>} />;
   if (loading) return <div className="page-stack studio-page">{headerFallback}<Skeleton rows={8} /></div>;
   if (error) return <div className="page-stack studio-page">{headerFallback}<AsyncBoundary loading={false} error={error} hasData={false} onRetry={() => void load(draftParam)}>{null}</AsyncBoundary></div>;
   if (!detail || !graph) return <div className="page-stack studio-page">{headerFallback}<EmptyState icon="ops" title={t('studio.error.noData')} action={<Button variant="secondary" onClick={() => void load(draftParam)}><Icon name="refresh" size={15} /> {t('action.retry')}</Button>} /></div>;
