@@ -132,6 +132,12 @@ and the table.
   content-sized.
 - `.toolbar-count` (`margin-left: auto`) stays; it is text, not a control.
 
+**2026-11-08 — tab strip geometry.** The strip is one 40px track; removing its own padding (`p-0`) is what
+lets the 40px trigger sit inside it. A 32px trigger inside a 40px track, or a 40px trigger over a 1px border
+plus 4px padding, is the mixed row C1 forbids. The active segment is painted on the track (surface card +
+shadow), not by borrowing the primary accent. The count keeps `margin-left: auto`; it is the only
+right-aligned text in the row.
+
 ### 2.5 Canvas, gutter, widths
 
 | breakpoint | gutter | canvas max | table min-width |

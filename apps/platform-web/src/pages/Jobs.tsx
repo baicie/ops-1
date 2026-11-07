@@ -74,7 +74,7 @@ export function JobsPage() {
           <Input aria-label={t('jobs.search.aria')} placeholder={t('jobs.search.placeholder')} value={query} onChange={(event) => setQuery(event.target.value)} className="pl-[33px]" />
         </div>
         <Select value={pipelineFilter} onValueChange={setPipelineFilter}>
-          <SelectTrigger aria-label={t('jobs.filter.aria')} className="w-[240px] max-w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label={t('jobs.filter.aria')} className="w-[180px] max-w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">{t('jobs.filter.allPipelines')}</SelectItem>
             {pipelines.map((pipeline) => <SelectItem key={pipeline} value={pipeline}>{pipeline}</SelectItem>)}

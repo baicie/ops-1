@@ -459,6 +459,8 @@ input::placeholder { color: var(--ow-text-muted); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--ow-control-md); padding: 12px 16px; border-bottom: 1px solid var(--ow-border); flex-wrap: wrap; }
 .panel-head h2 { font-size: var(--ow-type-body); font-weight: 600; letter-spacing: -.01em; }
 .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-meta); margin-top: 4px; }
+.list-block { display: flex; flex-direction: column; gap: var(--ow-space-2); min-width: 0; }
+.ow-panel-note { margin: 0; padding: 0 var(--ow-space-4); color: var(--ow-text-muted); font-size: var(--ow-type-meta); line-height: 1.4; }
 .table-panel { overflow: hidden; }
 /* Content panels: two columns. The metric strip below reuses .summary-grid on some pages,
    so it is the strip - not .summary-grid - that carries the four-column layout. One concept,
@@ -520,7 +522,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .search-box { position: relative; display: flex; align-items: center; min-width: 260px; flex: 1; max-width: 460px; }
 .search-box svg { position: absolute; left: 10px; color: var(--ow-text-muted); }
 .search-box input { padding-left: 32px; background: var(--ow-surface); }
-.toolbar-count { margin-left: auto; color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
+.toolbar-count { margin-left: auto; color: var(--ow-text-muted); font-size: var(--ow-type-meta); white-space: nowrap; }
 
 /* Overview */
 .attention-banner { display: flex; align-items: center; gap: 12px; padding: 16px 16px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); background: var(--ow-surface); }
@@ -2845,7 +2847,7 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 .ow-table thead th { height: 32px; padding-top: 0; padding-bottom: 0; font-size: var(--ow-type-label); line-height: 1.4; }
 /* One left edge for the panel title, the table note and the first column. */
 .ow-table thead th:first-child, .ow-table tbody td:first-child { padding-left: var(--ow-space-4); }
-.ow-table thead th:last-child, .ow-table tbody td:last-child { padding-right: var(--ow-space-4); }
+.ow-table thead th:last-child, .ow-table tbody td:last-child:not(.ow-row-action) { padding-right: var(--ow-space-4); }
 :where(.ow-table thead th):lang(en) { text-transform: uppercase; letter-spacing: .055em; }
 .ow-table tbody td .status,
 .ow-table tbody td .status-indicator { font-size: var(--ow-type-label); line-height: 1.4; }
@@ -3395,10 +3397,12 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    trigger, so the strip has to be pinned as well as the trigger.
    ───────────────────────────────────────────────────────────────────────────── */
 @media (min-width: 769px) {
-  /* 40px track, 32px trigger, 3px inset: the trigger was 40 inside a 40px track and painted
-     over the track's own padding and border. */
-  .toolbar [role='tablist'] { min-height: var(--ow-control-md); padding: 3px; }
-  .toolbar [role='tab'] { min-height: calc(var(--ow-control-md) - 8px); }
+  /* page-template §2.4/C1: a toolbar is one 40px tier. The trigger used to be 40 inside a 40px
+     track that also carried p-1 and a 1px border, so it painted over the inset; the track now
+     gives that space back instead of shrinking the trigger. */
+  .toolbar [role='tablist'] { min-height: var(--ow-control-md); padding: 0; border-color: transparent; background: var(--ow-surface-2); }
+  .toolbar [role='tab'] { min-height: var(--ow-control-md); padding: 0 var(--ow-space-1); border: 1px solid transparent; background: transparent; font-size: var(--ow-type-meta); color: var(--ow-text-secondary); }
+  .toolbar [role='tab'][data-state='active'] { background: var(--ow-surface); color: var(--ow-text); box-shadow: var(--ow-shadow-sm); }
 }
 .toolbar .btn-small,
 .toolbar button[class*='h-control-sm'],

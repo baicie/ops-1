@@ -166,7 +166,7 @@ test('nodes keep NO_DATA distinct from a measured 0%', async ({ page }) => {
   // §2.7: NO_DATA appears at most once per table, so the token is printed once above the table and
   // the row that has no sample says so in words. A cell never carries the dashed box.
   await expect(page.locator('.nodes-table td .value-token[data-value="NO_DATA"]')).toHaveCount(0);
-  await expect(page.locator('.table-panel [data-table-note="resources"] .value-token')).toHaveAttribute('data-value', 'NO_DATA');
+  await expect(page.locator('[data-table-note="resources"] .value-token')).toHaveAttribute('data-value', 'NO_DATA');
   await expect(missingRow.locator('[data-resource="resources"]')).toContainText('no resource snapshot');
   for (const resource of ['cpu', 'memory']) {
     await expect(missingRow.locator('[data-resource="' + resource + '"]')).toHaveCount(0);

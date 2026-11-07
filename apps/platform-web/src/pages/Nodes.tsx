@@ -249,14 +249,14 @@ export function NodesPage() {
           <span className="toolbar-count">{t('nodes.count.summary', { filtered: visible.length, total: nodes.length })}</span>
         </section>
         {isStale(observedAt, 5000) ? <NoticeBar state="stale" title={t('ui.stale.title')} detail={t('ui.stale.detail', { at: observedAt ?? '' })} /> : null}
-        <section className="panel table-panel">
+        <div className="list-block">
           {/* table-spec §2.2: four columns, not seven. CPU, memory, capacity and the sample time
               are one fact about one sample, so they share one resource cell - the 13px value line
               and the 11px label line §2.3 already defines - instead of four headings, four widths
               and four borders for one reading. §2.7: a sample that never arrived is stated once,
               here, above the table; the row says the same thing in words instead of spending its
               cells on dashed boxes. */}
-          <p className="stat-note" data-table-note="resources">
+          <p className="stat-note ow-panel-note" data-table-note="resources">
             {resourcesMeasurable ? t('nodes.table.note') : t('nodes.resource.none')}
             {resourcesMeasurable && missingSamples > 0 ? (
               <>
@@ -266,6 +266,7 @@ export function NodesPage() {
               </>
             ) : null}
           </p>
+          <section className="panel table-panel">
           <Table className={cn('nodes-table', stackTable)}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
@@ -352,7 +353,8 @@ export function NodesPage() {
               })}
             </TableBody>
           </Table>
-        </section>
+          </section>
+        </div>
       </AsyncBoundary>
 
       <ConfirmAction

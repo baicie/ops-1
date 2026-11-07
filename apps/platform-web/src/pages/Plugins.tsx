@@ -403,12 +403,14 @@ export function PluginsPage() {
         {filtered.length === 0 ? (
           <EmptyState icon="plugins" title={plugins.length ? t('plugins.empty.filtered.title') : t('plugins.empty.none.title')} description={plugins.length ? t('plugins.empty.filtered.description') : t('plugins.empty.none.description')} action={quickFilter ? <Button variant="secondary" onClick={() => setQuickFilter(null)}>{t('plugins.quickFilter.clear')}</Button> : <Link className={buttonVariants()} to="/admin/plugins/install">{t('plugins.action.installPackage')}</Link>} />
         ) : (
-          <section className="panel table-panel">
+          <div className="list-block">
             {/* table-spec §2.2/§2.7: one sentence above the table for every demoted or dropped
-                column, so the row never has to spend a cell saying it. */}
-            <p className="stat-note" data-table-note="demoted">
+                column, so the row never has to spend a cell saying it. It sits outside the
+                panel: inside, it read as a caption row touching the border. */}
+            <p className="stat-note ow-panel-note" data-table-note="demoted">
               {factsKnown ? t('plugins.table.note') : t('plugins.table.noteNoFacts')}
             </p>
+            <section className="panel table-panel">
             <Table className={cn('plugins-table', stackTable)}>
               <TableHeader className={stackHead}>
                 {/* Name and version are one block to read, so they lead. Deployment and runtime
@@ -548,7 +550,8 @@ export function PluginsPage() {
                 })}
               </TableBody>
             </Table>
-          </section>
+            </section>
+          </div>
         )}
       </AsyncBoundary>
 
