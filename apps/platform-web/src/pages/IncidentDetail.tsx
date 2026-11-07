@@ -7,7 +7,6 @@ import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
 import { ageMessage, clockMessage } from '../lib/age';
 import { apiFailureCopy } from '../lib/kernel-messages';
-import { shortLocator } from '../lib/identity';
 import { cn } from '../lib/utils';
 import { Icon } from '../components/Icons';
 import { Badge } from '../components/ui/badge';
@@ -300,7 +299,6 @@ export function IncidentDetailPage() {
               {t('incidents.detail.ownerChip', { owner: ownerLabel })}
             </span>
             <span className="tag incident-header-extra" data-testid="incident-detail-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
-            {incident.relatedEntity ? <span className="muted mono small incident-header-extra" data-testid="incident-detail-related" title={incident.relatedEntity}>{shortLocator(incident.relatedEntity)}</span> : null}
           </>
         )}
         actions={<><Button variant="secondary" data-testid="incident-refresh" onClick={retry}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{backLink}</>}
