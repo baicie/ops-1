@@ -612,11 +612,28 @@ mod tests {
             .bind(incidents.iter().map(|id| id.to_string()).collect::<Vec<_>>())
             .execute(pool)
             .await;
+        // A verdict is write-once and delete-guarded; test cleanup states the
+        // exception the schema accepts (0025) in a transaction-local setting.
+        // Without this, `DELETE FROM incidents` is refused by the verdict FK and
+        // the fixture user survives - which then blocks bootstrap admin creation
+        // in a shared CI database.
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL kernel.allow_verdict_removal = 'on'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id = ANY($1)")
+            .bind(incidents)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
         for incident in incidents {
-            let _ = sqlx::query("DELETE FROM kernel.incidents WHERE incident_id=$1")
+            sqlx::query("DELETE FROM kernel.incidents WHERE incident_id=$1")
                 .bind(incident)
                 .execute(pool)
-                .await;
+                .await
+                .expect("test cleanup must remove the incident");
         }
         for workspace in workspaces {
             let _ = sqlx::query("DELETE FROM kernel.business_workspaces WHERE workspace_id=$1")
