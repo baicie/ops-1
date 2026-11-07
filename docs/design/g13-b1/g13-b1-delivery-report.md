@@ -11,7 +11,7 @@
 | 项 | 值 |
 |---|---|
 | 起始 SHA | `0112f7e4c69d1b12e3cf8e9b30ecdd0becd64cfe` |
-| 最终 SHA（栈顶代码） | `4e37269`（`fix/g13-b1-event-principal-recovery`，含清理与跨切片 fixture 修复；本报告提交在其上） |
+| 最终 SHA（栈顶，CI 全绿） | `5bd457a`（`fix/g13-b1-event-principal-recovery`，含清理与跨切片 fixture 修复）；本报告更新提交在其上 |
 | 切片 SHA | B1.4 `93579dd` + 清理 `689c58e`；B1.5 `2b04a3a`；B1.6 `7daf2ac` + 清理 `6aedd0b` + fixture `2251df3`；B1.7 `a959150` + 清理 `4e37269` |
 | Diff 总量 | 29 files, +6414 / −339（含 3 个迁移、3 个验收脚本、1 个 Playwright spec、2 个设计文档） |
 | 工作区 | clean（`artifacts/g13b14/` 为未跟踪截图，CI artifact，不入库） |
@@ -94,9 +94,20 @@ Operator -> /incidents/claimable -> claim(CAS) -> evidence -> verdict -> close
 | B1.7 真实 worker | `tests/acceptance/g13_b17_principal.sh` | **10 passed / 0 failed** | `g13b17-principal` job |
 | 真实 Node/OCI Gateway E2E | `tests/ci/g13a1_gateway_e2e.sh` | PASS（仓库既有 E2E，未含 Claim 步骤） | CI `g13a1-gateway` |
 | G12 验收 / golden path | `acceptance`、`golden-path`、`legacy-regression`、`quality-faults` | PASS | CI |
-| 运行时 golden path（共享 DB） | `cargo test --workspace` 后在同一 DB 启动 Kernel 并登录 | 登录 **200**，bootstrap admin created；CI 待复跑 | 本地同序模拟 |
+| 运行时 golden path（共享 DB） | `tests/ci/data_foundation_ci.sh` | **PASS**（17m48s） | CI run [42398516328](https://github.com/baicie/ops-1/actions/runs/42398516328/job/128481014236) 及 #58 同 job |
 | 单 Kernel 串行验收 | 同一 DB 依次运行 B1.4/B1.6/B1.7 脚本 | **35/35、9/9、10/10** | 本地 `opsweave_final` |
 | 真实 Zabbix | — | **NOT_RUN** | 无真实 Zabbix |
+
+### CI 结果（四个 Draft PR，最终 head）
+
+| PR | 结果 | 关键 job |
+|---|---|---|
+| #55 | **全绿** | rust, web, web-unit, g13b14-claim, g13a1-gateway, acceptance, golden-path, runtime-golden-path, legacy-regression, quality-faults, contracts, spec-coverage, artifact-budget, zabbix-plugin |
+| #56 | **全绿** | 同上（含 g13b14-claim） |
+| #57 | **全绿** | 同上 + **g13b16-effect PASS** |
+| #58 | **全绿** | 同上 + **g13b16-effect、g13b17-principal PASS** |
+
+`runtime-golden-path` 在修复测试清理泄漏后由 fail 转为 **PASS**（17m48s），证明同一数据库上“全量测试 → Kernel 启动 → bootstrap admin → 登录”的链路恢复。
 
 ### 故障注入/并发场景（全部真实 PostgreSQL，可重复）
 
