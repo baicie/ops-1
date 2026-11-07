@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import type { JobList, PipelineDefinition, PipelineDetail, PipelineList, PipelineRevision } from '../types';
 import { Icon } from '../components/Icons';
@@ -18,7 +18,7 @@ import { getPipelineExecutionOrder, type TopologyStatus } from '../studio/ir/top
 import { shortDigest } from '../format';
 import { useI18n, useT, type MessageKey } from '../i18n';
 import { cn } from '../lib/utils';
-import { IdentityCell, LongId, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
  * The revision pill paints through the shared tone map, and its label comes from the same
@@ -67,6 +67,8 @@ const TOPOLOGY_MESSAGE: Record<Exclude<TopologyStatus, 'VALID'>, MessageKey> = {
 
 export function PipelinesPage() {
   const t = useT();
+  const { locale } = useI18n();
+  const navigate = useNavigate();
   useDocumentTitle(t('page.pipelines'));
   const [data, setData] = useState<PipelineList | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -135,20 +137,23 @@ export function PipelinesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody className={stackBody}>
-                {items.map((pipeline) => (
-                  // This row carried tabIndex=0 with no onClick and no key handler: a Tab stop that
-                  // did nothing at all, on a row that painted cursor:pointer anyway. The name is the
-                  // link and the chevron below is one too, so the row itself is not a control.
-                  <TableRow key={pipeline.pipelineId} className={stackRow}>
-                    <StackCell label={t('table.pipeline')}><Link to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><strong>{pipeline.name}</strong><span className="mono block">{pipeline.pipelineId}</span></Link></StackCell>
-                    <StackCell label={t('table.revision')}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
-                    <StackCell label={t('table.created')}><TimeAgo value={pipeline.createdAt} /></StackCell>
-                    <StackCell label={t('table.updated')}><TimeAgo value={pipeline.updatedAt} /></StackCell>
-                    {/* The chevron promised a click and did nothing. Same destination as the name, but
-                        the two are one stop apart, so it is labelled rather than duplicated speech. */}
-                    <TableCell className="w-8 text-right text-muted-foreground max-[768px]:hidden"><Link className="ow-row-go" aria-label={t('table.open')} to={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`}><Icon name="chevron" size={16} /></Link></TableCell>
-                  </TableRow>
-                ))}
+                {items.map((pipeline) => {
+                  const nameIsUnique = items.filter((item) => item.name === pipeline.name).length === 1;
+                  const identity = formatIdentity({ name: pipeline.name, id: pipeline.pipelineId, at: pipeline.updatedAt, locale, nameIsUnique, rowsOnPage: items.length });
+                  return (
+                    // This row carried tabIndex=0 with no onClick and no key handler: a Tab stop
+                    // that did nothing at all, on a row that painted cursor:pointer anyway. The
+                    // name is the link and the menu is the row's one control, so the row itself
+                    // is not a control.
+                    <TableRow key={pipeline.pipelineId} className={cn(cardTwoLineRow, stackRow)}>
+                      <IdentityCell label={t('table.pipeline')} identity={identity} href={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`} cardFact />
+                      <StackCell label={t('table.revision')} className={cardCellClass(true)}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
+                      <StackCell label={t('table.created')} className={cn(cardLineAfter, cardCellClass(true))}><TimeAgo value={pipeline.createdAt} /></StackCell>
+                      <StackCell label={t('table.updated')} className={cn(cardLineAfter, cardCellClass(true))}><TimeAgo value={pipeline.updatedAt} /></StackCell>
+                      <TableCell className={cardActionCell}><RowActions label={t('table.open')} actions={[copyIdAction(pipeline.pipelineId, t('table.copyIdentifier')), { id: 'open', label: t('table.open'), icon: 'chevron', onSelect: () => navigate(`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`) }]} /></TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </section>

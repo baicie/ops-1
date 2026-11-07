@@ -688,6 +688,13 @@ input::placeholder { color: var(--ow-text-muted); }
    mid-token ("linux/x86_64 / gen" / "49"). Truncate instead. */
 .ops-node-name strong, .ops-node-name .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ops-node-metric { color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
+/* At 390 the status pill + memory pair + age leave ~49px for the identity, so the node name
+   truncated to "e.." and its platform line to "l..." (measured on edge-2, whose "Unreachable"
+   pill is the widest). The identity takes its own line; the three facts share the second. */
+@media (max-width: 768px) {
+  .ops-node, .ops-plugin { flex-wrap: wrap; row-gap: 4px; }
+  .ops-node-name, .ops-plugin > span:first-child { flex: 1 1 100%; }
+}
 .ops-readiness { color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
 .resource-stack { padding: 8px 16px 12px; display: flex; flex-direction: column; gap: 12px; }
 .resource-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--ow-type-meta); margin-bottom: 4px; }
@@ -832,6 +839,11 @@ input::placeholder { color: var(--ow-text-muted); }
 .revision-list { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 0; }
 .revision-list li { display: grid; grid-template-columns: 60px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--ow-border); }
 .pagination-row { display: flex; justify-content: flex-end; gap: 8px; }
+/* A cursor pager can carry three buttons; at 390 their min-content width exceeds the row and
+   flex-end silently pushes the first one past the left edge (measured: "First page" at x=-16,
+   while document.scrollWidth stayed 375 because the overflow is leftwards). Wrapping keeps
+   every button on screen. */
+@media (max-width: 768px) { .pagination-row { flex-wrap: wrap; } }
 .studio-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
 .studio-palette, .studio-inspector { position: sticky; top: 78px; max-height: calc(100vh - 110px); overflow: auto; }
 .studio-palette h2, .studio-inspector h2 { margin: 0 0 4px; font-size: var(--ow-type-body); }
@@ -2840,8 +2852,6 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 /* The chevron in a pipeline row is a link now, so it would inherit the anchor's accent colour and
  * the hover underline. Neither suits a 16px glyph in a 44px slot: it keeps the muted tone the cell
  * always had, and the row's hover wash is the feedback. */
-.ow-row-go { color: var(--ow-text-muted); }
-.ow-row-go:hover { color: var(--ow-text); text-decoration: none; }
 .ow-ident-link { color: inherit; }
 .ow-ident-link:hover { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .ow-ident-link:focus-visible { outline-offset: 1px; }

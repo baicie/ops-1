@@ -59,6 +59,7 @@ import {
   stackRow,
   stackTable,
 } from './table-kit';
+import { shortLocator } from '../lib/identity';
 
 /**
  * `/app/incidents` - the incident list (G11 D3).
@@ -523,7 +524,7 @@ export function IncidentsPage() {
                     >
                       <IdentityCell label={t('table.incident')} identity={identity} href={href}>
                         <span className="ow-key" data-testid="incident-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
-                        {incident.relatedEntity ? <span className="ow-key" data-testid="incident-related">{incident.relatedEntity}</span> : null}
+                        {incident.relatedEntity ? <span className="ow-key" data-testid="incident-related" title={incident.relatedEntity}>{shortLocator(incident.relatedEntity)}</span> : null}
                         {/* §2.4: the run is stated on the row it collapsed into, with the span of
                             the occurrences, so no occurrence is hidden and none is invented.
                             A single occurrence has no span to state: when both ends render the

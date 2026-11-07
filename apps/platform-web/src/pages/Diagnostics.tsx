@@ -13,7 +13,8 @@ import { badgeVariantForTone, glyphForTone, statusForCode } from '../components/
 import { formatDuration } from '../format';
 import { useI18n, useT } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { IdentityCell, StackCell, StatusPill, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { cn } from '../lib/utils';
 
 /**
  * The runtime policies arrive as config keys ("bundle.signature", "placement.fence") and used to
@@ -133,11 +134,11 @@ export function DiagnosticsPage() {
                       </TableHeader>
                       <TableBody className={stackBody}>
                         {nodes.map((node) => (
-                          <TableRow key={node.id} className={stackRow}>
+                          <TableRow key={node.id} className={cn(cardTwoLineRow, stackRow)}>
                             <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale })} cardFact />
-                            <StackCell label={t('table.status')}><StatusPill status={node.status} /></StackCell>
+                            <StackCell label={t('table.status')} className={cardLineAfter}><StatusPill status={node.status} /></StackCell>
                             {/* No recorded heartbeat is NO_DATA, not "never" and not a blank cell. */}
-                            <StackCell label={t('table.lastObserved')}>{node.lastSeenAt ? <TimeAgo value={node.lastSeenAt} /> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+                            <StackCell label={t('table.lastObserved')} className={cardLineAfter}>{node.lastSeenAt ? <TimeAgo value={node.lastSeenAt} /> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
                           </TableRow>
                         ))}
                       </TableBody>

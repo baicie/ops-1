@@ -349,7 +349,7 @@ export function ActivityPage() {
                             ("Outcome" above the pill, "Occurred1m ago 05:02:45" with no gap). The
                             cell keeps table-kit's stacked flex row, which is what every other card
                             at 390 uses: label left, value right, 14px between them. */}
-                        <StackCell label={t('table.outcome')} className={cardLineAfter}>
+                        <StackCell label={t('table.outcome')}>
                           <div className="ow-cell">
                             <StatusPill status={event.result} />
                             <span className="ow-cell-meta">{event.action}</span>

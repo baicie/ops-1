@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * The fifteen cards DS-V1-1b moved to MetricCard, measured where they render.
+ * The fourteen cards DS-V1-1b moved to MetricCard, measured where they render.
  *
  * IncidentDetail uses a real seeded incident; Jobs, Pipelines and Governance answer from
  * response fixtures on the endpoints the pages already read (the same technique as admin-polish:
@@ -166,7 +166,7 @@ test('metric cards 1440/1024/390 x light/dark x en/zh-CN', async ({ browser }) =
         stubPipelines(page);
         await page.goto('/admin/pipelines/' + PIPELINE_ID);
         await expect(page.getByTestId('page-header')).toBeVisible();
-        await expectCards(page, 4, label + ' pipeline');
+        await expectCards(page, 3, label + ' pipeline');
         expect(await columnsOf(page, '.summary-grid'), label + ' pipeline columns').toBe(viewport.w > 768 ? 4 : 2);
         await expect(page.locator('.summary-grid')).toContainText('r2');
         await page.screenshot({ path: path.join(OUT, `pipeline__${label}.png`), fullPage: true });
