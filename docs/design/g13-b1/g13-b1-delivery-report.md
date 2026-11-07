@@ -13,7 +13,7 @@
 | 起始 SHA | `0112f7e4c69d1b12e3cf8e9b30ecdd0becd64cfe` |
 | 最终 SHA（栈顶代码） | `4e37269`（`fix/g13-b1-event-principal-recovery`，含清理与跨切片 fixture 修复；本报告提交在其上） |
 | 切片 SHA | B1.4 `93579dd` + 清理 `689c58e`；B1.5 `2b04a3a`；B1.6 `7daf2ac` + 清理 `6aedd0b` + fixture `2251df3`；B1.7 `a959150` + 清理 `4e37269` |
-| Diff 总量 | 29 files, +6408 / −339（含 4 个迁移、3 个验收脚本、1 个 Playwright spec、2 个设计文档） |
+| Diff 总量 | 29 files, +6414 / −339（含 3 个迁移、3 个验收脚本、1 个 Playwright spec、2 个设计文档） |
 | 工作区 | clean（`artifacts/g13b14/` 为未跟踪截图，CI artifact，不入库） |
 
 ### PR 列表与合并顺序
@@ -29,7 +29,7 @@
 
 ## B. Core Review
 
-审查文件：`apps/kernel/src/{automation,automation_flow,automation_worker,telemetry_events,telemetry_sources,incidents,scope,investigations,jobs,audit,capabilities,routes}.rs`；`apps/node/src/{runtime,worker_supervisor}.rs`；`plugins/zabbix-source/backend/`；`apps/platform-web/src/pages/{Incidents,IncidentDetail,incident-collect}.tsx`；迁移 `0016`–`0030`；契约与 CI；`tests/acceptance`、`tests/ui`。
+审查文件：`apps/kernel/src/{automation,automation_flow,automation_worker,telemetry_events,telemetry_sources,incidents,scope,investigations,jobs,audit,capabilities,routes}.rs`；`apps/node/src/{runtime,worker_supervisor}.rs`；`plugins/zabbix-source/backend/`；`apps/platform-web/src/pages/{Incidents,IncidentDetail,incident-collect}.tsx`；迁移 `0016`–`0033`；契约与 CI；`tests/acceptance`、`tests/ui`。
 
 核心调用链：
 
