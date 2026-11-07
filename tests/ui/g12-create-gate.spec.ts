@@ -158,7 +158,8 @@ test('an admin with a workspace creates through the header, and the record is re
   await page.getByTestId('incident-create-title').fill(title);
   await page.getByTestId('incident-create-submit').click();
   await expect(page).toHaveURL(/\/app\/incidents\/[0-9a-f-]{36}$/);
-  await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Incidents', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText(title);
 });
 
 test('an operator with one workspace creates without being asked which', async ({ page }) => {

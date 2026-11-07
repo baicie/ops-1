@@ -20,11 +20,14 @@ test('pipeline list and detail render real published data', async ({ page }) => 
   await login(page);
   await page.goto('/pipelines');
   await expect(page.getByRole('heading', { name: 'Pipelines', exact: true })).toBeVisible();
-  const row = page.getByRole('link', { name: new RegExp(PIPELINE) });
+  // The list's identity link is the pipeline NAME; the id moved to the row menu/title.
+  const row = page.getByRole('link', { name: /Host Metrics Pipeline/i });
   await expect(row).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-list.png'), fullPage: true });
   await row.click();
-  await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
+  // The detail route names the PAGE in its h1; the pipeline is the identity line under it.
+  await expect(page.getByRole('heading', { name: 'Pipeline detail', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText('Host Metrics Pipeline');
   await expect(page.getByRole('heading', { name: 'Latest revision' })).toBeVisible();
   await page.screenshot({ path: path.join(OUT, 'pipeline-detail.png'), fullPage: true });
 });
@@ -33,7 +36,8 @@ test('studio renders published nodes and inspector selection', async ({ page }) 
   fs.mkdirSync(OUT, { recursive: true });
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/editor`);
-  await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pipeline Studio', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText('Host Metrics Pipeline');
   await expect(page.getByLabel('Pipeline canvas')).toBeVisible();
   await expect(page.locator('.studio-rf-node').first()).toBeVisible();
   await page.locator('.studio-rf-node').filter({ hasText: 'source' }).first().click();
@@ -88,7 +92,8 @@ test('draft edit, save, reload, validate and publish creates a revision', async 
   await expect(page.getByRole('button', { name: 'Publish' })).toBeEnabled();
   await page.screenshot({ path: path.join(OUT, 'pipeline-validated.png'), fullPage: true });
   await page.getByRole('button', { name: 'Publish' }).click();
-  await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pipeline detail', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText('Host Metrics Pipeline');
   await expect(page.locator('.ow-metric-value').first()).not.toHaveText('r1');
   await page.screenshot({ path: path.join(OUT, 'pipeline-published.png'), fullPage: true });
 });
@@ -97,7 +102,8 @@ test('submit a published revision and open real job detail', async ({ page }) =>
   fs.mkdirSync(OUT, { recursive: true });
   await login(page);
   await page.goto(`/pipelines/${PIPELINE}/run`);
-  await expect(page.getByRole('heading', { name: 'Host Metrics Pipeline' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Run pipeline', exact: true })).toBeVisible();
+  await expect(page.getByTestId('page-header')).toContainText('Host Metrics Pipeline');
   await page.getByRole('button', { name: 'Submit job' }).click();
   await expect(page).toHaveURL(/\/jobs\/[0-9a-f-]+/);
   await expect(page.getByRole('heading', { name: 'Lifecycle' })).toBeVisible();

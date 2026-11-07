@@ -394,7 +394,7 @@ export function SourcesPage() {
           metricId="sources.serving"
           label={t('sources.kpi.serving')}
           value={unanswered ? undefined : summary.serving}
-          denominator={unanswered ? undefined : model.connectors.length}
+          denominator={unanswered || model.connectors.length === 0 ? undefined : model.connectors.length}
           detail={t('sources.kpi.serving.detail')}
           showSampled={false}
           // Serving needs the grant registry to be readable; without it the number would be a

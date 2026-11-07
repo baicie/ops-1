@@ -88,6 +88,11 @@ export function titleKeyFor(pathname: string): MessageKey {
 
 /** Deeper routes whose leaf has its own page title; anything else falls back to the id. */
 const CHILD_TITLE_KEYS: Array<{ test: RegExp; key: MessageKey }> = [
+  // Static leaves come before the :id patterns: /plugins/install also matches /plugins/:id,
+  // and a breadcrumb that says the plugin is named "install" is worse than no crumb.
+  { test: /^\/plugins\/install$/, key: 'install.title' },
+  { test: /^\/plugins\/[^/]+$/, key: 'page.pluginDetail' },
+  { test: /^\/nodes\/[^/]+$/, key: 'nodeDetail.title' },
   { test: /^\/pipelines\/[^/]+\/editor$/, key: 'page.pipelineStudio' },
   { test: /^\/pipelines\/[^/]+\/run$/, key: 'page.runPipeline' },
   { test: /^\/pipelines\/[^/]+$/, key: 'page.pipelineDetail' },

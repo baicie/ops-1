@@ -56,3 +56,14 @@ export function identityClock(occurredAt: string | null | undefined): string {
   const value = String(occurredAt || '');
   return value.length >= 19 ? value.slice(0, 19) : value;
 }
+
+/**
+ * Middle-ellipsis for a locator that is not a row identity (a related entity, a reference).
+ * Keeping both ends is the point: the prefix names the kind, the suffix is what a reader
+ * matches against. Used where a 36-character UUID would otherwise widen a 390 card.
+ */
+export function shortLocator(value: string | null | undefined, head = 14, tail = 6): string {
+  const raw = String(value || '');
+  if (raw.length <= head + tail + 1) return raw;
+  return raw.slice(0, head) + '\u2026' + raw.slice(-tail);
+}

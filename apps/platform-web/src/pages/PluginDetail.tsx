@@ -119,8 +119,8 @@ export function PluginDetailPage() {
 
   // The header keeps its description in the loading and error states too: the page still is what
   // it says it is while the answer is missing or refused.
-  if (loading && !data) return <><PageHeader title={t('table.plugin')} /><Skeleton rows={6} /></>;
-  if (error) return <><PageHeader title={t('table.plugin')} /><AsyncBoundary loading={false} error={error} hasData={false} onRetry={() => void reload()}>{null}</AsyncBoundary></>;
+  if (loading && !data) return <><PageHeader title={t('page.pluginDetail')} /><Skeleton rows={6} /></>;
+  if (error) return <><PageHeader title={t('page.pluginDetail')} /><AsyncBoundary loading={false} error={error} hasData={false} onRetry={() => void reload()}>{null}</AsyncBoundary></>;
   if (!data) return null;
 
   /**
@@ -246,12 +246,11 @@ export function PluginDetailPage() {
     <div className="page-stack">
       <PageHeader
         eyebrow={(data.publisher || t('pluginDetail.unknownPublisher')) + ' · ' + (data.isSystem ? t('pluginDetail.systemPlugin') : t('pluginDetail.trustedPackage'))}
-        title={<span className="title-with-status">{data.name}{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}</span>}
-        description={t('pluginDetail.description')}
+        title={t('page.pluginDetail')}
+        description={<span className="pipeline-identity"><strong>{data.name}</strong>{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}<span className="mono">{data.id}</span></span>}
         meta={
           <div className="detail-meta">
             <InstallationStatus state={data.state} />
-            <MetaChip mono value={data.id} />
             {activeVersion
               ? <MetaChip label={t('pluginDetail.effectiveVersion')} value={activeVersion} mono />
               : <StatusIndicator state="notConfigured" label={t('plugins.table.notActivated')} />}

@@ -322,7 +322,7 @@ export function JobSubmitPage() {
   };
   return (
     <div className="page-stack">
-      <PageHeader eyebrow={t('jobs.eyebrow')} title={detail.name} description={t('jobs.submit.description', { pipelineId })} />
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={t('page.runPipeline')} description={<span className="pipeline-identity"><strong>{detail.name}</strong><span className="mono">{detail.pipelineId}</span></span>} />
       {error && <div className="studio-banner studio-banner-error" role="alert">{error}</div>}
       <section className="panel panel-pad run-panel">
         <label><span>{t('jobs.submit.publishedRevision')}</span>

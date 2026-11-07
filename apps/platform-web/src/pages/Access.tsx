@@ -28,7 +28,7 @@ import {
   userCreatedLanded,
   userStateLanded,
 } from '../lib/verified-writes';
-import { IdentityCell, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 type ManagedUser = { id: string; email: string; displayName: string; role: string; disabled: boolean; createdAt: string };
 
@@ -259,7 +259,7 @@ export function AccessPage() {
               </TableHeader>
               <TableBody className={stackBody}>
                 {(users || []).map((item) => (
-                  <TableRow key={item.id} className={stackRow} data-user={item.id}>
+                  <TableRow key={item.id} className={cn(cardTwoLineRow, stackRow)} data-user={item.id}>
                     {/* §2.1: the row opens with one identity in human language; the email is its
                         qualifier line. It used to be a labelled cell, which also made the user card
                         carry four facts where §2.5 allows three. */}
@@ -269,9 +269,9 @@ export function AccessPage() {
                     {/* B3.4: a role is a word, not a state, and the status column beside it is a pill. The
                   bordered box made one column read as a different kind of fact from its
                   neighbour; the role sits at the value tier and the state keeps the pill. */}
-                  <StackCell label={t('table.role')}><span className="ow-cell-value">{item.role}</span></StackCell>
-                    <StackCell label={t('table.status')}><UserStatusPill disabled={item.disabled} /></StackCell>
-                    <StackCell label={t('table.actions')}>{item.id !== user?.id && <Button size="sm" variant={item.disabled ? 'default' : 'destructive'} onClick={() => setUserTarget({ account: item, disabled: !item.disabled })}>{item.disabled ? t('action.enable') : t('action.disable')}</Button>}</StackCell>
+                  <StackCell label={t('table.role')} className={cardLineAfter}><span className="ow-cell-value">{item.role}</span></StackCell>
+                    <StackCell label={t('table.status')} className={cardLineAfter}><UserStatusPill disabled={item.disabled} /></StackCell>
+                    <StackCell label={t('table.actions')} className={cardLineAfter}>{item.id !== user?.id && <Button size="sm" variant={item.disabled ? 'default' : 'destructive'} onClick={() => setUserTarget({ account: item, disabled: !item.disabled })}>{item.disabled ? t('action.enable') : t('action.disable')}</Button>}</StackCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -306,16 +306,16 @@ export function AccessPage() {
             </TableHeader>
             <TableBody className={stackBody}>
               {(data || []).map((publisher) => (
-                <TableRow key={publisher.publisherId} className={stackRow}>
+                <TableRow key={publisher.publisherId} className={cn(cardTwoLineRow, stackRow)}>
                   <IdentityCell label={t('table.publisher')} identity={formatIdentity({ name: publisher.publisherId, id: publisher.fingerprint, at: publisher.createdAt, locale, rowsOnPage: (data || []).length })} cardFact />
-                  <StackCell label={t('table.fingerprint')} className={cardCellClass(publisherCardFacts.includes('fingerprint'))}><span className="mono text-sm">{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
+                  <StackCell label={t('table.fingerprint')} className={cn(cardLineAfter, cardCellClass(publisherCardFacts.includes('fingerprint')))}><span className="mono text-sm min-w-0 truncate" title={publisher.fingerprint}>{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
                   <StackCell label={t('table.trust')} className={cardCellClass(publisherCardFacts.includes('trust'))}><StatusPill status={publisher.trustState} /></StackCell>
                   {/* §2.7 / M1: three of six publishers have no note, and three dashed boxes spent
                       a whole fact on saying one thing. A note that was never written is the source
                       answering "none" - the empty state, rendered as copy (M1's third row) - not a
                       sample that failed to arrive, which is what NO_DATA reserves. The notes that
                       do exist keep their cell. */}
-                  <StackCell label={t('table.note')} className={cardCellClass(publisherCardFacts.includes('note'))}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <span className="ow-cell-meta">{t('common.none')}</span>}</StackCell>
+                  <StackCell label={t('table.note')} className={cn(cardLineAfter, cardCellClass(publisherCardFacts.includes('note')))}>{publisher.note ? <span className="text-sm text-muted-foreground">{publisher.note}</span> : <span className="ow-cell-meta">{t('common.none')}</span>}</StackCell>
                   {/* §2.5: a labelled cell IS a fact, so the verb menu is a plain cell - and at 390 it
                       rides the identity line instead of spending a line of the card. */}
                   <TableCell className={cn('w-8 text-right text-muted-foreground', cardActionCell)}>

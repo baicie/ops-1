@@ -12,8 +12,9 @@ import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
 import { MetricCard } from '../components/app/metric-card';
 import { useI18n, useT } from '../i18n';
+import { cn } from '../lib/utils';
 import { formatDate } from '../format';
-import { IdentityCell, StackCell, StatusPill, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Dataset = { datasetId: string; name: string; schemaRevision: number; updatedAt: string };
 type QualityRun = { runId: string; datasetId: string; status: string; recordsExamined: number; recordsFailed: number; completedAt: string | null; createdAt: string };
@@ -116,7 +117,7 @@ export function GovernancePage() {
             </TableHeader>
             <TableBody className={stackBody}>
               {datasets.map((dataset) => (
-                <TableRow key={dataset.datasetId} className={stackRow} data-dataset={dataset.datasetId}>
+                <TableRow key={dataset.datasetId} className={cn(cardTwoLineRow, stackRow)} data-dataset={dataset.datasetId}>
                   <IdentityCell label={t('table.dataset')} identity={formatIdentity({ name: dataset.name, id: dataset.datasetId, at: dataset.latest?.createdAt, locale, rowsOnPage: datasets.length })} cardFact>
                     {/* Examined and failed were two columns that answered nothing for every row;
                         they are the run's counts, so they are read where the run is named. A
@@ -135,9 +136,9 @@ export function GovernancePage() {
                     {/* Nothing here when NO dataset has a run: the sentence above the table is the
                         one place that fact is stated (M1: once, not per row). */}
                   </IdentityCell>
-                  <StackCell label={t('table.schema')} className={cardCellClass(cardFacts.includes('schema'))}>r{dataset.schemaRevision}</StackCell>
+                  <StackCell label={t('table.schema')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('schema')))}>r{dataset.schemaRevision}</StackCell>
                   {qualityMeasurable ? (
-                    <StackCell label={t('table.quality')} className={cardCellClass(cardFacts.includes('quality'))}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <span className="ow-cell-meta">{t('common.noRuns')}</span>}</StackCell>
+                    <StackCell label={t('table.quality')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('quality')))}>{dataset.latest ? <StatusPill status={dataset.latest.status} /> : <span className="ow-cell-meta">{t('common.noRuns')}</span>}</StackCell>
                   ) : null}
                 </TableRow>
               ))}
@@ -156,7 +157,7 @@ export function GovernancePage() {
             </TableHeader>
             <TableBody className={stackBody}>
               {recentFailures.map((run) => (
-                <TableRow key={run.runId} className={stackRow}>
+                <TableRow key={run.runId} className={cn(cardTwoLineRow, stackRow)}>
                   {/* §2.1's disambiguator, earned: the same dataset can fail twice on this page, and
                       without it the two rows carry one identity (measured 24/27 distinct). */}
                   <IdentityCell
@@ -171,7 +172,7 @@ export function GovernancePage() {
                     })}
                     cardFact
                   />
-                  <StackCell label={t('table.status')}><StatusPill status={run.status} /></StackCell>
+                  <StackCell label={t('table.status')} className={cardLineAfter}><StatusPill status={run.status} /></StackCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -188,12 +189,12 @@ export function GovernancePage() {
             </TableHeader>
             <TableBody className={stackBody}>
               {nodeList.map((node) => (
-                <TableRow key={node.id} className={stackRow}>
+                <TableRow key={node.id} className={cn(cardTwoLineRow, stackRow)}>
                   <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale, rowsOnPage: nodeList.length })} cardFact />
                   {/* docs/04 §4.5 C: a node that stopped reporting is STALE, which is a different
                       answer from UNREACHABLE and from a green READY. */}
-                  <StackCell label={t('table.status')}><StatusIndicator state={indicatorStateForCode(node.status, { stale: node.stale, revoked: Boolean(node.revokedAt) })} /></StackCell>
-                  <StackCell label={t('table.generation')}>{node.generation}</StackCell>
+                  <StackCell label={t('table.status')} className={cardLineAfter}><StatusIndicator state={indicatorStateForCode(node.status, { stale: node.stale, revoked: Boolean(node.revokedAt) })} /></StackCell>
+                  <StackCell label={t('table.generation')} className={cardLineAfter}>{node.generation}</StackCell>
                 </TableRow>
               ))}
             </TableBody>

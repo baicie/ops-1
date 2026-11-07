@@ -40,7 +40,7 @@ export function SettingsPage() {
           </div>
         </section>
         <section className="panel">
-          <div className="panel-head"><div><h2>{t('common.runtimePolicies')}</h2><p>{t('settings.policies.description')}</p></div><CopyButton value={data ? JSON.stringify(data, null, 2) : ''} label={t('settings.policies.copy')} /></div>
+          <div className="panel-head"><div><h2>{t('common.runtimePolicies')}</h2><p>{t('settings.policies.description')}</p></div>{policyCount > 0 ? <CopyButton value={JSON.stringify(data, null, 2)} label={t('settings.policies.copy')} /> : null}</div>
           {/* Policies are a read-only GET contract, so this panel has three honest outcomes and no
               save button: permission wall for a non-admin, an empty list for an admin whose
               deployment reports none, and the values themselves. */}

@@ -16,7 +16,7 @@ import { ageMessage, clockMessage } from '../lib/age';
 import { auditEmptyKind, readAuditList } from '../lib/audit-scope';
 import { cn } from '../lib/utils';
 import { actorName, detailFact, presentEvents, subjectName, type PresentedRow } from './activity-facts';
-import { IdentityCell, StackCell, StatusPill, cardActionCell, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, cardActionCell, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /** Radix Select cannot express "no value", so every "all" state is a sentinel the page maps back. */
 const ALL = 'ALL';
@@ -318,7 +318,7 @@ export function ActivityPage() {
                           Enter and Space. The row used to be a second Tab stop with an Enter handler
                           as well, which announced nothing and duplicated the button one stop later. */}
                       <TableRow
-                        className={cn('cursor-pointer max-[768px]:relative', stackRow)}
+                        className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)}
                         data-row-key={row.foldKey}
                         data-expanded={open ? 'true' : 'false'}
                         onClick={() => setOpenRow(open ? null : row.identityKey)}
@@ -362,7 +362,7 @@ export function ActivityPage() {
                           cards whose text was byte-identical, clock included, because the fan-out
                           half was not printed at all.
                         */}
-                        <StackCell label={t('table.occurred')} title={formatDate(event.occurredAt)}>
+                        <StackCell label={t('table.occurred')} className={cardLineAfter} title={formatDate(event.occurredAt)}>
                           <span className="event-when" data-when={event.occurredAt}>
                             <TimeAgo value={event.occurredAt} />
                             <span className="ow-cell-meta mono">{clockMessage(locale, event.occurredAt)}</span>

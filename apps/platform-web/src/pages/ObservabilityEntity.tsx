@@ -304,9 +304,9 @@ export function ObservabilityEntityPage() {
     <div className="page-stack" data-testid="observability-entity">
       <PageHeader
         eyebrow={t('observabilityEntity.eyebrow')}
-        title={node?.name || t('observabilityEntity.title')}
+        title={t('page.observabilityNodeDetail')}
         description={node
-          ? t('observabilityEntity.description', { os: node.os, arch: node.arch, generation: node.generation })
+          ? <span className="pipeline-identity"><strong>{node.name}</strong><span>{t('observabilityEntity.description', { os: node.os, arch: node.arch, generation: node.generation })}</span></span>
           : t('observabilityEntity.descriptionLoading')}
         actions={
           <>

@@ -440,7 +440,6 @@ input::placeholder { color: var(--ow-text-muted); }
   .page-header-sub { flex-wrap: wrap; }
   .page-header-sub .page-header-meta { flex: 1 1 100%; }
 }
-.title-with-status { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .meta-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-meta); padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); background: var(--ow-surface); }
 .panel { background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); box-shadow: none; min-width: 0; }
@@ -689,6 +688,13 @@ input::placeholder { color: var(--ow-text-muted); }
    mid-token ("linux/x86_64 / gen" / "49"). Truncate instead. */
 .ops-node-name strong, .ops-node-name .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ops-node-metric { color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
+/* At 390 the status pill + memory pair + age leave ~49px for the identity, so the node name
+   truncated to "e.." and its platform line to "l..." (measured on edge-2, whose "Unreachable"
+   pill is the widest). The identity takes its own line; the three facts share the second. */
+@media (max-width: 768px) {
+  .ops-node, .ops-plugin { flex-wrap: wrap; row-gap: 4px; }
+  .ops-node-name, .ops-plugin > span:first-child { flex: 1 1 100%; }
+}
 .ops-readiness { color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
 .resource-stack { padding: 8px 16px 12px; display: flex; flex-direction: column; gap: 12px; }
 .resource-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--ow-type-meta); margin-bottom: 4px; }
@@ -833,6 +839,11 @@ input::placeholder { color: var(--ow-text-muted); }
 .revision-list { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 0; }
 .revision-list li { display: grid; grid-template-columns: 60px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--ow-border); }
 .pagination-row { display: flex; justify-content: flex-end; gap: 8px; }
+/* A cursor pager can carry three buttons; at 390 their min-content width exceeds the row and
+   flex-end silently pushes the first one past the left edge (measured: "First page" at x=-16,
+   while document.scrollWidth stayed 375 because the overflow is leftwards). Wrapping keeps
+   every button on screen. */
+@media (max-width: 768px) { .pagination-row { flex-wrap: wrap; } }
 .studio-shell { display: grid; grid-template-columns: 220px minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
 .studio-palette, .studio-inspector { position: sticky; top: 78px; max-height: calc(100vh - 110px); overflow: auto; }
 .studio-palette h2, .studio-inspector h2 { margin: 0 0 4px; font-size: var(--ow-type-body); }
@@ -1185,7 +1196,10 @@ details.panel.advanced > summary { padding: 12px 16px; }
   .studio-shell { grid-template-columns: minmax(0, 1fr) 280px; height: auto; min-height: 0; }
   .studio-palette { display: none; }
   .studio-canvas { height: 540px; }
-  .studio-inspector { max-height: 540px; }
+  /* The pre-rework rule at the top of this file pushes the inspector onto a row of its own
+     (grid-column: 1 / -1). This layout keeps it in the second column, so the push has to be
+     undone here or the canvas loses 280px to an empty column and the inspector opens below it. */
+  .studio-inspector { grid-column: auto; max-height: 540px; }
 }
 @media (max-width: 768px) {
   .main-content:has(.studio-page) { padding: 0; }
@@ -1799,7 +1813,7 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
  * Consecutive repeats of the same event on the same subject collapse into one row with a
  * xN marker, and the day band explains why six rows share one timestamp - they are one
  * burst, not six unrelated things. Only an abnormal result is coloured. */
-.event-list { list-style: none; margin: 0; padding: 0; }
+.event-ledger { list-style: none; margin: 0; padding: 0; }
 .event-day {
   display: flex;
   align-items: center;
@@ -1811,7 +1825,7 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
   background: var(--ow-surface-2);
   border-bottom: 1px solid var(--ow-border);
 }
-.event-row {
+.event-ledger .event-row {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
   gap: 12px;
@@ -1819,16 +1833,16 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
   width: 100%;
   padding: 9px 16px;
 }
-.event-time {
+.event-ledger .event-time {
   font-size: var(--ow-type-label);
   color: var(--ow-text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.event-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.event-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.event-title strong { font-size: var(--ow-type-body); font-weight: 500; color: var(--ow-text); }
-.event-count {
+.event-ledger .event-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.event-ledger .event-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.event-ledger .event-title strong { font-size: var(--ow-type-body); font-weight: 500; color: var(--ow-text); }
+.event-ledger .event-count {
   font-size: var(--ow-type-label);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1838,11 +1852,11 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
   color: var(--ow-text-secondary);
   line-height: 1.5;
 }
-.event-subject { font-size: var(--ow-type-label); color: var(--ow-text-muted); min-width: 0; overflow-wrap: anywhere; }
-.event-subject .mono { font-size: var(--ow-type-label); }
-.event-subject-kind { color: var(--ow-text-secondary); }
-.event-result { display: inline-flex; }
-.event-result .status-indicator { padding: 0 4px; font-size: var(--ow-type-label); }
+.event-ledger .event-subject { font-size: var(--ow-type-label); color: var(--ow-text-muted); min-width: 0; overflow-wrap: anywhere; }
+.event-ledger .event-subject .mono { font-size: var(--ow-type-label); }
+.event-ledger .event-subject-kind { color: var(--ow-text-secondary); }
+.event-ledger .event-result { display: inline-flex; }
+.event-ledger .event-result .status-indicator { padding: 0 4px; font-size: var(--ow-type-label); }
 
 /* ── 6. Attention: a work queue, or one honest line ─────────────────────────────────── */
 .attention-item { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--ow-border); border-left: 2px solid transparent; }
@@ -2061,9 +2075,9 @@ button.ow-summary-card { font: inherit; color: inherit; cursor: pointer; }
    is now the grid, so the wrappers must stay transparent - otherwise the divider is painted
    by a flex item that only spans its content (the 438px line under each row, not the 668px
    row). */
-.event-list > li { display: block; padding: 0; border: 0; border-bottom: 1px solid var(--ow-border); }
-.event-list > li:last-child { border-bottom: 0; }
-.event-list > li.event-day { display: flex; border-bottom: 0; }
+.event-ledger > li { display: block; padding: 0; border: 0; border-bottom: 1px solid var(--ow-border); }
+.event-ledger > li:last-child { border-bottom: 0; }
+.event-ledger > li.event-day { display: flex; border-bottom: 0; }
 
 
 /* Ledger rows read left to right: name, state, reason. The chevron is the only thing on the
@@ -2838,8 +2852,6 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 /* The chevron in a pipeline row is a link now, so it would inherit the anchor's accent colour and
  * the hover underline. Neither suits a 16px glyph in a 44px slot: it keeps the muted tone the cell
  * always had, and the row's hover wash is the feedback. */
-.ow-row-go { color: var(--ow-text-muted); }
-.ow-row-go:hover { color: var(--ow-text); text-decoration: none; }
 .ow-ident-link { color: inherit; }
 .ow-ident-link:hover { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .ow-ident-link:focus-visible { outline-offset: 1px; }
@@ -3736,3 +3748,16 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
     gap: 2px;
   }
 }
+
+/* One identity line under a page name: the entity is a fact, not the h1. This is the same
+   rule the audit asked for on /admin/jobs/:id, applied to pipeline detail, the studio and
+   node detail. Long ids wrap inside the line instead of widening the page. */
+.pipeline-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-width: 0;
+}
+.pipeline-identity > strong { color: var(--ow-text); font-weight: 600; overflow-wrap: anywhere; }
+.pipeline-identity > span { min-width: 0; overflow-wrap: anywhere; }

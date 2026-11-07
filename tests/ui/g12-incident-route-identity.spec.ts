@@ -231,7 +231,7 @@ test.describe('G12 A2 route identity', () => {
 
     await expect(page.locator('[data-testid="incident-detail"]')).toHaveAttribute('data-incident-id', b.id);
     await expect(page.locator('[data-testid="incident-detail"]')).toHaveAttribute('data-route-id', b.id);
-    await expect(page.locator('[data-testid="incident-detail"] h1')).not.toHaveText(a.title);
+    await expect(page.locator('[data-testid="incident-detail"] [data-testid="page-header"]')).not.toContainText(a.title);
     await expect(page).toHaveURL(new RegExp('/app/incidents/' + b.id));
   });
 
@@ -251,7 +251,7 @@ test.describe('G12 A2 route identity', () => {
     await expect(page.locator('[data-testid="incident-detail"]')).toHaveAttribute('data-detail-state', 'not-found');
     // The title that was on screen is gone: a 404 is an answer, and an answer takes data away.
     await expect(page.locator('[data-testid="incident-detail"]')).not.toHaveAttribute('data-incident-id', b.id);
-    await expect(page.locator('[data-testid="incident-detail"] h1')).not.toHaveText(b.title);
+    await expect(page.locator('[data-testid="incident-detail"] [data-testid="page-header"]')).not.toContainText(b.title);
   });
 
   test('a failed refresh on the same id keeps the record and dates it', async ({ page }) => {
@@ -266,7 +266,7 @@ test.describe('G12 A2 route identity', () => {
     await expect(page.locator('[data-testid="incident-freshness"]')).toHaveAttribute('data-stale', 'true');
     // The rows are still there: an absent answer is not a reason to erase a record.
     await expect(page.locator('[data-evidence-row]')).toHaveCount(1);
-    await expect(page.locator('[data-testid="incident-detail"] h1')).toHaveText(b.title);
+    await expect(page.locator('[data-testid="incident-detail"] [data-testid="page-header"]')).toContainText(b.title);
   });
 });
 

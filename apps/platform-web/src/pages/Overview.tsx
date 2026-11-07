@@ -431,7 +431,7 @@ export function OverviewPage() {
                     )}
                   </div>
                 ) : (
-                  <ol className="event-list">
+                  <ol className="event-list event-ledger">
                     {days.map((day) => (
                       <React.Fragment key={day.key}>
                         <li className="event-day" aria-hidden="true">{dayLabel(t, day.key)}</li>
