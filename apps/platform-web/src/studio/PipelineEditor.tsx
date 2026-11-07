@@ -300,8 +300,8 @@ export function PipelineEditorPage() {
           nothing below the header has to know how many of them there are. */}
       <PageHeader
         eyebrow={t('studio.eyebrow')}
-        title={definition.name}
-        description={t('studio.description')}
+        title={t('studio.pageTitle')}
+        description={<span className="pipeline-identity"><strong>{definition.name}</strong><span>{t('studio.description')}</span></span>}
         meta={<>
           <span className="meta-chip mono">{pipelineId}</span>
           <span className="meta-chip">{t('studio.meta.revision', { revision: definition.revision })}</span>
