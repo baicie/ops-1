@@ -895,6 +895,22 @@ mod tests {
     }
 
     async fn cleanup_event_fixture(pool: &PgPool, source: Uuid, incident_ids: &[Uuid]) {
+        if !incident_ids.is_empty() {
+            // Verdicts are delete-guarded (0025); the transaction-local setting
+            // is the schema's stated test-cleanup exception. A leftover verdict
+            // makes the incident undeletable and leaks its owner account.
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query("SET LOCAL kernel.allow_verdict_removal = 'on'")
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id = ANY($1)")
+                .bind(incident_ids)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+        }
         for incident in incident_ids {
             let _ = sqlx::query(
                 "DELETE FROM kernel.audit_events WHERE subject_type='INCIDENT' AND subject_id=$1",
