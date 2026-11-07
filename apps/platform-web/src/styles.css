@@ -128,7 +128,11 @@
   --ow-control-touch: 44px;
   --ow-sidebar: 240px;
   --ow-topbar: 56px;
-  --ow-readable: 1480px;
+  /* Wide monitors were showing a 1480px column with a large dead gutter. The
+     column still stops growing at 1720px so prose lines stay readable, but it
+     now uses the width the shell actually has on 1920/2000px displays. 1440 and
+     below are unchanged (the main column is narrower than the cap). */
+  --ow-readable: 1720px;
   --ow-motion-fast: 100ms;
   --ow-motion-normal: 180ms;
   /* Inter is not shipped yet, so this resolves to the system stack it already fell back to;
@@ -348,11 +352,12 @@ input::placeholder { color: var(--ow-text-muted); }
 .user-menu-head span { color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
 .user-menu button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 8px; border: 0; background: transparent; border-radius: var(--ow-radius-control); font-size: var(--ow-type-body); text-align: left; }
 .user-menu button:hover { background: var(--ow-surface-2); }
-.main-content { max-width: var(--ow-readable); margin: 0 auto; padding: 24px 24px 64px; }
+.main-content { max-width: min(100%, var(--ow-readable)); margin: 0 auto; padding: 24px 24px 64px; }
 .sidebar-scrim { display: none; }
 
 /* Page primitives */
-.page-stack { display: flex; flex-direction: column; gap: 24px; }
+.page-stack { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.page-stack > * { min-width: 0; }
 /* A header is never a shrinking flex item. On a page whose body is a viewport-height workspace
    (.investigation-page, .studio-page) the column has a declared height, and the default
    flex-shrink:1 then squeezed the header down to its 80px floor: the title wrapped to two lines
