@@ -440,7 +440,6 @@ input::placeholder { color: var(--ow-text-muted); }
   .page-header-sub { flex-wrap: wrap; }
   .page-header-sub .page-header-meta { flex: 1 1 100%; }
 }
-.title-with-status { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .meta-chip { display: inline-flex; align-items: center; gap: 4px; color: var(--ow-text-muted); font-size: var(--ow-type-meta); padding: 4px 8px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-control); background: var(--ow-surface); }
 .panel { background: var(--ow-surface); border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); box-shadow: none; min-width: 0; }
@@ -1185,7 +1184,10 @@ details.panel.advanced > summary { padding: 12px 16px; }
   .studio-shell { grid-template-columns: minmax(0, 1fr) 280px; height: auto; min-height: 0; }
   .studio-palette { display: none; }
   .studio-canvas { height: 540px; }
-  .studio-inspector { max-height: 540px; }
+  /* The pre-rework rule at the top of this file pushes the inspector onto a row of its own
+     (grid-column: 1 / -1). This layout keeps it in the second column, so the push has to be
+     undone here or the canvas loses 280px to an empty column and the inspector opens below it. */
+  .studio-inspector { grid-column: auto; max-height: 540px; }
 }
 @media (max-width: 768px) {
   .main-content:has(.studio-page) { padding: 0; }
@@ -1799,7 +1801,7 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
  * Consecutive repeats of the same event on the same subject collapse into one row with a
  * xN marker, and the day band explains why six rows share one timestamp - they are one
  * burst, not six unrelated things. Only an abnormal result is coloured. */
-.event-list { list-style: none; margin: 0; padding: 0; }
+.event-ledger { list-style: none; margin: 0; padding: 0; }
 .event-day {
   display: flex;
   align-items: center;
@@ -1811,7 +1813,7 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
   background: var(--ow-surface-2);
   border-bottom: 1px solid var(--ow-border);
 }
-.event-row {
+.event-ledger .event-row {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
   gap: 12px;
@@ -1819,16 +1821,16 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
   width: 100%;
   padding: 9px 16px;
 }
-.event-time {
+.event-ledger .event-time {
   font-size: var(--ow-type-label);
   color: var(--ow-text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.event-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.event-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.event-title strong { font-size: var(--ow-type-body); font-weight: 500; color: var(--ow-text); }
-.event-count {
+.event-ledger .event-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.event-ledger .event-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.event-ledger .event-title strong { font-size: var(--ow-type-body); font-weight: 500; color: var(--ow-text); }
+.event-ledger .event-count {
   font-size: var(--ow-type-label);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1838,11 +1840,11 @@ a.module-card:hover .module-card-go { color: var(--ow-accent); }
   color: var(--ow-text-secondary);
   line-height: 1.5;
 }
-.event-subject { font-size: var(--ow-type-label); color: var(--ow-text-muted); min-width: 0; overflow-wrap: anywhere; }
-.event-subject .mono { font-size: var(--ow-type-label); }
-.event-subject-kind { color: var(--ow-text-secondary); }
-.event-result { display: inline-flex; }
-.event-result .status-indicator { padding: 0 4px; font-size: var(--ow-type-label); }
+.event-ledger .event-subject { font-size: var(--ow-type-label); color: var(--ow-text-muted); min-width: 0; overflow-wrap: anywhere; }
+.event-ledger .event-subject .mono { font-size: var(--ow-type-label); }
+.event-ledger .event-subject-kind { color: var(--ow-text-secondary); }
+.event-ledger .event-result { display: inline-flex; }
+.event-ledger .event-result .status-indicator { padding: 0 4px; font-size: var(--ow-type-label); }
 
 /* ── 6. Attention: a work queue, or one honest line ─────────────────────────────────── */
 .attention-item { display: flex; align-items: flex-start; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--ow-border); border-left: 2px solid transparent; }
@@ -2061,9 +2063,9 @@ button.ow-summary-card { font: inherit; color: inherit; cursor: pointer; }
    is now the grid, so the wrappers must stay transparent - otherwise the divider is painted
    by a flex item that only spans its content (the 438px line under each row, not the 668px
    row). */
-.event-list > li { display: block; padding: 0; border: 0; border-bottom: 1px solid var(--ow-border); }
-.event-list > li:last-child { border-bottom: 0; }
-.event-list > li.event-day { display: flex; border-bottom: 0; }
+.event-ledger > li { display: block; padding: 0; border: 0; border-bottom: 1px solid var(--ow-border); }
+.event-ledger > li:last-child { border-bottom: 0; }
+.event-ledger > li.event-day { display: flex; border-bottom: 0; }
 
 
 /* Ledger rows read left to right: name, state, reason. The chevron is the only thing on the

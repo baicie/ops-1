@@ -30,6 +30,35 @@
 | 7 | `/admin/nodes/:id`、`/admin/instances/:id/logs` | 2.9 | 响应式 |
 | 8 | 其余 ≥3.0 页面 | — | 统一 token、状态、表格 |
 
-## 已开始
+## 完成情况（2026-11-07，分支 `fix/ui-page-ia`）
 
-S2 `/admin/jobs/:id`：h1 改为“任务详情”，pipeline 名进副标题；长 id/digest/JSON 在页面内可换行或滚动；Attempts 表格收进 `.table-panel`。后续 PR 按上表继续。
+| 顺序 | 页面 | 本轮结果 |
+|---|---|---|
+| 1 | `/admin/jobs/:id` | h1 为“任务详情”，pipeline 名/状态/revision/短 id 进副标题；3 张指标卡；长 id/digest/JSON 有界；Attempts 表格收进 `.table-panel`。 |
+| 2 | `/admin/pipelines/:id/editor` | h1 为“Pipeline Studio”，定义名进身份行；修正 1024 下 inspector 被旧规则推到独立行、右侧留 280px 空列的问题，画布与 inspector 回到两列。 |
+| 3 | `/admin/activity` | 390 卡片接入 `.ow-card-2l` 两行布局（身份行 + 结果/时间），行高从约 161px 降到约 125px；分页与连续事件折叠此前已存在。 |
+| 4 | `/admin/pipelines/:id` | 指标条 4→3（删除与 revision 历史重复的 Updated）；最新 digest 与历史 digest 改 `LongId`（截断 + 复制，不再四行折行）；Recent jobs 改用 `IdentityCell`（pipeline 名 · 4 位 id），revision 降为身份行 qualifier，390 两行卡片。 |
+| 5 | `/admin/settings/diagnostics` | 修复 V4 台账样式误伤旧事件列表：`event-list` 的 V4 规则收进 `.event-ledger`，Recent audit 恢复 24px 图标 + 标题/主体 + 右侧时间的紧凑行（原为 100px 竖排块）。 |
+| 6 | `/admin/governance` | 4 张指标卡、3 张表格均通过 40–42px 行高、≤3 facts、无 390 溢出；未再改结构。 |
+| 7 | `/admin/nodes/:id`、`/admin/instances/:id/logs` | Node events 与 Diagnostics 同因修复（共享 `.event-list`）；实例日志在 390/768/1024/1440 无溢出，头部 meta 正常换行。 |
+| 8 | 其余页面 | 补齐详情页 h1：`/admin/plugins/:id`、`/admin/pipelines/:id/run`、`/app/incidents/:id`、`/app/observability/nodes/:id` 均以页面名为 h1，实体名进身份行；删除随之失效的 `title-with-status` CSS 与两条 i18n 键。 |
+
+### 验证
+
+```
+pnpm --filter @opsweave/platform-web typecheck     # pass
+pnpm --filter @opsweave/platform-web test          # 32 files / 457 tests pass
+pnpm --filter @opsweave/platform-web build         # pass
+node scripts/check-i18n.mjs                        # OK, 2018 keys, 17 unused
+node scripts/check-status-vocabulary.mjs           # clean (43 codes)
+node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json  # PASS
+```
+
+浏览器矩阵用本地 Vite dev + Playwright 路由桩测量（22 条路由 × 390/768/1024/1440 light-en，另加 390 dark-en 与 390/1024/1440 light-zh-CN）：
+
+- 所有组合 `scrollWidth - clientWidth = -15`（滚动条槽），无页面级横向溢出；
+- 每页恰好一个 h1，且为页面名；
+- en 与 zh-CN 的 `scrollWidth` 差为 0px；
+- 表格行高 390 卡片 ≤ 171px（治理/插件等多事实页），桌面 40–42px。
+
+未做的事：第 7 条“视觉审计均分 ≥3.5”需要人工逐页判读，本轮不冒充已达成；证据截图未入库（仓库 PNG 预算为零余量），正式矩阵仍由 `staging-preview` 的 `ui-table-audit.spec.ts` + `check-ui-metrics.mjs --manifest` 守门。

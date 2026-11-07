@@ -15,9 +15,10 @@ import { PageHeader } from '../components/app/page-header';
 import { MetricCard } from '../components/app/metric-card';
 import { useDocumentTitle } from '../hooks';
 import { getPipelineExecutionOrder, type TopologyStatus } from '../studio/ir/topology';
-import { useT, type MessageKey } from '../i18n';
+import { shortDigest } from '../format';
+import { useI18n, useT, type MessageKey } from '../i18n';
 import { cn } from '../lib/utils';
-import { StackCell, StatusPill, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, LongId, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
  * The revision pill paints through the shared tone map, and its label comes from the same
@@ -229,6 +230,7 @@ function PipelineDetailHeader({ pipelineId, name, description, actions }: { pipe
 
 export function PipelineDetailPage() {
   const t = useT();
+  const { locale } = useI18n();
   const { pipelineId = '' } = useParams();
   useDocumentTitle(t('page.pipelineDetail'));
   const [detail, setDetail] = useState<PipelineDetail | null>(null);
@@ -273,24 +275,32 @@ export function PipelineDetailPage() {
         <MetricCard label={t('pipelines.metric.nodes')} value={latest ? latest.definition.nodes.length : undefined} state={latest ? 'ready' : 'noData'} showSampled={false} />
         {/* An unloaded job list is not "no runs": noRuns is only a fact once the list answered. */}
         <MetricCard label={t('pipelines.metric.latestRun')} value={jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')} state={jobs ? 'ready' : 'noData'} size="small" showSampled={false} />
-        <MetricCard label={t('pipelines.metric.updated')} value={latest?.publishedAt ? <TimeAgo value={latest.publishedAt} /> : undefined} state={latest?.publishedAt ? 'ready' : 'noData'} size="small" showSampled={false} />
       </section>
       {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>{t('pipelines.latestRevision.title')}</h2>{/* The 64-char digest is unbreakable text: at 390 it forced a 122px page-level
               horizontal overflow on this panel before (the same markup pre-dated the migration).
               Breaking the hash only where it needs to wrap keeps the page inside the viewport. */}
-            <p className="muted small">{latest.definition.name} · <span className="break-all">{latest.digest}</span></p></div><TonePill tone="ok" label={t('pipelines.badge.immutable')} /></div><NodeSummary definition={latest.definition} /></section> : <EmptyState icon="file" title={t('pipelines.empty.noPublishedRevision')} />}
+            {/* The digest is a copyable identity, not a paragraph: `break-all` wrapped it over four
+                lines at 390, so the panel grew a 71-character column of noise. LongId ellipsises it
+                and keeps the full value on the title and the copy button. */}
+            <p className="muted small">{latest.definition.name} · <LongId value={latest.digest} display={shortDigest(latest.digest, 18)} label={t('table.copyIdentifier')} /></p></div><TonePill tone="ok" label={t('pipelines.badge.immutable')} /></div><NodeSummary definition={latest.definition} /></section> : <EmptyState icon="file" title={t('pipelines.empty.noPublishedRevision')} />}
       <section className="panel panel-pad">
         <div className="panel-head"><div><h2>{t('pipelines.history.title')}</h2><p className="muted small">{t('pipelines.history.description')}</p></div></div>
         {detail.revisions.length === 0 ? <EmptyState icon="clock" title={t('pipelines.history.empty')} /> : (
           <ul className="revision-list">{detail.revisions.map((revision) => (
-            <li key={revision.revision}><span className="mono">r{revision.revision}</span><span className="mono muted small">{revision.digest}</span><RevisionPill status={revision.status} /><TimeAgo value={revision.publishedAt} /></li>
+            <li key={revision.revision}><span className="mono">r{revision.revision}</span><span className="muted small"><LongId value={revision.digest} display={shortDigest(revision.digest, 18)} label={t('table.copyIdentifier')} /></span><RevisionPill status={revision.status} /><TimeAgo value={revision.publishedAt} /></li>
           ))}</ul>
         )}
       </section>
       <section className="panel panel-pad">
         <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">{t('pipelines.jobs.empty')}</p> : (
-          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.revision')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => <TableRow key={job.jobId} className={stackRow}><StackCell label={t('table.job')} className="max-[768px]:!w-auto max-[768px]:!max-w-none"><Link className="mono truncate" title={job.jobId} to={`/admin/jobs/${job.jobId}`}>{job.jobId}</Link></StackCell><StackCell label={t('table.revision')}><span className="mono">r{job.pipelineRevision}</span></StackCell><StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')}><TimeAgo value={job.createdAt} /></StackCell></TableRow>)}</TableBody></Table></div>
+          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => {
+            // table-spec §2.1/§2.5: the row opens with a name and four hex characters, not a
+            // 36-character UUID that wraps over two lines on every card. The revision is constant
+            // for a pipeline, so it is a qualifier on the identity line, not a column of its own.
+            const identity = formatIdentity({ name: detail.name, id: job.jobId, at: job.createdAt, locale, nameIsUnique: false, rowsOnPage: jobs.items.length });
+            return <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)}><IdentityCell label={t('table.job')} identity={identity} href={`/admin/jobs/${job.jobId}`} cardFact><span className="ow-key">r{job.pipelineRevision}</span></IdentityCell><StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')} className={cardLineAfter}><TimeAgo value={job.createdAt} /></StackCell></TableRow>;
+          })}</TableBody></Table></div>
         )}
       </section>
       <p className="table-footnote"><Icon name="alert" size={13} /> {t('pipelines.footnote')}</p>

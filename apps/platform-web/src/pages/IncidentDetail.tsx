@@ -268,7 +268,7 @@ export function IncidentDetailPage() {
     const newOwner = directory.names?.[handover.toOwner] ?? shortOwner(handover.toOwner);
     return (
       <div className="page-stack" data-testid="incident-detail" data-detail-state="handed-over">
-        <PageHeader eyebrow={t('incidents.eyebrow')} title={incident.title} actions={backLink} />
+        <PageHeader eyebrow={t('incidents.eyebrow')} title={t('page.workspaceIncidents')} description={<span className="pipeline-identity"><strong>{incident.title}</strong></span>} actions={backLink} />
         <section className="panel pad" data-testid="incident-handover-complete" data-new-owner={handover.toOwner}>
           <h2>{t('incidents.transfer.done.title')}</h2>
           <p>{t('incidents.transfer.done.description', { owner: newOwner })}</p>
@@ -284,11 +284,11 @@ export function IncidentDetailPage() {
     <div className="page-stack investigation-page" data-testid="incident-detail" data-incident-id={incident.id} data-route-id={incidentId}>
       <PageHeader
         eyebrow={t('incidents.eyebrow')}
-        title={incident.title}
-        description={t('incidents.detail.headerMeta', {
+        title={t('page.workspaceIncidents')}
+        description={<span className="pipeline-identity"><strong>{incident.title}</strong><span>{t('incidents.detail.headerMeta', {
           started: ageMessage(locale, incident.startedAt),
           updated: ageMessage(locale, incident.updatedAt),
-        })}
+        })}</span></span>}
         meta={(
           <>
             <span data-testid="incident-detail-status"><Status code={incident.status} /></span>
