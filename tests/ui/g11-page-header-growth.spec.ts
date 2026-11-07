@@ -206,6 +206,8 @@ async function measure(page: Page) {
       ? (descriptionStyle.lineHeight === 'normal' ? parseFloat(descriptionStyle.fontSize) * 1.2 : parseFloat(descriptionStyle.lineHeight))
       : 0;
     const railOnOwnLine = rail ? Math.round(rail.getBoundingClientRect().top) >= Math.round(box.bottom) - 1 : false;
+    const headerMeta = header.querySelector('.page-header-meta') as HTMLElement | null;
+    const metaInline = Boolean(headerMeta && description && Math.round(headerMeta.getBoundingClientRect().top) <= Math.round(descriptionBox!.top) + 1);
     const copy = header.querySelector('.page-header-copy');
     const copyBox = copy ? copy.getBoundingClientRect() : null;
 
@@ -229,11 +231,18 @@ async function measure(page: Page) {
       noClippedText: clipped.length === 0,
       // The shape a header's height is a function of. Two pages may differ in height only when this
       // key differs; that comparison is what replaces a hardcoded 80.
+      //
+      // The meta row's PLACEMENT is part of the shape, not just its row count. .page-header-sub is a
+      // wrapping flex row: a short description lets the chips ride its line (80px), a long one pushes
+      // them to a block of their own (~102px). Both report two chip rows at 1024, so a shape without
+      // this axis compared two different layouts and failed on the height difference it had itself
+      // caused. `inline` means the chip container starts on the description's first line.
       shape: [
         header.querySelector('.eyebrow') ? 'eyebrow' : '-',
         'title' + (h1Box ? Math.max(1, Math.round(h1Box.height / h1LineHeight)) : 0),
         description ? 'desc' + Math.max(1, Math.round(descriptionBox!.height / descriptionLineHeight)) : '-',
-        'meta' + rows(header.querySelector('.page-header-meta')),
+        'meta' + rows(header.querySelector('.page-header-meta'))
+          + (metaInline ? 'inline' : 'block'),
         'rail' + rows(rail) + (railOnOwnLine ? 'wrapped' : 'inline'),
       ].join('/'),
       titleLines: h1Box ? Math.max(1, Math.round(h1Box.height / h1LineHeight)) : 0,

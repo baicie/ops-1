@@ -1365,7 +1365,6 @@
   "pluginDetail.field.deploymentStatus": "Deployment status",
   "pluginDetail.field.image": "Image",
   "pluginDetail.field.installation": "Installation",
-  "pluginDetail.hostOwnedRecovery": "Host-owned recovery UI",
   "pluginDetail.instances.deploymentDetail": "Deployment detail",
   "pluginDetail.instances.empty.description": "No instance is running for this plugin.",
   "pluginDetail.instances.empty.title": "No instances observed",

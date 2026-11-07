@@ -247,7 +247,7 @@ export function PluginDetailPage() {
       <PageHeader
         eyebrow={(data.publisher || t('pluginDetail.unknownPublisher')) + ' · ' + (data.isSystem ? t('pluginDetail.systemPlugin') : t('pluginDetail.trustedPackage'))}
         title={t('page.pluginDetail')}
-        description={<span className="pipeline-identity"><strong>{data.name}</strong>{data.isSystem ? <Badge variant="secondary">{t('common.tag.system')}</Badge> : null}<span className="mono">{data.id}</span></span>}
+        description={<span className="pipeline-identity"><strong>{data.name}</strong><span>{data.id}</span></span>}
         meta={
           <div className="detail-meta">
             <InstallationStatus state={data.state} />
@@ -258,14 +258,12 @@ export function PluginDetailPage() {
               ? <MetaChip icon="activity" value={t('pluginDetail.meta.revision', { revision: data.activeRevision.generation })} />
               : <NoData detail={t('ui.noData.detail')} />}
             {data.activeRevision?.activatedAt ? <MetaChip label={t('pluginDetail.meta.activated')} value={<TimeAgo value={data.activeRevision.activatedAt} />} /> : null}
-            {data.isSystem ? <MetaChip icon="access" value={t('pluginDetail.hostOwnedRecovery')} /> : null}
           </div>
         }
         actions={<>
           {latestDeployment?.status === 'READY' && latestDeployment.version === activeVersion && <StatusPill status="READY" />}
           {activeVersion && <Button variant="secondary" onClick={() => setConfirm('disable')} disabled={Boolean(busy)}><Icon name="stop" size={15} /> {t('action.disable')}</Button>}
           {!activeVersion && data.state === 'DISABLED' && <Button variant="secondary" onClick={() => setConfirm('enable')} disabled={Boolean(busy)}><Icon name="rotate" size={15} /> {t('action.enable')}</Button>}
-          <Button variant="secondary" onClick={() => setTab('versions')}><Icon name="plugins" size={15} /> {t('pluginDetail.tab.versions')}</Button>
         </>}
         primary={readyCandidate
           ? <Button onClick={() => setConfirm('activate')} disabled={Boolean(busy)}><Icon name="play" size={15} /> {t('pluginDetail.action.activateVersion', { version: readyCandidate.version })}</Button>

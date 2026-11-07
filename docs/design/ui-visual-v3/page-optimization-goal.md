@@ -62,7 +62,7 @@
 pnpm --filter @opsweave/platform-web typecheck     # pass
 pnpm --filter @opsweave/platform-web test          # 32 files / 457 tests pass
 pnpm --filter @opsweave/platform-web build         # pass
-node scripts/check-i18n.mjs                        # OK, 2018 keys, 17 unused
+node scripts/check-i18n.mjs                        # OK, 2017 keys, 17 unused
 node scripts/check-status-vocabulary.mjs           # clean (43 codes)
 node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json  # PASS
 ```

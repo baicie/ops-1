@@ -1365,7 +1365,6 @@
   "pluginDetail.field.deploymentStatus": "部署状态",
   "pluginDetail.field.image": "镜像",
   "pluginDetail.field.installation": "安装状态",
-  "pluginDetail.hostOwnedRecovery": "宿主自有的恢复界面",
   "pluginDetail.instances.deploymentDetail": "部署详情",
   "pluginDetail.instances.empty.description": "该插件当前没有运行中的实例。",
   "pluginDetail.instances.empty.title": "未观测到实例",
