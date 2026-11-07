@@ -383,7 +383,7 @@ export function IncidentsPage() {
               : null}
           </SelectContent>
         </Select>
-        <Button variant="secondary" data-testid="incident-refresh" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>
+        <Button className="text-muted-foreground" variant="ghost" data-testid="incident-refresh" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>
         {directory.readable ? null : <span className="muted small" data-testid="incident-owner-directory-unavailable">{t('incidents.filter.directoryUnavailable')}</span>}
         {/* A count is a claim about how many rows exist. While the read is loading, refused,
             conflicted or failed, no count is known - printing "0" there is the same lie as an

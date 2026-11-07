@@ -310,7 +310,7 @@ export function ObservabilityEntityPage() {
           : t('observabilityEntity.descriptionLoading')}
         actions={
           <>
-            <Button variant="secondary" onClick={() => void reload()}>
+            <Button variant="ghost" className="text-muted-foreground" onClick={() => void reload()}>
               <Icon name="refresh" size={15} /> {t('action.refresh')}
             </Button>
             {/* A Link wearing the button's classes, not a Button wrapping a Link: this

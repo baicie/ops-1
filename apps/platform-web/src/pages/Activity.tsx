@@ -16,7 +16,7 @@ import { ageMessage, clockMessage } from '../lib/age';
 import { auditEmptyKind, readAuditList } from '../lib/audit-scope';
 import { cn } from '../lib/utils';
 import { actorName, detailFact, presentEvents, subjectName, type PresentedRow } from './activity-facts';
-import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, cardActionCell, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, cardActionCell, colFit, colGrow, colTime, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /** Radix Select cannot express "no value", so every "all" state is a sentinel the page maps back. */
 const ALL = 'ALL';
@@ -151,7 +151,7 @@ export function ActivityPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader title={t('page.activity')} description={t('activity.description')} actions={<Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
+      <PageHeader title={t('page.activity')} description={t('activity.description')} actions={<Button variant="ghost" className="text-muted-foreground" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
 
       <section className="toolbar" data-testid="activity-filters">
         <div className="toolbar-search relative flex items-center">
@@ -228,7 +228,7 @@ export function ActivityPage() {
             state="stale"
             title={t('ui.stale.title')}
             detail={t('ui.stale.detail', { at: observedAt ? formatDateTime(observedAt) : t('ui.notObserved') })}
-            action={<Button variant="secondary" size="sm" onClick={() => void reload()}><Icon name="refresh" size={14} /> {t('action.refresh')}</Button>}
+            action={<Button className="text-muted-foreground" variant="ghost" size="sm" onClick={() => void reload()}><Icon name="refresh" size={14} /> {t('action.refresh')}</Button>}
           />
         </div>
       ) : null}
@@ -298,9 +298,10 @@ export function ActivityPage() {
             <Table className={stackTable}>
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>{t('table.event')}</TableHead>
-                  <TableHead>{t('table.outcome')}</TableHead>
-                  <TableHead>{t('table.occurred')}</TableHead>
+                  <TableHead className={colGrow}>{t('table.event')}</TableHead>
+                  <TableHead className={colFit}>{t('table.outcome')}</TableHead>
+                  <TableHead className={colTime}>{t('table.occurred')}</TableHead>
+                  <TableHead className="ow-col-action" aria-hidden="true" />
                   {/* The trailing cell is the disclosure button's slot, not a column: an empty header
                       above it was a hole in the band. A titled column would enter the audit's
                       min(distinctRatio) and the ratio of a column of identical buttons is 0.07, so
@@ -362,7 +363,7 @@ export function ActivityPage() {
                           cards whose text was byte-identical, clock included, because the fan-out
                           half was not printed at all.
                         */}
-                        <StackCell label={t('table.occurred')} className={cardLineAfter} title={formatDate(event.occurredAt)}>
+                        <StackCell label={t('table.occurred')} className={cn(cardLineAfter, colTime)} title={formatDate(event.occurredAt)}>
                           <span className="event-when" data-when={event.occurredAt}>
                             <TimeAgo value={event.occurredAt} />
                             <span className="ow-cell-meta mono">{clockMessage(locale, event.occurredAt)}</span>
@@ -394,8 +395,8 @@ export function ActivityPage() {
               <div className="table-pager" data-testid="activity-pager">
                 <span className="table-pager-summary">{t('activity.pagination.summary', { page: currentPage + 1, pages: pageCount, total: rows.length })}</span>
                 <div className="table-pager-actions">
-                  <Button variant="secondary" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t('pipelines.pagination.previous')}</Button>
-                  <Button variant="secondary" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>{t('pipelines.pagination.next')}</Button>
+                  <Button variant="ghost" size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{t('pipelines.pagination.previous')}</Button>
+                  <Button variant="ghost" size="sm" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>{t('pipelines.pagination.next')}</Button>
                 </div>
               </div>
             )}

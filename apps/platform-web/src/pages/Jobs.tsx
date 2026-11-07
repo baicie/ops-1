@@ -23,7 +23,7 @@ import { IDENTITY_ONE_OBJECT, identityDisambiguator } from '../lib/identity';
 import { shortDigest } from '../format';
 import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
 import { describeJobStatus, jobCancelledLanded } from '../lib/verified-writes';
-import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, colFit, colGrow, colNum, colNum6, colTime, copyIdAction, formatIdentity, rankCardFacts, relativeAge, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { useStatusText } from '../components/app/status';
 
 const STATUS_FILTERS = ['ALL', 'QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'];
@@ -42,6 +42,7 @@ export function JobsPage() {
   const [status, setStatus] = useState('ALL');
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState<string | null>(null);
+  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([]);
   const [reload, setReload] = useState(0);
   const [query, setQuery] = useState('');
   const [pipelineFilter, setPipelineFilter] = useState('ALL');
@@ -63,10 +64,10 @@ export function JobsPage() {
   const pipelineCount = new Set(visibleJobs.map((job) => job.pipelineId)).size;
   /** The status tab is a Kernel query, so an empty answer under it is a filtered miss. */
   const filtering = query !== '' || pipelineFilter !== 'ALL' || status !== 'ALL';
-  const clearFilters = () => { setQuery(''); setPipelineFilter('ALL'); setStatus('ALL'); setCursor(null); };
+  const clearFilters = () => { setQuery(''); setPipelineFilter('ALL'); setStatus('ALL'); setCursor(null); setCursorHistory([]); };
   return (
     <div className="page-stack">
-      <PageHeader title={t('page.jobs')} description={t('jobs.description')} actions={<Button variant="secondary" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
+      <PageHeader title={t('page.jobs')} description={t('jobs.description')} actions={<Button variant="ghost" className="text-muted-foreground" onClick={() => setReload((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
       <section className="toolbar">
         <div className="toolbar-search relative flex items-center">
           <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
@@ -85,7 +86,7 @@ export function JobsPage() {
             there. FilterScroller is the component that already solved this on /admin/plugins:
             it scrolls, it keeps the SELECTED chip in view, and its fade only exists on an
             edge that really hides content. */}
-        <Tabs value={status} onValueChange={(value) => { setStatus(value); setCursor(null); }}>
+        <Tabs value={status} onValueChange={(value) => { setStatus(value); setCursor(null); setCursorHistory([]); }}>
           <FilterScroller activeKey={status} testId="jobs-status-filter">
             <TabsList className="justify-start" aria-label={t('jobs.status.aria')}>
               {STATUS_FILTERS.map((value) => <TabsTrigger key={value} value={value}>{value === 'ALL' ? t('common.all') : statusText(value)}</TabsTrigger>)}
@@ -119,10 +120,11 @@ export function JobsPage() {
                   (ratio 0.00 and 0.07), so they stop being columns. 7 -> 4 data columns. */}
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>{t('table.job')}</TableHead>
-                  <TableHead>{t('table.status')}</TableHead>
-                  <TableHead>{t('table.duration')}</TableHead>
-                  <TableHead>{t('table.created')}</TableHead>
+                  <TableHead className={colGrow}>{t('table.job')}</TableHead>
+                  <TableHead className={colFit}>{t('table.status')}</TableHead>
+                  <TableHead className={colNum6}>{t('table.duration')}</TableHead>
+                  <TableHead className={colTime}>{t('table.created')}</TableHead>
+                  <TableHead className="ow-col-action" aria-hidden="true" />
                                     {/* The trailing cell is a row-MENU slot, not a column: its header held nothing but
                       an aria-label, and above a 44-62px body cell that read as a hole in the header
                       band. Titling it is not available - a labelled column enters the audit's
@@ -162,8 +164,8 @@ export function JobsPage() {
                       <StackCell label={t('table.status')} className={cardCellClass(cardFacts.includes('status'))}><StatusPill status={job.status} /></StackCell>
                       {/* The column name is not printed on the card (the line above it is the heading) but it
                           is not deleted either: data-label, the desktop header, and this tooltip keep it. */}
-                      <StackCell label={t('table.duration')} className={cn('whitespace-nowrap max-[768px]:whitespace-normal', cardLineAfter, cardCellClass(cardFacts.includes('duration')))}><span className="mono" title={t('table.duration')}>{durationLabel(job)}</span></StackCell>
-                      <StackCell label={t('table.created')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('created')))}><span title={job.createdAt}>{relativeAge(locale, job.createdAt)}</span></StackCell>
+                      <StackCell label={t('table.duration')} className={cn('whitespace-nowrap max-[768px]:whitespace-normal', cardLineAfter, cardCellClass(cardFacts.includes('duration')), colNum6)}><span className="mono" title={t('table.duration')}>{durationLabel(job)}</span></StackCell>
+                      <StackCell label={t('table.created')} className={cn(cardLineAfter, cardCellClass(cardFacts.includes('created')), colTime)}><span title={job.createdAt}>{relativeAge(locale, job.createdAt)}</span></StackCell>
                       {/* §2.5: the row menu rides the identity line at 390 instead of taking a row. */}
                       <TableCell className={cardActionCell}>
                         <RowActions label={t('jobs.action.menu', { id: identity.key })} actions={[copyIdAction(job.jobId, t('table.copyIdentifier')), { id: 'open', label: t('table.open'), icon: 'chevron', onSelect: () => navigate('/admin/jobs/' + job.jobId) }]} />
@@ -173,10 +175,22 @@ export function JobsPage() {
                 })}
               </TableBody>
             </Table>
+            {(!cursor && !cursorHistory.length && !data?.nextCursor) ? null : <div className="pagination-row">
+              <Button variant="ghost" size="sm" disabled={!cursor} onClick={() => { setCursor(null); setCursorHistory([]); }}>{t('pipelines.pagination.first')}</Button>
+              <Button variant="ghost" size="sm" disabled={!cursorHistory.length} onClick={() => {
+                const previous = cursorHistory[cursorHistory.length - 1];
+                setCursor(previous);
+                setCursorHistory((items) => items.slice(0, -1));
+              }}>{t('pipelines.pagination.previous')}</Button>
+              <Button variant="ghost" size="sm" disabled={!data?.nextCursor} onClick={() => {
+                setCursorHistory((items) => [...items, cursor]);
+                setCursor(data?.nextCursor || null);
+              }}>{t('pipelines.pagination.next')}</Button>
+            </div>}
           </section>
         )}
       </AsyncBoundary>
-      <div className="pagination-row"><Button variant="secondary" disabled={!cursor} onClick={() => setCursor(null)}>{t('pipelines.pagination.first')}</Button><Button variant="secondary" disabled={!data?.nextCursor} onClick={() => setCursor(data?.nextCursor || null)}>{t('pipelines.pagination.next')}</Button></div>
+      
     </div>
   );
 }
@@ -262,7 +276,7 @@ export function JobDetailPage() {
   const cancellable = ['QUEUED', 'CLAIMED', 'RUNNING'].includes(job.status);
   return (
     <div className="page-stack job-detail">
-      <PageHeader eyebrow={t('jobs.eyebrow')} title={t('page.jobDetail')} description={<span className="job-subtitle"><strong className="job-pipeline">{job.pipelineId}</strong><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId} data-testid="job-short-id">{t('jobs.runShortId', { id: identityDisambiguator(job.jobId) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="secondary" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
+      <PageHeader eyebrow={t('jobs.eyebrow')} title={t('page.jobDetail')} description={<span className="job-subtitle text-muted-foreground"><strong className="job-pipeline">{job.pipelineId}</strong><StatusPill status={job.status} /><span>{t('jobs.revision', { revision: job.pipelineRevision })}</span><span className="job-short-id" title={job.jobId} data-testid="job-short-id">{t('jobs.runShortId', { id: identityDisambiguator(job.jobId) })}</span></span>} actions={<>{cancellable && <Button variant="destructive" onClick={() => setCancelOpen(true)}><Icon name="pause" size={15} /> {t('action.cancel')}</Button>}<Button variant="ghost" onClick={() => setRefresh((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button><Link className={buttonVariants({ variant: 'secondary' })} to="/admin/jobs">{t('jobs.action.allJobs')}</Link></>} />
       <section className="summary-grid job-stats">
         <MetricCard label={t('table.status')} value={<StatusPill status={job.status} />} showSampled={false} />
         <MetricCard label={t('jobs.metric.execution')} value={<span className="mono">{durationLabel(job)}</span>} showSampled={false} />

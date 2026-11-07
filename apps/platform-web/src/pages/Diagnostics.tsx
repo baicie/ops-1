@@ -71,7 +71,7 @@ export function DiagnosticsPage() {
         eyebrow={t('diagnostics.eyebrow')}
         title={t('page.diagnostics')}
         description={t('diagnostics.description')}
-        actions={data ? <><Button variant="secondary" onClick={() => setRaw(!raw)}>{raw ? t('diagnostics.action.visualView') : t('diagnostics.action.rawJson')}</Button><Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button></> : undefined}
+        actions={data ? <><Button className="text-muted-foreground" variant="ghost" onClick={() => setRaw(!raw)}>{raw ? t('diagnostics.action.visualView') : t('diagnostics.action.rawJson')}</Button><Button variant="ghost" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button></> : undefined}
       />
       {stale ? (
         <div data-observed-at={observedAt ?? undefined}>
@@ -79,7 +79,7 @@ export function DiagnosticsPage() {
             state="stale"
             title={t('ui.stale.title')}
             detail={t('ui.stale.detail', { at: observedAt ? formatDateTime(observedAt) : t('ui.notObserved') })}
-            action={<Button variant="secondary" size="sm" onClick={() => void reload()}><Icon name="refresh" size={14} /> {t('action.refresh')}</Button>}
+            action={<Button className="text-muted-foreground" variant="ghost" size="sm" onClick={() => void reload()}><Icon name="refresh" size={14} /> {t('action.refresh')}</Button>}
           />
         </div>
       ) : null}

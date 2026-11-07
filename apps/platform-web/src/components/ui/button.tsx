@@ -4,18 +4,22 @@ import { cn } from '../../lib/utils';
 // shadcn/ui copy-in, adapted to this repo: variants are plain objects instead of cva
 // (cva is not an allowed dependency here) and every border is explicit because the
 // preflight layer is disabled — see tailwind.config.cjs.
-const base = 'inline-flex items-center justify-center gap-[7px] whitespace-nowrap rounded-control border border-solid font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50';
+// preflight is off, so `border` alone leaves the UA's buttontext colour (black in light,
+// #d5d5d5 in dark) and the UA's 1px vertical padding. Both are stated here instead: one
+// token border colour for the family, transparent where the fill carries the edge, and
+// py-0 so a <Button> and a <Link class=buttonVariants> are the same box.
+const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control border border-solid border-border-strong py-0 font-medium leading-[1.2] no-underline transition-colors hover:no-underline disabled:pointer-events-none disabled:opacity-50';
 
 const variantStyles = {
-  default: 'bg-primary text-primary-foreground hover:opacity-90',
+  default: 'border-primary bg-primary text-primary-foreground hover:opacity-90',
   secondary: 'bg-secondary text-secondary-foreground hover:bg-surface-3',
   outline: 'border-border-strong bg-card text-foreground hover:bg-secondary',
-  ghost: 'border-transparent text-foreground hover:bg-secondary',
+  ghost: 'border-transparent bg-transparent text-foreground hover:bg-secondary',
   // The SOLID pair, not the ink. --destructive/--ow-danger is an ink: in dark it is #ff7b7b, a
   // light pink that measured 2.51:1 under this variant's #ffffff. --ow-danger-solid states a fill
   // per theme that the one foreground is legible on (5.49:1 light, 7.01:1 dark).
   destructive: 'border-[var(--ow-danger-solid)] bg-[var(--ow-danger-solid)] text-[var(--ow-danger-solid-text)] hover:opacity-90',
-  link: 'border-transparent text-primary underline-offset-4 hover:underline',
+  link: 'border-transparent bg-transparent text-primary underline-offset-4 hover:underline',
 } as const;
 
 // token-table R4: two sizes, one family. shadcn ships four sizes (28 / 36 / 44px plus a

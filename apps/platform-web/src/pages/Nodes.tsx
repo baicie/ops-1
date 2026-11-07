@@ -22,7 +22,7 @@ import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../compon
 import { PageHeader } from '../components/app/page-header';
 import { Bytes, BytesPair, NoData, StatusIndicator, UnknownValue, indicatorStateForCode, labelKeyForState, type IndicatorState } from '../components/app/status-indicator';
 import { ConfirmAction } from '../components/app/confirm-action';
-import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, colFit, colGrow, colNum, colNum6, colWide, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 /**
  * A revoked node is proven by the node route, not by the DELETE's 200. `DELETE /nodes/{id}`
@@ -199,7 +199,7 @@ export function NodesPage() {
     <div className="page-stack">
       <PageHeader
         title={t('page.nodes')}
-        actions={<Button variant="secondary" className="max-[768px]:flex-1" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
+        actions={<Button variant="ghost" className="max-[768px]:flex-1 text-muted-foreground" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
         primary={<Button className="max-[768px]:flex-1" onClick={() => setJoinOpen(true)} disabled={user?.role !== 'admin'} title={user?.role !== 'admin' ? t('nodes.join.adminRequired') : ''}><Icon name="plus" size={15} /> {t('nodes.join.action')}</Button>}
       />
       <AsyncBoundary
@@ -269,10 +269,11 @@ export function NodesPage() {
           <Table className={cn('nodes-table', stackTable)}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
-                <TableHead>{t('table.node')}</TableHead>
-                <TableHead>{t('table.status')}</TableHead>
-                <TableHead>{t('table.instances')}</TableHead>
-                {resourcesMeasurable ? <TableHead>{t('table.resources')}</TableHead> : null}
+                <TableHead className={colGrow}>{t('table.node')}</TableHead>
+                <TableHead className={colFit}>{t('table.status')}</TableHead>
+                <TableHead className={colNum6}>{t('table.instances')}</TableHead>
+                {resourcesMeasurable ? <TableHead className={colWide}>{t('table.resources')}</TableHead> : null}
+                <TableHead className="ow-col-action" aria-hidden="true" />
                 {/* The trailing cell holds the row menu, so it is a slot and not a column: an empty
                     header above 56px of body read as a hole in the band, and titling it would add a
                     constant column to the audit's min(distinctRatio). The body is unchanged. */}
@@ -455,7 +456,7 @@ export function NodeDetailPage() {
         eyebrow={t('nodeDetail.eyebrow')}
         title={t('nodeDetail.title')}
         description={<span className="pipeline-identity"><strong>{data.name}</strong><span><span className="mono">{data.id}</span> · {t('nodeDetail.generation', { generation: data.generation })} · {data.os}/{data.arch}</span></span>}
-        actions={<><Button variant="secondary" className="max-[768px]:flex-1" onClick={() => { void reload(); void reloadInstances(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{user?.role === 'admin' && <Button variant="destructive" className="max-[768px]:flex-1" onClick={() => setConfirm(true)}><Icon name="trash" size={15} /> {t('action.revoke')}</Button>}</>}
+        actions={<><Button variant="ghost" className="max-[768px]:flex-1 text-muted-foreground" onClick={() => { void reload(); void reloadInstances(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{user?.role === 'admin' && <Button variant="destructive" className="max-[768px]:flex-1" onClick={() => setConfirm(true)}><Icon name="trash" size={15} /> {t('action.revoke')}</Button>}</>}
       />
       <div className="detail-meta"><StatusPill status={data.status} />{data.stale && <span className="meta-chip text-warning"><Icon name="warning" size={13} /> {t('nodeDetail.staleSince')} <TimeAgo value={data.lastSeenAt} /></span>}<span className="meta-chip"><Icon name="clock" size={13} /> {t('nodeDetail.enrolled', { at: formatDate(data.enrolledAt) })}</span><span className="meta-chip"><Icon name="server" size={13} /> {data.runtimeAdapterVersion || t('nodeDetail.adapterUnknown')}</span></div>
       <div className="summary-grid">

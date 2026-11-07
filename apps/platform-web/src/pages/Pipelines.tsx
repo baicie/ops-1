@@ -18,7 +18,7 @@ import { getPipelineExecutionOrder, type TopologyStatus } from '../studio/ir/top
 import { shortDigest } from '../format';
 import { useI18n, useT, type MessageKey } from '../i18n';
 import { cn } from '../lib/utils';
-import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, LongId, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, colFit, colGrow, colNum, colTime, copyIdAction, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
  * The revision pill paints through the shared tone map, and its label comes from the same
@@ -98,7 +98,7 @@ export function PipelinesPage() {
       <PageHeader
         title={t('page.pipelines')}
         description={t('pipelines.description')}
-        actions={<Button variant="secondary" onClick={() => setReloadToken((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
+        actions={<Button variant="ghost" className="text-muted-foreground" onClick={() => setReloadToken((value) => value + 1)}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
       />
       <section className="toolbar">
         <div className="toolbar-search relative flex items-center">
@@ -128,10 +128,11 @@ export function PipelinesPage() {
             <Table className={stackTable}>
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>{t('table.pipeline')}</TableHead>
-                  <TableHead>{t('table.revision')}</TableHead>
-                  <TableHead>{t('table.created')}</TableHead>
-                  <TableHead>{t('table.updated')}</TableHead>
+                  <TableHead className={colGrow}>{t('table.pipeline')}</TableHead>
+                  <TableHead className={colNum}>{t('table.revision')}</TableHead>
+                  <TableHead className={colTime}>{t('table.created')}</TableHead>
+                  <TableHead className={colTime}>{t('table.updated')}</TableHead>
+                  <TableHead className="ow-col-action" aria-hidden="true" />
                   {/* A row-menu slot, not a column: 44px of empty header above the chevron was a hole,
                       and titling it would put a constant column under the audit's min(distinctRatio). */}
                 </TableRow>
@@ -147,30 +148,30 @@ export function PipelinesPage() {
                     // is not a control.
                     <TableRow key={pipeline.pipelineId} className={cn(cardTwoLineRow, stackRow)}>
                       <IdentityCell label={t('table.pipeline')} identity={identity} href={`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`} cardFact />
-                      <StackCell label={t('table.revision')} className={cardCellClass(true)}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
-                      <StackCell label={t('table.created')} className={cn(cardLineAfter, cardCellClass(true))}><TimeAgo value={pipeline.createdAt} /></StackCell>
-                      <StackCell label={t('table.updated')} className={cn(cardLineAfter, cardCellClass(true))}><TimeAgo value={pipeline.updatedAt} /></StackCell>
+                      <StackCell label={t('table.revision')} className={cn(cardCellClass(true), colNum)}><span className="mono">r{pipeline.latestRevision}</span></StackCell>
+                      <StackCell label={t('table.created')} className={cn(cardLineAfter, cardCellClass(true), colTime)}><TimeAgo value={pipeline.createdAt} /></StackCell>
+                      <StackCell label={t('table.updated')} className={cn(cardLineAfter, cardCellClass(true), colTime)}><TimeAgo value={pipeline.updatedAt} /></StackCell>
                       <TableCell className={cardActionCell}><RowActions label={t('table.open')} actions={[copyIdAction(pipeline.pipelineId, t('table.copyIdentifier')), { id: 'open', label: t('table.open'), icon: 'chevron', onSelect: () => navigate(`/admin/pipelines/${encodeURIComponent(pipeline.pipelineId)}`) }]} /></TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
+            {(!cursor && !cursorHistory.length && !data?.nextCursor) ? null : <div className="pagination-row">
+              <Button variant="ghost" size="sm" disabled={!cursor} onClick={() => { setCursor(null); setCursorHistory([]); }}>{t('pipelines.pagination.first')}</Button>
+              <Button variant="ghost" size="sm" disabled={!cursorHistory.length} onClick={() => {
+                const previous = cursorHistory[cursorHistory.length - 1];
+                setCursor(previous);
+                setCursorHistory((items) => items.slice(0, -1));
+              }}>{t('pipelines.pagination.previous')}</Button>
+              <Button variant="ghost" size="sm" disabled={!data?.nextCursor} onClick={() => {
+                setCursorHistory((items) => [...items, cursor]);
+                setCursor(data?.nextCursor || null);
+              }}>{t('pipelines.pagination.next')} <Icon name="arrowRight" size={14} /></Button>
+            </div>}
           </section>
         )}
       </AsyncBoundary>
-      <div className="pagination-row">
-        <Button variant="secondary" disabled={!cursor} onClick={() => { setCursor(null); setCursorHistory([]); }}>{t('pipelines.pagination.first')}</Button>
-        <Button variant="secondary" disabled={!cursorHistory.length} onClick={() => {
-          const previous = cursorHistory[cursorHistory.length - 1];
-          setCursor(previous);
-          setCursorHistory((items) => items.slice(0, -1));
-        }}>{t('pipelines.pagination.previous')}</Button>
-        <Button variant="secondary" disabled={!data?.nextCursor} onClick={() => {
-          setCursorHistory((items) => [...items, cursor]);
-          setCursor(data?.nextCursor || null);
-        }}>{t('pipelines.pagination.next')} <Icon name="arrowRight" size={14} /></Button>
-      </div>
     </div>
   );
 }

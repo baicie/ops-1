@@ -18,7 +18,7 @@ export const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLA
   ({ className, ...props }, ref) => (
     // bg-muted on the section, not only on each th: a table whose trailing header cell is a
     // row-menu slot leaves that column heading-less, and the band has to reach the edge anyway.
-    <thead ref={ref} className={cn('border-b border-solid border-border bg-muted', className)} {...props} />
+    <thead ref={ref} className={cn('border-x-0 border-t-0 border-b border-solid border-border bg-surface-3', className)} {...props} />
   ),
 );
 TableHeader.displayName = 'TableHeader';
@@ -38,7 +38,7 @@ export const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttribut
         // --ow-hover, not --ow-surface-2: #f8f9fb is ~2% off white and styles.css records it as
         // reading like "nothing happened". The CSS override that migrated the wash reaches only
         // the two tables carrying a legacy class; every other row kept the colour it replaced.
-        'border-b border-solid border-border transition-colors hover:bg-[var(--ow-hover)] data-[state=selected]:bg-muted',
+        'border-x-0 border-t-0 border-b border-solid border-border transition-colors hover:bg-[var(--ow-hover)] data-[state=selected]:bg-muted',
         className,
       )}
       {...props}
@@ -52,7 +52,7 @@ export const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttr
     <th
       ref={ref}
       className={cn(
-        'h-9 whitespace-nowrap border-b border-solid border-border bg-muted px-3.5 text-left align-middle text-sm font-semibold text-muted-foreground',
+        'h-9 whitespace-nowrap border-x-0 border-t-0 border-b border-solid border-border bg-surface-3 px-3.5 text-left align-middle text-sm font-semibold text-muted-foreground',
         className,
       )}
       {...props}
