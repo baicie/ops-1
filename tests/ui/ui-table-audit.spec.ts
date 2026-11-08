@@ -735,7 +735,31 @@ for (const viewport of VIEWPORTS) {
       await page.click('[data-testid=login-submit]');
       await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
       for (const target of ROUTES) {
-        await page.goto(BASE + target.route);
+        // B1.8: one cold document load (the login above) is enough. A full
+        // page.goto per route re-downloads the 1.3 MB bundle and the CSS; the
+        // staging run 42458783764 traces one bundle fetch at 121 s and a CSS
+        // fetch at 40 s, which exhausted this test's 240 s budget after eight
+        // of ten routes and left plugin-detail/job-detail unmeasured. Geometry
+        // does not depend on a cold load, so drive the same router the sidebar
+        // drives: pushState + popstate, wait for the route path AND for the
+        // page heading to change (so the previous page cannot be measured under
+        // the new URL), then wait for this page's own async state. All ten
+        // routes are still measured; none is skipped.
+        const previousHeading = await page.evaluate(
+          () => document.querySelector('h1')?.textContent ?? null,
+        );
+        await page.evaluate((route) => {
+          window.history.pushState({}, '', route);
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }, target.route);
+        await page.waitForURL((url) => url.pathname === target.route, { timeout: 20_000 });
+        await page
+          .waitForFunction(
+            (previous) => (document.querySelector('h1')?.textContent ?? null) !== previous,
+            previousHeading,
+            { timeout: 20_000 },
+          )
+          .catch(() => undefined);
         await page.waitForSelector('[data-async-state="ready"], [data-async-state="empty"]', { timeout: 20000 }).catch(() => undefined);
         await page.waitForTimeout(500);
         pages[label][target.route] = await measure(page);
