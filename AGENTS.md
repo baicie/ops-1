@@ -37,7 +37,7 @@
 - 所有依赖与容器制品通过锁文件/摘要/可重复构建管理，升级单独审查。
 
 ## 规则索引
-- `rules/01-architecture.md`；`02-plugin-runtime.md`；`03-security.md`；`04-distributed.md`；`05-data.md`；`06-ui-ux.md`；`07-testing-release.md`；`08-docs-and-workflow.md`。
+- `rules/01-architecture.md`；`02-plugin-runtime.md`；`03-security.md`；`04-distributed.md`；`05-data.md`；`06-ui-ux.md`；`07-testing-release.md`；`08-docs-and-workflow.md`；`11-refactor-retirement-and-cleanup.md`。
 - 任务专用流程位于 `skills/*/SKILL.md`，任何团队成员均可手工遵循。
 
 ## 2026-10-22 OCI 多语言增补（与原规约同等效力）

@@ -8,7 +8,8 @@ nohup env \
   OPSWEAVE_PUBLIC_URL=http://127.0.0.1:18181 \
   DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
   OPSWEAVE_DATA_DIR="$ROOT/data-ci" \
-  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-web/dist" \
+  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-console/dist" \
+  OPSWEAVE_OPS_WEB_DIST="$ROOT/apps/ops-web/dist" \
   OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
   OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
   OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin' \

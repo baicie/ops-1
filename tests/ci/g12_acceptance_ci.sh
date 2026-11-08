@@ -50,7 +50,8 @@ trap cleanup EXIT INT TERM
 echo "== build kernel and web bundle"
 cargo build -q -p opsweave-kernel
 pnpm install --frozen-lockfile
-pnpm --filter @opsweave/platform-web build >/dev/null
+pnpm --filter @opsweave/platform-console --fail-if-no-match build >/dev/null
+pnpm --filter @opsweave/ops-web --fail-if-no-match build >/dev/null
 
 echo "== fresh database $DB_NAME"
 psql "postgres://postgres:postgres@127.0.0.1:5432/postgres" -v ON_ERROR_STOP=1 \
@@ -63,7 +64,8 @@ env \
   OPSWEAVE_PUBLIC_URL="$OPSWEAVE_URL" \
   DATABASE_URL="$OPSWEAVE_DATABASE_URL" \
   OPSWEAVE_DATA_DIR="$ROOT/data-ci/g12" \
-  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-web/dist" \
+  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-console/dist" \
+  OPSWEAVE_OPS_WEB_DIST="$ROOT/apps/ops-web/dist" \
   OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$OPSWEAVE_ADMIN_EMAIL" \
   OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$OPSWEAVE_ADMIN_PASSWORD" \
   OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin' \

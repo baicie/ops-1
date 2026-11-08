@@ -120,7 +120,7 @@ stop_kernel() {
 
 [ -f /tmp/g13a1-ui-dist/index.html ] || {
   echo "missing /tmp/g13a1-ui-dist. Build the UI from the commit under test:"
-  echo "  pnpm --filter @opsweave/platform-web build && rm -rf /tmp/g13a1-ui-dist && cp -R apps/platform-web/dist /tmp/g13a1-ui-dist"
+  echo "  pnpm --filter @opsweave/platform-console --fail-if-no-match build && rm -rf /tmp/g13a1-ui-dist && cp -R apps/platform-console/dist /tmp/g13a1-ui-dist"
   exit 2
 }
 command -v docker >/dev/null || { echo "docker is required"; exit 2; }
