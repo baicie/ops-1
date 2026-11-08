@@ -158,7 +158,7 @@ test('metric cards 1440/1024/390 x light/dark x en/zh-CN', async ({ browser }) =
         stubJobs(page);
         await page.goto('/admin/jobs/' + JOB_ID);
         await expect(page.getByTestId('page-header')).toBeVisible();
-        await expectCards(page, 3, label + ' job');
+        await expectCards(page, 4, label + ' job');
         expect(await columnsOf(page, '.summary-grid'), label + ' job columns').toBe(viewport.w > 768 ? 4 : 2);
         await expect(page.locator('.summary-grid')).toContainText('1 / 3');
         await page.screenshot({ path: path.join(OUT, `job__${label}.png`), fullPage: true });
@@ -166,7 +166,7 @@ test('metric cards 1440/1024/390 x light/dark x en/zh-CN', async ({ browser }) =
         stubPipelines(page);
         await page.goto('/admin/pipelines/' + PIPELINE_ID);
         await expect(page.getByTestId('page-header')).toBeVisible();
-        await expectCards(page, 3, label + ' pipeline');
+        await expectCards(page, 4, label + ' pipeline');
         expect(await columnsOf(page, '.summary-grid'), label + ' pipeline columns').toBe(viewport.w > 768 ? 4 : 2);
         await expect(page.locator('.summary-grid')).toContainText('r2');
         await page.screenshot({ path: path.join(OUT, `pipeline__${label}.png`), fullPage: true });

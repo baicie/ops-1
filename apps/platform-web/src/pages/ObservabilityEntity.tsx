@@ -21,6 +21,10 @@ import {
   cardCellClass,
   cardLineAfter,
   cardTwoLineRow,
+  colFit,
+  colGrow,
+  colNum,
+  colTime,
   formatIdentity,
   stackBody,
   stackHead,
@@ -496,10 +500,10 @@ export function ObservabilityEntityPage() {
                   <Table className={stackTable}>
                   <TableHeader className={stackHead}>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead>{t('table.instance')}</TableHead>
-                      <TableHead>{t('table.status')}</TableHead>
-                      <TableHead>{t('observabilityEntity.table.restarts')}</TableHead>
-                      <TableHead>{t('table.lastObserved')}</TableHead>
+                      <TableHead className={colGrow}>{t('table.instance')}</TableHead>
+                      <TableHead className={colFit}>{t('table.status')}</TableHead>
+                      <TableHead className={colNum}>{t('observabilityEntity.table.restarts')}</TableHead>
+                      <TableHead className={colTime}>{t('table.lastObserved')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody className={stackBody}>
@@ -520,13 +524,13 @@ export function ObservabilityEntityPage() {
                         >
                           <span className="ow-key">{t('observabilityEntity.table.slot', { slot: instance.slot })}</span>
                         </IdentityCell>
-                        <StackCell label={t('table.status')} className={cardCellClass(true)}>
+                        <StackCell label={t('table.status')} className={`${colFit} ${cardCellClass(true)}`}>
                           <StatusIndicator state={indicatorStateForCode(instance.state)} />
                         </StackCell>
-                        <StackCell label={t('observabilityEntity.table.restarts')} className={`${cardLineAfter} ${cardCellClass(true)}`}>
+                        <StackCell label={t('observabilityEntity.table.restarts')} className={`${cardLineAfter} ${colNum} ${cardCellClass(true)}`}>
                           <span className="ow-tnum">{instance.restartCount}</span>
                         </StackCell>
-                        <StackCell label={t('table.lastObserved')} className={cardCellClass(false)}>
+                        <StackCell label={t('table.lastObserved')} className={`${colTime} ${cardCellClass(false)}`}>
                           {instance.observedAt
                             ? <span className="ow-tnum">{ageMessage(locale, instance.observedAt)}</span>
                             : <UnknownValue detail={t('observabilityEntity.table.neverObserved')} />}
@@ -570,9 +574,9 @@ export function ObservabilityEntityPage() {
                   <Table className={stackTable}>
                   <TableHeader className={stackHead}>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead>{t('table.event')}</TableHead>
-                      <TableHead>{t('table.result')}</TableHead>
-                      <TableHead>{t('table.occurred')}</TableHead>
+                      <TableHead className={colGrow}>{t('table.event')}</TableHead>
+                      <TableHead className={colFit}>{t('table.result')}</TableHead>
+                      <TableHead className={colTime}>{t('table.occurred')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody className={stackBody}>
@@ -595,10 +599,10 @@ export function ObservabilityEntityPage() {
                             <span className="ow-run-count">{t('observabilityEntity.events.run', { count: run.count })}</span>
                           ) : null}
                         </IdentityCell>
-                        <StackCell label={t('table.result')} className={cardCellClass(true)}>
+                        <StackCell label={t('table.result')} className={`${colFit} ${cardCellClass(true)}`}>
                           <StatusIndicator state={indicatorStateForCode(run.event.result)} label={run.event.result} />
                         </StackCell>
-                        <StackCell label={t('table.occurred')} className={`${cardLineAfter} ${cardCellClass(true)}`}>
+                        <StackCell label={t('table.occurred')} className={`${cardLineAfter} ${colTime} ${cardCellClass(true)}`}>
                           <span className="ow-tnum">{ageMessage(locale, run.firstAt)}</span>
                           {run.count > 1 && run.lastAt !== run.firstAt ? (
                             <span className="ow-cell-meta ms-1">{t('observabilityEntity.events.span', { at: ageMessage(locale, run.lastAt) })}</span>

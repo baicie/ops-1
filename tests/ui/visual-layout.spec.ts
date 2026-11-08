@@ -23,7 +23,7 @@ test('pipeline detail stats are separated and do not collide', async ({ page }) 
   await page.goto(`/pipelines/${PIPELINE}`);
   const cards = page.locator('.pipeline-stats .ow-metric');
   // The Updated card was removed: the revision history already states when r7 was published.
-  await expect(cards).toHaveCount(3);
+  await expect(cards).toHaveCount(4);
   const boxes = await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON()));
   boxes.forEach((box) => expect(box.height).toBeGreaterThan(70));
   for (const card of await cards.all()) {

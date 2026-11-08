@@ -98,7 +98,7 @@ test('measure the shipped header on every page and width', async ({ page }) => {
     await page.waitForTimeout(400);
     await page.evaluate((labels) => {
       const row = document.querySelector('[data-testid=page-header] .page-actions') as HTMLElement;
-      labels.forEach((label: string) => { const b = document.createElement('button'); b.className = 'btn btn-secondary'; b.textContent = label; row.appendChild(b); });
+      labels.forEach((label: string) => { const b = document.createElement('button'); b.className = 'ow-btn'; b.style.height = 'var(--ow-control-md)'; b.style.padding = '0 var(--ow-space-4)'; b.textContent = label; row.appendChild(b); });
     }, LABELS);
     await page.waitForTimeout(200);
     table[width + ':injected-10-controls'] = await page.evaluate(MEASURE);

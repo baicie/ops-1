@@ -22,7 +22,7 @@ import { useI18n, useT } from '../i18n';
 import { describePlacementReason } from '../placement-reason';
 import { auditEmptyKind, readAuditList, type AuditList } from '../lib/audit-scope';
 import { verifiedWriteDetail, verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-write';
-import { IdentityCell, StackCell, StatusPill, cardActionCell, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardActionCell, cardCellClass, colFit, colGrow, colNum, colTime, colWide, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { InstallationStatus, useStatusText } from '../components/app/status';
 
 type Tab = 'overview' | 'versions' | 'deployments' | 'capabilities' | 'permissions' | 'events';
@@ -347,11 +347,11 @@ export function PluginDetailPage() {
               <Table className={stackTable}>
                 <TableHeader className={stackHead}>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead>{t('table.version')}</TableHead>
-                    <TableHead>{t('table.status')}</TableHead>
-                    <TableHead>{t('table.signature')}</TableHead>
-                    <TableHead>{t('table.imageDigest')}</TableHead>
-                    <TableHead>{t('table.published')}</TableHead>
+                    <TableHead className={colFit}>{t('table.version')}</TableHead>
+                    <TableHead className={colFit}>{t('table.status')}</TableHead>
+                    <TableHead className={colFit}>{t('table.signature')}</TableHead>
+                    <TableHead className={colWide}>{t('table.imageDigest')}</TableHead>
+                    <TableHead className={colTime}>{t('table.published')}</TableHead>
                     <TableHead>{t('table.actions')}</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -360,11 +360,11 @@ export function PluginDetailPage() {
                     const deployment = data.deployments.find((item) => item.version === version.version);
                     return (
                       <TableRow key={version.version} className={stackRow}>
-                        <StackCell label={t('table.version')}><strong className="mono">{version.version}</strong>{version.version === activeVersion && <Badge variant="success">{t('common.tag.active')}</Badge>}</StackCell>
-                        <StackCell label={t('table.status')}><StatusPill status={version.status} /></StackCell>
-                        <StackCell label={t('table.signature')}><StatusPill status={version.signatureState} /></StackCell>
-                        <StackCell label={t('table.imageDigest')}>{version.imageRef ? <span className="mono text-sm">{shortDigest(version.imageRef, 18)}</span> : <NoData detail={t('ui.noData.detail')} />}<CopyButton value={version.imageRef} /></StackCell>
-                        <StackCell label={t('table.published')}><TimeAgo value={version.createdAt} /></StackCell>
+                        <StackCell label={t('table.version')} className={colFit}><strong className="mono">{version.version}</strong>{version.version === activeVersion && <Badge variant="success">{t('common.tag.active')}</Badge>}</StackCell>
+                        <StackCell label={t('table.status')} className={colFit}><StatusPill status={version.status} /></StackCell>
+                        <StackCell label={t('table.signature')} className={colFit}><StatusPill status={version.signatureState} /></StackCell>
+                        <StackCell label={t('table.imageDigest')} className={colWide}>{version.imageRef ? <span className="mono text-sm">{shortDigest(version.imageRef, 18)}</span> : <NoData detail={t('ui.noData.detail')} />}<CopyButton value={version.imageRef} /></StackCell>
+                        <StackCell label={t('table.published')} className={colTime}><TimeAgo value={version.createdAt} /></StackCell>
                         <StackCell label={t('table.actions')} className="max-[768px]:flex-wrap">
                           {deployment?.status === 'READY' && deployment.version !== activeVersion && <Button size="sm" onClick={() => { setRollbackVersion(version.version); setConfirm('activate'); }}>{t('action.activate')}</Button>}
                           {(!deployment || ['DISABLED', 'DEGRADED', 'FAILED'].includes(deployment.status)) && version.version !== activeVersion && <Button variant="outline" size="sm" onClick={() => { setDeployVersion(version.version); setDeployOpen(true); }}>{deployment ? t('action.redeploy') : t('action.deploy')}</Button>}
@@ -415,19 +415,19 @@ export function PluginDetailPage() {
               <Table className={stackTable}>
                 <TableHeader className={stackHead}>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead>{t('table.event')}</TableHead>
-                    <TableHead>{t('table.result')}</TableHead>
-                    <TableHead>{t('table.actor')}</TableHead>
-                    <TableHead>{t('table.when')}</TableHead>
+                    <TableHead className={colGrow}>{t('table.event')}</TableHead>
+                    <TableHead className={colFit}>{t('table.result')}</TableHead>
+                    <TableHead className={colFit}>{t('table.actor')}</TableHead>
+                    <TableHead className={colTime}>{t('table.when')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody className={stackBody}>
                   {events.map((event) => (
                     <TableRow key={event.id} className={stackRow}>
-                      <StackCell label={t('table.event')}><strong>{event.eventType}</strong><div className="text-sm text-muted-foreground">{event.action}</div></StackCell>
-                      <StackCell label={t('table.result')}><StatusPill status={event.result} /></StackCell>
-                      <StackCell label={t('table.actor')}><span className="mono text-sm">{event.actorType}:{event.actorId.slice(0, 8)}</span></StackCell>
-                      <StackCell label={t('table.when')}><TimeAgo value={event.occurredAt} /></StackCell>
+                      <StackCell label={t('table.event')} className={colGrow}><strong>{event.eventType}</strong><div className="text-sm text-muted-foreground">{event.action}</div></StackCell>
+                      <StackCell label={t('table.result')} className={colFit}><StatusPill status={event.result} /></StackCell>
+                      <StackCell label={t('table.actor')} className={colFit}><span className="mono text-sm">{event.actorType}:{event.actorId.slice(0, 8)}</span></StackCell>
+                      <StackCell label={t('table.when')} className={colTime}><TimeAgo value={event.occurredAt} /></StackCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -527,11 +527,11 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
     <Table className={stackTable}>
       <TableHeader className={stackHead}>
         <TableRow className="hover:bg-transparent">
-          <TableHead>{t('table.node')}</TableHead>
-          <TableHead>{t('table.slot')}</TableHead>
-          <TableHead>{t('table.state')}</TableHead>
-          <TableHead>{t('table.container')}</TableHead>
-          <TableHead>{t('table.logs')}</TableHead>
+          <TableHead className={colGrow}>{t('table.node')}</TableHead>
+          <TableHead className={colNum}>{t('table.slot')}</TableHead>
+          <TableHead className={colFit}>{t('table.state')}</TableHead>
+          <TableHead className={colWide}>{t('table.container')}</TableHead>
+          <TableHead className={colFit}>{t('table.logs')}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody className={stackBody}>{instances.map((instance) => (
@@ -540,10 +540,10 @@ function InstanceTable({ instances }: { instances: PluginDetail['deployments'][n
             <span>{instance.nodeStatus}</span>
             <span>{t('table.restarts')} {instance.restartCount}</span>
           </IdentityCell>
-          <StackCell label={t('table.slot')} className={cardCellClass(cardFacts.includes('slot'))}><span className="mono">#{instance.slot}</span></StackCell>
-          <StackCell label={t('table.state')} className={cardCellClass(cardFacts.includes('state'))}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
-          <StackCell label={t('table.container')} className={cardCellClass(cardFacts.includes('container'))}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
-          <TableCell className="w-8"><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></TableCell>
+          <StackCell label={t('table.slot')} className={`${colNum} ${cardCellClass(cardFacts.includes('slot'))}`}><span className="mono">#{instance.slot}</span></StackCell>
+          <StackCell label={t('table.state')} className={`${colFit} ${cardCellClass(cardFacts.includes('state'))}`}><StatusPill status={instance.state} />{instance.lastError && <div className="inline-hint text-danger">{instance.lastError}</div>}</StackCell>
+          <StackCell label={t('table.container')} className={`${colWide} ${cardCellClass(cardFacts.includes('container'))}`}>{instance.containerId ? <span className="mono text-sm">{instance.containerId.slice(0, 12)}</span> : <NoData detail={t('ui.noData.detail')} />}</StackCell>
+          <TableCell className={`w-8 ${colFit}`}><Link className="text-link" to={`/admin/instances/${instance.id}/logs`}><Icon name="logs" size={14} /> {t('table.live')}</Link></TableCell>
         </TableRow>
       ))}</TableBody>
     </Table>

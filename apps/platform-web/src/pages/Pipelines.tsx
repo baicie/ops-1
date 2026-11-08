@@ -281,6 +281,7 @@ export function PipelineDetailPage() {
         <MetricCard label={t('pipelines.metric.nodes')} value={latest ? latest.definition.nodes.length : undefined} state={latest ? 'ready' : 'noData'} showSampled={false} />
         {/* An unloaded job list is not "no runs": noRuns is only a fact once the list answered. */}
         <MetricCard label={t('pipelines.metric.latestRun')} value={jobs?.items[0] ? <StatusPill status={jobs.items[0].status} /> : t('common.noRuns')} state={jobs ? 'ready' : 'noData'} size="small" showSampled={false} />
+        <MetricCard label={t('pipelines.metric.updated')} value={latest?.publishedAt ? <TimeAgo value={latest.publishedAt} /> : undefined} state={latest?.publishedAt ? 'ready' : 'noData'} size="small" showSampled={false} />
       </section>
       {latest ? <section className="panel panel-pad"><div className="panel-head"><div><h2>{t('pipelines.latestRevision.title')}</h2>{/* The 64-char digest is unbreakable text: at 390 it forced a 122px page-level
               horizontal overflow on this panel before (the same markup pre-dated the migration).
@@ -300,12 +301,12 @@ export function PipelineDetailPage() {
       <section className="panel panel-pad">
         <div className="panel-head"><div><h2>{t('pipelines.jobs.title')}</h2><p className="muted small">{t('pipelines.jobs.description')}</p></div><Link className={buttonVariants({ variant: 'secondary', size: 'sm' })} to={`/admin/pipelines/${encodeURIComponent(detail.pipelineId)}/run`}><Icon name="activity" size={14} /> {t('pipelines.jobs.submit')}</Link></div>
         {!jobs || jobs.items.length === 0 ? <p className="muted small">{t('pipelines.jobs.empty')}</p> : (
-          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead>{t('table.job')}</TableHead><TableHead>{t('table.status')}</TableHead><TableHead>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => {
+          <div className="table-panel"><Table className={cn('job-mini-table', stackTable)}><TableHeader className={stackHead}><TableRow className="hover:bg-transparent"><TableHead className={colGrow}>{t('table.job')}</TableHead><TableHead className={colFit}>{t('table.status')}</TableHead><TableHead className={colTime}>{t('table.created')}</TableHead></TableRow></TableHeader><TableBody className={stackBody}>{jobs.items.map((job) => {
             // table-spec §2.1/§2.5: the row opens with a name and four hex characters, not a
             // 36-character UUID that wraps over two lines on every card. The revision is constant
             // for a pipeline, so it is a qualifier on the identity line, not a column of its own.
             const identity = formatIdentity({ name: detail.name, id: job.jobId, at: job.createdAt, locale, nameIsUnique: false, rowsOnPage: jobs.items.length });
-            return <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)}><IdentityCell label={t('table.job')} identity={identity} href={`/admin/jobs/${job.jobId}`} cardFact><span className="ow-key">r{job.pipelineRevision}</span></IdentityCell><StackCell label={t('table.status')}><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')} className={cardLineAfter}><TimeAgo value={job.createdAt} /></StackCell></TableRow>;
+            return <TableRow key={job.jobId} className={cn('cursor-pointer max-[768px]:relative', cardTwoLineRow, stackRow)}><IdentityCell label={t('table.job')} identity={identity} href={`/admin/jobs/${job.jobId}`} cardFact><span className="ow-key">r{job.pipelineRevision}</span></IdentityCell><StackCell label={t('table.status')} className={colFit}><StatusPill status={job.status} /></StackCell><StackCell label={t('table.created')} className={cn(cardLineAfter, colTime)}><TimeAgo value={job.createdAt} /></StackCell></TableRow>;
           })}</TableBody></Table></div>
         )}
       </section>

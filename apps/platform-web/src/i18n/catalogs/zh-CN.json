@@ -1283,6 +1283,7 @@
   "pipelines.metric.latestRevision": "最新修订",
   "pipelines.metric.latestRun": "最近运行",
   "pipelines.metric.nodes": "节点数",
+  "pipelines.metric.updated": "更新时间",
   "pipelines.nodeType.datasetSink": "数据集输出",
   "pipelines.nodeType.filter": "过滤",
   "pipelines.nodeType.httpSource": "HTTP 数据源",

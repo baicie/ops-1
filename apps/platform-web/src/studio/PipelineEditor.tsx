@@ -5,7 +5,7 @@ import type { PipelineDetail, PipelineDraft, PipelinePreview, PipelineRevision, 
 import { Icon } from '../components/Icons';
 import { EmptyState, Skeleton } from '../components/Ui';
 import { AsyncBoundary } from '../components/app/async-boundary';
-import { Button } from '../components/ui/button';
+import { Button, buttonVariants } from '../components/ui/button';
 import { ConfirmAction } from '../components/app/confirm-action';
 import { PageHeader } from '../components/app/page-header';
 import { StatusIndicator, UnknownValue } from '../components/app/status-indicator';
@@ -309,23 +309,23 @@ export function PipelineEditorPage() {
           <StatusIndicator state={dirty ? 'attention' : 'ready'} label={dirty ? t('studio.header.unsavedChanges') : t('studio.header.saved')} />
         </>}
         actions={<>
-        <button className="btn btn-secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</button>
-        <button className="btn btn-secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</button>
-        <button className="btn btn-secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</button>
-        <button className="btn btn-secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title={t('studio.action.layoutToggle')}><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? t('studio.action.horizontal') : t('studio.action.vertical')}</button>
-        <button className={`btn btn-secondary ${viewMode === 'readable' ? 'active' : ''}`} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</button>
-        <button className={`btn btn-secondary ${viewMode === 'all' ? 'active' : ''}`} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</button>
-        <button className={`btn btn-secondary ${previewOpen ? 'active' : ''}`} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</button>
-        <Link className="btn btn-secondary" to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
+        <Button variant="secondary" onClick={undo} disabled={!history.length}><Icon name="rotate" size={15} /> {t('studio.action.undo')}</Button>
+        <Button variant="secondary" onClick={redo} disabled={!future.length}>{t('studio.action.redo')}</Button>
+        <Button variant="secondary" onClick={autoLayout}><Icon name="layout" size={15} /> {t('studio.action.autoLayout')}</Button>
+        <Button variant="secondary" onClick={() => changeLayout(layoutDirection === 'horizontal' ? 'vertical' : 'horizontal')} title={t('studio.action.layoutToggle')}><Icon name="refresh" size={15} /> {layoutDirection === 'horizontal' ? t('studio.action.horizontal') : t('studio.action.vertical')}</Button>
+        <Button variant={viewMode === 'readable' ? 'toggle' : 'secondary'} aria-pressed={viewMode === 'readable'} onClick={() => { setViewMode('readable'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.readableTitle')}>{t('studio.action.readable')}</Button>
+        <Button variant={viewMode === 'all' ? 'toggle' : 'secondary'} aria-pressed={viewMode === 'all'} onClick={() => { setViewMode('all'); setLayoutNonce((value) => value + 1); }} title={t('studio.action.fitAllTitle')}>{t('studio.action.fitAll')}</Button>
+        <Button variant={previewOpen ? 'toggle' : 'secondary'} aria-pressed={previewOpen} onClick={() => setPreviewOpen((value) => !value)}><Icon name="play" size={15} /> {t('studio.action.preview')}</Button>
+        <Link className={buttonVariants({ variant: 'secondary' })} to={`/admin/pipelines/${encodeURIComponent(pipelineId)}`}>{t('studio.action.detail')}</Link>
         {hasDraft && <>
-          <button className="btn btn-secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</button>
-          <button className="btn btn-secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</button>
+          <Button variant="secondary" onClick={() => void saveDraft()} disabled={busy !== null || !dirty || configInvalid}><Icon name="save" size={15} /> {busy === 'save' ? t('studio.action.saving') : t('studio.action.saveDraft')}</Button>
+          <Button variant="secondary" onClick={() => void validate()} disabled={busy !== null}><Icon name="check" size={15} /> {busy === 'validate' ? t('studio.action.validating') : t('studio.action.validate')}</Button>
         </>}
         </>}
         actionsLabel={t('studio.toolbar.aria')}
         primary={!hasDraft
-          ? <button className="btn btn-primary" onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</button>
-          : <button className="btn btn-primary" onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</button>}
+          ? <Button onClick={() => void createDraft()} disabled={busy !== null}><Icon name="plus" size={15} /> {t('studio.action.createDraft')}</Button>
+          : <Button onClick={() => void publish()} disabled={!canPublish || busy !== null} title={!serverValidation?.valid ? t('studio.action.publishHint.validation') : dirty ? t('studio.action.publishHint.save') : t('studio.action.publishHint.publish')}><Icon name="upload" size={15} /> {busy === 'publish' ? t('studio.action.publishing') : t('studio.action.publish')}</Button>}
       />
       {notice && <div className="studio-banner" role="status"><Icon name="check" size={14} /> {notice}</div>}
       {conflict && <div className="studio-banner studio-banner-error studio-conflict" role="alert">
@@ -345,9 +345,9 @@ export function PipelineEditorPage() {
           })()}
         </div>
         <div className="conflict-actions">
-          <button className="btn btn-secondary btn-small" onClick={() => setConflict(null)}>{t('studio.action.keepEditing')}</button>
-          <button className="btn btn-secondary btn-small" onClick={() => setConfirmConflict('discard')}>{t('studio.action.reloadLatest')}</button>
-          <button className="btn btn-primary btn-small" disabled={!conflictLatest || busy !== null} onClick={() => setConfirmConflict('overwrite')}>{t('studio.action.useLocalRetry')}</button>
+          <Button variant="secondary" size="sm" onClick={() => setConflict(null)}>{t('studio.action.keepEditing')}</Button>
+          <Button variant="secondary" size="sm" onClick={() => setConfirmConflict('discard')}>{t('studio.action.reloadLatest')}</Button>
+          <Button size="sm" disabled={!conflictLatest || busy !== null} onClick={() => setConfirmConflict('overwrite')}>{t('studio.action.useLocalRetry')}</Button>
         </div>
       </div>}
       {/* page-template §2.4 + token-table R4: history is a CHOICE, not a wall of verbs.
@@ -419,7 +419,7 @@ export function PipelineEditorPage() {
         </aside>
       </div>
       {previewOpen && <section className="panel panel-pad studio-preview" aria-label={t('studio.preview.ariaLabel')}>
-        <div className="panel-head"><div><h2>{t('studio.preview.title')}</h2><p className="muted small">{t('studio.preview.description')}</p></div><button className="btn btn-secondary" onClick={() => void runPreview()} disabled={previewBusy}>{previewBusy ? t('studio.preview.running') : t('studio.preview.run')}</button></div>
+        <div className="panel-head"><div><h2>{t('studio.preview.title')}</h2><p className="muted small">{t('studio.preview.description')}</p></div><Button variant="secondary" size="sm" onClick={() => void runPreview()} disabled={previewBusy}>{previewBusy ? t('studio.preview.running') : t('studio.preview.run')}</Button></div>
         <label className="preview-input"><span>{t('studio.preview.sampleLabel')}</span><textarea rows={6} value={sampleInput} onChange={(event) => setSampleInput(event.target.value)} /></label>
         {previewError && <div className="studio-banner studio-banner-error" role="alert"><Icon name="warning" size={14} /> {previewError}</div>}
         {preview && <>
