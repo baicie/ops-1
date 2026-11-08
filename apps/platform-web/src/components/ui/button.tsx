@@ -8,13 +8,15 @@ import { cn } from '../../lib/utils';
 // #d5d5d5 in dark) and the UA's 1px vertical padding. Both are stated here instead: one
 // token border colour for the family, transparent where the fill carries the edge, and
 // py-0 so a <Button> and a <Link class=buttonVariants> are the same box.
-const base = 'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control border border-solid border-border-strong py-0 font-medium leading-[1.2] no-underline transition-colors hover:no-underline disabled:pointer-events-none disabled:opacity-50';
+const base = 'ow-btn inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control border border-solid border-border-strong py-0 font-medium leading-[1.2] no-underline transition-colors hover:no-underline disabled:pointer-events-none disabled:opacity-50';
 
 const variantStyles = {
   default: 'border-primary bg-primary text-primary-foreground hover:opacity-90',
   secondary: 'bg-secondary text-secondary-foreground hover:bg-surface-3',
   outline: 'border-border-strong bg-card text-foreground hover:bg-secondary',
   ghost: 'border-transparent bg-transparent text-foreground hover:bg-secondary',
+  // A segmented toggle's pressed segment: the accent tint, not the solid primary.
+  toggle: 'border-ring bg-accent text-accent-foreground hover:bg-accent',
   // The SOLID pair, not the ink. --destructive/--ow-danger is an ink: in dark it is #ff7b7b, a
   // light pink that measured 2.51:1 under this variant's #ffffff. --ow-danger-solid states a fill
   // per theme that the one foreground is legible on (5.49:1 light, 7.01:1 dark).

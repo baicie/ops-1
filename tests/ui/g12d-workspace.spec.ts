@@ -192,7 +192,9 @@ test('D2: a header grows, never clips - long title, long description, ten contro
         (labels as string[]).forEach((label) => {
           const button = document.createElement('button');
           button.type = 'button';
-          button.className = 'btn btn-secondary';
+          button.className = 'ow-btn';
+          button.style.height = 'var(--ow-control-md)';
+          button.style.padding = '0 var(--ow-space-4)';
           button.textContent = label;
           row.appendChild(button);
         });

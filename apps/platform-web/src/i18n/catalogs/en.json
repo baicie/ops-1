@@ -1283,6 +1283,7 @@
   "pipelines.metric.latestRevision": "Latest revision",
   "pipelines.metric.latestRun": "Latest run",
   "pipelines.metric.nodes": "Nodes",
+  "pipelines.metric.updated": "Updated",
   "pipelines.nodeType.datasetSink": "Dataset Sink",
   "pipelines.nodeType.filter": "Filter",
   "pipelines.nodeType.httpSource": "HTTP Source",

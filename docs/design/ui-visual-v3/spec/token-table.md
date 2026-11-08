@@ -180,7 +180,7 @@ selector is not in the decoration list; or `h-7|h-9|h-11` on a control box in `c
 | `icon` | 32 or 40 **square**, chosen by the row it sits in | 0 | 16px glyph |
 
 **Deleted**: `lg` (44), the 28px `sm`, `.btn-small`, and the legacy `.btn` family. One family survives:
-the shadcn copy-in `Button` in `components/ui/button.tsx`; the 13 `className="btn …"` sites move to it.
+the shadcn copy-in `Button` in `components/ui/button.tsx`; the 13 `className="btn …"` sites have moved to it (2026-11-08), and `.btn` is gone.
 
 **2026-11-08 — the paint rule.** With preflight disabled, `border` declares only a width: a variant that
 does not name a border colour paints the UA `buttontext` (black in light, `#d5d5d5` in dark), and `ghost`
@@ -194,6 +194,7 @@ background, and a `Link` carrying `buttonVariants` must resolve to the same box 
 | page utility | `ghost` 40 | Refresh, All jobs, Open studio — no fill, muted text |
 | tonal row action | `secondary` 32 | batch toggles and dense in-panel actions |
 | pager / row menu | `ghost` `icon-sm` 32 | Previous/Next arrows, `⋯` menu |
+| pressed toggle | `toggle` 40 | segmented toggles: Studio Readable / Fit all / Preview, log Follow |
 | bordered | `outline` 40 | rare, where a boundary is the affordance |
 
 The 32px tier is the in-surface tier; a 40px toolbar keeps 40px controls.
