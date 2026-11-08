@@ -61,7 +61,8 @@ pub async fn validate_pipeline_definition(
     Json(mut definition): Json<PipelineDefinition>,
 ) -> AppResult<Json<PipelineValidationResponse>> {
     auth.require_operator()?;
-    let catalog = match live_schema_catalog(&state, &mut definition).await {
+    let workspaces = caller_workspaces(&state, &auth).await?;
+    let catalog = match live_schema_catalog(&state, &mut definition, &workspaces).await {
         Ok(catalog) => catalog,
         Err(error) => {
             return Ok(Json(PipelineValidationResponse {
@@ -495,6 +496,14 @@ pub struct SubmitJobRequest {
     pub max_attempts: i32,
     #[serde(default = "default_timeout")]
     pub timeout_seconds: i32,
+    /// Which business workspace this job writes into (B2.1a).
+    ///
+    /// Named by the submitter but VALIDATED against membership: naming one you
+    /// cannot enter is 404, not a grant. Absent means the submitter's only
+    /// workspace; a submitter with several must say which, because guessing
+    /// would file the job somewhere it does not belong.
+    #[serde(default)]
+    pub workspace_id: Option<Uuid>,
 }
 
 fn default_max_attempts() -> i32 {
@@ -502,6 +511,49 @@ fn default_max_attempts() -> i32 {
 }
 fn default_timeout() -> i32 {
     300
+}
+
+/// The business workspace a job is filed under (B2.1a).
+///
+/// The submitter may name one, but naming is only a proposal: `named` must be a
+/// workspace the caller is a MEMBER of, otherwise it is 404 (the same answer a
+/// workspace that does not exist gets, so the response cannot be used to probe).
+/// A caller that names none gets its only workspace; a caller with several must
+/// choose, because picking one for it would file the job in a workspace the
+/// request never asserted, and a caller with none cannot file at all.
+async fn resolve_job_workspace(
+    state: &AppState,
+    auth: &AuthUser,
+    named: Option<Uuid>,
+) -> AppResult<Uuid> {
+    let memberships: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT workspace_id FROM kernel.business_workspace_members WHERE user_id=$1 ORDER BY workspace_id",
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await?;
+    match named {
+        Some(workspace_id) => {
+            if memberships.contains(&workspace_id) {
+                Ok(workspace_id)
+            } else {
+                Err(AppError::not_found("workspace not found"))
+            }
+        }
+        None => match memberships.as_slice() {
+            [only] => Ok(*only),
+            [] => Err(AppError::new(
+                StatusCode::FORBIDDEN,
+                "JOB_WORKSPACE_FORBIDDEN",
+                "this account is not a member of any business workspace, so it has nowhere to file a job; an administrator grants membership",
+            )),
+            _ => Err(AppError::new(
+                StatusCode::BAD_REQUEST,
+                "JOB_WORKSPACE_REQUIRED",
+                "workspaceId is required when the caller is a member of more than one workspace",
+            )),
+        },
+    }
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -582,9 +634,28 @@ pub struct ResultRequest {
     pub effects: Vec<Value>,
 }
 
+/// The workspaces a DESIGN-TIME pipeline operation acts in (B2.1a).
+///
+/// Publishing, validating and previewing a pipeline all read the Catalog's
+/// schema to build a plan. That read must be bounded by the caller's own
+/// membership for the same reason the data reads are: a pipeline whose sink
+/// names another workspace's dataset must not be able to describe it, let alone
+/// later write into it. Passing the caller's set (not a single workspace) keeps
+/// the existing behaviour for a caller that belongs to several and simply
+/// narrows what the Catalog will answer.
+async fn caller_workspaces(state: &AppState, auth: &AuthUser) -> AppResult<Vec<Uuid>> {
+    Ok(sqlx::query_scalar(
+        "SELECT workspace_id FROM kernel.business_workspace_members WHERE user_id=$1 ORDER BY workspace_id",
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await?)
+}
+
 async fn live_schema_catalog(
     state: &AppState,
     definition: &mut PipelineDefinition,
+    workspaces: &[Uuid],
 ) -> AppResult<SchemaCatalog> {
     let sink = definition
         .nodes
@@ -602,6 +673,7 @@ async fn live_schema_catalog(
     let dataset = crate::capabilities::service_catalog_get(
         state,
         &format!("/api/data-catalog/datasets/{dataset_id}"),
+        workspaces,
     )
     .await
     .map_err(|error| {
@@ -619,6 +691,7 @@ async fn live_schema_catalog(
     let schemas = crate::capabilities::service_catalog_get(
         state,
         &format!("/api/data-catalog/datasets/{dataset_id}/schemas"),
+        workspaces,
     )
     .await?;
     let requested_revision = sink
@@ -706,8 +779,9 @@ async fn live_schema_catalog(
 async fn validate_and_plan(
     state: &AppState,
     definition: &mut PipelineDefinition,
+    workspaces: &[Uuid],
 ) -> AppResult<PipelineExecutionPlan> {
-    let catalog = live_schema_catalog(state, definition).await?;
+    let catalog = live_schema_catalog(state, definition, workspaces).await?;
     let definition_value = serde_json::to_value(&*definition)
         .map_err(|error| AppError::bad_request(error.to_string()))?;
     definition.digest = digest_without_field(&definition_value, "digest");
@@ -1043,7 +1117,8 @@ pub async fn create_pipeline(
     Json(mut definition): Json<PipelineDefinition>,
 ) -> AppResult<Json<PipelineResponse>> {
     auth.require_operator()?;
-    let plan = validate_and_plan(&state, &mut definition).await?;
+    let workspaces = caller_workspaces(&state, &auth).await?;
+    let plan = validate_and_plan(&state, &mut definition, &workspaces).await?;
     if definition.status != "DRAFT" && definition.status != "PUBLISHED" {
         return Err(AppError::bad_request(
             "pipeline status must be DRAFT or PUBLISHED",
@@ -1122,7 +1197,8 @@ pub async fn publish_revision(
     if definition.pipeline_id != pipeline_id {
         return Err(AppError::bad_request("pipelineId does not match path"));
     }
-    let plan = validate_and_plan(&state, &mut definition).await?;
+    let workspaces = caller_workspaces(&state, &auth).await?;
+    let plan = validate_and_plan(&state, &mut definition, &workspaces).await?;
     if definition.status != "PUBLISHED" {
         return Err(AppError::bad_request(
             "published revision must have status PUBLISHED",
@@ -1295,7 +1371,8 @@ pub async fn publish_draft(
     definition.pipeline_id = pipeline_id.clone();
     definition.revision = revision as u32;
     definition.status = "PUBLISHED".to_string();
-    let plan = match validate_and_plan(&state, &mut definition).await {
+    let workspaces = caller_workspaces(&state, &auth).await?;
+    let plan = match validate_and_plan(&state, &mut definition, &workspaces).await {
         Ok(plan) => plan,
         Err(error) => {
             tx.rollback().await?;
@@ -1522,7 +1599,8 @@ pub async fn preview_pipeline(
             },
         ));
     }
-    let plan = match validate_and_plan(&state, &mut definition).await {
+    let workspaces = caller_workspaces(&state, &auth).await?;
+    let plan = match validate_and_plan(&state, &mut definition, &workspaces).await {
         Ok(plan) => plan,
         Err(error) => {
             return Ok(preview_error(
@@ -1703,6 +1781,9 @@ pub async fn submit_job(
         .filter(|value| !value.is_empty() && value.len() <= 128)
         .ok_or_else(|| AppError::bad_request("Idempotency-Key is required"))?
         .to_string();
+    // Resolved here, from membership, and never from the request body alone: a
+    // caller that could pick an arbitrary workspace would be granting itself one.
+    let workspace_id = resolve_job_workspace(&state, &auth, request.workspace_id).await?;
     if request.max_attempts < 1
         || request.max_attempts > 8
         || request.timeout_seconds < 1
@@ -1729,7 +1810,10 @@ pub async fn submit_job(
     let request_digest = crate::pipeline::digest_value(&json!({
         "pipelineId": request.pipeline_id,
         "pipelineRevision": request.pipeline_revision,
-        "input": request.input
+        "input": request.input,
+        // The workspace is part of the logical request: the same idempotency key
+        // used for a different workspace is a conflict, not a replay.
+        "workspaceId": workspace_id,
     }));
     if let Some(existing) = sqlx::query_as::<_, JobView>(
         "SELECT job_id,pipeline_id,pipeline_revision,status,current_fence,current_lease_id,attempts,max_attempts,last_error_code,submitted_by,
@@ -1753,7 +1837,7 @@ pub async fn submit_job(
     let job_id = Uuid::new_v4();
     let mut tx = state.db.begin().await?;
     sqlx::query(
-        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds,submitted_by,deadline_at) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9,$10, now() + make_interval(secs => $9))",
+        "INSERT INTO kernel.pipeline_jobs (job_id,pipeline_id,pipeline_revision,pipeline_digest,idempotency_key,request_digest,status,input,max_attempts,timeout_seconds,submitted_by,workspace_id,deadline_at) VALUES ($1,$2,$3,$4,$5,$6,'QUEUED',$7,$8,$9,$10,$11, now() + make_interval(secs => $9))",
     )
     .bind(job_id)
     .bind(&request.pipeline_id)
@@ -1765,6 +1849,7 @@ pub async fn submit_job(
     .bind(request.max_attempts)
     .bind(request.timeout_seconds)
     .bind(auth.user_id)
+    .bind(workspace_id)
     .execute(&mut *tx)
     .await
     .map_err(|error| {
@@ -2171,7 +2256,7 @@ pub async fn worker_definition(
 ) -> AppResult<Json<Value>> {
     let trusted = authenticate_worker_header_only(&state, &headers).await?;
     let row = sqlx::query(
-        "SELECT j.pipeline_id,j.pipeline_revision,j.current_lease_id,j.input,r.definition,r.plan
+        "SELECT j.pipeline_id,j.pipeline_revision,j.current_lease_id,j.input,j.workspace_id,r.definition,r.plan
          FROM kernel.pipeline_jobs j
          JOIN kernel.pipeline_revisions r ON r.pipeline_id=j.pipeline_id AND r.revision=j.pipeline_revision
          WHERE j.job_id=$1",
@@ -2199,6 +2284,11 @@ pub async fn worker_definition(
         "pipelineId": row.get::<String, _>("pipeline_id"),
         "pipelineRevision": row.get::<i32, _>("pipeline_revision"),
         "leaseId": lease_id,
+        // B2.1a: the workspace this job writes into, delivered with the pin so
+        // the worker can scope its capability calls to it. Null for a job that
+        // predates the column (0034), and a worker that receives null must not
+        // write: it has no workspace to write into.
+        "workspaceId": row.get::<Option<Uuid>, _>("workspace_id"),
         "input": row.get::<Value, _>("input"),
         "definition": row.get::<Value, _>("definition"),
         "plan": row.get::<Value, _>("plan")
@@ -2957,12 +3047,19 @@ async fn verify_effect_set(
     accepted_total: u64,
 ) -> AppResult<()> {
     let row = sqlx::query(
-        "SELECT j.pipeline_id,j.pipeline_revision,r.definition FROM kernel.pipeline_jobs j JOIN kernel.pipeline_revisions r ON r.pipeline_id=j.pipeline_id AND r.revision=j.pipeline_revision WHERE j.job_id=$1",
+        "SELECT j.pipeline_id,j.pipeline_revision,j.workspace_id,r.definition FROM kernel.pipeline_jobs j JOIN kernel.pipeline_revisions r ON r.pipeline_id=j.pipeline_id AND r.revision=j.pipeline_revision WHERE j.job_id=$1",
     )
     .bind(job_id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::bad_request("job revision is not pinned"))?;
+    // The receipt this reads back lives in the job's own workspace. A job with
+    // no workspace (0034: submitted before the column) can have written nothing,
+    // so there is nothing to verify and claiming otherwise would be fabricated.
+    let job_workspaces: Vec<Uuid> = row
+        .get::<Option<Uuid>, _>("workspace_id")
+        .into_iter()
+        .collect();
     let pipeline_id: String = row.get("pipeline_id");
     let revision: i32 = row.get("pipeline_revision");
     let definition: Value = row.get("definition");
@@ -3028,6 +3125,7 @@ async fn verify_effect_set(
             &format!(
                 "/api/data-catalog/datasets/{dataset_id}/effect-receipts?effectId={expected_effect}"
             ),
+            &job_workspaces,
         )
         .await
         .map_err(|_| {

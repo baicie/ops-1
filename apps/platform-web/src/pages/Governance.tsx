@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { usePolling } from '../hooks';
+import { useBusinessWorkspaces } from './Incidents';
 import type { NodeView } from '../types';
 import { Icon } from '../components/Icons';
 import { Button } from '../components/ui/button';
@@ -34,13 +35,28 @@ export function GovernancePage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  // B2.1a: a dataset lives in a business workspace, and a caller that belongs to
+  // more than one must say which it is looking at. A caller with exactly one
+  // gets it implicitly, which is what the plugin does when no workspace is named.
+  const { workspaces } = useBusinessWorkspaces();
+  const [workspaceId, setWorkspaceId] = useState<string>('');
+  useEffect(() => {
+    if (!workspaces) return;
+    setWorkspaceId((current) => current || (workspaces.length === 1 ? workspaces[0].workspaceId : ''));
+  }, [workspaces]);
+  const workspaceQuery = workspaceId ? `?workspaceId=${encodeURIComponent(workspaceId)}` : '';
 
   async function load() {
     setLoading(true); setError(null);
+    // Nothing is asked until the workspace is known: a read without one would be
+    // refused (WORKSPACE_REQUIRED) and drawing that as "no datasets" would be a
+    // permission decision the page cannot make.
+    if (workspaces && workspaces.length > 0 && !workspaceId) { setLoading(false); return; }
+    if (workspaces && workspaces.length === 0) { setLoading(false); return; }
     try {
       const [catalog, governance] = await Promise.all([
-        api.gatewayGet<{ items: Dataset[] }>('opsweave.data-catalog', '/api/data-catalog/datasets'),
-        api.gatewayGet<Summary>('opsweave.data-catalog', '/api/data-catalog/governance-summary'),
+        api.gatewayGet<{ items: Dataset[] }>('opsweave.data-catalog', `/api/data-catalog/datasets${workspaceQuery}`),
+        api.gatewayGet<Summary>('opsweave.data-catalog', `/api/data-catalog/governance-summary${workspaceQuery}`),
       ]);
       setSummary(governance);
       const enriched = await Promise.all((catalog.items || []).slice(0, 50).map(async (dataset) => {
@@ -56,7 +72,7 @@ export function GovernancePage() {
     finally { setLoading(false); }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [workspaceId, workspaces === null]);
 
   const nodeList = nodes || [];
   const ready = nodeList.filter((node) => node.status === 'READY' && !node.stale).length;

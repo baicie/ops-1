@@ -122,16 +122,57 @@ sockets against a real PostgreSQL. It asserts, per plugin:
 Run on the pre-fix commit the suite fails 6 of 7 tests; run on the fix it passes
 7 of 7. That before/after pair is the reproduction and the proof.
 
+## 4a. Data-plane workspace isolation (PR-A2, same phase)
+
+Identity alone does not bound a read. PR-A2 adds the second half:
+
+| Where the workspace comes from | Column / claim |
+|---|---|
+| `catalog_datasets`, `integration_sources` | new `workspace_id`, NOT NULL, backfilled to the legacy workspace (0022's fixed uuid) |
+| `kernel.pipeline_jobs` | new `workspace_id` (migration 0034), fixed at submit from the submitter's membership; NULL only for jobs that predate the column |
+| user requests | `owu1.workspaceIds` (already present), resolved per request |
+| workload requests | `workspace:<uuid>` grant entries; **the Kernel writes them**, never the caller |
+| Kernel service principal | `service_catalog_get(state, path, workspaces)` — the acting user's membership |
+
+Enforcement points are deliberately few so none can be forgotten:
+
+- The **dataset** and **source** detail lookups are the single chokepoint for
+  every sub-resource (schemas, records, lineage, quality rules and runs,
+  ingest specs and runs). A resource outside the caller's workspaces answers
+  `404` — identical to "does not exist", so ids cannot be enumerated across
+  tenants.
+- Global endpoints (`list datasets`, `governance-summary`, `entity-types`,
+  `ingestion-runs`) are joined through the owning row, so aggregates count only
+  the caller's workspaces.
+- Naming a workspace the context does not hold is `403 WORKSPACE_FORBIDDEN`;
+  naming none with several held is `400 WORKSPACE_REQUIRED`; holding none is
+  `400 WORKSPACE_REQUIRED` for a workload and `403/400` for a user. Guessing is
+  never a fallback.
+- The pipeline worker's token is minted **from its live lease**
+  (`pipeline_job_leases.instance_id → pipeline_jobs.workspace_id`), so a worker
+  cannot name a workspace, and a worker with no live lease gets no
+  `workspace:` entry and therefore reaches no data.
+
+**Compatibility.** Both plugin migrations are additive: add column, backfill
+pre-existing rows into the legacy workspace, then `SET NOT NULL`. Existing data
+stays readable by exactly the accounts that could read it before (0022 already
+granted those accounts legacy membership). No row is deleted or rewritten beyond
+the NULL backfill.
+
+**Known limitation.** Pipeline *publish/validate/preview* read the Catalog as the
+Kernel service principal scoped to the caller's membership set. That is correct
+for the acting user, but a pipeline definition is not itself workspace-owned, so
+two users in different workspaces can publish revisions of the same
+`pipelineId`. Making pipelines workspace-owned is G14's application model, not
+this phase.
+
 ## 5. Residual risk and what this ADR does not cover
 
-- **Workspace scoping of plugin data.** `owu1` now carries `workspaceIds` and the
-  resolver returns them, but the data tables have no `workspace_id` column yet,
-  so a dataset is not yet attributable to a workspace. That is PR-A2 and it is a
-  prerequisite for calling the data plane multi-tenant. Until then the *identity*
-  is correct and the *data* is still platform-wide.
-- **Workload principals carry no workspace.** `service_catalog_get` and the
-  pipeline worker's `dataset:read/write` tokens are platform-global; PR-A2 adds
-  `workspace:<uuid>` grant entries and the job-attribution they need.
+- **Plugin ports remain reachable by design.** The signature makes the key the
+  boundary; the port still must not be published, and Node keeps it
+  loopback-bound.
+- **A job submitted before 0034 has no workspace** and can never be written
+  through. It stays readable to an admin. No backfill invents an attribution.
 - **Plugin port reachability.** Signature checking makes the key the boundary
   rather than the network position, which is the point; the port still should
   not be published, and Node keeps it loopback-bound.

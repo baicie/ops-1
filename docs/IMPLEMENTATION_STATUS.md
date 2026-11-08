@@ -160,3 +160,47 @@ Workspace scoping of plugin data: **NOT implemented** — the data tables still
 have no `workspace_id`, so the *identity* is correct while the *data* remains
 platform-wide. Tracked as PR-A2 and a release blocker for any multi-tenant claim.
 Real Zabbix / mTLS / OCI image signature: **NOT_RUN / BLOCKED** (unchanged).
+
+## B2.1a Data-plane workspace isolation (2026-11-08)
+
+Authority: [ADR-020](adr/ADR-020-plugin-identity-hardening.md) section 4a.
+
+**Defect closed.** B2.1 made identity unforgeable, but neither plugin had a
+workspace dimension at all: `catalog_datasets`, `catalog_schema_revisions`,
+`catalog_quality_*`, `integration_sources` and their siblings had no
+`workspace_id`, and every query was global. Any authenticated caller — and any
+workload token, however narrowly scoped — read every dataset and source on the
+platform.
+
+**Implemented.**
+
+| Layer | Change |
+|---|---|
+| `plugins/data-catalog` | `workspace_id` NOT NULL on `catalog_datasets` (backfilled to legacy), single chokepoint on dataset detail, workspace-scoped list / governance / entity-types, `workspaceScope()` helper |
+| `plugins/data-integration` | `workspace_id` NOT NULL on `integration_sources`, chokepoint on source detail, workspace-scoped sources / ingestion-runs (joined through source) |
+| `apps/kernel` | migration `0034_job_workspace.sql`; `SubmitJobRequest.workspaceId` validated against membership; `resolve_job_workspace`; `caller_workspaces` threads membership into publish/validate/preview; `service_catalog_get(.., workspaces)`; worker token derives `workspace:<uuid>` from the live lease; `worker_definition` returns `workspaceId` |
+| web | workspace selector on job submit and governance; both default to the caller's only workspace |
+
+**Tests actually run (local, 2026-11-08).**
+
+| Command | Result |
+|---|---|
+| `node --test tests/ci/b2_workspace_isolation.test.mjs` (real processes + real PostgreSQL 17) | **3/3 PASS** |
+| same suite against the pre-fix plugin sources | **0/3 pass, 3 fail** — the reproduction |
+| `node --test tests/ci/b2_plugin_identity_attack.test.mjs` | **7/7 PASS** (unchanged) |
+| `cargo test -p opsweave-kernel` (real PostgreSQL, migration 0034 applied) | **263/263 PASS** |
+| `cargo clippy -p opsweave-kernel -p opsweave-pipeline-worker --all-targets -- -D warnings` | clean |
+| `cargo fmt --all -- --check` | clean |
+| `pnpm --filter @opsweave/platform-web test` | **469/469 PASS** |
+| `pnpm --filter @opsweave/platform-web build` (tsc --noEmit) | clean |
+| `node scripts/check-i18n.mjs` | OK — 2046 keys, 17 unused (unchanged baseline) |
+| `node scripts/check-status-vocabulary.mjs` | clean |
+| `python3 tests/contract/validate_contracts.py` | passed |
+
+**NOT_RUN.** The full data-foundation CI (real OCI containers, two Node runtimes,
+pipeline worker end to end) was not executed on this host — it requires the
+Docker/registry path. `tests/ci/data_foundation_ci.sh` gained the fixture grant
+the new rule requires (admin → legacy workspace, through the public API) so that
+run is expected to work, but this is **NOT_RUN**, not PASS. Real Zabbix, mTLS,
+OCI image signature and production secrets are unchanged and remain
+NOT_RUN/BLOCKED.

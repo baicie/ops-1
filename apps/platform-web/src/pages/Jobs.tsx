@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { EmptyState, TimeAgo } from '../components/Ui';
+import { useBusinessWorkspaces } from './Incidents';
 import { AsyncBoundary } from '../components/app/async-boundary';
 import { FilterScroller } from '../components/app/filter-scroller';
 import { ConfirmAction } from '../components/app/confirm-action';
@@ -322,6 +323,15 @@ export function JobSubmitPage() {
   const [revision, setRevision] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // A job is filed under a business workspace (B2.1a): the Kernel refuses a job
+  // with no workspace, and refuses to guess when the caller belongs to several.
+  // The submitter therefore states it, defaulting to its only workspace.
+  const { workspaces } = useBusinessWorkspaces();
+  const [workspaceId, setWorkspaceId] = useState<string>('');
+  useEffect(() => {
+    if (!workspaces) return;
+    setWorkspaceId((current) => current || (workspaces.length === 1 ? workspaces[0].workspaceId : ''));
+  }, [workspaces]);
   useEffect(() => { api.get<PipelineDetail>(`/api/v1/pipelines/${encodeURIComponent(pipelineId)}`).then((value) => { setDetail(value); setRevision(value.latestRevision); }).catch((cause) => setError((cause as Error).message)); }, [pipelineId]);
   if (!detail) return (
     <div className="page-stack">
@@ -334,7 +344,7 @@ export function JobSubmitPage() {
     try {
       let parsed: unknown;
       try { parsed = JSON.parse(input); } catch { throw new Error(t('jobs.submit.invalidJson')); }
-      const job = await api.post<JobView>('/api/v1/jobs', { pipelineId, pipelineRevision: revision, input: parsed }, newIdempotencyKey());
+      const job = await api.post<JobView>('/api/v1/jobs', { pipelineId, pipelineRevision: revision, workspaceId, input: parsed }, newIdempotencyKey());
       navigate(`/admin/jobs/${job.jobId}`);
     } catch (cause) { setError((cause as Error).message); } finally { setSubmitting(false); }
   };
@@ -351,8 +361,16 @@ export function JobSubmitPage() {
             </SelectContent>
           </Select>
         </label>
+        <label><span>{t('jobs.submit.workspace')}</span>
+          <Select value={workspaceId} onValueChange={setWorkspaceId}>
+            <SelectTrigger data-testid="job-workspace"><SelectValue placeholder={t('jobs.submit.workspacePlaceholder')} /></SelectTrigger>
+            <SelectContent>
+              {(workspaces ?? []).map((item) => <SelectItem key={item.workspaceId} value={item.workspaceId}>{item.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </label>
         <label><span>{t('jobs.submit.inputJson')}</span><textarea rows={10} value={input} onChange={(event) => setInput(event.target.value)} /></label>
-        <Button onClick={() => void submit()} disabled={submitting || revision === null}>{submitting ? t('jobs.submit.submitting') : t('pipelines.jobs.submit')}</Button>
+        <Button onClick={() => void submit()} disabled={submitting || revision === null || !workspaceId}>{submitting ? t('jobs.submit.submitting') : t('pipelines.jobs.submit')}</Button>
         <p className="muted small">{t('jobs.submit.note')}</p>
       </section>
     </div>

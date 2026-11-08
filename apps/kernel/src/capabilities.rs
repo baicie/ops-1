@@ -300,6 +300,35 @@ pub async fn issue_workload_token(
             ));
         }
     };
+    // B2.1a: a workLOAD gets its workspace from the Kernel, never from the
+    // request. For the pipeline worker that is the workspace of the job it
+    // currently holds a live lease for - the instance is recorded on the lease,
+    // the Kernel wrote both rows, and the worker cannot name a different one.
+    // Without a live lease there is no workspace, and a token minted with no
+    // `workspace:<uuid>` entry reaches no data: the Catalog answers a workload
+    // with zero workspaces exactly as it answers one with no scope.
+    let mut scope = payload.scope;
+    if plugin_id == "opsweave.pipeline.worker" {
+        let leased_workspace: Option<Uuid> = sqlx::query_scalar(
+            r#"
+            SELECT j.workspace_id
+            FROM kernel.pipeline_job_leases l
+            JOIN kernel.pipeline_jobs j ON j.job_id = l.job_id
+            WHERE l.instance_id = $1
+              AND l.status = 'ACTIVE'
+              AND l.expires_at > now()
+              AND j.workspace_id IS NOT NULL
+            ORDER BY l.acquired_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(instance_id)
+        .fetch_optional(&state.db)
+        .await?;
+        if let Some(workspace_id) = leased_workspace {
+            scope.push(format!("workspace:{workspace_id}"));
+        }
+    }
     let expires_at = Utc::now() + ChronoDuration::seconds(state.config.workload_token_seconds);
     let claims = WorkloadClaims {
         v: 1,
@@ -311,7 +340,7 @@ pub async fn issue_workload_token(
         capability_name: payload.capability_name,
         capability_major: payload.capability_major,
         audience: payload.audience,
-        scope: payload.scope,
+        scope,
         issued_at: Utc::now().timestamp(),
         expires_at: expires_at.timestamp(),
         jti: Uuid::new_v4(),
@@ -394,7 +423,16 @@ pub async fn refresh_workload_token(
         ));
     };
     let granted: Vec<String> = serde_json::from_value(grant_scope).unwrap_or_default();
-    if !claims.scope.iter().all(|scope| granted.contains(scope)) {
+    // `workspace:<uuid>` entries are not capability scopes and are not covered by
+    // the grant: they are the Kernel's own statement of which workspace this
+    // workload may act in, written at mint time from the job's lease. A refresh
+    // keeps them only because it re-derives nothing the worker supplied.
+    if !claims
+        .scope
+        .iter()
+        .filter(|scope| !scope.starts_with("workspace:"))
+        .all(|scope| granted.contains(scope))
+    {
         return Err(AppError::forbidden(
             "CAPABILITY_FORBIDDEN: scope is no longer granted",
         ));
@@ -586,7 +624,17 @@ pub const CATALOG_SERVICE_PLUGIN: &str = "opsweave.kernel.catalog";
 /// Kernel-side, read-only Catalog metadata call. It uses a distinct service
 /// principal and the normal Capability provider/grant/scope checks; it never
 /// reads plugin tables and never reuses a user or Node credential.
-pub async fn service_catalog_get(state: &AppState, path: &str) -> AppResult<Value> {
+///
+/// `workspaces` is the membership set the call acts within (B2.1a). It is
+/// delivered as `workspace:<uuid>` grant entries, which the Catalog enforces as a
+/// filter. An empty set reaches no dataset at all, which is the correct answer
+/// for a caller that belongs to no workspace: the Kernel does not silently widen
+/// its own service principal to "everything" because a request had no scope.
+pub async fn service_catalog_get(
+    state: &AppState,
+    path: &str,
+    workspaces: &[Uuid],
+) -> AppResult<Value> {
     let name = "data.catalog.v1";
     let major = 1i64;
     let provider = resolve_provider(state, name, major).await?;
@@ -608,7 +656,14 @@ pub async fn service_catalog_get(state: &AppState, path: &str) -> AppResult<Valu
         capability_name: name.to_string(),
         capability_major: major,
         audience: format!("plugin:{name}"),
-        scope: vec!["dataset:read".to_string()],
+        scope: {
+            // The service principal's own capability scope plus the caller's
+            // workspace placement. The Catalog filters on the latter, so a
+            // service call can never see a dataset the acting user could not.
+            let mut scope = vec!["dataset:read".to_string()];
+            scope.extend(workspaces.iter().map(|id| format!("workspace:{id}")));
+            scope
+        },
         issued_at: now.timestamp(),
         expires_at: (now + ChronoDuration::seconds(60)).timestamp(),
         jti: Uuid::new_v4(),
@@ -745,7 +800,15 @@ pub async fn invoke(
         ));
     };
     let granted: Vec<String> = serde_json::from_value(grant_scope).unwrap_or_default();
-    if !claims.scope.iter().all(|scope| granted.contains(scope)) {
+    // `workspace:<uuid>` is a Kernel-written placement claim, not a capability
+    // scope, so the grant does not (and must not) enumerate it. It is still
+    // carried to the provider, which is the only place that can enforce it.
+    if !claims
+        .scope
+        .iter()
+        .filter(|scope| !scope.starts_with("workspace:"))
+        .all(|scope| granted.contains(scope))
+    {
         return Err(AppError::forbidden(
             "CAPABILITY_FORBIDDEN: scope is not granted",
         ));
