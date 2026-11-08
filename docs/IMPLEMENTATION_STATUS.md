@@ -318,3 +318,83 @@ locations, but "paths updated" is not "tests passed" — status **NOT_RUN**.
 **Not done in G14.2.** Separate origins, Application-scoped authorization, and
 the OIDC bridge are G14.3. Nothing yet *enforces* that a caller of the ops
 application holds the ops grant; the existing surface gate is unchanged.
+
+## G14.2 cleanup and the console route regression (2026-11-09)
+
+Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md), [rules/11](../rules/11-refactor-retirement-and-cleanup.md).
+
+The split (`461d4da`) moved the code but left references to the deleted path and, in
+two gates, left checks that pass while reading nothing. Rules 11 now requires the
+three completion criteria below, and `tests/ci/check-retired-paths.mjs` enforces the
+first of them in CI.
+
+**Fixed — live references to retired identifiers (was 15, now 0).**
+
+| File | Was | Now |
+|---|---|---|
+| `tests/ci/g12_acceptance_ci.sh` | built `@opsweave/platform-web` (exit 0, zero bundles), served its dist | builds both apps with `--fail-if-no-match`; sets `OPSWEAVE_OPS_WEB_DIST` |
+| `tests/ci/data_foundation_ci.sh` | same silent no-op build | both apps, `--fail-if-no-match` |
+| `tests/runtime/start_kernel.sh` | `OPSWEAVE_WEB_DIST=apps/platform-web/dist` | console dist + `OPSWEAVE_OPS_WEB_DIST` |
+| `tests/acceptance/kernel_restart.sh` | same | same |
+| `tests/acceptance/g12_evidence_content.sh` | X3 grep scanned the deleted tree | scans both apps and `packages`, and no longer dies at the assignment |
+| `tests/ci/g13a1_gateway_e2e.sh` | hand-run instructions named the deleted package | names `@opsweave/platform-console` |
+| `scripts/check-i18n.mjs` | stale comment; missing root silently filtered out | comment fixed; missing root now **fails** |
+| `packages/ui/src/code-rules.test.ts` | A5 scanned `pages/`, which no longer exists | scans page modules of both apps |
+| `README.md`, `rules/06-ui-ux.md` | described the deleted app | describe the two apps and two packages |
+
+**Fixed — gates that passed without reading anything.**
+
+- **`pnpm --filter <missing> build` exits 0** (measured on pnpm 10.34.3). Four
+  harnesses built zero bundles and reported success. `--fail-if-no-match` exits 1
+  on no match and 0 on a real match (both measured).
+- **`X="$(grep ... | wc -l)"` under `set -euo pipefail` aborts at the assignment**
+  when grep matches nothing (measured: exit 1 with zero matches), so X3 never ran.
+- **A5 scanned 0 of 113 files.** Pages moved from `pages/` to each app's top level,
+  so the directory test matched nothing. Restored to 47 page modules; a deliberately
+  injected write-response in `Incidents.tsx` now fails it (measured).
+- **The shared source map silently overwrote duplicate keys** `App.tsx`, `main.tsx`
+  and `index.ts`, so the console's `App.tsx` was never scanned. Keys are now
+  repo-relative and a collision fails the suite.
+
+**Defect found, NOT fixed — the Platform Console's in-app navigation is broken.**
+
+`apps/platform-console/src/App.tsx` mounts `basename="/console"`, but every
+destination it navigates to is still written as `/admin/*` (`AdminNavigation.ts`,
+`Overview.tsx`, `Settings.tsx`, ...), and the route tree declares `overview`,
+`plugins`, ... under the basename with no `/admin` segment.
+
+| Probe (real render, jsdom, react-router 7.18.4) | Result |
+|---|---|
+| URL `/console/` | redirects to `/console/overview`, renders **OK** |
+| URL `/console/overview` | renders **OK** |
+| `<Link to="/admin/plugins">` under `basename="/console"` | href = **`/console/admin/plugins`** |
+| does `/console/admin/plugins` match a declared route? | **no** (renders `/console/` → NotFound) |
+| URL `/admin/overview` | **renders nothing** (basename mismatch) |
+
+Before the split the router had **no basename** and declared `<Route path="/admin">`,
+so `/admin/*` worked. `461d4da` introduced the basename without rewriting the
+targets. Consequence: reaching the console and the console's Overview work; **every
+sidebar and in-page link then leaves the route tree**. `ops-web` is internally
+consistent (`basename="/app"` with `home`, `incidents`, ... and
+`SURFACE_HOME.workspace = /app/home`); only `admin` is affected.
+
+Not fixed here because the repair is a routing/ownership decision for G14.3
+(prefix the route tree with `/admin` under the `/console` basename, or move the
+targets to the basename and keep `/admin` as an alias), and the `/admin` spelling is
+what 33 Playwright specs navigate to. Recorded so it cannot be mistaken for working.
+
+**Tests actually run (local, 2026-11-09).**
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @opsweave/ui test` | **58/58 PASS** |
+| `node scripts/check-i18n.mjs` | OK — 2046 keys, 17 unused (baseline unchanged) |
+| `node scripts/check-status-vocabulary.mjs` / `check-ui-tokens.mjs --ratchet` / `sync-package-exports.mjs --check` | all pass |
+| `node tests/ci/check-retired-paths.mjs` | 939 files scanned, 0 references |
+| that check with a reintroduced reference | **exit 1**, names `README.md` |
+| `check-i18n` with `packages/ui` renamed away | **exit 1**, refuses to scan |
+| `bash -n` on the six edited shell scripts | all OK |
+
+**NOT_RUN.** No Playwright browser run: the console route defect above means a
+browser run would fail for that reason, not for the cleanup. No full
+g12/data-foundation harness run (both need Docker, PostgreSQL and a kernel).
