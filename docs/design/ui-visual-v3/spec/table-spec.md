@@ -147,6 +147,21 @@ The row menu is a 44px action cell at the right edge with a text-free `<th class
 header band reaches the edge without adding a measured column. At 1920 the identity owns the surplus and the
 facts cluster sits next to the action instead of leaving 200–600px voids inside each row.
 
+**The grow class goes on the `th`, not only on the `td`.** `w-full` on a cell does nothing in auto layout —
+the algorithm sizes columns from the header cells, so a table whose identity cell alone carried `colGrow`
+still handed the surplus to its fact columns. Measured on `/app/incidents` before the header carried it:
+`[441, 164, 221, 137, 128, 44]` with the title column at 39% of the row; after, the same columns settle as
+`[667, 107, 144, 89, 84, 44]` and the title leads. Both classes belong on the pair.
+
+**2026-11-08 — panel anatomy (`.panel`, `.panel-head`, `.panel-pad`).** A panel's head is 12/16 padding and
+a bottom rule; its body is inset 16px on all sides. `.panel-pad` had **no rule outside `.forbidden-page`**, so
+every detail page's body sat flush on the panel border while its own head was inset 16 — measured
+`bodyInsetL: 0` against `headPad: 12px 16px` on `/admin/pipelines/{id}` and `/admin/jobs/{id}`. Two shapes
+are legal: `.panel` + `.panel-head` + `.panel-pad` (head as direct child, body in its own padded div — what
+the list pages already do), or `.panel.panel-pad` with the head bleeding back out through a negative margin.
+A panel section is never headed by a bare `<h2>`: `/admin/jobs/{id}`'s Attempts and Checkpoints were, and
+they rendered 22.5px/700 beside three 15px/600 heads on the same screen.
+
 ### 2.3 Row height: 40px, and here is the arithmetic (R3)
 
 **2026-11-08 — the row is declared, not summed.** `tbody tr` declares `height: 40px` (39px content box

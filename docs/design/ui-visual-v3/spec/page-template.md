@@ -138,6 +138,14 @@ plus 4px padding, is the mixed row C1 forbids. The active segment is painted on 
 shadow), not by borrowing the primary accent. The count keeps `margin-left: auto`; it is the only
 right-aligned text in the row.
 
+**2026-11-08 — a toolbar with more predicates than fit is two rows, not seven controls.** The rule above
+assumes the controls fit one 40px row. Activity's four narrow predicates plus search plus count did not:
+measured 20px wider than the 1024 canvas, and at 390 the row wrapped into **five** control rows (244.8px).
+The fix is the same one the template already uses for secondary regions — one disclosure — not a smaller
+control tier: search and count stay in the toolbar, the predicates open under it, and the toggle prints
+the number of active predicates so a folded strip can never hide an applied filter. Measured after:
+1440/1024 one 40px row, 390 two rows (96px).
+
 ### 2.5 Canvas, gutter, widths
 
 | breakpoint | gutter | canvas max | table min-width |
