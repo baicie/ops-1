@@ -301,7 +301,7 @@ export function IncidentDetailPage() {
             <span className="tag incident-header-extra" data-testid="incident-detail-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
           </>
         )}
-        actions={<><Button variant="secondary" data-testid="incident-refresh" onClick={retry}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{backLink}</>}
+        actions={<><Button className="text-muted-foreground" variant="ghost" data-testid="incident-refresh" onClick={retry}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{backLink}</>}
       />
 
       {staleFailure ? <IncidentStale observedAt={view.observedAt} error={staleFailure} /> : null}

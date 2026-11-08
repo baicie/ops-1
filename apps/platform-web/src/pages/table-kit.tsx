@@ -45,6 +45,23 @@ export const stackBody = 'max-[768px]:block';
 export const stackRow = 'max-[768px]:relative max-[768px]:flex max-[768px]:flex-col max-[768px]:px-1 max-[768px]:py-1.5';
 
 /**
+ * Column width strategy for the desktop table (table-spec §2.2): the identity earns the
+ * spare width, every short fact column shrinks to its content. Auto layout without these
+ * classes handed a 500px column to "发生时间" and left the event text at 685px on a 1920
+ * screen. `w-full` + `w-px` is the standard auto-layout trick: the grow column absorbs the
+ * remainder, a fit column is only as wide as its narrowest unbreakable line.
+ */
+export const colGrow = 'min-[769px]:w-full';
+export const colFit = 'min-[769px]:w-px min-[769px]:min-w-[7rem] min-[769px]:whitespace-nowrap';
+/** A time column: wide enough for "刚刚 22:33:59", never allowed to wrap into a vertical stack. */
+export const colTime = 'min-[769px]:w-px min-[769px]:min-w-[10rem] min-[769px]:whitespace-nowrap min-[769px]:text-right min-[769px]:tabular-nums';
+/** A short numeric fact: revision, replica count, generation. Right-aligned and tabular. */
+export const colNum = 'min-[769px]:w-px min-[769px]:min-w-[4.5rem] min-[769px]:whitespace-nowrap min-[769px]:text-right min-[769px]:tabular-nums';
+export const colNum6 = 'min-[769px]:w-px min-[769px]:min-w-[6rem] min-[769px]:whitespace-nowrap min-[769px]:text-right min-[769px]:tabular-nums';
+/** A fact column whose content is wider than a word (digest, resource sample). */
+export const colWide = 'min-[769px]:w-px min-[769px]:min-w-[16rem] min-[769px]:whitespace-nowrap';
+
+/**
  * §2.5 at 390: the card is TWO lines, not five.
  *
  * The five-value card measured 144.6px per row on /admin/jobs (14 rows, 2568px of list, 2.5 rows

@@ -216,7 +216,7 @@ export function OverviewPage() {
           package: installing a plugin with no node enrolled would sit PENDING forever. */}
       <PageHeader
         title={t('page.overview')}
-        actions={<Button variant="secondary" onClick={() => { void overview.reload(); void diagnostics.reload(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
+        actions={<Button className="text-muted-foreground" variant="ghost" onClick={() => { void overview.reload(); void diagnostics.reload(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
         primary={unconfigured
           // The setup steps say "enroll a node first"; the page used to offer no verb for it.
           ? <Link className={buttonVariants()} to="/admin/nodes" data-testid="overview-primary-join"><Icon name="plus" size={15} /> {t('common.joinNode')}</Link>

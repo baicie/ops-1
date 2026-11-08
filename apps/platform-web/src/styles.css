@@ -459,6 +459,8 @@ input::placeholder { color: var(--ow-text-muted); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--ow-control-md); padding: 12px 16px; border-bottom: 1px solid var(--ow-border); flex-wrap: wrap; }
 .panel-head h2 { font-size: var(--ow-type-body); font-weight: 600; letter-spacing: -.01em; }
 .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-meta); margin-top: 4px; }
+.list-block { display: flex; flex-direction: column; gap: var(--ow-space-2); min-width: 0; }
+.ow-panel-note { margin: 0; padding: 0 var(--ow-space-4); color: var(--ow-text-muted); font-size: var(--ow-type-meta); line-height: 1.4; }
 .table-panel { overflow: hidden; }
 /* Content panels: two columns. The metric strip below reuses .summary-grid on some pages,
    so it is the strip - not .summary-grid - that carries the four-column layout. One concept,
@@ -507,7 +509,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .table-pager { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--ow-border); }
 .table-pager-summary { color: var(--ow-text-muted); font-size: var(--ow-type-meta); font-variant-numeric: tabular-nums; }
 .table-pager-actions { display: flex; gap: 8px; margin-left: auto; }
-.table-panel thead th { position: sticky; top: 0; z-index: 2; background: var(--ow-surface); }
+.table-panel thead th { position: sticky; top: 0; z-index: 2; background: var(--ow-surface-3); }
 .table-panel { overflow-x: auto; }
 .row-action { text-align: right; color: var(--ow-text-muted); width: 32px; }
 .entity-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -520,7 +522,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .search-box { position: relative; display: flex; align-items: center; min-width: 260px; flex: 1; max-width: 460px; }
 .search-box svg { position: absolute; left: 10px; color: var(--ow-text-muted); }
 .search-box input { padding-left: 32px; background: var(--ow-surface); }
-.toolbar-count { margin-left: auto; color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
+.toolbar-count { margin-left: auto; color: var(--ow-text-muted); font-size: var(--ow-type-meta); white-space: nowrap; }
 
 /* Overview */
 .attention-banner { display: flex; align-items: center; gap: 12px; padding: 16px 16px; border: 1px solid var(--ow-border); border-radius: var(--ow-radius-card); background: var(--ow-surface); }
@@ -839,6 +841,8 @@ input::placeholder { color: var(--ow-text-muted); }
 .revision-list { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 0; }
 .revision-list li { display: grid; grid-template-columns: 60px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--ow-border); }
 .pagination-row { display: flex; justify-content: flex-end; gap: 8px; }
+/* A cursor pager inside a table panel is the panel's footer, not a floating row. */
+.table-panel .pagination-row { padding: var(--ow-space-2) var(--ow-space-4); border-top: 1px solid var(--ow-border); background: var(--ow-surface); }
 /* A cursor pager can carry three buttons; at 390 their min-content width exceeds the row and
    flex-end silently pushes the first one past the left edge (measured: "First page" at x=-16,
    while document.scrollWidth stayed 375 because the overflow is leftwards). Wrapping keeps
@@ -1457,6 +1461,7 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .ow-utilization { font-variant-numeric: tabular-nums; font-weight: 600; }
 .ow-filter-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
 .ow-filter-select { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ow-type-meta); color: var(--ow-text-muted); }
+.toolbar .ow-filter-select select { min-height: var(--ow-control-md); }
 .ow-filter-select select { min-height: var(--ow-control-sm); padding: 4px 8px; background: var(--ow-surface); color: var(--ow-text); border: 1px solid var(--ow-border-strong); border-radius: var(--ow-radius-control); }
 .panel-count { color: var(--ow-text-muted); font-size: var(--ow-type-meta); }
 
@@ -1721,6 +1726,9 @@ details.panel.advanced > summary { padding: 12px 16px; }
   box-shadow: none;
   text-align: left;
 }
+/* A summary of three counts is not three 533px columns; the clickable strips on Plugins and
+   Nodes cap each cell at its content and start at the left edge. */
+.ow-summary { grid-template-columns: repeat(auto-fit, minmax(176px, max-content)); justify-content: start; }
 .stat-strip .ow-metric-label,
 .ow-summary-label { font-size: var(--ow-type-label); font-weight: 600; letter-spacing: .055em; color: var(--ow-text-muted); }
 .stat-strip .ow-metric-value,
@@ -2779,7 +2787,7 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
  * cells on top of each other - measured in artifacts/ui/visual-v3/table, not assumed. */
 @media (min-width: 769px) {
   .ow-table tbody tr { height: var(--ow-row); }
-  .ow-table tbody td { padding-top: 4px; padding-bottom: 4px; vertical-align: middle; line-height: 1.2; }
+  .ow-table tbody td { padding-top: 0; padding-bottom: 0; vertical-align: middle; line-height: 1.2; }
   /* §2.3's two tiers, reserved on every cell that prints a value: 15.6 + 15.4 = 31. A cell with
      one line and a cell with two then start on one band; without this the two-line identity cell
      centred 8px above the single-line status beside it, so one row read as two rows. */
@@ -2837,9 +2845,20 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
 .ow-table tbody td .ow-ident-meta .entity-icon { width: 13px; height: 13px; }
 .ow-table tbody td .ow-ident-meta .entity-icon svg { width: 13px; height: 13px; }
 .ow-table thead th { height: 32px; padding-top: 0; padding-bottom: 0; font-size: var(--ow-type-label); line-height: 1.4; }
+/* One left edge for the panel title, the table note and the first column. */
+.ow-table thead th:first-child, .ow-table tbody td:first-child { padding-left: var(--ow-space-4); }
+.ow-table thead th:last-child, .ow-table tbody td:last-child:not(.ow-row-action) { padding-right: var(--ow-space-4); }
+:where(.ow-table thead th):lang(en) { text-transform: uppercase; letter-spacing: .055em; }
 .ow-table tbody td .status,
 .ow-table tbody td .status-indicator { font-size: var(--ow-type-label); line-height: 1.4; }
 .ow-table tbody td .btn { min-height: var(--ow-control-sm); }
+/* The action cell is one 32px control at the right edge, not a 60px slot around it. Desktop
+   table geometry only: at 390 the card rules own the action cell's place on line 1. */
+@media (min-width: 769px) {
+  .ow-table th.ow-col-action { width: calc(var(--ow-control-sm) + var(--ow-space-3)); padding-right: var(--ow-space-3); }
+  .ow-table td.ow-row-action { width: calc(var(--ow-control-sm) + var(--ow-space-3)); padding: 0 var(--ow-space-3) 0 0; text-align: right; }
+  .ow-table td.ow-ident-cell { min-width: calc(var(--ow-space-8) * 9); }
+}
 
 /* §2.1 identity: ⟨name⟩ · ⟨4 hex⟩ · ⟨age⟩. The name is what gives way; the disambiguator and
  * the age are exactly what makes two rows tellable apart, so they never ellipsise. */
@@ -3377,8 +3396,14 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    the defect being fixed, and the two tab primitives size themselves from the
    trigger, so the strip has to be pinned as well as the trigger.
    ───────────────────────────────────────────────────────────────────────────── */
-.toolbar [role='tablist'] { min-height: var(--ow-control-md); }
-.toolbar [role='tab'] { min-height: var(--ow-control-md); }
+@media (min-width: 769px) {
+  /* page-template §2.4/C1: a toolbar is one 40px tier. The trigger used to be 40 inside a 40px
+     track that also carried p-1 and a 1px border, so it painted over the inset; the track now
+     gives that space back instead of shrinking the trigger. */
+  .toolbar [role='tablist'] { min-height: var(--ow-control-md); padding: 0; border-color: transparent; background: var(--ow-surface-2); }
+  .toolbar [role='tab'] { min-height: var(--ow-control-md); padding: 0 var(--ow-space-1); border: 1px solid transparent; background: transparent; font-size: var(--ow-type-meta); color: var(--ow-text-secondary); }
+  .toolbar [role='tab'][data-state='active'] { background: var(--ow-surface); color: var(--ow-text); box-shadow: var(--ow-shadow-sm); }
+}
 .toolbar .btn-small,
 .toolbar button[class*='h-control-sm'],
 .toolbar a[class*='h-control-sm'] { min-height: var(--ow-control-md); }

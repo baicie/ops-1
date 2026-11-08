@@ -424,7 +424,7 @@ export function SourcesPage() {
           state="stale"
           title={t('sources.notice.stale.title')}
           detail={t('sources.notice.stale.detail')}
-          action={<Button variant="secondary" size="sm" onClick={() => void reload()}>{t('action.refresh')}</Button>}
+          action={<Button className="text-muted-foreground" variant="ghost" size="sm" onClick={() => void reload()}>{t('action.refresh')}</Button>}
         />
       ) : null}
       {grantsWithheld ? (

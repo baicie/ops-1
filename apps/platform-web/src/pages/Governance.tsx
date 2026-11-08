@@ -14,7 +14,7 @@ import { MetricCard } from '../components/app/metric-card';
 import { useI18n, useT } from '../i18n';
 import { cn } from '../lib/utils';
 import { formatDate } from '../format';
-import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, cardCellClass, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, cardCellClass, colFit, colGrow, colNum, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 type Dataset = { datasetId: string; name: string; schemaRevision: number; updatedAt: string };
 type QualityRun = { runId: string; datasetId: string; status: string; recordsExamined: number; recordsFailed: number; completedAt: string | null; createdAt: string };
@@ -81,7 +81,7 @@ export function GovernancePage() {
   });
 
   return <div className="page-stack">
-    <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="secondary" onClick={() => { void load(); void reloadNodes(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
+    <PageHeader title={t('page.governance')} description={t('governance.description')} actions={<Button variant="ghost" className="text-muted-foreground" onClick={() => { void load(); void reloadNodes(); }}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
     {/* A policy summary is a count over observed runs: while no run has answered, the card says
         UNKNOWN instead of printing a 0 that reads like "zero failures". */}
     <AsyncBoundary
@@ -110,9 +110,9 @@ export function GovernancePage() {
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
-                <TableHead>{t('table.dataset')}</TableHead>
-                <TableHead>{t('table.schema')}</TableHead>
-                {qualityMeasurable ? <TableHead>{t('table.quality')}</TableHead> : null}
+                <TableHead className={colGrow}>{t('table.dataset')}</TableHead>
+                <TableHead className={colNum}>{t('table.schema')}</TableHead>
+                {qualityMeasurable ? <TableHead className={colFit}>{t('table.quality')}</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
@@ -152,7 +152,7 @@ export function GovernancePage() {
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
                 <TableHead>{t('table.dataset')}</TableHead>
-                <TableHead>{t('table.status')}</TableHead>
+                <TableHead className={colFit}>{t('table.status')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>
@@ -182,9 +182,9 @@ export function GovernancePage() {
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
-                <TableHead>{t('table.node')}</TableHead>
+                <TableHead className={colGrow}>{t('table.node')}</TableHead>
                 <TableHead>{t('table.status')}</TableHead>
-                <TableHead>{t('table.generation')}</TableHead>
+                <TableHead className={colNum}>{t('table.generation')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className={stackBody}>

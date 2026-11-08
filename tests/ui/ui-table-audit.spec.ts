@@ -997,7 +997,10 @@ test('row keyboard', async ({ browser }) => {
         .map((el) => ({ tag: el.tagName.toLowerCase(), why: 'focusable without an activation' })),
     ]);
     const heads = Array.from(document.querySelectorAll('table thead th'));
-    const last = heads[heads.length - 1] as HTMLElement | undefined;
+    // The row-menu slot is a text-free, aria-hidden <th class=ow-col-action>; the invariant is
+    // that every DATA column is labelled, not that the last physical cell carries text.
+    const labelled = heads.filter((th) => (th.textContent || '').trim().length > 0);
+    const last = labelled[labelled.length - 1] as HTMLElement | undefined;
     return {
       rows: rows.length,
       rowLinks: rows.reduce((sum, tr) => sum + tr.querySelectorAll('a[href]').length, 0),

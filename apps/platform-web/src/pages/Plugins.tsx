@@ -20,7 +20,7 @@ import { verifiedWriteFailure, verifyAfterWrite } from '../lib/verify-after-writ
 import { AsyncBoundary, NoticeBar, isStale, useObservedPolling } from '../components/app/async-boundary';
 import { PageHeader } from '../components/app/page-header';
 import { NoData, StatusIndicator, indicatorStateForCode } from '../components/app/status-indicator';
-import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, colFit, colGrow, colNum, colWide, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 import { InstallationStatus } from '../components/app/status';
 import { deriveInstallationState } from '../lib/installation-state';
 import { filterPlugins, isAbnormal, matchesQuickFilter, type QuickFilter } from './plugins-filter';
@@ -340,7 +340,7 @@ export function PluginsPage() {
     <div className="page-stack">
       <PageHeader
         title={t('page.plugins')}
-        actions={<Button variant="secondary" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
+        actions={<Button variant="ghost" className="text-muted-foreground" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>}
         primary={<Link className={buttonVariants()} to="/admin/plugins/install"><Icon name="plus" size={15} /> {t('plugins.action.installPackage')}</Link>}
       />
       <AsyncBoundary loading={loading} error={error} hasData={Boolean(data)} onRetry={() => void reload()} skeletonRows={6}>
@@ -358,7 +358,7 @@ export function PluginsPage() {
         </section>
         {isStale(observedAt, 8000) ? <NoticeBar state="stale" title={t('ui.stale.title')} detail={t('ui.stale.detail', { at: observedAt ?? '' })} /> : null}
         <section className="toolbar">
-          <div className="relative flex min-w-[220px] max-w-[460px] flex-1 items-center">
+          <div className="toolbar-search relative flex items-center">
             <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('plugins.search.placeholder')} aria-label={t('plugins.search.aria')} className="pl-[33px]" />
           </div>
@@ -403,12 +403,14 @@ export function PluginsPage() {
         {filtered.length === 0 ? (
           <EmptyState icon="plugins" title={plugins.length ? t('plugins.empty.filtered.title') : t('plugins.empty.none.title')} description={plugins.length ? t('plugins.empty.filtered.description') : t('plugins.empty.none.description')} action={quickFilter ? <Button variant="secondary" onClick={() => setQuickFilter(null)}>{t('plugins.quickFilter.clear')}</Button> : <Link className={buttonVariants()} to="/admin/plugins/install">{t('plugins.action.installPackage')}</Link>} />
         ) : (
-          <section className="panel table-panel">
+          <div className="list-block">
             {/* table-spec §2.2/§2.7: one sentence above the table for every demoted or dropped
-                column, so the row never has to spend a cell saying it. */}
-            <p className="stat-note" data-table-note="demoted">
+                column, so the row never has to spend a cell saying it. It sits outside the
+                panel: inside, it read as a caption row touching the border. */}
+            <p className="stat-note ow-panel-note" data-table-note="demoted">
               {factsKnown ? t('plugins.table.note') : t('plugins.table.noteNoFacts')}
             </p>
+            <section className="panel table-panel">
             <Table className={cn('plugins-table', stackTable)}>
               <TableHeader className={stackHead}>
                 {/* Name and version are one block to read, so they lead. Deployment and runtime
@@ -427,11 +429,12 @@ export function PluginsPage() {
                       />
                     </TableHead>
                   ) : null}
-                  <TableHead>{t('table.plugin')}</TableHead>
-                  <TableHead>{t('table.version')}</TableHead>
-                  <TableHead>{t('table.deployment')}</TableHead>
-                  {factsKnown ? <TableHead>{t('table.readyReplicas')}</TableHead> : null}
-                  {factsKnown ? <TableHead>{t('table.digest')}</TableHead> : null}
+                  <TableHead className={colGrow}>{t('table.plugin')}</TableHead>
+                  <TableHead className={colFit}>{t('table.version')}</TableHead>
+                  <TableHead className={colFit}>{t('table.deployment')}</TableHead>
+                  {factsKnown ? <TableHead className={colNum}>{t('table.readyReplicas')}</TableHead> : null}
+                  {factsKnown ? <TableHead className={colWide}>{t('table.digest')}</TableHead> : null}
+                  <TableHead className="ow-col-action" aria-hidden="true" />
                   {/* A row-menu slot, not a column: 58px of empty header above the menu was a hole in
                       the band, and a titled column would add a constant to min(distinctRatio). */}
                 </TableRow>
@@ -547,7 +550,8 @@ export function PluginsPage() {
                 })}
               </TableBody>
             </Table>
-          </section>
+            </section>
+          </div>
         )}
       </AsyncBoundary>
 

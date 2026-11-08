@@ -182,6 +182,22 @@ selector is not in the decoration list; or `h-7|h-9|h-11` on a control box in `c
 **Deleted**: `lg` (44), the 28px `sm`, `.btn-small`, and the legacy `.btn` family. One family survives:
 the shadcn copy-in `Button` in `components/ui/button.tsx`; the 13 `className="btn …"` sites move to it.
 
+**2026-11-08 — the paint rule.** With preflight disabled, `border` declares only a width: a variant that
+does not name a border colour paints the UA `buttontext` (black in light, `#d5d5d5` in dark), and `ghost`
+without `bg-transparent` paints the UA ButtonFace. Every variant therefore states both its border and its
+background, and a `Link` carrying `buttonVariants` must resolve to the same box as a `Button` (`py-0`,
+`no-underline`). The role map used by the six list pages:
+
+| role | variant / size | use |
+|---|---|---|
+| page primary | `default` 40 | exactly one per page (Install package, Join node) |
+| page utility | `ghost` 40 | Refresh, All jobs, Open studio — no fill, muted text |
+| tonal row action | `secondary` 32 | batch toggles and dense in-panel actions |
+| pager / row menu | `ghost` `icon-sm` 32 | Previous/Next arrows, `⋯` menu |
+| bordered | `outline` 40 | rare, where a boundary is the affordance |
+
+The 32px tier is the in-surface tier; a 40px toolbar keeps 40px controls.
+
 ### R5 — One page header
 
 `components/app/page-header.tsx` is the only `PageHeader`. `components/Ui.tsx`'s export is deleted and its

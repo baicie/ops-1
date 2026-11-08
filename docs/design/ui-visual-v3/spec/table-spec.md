@@ -140,23 +140,27 @@ Two hard caps, because degradation is what keeps them affordable:
 | 768–1023 | **4** | ditto |
 | < 768 | **3 facts per card** (§2.5) | ditto |
 
+**2026-11-08 — column policy.** Every list table has exactly one grow column: the identity. Fact columns
+are content-sized with a minimum (`min-[769px]:w-px min-[769px]:min-w-[…]` in `pages/table-kit.tsx`), never
+an equal share of `w-full`; time and count columns are right-aligned with `font-variant-numeric: tabular-nums`.
+The row menu is a 44px action cell at the right edge with a text-free `<th className="ow-col-action">`, so the
+header band reaches the edge without adding a measured column. At 1920 the identity owns the surplus and the
+facts cluster sits next to the action instead of leaving 200–600px voids inside each row.
+
 ### 2.3 Row height: 40px, and here is the arithmetic (R3)
 
-```
-40px = 1px  border-bottom
-     + 4px  padding-top   + 4px padding-bottom
-     + 15.6 13px × 1.2    ← the value line (--ow-type-meta)
-     + 15.4 11px × 1.4    ← the meta line  (--ow-type-label)
-```
-
-**A two-line cell fits in 40px** because the second line is a *smaller tier doing a smaller job*: 13px for
-the value the row is about, 11px for the qualifier (status word, count, age). That 11px line is the label
-tier, so a two-line cell introduces no new type size. Padding is 4, not 8: at 8 the two lines need 48px, and
-48 is how the review measured 63–84px rows once a cell’s content starts wrapping.
+**2026-11-08 — the row is declared, not summed.** `tbody tr` declares `height: 40px` (39px content box
+plus the 1px row rule); cells carry **0 block padding** and vertically centre their content. A two-line
+cell is 31px (15.6 value at 13×1.2 + 15.4 qualifier at 11×1.4), leaving 8px of air that the browser
+distributes above and below. The old 4px + 4px padding arithmetic measured 42px in the browser — exactly on
+the gate's fail ceiling — so it is retired, not re-derived. A cell that needs a third line is carrying a
+column §2.2 says should have been demoted.
 
 - Desktop (≥768): every table declares `height: 40px` on `tbody tr`, `vertical-align: middle`. A cell that
   needs a third line is carrying a column that §2.2 says should have been demoted.
-- Header row **32px** (`--ow-control-sm`), 11px labels uppercased only under `:lang(en)`, one `border-bottom`.
+- Header row **32px** (`--ow-control-sm`) on a `--ow-surface-3` band, 11px labels uppercased only under
+  `:lang(en)`, one `--ow-border-strong` bottom rule. No sticky header: the table wrapper is not the page's
+  scrollport, so a sticky `th` only promised a behaviour it could not deliver.
 - 390: rows are cards (§2.5); 40px does not apply to a card.
 
 ### 2.4 Collapse: three in a row is one fact (R4)

@@ -205,7 +205,7 @@ export function ObservabilityPage() {
         title={t('observability.title')}
         description={t('observability.description')}
         actions={(
-          <Button variant="secondary" onClick={() => void reload()}>
+          <Button variant="ghost" className="text-muted-foreground" onClick={() => void reload()}>
             <Icon name="refresh" size={15} /> {t('action.refresh')}
           </Button>
         )}
