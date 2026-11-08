@@ -107,7 +107,7 @@ describe('entityState', () => {
     expect(entityState(node({ status: 'READY', stale: true }))).toBe('stale');
     expect(entityState(node({ status: 'UNREACHABLE' }))).toBe('unreachable');
     // Revocation outranks everything, including a status column that still says READY.
-    expect(entityState(node({ status: 'READY', revokedAt: ago(1_000) }))).toBe('revoked');
+    expect(entityState(node({ status: 'REVOKED' }))).toBe('revoked');
     expect(entityState(node({ status: 'READY' }))).toBe('ready');
     expect(entityState(node({ status: 'WAT' }))).toBe('unknown');
   });
@@ -187,7 +187,7 @@ describe('entityRows - the instance count is gated like every other reading', ()
   });
 
   it('drops the count for a revoked node on the same rule', () => {
-    const [row] = entityRows([node({ revokedAt: ago(60_000), instancesReady: 1, instancesTotal: 1 })], NOW);
+    const [row] = entityRows([node({ status: 'REVOKED', instancesReady: 1, instancesTotal: 1 })], NOW);
     expect(row.instances).toBeNull();
   });
 
@@ -328,7 +328,7 @@ describe('summarise', () => {
       node({ id: 'c', name: 'c', resourceSnapshot: null }),
       node({ id: 'd', name: 'd', status: 'UNREACHABLE' }),
       node({ id: 'e', name: 'e', status: 'UNKNOWN' }),
-      node({ id: 'f', name: 'f', revokedAt: ago(60_000) }),
+      node({ id: 'f', name: 'f', status: 'REVOKED' }),
     ], NOW);
     // a is healthy; b is degraded; c has no sample; d/e not observable; f revoked.
     expect(summary.attention).toBe(5);

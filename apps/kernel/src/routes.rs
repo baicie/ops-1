@@ -13,6 +13,7 @@ use crate::investigations;
 use crate::jobs;
 use crate::logs;
 use crate::nodes;
+use crate::ops_observability;
 use crate::packages;
 use crate::plugins;
 use crate::publishers;
@@ -395,6 +396,13 @@ pub fn build(state: AppState) -> Router {
     // session + workspace membership) so nothing that worked before this phase
     // breaks; retiring them needs its own ADR and a client inventory.
     let ops_application = Router::new()
+        // G14.4: the Ops application's own fleet read. NOT /api/v1/nodes, which
+        // is the platform console's view and carries every node's endpoint and
+        // inventory. See ops_observability for why the projection is separate.
+        .route(
+            "/api/v1/apps/opsweave.ops/observability/fleet",
+            get(ops_observability::fleet),
+        )
         .route(
             "/api/v1/apps/opsweave.ops/incidents",
             get(incidents::list_incidents).post(incidents::create_incident),

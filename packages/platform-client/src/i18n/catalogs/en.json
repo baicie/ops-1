@@ -1961,6 +1961,7 @@
   "verify.state": "State now: {state}",
   "verify.unchanged": "Submitted, but the state did not change (current: {state})",
   "verify.writeFailed": "The platform rejected the request and returned no reason",
+  "workspace.capabilities.observability.shipped": "The liveness, staleness and resource sample of every node in the fleet, read through the ops application's own granted endpoint. It is node health only: APM, distributed traces, log search and cross-service maps are not collected and are named as missing on the page itself.",
   "workspace.capabilities.incidents.shipped": "The incident list, evidence and human verdicts, over the kernel's incident API. Records enter through manual entry or the API; no collector is connected.",
   "workspace.home.account.description": "The identity this session was established with.",
   "workspace.home.account.none": "The server declared no capability",

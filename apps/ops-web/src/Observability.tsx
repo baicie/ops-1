@@ -3,7 +3,6 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@opsweave/platform-client';
 import { useDocumentTitle } from '@opsweave/platform-client/hooks';
 import { useI18n, useT } from '@opsweave/platform-client/i18n';
-import type { NodeView } from '@opsweave/platform-client/contracts';
 import { Icon } from '@opsweave/ui/icons';
 import { Button } from '@opsweave/ui/button';
 import { Input } from '@opsweave/ui/input';
@@ -45,6 +44,7 @@ import {
   summarise,
   type EntityFilter,
   type EntityRow,
+  type FleetResponse,
   type Reading,
 } from './observability-model';
 
@@ -151,7 +151,13 @@ export function ObservabilityPage() {
   useDocumentTitle(t('observability.title'));
 
   const { data, error, loading, reload, observedAt } = useObservedPolling(
-    () => api.get<NodeView[]>('/api/v1/nodes'),
+    () => api
+        // G14.4: the Ops application's own fleet read, behind the ops grant. The
+        // platform console's /api/v1/nodes exposes every node's endpoint and
+        // inventory and is gated on platform access; this projects only what a
+        // health view needs.
+        .get<FleetResponse>('/api/v1/apps/opsweave.ops/observability/fleet')
+        .then((body) => body.nodes),
     POLL_MS,
   );
 
@@ -455,8 +461,10 @@ export function ObservabilityPage() {
                       onClick={() => navigate(href)}
                     >
                       <IdentityCell label={t('table.node')} identity={identity} href={href} className={colGrow} cardFact>
+                        {/* No generation: it is a deployment counter the Platform Console
+                            uses to reason about rollouts, not a fact about health. The ops
+                            projection does not carry it (G14.4). */}
                         <span className="mono">{row.node.os}/{row.node.arch}</span>
-                        <span className="ow-key">{t('nodes.table.generation', { generation: row.node.generation })}</span>
                       </IdentityCell>
                       <StackCell label={t('table.status')} className={cardCellClass(cardFacts.includes('state'))}>
                         <div className="ow-cell-stack">

@@ -451,3 +451,64 @@ call) and `a_disabled_application_is_refused_even_with_a_grant`.
   authorization hole — but it is a gap and is not claimed as done.
 - No browser run of the two applications against the new gate (Playwright
   **NOT_RUN**, unchanged from G14.2).
+
+## G14.4 Ops observability product closure (2026-11-09)
+
+Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md) §2.2, §2.5.
+
+**Defect closed — and it was an authorization gap, not a boolean.** The task named
+`observability` and `sources` as "pages implemented, still `shipped=false`". The
+reason was real and is the reason neither could simply be flipped:
+
+- `Observability` read `GET /api/v1/nodes`, the **platform console's** view. It
+  carries `dataEndpoint`, `labels`, `capabilities` and the runtime adapter
+  version, and its gate is "any authenticated session" — so an operator without
+  platform rights would have seen 403s, and the sessions that did get data would
+  have been reading platform inventory from the ops application.
+- `Sources` reads `/api/v1/plugins`, `/api/v1/capability-grants` and
+  `/api/v1/publishers`. Every one is a platform API, for the same reasons.
+
+**Implemented.**
+
+| Piece | What it does |
+|---|---|
+| `apps/kernel/src/ops_observability.rs` | `GET /api/v1/apps/opsweave.ops/observability/fleet`, behind the ops application grant, projecting only id, name, status, last-seen, staleness, ready/total instances and the resource sample |
+| fleet payload | carries `covers` and `doesNotCover` so the page states what it is NOT (APM, traces, log search, service maps) instead of implying it is a unified observability platform |
+| `FleetNode` / `FleetResponse` | the ops model no longer imports `NodeView`; a page cannot start rendering a node endpoint by accident |
+| `observability` capability | `shipped: true`, with copy that says "node health only" and lists what is missing |
+
+`revoked` stays in `entityState` even though the fleet endpoint filters revoked
+nodes out: the rule is the model's, not the endpoint's, and its tests were updated
+to drive it through `status` rather than the removed `revokedAt` field.
+
+**`sources` remains `shipped: false`, deliberately.** Flipping it would be the
+substitution the brief forbids: the page renders and `pnpm build` passes, but a
+workspace operator gets 403s and the sessions that do get data read platform
+inventory from the ops application. It needs a workspace-scoped source-registry
+endpoint first. The reason is now written at the registry row and in both E2E
+assertions rather than left to be rediscovered.
+
+**Tests actually run (local, 2026-11-09).**
+
+| Command | Result |
+|---|---|
+| `cargo test -p opsweave-kernel` (real PostgreSQL) | **272/272 PASS** (incl. the projection test asserting no `dataEndpoint`/`labels`/`capabilities` leaks) |
+| `cargo clippy -p opsweave-kernel --all-targets -- -D warnings` | clean |
+| `cargo fmt --all -- --check` | clean |
+| `pnpm --filter @opsweave/ops-web test` | **236/236 PASS** |
+| `pnpm --filter @opsweave/ops-web build` | succeeds |
+| ops-web / platform-console / ui / platform-client tests | 236 / 62 / 58 / 113 PASS |
+| `check-i18n` / `check-status-vocabulary` / `check-ui-tokens` / `check-retired-paths` | all pass (2047 keys, 0 retired refs across 942 files) |
+
+**E2E assertions updated with the fact, not around it.** Both specs that assert
+the not-shipped count moved 5 → 4, and their comments now say why observability
+was allowed to move and why sources was not. An assertion whose number changes
+without its reason changing is how a registry stops meaning anything.
+
+**NOT_RUN.** Playwright itself was not executed — the specs' assertions and paths
+were updated, but "the assertion compiles" is not "the browser passed".
+
+**Not done.** The Investigation panel already covers start / status / provider /
+tool calls / hypothesis / evidence citation / human review / TEST_FIXTURE
+labelling and is unchanged by this phase; no new product behaviour was added
+there. Pipeline definitions are still not workspace-owned (G14.1 §4a).
