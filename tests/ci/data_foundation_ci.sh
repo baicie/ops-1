@@ -24,18 +24,23 @@ cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl -p opsweav
 pnpm install --frozen-lockfile
 # Build every web application this tree actually has.
 #
-# Hardcoding the names broke the stack twice: a branch that predates the split
-# names one package, a branch after it names two, and `--fail-if-no-match` then
-# fails on the name that is absent - a correct gate firing for a reason that is
-# not a defect. The set is derived from the tree instead, and the build itself
-# still fails loudly if a listed package cannot build.
+# Discovered by scanning apps/* rather than naming packages: an enumerated list is
+# a snapshot, and a snapshot is wrong on the other side of any rename - the stack
+# this harness runs on has one web application before the split and two after.
+# Scanning cannot go stale, and a tree with no web application at all fails loudly
+# instead of building nothing and reporting success.
 WEB_APPS=()
-for dir in apps/platform-console apps/ops-web apps/platform-web; do
-  if [ -f "$dir/package.json" ]; then
-    WEB_APPS+=("$(python3 -c "import json;print(json.load(open('$dir/package.json'))['name'])")")
+for manifest in apps/*/package.json; do
+  [ -f "$manifest" ] || continue
+  name="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('name',''))" "$manifest")"
+  [ -n "$name" ] || continue
+  # A web application is one that has a build script; a Rust binary or a CLI has
+  # a Cargo.toml and no Vite build.
+  if python3 -c "import json,sys;sys.exit(0 if 'build' in json.load(open(sys.argv[1])).get('scripts',{}) else 1)" "$manifest"; then
+    WEB_APPS+=("$name")
   fi
 done
-[ "${#WEB_APPS[@]}" -gt 0 ] || { echo "no web application found under apps/"; exit 1; }
+[ "${#WEB_APPS[@]}" -gt 0 ] || { echo "no buildable web application found under apps/"; exit 1; }
 for app in "${WEB_APPS[@]}"; do
   pnpm --fail-if-no-match --filter "$app" build >/dev/null
 done
