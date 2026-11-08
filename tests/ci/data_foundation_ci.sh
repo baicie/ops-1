@@ -22,7 +22,8 @@ trap cleanup EXIT
 echo "== build binaries and frontends"
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl -p opsweave-pipeline-worker
 pnpm install --frozen-lockfile
-pnpm --filter @opsweave/platform-web build >/dev/null
+pnpm --filter @opsweave/platform-console --fail-if-no-match build >/dev/null
+pnpm --filter @opsweave/ops-web --fail-if-no-match build >/dev/null
 mkdir -p keys
 ./target/debug/opsctl keygen --out-dir keys >/dev/null
 

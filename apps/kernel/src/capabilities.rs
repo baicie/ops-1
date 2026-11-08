@@ -72,7 +72,7 @@ pub struct InstanceEnvironmentResponse {
     pub env: std::collections::BTreeMap<String, String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkloadClaims {
     v: u8,
@@ -588,7 +588,26 @@ pub async fn instance_environment(
             .fetch_optional(&state.db)
             .await?;
             let Some(scope_value) = grant else { continue };
-            let scope: Vec<String> = serde_json::from_value(scope_value).unwrap_or_default();
+            let mut scope: Vec<String> = serde_json::from_value(scope_value).unwrap_or_default();
+            // B2.1a: a grant may name `workspace:*`, meaning "every business
+            // workspace in this deployment". It exists for the cross-workspace
+            // service plugins (an integration runs against whatever source the
+            // operator filed, in whatever workspace), which cannot enumerate
+            // workspace ids in a static grant and must not choose one per call.
+            //
+            // Expanded HERE, at mint time, from the database: the token then
+            // carries concrete workspace ids, so the provider filters on data
+            // rather than trusting a pattern. A deployment adds a workspace and
+            // the next mint covers it; no grant edit is needed.
+            if scope.iter().any(|entry| entry == "workspace:*") {
+                scope.retain(|entry| entry != "workspace:*");
+                let all: Vec<Uuid> = sqlx::query_scalar(
+                    "SELECT workspace_id FROM kernel.business_workspaces ORDER BY workspace_id",
+                )
+                .fetch_all(&state.db)
+                .await?;
+                scope.extend(all.into_iter().map(|id| format!("workspace:{id}")));
+            }
             let expires_at =
                 Utc::now() + ChronoDuration::seconds(state.config.workload_token_seconds);
             let claims = WorkloadClaims {
@@ -863,6 +882,12 @@ pub async fn invoke(
         requested,
         query
     );
+    let provider_claims = narrow_to_named_workspace(
+        claims.clone(),
+        headers
+            .get("x-opsweave-workspace-id")
+            .and_then(|value| value.to_str().ok()),
+    )?;
     let mut request = state
         .http
         .request(method, target)
@@ -873,7 +898,7 @@ pub async fn invoke(
         .header("x-opsweave-workload-plugin-id", &claims.plugin_id)
         .header(
             "x-opsweave-caller-context",
-            caller_context_token(&state, &provider.plugin_id, &claims)?,
+            caller_context_token(&state, &provider.plugin_id, &provider_claims)?,
         )
         .timeout(Duration::from_secs(30));
     for (key, value) in headers.iter() {
@@ -1121,6 +1146,44 @@ fn parse_claims_with_key(key: &[u8], token: &str) -> AppResult<WorkloadClaims> {
         .map_err(|_| AppError::unauthorized("invalid workload token claims"))
 }
 
+/// Narrow a workload's placement to the one workspace a call names.
+///
+/// The permission matrix forbids a workload SELF-REPORTING a workspace, and this
+/// keeps that: the named value is only ever a narrowing of the scope the grant
+/// already gave this consumer, and a name outside that scope is refused. What it
+/// fixes is the ambiguity on the provider side - a serving plugin granted several
+/// workspaces could not tell which one an ingestion meant, and the Catalog
+/// correctly refused to guess.
+fn narrow_to_named_workspace(
+    mut claims: WorkloadClaims,
+    named: Option<&str>,
+) -> AppResult<WorkloadClaims> {
+    let Some(named) = named.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(claims);
+    };
+    let workspace = Uuid::parse_str(named).map_err(|_| {
+        AppError::new(
+            StatusCode::BAD_REQUEST,
+            "WORKSPACE_INVALID",
+            "x-opsweave-workspace-id must be a UUID",
+        )
+    })?;
+    let holder = format!("workspace:{workspace}");
+    if !claims.scope.iter().any(|scope| scope == &holder) {
+        // A stable code, not a sentence: the console localises by code (rules/06).
+        return Err(AppError::new(
+            StatusCode::FORBIDDEN,
+            "WORKSPACE_FORBIDDEN",
+            "this workload was not granted that workspace",
+        ));
+    }
+    claims
+        .scope
+        .retain(|scope| !scope.starts_with("workspace:"));
+    claims.scope.push(holder);
+    Ok(claims)
+}
+
 fn verify_claims_with_key(key: &[u8], token: &str) -> AppResult<WorkloadClaims> {
     let claims = parse_claims_with_key(key, token)?;
     if claims.v != 1 || claims.expires_at <= Utc::now().timestamp() {
@@ -1154,7 +1217,8 @@ fn safe_path(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_path, validate_capability_name};
+    use super::{narrow_to_named_workspace, safe_path, validate_capability_name, WorkloadClaims};
+    use uuid::Uuid;
 
     #[test]
     fn capability_names_are_bounded() {
@@ -1362,6 +1426,69 @@ mod tests {
         assert!(!b_encoded.contains("a.example"));
         assert!(!b_encoded.contains("secretref:a"));
         assert!(!b.contains_key("OPSWEAVE_ALLOW_INSECURE_SOURCE_ENDPOINTS"));
+    }
+
+    fn workload_claims(scope: Vec<String>) -> WorkloadClaims {
+        WorkloadClaims {
+            v: 1,
+            sub: "instance".into(),
+            plugin_id: "opsweave.data-integration".into(),
+            instance_id: Uuid::nil(),
+            node_id: Uuid::nil(),
+            node_generation: 1,
+            capability_name: "data.catalog.v1".into(),
+            capability_major: 1,
+            audience: "plugin:data.catalog.v1".into(),
+            scope,
+            issued_at: 0,
+            expires_at: i64::MAX,
+            jti: Uuid::nil(),
+        }
+    }
+
+    /// B2.1a: a capability call may narrow to one granted workspace, and may not
+    /// name one it was not granted. This is the rule that lets an ingestion file
+    /// records into the spec's workspace without letting it choose freely.
+    #[test]
+    fn a_capability_call_narrows_to_a_granted_workspace_and_refuses_an_ungranted_one() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let claims = workload_claims(vec![
+            "dataset:read".into(),
+            "dataset:write".into(),
+            format!("workspace:{a}"),
+            format!("workspace:{b}"),
+        ]);
+
+        // Named a granted workspace: the scope keeps the capability scopes and
+        // exactly that one placement.
+        let narrowed = narrow_to_named_workspace(claims.clone(), Some(&a.to_string()))
+            .expect("naming a granted workspace is allowed");
+        assert!(narrowed.scope.contains(&"dataset:write".to_string()));
+        assert!(narrowed.scope.contains(&format!("workspace:{a}")));
+        assert!(
+            !narrowed.scope.contains(&format!("workspace:{b}")),
+            "narrowing must drop the other placements, not add to them"
+        );
+
+        // Named a workspace that was not granted: refused.
+        let other = Uuid::new_v4();
+        let denied = narrow_to_named_workspace(claims.clone(), Some(&other.to_string()));
+        assert!(denied.is_err());
+        assert_eq!(denied.unwrap_err().code, "WORKSPACE_FORBIDDEN");
+
+        // Not named: the whole scope is kept (a serving plugin acting across the
+        // workspaces it was granted).
+        let whole = narrow_to_named_workspace(claims.clone(), None).expect("no name is allowed");
+        assert_eq!(whole.scope, claims.scope);
+
+        // Malformed: refused rather than silently ignored.
+        assert_eq!(
+            narrow_to_named_workspace(claims, Some("not-a-uuid"))
+                .unwrap_err()
+                .code,
+            "WORKSPACE_INVALID"
+        );
     }
 
     #[test]

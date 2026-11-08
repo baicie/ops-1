@@ -23,7 +23,7 @@ echo "== deploy/activate catalog"
 ./target/debug/opsctl --url "$URL" activate opsweave.data-catalog 0.0.1
 echo "== grant data.catalog.v1 to integration"
 curl -fsS -X POST "${auth[@]}" -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
-  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write"]}' >/dev/null
+  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write","workspace:*"]}' >/dev/null
 if [ "${OPSWEAVE_DATA_ALT:-0}" = "1" ]; then
   echo "== deploy/activate alternate Catalog provider"
   ./target/debug/opsctl --url "$URL" install dist/plugins/data-catalog-alt-0.0.1.plugin.zip
