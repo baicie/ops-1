@@ -29,6 +29,23 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+/// A business workspace the caller named but cannot enter. 404 and not 403, for the
+/// same reason an out-of-scope row answers 404: the two answers must not say which
+/// workspace ids exist, and a caller refused membership of a workspace it named
+/// already knows the id it typed.
+///
+/// G14.1: this lives in Core. It was in `incidents`, which made the module that
+/// owns workspace membership depend on the operations domain to build a 404 —
+/// the dependency direction this phase exists to fix, and a constructor that
+/// never needed the domain in the first place.
+pub(crate) fn workspace_not_found() -> AppError {
+    AppError::new(
+        StatusCode::NOT_FOUND,
+        "BUSINESS_WORKSPACE_NOT_FOUND",
+        "business workspace not found",
+    )
+}
+
 /// The subject type membership changes are recorded under. Deliberately its own type
 /// rather than folded into user or workspace writes: who could read what, and when that
 /// changed, is the question this whole phase is about.
@@ -316,7 +333,7 @@ pub(crate) async fn ensure_workspace(
     .fetch_optional(&mut **tx)
     .await?;
     if exists.is_none() {
-        return Err(crate::incidents::workspace_not_found());
+        return Err(workspace_not_found());
     }
     Ok(())
 }
