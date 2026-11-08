@@ -65,7 +65,10 @@ if [ ! -x plugins/hello-java/jre/bin/java ]; then
   echo "Downloading pinned Temurin 21 JRE for linux/$JRE_ARCH" >&2
   mkdir -p plugins/hello-java/jre
   JRE_FILE="OpenJDK21U-jre_${JRE_ARCH}_linux_hotspot_21.0.13_9.tar.gz"
-  curl -fsSL --max-time 240 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/${JRE_FILE}" -o /tmp/opsweave-jre21.tar.gz
+  # GitHub Releases intermittently answers 504 while serving the pinned JRE
+  # (observed on B1.8 runs 42469656670 / 42469747350). Retry the transfer a
+  # bounded number of times; the SHA-256 check below still decides integrity.
+  curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --max-time 240 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/${JRE_FILE}" -o /tmp/opsweave-jre21.tar.gz
   verify_sha256 /tmp/opsweave-jre21.tar.gz "$JRE_SHA256"
   tar xzf /tmp/opsweave-jre21.tar.gz -C plugins/hello-java/jre --strip-components=1
 fi
