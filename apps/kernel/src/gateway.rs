@@ -170,29 +170,31 @@ pub async fn proxy(
                     tokio::time::sleep(Duration::from_millis(120)).await;
                     continue;
                 }
-                if response
-                    .content_length()
-                    .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-                {
-                    return Err(AppError::unavailable(
-                        "UPSTREAM_RESPONSE_TOO_LARGE",
-                        "plugin response exceeded the 8 MiB gateway limit",
-                    ));
-                }
                 let content_type = response
                     .headers()
                     .get(header::CONTENT_TYPE)
                     .and_then(|value| value.to_str().ok())
                     .map(str::to_string);
-                let bytes = response.bytes().await.map_err(|error| {
-                    AppError::internal(format!("read plugin response: {error}"))
-                })?;
-                if bytes.len() > MAX_RESPONSE_BYTES {
-                    return Err(AppError::unavailable(
+                // B2.2: bounded streaming read. `bytes()` buffered the whole body
+                // before the limit was checked, so a plugin that streamed without
+                // a Content-Length was fully materialised first.
+                let bytes = opsweave_http_body_guard::read_bounded(
+                    response,
+                    MAX_RESPONSE_BYTES,
+                    Some(Duration::from_secs(
+                        state.config.request_timeout_seconds.max(1),
+                    )),
+                )
+                .await
+                .map_err(|failure| match failure {
+                    opsweave_http_body_guard::ReadFailure::TooLarge => AppError::unavailable(
                         "UPSTREAM_RESPONSE_TOO_LARGE",
                         "plugin response exceeded the 8 MiB gateway limit",
-                    ));
-                }
+                    ),
+                    other => {
+                        AppError::internal(format!("read plugin response: {}", other.as_str()))
+                    }
+                })?;
                 let mut out = (status, bytes).into_response();
                 if let Some(content_type) = content_type {
                     if let Ok(value) = header::HeaderValue::from_str(&content_type) {

@@ -152,27 +152,25 @@ async fn post(
             )
         })?;
     let status = response.status();
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_UPSTREAM_BYTES as u64)
-    {
-        return Err(AppError::unavailable(
+    // B2.2: bounded streaming read; see kernel::bounded_body.
+    let bytes = opsweave_http_body_guard::read_bounded(
+        response,
+        MAX_UPSTREAM_BYTES,
+        Some(std::time::Duration::from_secs(
+            state.config.request_timeout_seconds.max(5),
+        )),
+    )
+    .await
+    .map_err(|failure| match failure {
+        opsweave_http_body_guard::ReadFailure::TooLarge => AppError::unavailable(
             "AUTOMATION_RESPONSE_TOO_LARGE",
             "the plugin response exceeded the automation limit",
-        ));
-    }
-    let bytes = response.bytes().await.map_err(|_| {
-        AppError::unavailable(
+        ),
+        other => AppError::unavailable(
             "AUTOMATION_UPSTREAM_UNAVAILABLE",
-            "the plugin response could not be read",
-        )
+            format!("the plugin response could not be read: {}", other.as_str()),
+        ),
     })?;
-    if bytes.len() > MAX_UPSTREAM_BYTES {
-        return Err(AppError::unavailable(
-            "AUTOMATION_RESPONSE_TOO_LARGE",
-            "the plugin response exceeded the automation limit",
-        ));
-    }
     let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     if !status.is_success() {
         let code = body

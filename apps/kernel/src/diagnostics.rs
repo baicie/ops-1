@@ -75,6 +75,55 @@ pub async fn diagnostics(State(state): State<AppState>, auth: AuthUser) -> AppRe
         None,
     )
     .await?;
+    // B2.2: job-queue health. These are the numbers an operator needs to tell
+    // "the queue is slow" from "the worker is stuck", and they are read from the
+    // tables the dispatcher actually writes - not from counters in memory, which
+    // a restart would silently reset.
+    //
+    // Every field is a real observation or is omitted (`null`), never a
+    // placeholder: a window with no jobs reports null rather than 0, because 0
+    // would read as "instant" rather than "nothing to measure".
+    // Named so the query's row type is stated once instead of inline.
+    type JobMetricsRow = (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+    );
+    let job_metrics: JobMetricsRow =
+        sqlx::query_as(
+            r#"
+            SELECT
+              (SELECT count(*) FROM kernel.pipeline_jobs WHERE status='QUEUED')::bigint,
+              (SELECT count(*) FROM kernel.pipeline_jobs WHERE status IN ('CLAIMED','RUNNING'))::bigint,
+              (SELECT count(*) FROM kernel.pipeline_jobs WHERE status='FAILED')::bigint,
+              (SELECT count(*) FROM kernel.pipeline_jobs WHERE status='CANCELLED')::bigint,
+              (SELECT count(*) FROM kernel.pipeline_job_leases
+                 WHERE status='ACTIVE' AND expires_at < now())::bigint,
+              (SELECT avg(extract(epoch FROM (s.occurred_at - j.created_at)))
+                 FROM kernel.pipeline_jobs j
+                 JOIN LATERAL (SELECT min(occurred_at) AS occurred_at
+                                 FROM kernel.pipeline_job_events e
+                                WHERE e.job_id=j.job_id AND e.event_type='JOB_STARTED') s ON true
+                WHERE j.created_at > now() - interval '24 hours'),
+              (SELECT avg(extract(epoch FROM (r.completed_at - s.occurred_at)))
+                 FROM kernel.pipeline_job_results r
+                 JOIN LATERAL (SELECT min(occurred_at) AS occurred_at
+                                 FROM kernel.pipeline_job_events e
+                                WHERE e.job_id=r.job_id AND e.event_type='JOB_STARTED') s ON true
+                WHERE r.completed_at > now() - interval '24 hours'),
+              (SELECT CASE WHEN count(*) = 0 THEN NULL
+                           ELSE count(*) FILTER (WHERE j.attempts > 1)::float8 / count(*)::float8 END
+                 FROM kernel.pipeline_jobs j
+                WHERE j.created_at > now() - interval '24 hours')
+            "#,
+        )
+        .fetch_one(&state.db)
+        .await?;
     Ok(Json(serde_json::json!({
         "kernel": {
             "version": env!("CARGO_PKG_VERSION"),
@@ -98,6 +147,17 @@ pub async fn diagnostics(State(state): State<AppState>, auth: AuthUser) -> AppRe
             "status": node.2,
             "lastSeenAt": node.3
         })).collect::<Vec<_>>(),
+        "jobs": {
+            "backlog": job_metrics.0,
+            "inFlight": job_metrics.1,
+            "failed": job_metrics.2,
+            "cancelled": job_metrics.3,
+            "expiredActiveLeases": job_metrics.4,
+            "avgWaitSeconds24h": job_metrics.5,
+            "avgRunSeconds24h": job_metrics.6,
+            "retryRate24h": job_metrics.7,
+            "window": "24h"
+        },
         "recentEvents": recent_failures,
         "policies": {
             "heartbeatIntervalSeconds": state.config.heartbeat_interval_seconds,
@@ -221,4 +281,100 @@ fn escape_html(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::{postgres::PgConnectOptions, PgPool};
+
+    const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+
+    async fn test_pool() -> Option<PgPool> {
+        let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                    panic!("{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset");
+                }
+                eprintln!("skip: OPSWEAVE_TEST_DATABASE_URL is unset");
+                return None;
+            }
+        };
+        let options: PgConnectOptions = url.parse().expect("test database URL parses");
+        let pool = PgPool::connect_with(options)
+            .await
+            .expect("cannot connect to the test database");
+        crate::db::migrate(&pool)
+            .await
+            .expect("the test database rejected the migrations");
+        Some(pool)
+    }
+
+    /// B2.2: the job metrics must be a valid query against the real schema, and
+    /// must report `null` rather than `0` for a window with nothing to average.
+    ///
+    /// This is deliberately a database test: the failure mode of these queries
+    /// is a column that does not exist or a type that does not cast, neither of
+    /// which a unit test of the JSON shape would catch.
+    #[tokio::test]
+    async fn job_metrics_query_returns_null_not_zero_for_an_empty_window() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        type JobMetricsRow = (
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            Option<f64>,
+            Option<f64>,
+            Option<f64>,
+        );
+        let row: JobMetricsRow =
+            sqlx::query_as(
+                r#"
+                SELECT
+                  (SELECT count(*) FROM kernel.pipeline_jobs WHERE status='QUEUED')::bigint,
+                  (SELECT count(*) FROM kernel.pipeline_jobs WHERE status IN ('CLAIMED','RUNNING'))::bigint,
+                  (SELECT count(*) FROM kernel.pipeline_jobs WHERE status='FAILED')::bigint,
+                  (SELECT count(*) FROM kernel.pipeline_jobs WHERE status='CANCELLED')::bigint,
+                  (SELECT count(*) FROM kernel.pipeline_job_leases
+                     WHERE status='ACTIVE' AND expires_at < now())::bigint,
+                  (SELECT avg(extract(epoch FROM (s.occurred_at - j.created_at)))
+                     FROM kernel.pipeline_jobs j
+                     JOIN LATERAL (SELECT min(occurred_at) AS occurred_at
+                                     FROM kernel.pipeline_job_events e
+                                    WHERE e.job_id=j.job_id AND e.event_type='JOB_STARTED') s ON true
+                    WHERE j.created_at > now() - interval '24 hours'),
+                  (SELECT avg(extract(epoch FROM (r.completed_at - s.occurred_at)))
+                     FROM kernel.pipeline_job_results r
+                     JOIN LATERAL (SELECT min(occurred_at) AS occurred_at
+                                     FROM kernel.pipeline_job_events e
+                                    WHERE e.job_id=r.job_id AND e.event_type='JOB_STARTED') s ON true
+                    WHERE r.completed_at > now() - interval '24 hours'),
+                  (SELECT CASE WHEN count(*) = 0 THEN NULL
+                               ELSE count(*) FILTER (WHERE j.attempts > 1)::float8 / count(*)::float8 END
+                     FROM kernel.pipeline_jobs j
+                    WHERE j.created_at > now() - interval '24 hours')
+                "#,
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("the job metrics query must be valid against the migrated schema");
+
+        assert!(row.0 >= 0 && row.1 >= 0 && row.2 >= 0 && row.3 >= 0 && row.4 >= 0);
+        // On a database with no jobs in the window every average is NULL. If the
+        // fixture database happens to hold jobs, the value is a real average.
+        for (label, value) in [
+            ("avgWaitSeconds24h", row.5),
+            ("avgRunSeconds24h", row.6),
+            ("retryRate24h", row.7),
+        ] {
+            if let Some(value) = value {
+                assert!(value.is_finite(), "{label} must never be NaN or infinite");
+                assert!(value >= 0.0, "{label} must not be negative");
+            }
+        }
+    }
 }

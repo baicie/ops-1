@@ -1,0 +1,16 @@
+[package]
+name = "opsweave-http-body-guard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Bounded streaming reads of untrusted upstream response bodies (B2.2)"
+
+[dependencies]
+bytes.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+axum.workspace = true
