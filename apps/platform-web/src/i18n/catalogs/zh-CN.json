@@ -114,6 +114,7 @@
   "activity.filter.range.7d": "最近 7 天",
   "activity.filter.range.all": "全部时间",
   "activity.filter.rangeAria": "按时间范围筛选",
+  "activity.filters.toggle": "筛选",
   "activity.filter.result.all": "全部结果",
   "activity.filter.result.aria": "按结果筛选",
   "activity.footnote": "审计详情在写入时即已脱敏。原始会话令牌、注册令牌与插件密钥从不记录。",

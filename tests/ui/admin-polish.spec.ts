@@ -342,6 +342,10 @@ test('a filter is answered by the Kernel, not by the browser', async ({ page }) 
   await expect(page.locator('[data-async-state="ready"]')).toBeVisible();
   const auditResponse = page.waitForResponse((response) =>
     response.url().includes('/api/v1/audit?') && response.url().includes('subjectType=node') && response.request().method() === 'GET');
+  // The five narrow predicates sit behind one disclosure (page-template 2.4): five selects on
+  // one 40px row needed 20px more than the 1024 canvas and wrapped into five rows at 390.
+  await page.getByTestId('activity-filter-toggle').click();
+  await expect(page.getByTestId('activity-filter-panel')).toBeVisible();
   await page.getByRole('combobox', { name: 'Filter subject type' }).click();
   await page.getByRole('option', { name: 'Node', exact: true }).click();
   const audit = await auditResponse;

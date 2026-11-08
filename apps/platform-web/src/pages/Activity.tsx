@@ -65,6 +65,14 @@ export function ActivityPage() {
   const [eventType, setEventType] = useState('');
   const [actor, setActor] = useState('');
   const [result, setResult] = useState('');
+  /**
+   * The four narrow filters stay folded on first paint. Measured at 390: the one 40px toolbar
+   * became 244.8px of five control rows, and at 1024 five selects plus the search and the count
+   * summed to 20px more than the canvas had. A ledger is read by scrolling, not by narrowing;
+   * the filters that narrow it are a tool, so they open on demand - and the disclosure says how
+   * many are on, so a folded strip can never hide an active predicate.
+   */
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [openRow, setOpenRow] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const { data, error, loading, reload, observedAt } = useObservedPolling(
@@ -132,6 +140,7 @@ export function ActivityPage() {
   /** The kinds the kernel said can reach this caller, printed verbatim rather than summarised. */
   const readableKinds = (scope?.readableSubjectTypes ?? []).join(', ');
   const clearFilters = () => { setQuery(''); setSubjectType(''); setEventType(''); setActor(''); setResult(''); setRange('all'); };
+  const activeNarrow = [eventType, actor, result, subjectType, range !== 'all' ? range : ''].filter(Boolean).length;
 
   // A filter that shrinks the result set must not leave the reader on a page that no longer
   // exists; the window clamps rather than rendering an empty table.
@@ -153,62 +162,87 @@ export function ActivityPage() {
     <div className="page-stack">
       <PageHeader title={t('page.activity')} description={t('activity.description')} actions={<Button variant="ghost" className="text-muted-foreground" onClick={() => void reload()}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>} />
 
-      <section className="toolbar" data-testid="activity-filters">
+      {/*
+        One row, one control tier (page-template 2.4). The search and the count are always on
+        screen; the five predicates that narrow the ledger sit behind one disclosure, because a
+        ledger is read by scrolling and its filters are a tool you reach for, not a band you
+        read past. The toggle carries the number of active predicates, so folding never hides
+        an applied filter.
+      */}
+      <section className="toolbar activity-toolbar" data-testid="activity-filters">
         <div className="toolbar-search relative flex items-center">
           <Icon name="search" size={16} className="absolute left-[10px] text-muted-foreground" />
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('activity.search.placeholder')} aria-label={t('activity.search.aria')} className="pl-[33px]" />
         </div>
-        <Select value={range} onValueChange={setRange}>
-          <SelectTrigger aria-label={t('activity.filter.rangeAria')} className="w-auto" data-testid="filter-range">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {RANGES.map((entry) => <SelectItem key={entry.id} value={entry.id}>{t(entry.label)}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={eventType || ALL} onValueChange={(value) => setEventType(value === ALL ? '' : value)}>
-          <SelectTrigger aria-label={t('activity.filter.eventType.aria')} className="w-auto" data-testid="filter-event-type">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t('activity.filter.eventType.all')}</SelectItem>
-            {options.eventType.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={actor || ALL} onValueChange={(value) => setActor(value === ALL ? '' : value)}>
-          <SelectTrigger aria-label={t('activity.filter.actor.aria')} className="w-auto" data-testid="filter-actor">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t('activity.filter.actor.all')}</SelectItem>
-            {options.actor.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={result || ALL} onValueChange={(value) => setResult(value === ALL ? '' : value)}>
-          <SelectTrigger aria-label={t('activity.filter.result.aria')} className="w-auto" data-testid="filter-result">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t('activity.filter.result.all')}</SelectItem>
-            {options.result.map((value) => <SelectItem key={value} value={value}><Status code={value} /></SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={subjectType || ALL} onValueChange={(value) => setSubjectType(value === ALL ? '' : value)}>
-          <SelectTrigger aria-label={t('activity.filter.aria')} className="w-auto" data-testid="filter-subject">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>{t('activity.filter.allSubjects')}</SelectItem>
-            <SelectItem value="plugin">{t('activity.filter.plugin')}</SelectItem>
-            <SelectItem value="deployment">{t('activity.filter.deployment')}</SelectItem>
-            <SelectItem value="node">{t('activity.filter.node')}</SelectItem>
-            <SelectItem value="publisher">{t('activity.filter.publisher')}</SelectItem>
-            <SelectItem value="enrollment_token">{t('activity.filter.enrollmentToken')}</SelectItem>
-          </SelectContent>
-        </Select>
+        <Button
+          variant={filtersOpen || activeNarrow > 0 ? 'toggle' : 'secondary'}
+          aria-expanded={filtersOpen}
+          aria-controls="activity-filter-panel"
+          data-testid="activity-filter-toggle"
+          data-active-count={activeNarrow}
+          onClick={() => setFiltersOpen((open) => !open)}
+        >
+          <Icon name="filter" size={15} />
+          {t('activity.filters.toggle')}
+          {activeNarrow > 0 ? <span className="activity-filter-count">{activeNarrow}</span> : null}
+          <Icon name="down" size={14} className={filtersOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+        </Button>
         <span className="toolbar-count" data-testid="activity-count">{t('activity.count.summary', { shown: events.length, total: loaded.length, window: WINDOW })}</span>
         {narrowed ? <Button variant="ghost" size="sm" onClick={clearFilters} data-testid="activity-clear"><Icon name="close" size={14} /> {t('ui.clearFilters')}</Button> : null}
       </section>
+
+      {filtersOpen ? (
+        <section className="toolbar activity-filter-panel" id="activity-filter-panel" data-testid="activity-filter-panel">
+          <Select value={range} onValueChange={setRange}>
+            <SelectTrigger aria-label={t('activity.filter.rangeAria')} className="w-auto" data-testid="filter-range">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RANGES.map((entry) => <SelectItem key={entry.id} value={entry.id}>{t(entry.label)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={eventType || ALL} onValueChange={(value) => setEventType(value === ALL ? '' : value)}>
+            <SelectTrigger aria-label={t('activity.filter.eventType.aria')} className="w-auto" data-testid="filter-event-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t('activity.filter.eventType.all')}</SelectItem>
+              {options.eventType.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={actor || ALL} onValueChange={(value) => setActor(value === ALL ? '' : value)}>
+            <SelectTrigger aria-label={t('activity.filter.actor.aria')} className="w-auto" data-testid="filter-actor">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t('activity.filter.actor.all')}</SelectItem>
+              {options.actor.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={result || ALL} onValueChange={(value) => setResult(value === ALL ? '' : value)}>
+            <SelectTrigger aria-label={t('activity.filter.result.aria')} className="w-auto" data-testid="filter-result">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t('activity.filter.result.all')}</SelectItem>
+              {options.result.map((value) => <SelectItem key={value} value={value}><Status code={value} /></SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={subjectType || ALL} onValueChange={(value) => setSubjectType(value === ALL ? '' : value)}>
+            <SelectTrigger aria-label={t('activity.filter.aria')} className="w-auto" data-testid="filter-subject">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>{t('activity.filter.allSubjects')}</SelectItem>
+              <SelectItem value="plugin">{t('activity.filter.plugin')}</SelectItem>
+              <SelectItem value="deployment">{t('activity.filter.deployment')}</SelectItem>
+              <SelectItem value="node">{t('activity.filter.node')}</SelectItem>
+              <SelectItem value="publisher">{t('activity.filter.publisher')}</SelectItem>
+              <SelectItem value="enrollment_token">{t('activity.filter.enrollmentToken')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </section>
+      ) : null}
 
       {/*
         A narrowed ledger that is NOT empty explains itself too. An operator who sees two rows

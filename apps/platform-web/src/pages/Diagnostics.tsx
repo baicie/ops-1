@@ -13,7 +13,7 @@ import { badgeVariantForTone, glyphForTone, statusForCode } from '../components/
 import { formatDuration } from '../format';
 import { useI18n, useT } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, StackCell, StatusPill, cardLineAfter, cardTwoLineRow, colGrow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 import { cn } from '../lib/utils';
 
 /**
@@ -127,7 +127,7 @@ export function DiagnosticsPage() {
                     <Table className={stackTable}>
                       <TableHeader className={stackHead}>
                         <TableRow className="hover:bg-transparent">
-                          <TableHead>{t('table.node')}</TableHead>
+                          <TableHead className={colGrow}>{t('table.node')}</TableHead>
                           <TableHead>{t('table.status')}</TableHead>
                           <TableHead>{t('table.lastObserved')}</TableHead>
                         </TableRow>
@@ -135,7 +135,7 @@ export function DiagnosticsPage() {
                       <TableBody className={stackBody}>
                         {nodes.map((node) => (
                           <TableRow key={node.id} className={cn(cardTwoLineRow, stackRow)}>
-                            <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale })} cardFact />
+                            <IdentityCell label={t('table.node')} identity={formatIdentity({ name: node.name, id: node.id, at: node.lastSeenAt, locale })} cardFact className={colGrow} />
                             <StackCell label={t('table.status')} className={cardLineAfter}><StatusPill status={node.status} /></StackCell>
                             {/* No recorded heartbeat is NO_DATA, not "never" and not a blank cell. */}
                             <StackCell label={t('table.lastObserved')} className={cardLineAfter}>{node.lastSeenAt ? <TimeAgo value={node.lastSeenAt} /> : <NoData detail={t('ui.noData.detail')} />}</StackCell>

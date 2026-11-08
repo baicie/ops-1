@@ -25,6 +25,7 @@ import {
   cardCellClass,
   cardLineAfter,
   cardTwoLineRow,
+  colGrow,
   copyIdAction,
   formatIdentity,
   rankCardFacts,
@@ -428,7 +429,7 @@ export function ObservabilityPage() {
                   ride the identity cell's second line instead of owning columns. */}
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>{t('table.node')}</TableHead>
+                  <TableHead className={colGrow}>{t('table.node')}</TableHead>
                   <TableHead>{t('table.status')}</TableHead>
                   {loadIsColumn ? <TableHead>{t('observability.table.load')}</TableHead> : null}
                   <TableHead>{t('table.instances')}</TableHead>
@@ -453,7 +454,7 @@ export function ObservabilityPage() {
                       data-observed-at={row.observedAt ?? ''}
                       onClick={() => navigate(href)}
                     >
-                      <IdentityCell label={t('table.node')} identity={identity} href={href} cardFact>
+                      <IdentityCell label={t('table.node')} identity={identity} href={href} className={colGrow} cardFact>
                         <span className="mono">{row.node.os}/{row.node.arch}</span>
                         <span className="ow-key">{t('nodes.table.generation', { generation: row.node.generation })}</span>
                       </IdentityCell>

@@ -69,7 +69,7 @@ import {
 import { IncidentFailureNotice, useUserDirectory } from './Incidents';
 import { TrustChip, TrustGap, TrustLegend, TrustSummary } from './incident-trust';
 import { CollectEvidenceDialog } from './incident-collect';
-import { IdentityCell, LongId, StackCell, cardTwoLineRow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
+import { IdentityCell, LongId, StackCell, cardTwoLineRow, colGrow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
 
 /**
  * /app/incidents/:id - one incident, its evidence and its human verdict (G11 D3, hardened in G12).
@@ -466,7 +466,7 @@ export function IncidentDetailPage() {
                       <Table className={stackTable} data-testid="incident-evidence-table">
                         <TableHeader className={stackHead}>
                           <TableRow className="hover:bg-transparent">
-                            <TableHead>{t('table.kind')}</TableHead>
+                            <TableHead className={colGrow}>{t('table.kind')}</TableHead>
                             <TableHead>{t('table.trust')}</TableHead>
                             <TableHead>{t('table.source')}</TableHead>
                             <TableHead>{t('table.collectedAt')}</TableHead>
@@ -486,6 +486,7 @@ export function IncidentDetailPage() {
                                 label={t('table.kind')}
                                 identity={formatIdentity({ name: t(evidenceKindKey(row.kind)), id: row.id, at: row.collectedAt, locale })}
                                 data-evidence-kind={row.kind}
+                                className={colGrow}
                                 cardFact
                               >
                                 <span className="mono">{row.source}</span>

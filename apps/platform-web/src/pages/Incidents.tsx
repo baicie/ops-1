@@ -52,6 +52,7 @@ import {
   cardActionCell,
   cardLineAfter,
   cardTwoLineRow,
+  colGrow,
   copyIdAction,
   formatIdentity,
   stackBody,
@@ -482,7 +483,7 @@ export function IncidentsPage() {
             <Table className={stackTable} data-testid="incidents-table">
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>{t('table.incident')}</TableHead>
+                  <TableHead className={colGrow}>{t('table.incident')}</TableHead>
                   {/* §2.2: only the columns the plan kept are rendered at all. A header for a
                       column that holds one value on every row is a header that earns no width. */}
                   {plan.visible.map((column) => <TableHead key={column}>{t(INCIDENT_COLUMN_LABEL_KEYS[column])}</TableHead>)}
@@ -522,7 +523,7 @@ export function IncidentsPage() {
                       data-run-size={run.rows.length}
                       onClick={() => navigate(href)}
                     >
-                      <IdentityCell label={t('table.incident')} identity={identity} href={href}>
+                      <IdentityCell label={t('table.incident')} identity={identity} href={href} className={colGrow}>
                         <span className="ow-key" data-testid="incident-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
                         {incident.relatedEntity ? <span className="ow-key" data-testid="incident-related" title={incident.relatedEntity}>{shortLocator(incident.relatedEntity)}</span> : null}
                         {/* §2.4: the run is stated on the row it collapsed into, with the span of

@@ -114,6 +114,7 @@
   "activity.filter.range.7d": "Last 7 days",
   "activity.filter.range.all": "All time",
   "activity.filter.rangeAria": "Time range",
+  "activity.filters.toggle": "Filters",
   "activity.filter.result.all": "All results",
   "activity.filter.result.aria": "Filter result",
   "activity.footnote": "Audit details are redacted at write time. Raw session tokens, enrollment tokens and plugin secrets are never recorded.",

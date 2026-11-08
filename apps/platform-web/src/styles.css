@@ -442,6 +442,29 @@ input::placeholder { color: var(--ow-text-muted); }
 .panel-head h2 { font-size: var(--ow-type-body); font-weight: 600; letter-spacing: -.01em; }
 .panel-head p { color: var(--ow-text-muted); font-size: var(--ow-type-meta); margin-top: 4px; }
 .list-block { display: flex; flex-direction: column; gap: var(--ow-space-2); min-width: 0; }
+/* The body of a panel, below its `.panel-head`. Until now the class had NO rule outside
+   `.forbidden-page`, so every detail page's body sat flush against the panel border while its
+   own head was inset 16px - measured `bodyInsetL: 0` against `headPad: 12px 16px` on
+   /admin/pipelines/{id}, /admin/jobs/{id} and the run panel. A panel is one box: its head and
+   its body share the same inline inset. A panel that carries a `.panel-head` must NOT also
+   carry `.panel-pad` on the same element - the head would then be inset twice; the head stays
+   a direct child and the body goes in a `.panel-pad` of its own. */
+.panel-pad { padding: 16px; }
+/* A panel that carries both `.panel-pad` and a `.panel-head` is still one box: the head bleeds
+   to the panel's edges and keeps its own 12/16 padding, the body keeps the 16px inset. Without
+   this the head would be inset twice and the 1px rule under it would stop at x=16 instead of
+   reaching the border. */
+.panel-pad > .panel-head { margin: -16px -16px 16px; }
+/* A body that already owns its inline inset delegates it instead of adding to it. `.kv-grid`
+   and `.timeline` each declare `8px 16px` / `0 16px` because they are also used as regions of
+   their own; nested in a padded body those numbers would double to 32px and the rows would no
+   longer line up with the note under them. */
+.panel-pad > .kv-grid,
+.panel-pad > .timeline { padding: 0; }
+/* A list that is the whole body keeps no outer margin of its own; the body's padding is the
+   inset. Without this the revision list, the checkpoint list and the attempts table indented
+   32px from the panel edge. */
+.panel-pad > .revision-list, .panel-pad > .detail-list, .panel-pad > .table-panel { margin: 0; }
 .ow-panel-note { margin: 0; padding: 0 var(--ow-space-4); color: var(--ow-text-muted); font-size: var(--ow-type-meta); line-height: 1.4; }
 .table-panel { overflow: hidden; }
 /* Content panels: two columns. The metric strip below reuses .summary-grid on some pages,
@@ -820,8 +843,13 @@ input::placeholder { color: var(--ow-text-muted); }
 
 /* Pipeline Studio read-only foundation */
 .pipeline-node-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.revision-list { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 0; }
-.revision-list li { display: grid; grid-template-columns: 60px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--ow-border); }
+.revision-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0; }
+/* The digest track is content-sized (`fit-content`), not `minmax(0,1fr)`: with the flexible
+   track the row's 64-char hash took every spare pixel and pushed the status pill and the time
+   to the far edge, so the list read as four columns of unrelated things. A revision row is
+   identity · digest · state · when, packed left, which is how it is read. */
+.revision-list li { display: grid; grid-template-columns: 60px fit-content(22rem) auto auto; gap: 12px; align-items: center; justify-content: start; padding: 8px 0; border-top: 1px solid var(--ow-border); }
+.revision-list li:first-child { border-top: 0; }
 .pagination-row { display: flex; justify-content: flex-end; gap: 8px; }
 /* A cursor pager inside a table panel is the panel's footer, not a floating row. */
 .table-panel .pagination-row { padding: var(--ow-space-2) var(--ow-space-4); border-top: 1px solid var(--ow-border); background: var(--ow-surface); }
@@ -843,7 +871,7 @@ input::placeholder { color: var(--ow-text-muted); }
 .studio-inspector summary { cursor: pointer; font-size: var(--ow-type-meta); }
 .studio-inspector pre { max-height: 160px; overflow: auto; font-size: var(--ow-type-label); background: var(--ow-surface-2); padding: 8px; border-radius: var(--ow-radius-card); }
 @media (max-width: 1024px) { .studio-shell { grid-template-columns: 180px minmax(0, 1fr); } .studio-inspector { grid-column: 1 / -1; position: static; max-height: none; } }
-@media (max-width: 768px) { .studio-shell { grid-template-columns: 1fr; } .studio-palette, .studio-inspector { position: static; max-height: none; } .revision-list li { grid-template-columns: 50px minmax(0, 1fr); } .revision-list li > :nth-child(3), .revision-list li time { grid-column: 2; justify-self: start; } }
+@media (max-width: 768px) { .studio-shell { grid-template-columns: 1fr; } .studio-palette, .studio-inspector { position: static; max-height: none; } }
 .studio-rf-wrap { height: 100%; min-height: 460px; width: 100%; }
 .studio-rf-node { min-width: 170px; border: 1px solid var(--ow-accent); border-radius: var(--ow-radius-card); background: var(--ow-surface); padding: 8px 12px; box-shadow: var(--ow-shadow-sm); }
 .studio-rf-node.selected { outline: 2px solid var(--ow-accent); }
@@ -1054,6 +1082,14 @@ details.panel.advanced > summary { padding: 12px 16px; }
 .job-mini-table .truncate { max-width: 100%; }
 .revision-list li { min-width: 0; }
 .revision-list .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 390: two rows, not a 2x2 grid. The grid fallback stacked the revision, the pill and the age
+   into three separate lines under a 255px digest (measured 118.8px a row). The first line is
+   the identity, the state and the moment; the digest - the one string that must not squeeze -
+   takes the second line whole. */
+@media (max-width: 768px) {
+  .revision-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .revision-list li > :nth-child(2) { order: 1; flex: 1 1 100%; }
+}
 
 /* G12 D: .studio-toolbar is gone.
    It existed because the header could not hold nine controls: at 1440 they measured 842px against
@@ -2894,9 +2930,13 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
  * region inside the card, not the page. Neither element can carry the .mono utility: the blanket
  * rule above matches it, and four characters per line is what that costs.
  */
-.ow-longid { display: flex; align-items: baseline; gap: 4px; flex: 1 1 auto; min-width: 0; max-width: 100%; }
+/* `flex: 1 1 auto` sized the id, not the box: inside a grid track of `minmax(0,1fr)` the value
+   took the whole track and the copy button was pushed to its far end - measured 927px of digest
+   track and a 900px gap between a value and the button that copies it on /admin/pipelines/{id}.
+   The id is content-sized up to the space available; the button stays next to what it copies. */
+.ow-longid { display: flex; align-items: baseline; gap: 4px; flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .ow-longid > .icon-btn { flex: none; }
-.ow-longid-value { flex: 1 1 auto; min-width: 0; font-family: var(--ow-font-mono); font-size: var(--ow-type-meta); white-space: nowrap; overflow-wrap: normal; word-break: normal; overflow: hidden; text-overflow: ellipsis; }
+.ow-longid-value { flex: 1 1 auto; min-width: 0; max-width: max-content; font-family: var(--ow-font-mono); font-size: var(--ow-type-meta); white-space: nowrap; overflow-wrap: normal; word-break: normal; overflow: hidden; text-overflow: ellipsis; }
 .ow-longid-value[data-scroll] { overflow-x: auto; overflow-y: hidden; }
 
 /* §2.6: a bound on the payload, not a wrap of it. Pretty-printed JSON at 390 is a column of long
@@ -3397,6 +3437,23 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    three times in two syntaxes - and 220/380 on Activity, so the one flexible
    child was a different width per page. One declaration, one pair of numbers. */
 .toolbar > .toolbar-search { flex: 1 1 260px; max-width: 460px; min-width: 0; }
+
+/* Activity: the ledger's four narrow filters, folded behind one toggle (page-template 2.4).
+   Measured before this: five selects plus search plus count on one row needed 20px more than
+   the 1024 canvas had, and at 390 the same row wrapped into five control rows (244.8px). The
+   predicates are a tool you reach for, not a band you read past - so the row keeps search and
+   count, and the toggle states how many predicates are on. */
+.activity-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--ow-radius-pill); background: var(--ow-accent); color: var(--ow-accent-foreground); font-size: var(--ow-type-label); font-variant-numeric: tabular-nums; }
+.activity-filter-panel { margin-top: -12px; }
+/* 390: the search keeps the first line; the toggle and the count share the second. Left to
+   `flex-wrap` the count's `margin-left:auto` claimed a line of its own, so a two-control row
+   became three rows and the ledger started 44px lower than it had to. */
+@media (max-width: 768px) {
+  .activity-toolbar { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+  .activity-toolbar > .toolbar-search { grid-column: 1 / -1; max-width: none; }
+  .activity-toolbar > .toolbar-count { margin-left: 0; justify-self: end; text-align: right; }
+  .activity-filter-panel { flex-wrap: wrap; }
+}
 
 /* Above 768 a toolbar is ONE row: wrapping is what turned a declared 40px band
    into an undeclared 80px one and pushed the first block off its ruler. Below
