@@ -52,7 +52,7 @@ PY
 }
 
 echo "== web assets"
-PLUGIN_VERSION="${VERSION}" pnpm --filter @opsweave/hello-web build >/dev/null
+PLUGIN_VERSION="${VERSION}" pnpm --fail-if-no-match --filter @opsweave/hello-web build >/dev/null
 
 echo "== backend image ${IMAGE_REF} (${IMAGE_PLATFORM})"
 CAPABILITY="$(capability_digest "${TEMPLATE}")"

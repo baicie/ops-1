@@ -40,7 +40,7 @@ if [ "$RESET" = "1" ]; then
 fi
 
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
-pnpm --filter @opsweave/platform-console build && pnpm --filter @opsweave/ops-web build >/dev/null
+pnpm --fail-if-no-match --filter @opsweave/platform-console build && pnpm --fail-if-no-match --filter @opsweave/ops-web build >/dev/null
 
 if [ "$BUILD" = "1" ]; then
   BUILD=1 scripts/build-plugins.sh

@@ -281,8 +281,8 @@ cmd_test() {
   python3 tests/contract/validate_contracts.py
   cargo test --locked --workspace
   cargo clippy --locked --workspace --all-targets -- -D warnings
-  pnpm --filter @opsweave/platform-console typecheck && pnpm --filter @opsweave/ops-web typecheck
-  pnpm --filter @opsweave/platform-console test
+  pnpm --fail-if-no-match --filter @opsweave/platform-console typecheck && pnpm --fail-if-no-match --filter @opsweave/ops-web typecheck
+  pnpm --fail-if-no-match --filter @opsweave/platform-console test
   ok "local verification complete"
 }
 

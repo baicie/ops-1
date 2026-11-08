@@ -17,7 +17,7 @@ import { dirname, extname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** Frozen by tests: Playwright specs assert English copy, so `en` must stay the default. */
-// Must match DEFAULT_LOCALE in apps/platform-web/src/i18n/index.tsx.
+// Must match DEFAULT_LOCALE in packages/platform-client/src/i18n/index.tsx.
 const DEFAULT_LOCALE = 'zh-CN';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,12 +33,22 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
  * forgetting is a visible omission rather than a silent one.
  */
 const SOURCE_ROOTS = [
-  join(ROOT, 'apps', 'platform-web', 'src'),
   join(ROOT, 'apps', 'platform-console', 'src'),
   join(ROOT, 'apps', 'ops-web', 'src'),
   join(ROOT, 'packages', 'ui', 'src'),
   join(ROOT, 'packages', 'platform-client', 'src'),
-].filter((dir) => statSync(dir, { throwIfNoEntry: false })?.isDirectory());
+];
+
+// Fail closed (rules/11): a `.filter(existsSync)` here would silently drop a renamed package,
+// and the keys used only in that package would then be reported "unused" - a wrong failure at
+// best, and at worst a whole application exempt from the gate with nothing saying so.
+const missingRoots = SOURCE_ROOTS.filter((dir) => !statSync(dir, { throwIfNoEntry: false })?.isDirectory());
+if (missingRoots.length > 0) {
+  console.error('[i18n] these source roots are missing, so they were NOT scanned:');
+  for (const dir of missingRoots) console.error('[i18n]   ' + relative(ROOT, dir));
+  console.error('[i18n] a new workspace package must be added to SOURCE_ROOTS; a removed one removed from it');
+  process.exit(1);
+}
 
 /** One catalog set, shared by every application: a key is either translated or it is not. */
 const CATALOG_DIR = join(ROOT, 'packages', 'platform-client', 'src', 'i18n', 'catalogs');

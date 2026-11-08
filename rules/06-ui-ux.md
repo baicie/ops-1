@@ -10,7 +10,8 @@
 
 ## 前端技术栈（MUST）
 
-- 新建页面/组件：**Vite + React + TypeScript + Tailwind CSS + shadcn/ui**。参考开源 `shadcn-admin` 模板的分层与页面骨架，但组件按 shadcn copy-in 模式落到 `apps/platform-web/src/components/ui/`，由仓库自己持有；**不**把模板或组件库作为运行时依赖。
+- 新建页面/组件：**Vite + React + TypeScript + Tailwind CSS + shadcn/ui**。参考开源 `shadcn-admin` 模板的分层与页面骨架，但组件按 shadcn copy-in 模式落到共享包 `packages/ui/src/`（G14.2 起；见 ADR-022），由仓库自己持有；**不**把模板或组件库作为运行时依赖。
+- 应用边界（G14.2 起）：`apps/platform-console` 与 `apps/ops-web` 是**两个独立构建**，互不 import；共享层只能是 `packages/ui` 与 `packages/platform-client`。新应用不得修改 Platform Console 的静态路由，也不得复制 Kernel。
 - 图标用 `lucide-react`；样式只用 Tailwind 工具类 + 语义化 CSS 变量（token），禁止新增第二套设计令牌或运行时 CSS-in-JS。
 - 禁止并列引入第二套 UI 框架（MUI/AntD/Chakra/Bootstrap）；迁移期间若确需并存，必须有 ADR 与下线日期。
 - 迁移策略：**新代码必须用新栈**；存量页面按批次替换，每批同步更新 E2E 选择器与截图，不允许一次性大重写。

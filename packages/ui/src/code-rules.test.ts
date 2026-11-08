@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -26,6 +26,24 @@ const ADDITIONAL_SOURCE_ROOTS = [
   join(REPO_ROOT, 'apps', 'ops-web', 'src'),
   join(REPO_ROOT, 'packages', 'platform-client', 'src'),
 ].filter((dir) => existsSync(dir));
+/** The two applications, repo-relative: where a page module lives after the G14.2 split. */
+const APPLICATION_SOURCE_ROOTS = ['apps/platform-console/src/', 'apps/ops-web/src/'];
+
+/**
+ * A module at the top level of an application's `src` - the page modules.
+ *
+ * A5's scope was `pages/`, which excluded the studio deliberately (the studio's own
+ * writes are reported in docs/design/ui-visual-v3/code-rules.md, not exempted here).
+ * After the split the pages are top-level modules of each application and the studio
+ * is `apps/platform-console/src/studio/`, so "no further slash" is what preserves the
+ * original scope instead of quietly widening it to the studio.
+ */
+function isPageModule(name: string): boolean {
+  return APPLICATION_SOURCE_ROOTS.some((root) => {
+    if (!name.startsWith(root)) return false;
+    return !name.slice(root.length).includes('/');
+  });
+}
 const css = readFileSync(join(SRC, 'styles.css'), 'utf8');
 const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -42,29 +60,45 @@ function leafBlocks(): { selector: string; body: string; line: number }[] {
   return blocks;
 }
 
+/**
+ * Source text keyed by REPO-RELATIVE path (G14.2).
+ *
+ * The key used to be the path below each root, and after the split every root has an
+ * `App.tsx` and a `main.tsx`: the last root silently overwrote the earlier ones, so the
+ * console's App.tsx was never scanned. A key that two files can claim is the same defect
+ * as a scan root that can vanish, so the key is now unique by construction and a
+ * collision fails the suite instead of hiding.
+ */
+function repoRelative(path: string): string {
+  return relative(REPO_ROOT, path).split(sep).join('/');
+}
+
 function sourceText(): Map<string, string> {
   const files = new Map<string, string>();
+  const add = (path: string) => {
+    const key = repoRelative(path);
+    const existing = files.get(key);
+    if (existing !== undefined) throw new Error('sourceText: two files share the key ' + key);
+    files.set(key, readFileSync(path, 'utf8'));
+  };
   (function walk(dir: string) {
     for (const name of readdirSync(dir)) {
       const path = join(dir, name);
       if (statSync(path).isDirectory()) walk(path);
-      else if (/\.(tsx?|json)$/.test(name) && !/\.test\.tsx?$/.test(name)) {
-        files.set(path.slice(SRC.length + 1), readFileSync(path, 'utf8'));
-      }
+      else if (/\.(tsx?|json)$/.test(name) && !/\.test\.tsx?$/.test(name)) add(path);
     }
   })(SRC);
   for (const root of ADDITIONAL_SOURCE_ROOTS) {
-    if (!existsSync(root)) continue;
     (function walk(dir: string) {
       for (const name of readdirSync(dir)) {
         const path = join(dir, name);
         if (statSync(path).isDirectory()) walk(path);
-        else if (/\.(tsx?|json)$/.test(name) && !/\.test\.tsx?$/.test(name)) {
-          files.set(path.slice(root.length + 1), readFileSync(path, 'utf8'));
-        }
+        else if (/\.(tsx?|json)$/.test(name) && !/\.test\.tsx?$/.test(name)) add(path);
       }
     })(root);
   }
+  // A gate that scanned nothing is a failure, not a pass (rules/11).
+  if (files.size === 0) throw new Error('sourceText: scanned 0 files');
   return files;
 }
 
@@ -143,10 +177,11 @@ describe('code rules: a write is verified by a re-read, not by its own response'
     const oneTimeSecret = /const result = await api\.post<\{ token: string; expiresAt: string \}>/;
     for (const [name, text] of sourceText()) {
       if (/\.test\./.test(name)) continue;
-      // A5 states its scope as apps/platform-web/src/pages. The studio surface has its own two
-      // hits (PipelineEditor.tsx:182 saves a draft from the PUT body; :269 is a computing POST,
-      // /pipelines/preview, which writes nothing) - reported, not smuggled in as exempt here.
-      if (name.split(/[\\/]/)[0] !== 'pages') continue;
+      // A5 applies to every page of every application (G14.2). Pages used to sit under
+      // one `pages/` directory; after the split they are top-level modules of
+      // apps/platform-console/src and apps/ops-web/src. A directory test would now scan
+      // zero files and pass - the whole rule would disappear, silently.
+      if (!isPageModule(name)) continue;
       const bound = new Map<string, number>();
       text.split('\n').forEach((line, index) => {
         const inline = line.match(/\bset[A-Z]\w*\(\s*await\s+api\.(post|put|patch|delete)\b/);
