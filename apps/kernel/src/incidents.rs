@@ -702,11 +702,11 @@ pub(crate) async fn append_automation_evidence(
     workspace_id: Uuid,
     incident_id: Uuid,
     evidence: serde_json::Value,
-    job_id: Uuid,
+    lease: AutomationLeaseHandle,
 ) -> AppResult<Uuid> {
     // The receipt first: a retry after the Evidence committed but the Job did
     // not must return the committed effect, not collect or write again.
-    if let Some(evidence_id) = committed_automation_evidence(&state.db, job_id).await? {
+    if let Some(evidence_id) = committed_automation_evidence(&state.db, lease.job_id).await? {
         return Ok(evidence_id);
     }
     let row: Option<(Uuid, String)> =
@@ -755,7 +755,8 @@ pub(crate) async fn append_automation_evidence(
         EvidenceActor {
             actor_type: "AUTOMATION",
             actor_id: principal_id,
-            automation_job_id: Some(job_id),
+            automation_job_id: Some(lease.job_id),
+            lease: Some(lease),
         },
         incident_id,
         payload,
@@ -1269,19 +1270,34 @@ async fn insert_evidence(
         actor_type: "USER",
         actor_id: caller.user_id,
         automation_job_id: None,
+        lease: None,
     };
     insert_evidence_as(db, adapters, caller, actor, incident_id, payload).await
+}
+
+/// The execution grant a worker holds when it asks to write an automation
+/// effect. It is an internal handle: no header, body or client-supplied job id
+/// can stand in for it (B1.8 Phase 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AutomationLeaseHandle {
+    pub job_id: Uuid,
+    pub lease_id: Uuid,
+    pub fencing_token: i64,
 }
 
 /// Who is writing this row, and (for automation) which job's effect it is.
 ///
 /// Grouped so the writer's argument list stays about the write; the job id is
 /// the effect identity from ADR-G13-B1.6, never chosen by evidence content.
+/// `lease` is present exactly when `actor_type == "AUTOMATION"`: the evidence
+/// transaction locks the job and proves the caller still holds that generation
+/// before it writes.
 #[derive(Debug, Clone, Copy)]
 struct EvidenceActor {
     actor_type: &'static str,
     actor_id: Uuid,
     automation_job_id: Option<Uuid>,
+    lease: Option<AutomationLeaseHandle>,
 }
 
 /// The shared writer behind the user endpoint and the automation path. The
@@ -1349,24 +1365,99 @@ async fn insert_evidence_as(
         ));
     }
 
-    let status = incident_status(db, caller.clone(), incident_id).await?;
-    if status == "CLOSED" {
-        return Err(AppError::conflict(
-            "INCIDENT_CLOSED",
-            "this incident is closed and accepts no new evidence",
-        ));
-    }
-
     let evidence_id = Uuid::new_v4();
     // Evidence, the OPEN -> INVESTIGATING transition and the audit row commit
     // together: rolled back after the transition, an audit failure would leave
     // the incident investigating evidence that this endpoint never accepted.
     let mut tx = db.begin().await?;
-    // The per-incident row cap, checked inside the transaction. Two concurrent
-    // writers can still land one row each past the cap - a cross-row maximum
-    // cannot be expressed as a row-level constraint - so the bound is "200 plus
-    // at most the number of concurrent writers", stated in the ADR rather than
-    // pretended away with a distributed lock.
+    // B1.8 Phase 2: an automation effect may only be created by the worker that
+    // currently holds the job's execution grant. The job row is locked first
+    // (the same lock finish_success/claim/reaper take), and the generation must
+    // still be RUNNING with a live lease. A worker that lost the lease - because
+    // another worker took over, or because it stalled past `lease_until` - is
+    // refused atomically by the database, not by a caller-side pre-check.
+    // Lock order is job -> incident in this path; no path takes incident -> job.
+    if let Some(lease) = actor.lease {
+        if actor.automation_job_id != Some(lease.job_id) {
+            tx.rollback().await?;
+            return Err(AppError::internal(
+                "automation evidence lease does not name its job",
+            ));
+        }
+        let live: Option<Uuid> = sqlx::query_scalar(
+            "SELECT job_id FROM kernel.automation_jobs
+              WHERE job_id=$1 AND lease_id=$2 AND fencing_token=$3
+                AND status='RUNNING' AND lease_until > now()
+              FOR UPDATE",
+        )
+        .bind(lease.job_id)
+        .bind(lease.lease_id)
+        .bind(lease.fencing_token)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if live.is_none() {
+            tx.rollback().await?;
+            return Err(AppError::conflict(
+                "AUTOMATION_STALE_LEASE",
+                "this worker no longer holds the job's execution grant; no evidence was written",
+            ));
+        }
+    } else if actor.actor_type == "AUTOMATION" {
+        tx.rollback().await?;
+        return Err(AppError::internal(
+            "automation evidence requires a lease handle",
+        ));
+    }
+    // B1.8: the lifecycle decision is made under the SAME row lock the verdict
+    // writer takes, inside the transaction that writes the evidence. The
+    // earlier status read (append_automation_evidence) is a fast path, not the
+    // authority: a Human Verdict that commits between that read and this write
+    // must be observed here. Lock order is incident-then-evidence in both
+    // writers, so the two serialize without a deadlock.
+    //
+    //   * CLOSED refuses every writer (the historical contract).
+    //   * CONCLUDED refuses AUTOMATION writers: a verdict is a signed set, and
+    //     evidence appended after it was never part of what the signer weighed.
+    //     A HUMAN writer may still append after CONCLUDED (afterVerdict=true),
+    //     which is the existing, separately specified behaviour.
+    let locked: Option<(String, Uuid)> = sqlx::query_as(
+        "SELECT status, workspace_id FROM kernel.incidents
+          WHERE incident_id=$1 AND workspace_id = ANY($2::uuid[])
+          FOR UPDATE",
+    )
+    .bind(incident_id)
+    .bind(&caller.workspaces)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((status, locked_workspace)) = locked else {
+        tx.rollback().await?;
+        return Err(incident_not_found());
+    };
+    if locked_workspace != workspace_id {
+        // The signed tuple names a workspace the authoritative row does not.
+        // Refuse rather than store evidence under a binding that disagrees with
+        // the incident; a concurrent move is not a product operation, so this
+        // is a corruption guard, not a normal branch.
+        tx.rollback().await?;
+        return Err(incident_not_found());
+    };
+    if status == "CLOSED" {
+        tx.rollback().await?;
+        return Err(AppError::conflict(
+            "INCIDENT_CLOSED",
+            "this incident is closed and accepts no new evidence",
+        ));
+    }
+    if status == "CONCLUDED" && actor.actor_type == "AUTOMATION" {
+        tx.rollback().await?;
+        return Err(AppError::conflict(
+            "INCIDENT_ALREADY_CONCLUDED",
+            "an automation may not add evidence after a human verdict: the signed set is what the verdict weighed",
+        ));
+    }
+    // The per-incident row cap, checked inside the transaction and now under
+    // the incident lock, so concurrent writers serialize and the cap is exact
+    // rather than "cap plus the number of concurrent writers".
     let existing_rows: i64 =
         sqlx::query_scalar("SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1")
             .bind(incident_id)
@@ -7688,7 +7779,11 @@ mod effect_tests {
         }
     }
 
-    async fn add_job(pool: &PgPool, fixture: &mut Fixture) -> Uuid {
+    /// A job in the state a worker holds while it is executing: RUNNING with a
+    /// live lease. The evidence writer now proves this grant inside its
+    /// transaction (B1.8 Phase 2), so a PENDING fixture would be refused before
+    /// the behaviour under test.
+    async fn add_job(pool: &PgPool, fixture: &mut Fixture) -> (Uuid, AutomationLeaseHandle) {
         let event = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO kernel.telemetry_events
@@ -7707,22 +7802,32 @@ mod effect_tests {
         .await
         .unwrap();
         let job = Uuid::new_v4();
+        let lease_id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO kernel.automation_jobs
-                 (job_id,event_id,incident_id,principal_id,source_id,status,max_attempts)
-             VALUES ($1,$2,$3,$4,$5,'PENDING',3)",
+                 (job_id,event_id,incident_id,principal_id,source_id,status,max_attempts,
+                  attempts,lease_owner,lease_until,lease_id,fencing_token)
+             VALUES ($1,$2,$3,$4,$5,'RUNNING',3,1,'effect-test',now()+interval '5 minutes',$6,1)",
         )
         .bind(job)
         .bind(event)
         .bind(fixture.incident)
         .bind(fixture.principal)
         .bind(fixture.source)
+        .bind(lease_id)
         .execute(pool)
         .await
         .unwrap();
         fixture.events.push(event);
         fixture.jobs.push(job);
-        job
+        (
+            job,
+            AutomationLeaseHandle {
+                job_id: job,
+                lease_id,
+                fencing_token: 1,
+            },
+        )
     }
 
     async fn cleanup(pool: &PgPool, fixture: &Fixture) {
@@ -7881,13 +7986,314 @@ mod effect_tests {
         .unwrap()
     }
 
+    /// B1.8 Phase 1 reproduction: the automation path checks the incident
+    /// status, then writes. If a Human Verdict commits between that check and
+    /// the write, the inner writer must refuse. Here the verdict has already
+    /// committed when the inner writer is called - the state the race leaves.
+    #[tokio::test]
+    async fn automation_evidence_cannot_commit_after_a_human_verdict() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let (job, lease) = add_job(&pool, &mut fixture).await;
+        let service = Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap();
+        let caller = DataScope::for_automation(service, fixture.workspace);
+        insert_verdict(
+            &pool,
+            caller.clone(),
+            fixture.incident,
+            CreateVerdictRequest {
+                verdict: "INCONCLUSIVE".into(),
+                rationale: "a person concluded while the attempt was in flight".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let request: CreateEvidenceRequest = serde_json::from_value(automation_evidence(
+            &fixture,
+            r#"{"samples":[1]}"#,
+            Utc::now(),
+        ))
+        .unwrap();
+        let error = insert_evidence_as(
+            &pool,
+            &adapters_map(),
+            caller,
+            EvidenceActor {
+                actor_type: "AUTOMATION",
+                actor_id: fixture.principal,
+                automation_job_id: Some(job),
+                lease: Some(lease),
+            },
+            fixture.incident,
+            request,
+        )
+        .await
+        .expect_err("automation evidence after a verdict must be refused");
+        assert_eq!(error.code, "INCIDENT_ALREADY_CONCLUDED", "{error:?}");
+        assert!(
+            evidence_rows(&pool, fixture.incident).await.is_empty(),
+            "no evidence row may be written after the verdict"
+        );
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    /// B1.8 Phase 1, reverse order: a verdict and an automation evidence write
+    /// race. The database lock decides the serial order. If the verdict wins
+    /// first it must see no evidence and refuse CONFIRMED (never succeed with a
+    /// snapshot that omits a row that committed after it); if the evidence wins
+    /// first the verdict must include it. No sleeps are used - the incident row
+    /// lock is the synchronisation point.
+    #[tokio::test]
+    async fn a_verdict_and_automation_evidence_serialize_without_a_missing_snapshot() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut successes = 0;
+        for _ in 0..20 {
+            let mut fixture = seed(&pool, false).await;
+            let (job, lease) = add_job(&pool, &mut fixture).await;
+            let service = Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap();
+            let caller = DataScope::for_automation(service, fixture.workspace);
+            let request: CreateEvidenceRequest = serde_json::from_value(automation_evidence(
+                &fixture,
+                r#"{"samples":[3]}"#,
+                Utc::now(),
+            ))
+            .unwrap();
+            let adapters = adapters_map();
+            let evidence = insert_evidence_as(
+                &pool,
+                &adapters,
+                caller.clone(),
+                EvidenceActor {
+                    actor_type: "AUTOMATION",
+                    actor_id: fixture.principal,
+                    automation_job_id: Some(job),
+                    lease: Some(lease),
+                },
+                fixture.incident,
+                request,
+            );
+            let verdict = insert_verdict(
+                &pool,
+                caller,
+                fixture.incident,
+                CreateVerdictRequest {
+                    verdict: "CONFIRMED".into(),
+                    rationale: "the committed measurement supports the conclusion".into(),
+                },
+            );
+            let (evidence, verdict) = tokio::join!(evidence, verdict);
+            evidence.expect("the automation evidence write is serializable");
+            let rows = evidence_rows(&pool, fixture.incident).await;
+            assert_eq!(rows.len(), 1, "one evidence row in every serial order");
+            match verdict {
+                Ok(verdict) => {
+                    successes += 1;
+                    assert_eq!(
+                        verdict.considered_evidence_count, 1,
+                        "a successful verdict must weigh the evidence that committed first"
+                    );
+                }
+                Err(error) => {
+                    assert_eq!(
+                        error.code, "INCIDENT_EVIDENCE_REQUIRED",
+                        "a verdict that locked first has no evidence to confirm: {error:?}"
+                    );
+                    let has_verdict: Option<Uuid> = sqlx::query_scalar(
+                        "SELECT incident_id FROM kernel.incident_verdicts WHERE incident_id=$1",
+                    )
+                    .bind(fixture.incident)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap();
+                    assert!(has_verdict.is_none());
+                }
+            }
+            cleanup(&pool, &fixture).await;
+        }
+        // Both orders are legal; the invariant above holds in each. At least one
+        // interleaving must have produced a verdict, or the test proved nothing.
+        assert!(
+            successes > 0,
+            "the race never exercised the verdict-success path"
+        );
+    }
+
+    /// A worker whose lease expired - even if nobody took over - must not
+    /// create a new effect. The evidence transaction checks the grant itself.
+    #[tokio::test]
+    async fn an_expired_lease_cannot_create_an_evidence_effect() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let (_job, lease) = add_job(&pool, &mut fixture).await;
+        sqlx::query(
+            "UPDATE kernel.automation_jobs
+                SET lease_until=now()-interval '1 second' WHERE job_id=$1",
+        )
+        .bind(lease.job_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let state = state(pool.clone()).await;
+        let error = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[21]}"#, Utc::now()),
+            lease,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "AUTOMATION_STALE_LEASE", "{error:?}");
+        assert!(evidence_rows(&pool, fixture.incident).await.is_empty());
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    /// A worker whose generation was superseded cannot write the effect, while
+    /// the current generation can - and exactly one row exists afterwards.
+    #[tokio::test]
+    async fn a_superseded_worker_cannot_create_the_effect_but_the_new_one_can() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let (_job, old_lease) = add_job(&pool, &mut fixture).await;
+        let new_lease = AutomationLeaseHandle {
+            job_id: old_lease.job_id,
+            lease_id: Uuid::new_v4(),
+            fencing_token: old_lease.fencing_token + 1,
+        };
+        sqlx::query(
+            "UPDATE kernel.automation_jobs
+                SET lease_id=$2, fencing_token=$3, lease_owner='new-worker',
+                    lease_until=now()+interval '5 minutes', attempts=attempts+1
+              WHERE job_id=$1",
+        )
+        .bind(new_lease.job_id)
+        .bind(new_lease.lease_id)
+        .bind(new_lease.fencing_token)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let state = state(pool.clone()).await;
+
+        let stale = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[22]}"#, Utc::now()),
+            old_lease,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(stale.code, "AUTOMATION_STALE_LEASE", "{stale:?}");
+        assert!(evidence_rows(&pool, fixture.incident).await.is_empty());
+
+        let committed = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[23]}"#, Utc::now()),
+            new_lease,
+        )
+        .await
+        .unwrap();
+        assert_eq!(evidence_rows(&pool, fixture.incident).await.len(), 1);
+        assert_eq!(
+            committed_automation_evidence(&pool, new_lease.job_id)
+                .await
+                .unwrap(),
+            Some(committed)
+        );
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    /// Old and new generation racing to write the same job: the database admits
+    /// only the live grant, and the effect stays one row.
+    #[tokio::test]
+    async fn old_and_new_generations_racing_write_one_effect() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let (_job, old_lease) = add_job(&pool, &mut fixture).await;
+        let new_lease = AutomationLeaseHandle {
+            job_id: old_lease.job_id,
+            lease_id: Uuid::new_v4(),
+            fencing_token: old_lease.fencing_token + 1,
+        };
+        sqlx::query(
+            "UPDATE kernel.automation_jobs
+                SET lease_id=$2, fencing_token=$3, lease_owner='new-worker',
+                    lease_until=now()+interval '5 minutes', attempts=attempts+1
+              WHERE job_id=$1",
+        )
+        .bind(new_lease.job_id)
+        .bind(new_lease.lease_id)
+        .bind(new_lease.fencing_token)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let state = state(pool.clone()).await;
+        let stale = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[24]}"#, Utc::now()),
+            old_lease,
+        );
+        let live = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[25]}"#, Utc::now()),
+            new_lease,
+        );
+        let (stale, live) = tokio::join!(stale, live);
+        assert_eq!(
+            stale.unwrap_err().code,
+            "AUTOMATION_STALE_LEASE",
+            "the old generation is refused"
+        );
+        let live = live.expect("the live generation writes the effect");
+        assert_eq!(
+            committed_automation_evidence(&pool, new_lease.job_id)
+                .await
+                .unwrap(),
+            Some(live)
+        );
+        assert_eq!(evidence_rows(&pool, fixture.incident).await.len(), 1);
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    fn adapters_map() -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        map.insert(ADAPTER.to_string(), SECRET.to_string());
+        map
+    }
+
     #[tokio::test]
     async fn a_job_binds_one_evidence_and_a_retry_returns_it_unchanged() {
         let Some(pool) = test_pool().await else {
             return;
         };
         let mut fixture = seed(&pool, false).await;
-        let job = add_job(&pool, &mut fixture).await;
+        let (job, lease) = add_job(&pool, &mut fixture).await;
         let state = state(pool.clone()).await;
         let first_at = Utc::now() - chrono::Duration::seconds(10);
         let retry_at = Utc::now();
@@ -7898,7 +8304,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[1]}"#, first_at),
-            job,
+            lease,
         )
         .await
         .unwrap();
@@ -7910,7 +8316,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[2]}"#, retry_at),
-            job,
+            lease,
         )
         .await
         .unwrap();
@@ -7941,8 +8347,8 @@ mod effect_tests {
             return;
         };
         let mut fixture = seed(&pool, false).await;
-        let first_job = add_job(&pool, &mut fixture).await;
-        let second_job = add_job(&pool, &mut fixture).await;
+        let (first_job, first_lease) = add_job(&pool, &mut fixture).await;
+        let (second_job, second_lease) = add_job(&pool, &mut fixture).await;
         let state = state(pool.clone()).await;
         let at = Utc::now();
         let body = r#"{"samples":[42]}"#;
@@ -7953,7 +8359,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, body, at),
-            first_job,
+            first_lease,
         )
         .await
         .unwrap();
@@ -7963,7 +8369,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, body, at),
-            second_job,
+            second_lease,
         )
         .await
         .unwrap();
@@ -7986,7 +8392,7 @@ mod effect_tests {
             return;
         };
         let mut fixture = seed(&pool, false).await;
-        let job = add_job(&pool, &mut fixture).await;
+        let (_job, lease) = add_job(&pool, &mut fixture).await;
         let state = state(pool.clone()).await;
         let at = Utc::now();
         let left = append_automation_evidence(
@@ -7995,7 +8401,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[1]}"#, at),
-            job,
+            lease,
         );
         let right = append_automation_evidence(
             &state,
@@ -8003,7 +8409,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[2]}"#, at),
-            job,
+            lease,
         );
         let (left, right) = tokio::join!(left, right);
         let left = left.unwrap();
@@ -8032,7 +8438,7 @@ mod effect_tests {
             return;
         };
         let mut fixture = seed(&pool, false).await;
-        let job = add_job(&pool, &mut fixture).await;
+        let (_job, lease) = add_job(&pool, &mut fixture).await;
         let state = state(pool.clone()).await;
         let committed = append_automation_evidence(
             &state,
@@ -8040,7 +8446,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[7]}"#, Utc::now()),
-            job,
+            lease,
         )
         .await
         .unwrap();
@@ -8054,7 +8460,7 @@ mod effect_tests {
             fixture.incident,
             fixture.source,
             Utc::now(),
-            job,
+            lease,
         )
         .await
         .expect("recovery must not need an upstream");
@@ -8071,7 +8477,7 @@ mod effect_tests {
             return;
         };
         let mut fixture = seed(&pool, false).await;
-        let job = add_job(&pool, &mut fixture).await;
+        let (_job, lease) = add_job(&pool, &mut fixture).await;
         let state = state(pool.clone()).await;
         let committed = append_automation_evidence(
             &state,
@@ -8079,7 +8485,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[9]}"#, Utc::now()),
-            job,
+            lease,
         )
         .await
         .unwrap();
@@ -8105,7 +8511,7 @@ mod effect_tests {
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[10]}"#, Utc::now()),
-            job,
+            lease,
         )
         .await
         .unwrap();
@@ -8117,14 +8523,14 @@ mod effect_tests {
         );
 
         // A DIFFERENT job cannot add evidence after the verdict.
-        let late_job = add_job(&pool, &mut fixture).await;
+        let (_late_job, late_lease) = add_job(&pool, &mut fixture).await;
         let rejected = append_automation_evidence(
             &state,
             fixture.principal,
             fixture.workspace,
             fixture.incident,
             automation_evidence(&fixture, r#"{"samples":[11]}"#, Utc::now()),
-            late_job,
+            late_lease,
         )
         .await
         .unwrap_err();
@@ -8155,6 +8561,7 @@ mod effect_tests {
             actor_type: "USER",
             actor_id: user,
             automation_job_id: None,
+            lease: None,
         };
         let (created, first) = insert_evidence_as(
             &pool,

@@ -61,13 +61,77 @@ GO_BUILD="$(sha256_file plugins/hello-go/hello-go-linux)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$GO_CAP" --build-arg BUILD_DIGEST="$GO_BUILD" -t "$REGISTRY/opsweave/hello-go:0.0.1" plugins/hello-go >/dev/null
 
 echo "== Java OCI image"
+# The pinned JRE comes from one of two deterministic sources, in this order:
+#
+#   1. the Temurin 21 JDK the runner already carries (actions/setup-java in CI,
+#      or a local toolchain), through its own jlink;
+#   2. the pinned Temurin 21 JRE release archive, SHA-256 verified.
+#
+# Source 1 exists because the GitHub Releases host answered HTTP 504 to every
+# attempt from a GitHub runner (B1.8 runs 42469656670, 42469747350: six
+# retries, all 504), so retrying a broken transport was not a fix. jlink from
+# the same major JDK keeps the runtime's language level; the archive path
+# remains for hosts without a JDK and is still the only path that pins a
+# byte-for-byte upstream digest.
+# A cached JRE is reused across runs, so a runtime produced on another platform
+# would be baked into every later image. The image base is Linux, so the cached
+# java binary must be an ELF executable; anything else (Mach-O from a macOS jlink,
+# PE from Windows) is discarded and rebuilt.
+if [ -e plugins/hello-java/jre/bin/java ] && [ "$(head -c 4 plugins/hello-java/jre/bin/java 2>/dev/null | od -An -tx1 | tr -d ' \n')" != "7f454c46" ]; then
+  echo "discarding the cached Java plugin JRE: bin/java is not a Linux ELF executable" >&2
+  rm -rf plugins/hello-java/jre
+fi
 if [ ! -x plugins/hello-java/jre/bin/java ]; then
-  echo "Downloading pinned Temurin 21 JRE for linux/$JRE_ARCH" >&2
   mkdir -p plugins/hello-java/jre
-  JRE_FILE="OpenJDK21U-jre_${JRE_ARCH}_linux_hotspot_21.0.13_9.tar.gz"
-  curl -fsSL --max-time 240 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/${JRE_FILE}" -o /tmp/opsweave-jre21.tar.gz
-  verify_sha256 /tmp/opsweave-jre21.tar.gz "$JRE_SHA256"
-  tar xzf /tmp/opsweave-jre21.tar.gz -C plugins/hello-java/jre --strip-components=1
+  JRE_SOURCE=""
+  JDK_HOME=""
+  if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/jlink" ]; then
+    JDK_HOME="$JAVA_HOME"
+  elif command -v javac >/dev/null 2>&1; then
+    JDK_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)" 2>/dev/null || command -v javac)")")"
+    [ -x "$JDK_HOME/bin/jlink" ] || JDK_HOME=""
+  fi
+  # The jar targets Java 21; a runtime from an older JDK must not be substituted,
+  # and a newer one is only accepted when it can still run `--release 21` output
+  # (every JDK >= 21 can). The major version is read from the JDK itself.
+  if [ -n "$JDK_HOME" ]; then
+    JDK_MAJOR="$("$JDK_HOME/bin/jlink" --version 2>/dev/null | sed -E 's/^([0-9]+).*/\1/' || true)"
+    if [ -z "$JDK_MAJOR" ] || [ "$JDK_MAJOR" -lt 21 ] 2>/dev/null; then
+      echo "the JDK at $JDK_HOME is not >= 21; falling back to the pinned archive" >&2
+      JDK_HOME=""
+    fi
+  fi
+  # jlink produces a runtime for the platform it runs on, and the image it is
+  # copied into is always linux/<the same arch>. A macOS or Windows JDK would
+  # therefore bake a Mach-O/PE runtime into a Linux image: the build succeeds and
+  # the Pod then dies on exec. Only a Linux JDK may take the jlink path.
+  if [ -n "$JDK_HOME" ]; then
+    JDK_PLATFORM="$(uname -s)"
+    if [ "$JDK_PLATFORM" != "Linux" ]; then
+      echo "the JDK at $JDK_HOME runs on $JDK_PLATFORM; its jlink output cannot enter a Linux image, falling back to the pinned archive" >&2
+      JDK_HOME=""
+    fi
+  fi
+  if [ -n "$JDK_HOME" ]; then
+    echo "Building the plugin JRE with jlink from $JDK_HOME (JDK $JDK_MAJOR)" >&2
+    rm -rf plugins/hello-java/jre
+    # java.se plus the JDK-only modules Spring Boot needs. A hand-listed subset
+    # is not enough: the previous set omitted java.desktop and the plugin died at
+    # startup with ClassNotFoundException: java.beans.PropertyEditorSupport, which
+    # only shows up after deployment. java.se is the whole SE surface, so
+    # reflection and SPI lookups cannot fall outside it.
+    "$JDK_HOME/bin/jlink" --add-modules java.se,jdk.unsupported,jdk.crypto.ec,jdk.jfr --strip-debug --no-man-pages --no-header-files --compress=zip-6 --output plugins/hello-java/jre >/dev/null
+    JRE_SOURCE="jlink:$(basename "$JDK_HOME"):java.se"
+  else
+    echo "Downloading pinned Temurin 21 JRE for linux/$JRE_ARCH" >&2
+    JRE_FILE="OpenJDK21U-jre_${JRE_ARCH}_linux_hotspot_21.0.13_9.tar.gz"
+    curl -fsSL --retry 8 --retry-delay 5 --retry-max-time 600 --retry-all-errors --max-time 240 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/${JRE_FILE}" -o /tmp/opsweave-jre21.tar.gz
+    verify_sha256 /tmp/opsweave-jre21.tar.gz "$JRE_SHA256"
+    tar xzf /tmp/opsweave-jre21.tar.gz -C plugins/hello-java/jre --strip-components=1
+    JRE_SOURCE="pinned-archive"
+  fi
+  [ -x plugins/hello-java/jre/bin/java ] || { echo "the Java plugin JRE was not produced ($JRE_SOURCE)" >&2; exit 1; }
+  echo "Java plugin JRE source: $JRE_SOURCE" >&2
 fi
 if [ -x /opt/homebrew/opt/openjdk@21/bin/java ]; then
   JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -f plugins/hello-java/pom.xml -DskipTests package
@@ -76,6 +140,31 @@ else
 fi
 JAVA_BUILD="$(sha256_file plugins/hello-java/target/hello-java-0.0.1.jar)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$JAVA_CAP" --build-arg BUILD_DIGEST="$JAVA_BUILD" -t "$REGISTRY/opsweave/hello-java:0.0.1" plugins/hello-java >/dev/null
+# A JRE that cannot boot the jar still builds and pushes cleanly; the failure only
+# appears minutes later inside a Pod as a replica stuck in DEGRADED (B1.8 run
+# 42472581569: java.beans.PropertyEditorSupport missing from a hand-listed jlink
+# module set). Booting the image here turns that class of defect into a build-time
+# failure with the container log attached.
+JAVA_SMOKE_NAME="opsweave-hello-java-smoke-$$"
+docker rm -f "$JAVA_SMOKE_NAME" >/dev/null 2>&1 || true
+docker run -d --name "$JAVA_SMOKE_NAME" -p 127.0.0.1::8080 "$REGISTRY/opsweave/hello-java:0.0.1" >/dev/null
+JAVA_SMOKE_PORT="$(docker port "$JAVA_SMOKE_NAME" 8080/tcp 2>/dev/null | head -1 | sed -E 's/.*:([0-9]+)$/\1/')"
+JAVA_SMOKE_OK=""
+if [ -n "$JAVA_SMOKE_PORT" ]; then
+  for _ in $(seq 1 60); do
+    if curl -fsS -m 2 "http://127.0.0.1:${JAVA_SMOKE_PORT}/_opsweave/health/live" >/dev/null 2>&1; then JAVA_SMOKE_OK=1; break; fi
+    [ "$(docker inspect -f '{{.State.Running}}' "$JAVA_SMOKE_NAME" 2>/dev/null)" = "true" ] || break
+    sleep 1
+  done
+fi
+if [ -z "$JAVA_SMOKE_OK" ]; then
+  echo "the hello-java image never becomes live ($JRE_SOURCE); container log:" >&2
+  docker logs "$JAVA_SMOKE_NAME" >&2 2>&1 || true
+  docker rm -f "$JAVA_SMOKE_NAME" >/dev/null 2>&1 || true
+  exit 1
+fi
+docker rm -f "$JAVA_SMOKE_NAME" >/dev/null 2>&1 || true
+echo "Java plugin image boots and answers /_opsweave/health/live ($JRE_SOURCE)" >&2
 
 echo "== push digests"
 docker push "$REGISTRY/opsweave/hello-ts:$TS_VERSION" >/dev/null

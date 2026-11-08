@@ -204,17 +204,17 @@ pub async fn collect_and_append(
     incident_id: Uuid,
     source_id: Uuid,
     occurred_at: chrono::DateTime<chrono::Utc>,
-    job_id: Uuid,
+    lease: crate::incidents::AutomationLeaseHandle,
 ) -> AppResult<AutomationRunView> {
     // Recovery before any RPC (ADR-G13-B1.6 §3.3): if this job's Evidence is
     // already committed, the logical effect happened. Re-collecting would not
     // add a fact - it would add a second measurement of the same event.
     if let Some(evidence_id) =
-        crate::incidents::committed_automation_evidence(&state.db, job_id).await?
+        crate::incidents::committed_automation_evidence(&state.db, lease.job_id).await?
     {
         return Ok(AutomationRunView {
             status: "COLLECTED".into(),
-            job_id: Some(job_id),
+            job_id: Some(lease.job_id),
             collection_id: None,
             evidence_id: Some(evidence_id),
             code: None,
@@ -382,12 +382,12 @@ pub async fn collect_and_append(
         principal.claims.workspace_id,
         incident_id,
         evidence,
-        job_id,
+        lease,
     )
     .await?;
     Ok(AutomationRunView {
         status: "COLLECTED".into(),
-        job_id: Some(job_id),
+        job_id: Some(lease.job_id),
         collection_id: Some(collection_id),
         evidence_id: Some(evidence_id),
         code: None,
