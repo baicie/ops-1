@@ -6,7 +6,7 @@ ARG BUILD_DIGEST
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
-COPY server.mjs quality.mjs ./
+COPY server.mjs quality.mjs identity.mjs ./
 ENV NODE_ENV=production \
     PORT=8080 \
     OPSWEAVE_PLUGIN_ID=opsweave.data-catalog \

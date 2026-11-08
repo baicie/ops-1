@@ -6,12 +6,13 @@ cd "$ROOT"
 REGISTRY="${OPSWEAVE_REGISTRY:-localhost:5001}"
 TS_VERSION="${OPSWEAVE_DATA_VERSION:-0.0.1}"
 sha256_file() {
-  python3 - "$1" <<'PY'
+  python3 - "$@" <<'PY'
 import hashlib, sys
 h = hashlib.sha256()
-with open(sys.argv[1], 'rb') as f:
-    for chunk in iter(lambda: f.read(1024 * 1024), b''):
-        h.update(chunk)
+for path in sys.argv[1:]:
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
 print('sha256:' + h.hexdigest())
 PY
 }
@@ -38,7 +39,12 @@ if [ "${OPSWEAVE_SKIP_IMAGE_BUILD:-0}" = "1" ]; then
 else
   for name in data-catalog data-integration; do
     cap="$(cap_digest "plugins/$name/manifest.template.json")"
-    build="$(sha256_file "plugins/$name/backend/server.mjs")"
+    # The digest covers every runtime module, not just the entry point: the image
+    # now ships identity.mjs (and quality.mjs for the catalog), and a digest over
+    # server.mjs alone would stay identical when one of them changed.
+    modules=("plugins/$name/backend/server.mjs" "plugins/$name/backend/identity.mjs")
+    [ -f "plugins/$name/backend/quality.mjs" ] && modules+=("plugins/$name/backend/quality.mjs")
+    build="$(sha256_file "${modules[@]}")"
     base="$(docker inspect node:22-bookworm-slim --format '{{index .RepoDigests 0}}' 2>/dev/null | tr -d '\n' || true)"
     if [ -z "$base" ]; then base="node:22-bookworm-slim"; fi
     docker build --build-arg BASE_IMAGE="$base" --build-arg PLUGIN_VERSION="$TS_VERSION" --build-arg CAPABILITY_DIGEST="$cap" --build-arg BUILD_DIGEST="$build" -t "$REGISTRY/opsweave/$name:$TS_VERSION" "plugins/$name/backend" >/dev/null

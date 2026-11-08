@@ -53,6 +53,22 @@ const DEFAULTS = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EVIDENCE_KINDS = new Set(['METRIC_SNAPSHOT']);
 
+// Which capabilities a signed role carries IN THIS PLUGIN. The identity module
+// verifies the token; what the token is worth is the plugin's own decision, so
+// the mapping lives here rather than in the shared resolver.
+// Exported so the socket tests build the resolver from these same maps: a test
+// that invented its own mapping would keep passing while production drifted.
+export const ROLE_SCOPES = {
+  admin: ['telemetry.source.read', 'telemetry.source.write'],
+  operator: ['telemetry.source.read', 'telemetry.source.write'],
+  viewer: ['telemetry.source.read'],
+};
+// The automation operations this plugin serves, and what each is worth.
+export const AUTOMATION_SCOPES = {
+  SOURCE_COLLECT: ['telemetry.source.write'],
+  EVIDENCE_APPEND: ['telemetry.source.write'],
+};
+
 function parseSecretMap(raw) {
   try {
     const parsed = JSON.parse(raw || '{}');
@@ -768,6 +784,9 @@ export async function startServer(env = process.env) {
     contextKeyHex: env.OPSWEAVE_CALLER_CONTEXT_KEY || '',
     automationPublicKeyHex: env.OPSWEAVE_AUTOMATION_PUBLIC_KEY || '',
     pluginId,
+    roleScopes: ROLE_SCOPES,
+    scopePrefix: 'telemetry.source.',
+    automationScopes: AUTOMATION_SCOPES,
   });
   const secrets = secretConfiguration(env);
   const plugin = createPlugin({

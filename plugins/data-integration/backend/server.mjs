@@ -5,6 +5,7 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import pg from 'pg';
+import { createIdentityResolver, hasScope } from './identity.mjs';
 
 const PLUGIN_ID = process.env.OPSWEAVE_PLUGIN_ID || 'opsweave.data-integration';
 const VERSION = process.env.OPSWEAVE_PLUGIN_VERSION || '0.0.1';
@@ -86,20 +87,31 @@ async function catalogToken() {
   }
   return tokenRefreshPromise;
 }
-function verifyContext(token) { if (!token || !CONTEXT_KEY) return null; const p = token.split('.'); if (p.length !== 3 || p[0] !== 'oww1') return null; const expected = crypto.createHmac('sha256', Buffer.from(CONTEXT_KEY, 'hex')).update(p[1]).digest('base64url'); if (expected.length !== p[2].length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(p[2]))) return null; try { const c = JSON.parse(Buffer.from(p[1], 'base64url').toString()); if (c.v !== 1 || Number(c.expiresAt) * 1000 <= Date.now()) return null; return c; } catch { return null; } }
-function identity(req) {
-  const c = verifyContext(req.headers['x-opsweave-caller-context']);
-  if (c) return { kind: 'workload', pluginId: c.pluginId, scope: Array.isArray(c.scope) ? c.scope : [] };
-  const rawRole = req.headers['x-opsweave-user-role'];
-  if (rawRole) {
-    const role = String(rawRole).toLowerCase();
-    if (role === 'admin' || role === 'operator') return { kind: 'user', role, scope: ['source:read', 'source:write'] };
-    if (role === 'viewer') return { kind: 'user', role, scope: ['source:read'] };
-    return { kind: 'user', role, scope: [] };
-  }
-  return null;
+// Which capabilities a signed role carries IN THIS PLUGIN (B2.1). The bare
+// `x-opsweave-user-role` header is no longer read: a caller cannot assert a role,
+// only present a context the Kernel signed for this plugin.
+const ROLE_SCOPES = {
+  admin: ['source:read', 'source:write'],
+  operator: ['source:read', 'source:write'],
+  viewer: ['source:read'],
+};
+// Integration has no automation-facing route: an ingestion run is started by a
+// user. An automation principal therefore gets no scope here.
+const AUTOMATION_SCOPES = {};
+
+const identity = createIdentityResolver({
+  contextKeyHex: CONTEXT_KEY,
+  pluginId: PLUGIN_ID,
+  roleScopes: ROLE_SCOPES,
+  scopePrefix: 'source:',
+  automationScopes: AUTOMATION_SCOPES,
+});
+
+function actorOf(who) {
+  if (who.kind === 'user') return who.userId;
+  if (who.kind === 'automation') return `automation:${who.principalId}`;
+  return `workload:${who.pluginId}`;
 }
-function hasScope(who, scope) { return Boolean(who && Array.isArray(who.scope) && who.scope.includes(scope)); }
 function ipv4Bytes(ip) {
   if (!net.isIPv4(ip)) return null;
   return ip.split('.').map(Number);
@@ -246,7 +258,7 @@ async function handle(req, res) {
   if (url.pathname === '/_opsweave/health/live') return send(res, stopping ? 503 : 200, { status: stopping ? 'stopping' : 'live' }, id);
   if (url.pathname === '/_opsweave/health/ready') return send(res, ready && !stopping ? 200 : 503, { status: ready && !stopping ? 'ready' : 'not_ready' }, id);
   if (url.pathname === '/_opsweave/health/startup') return send(res, 200, { status: 'started' }, id);
-  const who = identity(req); if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'caller identity required', id);
+  const who = identity(req.headers); if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'caller identity required', id);
   if (url.pathname === '/api/data-integration/sources' && req.method === 'GET') { if (!hasScope(who, 'source:read')) return fail(res, 403, 'FORBIDDEN', 'source:read required', id); const rows = await pool.query('SELECT * FROM integration_sources ORDER BY created_at DESC LIMIT 100'); return send(res, 200, rows.rows.map(sourceView), id); }
   if (url.pathname === '/api/data-integration/sources' && req.method === 'POST') {
     if (!hasScope(who, 'source:write')) return fail(res, 403, 'FORBIDDEN', 'source:write required', id); const body = await readJson(req); if (!body.name || body.connectorType !== 'http-json' || !body.endpoint || typeof body.credential?.credentialRef !== 'string' || !/^secret:\/\/[a-z0-9][a-z0-9/_-]{2,120}$/.test(body.credential.credentialRef)) return fail(res, 400, 'INVALID_REQUEST', 'name, http-json connector, endpoint and a secret:// credentialRef are required', id); const row = await pool.query('INSERT INTO integration_sources (source_id,name,connector_type,endpoint,credential,status) VALUES ($1,$2,$3,$4,$5,\'UNVERIFIED\') RETURNING *', [crypto.randomUUID(), body.name, body.connectorType, body.endpoint, JSON.stringify(body.credential)]); return send(res, 201, sourceView(row.rows[0]), id);

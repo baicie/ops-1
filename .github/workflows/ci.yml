@@ -137,6 +137,44 @@ jobs:
         run: node --test plugins/zabbix-source/backend/zabbix.test.mjs plugins/zabbix-source/backend/server.test.mjs tests/ci/g13a2_endpoint_attack.test.mjs
       - name: source and collection persistence against real PostgreSQL
         run: node --test plugins/zabbix-source/backend/storage.test.mjs
+  # B2.1: the data plugins' identity boundary, driven over real sockets against
+  # real plugin processes and a real PostgreSQL. The suite asserts the secure
+  # behaviour (an unsigned role header authenticates nothing, a signed context is
+  # bound to one plugin and one user) and asserts zero row side effects on every
+  # refusal. It failed 6 of 7 tests on the pre-fix commit, which is the
+  # reproduction this gate protects against recurring.
+  b2-plugin-identity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave_b2_identity
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave_b2_identity"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      OPSWEAVE_TEST_PLUGIN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave_b2_identity
+      OPSWEAVE_REQUIRE_PLUGIN_DATABASE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # Every OCI image is built from its own backend context, so the identity
+      # module is copied per plugin. The copies must stay byte-identical to the
+      # canonical source or three security-critical implementations drift apart.
+      - name: plugin identity modules match the canonical source
+        run: node scripts/sync-plugin-identity.mjs --check
+      - run: npm ci --prefix plugins/data-catalog/backend
+      - run: npm ci --prefix plugins/data-integration/backend
+      - name: identity attack and regression suite
+        run: node --test tests/ci/b2_plugin_identity_attack.test.mjs
   # The decomposed suites cannot prove a round trip: two implementations of the
   # same digest can both be wrong. This job starts a real Kernel, a real plugin
   # process and a real PostgreSQL, and checks that the bytes the plugin signed
