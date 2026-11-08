@@ -11,7 +11,8 @@
 6. 完成后更新实现状态、风险清单、迁移说明和变更摘要；不得伪造通过率、生产就绪声明。
 
 ## 前端与国际化（MUST）
-- 前端统一 **Vite + React + TypeScript + Tailwind CSS + shadcn/ui**；组件以开源 `shadcn-admin` 模板的既有实现为参考，按 shadcn 的 copy-in 模式进仓库（`apps/platform-web/src/components/ui/`），不引运行时组件包；禁止并列引入 MUI/AntD/Chakra 等第二套 UI 框架。
+- 前端统一 **Vite + React + TypeScript + Tailwind CSS + shadcn/ui**；组件以开源 `shadcn-admin` 模板的既有实现为参考，按 shadcn 的 copy-in 模式进仓库（**G14.2 起为共享包 `packages/ui/src/`**，平台控制台与运维应用共同引用），不引运行时组件包；禁止并列引入 MUI/AntD/Chakra 等第二套 UI 框架。
+- **G14.2 起前端分为两个独立应用**：`apps/platform-console`（平台管理）与 `apps/ops-web`（运维业务），各自独立构建产物与路由，**互不 import**；共享层只能是 `packages/ui`、`packages/platform-client`。新增业务应用不得修改 Platform Console 的静态路由，也不得复制 Kernel。
 - 所有用户可见文案 **必须**走 i18n 消息目录（默认 `en` + `zh-CN`），禁止硬编码；缺键与未使用键必须可被校验发现；时间/数字/货币用 `Intl` 格式化。
 - E2E 选择器 **禁止**依赖本地化后的可见文案（用 role、稳定的 accessible name 或 `data-testid`），否则切换语言即碎。
 - 后端返回给用户看的错误必须带稳定错误码，前端按码取本地化文案；不得直接把服务端英文句子渲染给用户。

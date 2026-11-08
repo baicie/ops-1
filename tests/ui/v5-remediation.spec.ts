@@ -28,7 +28,7 @@ type Row = Record<string, unknown>;
 const records: Row[] = [];
 
 function bundleHash(): string {
-  const dir = path.resolve('../../apps/platform-web/dist/assets');
+  const dir = path.resolve('../../apps/platform-console/dist/assets');
   const files = fs.readdirSync(dir).sort();
   const hash = crypto.createHash('sha256');
   for (const file of files) hash.update(fs.readFileSync(path.join(dir, file)));

@@ -44,7 +44,7 @@ function repoRoot(): string {
 }
 
 const CATALOG = JSON.parse(
-  fs.readFileSync(path.join(repoRoot(), 'apps/platform-web/src/i18n/catalogs', LOCALE + '.json'), 'utf8'),
+  fs.readFileSync(path.join(repoRoot(), 'packages/platform-client/src/i18n/catalogs', LOCALE + '.json'), 'utf8'),
 ) as Record<string, string>;
 
 /** The rendered copy of a key, from the catalog the page itself is built from. */

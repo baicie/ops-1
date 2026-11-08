@@ -29,8 +29,8 @@ type Surface = {
   optional?: boolean;
 };
 
-// Each title is the <h1> rendered by PageHeader (apps/platform-web/src/components/Ui.tsx)
-// from the page modules listed in apps/platform-web/src/App.tsx.
+// Each title is the <h1> rendered by PageHeader (packages/ui/src/Ui.tsx)
+// from the page modules listed in apps/platform-console/src/App.tsx.
 const SURFACES: Surface[] = [
   { name: 'Overview', route: '/', title: 'Overview', screenshot: 'overview.png' },
   { name: 'Nodes', route: '/nodes', title: 'Nodes', screenshot: 'nodes.png' },

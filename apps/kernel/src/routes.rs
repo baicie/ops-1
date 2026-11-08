@@ -384,7 +384,17 @@ pub fn build(state: AppState) -> Router {
     // from this one stack rather than from a second copy of the header logic.
     public
         .merge(protected)
-        .fallback_service(static_site::StaticSite::new(state.config.web_dist.clone()).router())
+        .fallback_service({
+            // G14.2: two applications, two bundles, two shells. The Ops Web is
+            // mounted under /app only when its build is present; without it the
+            // console shell keeps answering the legacy paths, which is what an
+            // installation that has not adopted the split sees.
+            let mut site = static_site::StaticSite::new(state.config.web_dist.clone());
+            if let Some(ops) = state.config.ops_web_dist.clone() {
+                site = site.with_mount(static_site::Mount::new("/app", ops));
+            }
+            site.router()
+        })
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn(request_id))

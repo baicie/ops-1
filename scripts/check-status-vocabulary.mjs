@@ -26,7 +26,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SRC = path.join(ROOT, 'apps/platform-web/src');
+// G14.2: the surface split into two applications plus two packages. Scanning one
+// of them would let a raw wire code reach the UI in the others.
+const SRC_ROOTS = [
+  'apps/platform-console/src',
+  'apps/ops-web/src',
+  'packages/ui/src',
+  'packages/platform-client/src',
+].map((dir) => path.join(ROOT, dir)).filter((dir) => fs.existsSync(dir));
 
 /** Real acronyms. Anything else in caps is a wire code or a design tag wearing prose. */
 const ACRONYMS = new Set(['CPU','GPU','MB','GB','MIB','GIB','API','URL','URI','JSON','YAML','HTTP','HTTPS','UTC','ISO','ID','IP','DNS','TLS','SSE','OCI','RBAC','UI','UX','OK','PDF','CSV','SHA256','CLI','SDK','ZIP','CSRF','SSO']);
@@ -38,17 +45,35 @@ const BLACKLIST = [
   { text: 'connected', why: 'raw socket token; the catalog has a state word', exact: true, lowercaseOnly: true },
 ];
 
-/** Files whose whole job is to render protocol vocabulary. */
+/**
+ * Files whose whole job is to render protocol vocabulary.
+ *
+ * Paths are package-relative now that the surface is two applications and two
+ * packages (G14.2). The list is matched against the path under whichever source
+ * root the file was found in, so it stays readable and cannot silently match a
+ * different file after a move.
+ */
 const ALLOWED_FILES = new Set([
-  'components/status-tone.ts',
-  'components/app/status.tsx',
-  'components/app/status-indicator.tsx',
-  'lib/installation-state.ts',
-  'lib/installation-state.test.ts',
+  'status-tone.ts',
+  'status.tsx',
+  'status-indicator.tsx',
+  'installation-state.ts',
+  'installation-state.test.ts',
 ]);
 
+/** Resolve a package-relative path against the roots, first hit wins. */
+function resolveSource(relPath) {
+  for (const root of SRC_ROOTS) {
+    const candidate = path.join(root, relPath);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 function readCodes() {
-  const text = fs.readFileSync(path.join(SRC, 'components/status-tone.ts'), 'utf8');
+  const statusMap = resolveSource('status-tone.ts');
+  if (!statusMap) fail('status-tone.ts is missing from every source root');
+  const text = fs.readFileSync(statusMap, 'utf8');
   const start = text.indexOf('export const STATUS_MAP');
   const end = text.indexOf('/** Lookup that never throws');
   const block = text.slice(start, end === -1 ? undefined : end);
@@ -69,7 +94,14 @@ function walk(dir, out = []) {
 
 const CODES = readCodes();
 const violations = [];
-const rel = (file) => path.relative(SRC, file).split(path.sep).join('/');
+const rel = (file) => {
+  for (const root of SRC_ROOTS) {
+    if (file.startsWith(root + path.sep)) {
+      return path.relative(root, file).split(path.sep).join('/');
+    }
+  }
+  return path.basename(file);
+};
 const isAllowed = (relPath) => ALLOWED_FILES.has(relPath) || /\.test\.(ts|tsx)$/.test(relPath);
 
 function flag(where, rule, detail) { violations.push({ where, rule, detail }); }
@@ -104,13 +136,15 @@ function checkCopy(where, text) {
 
 for (const locale of ['en', 'zh-CN']) {
   const file = 'i18n/catalogs/' + locale + '.json';
-  const json = JSON.parse(fs.readFileSync(path.join(SRC, file), 'utf8'));
+  const catalog = resolveSource(file);
+  if (!catalog) fail('catalog ' + file + ' is missing from every source root');
+  const json = JSON.parse(fs.readFileSync(catalog, 'utf8'));
   for (const [key, value] of Object.entries(json)) {
     if (typeof value === 'string') checkCopy(file + ' [' + key + ']', value);
   }
 }
 
-for (const file of walk(SRC)) {
+for (const root of SRC_ROOTS) for (const file of walk(root)) {
   if (!/\.tsx$/.test(file)) continue;
   const relPath = rel(file);
   if (isAllowed(relPath)) continue;

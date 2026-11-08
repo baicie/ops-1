@@ -12,7 +12,7 @@ import path from 'node:path';
  *
  * Why this spec stubs the session as well as the data: the committed harness logs in against a
  * live kernel, and this host has none running. Auth is therefore answered here with the
- * documented `access` payload (`apps/platform-web/src/surface.ts`) so the workspace shell
+ * documented `access` payload (`packages/platform-client/src/surface.tsx`) so the workspace shell
  * mounts; the fixtures below then answer only the five routes the Sources page reads. Nothing
  * is faked about the page itself — the component tree, the stylesheet and the browser are real,
  * which is what the measurement is of.

@@ -257,3 +257,64 @@ by the pre-existing unit suite, not by a live two-worker run.
 *production* code by state machine / persistence / API was deliberately left out:
 it would rewrite the modules whose behaviour B2.1 and B2.1a just changed, and
 AGENTS.md forbids doing that inside the same change.
+
+## G14.2 Two independent front-end applications (2026-11-09)
+
+Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md) §2.7 and the
+G14.2 implementation note.
+
+**Defect closed.** `apps/platform-web` was one Vite bundle with two route trees
+(`/admin/*`, `/app/*`) sharing one router. "Two surfaces" could not fail
+independently, deploy independently, or keep one application's domain types out
+of the other.
+
+**Structure now.**
+
+| Path | Contains | Must not import |
+|---|---|---|
+| `packages/ui` | shadcn primitives, icons, `styles.css`, shared presentational components | any application |
+| `packages/platform-client` | HTTP client, contract types, i18n catalogs, access model, `useBusinessWorkspaces` | any application |
+| `apps/platform-console` | platform routes only, `basename="/console"` | `apps/ops-web` |
+| `apps/ops-web` | workspace routes only, `basename="/app"` | `apps/platform-console` |
+
+`apps/platform-web` is deleted, not kept as a third entry: an entry that renders
+both surfaces would restore the property being removed.
+
+**Cross-application type leakage fixed.** `types.ts` was split: platform/pipeline
+types stay in `packages/platform-client/src/contracts.ts`, Incident/Evidence/
+Verdict types move to `apps/ops-web/src/types.ops.ts`. The console cannot import
+an Incident type. `BusinessWorkspace` moved the other way — into Core — because
+membership is a platform concept both applications need.
+
+**Kernel serving.** `StaticSite` gained optional mounts; `/app` resolves inside
+the ops bundle and answers with its own `index.html`. `OPSWEAVE_OPS_WEB_DIST` is
+optional so an installation that has not adopted the split is unchanged.
+
+**Gates moved with the code** (none relaxed): i18n (five source roots, 2046 keys,
+17 unused — unchanged), status vocabulary, UI token ratchet (pass, zero debt),
+CSS reachability (scan roots extended), and a generated `exports` map for both
+packages checked by `scripts/sync-package-exports.mjs --check`.
+
+**Tests actually run (local, 2026-11-09).**
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @opsweave/ui test` | **58/58 PASS** |
+| `pnpm --filter @opsweave/platform-client test` | **113/113 PASS** |
+| `pnpm --filter @opsweave/platform-console test` | **62/62 PASS** |
+| `pnpm --filter @opsweave/ops-web test` | **236/236 PASS** |
+| `pnpm --filter @opsweave/platform-console build` | succeeds |
+| `pnpm --filter @opsweave/ops-web build` | succeeds |
+| **build independence**: break `ops-web`, then build console | console still **exit 0** |
+| `cargo test -p opsweave-kernel` (real PostgreSQL) | **265/265 PASS** (incl. new two-shell test) |
+| `cargo clippy -p opsweave-kernel --all-targets -- -D warnings` | clean |
+| `cargo fmt --all -- --check` | clean |
+| `node scripts/check-i18n.mjs` / `check-status-vocabulary.mjs` / `check-ui-tokens.mjs` / `sync-package-exports.mjs --check` | all pass |
+
+**NOT_RUN.** The Playwright suite was not executed (it needs a live Kernel with
+both bundles served and a browser). Its spec paths were updated to the new
+locations, but "paths updated" is not "tests passed" — status **NOT_RUN**.
+
+**Not done in G14.2.** Separate origins, Application-scoped authorization, and
+the OIDC bridge are G14.3. Nothing yet *enforces* that a caller of the ops
+application holds the ops grant; the existing surface gate is unchanged.

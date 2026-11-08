@@ -21,8 +21,27 @@ import { fileURLToPath } from 'node:url';
 const DEFAULT_LOCALE = 'zh-CN';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SOURCE_ROOT = join(ROOT, 'apps', 'platform-web', 'src');
-const CATALOG_DIR = join(SOURCE_ROOT, 'i18n', 'catalogs');
+
+/**
+ * Every source tree whose literals must come from the catalog (G14.2).
+ *
+ * The gate previously scanned one application. Now that the design system, the
+ * shared client and two applications are separate packages, scanning only one of
+ * them would let a hardcoded string ship in any of the others - the exact hole
+ * rules/06 exists to close, made bigger by splitting the codebase. A new
+ * workspace package must be added here, and the list is deliberately explicit so
+ * forgetting is a visible omission rather than a silent one.
+ */
+const SOURCE_ROOTS = [
+  join(ROOT, 'apps', 'platform-web', 'src'),
+  join(ROOT, 'apps', 'platform-console', 'src'),
+  join(ROOT, 'apps', 'ops-web', 'src'),
+  join(ROOT, 'packages', 'ui', 'src'),
+  join(ROOT, 'packages', 'platform-client', 'src'),
+].filter((dir) => statSync(dir, { throwIfNoEntry: false })?.isDirectory());
+
+/** One catalog set, shared by every application: a key is either translated or it is not. */
+const CATALOG_DIR = join(ROOT, 'packages', 'platform-client', 'src', 'i18n', 'catalogs');
 
 const KEY_SHAPE = /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/;
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx']);
@@ -117,9 +136,11 @@ for (const locale of otherLocales) {
 }
 
 // --- 3/4. usage scan ---------------------------------------------------------
-const sourceFiles = listSourceFiles(SOURCE_ROOT);
+const sourceFiles = SOURCE_ROOTS.flatMap((root) =>
+  listSourceFiles(root).map((file) => ({ file, root })),
+);
 const usedLiterals = new Set();
-for (const file of sourceFiles) {
+for (const { file } of sourceFiles) {
   const text = stripComments(readFileSync(file, 'utf8'));
   for (const literal of stringLiterals(text)) usedLiterals.add(literal);
   for (const match of text.matchAll(DYNAMIC_KEY)) {
@@ -134,7 +155,7 @@ const unusedKeys = [...knownKeys].filter((key) => !usedLiterals.has(key)).sort()
 const summary = [
   `[i18n] default locale: ${DEFAULT_LOCALE}`,
   ...[...catalogs.entries()].map(([locale, catalog]) => `[i18n] catalog ${locale}.json: ${Object.keys(catalog).length} keys`),
-  `[i18n] scanned ${sourceFiles.length} source files under ${relative(ROOT, SOURCE_ROOT)}`,
+  `[i18n] scanned ${sourceFiles.length} source files under ${SOURCE_ROOTS.map((root) => relative(ROOT, root)).join(', ')}`,
 ];
 
 if (unusedKeys.length > 0) {

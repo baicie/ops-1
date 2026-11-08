@@ -1,0 +1,74 @@
+import React, { useState } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '@opsweave/platform-client/auth';
+import { Icon } from '@opsweave/ui/icons';
+import { Button } from '@opsweave/ui/button';
+import { useT } from '@opsweave/platform-client/i18n';
+
+export function LoginPage() {
+  const t = useT();
+  const { user, login, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!loading && user) return <Navigate to="/" replace />;
+  const from = (location.state as { from?: string } | null)?.from || '/';
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await login(email.trim(), password);
+      navigate(from, { replace: true });
+    } catch (cause: any) {
+      // Server text is diagnostic detail; the localized message is the primary copy.
+      setError(cause?.message || t('login.error.failed'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="login-page">
+      <section className="login-brand">
+        <div className="brand brand-large">
+          <span className="brand-mark" aria-hidden="true"><span /><span /><span /></span>
+          <span className="brand-word">{t('app.brand')}</span>
+        </div>
+        <div className="login-copy">
+          <p className="eyebrow">{t('login.eyebrow')}</p>
+          <h1>{t('login.headline')}</h1>
+          <p>{t('login.lead')}</p>
+        </div>
+        {/* The three ticks that used to sit here were design declarations, not facts about
+            this deployment: "kernel recovery never depends on a business plugin" is a property
+            of the architecture, and a sign-in screen is not where it is proven. Deleted rather
+            than reworded. The one caveat that IS about this environment stays. */}
+        <p className="login-footnote">{t('login.footnote')}</p>
+      </section>
+      <section className="login-panel">
+        <form className="login-form" onSubmit={submit}>
+          <div className="login-form-head">
+            <p className="eyebrow">{t('login.form.eyebrow')}</p>
+            <h2>{t('login.form.title')}</h2>
+            <p>{t('login.form.lead')}</p>
+          </div>
+          {error && <div className="inline-error" role="alert"><Icon name="warning" size={16} /> {error}</div>}
+          <label className="field">
+            <span className="field-label">{t('login.field.email')}</span>
+            <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus />
+          </label>
+          <label className="field">
+            <span className="field-label">{t('login.field.password')}</span>
+            <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+          </label>
+          <Button type="submit" data-testid="login-submit" className="w-full" disabled={busy}>{busy ? t('login.submitPending') : t('login.submit')}</Button>
+        </form>
+      </section>
+    </div>
+  );
+}

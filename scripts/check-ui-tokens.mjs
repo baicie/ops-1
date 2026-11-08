@@ -8,7 +8,7 @@
  *   node scripts/check-ui-tokens.mjs --ratchet debt.json  migration: counts may not rise
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, relative, resolve } from 'node:path';
+import { join, dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -36,8 +36,16 @@ if (RATCHET === null) {
   console.error('  node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json');
   process.exit(2);
 }
-const SRC = join(ROOT, 'apps', 'platform-web', 'src');
-const cssPath = join(SRC, 'styles.css');
+// G14.2: the stylesheet and the primitives it styles now live in packages/ui,
+// and the two applications consume them. The token rules must scan all three, or
+// a radius tier added in a new application would pass unchecked.
+const UI_SRC = join(ROOT, 'packages', 'ui', 'src');
+const SRC_ROOTS = [
+  UI_SRC,
+  join(ROOT, 'apps', 'platform-console', 'src'),
+  join(ROOT, 'apps', 'ops-web', 'src'),
+].filter((dir) => existsSync(dir));
+const cssPath = join(UI_SRC, 'styles.css');
 if (!existsSync(cssPath)) {
   console.error('check-ui-tokens: ' + relative(ROOT, cssPath) + ' not found (wrong --root?)');
   process.exit(2);
@@ -88,17 +96,25 @@ for (let i = 0; i < body.length; i += 1) {
   }
 }
 const tsxFiles = [];
-(function walk(dir) {
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) walk(p);
-    else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) tsxFiles.push(p);
+for (const root of SRC_ROOTS) {
+  (function walk(dir) {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) tsxFiles.push(p);
+    }
+  })(root);
+}
+const repoRelative = (file) => {
+  for (const root of SRC_ROOTS) {
+    if (file.startsWith(root + sep)) return relative(root, file);
   }
-})(SRC);
+  return relative(ROOT, file);
+};
 for (const file of tsxFiles) {
   readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
     const hits = line.match(/rounded-(sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g);
-    if (hits) for (const hit of hits) add('radius-tier', relative(SRC, file), i + 1, hit);
+    if (hits) for (const hit of hits) add('radius-tier', repoRelative(file), i + 1, hit);
   });
 }
 
@@ -119,7 +135,7 @@ for (const file of tsxFiles) {
   readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
     if (GLYPH_HEIGHTS.some((g) => line.includes(g + ' '))) return;
     const hits = line.match(/\bh-(6|7|8|9|10|11|12)\b/g);
-    if (hits) for (const hit of hits) add('control-tier', relative(SRC, file), i + 1, hit + ' on a control box');
+    if (hits) for (const hit of hits) add('control-tier', repoRelative(file), i + 1, hit + ' on a control box');
   });
 }
 
@@ -148,14 +164,14 @@ for (let i = 0; i < body.length; i += 1) {
 }
 
 // R4 one page header ---------------------------------------------------------
-const appHeader = join(SRC, 'components', 'app', 'page-header.tsx');
+const appHeader = join(UI_SRC, 'page-header.tsx');
 for (const file of tsxFiles) {
   const text = readFileSync(file, 'utf8');
   if (/export function PageHeader\b/.test(text) && file !== appHeader) {
-    add('one-header', relative(SRC, file), 0, 'second PageHeader implementation');
+    add('one-header', repoRelative(file), 0, 'second PageHeader implementation');
   }
   if (/import \{[^}]*\bPageHeader\b[^}]*\} from '[^']*components\/Ui'/.test(text)) {
-    add('one-header', relative(SRC, file), 0, 'imports PageHeader from components/Ui');
+    add('one-header', repoRelative(file), 0, 'imports PageHeader from components/Ui');
   }
 }
 
@@ -168,7 +184,7 @@ for (let i = 0; i < body.length; i += 1) {
 
 // R6 formatters speak the locale, not English -------------------------------
 const BT = String.fromCharCode(96);
-const formatPath = join(SRC, 'format.ts');
+const formatPath = join(ROOT, 'packages', 'platform-client', 'src', 'format.ts');
 if (existsSync(formatPath)) {
   readFileSync(formatPath, 'utf8').split('\n').forEach((line, i) => {
     if (!/\breturn\b/.test(line)) return;

@@ -1,0 +1,45 @@
+{
+  "name": "@opsweave/platform-client",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Shared client for OpsWeave Platform Core: HTTP client, contract types, i18n. Contains no application domain model.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.tsx",
+    "./i18n/catalogs/*": "./src/i18n/catalogs/*",
+    "./age": "./src/age.ts",
+    "./api": "./src/api.ts",
+    "./audit-scope": "./src/audit-scope.ts",
+    "./auth-generation": "./src/auth-generation.ts",
+    "./auth": "./src/auth.tsx",
+    "./contracts": "./src/contracts.ts",
+    "./deploy-readback": "./src/deploy-readback.ts",
+    "./facts-ledger": "./src/facts-ledger.ts",
+    "./format": "./src/format.ts",
+    "./hooks": "./src/hooks.ts",
+    "./identity": "./src/identity.ts",
+    "./installation-state": "./src/installation-state.ts",
+    "./kernel-messages": "./src/kernel-messages.ts",
+    "./placement-reason": "./src/placement-reason.ts",
+    "./platform-status": "./src/platform-status.ts",
+    "./surface": "./src/surface.tsx",
+    "./verified-writes": "./src/verified-writes.ts",
+    "./verify-after-write": "./src/verify-after-write.ts",
+    "./workspaces": "./src/workspaces.ts"
+  },
+  "dependencies": {
+    "@opsweave/ui": "workspace:*",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.5",
+    "jsdom": "^26.1.0"
+  },
+  "scripts": {
+    "test": "vitest run src",
+    "typecheck": "tsc --noEmit"
+  }
+}

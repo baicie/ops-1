@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "types": [
+      "vite/client"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@opsweave/platform-client/i18n": [
+        "../../packages/platform-client/src/i18n/index.tsx"
+      ],
+      "@opsweave/platform-client/*": [
+        "../../packages/platform-client/src/*"
+      ],
+      "@opsweave/platform-client": [
+        "../../packages/platform-client/src/index.ts"
+      ],
+      "@opsweave/ui/*": [
+        "../../packages/ui/src/*"
+      ],
+      "@opsweave/ui": [
+        "../../packages/ui/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
+}

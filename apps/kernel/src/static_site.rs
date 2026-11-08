@@ -38,6 +38,7 @@ const REVALIDATE_CACHE: &str = "no-cache";
 /// `/nodes`, ...) are listed because the client still redirects them.
 const CLIENT_ROUTE_PREFIXES: &[&str] = &[
     "/admin",
+    "/console",
     "/app",
     "/login",
     "/403",
@@ -55,17 +56,65 @@ const CLIENT_ROUTE_PREFIXES: &[&str] = &[
 ];
 
 /// The web bundle on disk: `index.html` plus whatever the build emitted.
+///
+/// G14.2: there is more than one bundle now. The Platform Console and the Ops
+/// Web are separate applications with separate builds, so a request under
+/// `/console` must be answered with the console's shell and a request under
+/// `/app` with the ops shell. Serving one shell for both would mount the wrong
+/// router and the other application would 404 on its own routes.
+///
+/// `extra` holds the additional mounts; the primary root keeps its existing
+/// behaviour so an installation with one bundle is unchanged.
 #[derive(Clone)]
 pub struct StaticSite {
     root: PathBuf,
     shell: PathBuf,
+    extra: Vec<Mount>,
+}
+
+/// One additional application bundle and the path prefix it owns.
+#[derive(Clone)]
+pub struct Mount {
+    prefix: String,
+    root: PathBuf,
+    shell: PathBuf,
+}
+
+impl Mount {
+    pub fn new(prefix: impl Into<String>, root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
+        let shell = root.join("index.html");
+        Self {
+            prefix: prefix.into(),
+            root,
+            shell,
+        }
+    }
+
+    fn owns(&self, path: &str) -> bool {
+        let trimmed = path.trim_end_matches('/');
+        trimmed == self.prefix
+            || trimmed
+                .strip_prefix(&self.prefix)
+                .is_some_and(|rest| rest.starts_with('/'))
+    }
 }
 
 impl StaticSite {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
         let shell = root.join("index.html");
-        Self { root, shell }
+        Self {
+            root,
+            shell,
+            extra: Vec::new(),
+        }
+    }
+
+    /// Mount another application bundle under `prefix`.
+    pub fn with_mount(mut self, mount: Mount) -> Self {
+        self.extra.push(mount);
+        self
     }
 
     /// Serve the bundle: `ServeDir` for real files, this module for the shell.
@@ -78,6 +127,16 @@ impl StaticSite {
 
     /// What `path` addresses, without serving it.
     async fn resolve(&self, path: &str) -> Target {
+        // A path an additional application owns is resolved inside THAT bundle,
+        // never against the primary one: the two have different `index.html`
+        // files, and picking the wrong one mounts the wrong router.
+        if let Some(mount) = self.extra.iter().find(|mount| mount.owns(path)) {
+            return resolve_in(&mount.root, &mount.shell, path, true).await;
+        }
+        self.resolve_primary(path).await
+    }
+
+    async fn resolve_primary(&self, path: &str) -> Target {
         let Some(relative) = relative_path(path) else {
             return Target::Missing;
         };
@@ -107,9 +166,40 @@ impl StaticSite {
     }
 }
 
+/// Resolve a path inside one bundle root.
+///
+/// `always_shell` is for a mounted application: any path it owns that is not a
+/// real file is one of ITS client routes, because the mount owns the whole
+/// prefix. Without it, a console route added after this code was written would
+/// 404 until someone extended the closed prefix table.
+async fn resolve_in(root: &Path, shell: &Path, path: &str, always_shell: bool) -> Target {
+    let Some(relative) = relative_path(path) else {
+        return Target::Missing;
+    };
+    if relative.as_os_str().is_empty() || relative == Path::new("index.html") {
+        return if is_file(shell).await {
+            Target::ShellAt(shell.to_path_buf())
+        } else {
+            Target::Missing
+        };
+    }
+    let candidate = root.join(&relative);
+    if is_file(&candidate).await {
+        Target::File(candidate)
+    } else if always_shell && is_file(shell).await {
+        Target::ShellAt(shell.to_path_buf())
+    } else if is_client_route(path) {
+        Target::Shell
+    } else {
+        Target::Missing
+    }
+}
+
 enum Target {
     /// `index.html`, for `/`, `/index.html` and every client route.
     Shell,
+    /// A specific bundle's shell, when more than one bundle is mounted.
+    ShellAt(PathBuf),
     /// A file that exists inside the bundle root.
     File(PathBuf),
     /// Nothing serves this path; `ServeDir` answers `404`.
@@ -146,6 +236,7 @@ async fn serve(State(site): State<StaticSite>, request: Request, next: Next) -> 
     let (file, shell) = match site.resolve(&path).await {
         Target::Missing => return next.run(request).await,
         Target::Shell => (site.shell.clone(), true),
+        Target::ShellAt(shell) => (shell, true),
         Target::File(file) => (file, false),
     };
 
@@ -277,6 +368,7 @@ mod tests {
 
     struct Fixture {
         root: PathBuf,
+        ops_root: Option<PathBuf>,
     }
 
     impl Fixture {
@@ -298,19 +390,44 @@ mod tests {
             .unwrap();
             std::fs::write(root.join("logo.png"), vec![0x89u8; 1500]).unwrap();
             std::fs::write(root.join("fonts/inter.woff2"), vec![0x77u8; 1500]).unwrap();
-            Self { root }
+            Self {
+                root,
+                ops_root: None,
+            }
+        }
+
+        /// A second bundle whose shell is distinguishable from the first, which
+        /// is the whole point of the assertion below.
+        fn with_second_bundle(mut self, name: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("opsweave-static-{}-{name}-ops", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(root.join("assets")).unwrap();
+            std::fs::write(
+                root.join("index.html"),
+                "<!doctype html><html><body><div id=\"root\"></div><script type=\"module\" src=\"/assets/ops-entry.js\"></script></body></html>",
+            )
+            .unwrap();
+            std::fs::write(root.join("assets/ops-entry.js"), BUNDLE_LINE).unwrap();
+            self.ops_root = Some(root);
+            self
         }
 
         fn app(&self) -> Router {
-            StaticSite::new(&self.root)
-                .router()
-                .layer(compression_layer())
+            let mut site = StaticSite::new(&self.root);
+            if let Some(ops) = self.ops_root.clone() {
+                site = site.with_mount(Mount::new("/app", ops));
+            }
+            site.router().layer(compression_layer())
         }
     }
 
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
+            if let Some(ops) = &self.ops_root {
+                let _ = std::fs::remove_dir_all(ops);
+            }
         }
     }
 
@@ -332,6 +449,45 @@ mod tests {
 
     async fn get(app: &Router, path: &str) -> Response {
         request(app, Method::GET, path, &[]).await
+    }
+
+    /// G14.2: two applications, two shells. A `/app` route must be answered with
+    /// the ops bundle, not the console's, or the browser mounts the wrong router
+    /// and every ops route 404s inside a shell that loaded successfully.
+    #[tokio::test]
+    async fn a_mounted_application_serves_its_own_shell_not_the_primary_one() {
+        let fixture = Fixture::new("two-bundles").with_second_bundle("two-bundles");
+        let app = fixture.app();
+
+        let console = read_body(get(&app, "/admin/overview").await).await;
+        let console_html = String::from_utf8_lossy(&console);
+        assert!(
+            console_html.contains("/assets/index-abc123.js"),
+            "the primary bundle answers the platform console, got: {console_html}"
+        );
+
+        let ops = read_body(get(&app, "/app/incidents").await).await;
+        let ops_html = String::from_utf8_lossy(&ops);
+        assert!(
+            ops_html.contains("/assets/ops-entry.js"),
+            "an /app route must be answered by the ops bundle's shell, got: {ops_html}"
+        );
+        assert!(
+            !ops_html.contains("/assets/index-abc123.js"),
+            "the ops shell must not be the console's shell"
+        );
+
+        // A deep route the mount owns but the closed prefix table never listed
+        // still reaches the ops shell: the mount owns the whole prefix.
+        assert_eq!(
+            get(&app, "/app/incidents/abc").await.status(),
+            StatusCode::OK
+        );
+        // And the primary bundle's own assets still resolve.
+        assert_eq!(
+            get(&app, "/assets/index-abc123.js").await.status(),
+            StatusCode::OK
+        );
     }
 
     async fn read_body(response: Response) -> Vec<u8> {

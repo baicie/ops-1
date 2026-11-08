@@ -68,7 +68,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @opsweave/platform-web typecheck
+      # G14.2: two applications and two shared packages. Each is typechecked and
+      # built on its own, so one application cannot mask the other's failure.
+      - run: pnpm --filter @opsweave/platform-client typecheck
+      - run: pnpm --filter @opsweave/ui typecheck
+      - run: pnpm --filter @opsweave/platform-console typecheck
+      - run: pnpm --filter @opsweave/ops-web typecheck
       - run: pnpm --filter @opsweave/hello-web typecheck
       - run: pnpm --filter @opsweave/data-catalog-web typecheck
       - run: pnpm --filter @opsweave/data-integration-web typecheck
@@ -86,13 +91,14 @@ jobs:
       # the route manifest deliberately has no such axis.
       - run: node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/audit
       - run: node scripts/check-ui-metrics.mjs --matrix docs/design/ui-visual-v3/spec/matrix-manifest.json artifacts/ui/observability/metrics
-      - run: pnpm --filter @opsweave/platform-web build
+      - run: pnpm --filter @opsweave/platform-console build
+      - run: pnpm --filter @opsweave/ops-web build
       - run: pnpm --filter @opsweave/hello-web build
       - run: pnpm --filter @opsweave/data-catalog-web build
       - run: pnpm --filter @opsweave/data-integration-web build
       - run: node --check plugins/data-catalog/backend/server.mjs
       - run: node --check plugins/data-integration/backend/server.mjs
-  # The vitest suite of apps/platform-web (src/**/*.test.ts) used to run nowhere: the web job
+  # The vitest suites used to run nowhere: the web job
   # above only typechecks and builds, so a green pipeline never proved a unit test passed. It is
   # its own job so a red unit run is reported as such instead of hiding behind a build failure.
   web-unit:
@@ -103,7 +109,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @opsweave/platform-web test
+      - run: pnpm --filter @opsweave/platform-client test
+      - run: pnpm --filter @opsweave/ui test
+      - run: pnpm --filter @opsweave/platform-console test
+      - run: pnpm --filter @opsweave/ops-web test
   # The Zabbix plugin had no CI at all: package.json pointed at a server.test.mjs that did not
   # exist, and node --check does not resolve imports, so the server could not be proven to start.
   # This job binds a real socket and runs a real PostgreSQL, which is the only evidence that the
@@ -239,9 +248,9 @@ jobs:
           # The browser must come from the same tree as the Kernel, Node and
           # plugin. The old job pinned #39's SHA, so a green run said nothing
           # about the UI merged into main.
-          pnpm --filter @opsweave/platform-web build
+          pnpm --filter @opsweave/platform-console build
           rm -rf /tmp/g13a1-ui-dist
-          cp -R apps/platform-web/dist /tmp/g13a1-ui-dist
+          cp -R apps/platform-console/dist /tmp/g13a1-ui-dist
       - name: local registry
         run: |
           set -euo pipefail
@@ -288,7 +297,8 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       # The browser must come from this commit: the queue panel is what the spec measures.
-      - run: pnpm --filter @opsweave/platform-web build
+      - run: pnpm --filter @opsweave/platform-console build
+      - run: pnpm --filter @opsweave/ops-web build
       - run: cargo build --locked -p opsweave-kernel
       - name: start the kernel on the throw-away database
         run: |
@@ -298,7 +308,7 @@ jobs:
           export OPSWEAVE_PUBLIC_URL="$OPSWEAVE_URL"
           export DATABASE_URL="$OPSWEAVE_DATABASE_URL"
           export OPSWEAVE_DATA_DIR="$PWD/data-ci/g13b14"
-          export OPSWEAVE_WEB_DIST="$PWD/apps/platform-web/dist"
+          export OPSWEAVE_WEB_DIST="$PWD/apps/platform-console/dist"
           export OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$OPSWEAVE_ADMIN_EMAIL"
           export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$OPSWEAVE_ADMIN_PASSWORD"
           export OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin'

@@ -4,9 +4,9 @@
   "version": "0.0.1",
   "packageManager": "pnpm@10.34.3",
   "scripts": {
-    "build:web": "pnpm --filter @opsweave/platform-web build",
+    "build:web": "pnpm --filter @opsweave/platform-console build && pnpm --filter @opsweave/ops-web build",
     "build:hello-web": "pnpm --filter @opsweave/hello-web build",
-    "dev:web": "pnpm --filter @opsweave/platform-web dev",
+    "dev:web": "pnpm --filter @opsweave/platform-console dev",
     "typecheck": "pnpm -r typecheck",
     "contracts": "python3 tests/contract/validate_contracts.py",
     "ui:test": "pnpm --filter @opsweave/ui-tests test"

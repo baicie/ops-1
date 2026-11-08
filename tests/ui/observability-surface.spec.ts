@@ -31,7 +31,7 @@ const LIVE = process.env.OBS_DATA === 'live';
 /** Copy assertions follow the catalog the page renders, not a duplicated English sentence. */
 const EN = JSON.parse(
   fs.readFileSync(
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../apps/platform-web/src/i18n/catalogs/en.json'),
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../packages/platform-client/src/i18n/catalogs/en.json'),
     'utf8',
   ),
 ) as Record<string, string>;
