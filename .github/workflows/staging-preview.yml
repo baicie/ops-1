@@ -604,7 +604,7 @@ jobs:
           # Never let an undefined output read as a measurement the record job can trust.
           printf 'summary=%s\n' '{"available":false,"reason":"probe-did-not-complete"}' >> "${GITHUB_OUTPUT:-/dev/null}"
           python3 - <<'PY'
-          import json, os, statistics, subprocess, time
+          import json, os, re, statistics, subprocess, time
 
           OUT = os.environ.get("RUNNER_NETWORK_OUT", "artifacts/staging-preview/runner-network.json")
           PATHS = ("/livez", "/readyz", "/api/v1/version", "/")
@@ -665,12 +665,12 @@ jobs:
                   return None
 
 
-          def probe_once(url, scheme):
+          def probe_once(url, scheme, max_time=20):
               command = ["curl", "-sS", "-o", os.devnull, "--connect-timeout", "10",
-                         "--max-time", "20", "-w", CURL_TEMPLATE, url]
+                         "--max-time", str(max_time), "-w", CURL_TEMPLATE, url]
               started = time.time()
               try:
-                  completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+                  completed = subprocess.run(command, capture_output=True, text=True, timeout=max_time + 10)
               except (OSError, subprocess.TimeoutExpired) as exc:
                   return {"ok": False, "curl_exit": None,
                           "error": "%s: %s" % (type(exc).__name__, exc),
@@ -773,6 +773,59 @@ jobs:
               return scheme, probes, overall
 
 
+          def probe_entry_bundle(base, scheme):
+              """The SPA entry bundle is the largest object the browser must fetch.
+
+              The small-path probe says the host answers /livez and /version; it does
+              NOT say a 1.3 MB hashed asset can be delivered. On run 42458783764 the
+              bundle took 121 s and the CSS 40 s while every small path was green, which
+              exhausted the table-audit budget. Measure the real object, twice, and
+              record it separately: a slow asset is a staging-host fact, not a reason to
+              raise a Playwright timeout.
+              """
+              asset = {"path": None, "url": None, "attempts": [], "summary": None,
+                       "overall": "not-measured"}
+              try:
+                  page = subprocess.run(
+                      ["curl", "-sS", "--connect-timeout", "10", "--max-time", "20", base + "/"],
+                      capture_output=True, text=True, timeout=30,
+                  )
+                  match = re.search(r'src="(/assets/[^"]+\.js)"', page.stdout or "")
+                  if not match:
+                      asset["reason"] = "no /assets/*.js entry in the HTML"
+                      return asset
+                  asset["path"] = match.group(1)
+                  asset["url"] = base + asset["path"]
+                  for index in range(1, 3):
+                      record = probe_once(asset["url"], scheme, max_time=120)
+                      record["attempt"] = index
+                      asset["attempts"].append(record)
+                  successes = [record for record in asset["attempts"] if record["ok"]]
+                  failures = [record for record in asset["attempts"] if not record["ok"]]
+                  totals = [record.get("total_ms") for record in successes]
+                  asset["summary"] = {
+                      "attempts": len(asset["attempts"]),
+                      "successes": len(successes),
+                      "failures": len(failures),
+                      "ttfb_ms": stats([record.get("ttfb_ms") for record in successes]),
+                      "total_ms": stats(totals),
+                      "size_download": stats([record.get("size_download") for record in successes]),
+                      "errors": [record["error"] for record in failures if record.get("error")],
+                  }
+                  median = (asset["summary"]["total_ms"] or {}).get("median")
+                  if failures:
+                      asset["overall"] = "degraded"
+                  elif isinstance(median, (int, float)) and median > 15_000:
+                      asset["overall"] = "slow"
+                  elif successes:
+                      asset["overall"] = "ok"
+                  else:
+                      asset["overall"] = "not-measured"
+              except Exception as exc:  # the probe is evidence, never a gate
+                  asset["reason"] = "%s: %s" % (type(exc).__name__, exc)
+              return asset
+
+
           def write_payload(payload):
               directory = os.path.dirname(OUT)
               if directory:
@@ -800,6 +853,7 @@ jobs:
                   print("::warning::runner network probe did not run: STAGING_BASE_URL is empty")
                   return
               scheme, probes, overall = build(base)
+              asset = probe_entry_bundle(base, scheme)
               payload = {
                   "schema": "opsweave.runner-network/1",
                   "available": True,
@@ -815,6 +869,7 @@ jobs:
                                      "time_starttransfer; total_ms = time_total. ttfb_ms and total_ms are "
                                      "cumulative from the start of the request, as curl defines them."),
                   "overall": overall,
+                  "asset": asset,
                   "paths": probes,
               }
               write_payload(payload)
@@ -833,6 +888,12 @@ jobs:
                   "curl_version": payload["curl_version"],
                   "runner": payload["runner"],
                   "overall": overall,
+                  "asset": {
+                      "path": asset.get("path"),
+                      "overall": asset.get("overall"),
+                      "summary": asset.get("summary"),
+                      "reason": asset.get("reason"),
+                  },
                   "paths": [{"path": probe["path"], **{key: probe["summary"][key] for key in
                              ("successes", "failures", "http_codes", "dns_ms", "tcp_connect_ms",
                               "tls_ms", "ttfb_ms", "total_ms", "errors")}}
@@ -840,6 +901,10 @@ jobs:
               }
               emit_summary(summary)
               print(json.dumps(summary, indent=2))
+              if asset.get("overall") in ("slow", "degraded"):
+                  print("::warning::runner network probe: entry asset %s is %s (%s)"
+                        % (asset.get("path"), asset.get("overall"),
+                           json.dumps(asset.get("summary"))))
               for probe in probes:
                   failed = probe["summary"]["failures"]
                   if failed:
