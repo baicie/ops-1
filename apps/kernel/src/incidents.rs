@@ -702,7 +702,13 @@ pub(crate) async fn append_automation_evidence(
     workspace_id: Uuid,
     incident_id: Uuid,
     evidence: serde_json::Value,
+    job_id: Uuid,
 ) -> AppResult<Uuid> {
+    // The receipt first: a retry after the Evidence committed but the Job did
+    // not must return the committed effect, not collect or write again.
+    if let Some(evidence_id) = committed_automation_evidence(&state.db, job_id).await? {
+        return Ok(evidence_id);
+    }
     let row: Option<(Uuid, String)> =
         sqlx::query_as("SELECT workspace_id, status FROM kernel.incidents WHERE incident_id=$1")
             .bind(incident_id)
@@ -746,13 +752,31 @@ pub(crate) async fn append_automation_evidence(
         &state.db,
         &state.config.evidence_adapters,
         caller,
-        "AUTOMATION",
-        principal_id,
+        EvidenceActor {
+            actor_type: "AUTOMATION",
+            actor_id: principal_id,
+            automation_job_id: Some(job_id),
+        },
         incident_id,
         payload,
     )
     .await?;
     Ok(view.evidence_id)
+}
+
+/// The Evidence a job already committed, if any. This is the recovery read:
+/// the evidence row carries the job identity, so "committed" and "receipt
+/// written" are the same fact (ADR-G13-B1.6 §3.1).
+pub(crate) async fn committed_automation_evidence(
+    db: &PgPool,
+    job_id: Uuid,
+) -> AppResult<Option<Uuid>> {
+    Ok(sqlx::query_scalar(
+        "SELECT evidence_id FROM kernel.incident_evidence WHERE automation_job_id=$1",
+    )
+    .bind(job_id)
+    .fetch_optional(db)
+    .await?)
 }
 
 /// Add the automation Event to the incident's existing audit timeline. This is
@@ -1241,8 +1265,23 @@ async fn insert_evidence(
     incident_id: Uuid,
     payload: CreateEvidenceRequest,
 ) -> AppResult<(bool, EvidenceView)> {
-    let actor_id = caller.user_id;
-    insert_evidence_as(db, adapters, caller, "USER", actor_id, incident_id, payload).await
+    let actor = EvidenceActor {
+        actor_type: "USER",
+        actor_id: caller.user_id,
+        automation_job_id: None,
+    };
+    insert_evidence_as(db, adapters, caller, actor, incident_id, payload).await
+}
+
+/// Who is writing this row, and (for automation) which job's effect it is.
+///
+/// Grouped so the writer's argument list stays about the write; the job id is
+/// the effect identity from ADR-G13-B1.6, never chosen by evidence content.
+#[derive(Debug, Clone, Copy)]
+struct EvidenceActor {
+    actor_type: &'static str,
+    actor_id: Uuid,
+    automation_job_id: Option<Uuid>,
 }
 
 /// The shared writer behind the user endpoint and the automation path. The
@@ -1252,11 +1291,11 @@ async fn insert_evidence_as(
     db: &PgPool,
     adapters: &HashMap<String, String>,
     caller: DataScope,
-    actor_type: &'static str,
-    actor_id: Uuid,
+    actor: EvidenceActor,
     incident_id: Uuid,
     payload: CreateEvidenceRequest,
 ) -> AppResult<(bool, EvidenceView)> {
+    let automation_job_id = actor.automation_job_id;
     let kind = closed_set(&payload.kind, EVIDENCE_KINDS, "kind")?;
     let source = bounded(&payload.source, "source", 2, 200)?;
     check_collected_at(payload.collected_at)?;
@@ -1342,48 +1381,100 @@ async fn insert_evidence_as(
             ),
         ));
     }
-    let inserted: Option<Uuid> = sqlx::query_scalar(
-        r#"
-        INSERT INTO kernel.incident_evidence
-          (evidence_id,incident_id,kind,source,collected_at,content_ref,claimed_trust,
-           verified_trust,verification_method,verified_at,verifier_identity,submitted_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        ON CONFLICT DO NOTHING
-        RETURNING evidence_id
-        "#,
-    )
-    .bind(evidence_id)
-    .bind(incident_id)
-    .bind(&kind)
-    .bind(&source)
-    .bind(payload.collected_at)
-    .bind(&content_ref)
-    .bind(&trust.claimed)
-    .bind(&trust.verified)
-    .bind(trust.method)
-    .bind(trust.verified_at)
-    .bind(trust.verifier_identity.as_deref())
-    .bind(caller.user_id)
-    .fetch_optional(&mut *tx)
-    .await?;
+    // Two conflict targets, one meaning each (ADR-G13-B1.6 §3.2):
+    //   * a job-scoped row is unique by its job; a second attempt of the same job
+    //     loses to the first and reads it back, while a DIFFERENT job with the
+    //     same content is a separate row (its own effect);
+    //   * a row without a job keeps the historical tuple uniqueness.
+    let inserted: Option<Uuid> = if automation_job_id.is_some() {
+        sqlx::query_scalar(
+            r#"
+            INSERT INTO kernel.incident_evidence
+              (evidence_id,incident_id,kind,source,collected_at,content_ref,claimed_trust,
+               verified_trust,verification_method,verified_at,verifier_identity,submitted_by,
+               automation_job_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+            ON CONFLICT (automation_job_id) WHERE automation_job_id IS NOT NULL DO NOTHING
+            RETURNING evidence_id
+            "#,
+        )
+        .bind(evidence_id)
+        .bind(incident_id)
+        .bind(&kind)
+        .bind(&source)
+        .bind(payload.collected_at)
+        .bind(&content_ref)
+        .bind(&trust.claimed)
+        .bind(&trust.verified)
+        .bind(trust.method)
+        .bind(trust.verified_at)
+        .bind(trust.verifier_identity.as_deref())
+        .bind(caller.user_id)
+        .bind(automation_job_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    } else {
+        sqlx::query_scalar(
+            r#"
+            INSERT INTO kernel.incident_evidence
+              (evidence_id,incident_id,kind,source,collected_at,content_ref,claimed_trust,
+               verified_trust,verification_method,verified_at,verifier_identity,submitted_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            ON CONFLICT DO NOTHING
+            RETURNING evidence_id
+            "#,
+        )
+        .bind(evidence_id)
+        .bind(incident_id)
+        .bind(&kind)
+        .bind(&source)
+        .bind(payload.collected_at)
+        .bind(&content_ref)
+        .bind(&trust.claimed)
+        .bind(&trust.verified)
+        .bind(trust.method)
+        .bind(trust.verified_at)
+        .bind(trust.verifier_identity.as_deref())
+        .bind(caller.user_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    };
 
     let Some(stored_id) = inserted else {
         tx.rollback().await?;
         // A replay answers with the row that already exists - unchanged. That is
         // a security property, not only idempotency: presenting a valid
         // attestation for an already-stored UNVERIFIED row returns the stored
-        // row, so a replay can never upgrade a settled trust value.
-        let existing = sqlx::query_as::<_, EvidenceView>(&format!(
-            "{EVIDENCE_SELECT} WHERE e.incident_id=$1 AND e.kind=$2 AND e.source=$3
-             AND e.content_ref=$4"
-        ))
-        .bind(incident_id)
-        .bind(&kind)
-        .bind(&source)
-        .bind(&content_ref)
-        .fetch_optional(db)
-        .await?
-        .ok_or_else(|| {
+        // row, so a replay can never upgrade a settled trust value. For a job,
+        // the identity is the job: the retry gets the effect that already
+        // committed, whatever bytes this attempt collected.
+        let existing = match automation_job_id {
+            Some(job_id) => {
+                let evidence_id: Option<Uuid> = sqlx::query_scalar(
+                    "SELECT evidence_id FROM kernel.incident_evidence WHERE automation_job_id=$1",
+                )
+                .bind(job_id)
+                .fetch_optional(db)
+                .await?;
+                match evidence_id {
+                    Some(id) => Some(query_evidence_row(db, id).await?),
+                    None => None,
+                }
+            }
+            None => {
+                sqlx::query_as::<_, EvidenceView>(&format!(
+                    "{EVIDENCE_SELECT} WHERE e.incident_id=$1 AND e.kind=$2 AND e.source=$3
+                 AND e.content_ref=$4"
+                ))
+                .bind(incident_id)
+                .bind(&kind)
+                .bind(&source)
+                .bind(&content_ref)
+                .fetch_optional(db)
+                .await?
+            }
+        };
+        let existing = existing.ok_or_else(|| {
             AppError::conflict(
                 "INCIDENT_WRITE_CONFLICT",
                 "a concurrent write changed this evidence set; retry the request",
@@ -1429,8 +1520,8 @@ async fn insert_evidence_as(
     audit_in_tx_as(
         &mut tx,
         "INCIDENT_EVIDENCE_ADDED",
-        actor_type,
-        actor_id,
+        actor.actor_type,
+        actor.actor_id,
         incident_id,
         "ADD_EVIDENCE",
         serde_json::json!({
@@ -7467,5 +7558,639 @@ mod tests {
 
         cleanup(&pool, &[operator]).await;
         drop_workspaces(&pool, &[workspace]).await;
+    }
+}
+
+/// G13-B1.6: the job-scoped Evidence effect (ADR-G13-B1.6).
+///
+/// These tests drive the real evidence writer against real PostgreSQL. The
+/// crash matrix itself is simulated by the states a crash leaves behind - an
+/// Evidence row bound to a job whose terminal write never happened - because a
+/// process kill adds no database state beyond that.
+#[cfg(test)]
+mod effect_tests {
+    use super::*;
+    use crate::scope::{self, DataScope, RowRule};
+    use sqlx::postgres::PgConnectOptions;
+    use sqlx::PgPool;
+
+    const REQUIRE_DATABASE_ENV: &str = "OPSWEAVE_REQUIRE_TEST_DATABASE";
+    const ADAPTER: &str = "effect-adapter";
+    const SECRET: &str = "effect-secret";
+
+    async fn test_pool() -> Option<PgPool> {
+        let url = match std::env::var("OPSWEAVE_TEST_DATABASE_URL") {
+            Ok(url) => url,
+            Err(std::env::VarError::NotPresent) => {
+                if std::env::var(REQUIRE_DATABASE_ENV).ok().as_deref() == Some("1") {
+                    panic!("{REQUIRE_DATABASE_ENV} is set but OPSWEAVE_TEST_DATABASE_URL is unset");
+                }
+                return None;
+            }
+            Err(std::env::VarError::NotUnicode(_)) => {
+                panic!("OPSWEAVE_TEST_DATABASE_URL is not valid UTF-8")
+            }
+        };
+        let options: PgConnectOptions = url.parse().unwrap();
+        let pool = PgPool::connect_with(options).await.unwrap();
+        crate::db::migrate(&pool).await.unwrap();
+        Some(pool)
+    }
+
+    async fn state(pool: PgPool) -> AppState {
+        let mut config = crate::config::Config::from_env();
+        config
+            .evidence_adapters
+            .insert(ADAPTER.to_string(), SECRET.to_string());
+        AppState::new(config, pool, b"effect-test-cursor".to_vec()).unwrap()
+    }
+
+    struct Fixture {
+        workspace: Uuid,
+        source: Uuid,
+        incident: Uuid,
+        principal: Uuid,
+        events: Vec<Uuid>,
+        jobs: Vec<Uuid>,
+    }
+
+    async fn seed(pool: &PgPool, concluded: bool) -> Fixture {
+        let workspace = scope::legacy_workspace();
+        let source = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.telemetry_sources
+                 (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state)
+             VALUES ($1,$2,'zabbix-source','secretref:zabbix/effect','https://zabbix.example/api_jsonrpc.php','VERIFY','READY')",
+        )
+        .bind(source)
+        .bind(workspace)
+        .execute(pool)
+        .await
+        .unwrap();
+        let incident = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.incidents
+               (incident_id,title,severity,status,source,native_id,started_at,owner,workspace_id,origin)
+             VALUES ($1,$2,'MAJOR','OPEN','ZABBIX',$3,now(),$4,$5,'AUTOMATION')",
+        )
+        .bind(incident)
+        .bind(format!("effect incident {incident}"))
+        .bind(format!("effect-native-{incident}"))
+        .bind(Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap())
+        .bind(workspace)
+        .execute(pool)
+        .await
+        .unwrap();
+        if concluded {
+            // The shape a human verdict leaves while an automation attempt is in
+            // flight. A fixture sets it directly because this test is about the
+            // automation's recovery, not about how a verdict is recorded.
+            sqlx::query(
+                "INSERT INTO kernel.incident_verdicts
+                   (incident_id,verdict,rationale,decided_by)
+                 VALUES ($1,'CONFIRMED','a person concluded this while the worker was running',$2)",
+            )
+            .bind(incident)
+            .bind(Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap())
+            .execute(pool)
+            .await
+            .unwrap();
+            sqlx::query("UPDATE kernel.incidents SET status='CONCLUDED' WHERE incident_id=$1")
+                .bind(incident)
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+        let principal = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.automation_principals
+                 (principal_id,plugin_id,instance_id,node_id,node_generation,workspace_id,source_id,
+                  allowed_ops,event_id,incident_id,budget,issued_at,expires_at,jti)
+             VALUES ($1,'zabbix-source',$2,$3,1,$4,$5,$6,NULL,NULL,'{}'::jsonb,now(),now()+interval '300 seconds',$7)",
+        )
+        .bind(principal)
+        .bind(Uuid::new_v4())
+        .bind(Uuid::new_v4())
+        .bind(workspace)
+        .bind(source)
+        .bind(vec!["SOURCE_COLLECT".to_string()])
+        .bind(Uuid::new_v4())
+        .execute(pool)
+        .await
+        .unwrap();
+        Fixture {
+            workspace,
+            source,
+            incident,
+            principal,
+            events: Vec::new(),
+            jobs: Vec::new(),
+        }
+    }
+
+    async fn add_job(pool: &PgPool, fixture: &mut Fixture) -> Uuid {
+        let event = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.telemetry_events
+                 (event_id,workspace_id,source_id,native_id,idempotency_key,trigger_state,severity,
+                  occurred_at,observed_at,payload_digest,payload,late,incident_id)
+             VALUES ($1,$2,$3,$4,$5,'PROBLEM','MAJOR',now(),now(),$6,'{}'::jsonb,false,$7)",
+        )
+        .bind(event)
+        .bind(fixture.workspace)
+        .bind(fixture.source)
+        .bind(format!("effect-native-{event}"))
+        .bind(format!("effect-key-{event}"))
+        .bind(format!("sha256:{}", "a".repeat(64)))
+        .bind(fixture.incident)
+        .execute(pool)
+        .await
+        .unwrap();
+        let job = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.automation_jobs
+                 (job_id,event_id,incident_id,principal_id,source_id,status,max_attempts)
+             VALUES ($1,$2,$3,$4,$5,'PENDING',3)",
+        )
+        .bind(job)
+        .bind(event)
+        .bind(fixture.incident)
+        .bind(fixture.principal)
+        .bind(fixture.source)
+        .execute(pool)
+        .await
+        .unwrap();
+        fixture.events.push(event);
+        fixture.jobs.push(job);
+        job
+    }
+
+    async fn cleanup(pool: &PgPool, fixture: &Fixture) {
+        let _ = sqlx::query("DELETE FROM kernel.incident_evidence WHERE incident_id=$1")
+            .bind(fixture.incident)
+            .execute(pool)
+            .await;
+        // 0025 guards verdict deletion even for cleanup; state the exception the
+        // schema accepts so the incident can be removed and no fixture survives.
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SET LOCAL kernel.allow_verdict_removal = 'on'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM kernel.incident_verdicts WHERE incident_id=$1")
+            .bind(fixture.incident)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let _ = sqlx::query(
+            "DELETE FROM kernel.audit_events WHERE subject_type='INCIDENT' AND subject_id=$1",
+        )
+        .bind(fixture.incident.to_string())
+        .execute(pool)
+        .await;
+        for job in &fixture.jobs {
+            let _ = sqlx::query("DELETE FROM kernel.automation_jobs WHERE job_id=$1")
+                .bind(job)
+                .execute(pool)
+                .await;
+        }
+        for event in &fixture.events {
+            let _ = sqlx::query("DELETE FROM kernel.telemetry_events WHERE event_id=$1")
+                .bind(event)
+                .execute(pool)
+                .await;
+        }
+        let _ = sqlx::query("DELETE FROM kernel.automation_principals WHERE principal_id=$1")
+            .bind(fixture.principal)
+            .execute(pool)
+            .await;
+        sqlx::query("DELETE FROM kernel.incidents WHERE incident_id=$1")
+            .bind(fixture.incident)
+            .execute(pool)
+            .await
+            .expect("test cleanup must remove the incident");
+        let _ = sqlx::query("DELETE FROM kernel.telemetry_sources WHERE source_id=$1")
+            .bind(fixture.source)
+            .execute(pool)
+            .await;
+    }
+
+    /// A complete v2-attested evidence body, signed the way a plugin does.
+    fn automation_evidence(
+        fixture: &Fixture,
+        body: &str,
+        collected_at: DateTime<Utc>,
+    ) -> serde_json::Value {
+        // The Kernel derives contentRef from the bytes it stores; a supplied
+        // value that disagrees is refused, so the fixture signs the same one.
+        let content_ref = format!("sha256:{}", hex::encode(Sha256::digest(body.as_bytes())));
+        let bound = EvidenceTuple {
+            incident_id: fixture.incident,
+            workspace_id: fixture.workspace,
+            kind: "METRIC_SNAPSHOT",
+            source: "zabbix:effect",
+            collected_at,
+            content_ref: &content_ref,
+        };
+        let issued_at = Utc::now();
+        let payload = attestation_payload(ADAPTER, &bound, issued_at).unwrap();
+        let mut mac = HmacSha256::new_from_slice(SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        use base64::Engine;
+        let signature =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        serde_json::json!({
+            "kind": "METRIC_SNAPSHOT",
+            "source": "zabbix:effect",
+            "collectedAt": collected_at,
+            "contentRef": content_ref,
+            "content": {"contentType": "application/json", "body": body},
+            "attestation": {
+                "adapterId": ADAPTER,
+                "workspaceId": fixture.workspace,
+                "issuedAt": issued_at,
+                "signature": signature
+            }
+        })
+    }
+
+    fn principal(fixture: &Fixture) -> crate::automation::AutomationPrincipal {
+        let now = Utc::now();
+        crate::automation::AutomationPrincipal {
+            row: crate::automation::PrincipalRow {
+                principal_id: fixture.principal,
+                plugin_id: "zabbix-source".into(),
+                instance_id: Uuid::new_v4(),
+                node_id: Uuid::new_v4(),
+                node_generation: 1,
+                workspace_id: fixture.workspace,
+                source_id: fixture.source,
+                allowed_ops: vec!["SOURCE_COLLECT".into()],
+                event_id: None,
+                incident_id: None,
+                budget: serde_json::json!({"windowSeconds": 300, "evidenceBytes": 1048576}),
+                issued_at: now,
+                expires_at: now + chrono::Duration::seconds(300),
+                jti: Uuid::new_v4(),
+                revoked_at: None,
+            },
+            claims: crate::automation::AutomationClaims {
+                v: 1,
+                kind: "automation".into(),
+                principal_id: fixture.principal,
+                plugin_id: "zabbix-source".into(),
+                instance_id: Uuid::new_v4(),
+                node_id: Uuid::new_v4(),
+                node_generation: 1,
+                workspace_id: fixture.workspace,
+                source_id: fixture.source,
+                allowed_ops: vec!["SOURCE_COLLECT".into()],
+                event_id: None,
+                incident_id: None,
+                budget: serde_json::json!({"windowSeconds": 300}),
+                issued_at: now.timestamp(),
+                expires_at: (now + chrono::Duration::seconds(300)).timestamp(),
+                jti: Uuid::new_v4(),
+                audience: crate::automation::AUDIENCE.into(),
+            },
+        }
+    }
+
+    fn human_evidence_request(content_ref: &str) -> CreateEvidenceRequest {
+        CreateEvidenceRequest {
+            kind: "METRIC_SNAPSHOT".to_string(),
+            source: "prometheus".to_string(),
+            collected_at: Utc::now(),
+            content_ref: Some(content_ref.to_string()),
+            content: None,
+            trust: None,
+            claimed_trust: None,
+            attestation: None,
+        }
+    }
+
+    async fn evidence_rows(pool: &PgPool, incident: Uuid) -> Vec<(Uuid, Option<Uuid>, String)> {
+        sqlx::query_as(
+            "SELECT evidence_id, automation_job_id, content_ref
+               FROM kernel.incident_evidence WHERE incident_id=$1 ORDER BY created_at",
+        )
+        .bind(incident)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_job_binds_one_evidence_and_a_retry_returns_it_unchanged() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let job = add_job(&pool, &mut fixture).await;
+        let state = state(pool.clone()).await;
+        let first_at = Utc::now() - chrono::Duration::seconds(10);
+        let retry_at = Utc::now();
+
+        let first = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[1]}"#, first_at),
+            job,
+        )
+        .await
+        .unwrap();
+        // The retry collects DIFFERENT bytes (a new sampling window); the job's
+        // effect identity must still return the first committed row.
+        let second = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[2]}"#, retry_at),
+            job,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, second, "one job, one evidence id");
+        let rows = evidence_rows(&pool, fixture.incident).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, first);
+        assert_eq!(rows[0].1, Some(job));
+        let first_ref = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(br#"{"samples":[1]}"#))
+        );
+        assert_eq!(
+            rows[0].2, first_ref,
+            "the committed original must not be replaced by the retry's bytes"
+        );
+        assert_eq!(
+            committed_automation_evidence(&pool, job).await.unwrap(),
+            Some(first)
+        );
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn different_jobs_with_identical_content_are_two_rows() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let first_job = add_job(&pool, &mut fixture).await;
+        let second_job = add_job(&pool, &mut fixture).await;
+        let state = state(pool.clone()).await;
+        let at = Utc::now();
+        let body = r#"{"samples":[42]}"#;
+
+        let first = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, body, at),
+            first_job,
+        )
+        .await
+        .unwrap();
+        let second = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, body, at),
+            second_job,
+        )
+        .await
+        .unwrap();
+        assert_ne!(first, second, "two effects, two rows");
+        let rows = evidence_rows(&pool, fixture.incident).await;
+        assert_eq!(rows.len(), 2);
+        assert!(rows
+            .iter()
+            .any(|(id, job, _)| *id == first && *job == Some(first_job)));
+        assert!(rows
+            .iter()
+            .any(|(id, job, _)| *id == second && *job == Some(second_job)));
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn concurrent_attempts_of_one_job_commit_one_row() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let job = add_job(&pool, &mut fixture).await;
+        let state = state(pool.clone()).await;
+        let at = Utc::now();
+        let left = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[1]}"#, at),
+            job,
+        );
+        let right = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[2]}"#, at),
+            job,
+        );
+        let (left, right) = tokio::join!(left, right);
+        let left = left.unwrap();
+        let right = right.unwrap();
+        assert_eq!(left, right, "the loser reads the winner's committed effect");
+        assert_eq!(evidence_rows(&pool, fixture.incident).await.len(), 1);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM kernel.audit_events
+                  WHERE event_type='INCIDENT_EVIDENCE_ADDED' AND subject_id=$1"
+            )
+            .bind(fixture.incident.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+            1,
+            "one committed effect, one audit row"
+        );
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn recovery_returns_the_receipt_without_any_plugin_route() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let job = add_job(&pool, &mut fixture).await;
+        let state = state(pool.clone()).await;
+        let committed = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[7]}"#, Utc::now()),
+            job,
+        )
+        .await
+        .unwrap();
+
+        // There is no node, instance or route in this fixture. If the recovery
+        // path called the plugin it would fail with AUTOMATION_INSTANCE_UNAVAILABLE;
+        // returning the committed id proves the receipt was checked first.
+        let run = crate::automation_flow::collect_and_append(
+            &state,
+            &principal(&fixture),
+            fixture.incident,
+            fixture.source,
+            Utc::now(),
+            job,
+        )
+        .await
+        .expect("recovery must not need an upstream");
+        assert!(run.recovered);
+        assert_eq!(run.evidence_id, Some(committed));
+        assert_eq!(evidence_rows(&pool, fixture.incident).await.len(), 1);
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn a_concluded_incident_still_returns_an_effect_that_already_committed() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let mut fixture = seed(&pool, false).await;
+        let job = add_job(&pool, &mut fixture).await;
+        let state = state(pool.clone()).await;
+        let committed = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[9]}"#, Utc::now()),
+            job,
+        )
+        .await
+        .unwrap();
+        // The verdict lands while the job's success is still unconfirmed.
+        sqlx::query(
+            "INSERT INTO kernel.incident_verdicts (incident_id,verdict,rationale,decided_by)
+             VALUES ($1,'CONFIRMED','concluded after the evidence committed',$2)",
+        )
+        .bind(fixture.incident)
+        .bind(Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE kernel.incidents SET status='CONCLUDED' WHERE incident_id=$1")
+            .bind(fixture.incident)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let recovered = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[10]}"#, Utc::now()),
+            job,
+        )
+        .await
+        .unwrap();
+        assert_eq!(recovered, committed, "the committed effect is returned");
+        assert_eq!(
+            evidence_rows(&pool, fixture.incident).await.len(),
+            1,
+            "a concluded incident takes no new evidence"
+        );
+
+        // A DIFFERENT job cannot add evidence after the verdict.
+        let late_job = add_job(&pool, &mut fixture).await;
+        let rejected = append_automation_evidence(
+            &state,
+            fixture.principal,
+            fixture.workspace,
+            fixture.incident,
+            automation_evidence(&fixture, r#"{"samples":[11]}"#, Utc::now()),
+            late_job,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(rejected.code, "INCIDENT_ALREADY_CONCLUDED", "{rejected:?}");
+        assert_eq!(evidence_rows(&pool, fixture.incident).await.len(), 1);
+
+        cleanup(&pool, &fixture).await;
+    }
+
+    #[tokio::test]
+    async fn human_evidence_keeps_its_old_tuple_dedup_and_no_job_binding() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fixture = seed(&pool, false).await;
+        let user = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.users (id,email,display_name,password_hash,role)
+             VALUES ($1,$2,'effect human','not-a-real-hash','operator')",
+        )
+        .bind(user)
+        .bind(format!("effect-{user}@example.invalid"))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let caller = DataScope::for_test(user, vec![fixture.workspace], RowRule::AllRows);
+        let actor = EvidenceActor {
+            actor_type: "USER",
+            actor_id: user,
+            automation_job_id: None,
+        };
+        let (created, first) = insert_evidence_as(
+            &pool,
+            &HashMap::new(),
+            caller.clone(),
+            actor,
+            fixture.incident,
+            human_evidence_request("sha256:human-once"),
+        )
+        .await
+        .unwrap();
+        assert!(created);
+        let (created_again, second) = insert_evidence_as(
+            &pool,
+            &HashMap::new(),
+            caller,
+            actor,
+            fixture.incident,
+            human_evidence_request("sha256:human-once"),
+        )
+        .await
+        .unwrap();
+        assert!(!created_again, "the historical tuple dedup still applies");
+        assert_eq!(second.evidence_id, first.evidence_id);
+        let rows = evidence_rows(&pool, fixture.incident).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, None, "a human row carries no job binding");
+
+        // The incident still references this account (`owner`), and evidence
+        // references it as `submitted_by`; remove the business rows first, then
+        // the account, so cleanup cannot silently leave the user behind.
+        cleanup(&pool, &fixture).await;
+        sqlx::query("DELETE FROM kernel.users WHERE id=$1")
+            .bind(user)
+            .execute(&pool)
+            .await
+            .expect("test cleanup must remove the fixture account");
     }
 }

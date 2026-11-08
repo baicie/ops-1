@@ -364,6 +364,7 @@ pub async fn run_once(state: &AppState, worker: &str) -> anyhow::Result<bool> {
         job.incident_id,
         job.source_id,
         occurred_at,
+        job.job_id,
     )
     .await
     {
@@ -1159,6 +1160,80 @@ mod fencing_tests {
         assert!(evidence.is_none());
         assert_eq!(lease, Some(job.lease_id), "the lease was not released");
 
+        cleanup(&pool, &fixture).await;
+    }
+
+    /// Fault injection: the Evidence committed, the Job success did not (a crash
+    /// in that window). The restarted worker must find the receipt, skip the
+    /// plugin entirely (there is no route in this fixture), and confirm success.
+    #[tokio::test]
+    async fn a_restarted_worker_recovers_a_committed_effect_without_collecting_again() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fixture = seed(&pool).await;
+        let state = state(pool.clone());
+        let evidence = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.incident_evidence
+               (evidence_id,incident_id,kind,source,collected_at,content_ref,claimed_trust,
+                verified_trust,verification_method,verified_at,submitted_by,automation_job_id)
+             VALUES ($1,$2,'METRIC_SNAPSHOT','zabbix:effect',now(),$3,'OPERATOR_ASSERTED',
+                     'OPERATOR_ASSERTED','OPERATOR_IDENTITY',now(),$4,$5)",
+        )
+        .bind(evidence)
+        .bind(fixture.incident)
+        .bind(format!("sha256:{}", "b".repeat(64)))
+        .bind(Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap())
+        .bind(fixture.job)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let job = claim_matching(&state, "restarted-worker", Some(fixture.job), None)
+            .await
+            .unwrap()
+            .expect("the expired attempt is claimable");
+        let principal = automation::load_principal(&state, fixture.principal)
+            .await
+            .unwrap();
+        let run = automation_flow::collect_and_append(
+            &state,
+            &principal,
+            fixture.incident,
+            fixture.source,
+            chrono::Utc::now(),
+            job.job_id,
+        )
+        .await
+        .expect("recovery must not need an upstream");
+        assert!(run.recovered);
+        assert_eq!(run.evidence_id, Some(evidence));
+        finish_success(&state, &job, run.evidence_id.unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            terminal(&pool, fixture.job).await,
+            ("SUCCEEDED".into(), Some(evidence))
+        );
+        assert_eq!(
+            job_audit(&pool, fixture.job, "telemetry.automation.succeeded").await,
+            1
+        );
+        let rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM kernel.incident_evidence WHERE incident_id=$1",
+        )
+        .bind(fixture.incident)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows, 1, "recovery adds no second evidence row");
+
+        // The evidence FK is RESTRICT: clean it before the job it names.
+        let _ = sqlx::query("DELETE FROM kernel.incident_evidence WHERE incident_id=$1")
+            .bind(fixture.incident)
+            .execute(&pool)
+            .await;
         cleanup(&pool, &fixture).await;
     }
 
