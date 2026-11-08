@@ -213,7 +213,8 @@ async fn finish_success(state: &AppState, job: &Job, evidence_id: Uuid) -> anyho
         "UPDATE kernel.automation_jobs
             SET status='SUCCEEDED', evidence_id=$4, lease_owner=NULL, lease_until=NULL,
                 lease_id=NULL, last_error_code=NULL, updated_at=now()
-          WHERE job_id=$1 AND lease_id=$2 AND fencing_token=$3 AND status='RUNNING'
+          WHERE job_id=$1 AND lease_id=$2 AND fencing_token=$3
+            AND status='RUNNING' AND lease_until > now()
           RETURNING job_id",
     )
     .bind(job.job_id)
@@ -273,7 +274,8 @@ async fn finish_error(state: &AppState, job: &Job, error: &AppError) -> anyhow::
                 SET status='RETRY_WAIT', available_at=now() + ($5 || ' seconds')::interval,
                     lease_owner=NULL, lease_until=NULL, lease_id=NULL,
                     last_error_code=$4, updated_at=now()
-              WHERE job_id=$1 AND lease_id=$2 AND fencing_token=$3 AND status='RUNNING'
+              WHERE job_id=$1 AND lease_id=$2 AND fencing_token=$3
+                AND status='RUNNING' AND lease_until > now()
               RETURNING job_id",
         )
         .bind(job.job_id)
@@ -288,7 +290,8 @@ async fn finish_error(state: &AppState, job: &Job, error: &AppError) -> anyhow::
             "UPDATE kernel.automation_jobs
                 SET status='FAILED_FINAL', lease_owner=NULL, lease_until=NULL, lease_id=NULL,
                     last_error_code=$4, updated_at=now()
-              WHERE job_id=$1 AND lease_id=$2 AND fencing_token=$3 AND status='RUNNING'
+              WHERE job_id=$1 AND lease_id=$2 AND fencing_token=$3
+                AND status='RUNNING' AND lease_until > now()
               RETURNING job_id",
         )
         .bind(job.job_id)
@@ -364,7 +367,11 @@ pub async fn run_once(state: &AppState, worker: &str) -> anyhow::Result<bool> {
         job.incident_id,
         job.source_id,
         occurred_at,
-        job.job_id,
+        crate::incidents::AutomationLeaseHandle {
+            job_id: job.job_id,
+            lease_id: job.lease_id,
+            fencing_token: job.fencing_token,
+        },
     )
     .await
     {
@@ -1220,7 +1227,11 @@ mod fencing_tests {
             fixture.incident,
             fixture.source,
             chrono::Utc::now(),
-            job.job_id,
+            crate::incidents::AutomationLeaseHandle {
+                job_id: job.job_id,
+                lease_id: job.lease_id,
+                fencing_token: job.fencing_token,
+            },
         )
         .await
         .expect("recovery must not need an upstream");
@@ -1313,7 +1324,11 @@ mod fencing_tests {
             fixture.incident,
             fixture.source,
             chrono::Utc::now(),
-            job.job_id,
+            crate::incidents::AutomationLeaseHandle {
+                job_id: job.job_id,
+                lease_id: job.lease_id,
+                fencing_token: job.fencing_token,
+            },
         )
         .await
         .unwrap_err();
@@ -1432,6 +1447,59 @@ mod fencing_tests {
                 Some("AUTOMATION_INSTANCE_STALE".into())
             )
         );
+        cleanup(&pool, &fixture).await;
+    }
+
+    /// B1.8 Phase 2, Finding A: an expired lease has no terminal authority even
+    /// when no other worker has taken over. The refusal is the database's
+    /// compare-and-set (`lease_until > now()`), not a Rust pre-check. The job
+    /// stays RUNNING and the next claim advances the generation.
+    #[tokio::test]
+    async fn an_expired_lease_cannot_write_a_terminal_state_without_a_takeover() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let fixture = seed(&pool).await;
+        let state = state(pool.clone());
+        let job = claim_matching(&state, "expired-lease", Some(fixture.job), None)
+            .await
+            .unwrap()
+            .unwrap();
+        sqlx::query(
+            "UPDATE kernel.automation_jobs
+                SET lease_until=now()-interval '1 second' WHERE job_id=$1",
+        )
+        .bind(fixture.job)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let success = finish_success(&state, &job, Uuid::new_v4())
+            .await
+            .unwrap_err();
+        assert_eq!(stale_code(&success), Some("AUTOMATION_STALE_LEASE"));
+        let failure = finish_error(
+            &state,
+            &job,
+            &AppError::unavailable("AUTOMATION_UPSTREAM_UNAVAILABLE", "late"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(stale_code(&failure), Some("AUTOMATION_STALE_LEASE"));
+        assert_eq!(
+            last_error(&pool, fixture.job).await.0,
+            "RUNNING",
+            "an expired-but-unclaimed lease leaves the job reclaimable"
+        );
+
+        let next = claim_matching(&state, "next-worker", Some(fixture.job), None)
+            .await
+            .unwrap()
+            .expect("the expired lease is reclaimable");
+        assert_eq!(next.fencing_token, job.fencing_token + 1);
+        finish_success(&state, &next, Uuid::new_v4()).await.unwrap();
+        assert_eq!(last_error(&pool, fixture.job).await.0, "SUCCEEDED");
+
         cleanup(&pool, &fixture).await;
     }
 
