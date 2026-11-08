@@ -452,6 +452,77 @@ AFTER_COUNT="$(api GET "/api/v1/incidents/${AUTO_INCIDENT}/evidence" >/dev/null;
 [ "$BEFORE_COUNT" = "$AFTER_COUNT" ] || { echo "duplicate event added evidence: ${BEFORE_COUNT} -> ${AFTER_COUNT}"; exit 1; }
 ok "duplicate event is idempotent and adds no evidence"
 
+step "operator claim -> investigation -> human verdict on the automation incident"
+# G13-B1.8: the automation incident is owned by the non-login service user until
+# a workspace operator claims it. This block drives the SAME real Kernel with a
+# real operator session (cookie + CSRF, the browser path) through the queue,
+# claim, investigation, verdict and closure - the whole chain, not just the
+# automation half.
+OP_EMAIL="g13b18-op-$(date +%s)-$$@example.invalid"
+OP_PASSWORD='g13b18-operator-password-1'
+code="$(api POST /api/v1/users "{\"email\":\"${OP_EMAIL}\",\"displayName\":\"G13 B1.8 operator\",\"password\":\"${OP_PASSWORD}\",\"role\":\"operator\"}")"
+[ "$code" = "200" ] || { echo "operator account failed: ${code} $(cat /tmp/g13a1-body.json)"; exit 1; }
+OP_ID="$(json "d['id']" < /tmp/g13a1-body.json)"
+code="$(api POST "/api/v1/business-workspaces/${WORKSPACE_A}/members" "{\"userId\":\"${OP_ID}\"}")"
+case "$code" in 200|201) ;; *) echo "operator membership failed: ${code}"; exit 1;; esac
+OP_JAR="$(mktemp)"
+OP_LOGIN="$(curl -sS -c "$OP_JAR" -H 'content-type: application/json' \
+  -d "{\"email\":\"${OP_EMAIL}\",\"password\":\"${OP_PASSWORD}\"}" "$URL/api/v1/auth/login")"
+OP_CSRF="$(printf '%s' "$OP_LOGIN" | json "d['csrfToken']")"
+[ -n "$OP_CSRF" ] || { echo "operator login failed"; exit 1; }
+op_api() {
+  local method="$1" path="$2" body="${3:-}"
+  local args=(-sS -m 30 -o /tmp/g13a1-body.json -w '%{http_code}' -X "$method" \
+    -b "$OP_JAR" -H "x-csrf-token: $OP_CSRF")
+  [ -n "$body" ] && args+=(-H 'content-type: application/json' --data-binary "$body")
+  curl "${args[@]}" "$URL$path"
+}
+code="$(op_api GET /api/v1/incidents/claimable)"
+[ "$code" = "200" ] || { echo "claim queue failed: ${code}"; exit 1; }
+REV="$(python3 -c "import json;d=json.load(open('/tmp/g13a1-body.json'));print(next(i['revision'] for i in d['items'] if i['id']=='${AUTO_INCIDENT}'))")"
+[ -n "$REV" ] || { echo "automation incident is not in the operator queue"; exit 1; }
+code="$(op_api POST "/api/v1/incidents/${AUTO_INCIDENT}/claim" "{\"expectedRevision\":${REV}}")"
+[ "$code" = "200" ] || { echo "claim failed: ${code} $(cat /tmp/g13a1-body.json)"; exit 1; }
+[ "$(json "d['owner']" < /tmp/g13a1-body.json)" = "$OP_ID" ] || { echo "claim did not move ownership"; exit 1; }
+ok "operator ${OP_ID} claimed automation incident ${AUTO_INCIDENT}"
+
+STARTED="$(op_api POST "/api/v1/incidents/${AUTO_INCIDENT}/investigations" "{\"idempotencyKey\":\"g13b18-$(date +%s)-$$\",\"scenario\":\"AUTO\"}")"
+case "$STARTED" in 200|201|202) ;; *) echo "operator investigation start failed: ${STARTED} $(cat /tmp/g13a1-body.json)"; exit 1;; esac
+RUN_ID="$(json "d['runId']" < /tmp/g13a1-body.json)"
+for _ in $(seq 1 60); do
+  RUN_STATUS="$(json "d['status']" < /tmp/g13a1-body.json)"
+  [ "$RUN_STATUS" = "RUNNING" ] || break
+  sleep 0.25
+  op_api GET "/api/v1/incidents/${AUTO_INCIDENT}/investigations/${RUN_ID}" >/dev/null
+done
+RUN_STATUS="$(json "d['status']" < /tmp/g13a1-body.json)"
+ADAPTER="$(json "d['adapter']" < /tmp/g13a1-body.json)"
+SYNTHETIC="$(json "d['synthetic']" < /tmp/g13a1-body.json)"
+[ "$RUN_STATUS" != "RUNNING" ] && [ "$ADAPTER" = "TEST_FIXTURE" ] && [ "$SYNTHETIC" = "True" ] || { echo "operator investigator was not the labelled TEST_FIXTURE: status=$RUN_STATUS adapter=$ADAPTER synthetic=$SYNTHETIC"; exit 1; }
+python3 - "$AUTO_EVIDENCE" <<'PY2'
+import json, sys
+d = json.load(open('/tmp/g13a1-body.json'))
+eid = sys.argv[1]
+cited = any(
+    c.get('evidenceId') == eid
+    for h in d.get('hypotheses') or []
+    for c in (h.get('supportingEvidence') or []) + (h.get('contradictingEvidence') or [])
+)
+assert cited, f'operator investigation did not cite {eid}'
+PY2
+ok "operator investigation ${RUN_ID} cited automation evidence ${AUTO_EVIDENCE}"
+
+code="$(op_api POST "/api/v1/incidents/${AUTO_INCIDENT}/verdict" '{"verdict":"CONFIRMED","rationale":"the operator reviewed the attested automation snapshot and confirms the saturation"}')"
+[ "$code" = "201" ] || { echo "operator verdict failed: ${code} $(cat /tmp/g13a1-body.json)"; exit 1; }
+ok "operator wrote the human verdict on the automation incident"
+op_api GET "/api/v1/incidents/${AUTO_INCIDENT}" >/dev/null
+REV="$(json "d['revision']" < /tmp/g13a1-body.json)"
+code="$(op_api POST "/api/v1/incidents/${AUTO_INCIDENT}/close" "{\"expectedRevision\":${REV},\"note\":\"the operator closed the automation incident after review\"}")"
+[ "$code" = "200" ] || { echo "operator close failed: ${code} $(cat /tmp/g13a1-body.json)"; exit 1; }
+[ "$(json "d['status']" < /tmp/g13a1-body.json)" = "CLOSED" ] || { echo "operator close did not reach CLOSED"; exit 1; }
+ok "operator closed automation incident ${AUTO_INCIDENT}"
+rm -f "$OP_JAR"
+
 step "A/B workspace boundary through the Gateway"
 GW_SOURCE_B="$(python3 - "$WORKSPACE_B" "$PLUGIN_HOST" <<'PY'
 import json, sys
