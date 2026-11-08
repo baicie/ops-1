@@ -23,7 +23,6 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-const AUTOMATION_OWNER: &str = "00000000-0000-4000-8000-0000000000a1";
 const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
 const MAX_CLOCK_SKEW_SECONDS: i64 = 300;
 const MAX_AGE_DAYS: i64 = 90;
@@ -299,7 +298,7 @@ async fn store_event(
         .bind(severity)
         .bind(req.native_id.trim())
         .bind(req.occurred_at)
-        .bind(Uuid::parse_str(AUTOMATION_OWNER).expect("owner is a literal uuid"))
+        .bind(Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).expect("owner is a literal uuid"))
         .bind(req.workspace_id)
         .bind(req.source_id)
         .bind(recurrence)
@@ -614,6 +613,200 @@ mod tests {
             .await;
     }
 
+    /// B1.4 invariant: the Event handler owns the incident as the non-login
+    /// automation service user, and the operator row rule is `owner = caller`.
+    /// An UNCLAIMED automation incident is therefore invisible to the operator's
+    /// ordinary reads and writes - which is exactly why the claim queue exists.
+    /// This test pins the narrow half: fixing the operator lockout must not widen
+    /// `OwnedRows`, so the ordinary read stays closed until a claim has moved the
+    /// owner. incident_claims::tests drives the queue and the claim.
+    #[tokio::test]
+    async fn an_unclaimed_automation_incident_stays_invisible_to_the_operator_row_rule() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let workspace = crate::scope::legacy_workspace();
+        let source_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.telemetry_sources
+                 (source_id,workspace_id,plugin_id,secret_ref,endpoint,tls_policy,state)
+             VALUES ($1,$2,'zabbix-source','secretref:zabbix/main','https://zabbix.example/api_jsonrpc.php','VERIFY','READY')",
+        )
+        .bind(source_id)
+        .bind(workspace)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let operator = seed_claim_user(&pool, "operator").await;
+        let admin = seed_claim_user(&pool, "admin").await;
+        sqlx::query(
+            "INSERT INTO kernel.business_workspace_members (workspace_id,user_id)
+             VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        )
+        .bind(workspace)
+        .bind(operator)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO kernel.business_workspace_members (workspace_id,user_id)
+             VALUES ($1,$2) ON CONFLICT DO NOTHING",
+        )
+        .bind(workspace)
+        .bind(admin)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let actor = principal();
+        sqlx::query(
+            "INSERT INTO kernel.automation_principals
+                 (principal_id,plugin_id,instance_id,node_id,node_generation,workspace_id,source_id,
+                  allowed_ops,event_id,incident_id,budget,issued_at,expires_at,jti)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        )
+        .bind(actor.row.principal_id)
+        .bind(&actor.row.plugin_id)
+        .bind(actor.row.instance_id)
+        .bind(actor.row.node_id)
+        .bind(actor.row.node_generation)
+        .bind(actor.row.workspace_id)
+        .bind(source_id)
+        .bind(&actor.row.allowed_ops)
+        .bind(actor.row.event_id)
+        .bind(actor.row.incident_id)
+        .bind(&actor.row.budget)
+        .bind(actor.row.issued_at)
+        .bind(actor.row.expires_at)
+        .bind(actor.row.jti)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut req = request();
+        req.workspace_id = workspace;
+        req.source_id = source_id;
+        req.native_id = format!("b14-repro-{}", Uuid::new_v4());
+        req.payload_digest = digest(&req.payload);
+        let key = idempotency_key(&req);
+        let (_, stored) = store_event(&pool, &actor, &req, &key).await.unwrap();
+        let incident_id = stored.incident_id.expect("PROBLEM creates an incident");
+
+        let owner: Uuid =
+            sqlx::query_scalar("SELECT owner FROM kernel.incidents WHERE incident_id=$1")
+                .bind(incident_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            owner.to_string(),
+            crate::automation::AUTOMATION_USER_ID,
+            "the Event handler owns the incident as the automation service user"
+        );
+
+        let operator_scope = crate::scope::DataScope::for_test(
+            operator,
+            vec![workspace],
+            crate::scope::RowRule::for_role(opsweave_contracts::Role::Operator),
+        );
+        let visible = crate::incidents::query_incidents(
+            &pool,
+            operator_scope.clone(),
+            crate::incidents::IncidentListQuery::default(),
+        )
+        .await
+        .unwrap();
+        let ids: Vec<Uuid> = visible.items.iter().map(|item| item.id).collect();
+        assert!(
+            !ids.contains(&incident_id),
+            "REPRODUCED: the workspace operator's incident list does not contain the automation incident"
+        );
+        let read = crate::incidents::query_incident(&pool, operator_scope.clone(), incident_id)
+            .await
+            .unwrap_err();
+        assert_eq!(read.status, StatusCode::NOT_FOUND);
+
+        // The two writes go through the real HTTP handlers with a real operator
+        // AuthUser and real membership rows: the same 404 the read gives is what
+        // every writer's incident predicate gives.
+        let state = crate::state::AppState::new(
+            crate::config::Config::from_env(),
+            pool.clone(),
+            b"b14-repro-cursor".to_vec(),
+        )
+        .unwrap();
+        let (status, body) = post_as_operator(
+            state.clone(),
+            operator,
+            incident_id,
+            "/evidence",
+            json!({
+                "kind": "OPERATOR_NOTE",
+                "source": "operator:b14-repro",
+                "collectedAt": Utc::now().to_rfc3339(),
+                "contentRef": "note:b14-repro"
+            }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "REPRODUCED: the operator cannot append evidence to the automation incident: {body}"
+        );
+        let (status, body) = post_as_operator(
+            state.clone(),
+            operator,
+            incident_id,
+            "/verdict",
+            json!({
+                "verdict": "CONFIRMED",
+                "rationale": "the automation evidence is enough to confirm this"
+            }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "REPRODUCED: the operator cannot sign a human verdict on the automation incident: {body}"
+        );
+
+        let admin_scope = crate::scope::DataScope::for_test(
+            admin,
+            vec![workspace],
+            crate::scope::RowRule::for_role(opsweave_contracts::Role::Admin),
+        );
+        assert!(
+            crate::incidents::query_incident(&pool, admin_scope, incident_id)
+                .await
+                .is_ok(),
+            "the workspace admin can read it, which is why the defect is invisible in an admin-only smoke test"
+        );
+
+        let _ = sqlx::query("DELETE FROM kernel.automation_jobs WHERE source_id=$1")
+            .bind(source_id)
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.telemetry_events WHERE source_id=$1")
+            .bind(source_id)
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.incidents WHERE source_id=$1")
+            .bind(source_id)
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.automation_principals WHERE source_id=$1")
+            .bind(source_id)
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.telemetry_sources WHERE source_id=$1")
+            .bind(source_id)
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM kernel.users WHERE id=ANY($1)")
+            .bind(&[operator, admin][..])
+            .execute(&pool)
+            .await;
+    }
+
     fn request() -> EventRequest {
         EventRequest {
             native_id: "evt-1".into(),
@@ -651,5 +844,75 @@ mod tests {
         req.payload = json!({"trigger": "CPU low"});
         let error = validate(&req).unwrap_err();
         assert_eq!(error.code, "EVENT_DIGEST_MISMATCH");
+    }
+
+    async fn seed_claim_user(pool: &PgPool, role: &str) -> Uuid {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.users (id,email,display_name,password_hash,role)
+             VALUES ($1,$2,$3,'not-a-real-hash',$4)",
+        )
+        .bind(id)
+        .bind(format!("b14-{id}@example.invalid"))
+        .bind(format!("b14 {role}"))
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn post_as_operator(
+        state: crate::state::AppState,
+        user: Uuid,
+        incident_id: Uuid,
+        suffix: &str,
+        body: Value,
+    ) -> (StatusCode, String) {
+        use axum::body::Body;
+        use axum::http::Request;
+        use axum::routing::post;
+        use tower::ServiceExt;
+
+        let router = axum::Router::new()
+            .route(
+                "/api/v1/incidents/{incident_id}/evidence",
+                post(crate::incidents::append_evidence),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/verdict",
+                post(crate::incidents::create_verdict),
+            )
+            .layer(axum::middleware::from_fn(
+                move |mut request: axum::extract::Request, next: axum::middleware::Next| async move {
+                    request.extensions_mut().insert(crate::auth::AuthUser {
+                        user_id: user,
+                        email: format!("{user}@example.invalid"),
+                        display_name: "b14 operator".into(),
+                        role: opsweave_contracts::Role::Operator,
+                        session_id: Uuid::new_v4(),
+                        csrf_token: "csrf".into(),
+                        via_cookie: true,
+                    });
+                    next.run(request).await
+                },
+            ))
+            .with_state(state);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/incidents/{incident_id}{suffix}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        (status, String::from_utf8_lossy(&bytes).to_string())
     }
 }

@@ -523,6 +523,18 @@ export interface IncidentView {
   /** When the current owner was assigned; equal to createdAt for a row never handed over. */
   ownerAssignedAt: string;
   /**
+   * G13-B1.4: USER, AUTOMATION, or null for a row that predates migration 0026. It says who
+   * filed the record; a source adapter's provenance is in `source`.
+   */
+  origin: string | null;
+  /**
+   * G13-B1.4: true exactly when the row is waiting in the workspace automation queue (origin
+   * AUTOMATION, the non-login service owner, status OPEN or INVESTIGATING). The kernel derives
+   * it from the same fields the claim route checks, so a button built from it cannot appear for
+   * a row the claim would refuse.
+   */
+  claimable: boolean;
+  /**
    * G12 C: the version the lifecycle writes arbitrate on. Every close and handover sends it as
    * `expectedRevision`, so a decision taken against a record that has since changed is refused
    * (409 INCIDENT_VERSION_CONFLICT) instead of overwriting what the caller never saw.

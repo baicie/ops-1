@@ -96,6 +96,8 @@ function incident(overrides: Partial<IncidentView> = {}): IncidentView {
     updatedAt: '2026-10-30T22:15:00Z',
     owner: '22222222-2222-4222-8222-222222222222',
     ownerAssignedAt: '2026-10-30T22:15:00Z',
+    origin: 'USER',
+    claimable: false,
     revision: 1,
     closedAt: null,
     closedBy: null,

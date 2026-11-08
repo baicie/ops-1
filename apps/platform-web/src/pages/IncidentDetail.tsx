@@ -1,10 +1,11 @@
 import * as React from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
 import type { IncidentEvidence, IncidentEvidenceList, IncidentList, IncidentOwnerTransfer, IncidentTimeline, IncidentTimelineEvent, IncidentView } from '../types';
 import { useAuth } from '../auth';
 import { useDocumentTitle } from '../hooks';
 import { useI18n, useT } from '../i18n';
+import type { MessageKey } from '../i18n';
 import { ageMessage, clockMessage } from '../lib/age';
 import { apiFailureCopy } from '../lib/kernel-messages';
 import { cn } from '../lib/utils';
@@ -67,6 +68,7 @@ import {
   verificationMethodKey,
 } from '../incidents';
 import { IncidentFailureNotice, useUserDirectory } from './Incidents';
+import { claimFailureKey, claimFailureNeedsRefresh, claimPayload } from '../incident-claims';
 import { TrustChip, TrustGap, TrustLegend, TrustSummary } from './incident-trust';
 import { CollectEvidenceDialog } from './incident-collect';
 import { IdentityCell, LongId, StackCell, cardTwoLineRow, colGrow, formatIdentity, stackBody, stackHead, stackRow, stackTable } from './table-kit';
@@ -299,6 +301,9 @@ export function IncidentDetailPage() {
               {t('incidents.detail.ownerChip', { owner: ownerLabel })}
             </span>
             <span className="tag incident-header-extra" data-testid="incident-detail-source" data-source={incident.source}>{t(incidentSourceKey(incident.source))}</span>
+            {incident.claimable ? (
+              <span className="tag" data-testid="incident-unclaimed-badge">{t('incidents.claim.unclaimedBadge')}</span>
+            ) : null}
           </>
         )}
         actions={<><Button className="text-muted-foreground" variant="ghost" data-testid="incident-refresh" onClick={retry}><Icon name="refresh" size={15} /> {t('action.refresh')}</Button>{backLink}</>}
@@ -757,6 +762,14 @@ export function IncidentDetailPage() {
                             <p>{t('incidents.close.description')}</p>
                           </div>
                         </div>
+                        {capabilities.canClaim || capabilities.canRelease ? (
+                          <IncidentOwnershipAction
+                            incident={incident}
+                            canClaim={capabilities.canClaim}
+                            canRelease={capabilities.canRelease}
+                            onChanged={retry}
+                          />
+                        ) : null}
                         {closureState === 'closed' ? (
                           <div className="pad" data-testid="incident-closure-record" data-closed-at={incident.closedAt ?? ''}>
                             <p><Status code="CLOSED" /> <span className="muted small" data-testid="incident-closure-note">{incident.closureNote ?? t('common.none')}</span></p>
@@ -1265,6 +1278,96 @@ function AuditRow({ event, directory }: { event: IncidentTimelineEvent; director
         {facts.closureNote ? <span className="muted small" data-testid="audit-note">{t('incidents.audit.note', { note: facts.closureNote })}</span> : null}
       </div>
     </li>
+  );
+}
+
+/**
+ * G13-B1.4: claim an unclaimed automation incident, or release one this account owns
+ * back to the workspace queue.
+ *
+ * Both are one POST with the revision on screen. A claim is decided against that revision
+ * (409 INCIDENT_CLAIM_CONFLICT when the row moved) and a conflict refreshes the page, so a
+ * second click is decided against what the kernel holds now rather than against a stale
+ * rendering. A release ends this account's read access (an operator reads what it owns), so
+ * the page navigates back to the list instead of re-reading a row that will 404.
+ */
+function IncidentOwnershipAction({
+  incident,
+  canClaim,
+  canRelease,
+  onChanged,
+}: {
+  incident: IncidentView;
+  canClaim: boolean;
+  canRelease: boolean;
+  onChanged: () => void;
+}) {
+  const t = useT();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [pending, setPending] = React.useState<'claim' | 'release' | null>(null);
+  const [error, setError] = React.useState<ApiError | null>(null);
+  const [failure, setFailure] = React.useState<MessageKey | null>(null);
+
+  const run = (mode: 'claim' | 'release') => {
+    setPending(mode);
+    setError(null);
+    setFailure(null);
+    const path = mode === 'claim'
+      ? `/api/v1/incidents/${incident.id}/claim`
+      : `/api/v1/incidents/${incident.id}/release`;
+    api.post(path, claimPayload(incident.revision))
+      .then(() => {
+        toast.push({
+          tone: 'ok',
+          title: mode === 'claim' ? t('incidents.claim.success') : t('incidents.claim.releaseSuccess'),
+          detail: mode === 'claim'
+            ? t('incidents.claim.successDetail', { title: incident.title })
+            : t('incidents.claim.releaseSuccessDetail', { title: incident.title }),
+        });
+        if (mode === 'release') navigate('/app/incidents');
+        else onChanged();
+      })
+      .catch((cause: Error) => {
+        if (cause instanceof ApiError) {
+          setError(cause);
+          if (claimFailureNeedsRefresh(cause.code)) onChanged();
+        } else {
+          setFailure('incidents.claim.error.network');
+        }
+      })
+      .finally(() => setPending(null));
+  };
+
+  const code = error?.code ?? null;
+  const key = claimFailureKey(code);
+  return (
+    <div className="pad form-stack" data-testid="incident-ownership-action" data-claimable={canClaim} data-releasable={canRelease}>
+      <p className="muted small" data-testid="incident-ownership-hint">
+        {canClaim ? t('incidents.claim.detailHint') : t('incidents.claim.releaseHint')}
+      </p>
+      <div className="form-actions">
+        {canClaim ? (
+          <Button data-testid="incident-claim-detail" disabled={pending !== null} aria-busy={pending === 'claim'} onClick={() => run('claim')}>
+            <Icon name="check" size={15} /> {pending === 'claim' ? t('incidents.claim.action.claiming') : t('incidents.claim.action.claim')}
+          </Button>
+        ) : null}
+        {canRelease ? (
+          <Button variant="secondary" data-testid="incident-release-detail" disabled={pending !== null} aria-busy={pending === 'release'} onClick={() => run('release')}>
+            <Icon name="rotate" size={15} /> {pending === 'release' ? t('incidents.claim.action.releasing') : t('incidents.claim.action.release')}
+          </Button>
+        ) : null}
+      </div>
+      {key || failure || error ? (
+        <div className="inline-error" role="alert" data-testid="incident-ownership-error" data-error-code={code ?? 'UNREACHABLE'}>
+          <Icon name="warning" size={14} />
+          <div>
+            <p>{key ? t(key) : failure ? t(failure) : t('incidents.claim.error.unknown', { code: code ?? '' })}</p>
+            {code ? <p className="muted small"><code>{code}</code></p> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
