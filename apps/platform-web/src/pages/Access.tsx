@@ -28,7 +28,7 @@ import {
   userCreatedLanded,
   userStateLanded,
 } from '../lib/verified-writes';
-import { IdentityCell, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
+import { IdentityCell, RowActions, StackCell, StatusPill, cardActionCell, cardCellClass, cardLineAfter, cardTwoLineRow, colGrow, copyIdAction, formatIdentity, rankCardFacts, stackBody, stackHead, stackRow, stackTable, type RowAction } from './table-kit';
 
 type ManagedUser = { id: string; email: string; displayName: string; role: string; disabled: boolean; createdAt: string };
 
@@ -251,7 +251,7 @@ export function AccessPage() {
             <Table className={stackTable}>
               <TableHeader className={stackHead}>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>{t('table.user')}</TableHead>
+                  <TableHead className={colGrow}>{t('table.user')}</TableHead>
                   <TableHead>{t('table.role')}</TableHead>
                   <TableHead>{t('table.status')}</TableHead>
                   <TableHead>{t('table.actions')}</TableHead>
@@ -263,7 +263,7 @@ export function AccessPage() {
                     {/* §2.1: the row opens with one identity in human language; the email is its
                         qualifier line. It used to be a labelled cell, which also made the user card
                         carry four facts where §2.5 allows three. */}
-                    <IdentityCell label={t('table.user')} identity={formatIdentity({ name: item.displayName, id: item.id, at: item.createdAt, locale, rowsOnPage: (users || []).length })} cardFact>
+                    <IdentityCell label={t('table.user')} identity={formatIdentity({ name: item.displayName, id: item.id, at: item.createdAt, locale, rowsOnPage: (users || []).length })} cardFact className={colGrow}>
                       <span>{item.email}</span>
                     </IdentityCell>
                     {/* B3.4: a role is a word, not a state, and the status column beside it is a pill. The
@@ -296,7 +296,7 @@ export function AccessPage() {
           <Table className={stackTable}>
             <TableHeader className={stackHead}>
               <TableRow className="hover:bg-transparent">
-                <TableHead>{t('table.publisher')}</TableHead>
+                <TableHead className={colGrow}>{t('table.publisher')}</TableHead>
                 <TableHead>{t('table.fingerprint')}</TableHead>
                 <TableHead>{t('table.trust')}</TableHead>
                 <TableHead>{t('table.note')}</TableHead>
@@ -307,7 +307,7 @@ export function AccessPage() {
             <TableBody className={stackBody}>
               {(data || []).map((publisher) => (
                 <TableRow key={publisher.publisherId} className={cn(cardTwoLineRow, stackRow)}>
-                  <IdentityCell label={t('table.publisher')} identity={formatIdentity({ name: publisher.publisherId, id: publisher.fingerprint, at: publisher.createdAt, locale, rowsOnPage: (data || []).length })} cardFact />
+                  <IdentityCell label={t('table.publisher')} identity={formatIdentity({ name: publisher.publisherId, id: publisher.fingerprint, at: publisher.createdAt, locale, rowsOnPage: (data || []).length })} cardFact className={colGrow} />
                   <StackCell label={t('table.fingerprint')} className={cn(cardLineAfter, cardCellClass(publisherCardFacts.includes('fingerprint')))}><span className="mono text-sm min-w-0 truncate" title={publisher.fingerprint}>{shortDigest(publisher.fingerprint, 20)}</span><CopyButton value={publisher.fingerprint} /></StackCell>
                   <StackCell label={t('table.trust')} className={cardCellClass(publisherCardFacts.includes('trust'))}><StatusPill status={publisher.trustState} /></StackCell>
                   {/* §2.7 / M1: three of six publishers have no note, and three dashed boxes spent
