@@ -1,3 +1,4 @@
+mod applications;
 mod assets;
 mod audit;
 mod auth;

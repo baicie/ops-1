@@ -398,3 +398,56 @@ what 33 Playwright specs navigate to. Recorded so it cannot be mistaken for work
 **NOT_RUN.** No Playwright browser run: the console route defect above means a
 browser run would fail for that reason, not for the cleanup. No full
 g12/data-foundation harness run (both need Docker, PostgreSQL and a kernel).
+
+## G14.3 Application-scoped authorization (2026-11-09)
+
+Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md) §2.2, §2.5 and the
+G14.3 implementation note.
+
+**Defect closed.** `access.allowedSurfaces` was a navigation declaration with no
+server enforcement. "The ops application is installed" and "this account may use
+it" were the same statement: any authenticated session could call
+`/api/v1/incidents` and be filtered only by workspace membership. A platform
+administrator was therefore an implicit operator of every business application.
+
+**Implemented.**
+
+| Piece | What it does |
+|---|---|
+| `kernel.applications` (0035) | registry: id, display name, surface prefix, required surfaces, enabled |
+| `kernel.application_grants` (0035) | per-user grant with an explicit verb list; empty = "may open", no verbs |
+| `/api/v1/apps/opsweave.ops/*` | separate router behind `require_ops_application`; `403 APPLICATION_FORBIDDEN` without a grant |
+| `/api/v1/applications` | what this caller may open, and what it may not |
+| `GET /api/v1/auth/me` | additive `applications` block |
+
+The migration is behaviour-preserving: the console application goes to the set
+the existing admin-surface predicate already covered; the ops application goes to
+every existing workspace member plus pre-existing admins (who could already reach
+`/app` and read nothing). Nobody gains access; accounts created afterwards start
+with none until granted.
+
+Legacy `/api/v1/incidents/*` keeps its original gate, per ADR-022 §2.6.
+
+**Tests actually run (local, 2026-11-09).**
+
+| Command | Result |
+|---|---|
+| `cargo test -p opsweave-kernel` (real PostgreSQL, migrations 0034+0035) | **270/270 PASS** |
+| `cargo clippy -p opsweave-kernel --all-targets -- -D warnings` | clean |
+| `cargo fmt --all -- --check` | clean |
+
+Two of the 270 are the ruling stated as a test:
+`an_admin_role_does_not_imply_an_application_grant` (admin refused without a
+grant, admitted with one, verb list enforced, revocation effective on the next
+call) and `a_disabled_application_is_refused_even_with_a_grant`.
+
+**NOT_RUN / not done.**
+- Separate origins and the OIDC Authorization Code + PKCE bridge (§2.7) are not
+  implemented. Both applications are still served from one origin, so the cookie
+  session continues to work; the single-origin reverse-proxy bridge remains the
+  documented interim behaviour.
+- The Ops Web client does not yet consult the `applications` block to hide
+  entries it cannot use. The server refuses them, so this is a UX gap, not an
+  authorization hole — but it is a gap and is not claimed as done.
+- No browser run of the two applications against the new gate (Playwright
+  **NOT_RUN**, unchanged from G14.2).
