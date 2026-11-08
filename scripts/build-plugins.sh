@@ -61,16 +61,53 @@ GO_BUILD="$(sha256_file plugins/hello-go/hello-go-linux)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$GO_CAP" --build-arg BUILD_DIGEST="$GO_BUILD" -t "$REGISTRY/opsweave/hello-go:0.0.1" plugins/hello-go >/dev/null
 
 echo "== Java OCI image"
+# The pinned JRE comes from one of two deterministic sources, in this order:
+#
+#   1. the Temurin 21 JDK the runner already carries (actions/setup-java in CI,
+#      or a local toolchain), through its own jlink;
+#   2. the pinned Temurin 21 JRE release archive, SHA-256 verified.
+#
+# Source 1 exists because the GitHub Releases host answered HTTP 504 to every
+# attempt from a GitHub runner (B1.8 runs 42469656670, 42469747350: six
+# retries, all 504), so retrying a broken transport was not a fix. jlink from
+# the same major JDK keeps the runtime's language level; the archive path
+# remains for hosts without a JDK and is still the only path that pins a
+# byte-for-byte upstream digest.
 if [ ! -x plugins/hello-java/jre/bin/java ]; then
-  echo "Downloading pinned Temurin 21 JRE for linux/$JRE_ARCH" >&2
   mkdir -p plugins/hello-java/jre
-  JRE_FILE="OpenJDK21U-jre_${JRE_ARCH}_linux_hotspot_21.0.13_9.tar.gz"
-  # GitHub Releases intermittently answers 504 while serving the pinned JRE
-  # (observed on B1.8 runs 42469656670 / 42469747350). Retry the transfer a
-  # bounded number of times; the SHA-256 check below still decides integrity.
-  curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --max-time 240 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/${JRE_FILE}" -o /tmp/opsweave-jre21.tar.gz
-  verify_sha256 /tmp/opsweave-jre21.tar.gz "$JRE_SHA256"
-  tar xzf /tmp/opsweave-jre21.tar.gz -C plugins/hello-java/jre --strip-components=1
+  JRE_SOURCE=""
+  JDK_HOME=""
+  if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/jlink" ]; then
+    JDK_HOME="$JAVA_HOME"
+  elif command -v javac >/dev/null 2>&1; then
+    JDK_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)" 2>/dev/null || command -v javac)")")"
+    [ -x "$JDK_HOME/bin/jlink" ] || JDK_HOME=""
+  fi
+  # The jar targets Java 21; a runtime from an older JDK must not be substituted,
+  # and a newer one is only accepted when it can still run `--release 21` output
+  # (every JDK >= 21 can). The major version is read from the JDK itself.
+  if [ -n "$JDK_HOME" ]; then
+    JDK_MAJOR="$("$JDK_HOME/bin/jlink" --version 2>/dev/null | sed -E 's/^([0-9]+).*/\1/' || true)"
+    if [ -z "$JDK_MAJOR" ] || [ "$JDK_MAJOR" -lt 21 ] 2>/dev/null; then
+      echo "the JDK at $JDK_HOME is not >= 21; falling back to the pinned archive" >&2
+      JDK_HOME=""
+    fi
+  fi
+  if [ -n "$JDK_HOME" ]; then
+    echo "Building the plugin JRE with jlink from $JDK_HOME (JDK $JDK_MAJOR)" >&2
+    rm -rf plugins/hello-java/jre
+    "$JDK_HOME/bin/jlink" --add-modules java.base,java.logging,java.xml,java.management,java.naming,java.security.jgss,jdk.crypto.ec,jdk.unsupported --strip-debug --no-man-pages --no-header-files --compress=zip-6 --output plugins/hello-java/jre >/dev/null
+    JRE_SOURCE="jlink:$(basename "$JDK_HOME")"
+  else
+    echo "Downloading pinned Temurin 21 JRE for linux/$JRE_ARCH" >&2
+    JRE_FILE="OpenJDK21U-jre_${JRE_ARCH}_linux_hotspot_21.0.13_9.tar.gz"
+    curl -fsSL --retry 8 --retry-delay 5 --retry-max-time 600 --retry-all-errors --max-time 240 "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/${JRE_FILE}" -o /tmp/opsweave-jre21.tar.gz
+    verify_sha256 /tmp/opsweave-jre21.tar.gz "$JRE_SHA256"
+    tar xzf /tmp/opsweave-jre21.tar.gz -C plugins/hello-java/jre --strip-components=1
+    JRE_SOURCE="pinned-archive"
+  fi
+  [ -x plugins/hello-java/jre/bin/java ] || { echo "the Java plugin JRE was not produced ($JRE_SOURCE)" >&2; exit 1; }
+  echo "Java plugin JRE source: $JRE_SOURCE" >&2
 fi
 if [ -x /opt/homebrew/opt/openjdk@21/bin/java ]; then
   JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q -f plugins/hello-java/pom.xml -DskipTests package
