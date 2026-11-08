@@ -22,9 +22,24 @@ trap cleanup EXIT
 echo "== build binaries and frontends"
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl -p opsweave-pipeline-worker
 pnpm install --frozen-lockfile
-# G14.2 splits this into two apps; on THIS branch one bundle still serves both
-# surfaces, so it is built here and the split changes only the build line.
-pnpm --fail-if-no-match --filter @opsweave/platform-web build >/dev/null
+# Build every web application this tree actually has.
+#
+# Hardcoding the names broke the stack twice: a branch that predates the split
+# names one package, a branch after it names two, and `--fail-if-no-match` then
+# fails on the name that is absent - a correct gate firing for a reason that is
+# not a defect. The set is derived from the tree instead, and the build itself
+# still fails loudly if a listed package cannot build.
+WEB_APPS=()
+for dir in apps/platform-console apps/ops-web apps/platform-web; do
+  if [ -f "$dir/package.json" ]; then
+    WEB_APPS+=("$(python3 -c "import json;print(json.load(open('$dir/package.json'))['name'])")")
+  fi
+done
+[ "${#WEB_APPS[@]}" -gt 0 ] || { echo "no web application found under apps/"; exit 1; }
+for app in "${WEB_APPS[@]}"; do
+  pnpm --fail-if-no-match --filter "$app" build >/dev/null
+done
+echo "built web applications: ${WEB_APPS[*]}"
 mkdir -p keys
 ./target/debug/opsctl keygen --out-dir keys >/dev/null
 
