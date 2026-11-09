@@ -118,7 +118,11 @@ export async function login(page: Page) {
   await page.fill('input[type=email]', WORKBENCH_ADMIN_EMAIL);
   await page.fill('input[type=password]', WORKBENCH_ADMIN_PASSWORD);
   await page.click('[data-testid="login-submit"]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  // G14.2: each application serves /login INSIDE its base (/admin/login,
+  // /app/login), so a predicate that only excluded '/login' became true the
+  // moment the browser landed on /admin/login - the wait returned before
+  // sign-in finished and the next goto raced the redirect.
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 export async function firstIncidentId(page: Page): Promise<string> {

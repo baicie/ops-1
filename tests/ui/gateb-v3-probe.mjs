@@ -30,7 +30,7 @@ async function newPage(browser, { w, h, theme, locale }) {
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((u) => !/\/login$/.test(u.pathname), { timeout: 30000 });
   await page.waitForTimeout(500);
   return { ctx, page };
 }

@@ -74,7 +74,7 @@ async function signIn(browser: Browser, locale: string) {
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((u) => !/\/login$/.test(u.pathname), { timeout: 30000 });
   const state = await ctx.storageState();
   await ctx.close();
   state.origins = [

@@ -12,7 +12,7 @@ async function open(w, h, locale) {
   await page.fill('input[type=email]', 'admin@opsweave.local');
   await page.fill('input[type=password]', 'OpsWeave!2026');
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((u) => !/\/login$/.test(u.pathname), { timeout: 30000 });
   await page.waitForTimeout(400);
   return { ctx, page };
 }
