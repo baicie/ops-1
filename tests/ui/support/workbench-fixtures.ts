@@ -114,6 +114,27 @@ export async function installFixtures(page: Page) {
       }),
     });
   });
+  // The entity page's three reads, through the ops grant. Registered in this order
+  // because Playwright matches the most recently added handler first: the
+  // sub-resources must be added AFTER the single-node pattern or it swallows them.
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*/history**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(historyPayload(NODES[0].id)) }));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*/instances', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) }));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*', (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').pop();
+    const spec = NODES.find((entry) => entry.id === id) || NODES[0];
+    const full = nodePayload(spec);
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: full.id, name: full.name, status: full.status, lastSeenAt: full.lastSeenAt,
+        stale: spec.stale, instancesReady: full.instancesReady, instancesTotal: full.instancesTotal,
+        resourceSnapshot: full.resourceSnapshot, os: full.os, arch: full.arch,
+      }),
+    });
+  });
   await page.route('**/api/v1/nodes**', async (route) => {
     const url = new URL(route.request().url());
     const match = url.pathname.match(/\/api\/v1\/nodes\/([^/]+)(\/.*)?$/);

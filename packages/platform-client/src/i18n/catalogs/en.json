@@ -1151,7 +1151,7 @@
   "observabilityEntity.action.back": "All nodes",
   "observabilityEntity.copyId": "Copy node ID",
   "observabilityEntity.current.title": "Latest sample",
-  "observabilityEntity.description": "{os}/{arch} · generation {generation}",
+  "observabilityEntity.description": "{os}/{arch}",
   "observabilityEntity.descriptionLoading": "Reading this node’s samples.",
   "observabilityEntity.events.description": "Audit entries whose subject is this node. Three or more identical entries in a row are folded into one.",
   "observabilityEntity.events.empty.description": "The audit log holds no entry whose subject is this node.",

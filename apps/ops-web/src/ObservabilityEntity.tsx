@@ -46,6 +46,7 @@ import {
   sampleIsStale,
   segmentPath,
   stateCanReport,
+  type FleetNode,
   type HistorySample,
   type HistoryWindowHours,
   type MetricKey,
@@ -207,7 +208,10 @@ export function ObservabilityEntityPage() {
   const [hours, setHours] = React.useState<HistoryWindowHours>(1);
 
   const { data: node, error, loading, reload, observedAt } = useObservedPolling(
-    () => api.get<NodeView>(`/api/v1/nodes/${nodeId}`),
+    // G14.4: the ops application reads its OWN granted projection, not the platform
+      // console's node view (which carries the endpoint and inventory). Same reason
+      // the fleet list moved.
+      () => api.get<FleetNode>(`/api/v1/apps/opsweave.ops/observability/nodes/${nodeId}`),
     POLL_MS,
   );
   const {
@@ -216,7 +220,7 @@ export function ObservabilityEntityPage() {
     loading: instancesLoading,
     reload: reloadInstances,
   } = useObservedPolling(
-    () => api.get<InstanceView[]>(`/api/v1/nodes/${nodeId}/instances`),
+    () => api.get<InstanceView[]>(`/api/v1/apps/opsweave.ops/observability/nodes/${nodeId}/instances`),
     POLL_MS,
   );
   // The audit log is not polled: an event that already happened does not change, and a 10s
@@ -242,7 +246,9 @@ export function ObservabilityEntityPage() {
     setWindowBounds({ fromMs, toMs });
     setHistory(null);
     const query = `limit=500&resolution=${resolutionFor(hours)}&from=${encodeURIComponent(new Date(fromMs).toISOString())}`;
-    void api.get<HistorySample[]>(`/api/v1/nodes/${nodeId}/resource-history?${query}`)
+    void api.get<HistorySample[]>(
+        `/api/v1/apps/opsweave.ops/observability/nodes/${nodeId}/history?${query}`,
+      )
       .then((items) => { if (!cancelled) setHistory({ samples: items || [], failed: false }); })
       // A failed history request is not an empty history. The panel says which one it is.
       .catch(() => { if (!cancelled) setHistory({ samples: [], failed: true }); });
@@ -310,7 +316,7 @@ export function ObservabilityEntityPage() {
         eyebrow={t('observabilityEntity.eyebrow')}
         title={t('page.observabilityNodeDetail')}
         description={node
-          ? <span className="pipeline-identity"><strong>{node.name}</strong><span>{t('observabilityEntity.description', { os: node.os, arch: node.arch, generation: node.generation })}</span></span>
+          ? <span className="pipeline-identity"><strong>{node.name}</strong><span>{t('observabilityEntity.description', { os: node.os ?? '', arch: node.arch ?? '' })}</span></span>
           : t('observabilityEntity.descriptionLoading')}
         actions={
           <>

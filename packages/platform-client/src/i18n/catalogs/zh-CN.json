@@ -1151,7 +1151,7 @@
   "observabilityEntity.action.back": "全部节点",
   "observabilityEntity.copyId": "复制节点 ID",
   "observabilityEntity.current.title": "最新采样",
-  "observabilityEntity.description": "{os}/{arch} · 第 {generation} 代",
+  "observabilityEntity.description": "{os}/{arch}",
   "observabilityEntity.descriptionLoading": "正在读取该节点的采样。",
   "observabilityEntity.events.description": "以该节点为对象的审计记录。连续三条及以上相同记录会折叠为一条。",
   "observabilityEntity.events.empty.description": "审计日志中没有以该节点为对象的记录。",

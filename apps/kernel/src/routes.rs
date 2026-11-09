@@ -404,6 +404,18 @@ pub fn build(state: AppState) -> Router {
             get(ops_observability::fleet),
         )
         .route(
+            "/api/v1/apps/opsweave.ops/observability/nodes/{node_id}",
+            get(ops_observability::node_detail),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/observability/nodes/{node_id}/history",
+            get(ops_observability::node_history),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/observability/nodes/{node_id}/instances",
+            get(ops_observability::node_instances),
+        )
+        .route(
             "/api/v1/apps/opsweave.ops/incidents",
             get(incidents::list_incidents).post(incidents::create_incident),
         )

@@ -225,6 +225,40 @@ function eventsPayload() {
 async function installFixtures(page: Page) {
   if (LIVE) return;
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  // G14.4: the ops application reads its own granted projection, not the platform
+  // console's node view. Stubbing only /api/v1/nodes left these pages polling an
+  // unanswered URL and stuck on `loading`, which is why the matrix and a11y specs
+  // timed out. Same fixture data, projected the way the server projects it.
+  const fleetNode = (spec: typeof NODES[number]) => {
+    const full = nodePayload(spec);
+    return {
+      id: full.id,
+      name: full.name,
+      status: full.status,
+      lastSeenAt: full.lastSeenAt,
+      stale: spec.stale,
+      instancesReady: full.instancesReady,
+      instancesTotal: full.instancesTotal,
+      resourceSnapshot: full.resourceSnapshot,
+      os: full.os,
+      arch: full.arch,
+    };
+  };
+  await page.route('**/api/v1/apps/opsweave.ops/observability/fleet**', (route) =>
+    route.fulfill(json({
+      nodes: NODES.map(fleetNode),
+      staleAfterSeconds: 90,
+      covers: ['node liveness and staleness'],
+      doesNotCover: ['distributed traces'],
+    })));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*/history**', (route) =>
+    route.fulfill(json(historyPayload())));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*/instances', (route) =>
+    route.fulfill(json(INSTANCES)));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*', (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill(json(fleetNode(NODES.find((entry) => entry.id === id) || NODES[0])));
+  });
   await page.route('**/api/v1/nodes', (route) => route.fulfill(json(NODES.map(nodePayload))));
   await page.route('**/api/v1/nodes/*/resource-history*', (route) => route.fulfill(json(historyPayload())));
   await page.route('**/api/v1/nodes/*/instances', (route) => route.fulfill(json(INSTANCES)));
