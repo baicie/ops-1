@@ -103,7 +103,11 @@ for attempt in range(6):
         break
     time.sleep(1)
 check(status == 200, "gateway TS echo 200")
-check(echo.get("serverVerifiedCallerRole") == "admin", "gateway overwrites forged caller role")
+# B2.1: the unsigned role header is never forwarded. The client forged
+# "forged-superadmin"; the plugin must see no role header at all, and the
+# identity it may act on is the Kernel-signed owu1 context below.
+check(echo.get("deliveredUnsignedRole") is None, "gateway strips the unsigned caller role header")
+check(echo.get("deliveredSignedContext") is True, "gateway delivers a Kernel-signed user context")
 
 print(f"\nRuntime conformance: {len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

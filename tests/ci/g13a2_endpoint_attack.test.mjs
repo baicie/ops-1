@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 
 process.env.OPSWEAVE_ALLOW_LOOPBACK_SOURCE = '1';
 
-const { createPlugin } = await import('../../plugins/zabbix-source/backend/server.mjs');
+const { createPlugin, ROLE_SCOPES, AUTOMATION_SCOPES } = await import('../../plugins/zabbix-source/backend/server.mjs');
 const { MemoryStore } = await import('../../plugins/zabbix-source/backend/storage.mjs');
 const { createIdentityResolver, signContext } = await import('../../plugins/zabbix-source/backend/identity.mjs');
 const { normalizeEndpoint, parseCredentialBindings } = await import('../../plugins/zabbix-source/backend/credential-binding.mjs');
@@ -78,7 +78,13 @@ async function startPlugin(approvedEndpoint) {
   const store = new MemoryStore();
   const plugin = createPlugin({
     store,
-    verifyIdentity: createIdentityResolver({ contextKeyHex: KEY, pluginId: PLUGIN_ID }),
+    verifyIdentity: createIdentityResolver({
+      contextKeyHex: KEY,
+      pluginId: PLUGIN_ID,
+      roleScopes: ROLE_SCOPES,
+      scopePrefix: 'telemetry.source.',
+      automationScopes: AUTOMATION_SCOPES,
+    }),
     workspaceSecretMap: { [WORKSPACE]: { [REF]: TOKEN } },
     secretMode: 'workspace',
     credentialBindings: {
@@ -179,7 +185,13 @@ async function startWith({ bindings = {}, secrets = { [REF]: TOKEN }, allowInsec
   const store = new MemoryStore();
   const plugin = createPlugin({
     store,
-    verifyIdentity: createIdentityResolver({ contextKeyHex: KEY, pluginId: PLUGIN_ID }),
+    verifyIdentity: createIdentityResolver({
+      contextKeyHex: KEY,
+      pluginId: PLUGIN_ID,
+      roleScopes: ROLE_SCOPES,
+      scopePrefix: 'telemetry.source.',
+      automationScopes: AUTOMATION_SCOPES,
+    }),
     workspaceSecretMap: { [WORKSPACE]: secrets },
     secretMode: 'workspace',
     credentialBindings: bindings,

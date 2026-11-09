@@ -2,6 +2,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { normalizeRuleInput, ruleSetDigest, evaluateRules, QUALITY_RULE_TYPES } from './quality.mjs';
+import { createIdentityResolver, hasScope } from './identity.mjs';
 
 const PLUGIN_ID = process.env.OPSWEAVE_PLUGIN_ID || 'opsweave.data-catalog';
 const VERSION = process.env.OPSWEAVE_PLUGIN_VERSION || '0.0.1';
@@ -52,31 +53,33 @@ function canonical(value) {
 }
 function digest(value) { return 'sha256:' + crypto.createHash('sha256').update(canonical(value)).digest('hex'); }
 function b64url(value) { return Buffer.from(value).toString('base64url'); }
-function verifyContext(token) {
-  if (!token || !CONTEXT_KEY) return null;
-  const parts = token.split('.');
-  if (parts.length !== 3 || parts[0] !== 'oww1') return null;
-  const expected = crypto.createHmac('sha256', Buffer.from(CONTEXT_KEY, 'hex')).update(parts[1]).digest('base64url');
-  if (expected.length !== parts[2].length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts[2]))) return null;
-  try {
-    const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
-    if (claims.v !== 1 || Number(claims.expiresAt) * 1000 <= Date.now()) return null;
-    return claims;
-  } catch { return null; }
+// Which capabilities a signed role carries IN THIS PLUGIN. The resolver verifies
+// the token; what the token is worth is the plugin's decision, so the map lives
+// here. The bare `x-opsweave-user-role` header used to be read as a fallback
+// identity (G10 R1 / B2.1); it is now ignored entirely - a caller cannot assert
+// a role, only present a context the Kernel signed for this plugin.
+const ROLE_SCOPES = {
+  admin: ['dataset:read', 'dataset:write'],
+  operator: ['dataset:read', 'dataset:write'],
+  viewer: ['dataset:read'],
+};
+// `dataset:read` is a workload scope: an automation principal has no user role
+// and no dataset grant of its own, so it gets nothing from this map.
+const AUTOMATION_SCOPES = {};
+
+const identity = createIdentityResolver({
+  contextKeyHex: CONTEXT_KEY,
+  pluginId: PLUGIN_ID,
+  roleScopes: ROLE_SCOPES,
+  scopePrefix: 'dataset:',
+  automationScopes: AUTOMATION_SCOPES,
+});
+
+function actorOf(who) {
+  if (who.kind === 'user') return who.userId;
+  if (who.kind === 'automation') return `automation:${who.principalId}`;
+  return `workload:${who.pluginId}`;
 }
-function identity(req) {
-  const context = verifyContext(req.headers['x-opsweave-caller-context']);
-  if (context) return { kind: 'workload', pluginId: context.pluginId, scope: Array.isArray(context.scope) ? context.scope : [], claims: context };
-  const rawRole = req.headers['x-opsweave-user-role'];
-  if (rawRole) {
-    const role = String(rawRole).toLowerCase();
-    if (role === 'admin' || role === 'operator') return { kind: 'user', role, scope: ['dataset:read', 'dataset:write'] };
-    if (role === 'viewer') return { kind: 'user', role, scope: ['dataset:read'] };
-    return { kind: 'user', role, scope: [] };
-  }
-  return null;
-}
-function hasScope(who, scope) { return Boolean(who && Array.isArray(who.scope) && who.scope.includes(scope)); }
 
 function validateFields(fields) {
   if (!Array.isArray(fields) || fields.length < 1 || fields.length > 512) throw new Error('fields must contain 1..512 entries');
@@ -600,7 +603,7 @@ async function handle(req, res) {
   if (url.pathname === '/_opsweave/health/live') return send(res, stopping ? 503 : 200, { status: stopping ? 'stopping' : 'live' }, requestId);
   if (url.pathname === '/_opsweave/health/ready') return send(res, ready && !stopping ? 200 : 503, { status: ready && !stopping ? 'ready' : 'not_ready' }, requestId);
   if (url.pathname === '/_opsweave/health/startup') return send(res, 200, { status: 'started' }, requestId);
-  const who = identity(req);
+  const who = identity(req.headers);
   if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'caller identity required', requestId);
   if (url.pathname === '/api/data-catalog/governance-summary' && req.method === 'GET') {
     if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'authentication required', requestId);
@@ -911,7 +914,7 @@ async function handle(req, res) {
       const row = await pool.query(
         `INSERT INTO catalog_quality_rules (rule_id,dataset_id,schema_revision,rule_type,config,severity,enabled,version,created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,1,$8) RETURNING *`,
-        [crypto.randomUUID(), datasetId, revision, input.ruleType, JSON.stringify(input.config), input.severity, input.enabled, who.role || who.pluginId || 'unknown'],
+        [crypto.randomUUID(), datasetId, revision, input.ruleType, JSON.stringify(input.config), input.severity, input.enabled, actorOf(who)],
       );
       return send(res, 201, qualityRuleView(row.rows[0]), requestId);
     }
@@ -980,7 +983,7 @@ async function handle(req, res) {
         inserted = await pool.query(
           `INSERT INTO catalog_quality_runs (run_id,dataset_id,schema_revision,status,idempotency_key,rule_set,rule_set_digest,request_digest,created_by)
            VALUES ($1,$2,$3,'PENDING',$4,$5,$6,$7,$8) RETURNING *`,
-          [runId, datasetId, revision, key, JSON.stringify(snapshot), ruleDigest, requestDigest, who.role || who.pluginId || 'unknown'],
+          [runId, datasetId, revision, key, JSON.stringify(snapshot), ruleDigest, requestDigest, actorOf(who)],
         );
       } catch (error) {
         if (error.code === '23505') {

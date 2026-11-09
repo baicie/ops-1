@@ -75,10 +75,18 @@ pub async fn proxy(
     // client claimed role Y". Only the Kernel may answer that, and it answers
     // from the membership table at the moment of the call - not from a header
     // the request brought with it (G10 R1).
+    //
+    // B2.1: the answer is the SIGNED context and nothing else. The gateway used
+    // to also forward `x-opsweave-user-role`; plugins fell back to it whenever
+    // they did not verify the signed context, which made an unsigned header the
+    // identity of any caller that could reach the plugin port. It is no longer
+    // sent, and no plugin reads it.
     // One definition of membership: DataScope owns the workspace/row rule, and
     // a second copy here could drift from the endpoints the plugin's data will
     // be read through.
-    let workspace_ids = DataScope::resolve(&state.db, &auth).await?.workspaces;
+    let mut workspace_ids = DataScope::resolve(&state.db, &auth).await?.workspaces;
+    // Stable order so the signed claim does not depend on query plan order.
+    workspace_ids.sort();
     let user_context = user_context_token(
         &state,
         &first.plugin_id,
@@ -128,12 +136,12 @@ pub async fn proxy(
                 "x-opsweave-activation-revision",
                 route.generation.to_string(),
             )
-            .header("x-opsweave-user-id", auth.user_id.to_string())
-            .header("x-opsweave-user-role", auth.role.to_string())
-            .header("x-opsweave-user-context", &user_context)
             .timeout(Duration::from_secs(
                 state.config.request_timeout_seconds.max(1),
             ));
+        for (name, value) in identity_headers(auth.user_id, &user_context) {
+            request = request.header(name, value);
+        }
         for (name, value) in headers.iter() {
             let name_str = name.as_str().to_ascii_lowercase();
             if matches!(
@@ -224,6 +232,21 @@ pub async fn proxy(
 
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
+/// The identity a plugin is allowed to act on, as headers.
+///
+/// B2.1: this list is exhaustive on purpose. `x-opsweave-user-role` is NOT here
+/// and must never be added back: it is an unsigned assertion, and a plugin that
+/// falls back to it turns "the caller typed admin" into an administrative
+/// grant. The signature over `x-opsweave-user-context` is the whole identity;
+/// the user id beside it is a convenience for logging, and no plugin decides
+/// access from it alone.
+fn identity_headers(user_id: Uuid, user_context: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("x-opsweave-user-id", user_id.to_string()),
+        ("x-opsweave-user-context", user_context.to_string()),
+    ]
+}
+
 fn safe_forward_path(path: &str) -> bool {
     if path.contains('\0') || path.contains('\\') || path.contains('\\') {
         return false;
@@ -271,7 +294,23 @@ async fn route_candidates(state: &AppState, plugin_id: &str) -> AppResult<Vec<Ro
 
 #[cfg(test)]
 mod tests {
-    use super::safe_forward_path;
+    use super::{identity_headers, safe_forward_path};
+    use uuid::Uuid;
+
+    #[test]
+    fn the_gateway_never_forwards_an_unsigned_role() {
+        let headers = identity_headers(Uuid::nil(), "owu1.payload.signature");
+        let names: Vec<&str> = headers.iter().map(|(name, _)| *name).collect();
+        assert!(
+            !names.contains(&"x-opsweave-user-role"),
+            "an unsigned role header must never be forwarded: plugins would read it as identity"
+        );
+        assert_eq!(
+            names,
+            vec!["x-opsweave-user-id", "x-opsweave-user-context"],
+            "the identity header set is exhaustive; adding one is a security decision"
+        );
+    }
 
     #[test]
     fn rejects_path_traversal_variants() {

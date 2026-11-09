@@ -83,15 +83,25 @@ const server = http.createServer(async (req, res) => {
     try { parsed = body ? JSON.parse(body) : {}; } catch {
       return error(res, 400, 'INVALID_JSON', 'Body must be valid JSON', id);
     }
-    const forged = req.headers['x-opsweave-user-role'];
+    // B2.1: the Kernel no longer forwards an unsigned role header, and no plugin
+    // may treat one as identity. This probe reports what ARRIVED so the
+    // conformance test can assert the forged header never survives the Gateway.
+    // It is a diagnostic field, not an authorization input: nothing here decides
+    // access from it.
+    const arrivedRole = req.headers['x-opsweave-user-role'];
+    const arrivedContext = req.headers['x-opsweave-user-context'];
     return send(res, 200, {
       echoed: parsed,
       pluginId: PLUGIN_ID,
       version: VERSION,
       instanceId: INSTANCE_ID,
       requestId: id,
-      serverVerifiedCallerRole: typeof forged === 'string' ? forged : null,
-      note: 'Caller context headers are set by the Kernel Gateway; clients cannot self-assert them.',
+      // null means the Gateway stripped the client's forged header (the point).
+      deliveredUnsignedRole: typeof arrivedRole === 'string' ? arrivedRole : null,
+      // Presence only: the plugin does not hold this plugin's context key and
+      // must not pretend to have verified the token.
+      deliveredSignedContext: typeof arrivedContext === 'string' && arrivedContext.startsWith('owu1.'),
+      note: 'Caller identity arrives only as a Kernel-signed context; an unsigned role header is never forwarded.',
     }, id);
   }
   if (url.pathname.startsWith('/api/hello')) {

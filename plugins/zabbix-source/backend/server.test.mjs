@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 // before the dynamic import so the module-level constant sees it.
 process.env.OPSWEAVE_ALLOW_LOOPBACK_SOURCE = '1';
 
-const { createPlugin, secretConfiguration } = await import('./server.mjs');
+const { createPlugin, secretConfiguration, ROLE_SCOPES, AUTOMATION_SCOPES } = await import('./server.mjs');
 const { MemoryStore } = await import('./storage.mjs');
 const { createIdentityResolver, signContext } = await import('./identity.mjs');
 const { attestationPayload } = await import('./zabbix.mjs');
@@ -150,6 +150,9 @@ async function startPlugin({ store = new MemoryStore(), adapter = true, workspac
       contextKeyHex: KEY_HEX,
       pluginId: PLUGIN_ID,
       automationPublicKeyHex: AUTOMATION_PUBLIC_HEX,
+      roleScopes: ROLE_SCOPES,
+      scopePrefix: 'telemetry.source.',
+      automationScopes: AUTOMATION_SCOPES,
     }),
     adapterId: adapter ? ADAPTER_ID : '',
     adapterSecret: adapter ? ADAPTER_SECRET : '',

@@ -7,6 +7,13 @@ info:
     and immutable Schema revisions; it is not a one-to-one mapping to physical
     database tables. All writes require an idempotency key and return a durable
     receipt. Preview is not part of this API.
+
+    Identity (B2.1, ADR-020): the plugin accepts only Kernel-signed contexts -
+    `x-opsweave-user-context` (`owu1`, a proxied user session, bound to this
+    plugin and carrying the caller's business workspace membership) or
+    `x-opsweave-caller-context` (`oww1`, a workload capability call). It does not
+    read `x-opsweave-user-role` or any other self-asserted header; a request
+    carrying only those is answered `401 UNAUTHENTICATED`.
 servers:
   - url: /api/data-catalog
 security:

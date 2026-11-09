@@ -28,7 +28,32 @@ cleanup_case() {
   DB=""
 }
 trap cleanup_case EXIT
-api() { curl -fsS -H 'x-opsweave-user-role: admin' -H 'content-type: application/json' "$@"; }
+# B2.1: the plugin accepts no unsigned identity, so this harness signs a real
+# per-plugin context the way the Kernel Gateway does. The key is HMAC-SHA256 over
+# "caller-context:<pluginId>" under the Kernel cursor secret; here the harness owns
+# both sides of that exchange, so it derives the per-plugin key directly.
+CONTEXT_KEY="${FT_CONTEXT_KEY:-deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef}"
+WORKSPACE_ID="${FT_WORKSPACE_ID:-00000000-0000-4000-8000-000000000001}"
+USER_ID="${FT_USER_ID:-11111111-1111-4111-8111-111111111111}"
+# ctx <role> [pluginId] -> a signed owu1 context for that role.
+ctx() {
+  node -e '
+    const crypto = require("node:crypto");
+    const [keyHex, pluginId, role, workspaceId, userId] = process.argv.slice(1);
+    const now = Math.floor(Date.now() / 1000);
+    const claims = {
+      v: 1, userId, role, pluginId,
+      workspaceIds: [workspaceId],
+      issuedAt: now, expiresAt: now + 600,
+      requestId: crypto.randomUUID(),
+    };
+    const encoded = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+    const signature = crypto.createHmac("sha256", Buffer.from(keyHex, "hex"))
+      .update(encoded).digest("base64url");
+    process.stdout.write(`owu1.${encoded}.${signature}`);
+  ' "$CONTEXT_KEY" "${2:-opsweave.data-catalog}" "$1" "$WORKSPACE_ID" "$USER_ID"
+}
+api() { curl -fsS -H "x-opsweave-user-context: $(ctx admin)" -H 'content-type: application/json' "$@"; }
 run_status() { psql -d "$DB" -tAc "select status from catalog_quality_runs where run_id='$1'"; }
 wait_run() {
   local rid="$1" expected="$2" deadline=$((SECONDS+30)) s
@@ -41,7 +66,7 @@ wait_run() {
 }
 start_catalog() {
   local log="$1"
-  (cd "$ROOT/plugins/data-catalog/backend" && exec env DATABASE_URL="${FT_DATABASE_PREFIX:-postgres://localhost}/$DB?sslmode=disable" OPSWEAVE_PLUGIN_DATABASE_URL="${FT_DATABASE_PREFIX:-postgres://localhost}/$DB?sslmode=disable" OPSWEAVE_CALLER_CONTEXT_KEY='' OPSWEAVE_QUALITY_TEST_DELAY_MS=2000 PORT="$PORT" node server.mjs >"$log" 2>&1) &
+  (cd "$ROOT/plugins/data-catalog/backend" && exec env DATABASE_URL="${FT_DATABASE_PREFIX:-postgres://localhost}/$DB?sslmode=disable" OPSWEAVE_PLUGIN_DATABASE_URL="${FT_DATABASE_PREFIX:-postgres://localhost}/$DB?sslmode=disable" OPSWEAVE_CALLER_CONTEXT_KEY="$CONTEXT_KEY" OPSWEAVE_QUALITY_TEST_DELAY_MS=2000 PORT="$PORT" node server.mjs >"$log" 2>&1) &
   CAT_PID=$!
   echo "$CAT_PID" > "$CASE_ART/catalog.pid"
   for _ in $(seq 1 100); do
@@ -57,11 +82,11 @@ make_fixture() {
   ds="$(api -X POST "http://127.0.0.1:$PORT/api/data-catalog/datasets" -d "$payload")"
   DATASET_ID="$(printf '%s' "$ds" | python3 -c 'import json,sys;print(json.load(sys.stdin)["datasetId"])')"
   api -X POST "http://127.0.0.1:$PORT/api/data-catalog/datasets/$DATASET_ID/quality-rules" -d '{"ruleType":"RECORD_COUNT","config":{"min":1,"max":10000},"severity":"HIGH"}' >/dev/null
-  python3 - "$PORT" "$DATASET_ID" <<'PY' >/dev/null
+  python3 - "$PORT" "$DATASET_ID" "$(ctx admin)" <<'PY' >/dev/null
 import json,sys,urllib.request
-port,ds=sys.argv[1:]
+port,ds,context=sys.argv[1:]
 records=[{"id":str(i),"name":"n"} for i in range(20)]
-req=urllib.request.Request(f"http://127.0.0.1:{port}/api/data-catalog/datasets/{ds}/records",data=json.dumps({"schemaRevision":1,"sourceBatchKey":"ft-batch-00000001","records":records}).encode(),headers={"content-type":"application/json","x-opsweave-user-role":"admin"},method="POST")
+req=urllib.request.Request(f"http://127.0.0.1:{port}/api/data-catalog/datasets/{ds}/records",data=json.dumps({"schemaRevision":1,"sourceBatchKey":"ft-batch-00000001","records":records}).encode(),headers={"content-type":"application/json","x-opsweave-user-context":context},method="POST")
 urllib.request.urlopen(req).read()
 PY
 }
@@ -104,7 +129,7 @@ run_case() {
       ;;
     FT-06)
       rid="$(submit ft-06-key-0001)"; wait_run "$rid" RUNNING
-      code="$(curl -sS -o "$CASE_ART/cancel.json" -w '%{http_code}' -H 'x-opsweave-user-role: admin' -X POST "http://127.0.0.1:$PORT/api/data-catalog/datasets/$DATASET_ID/quality-runs/$rid/cancel")"
+      code="$(curl -sS -o "$CASE_ART/cancel.json" -w '%{http_code}' -H "x-opsweave-user-context: $(ctx admin)" -X POST "http://127.0.0.1:$PORT/api/data-catalog/datasets/$DATASET_ID/quality-runs/$rid/cancel")"
       [ "$code" = 200 ] || { echo "FT-06 FAIL: cancel http=$code" >&2; exit 1; }
       [ "$(run_status "$rid")" = CANCELLED ] || { echo "FT-06 FAIL: not cancelled" >&2; exit 1; }
       n="$(psql -d "$DB" -tAc "select count(*) from catalog_quality_results where run_id='$rid'")"; [ "$n" = 0 ] || { echo "FT-06 FAIL: results=$n" >&2; exit 1; }

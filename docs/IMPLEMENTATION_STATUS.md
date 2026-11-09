@@ -122,3 +122,41 @@ AI RCA, Data Catalog, general DAG engine, historical log storage/search, arbitra
 - P1 migration failure records can no longer overwrite `APPLIED`.
 - Remaining NOT_RUN: signed package migration plans, real multi-provider switch test,
   true concurrent migration interleaving test, production secret management/mTLS/Fencing.
+
+## B2.1 Plugin identity hardening (2026-11-08)
+
+Authority: [ADR-020](adr/ADR-020-plugin-identity-hardening.md).
+
+**Defect closed.** Both data plugins accepted the unsigned `x-opsweave-user-role`
+header as the caller's role (admin/operator → read+write) and never verified the
+Kernel-signed `owu1` context. Because the Gateway sent both, the signed identity
+was rejected and the unsigned header was the identity on the production path.
+Rule and run rows recorded the role string (`"admin"`) as `created_by` rather
+than a user id.
+
+**Implemented.** One canonical resolver (`plugins/shared/plugin-identity.mjs`,
+byte-copied into each plugin backend by `scripts/sync-plugin-identity.mjs`, with a
+CI `--check` gate). It verifies `owu1` / `oww1` / `owa2`, binds `owu1` to the
+receiving plugin, rejects expired/future/unknown-role/user-id-less tokens, and
+returns `null` with no configured key. The Gateway no longer forwards the role
+header (`gateway::identity_headers`, unit-tested as an exhaustive list).
+`created_by` records `userId`, `automation:<principalId>` or `workload:<pluginId>`.
+
+**Tests actually run (local, 2026-11-08).**
+
+| Command | Result |
+|---|---|
+| `node --test tests/ci/b2_plugin_identity_attack.test.mjs` (real processes + real PostgreSQL 17) | **7/7 PASS** |
+| same suite against the pre-fix plugin sources | **1/7 pass, 6 fail** — the reproduction |
+| `node --test plugins/zabbix-source/backend/server.test.mjs` | **25/25 PASS** (shared module is behaviour-equivalent) |
+| `node --test tests/ci/g13a2_endpoint_attack.test.mjs` | **8/8 PASS** |
+| `./tests/reliability/run.sh --all` (real PostgreSQL, signed contexts now) | **4/4 PASS** (FT-01, FT-02, FT-06, FT-IDEM-01) |
+| `cargo test -p opsweave-kernel` against `opsweave_b2_kernel` | **262/262 PASS** |
+| `cargo fmt --all -- --check` | clean |
+| `python3 tests/contract/validate_contracts.py` | passed (17 schemas, 6 examples validated) |
+
+**Status split.** Identity: **implemented and locally verified**.
+Workspace scoping of plugin data: **NOT implemented** — the data tables still
+have no `workspace_id`, so the *identity* is correct while the *data* remains
+platform-wide. Tracked as PR-A2 and a release blocker for any multi-tenant claim.
+Real Zabbix / mTLS / OCI image signature: **NOT_RUN / BLOCKED** (unchanged).
