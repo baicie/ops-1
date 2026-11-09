@@ -333,13 +333,20 @@ mod database_tests {
             .ok();
     }
 
-    /// A disabled application is refused even to a granted caller: disabling is
-    /// how an application is taken out of service without deleting its data.
+    /// A disabled application is refused even to a granted caller.
+    ///
+    /// This uses a TEST-OWNED application rather than toggling `opsweave.ops`.
+    /// Cargo runs these tests in parallel against one shared database, and the
+    /// first version disabled the built-in application for the duration of the
+    /// test - which another test then observed as "denied", failing intermittently
+    /// depending on scheduling. A test that mutates shared global state is a test
+    /// that fails for reasons having nothing to do with the rule it checks.
     #[tokio::test]
     async fn a_disabled_application_is_refused_even_with_a_grant() {
         let Some(pool) = test_pool().await else {
             return;
         };
+        let application = format!("test.disabled-{}", Uuid::new_v4());
         let user_id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO kernel.users (id, email, display_name, password_hash, role)
@@ -351,10 +358,19 @@ mod database_tests {
         .await
         .expect("seed user");
         sqlx::query(
+            "INSERT INTO kernel.applications (application_id, display_name, surface_prefix)
+             VALUES ($1,'Disabled under test',$2) ON CONFLICT DO NOTHING",
+        )
+        .bind(&application)
+        .bind(format!("/t-{}", &application[application.len() - 8..]))
+        .execute(&pool)
+        .await
+        .expect("seed application");
+        sqlx::query(
             "INSERT INTO kernel.application_grants (application_id, user_id) VALUES ($1,$2)
              ON CONFLICT DO NOTHING",
         )
-        .bind(OPS_APPLICATION)
+        .bind(&application)
         .bind(user_id)
         .execute(&pool)
         .await
@@ -368,20 +384,33 @@ mod database_tests {
             via_cookie: false,
             session_id: Uuid::new_v4(),
         };
-        assert!(require_application(&pool, &auth, OPS_APPLICATION)
-            .await
-            .is_ok());
+        assert!(
+            require_application(&pool, &auth, &application)
+                .await
+                .is_ok(),
+            "an enabled application with a grant is admitted"
+        );
 
         sqlx::query("UPDATE kernel.applications SET enabled=false WHERE application_id=$1")
-            .bind(OPS_APPLICATION)
+            .bind(&application)
             .execute(&pool)
             .await
             .expect("disable");
-        let refused = require_application(&pool, &auth, OPS_APPLICATION).await;
-        assert!(refused.is_err(), "a disabled application is out of service");
-        // Restore so the shared test database is left as it was found.
-        sqlx::query("UPDATE kernel.applications SET enabled=true WHERE application_id=$1")
-            .bind(OPS_APPLICATION)
+        let refused = require_application(&pool, &auth, &application).await;
+        assert!(
+            refused.is_err(),
+            "a disabled application is out of service even for a granted caller"
+        );
+
+        // Clean up only what this test created; the built-in applications are
+        // other tests' fixtures and are never touched.
+        sqlx::query("DELETE FROM kernel.application_grants WHERE application_id=$1")
+            .bind(&application)
+            .execute(&pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM kernel.applications WHERE application_id=$1")
+            .bind(&application)
             .execute(&pool)
             .await
             .ok();
