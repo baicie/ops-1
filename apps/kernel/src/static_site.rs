@@ -28,6 +28,33 @@ use tower_http::services::{ServeDir, ServeFile};
 const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
 
 /// The shell and every other unhashed file must be revalidated before reuse.
+/// Pre-split entry points that no longer have an application to render them.
+///
+/// Returns the path to redirect to, preserving the query. Kept as a closed table
+/// for the same reason the client-route prefixes are: an open rule ("anything not
+/// a file") would swallow genuine 404s.
+fn legacy_entry_redirect(path: &str, query: Option<&str>) -> Option<String> {
+    let trimmed = path.trim_end_matches('/');
+    let target = match trimmed {
+        "/login" => "/admin/login".to_string(),
+        // The split briefly mounted the platform console under /console. Anything
+        // that recorded that path (a bookmark, a log line, a runbook) still has to
+        // land somewhere real, and /admin is where the console actually lives.
+        // Deep paths keep their tail so a bookmarked page still resolves.
+        "/console" => "/admin".to_string(),
+        other if other.starts_with("/console/") => {
+            format!("/admin/{}", &other["/console/".len()..])
+        }
+        // The pre-split workspace entry: /app still exists, so only the exact
+        // root needs steering, and the ops application resolves it itself.
+        _ => return None,
+    };
+    Some(match query {
+        Some(query) if !query.is_empty() => format!("{target}?{query}"),
+        _ => target,
+    })
+}
+
 const REVALIDATE_CACHE: &str = "no-cache";
 
 /// Path prefixes the client router owns; each is answered `200` with the shell.
@@ -232,6 +259,18 @@ async fn serve(State(site): State<StaticSite>, request: Request, next: Next) -> 
     }
 
     let path = request.uri().path().to_owned();
+    // G14.2 split the single bundle into two applications, each mounted under its
+    // own base (`/console`, `/app`). A bare `/login` therefore belongs to neither:
+    // both applications serve `/login` INSIDE their base, and the old path has no
+    // router to match it. Bookmarking or landing on it would render an empty shell.
+    //
+    // Signing in is a platform act, so the bare path forwards to the Platform
+    // Console's login and carries the original query (which holds `?next=`). A
+    // redirect and not a rewrite: the browser must end up with a URL that matches
+    // the router that will actually render.
+    if let Some(target) = crate::static_site::legacy_entry_redirect(&path, request.uri().query()) {
+        return axum::response::Redirect::temporary(&target).into_response();
+    }
     let cache_control = HeaderValue::from_static(site.cache_control(&path));
     let (file, shell) = match site.resolve(&path).await {
         Target::Missing => return next.run(request).await,
@@ -451,6 +490,60 @@ mod tests {
         request(app, Method::GET, path, &[]).await
     }
 
+    /// A path recorded under the briefly-used `/console` base still lands on the
+    /// console, and a deep path keeps its tail.
+    #[tokio::test]
+    async fn a_console_path_is_forwarded_to_the_console_application() {
+        let fixture = Fixture::new("console-redirect");
+        let app = fixture.app();
+        for (from, to) in [
+            ("/console", "/admin"),
+            ("/console/overview", "/admin/overview"),
+            (
+                "/console/nodes/node-1?tab=logs",
+                "/admin/nodes/node-1?tab=logs",
+            ),
+        ] {
+            let response = get(&app, from).await;
+            assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT, "{from}");
+            assert_eq!(
+                response
+                    .headers()
+                    .get(axum::http::header::LOCATION)
+                    .and_then(|value| value.to_str().ok()),
+                Some(to),
+                "{from}"
+            );
+        }
+    }
+
+    /// The split left `/login` belonging to neither application: each serves it
+    /// INSIDE its base, so the bare path rendered an empty shell. Signing in is a
+    /// platform act, so it forwards to the console's login and keeps the query.
+    #[tokio::test]
+    async fn a_bare_login_is_redirected_into_the_console_application() {
+        let fixture = Fixture::new("legacy-login").with_second_bundle("legacy-login");
+        let app = fixture.app();
+
+        let response = get(&app, "/login?next=/app/incidents").await;
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("/admin/login?next=/app/incidents"),
+            "the query carries the post-login destination and must survive"
+        );
+
+        // A path that is genuinely missing stays a 404: the redirect is a closed
+        // table, not "anything unfound goes to the login page".
+        assert_eq!(
+            get(&app, "/nope-not-a-route").await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
     /// G14.2: two applications, two shells. A `/app` route must be answered with
     /// the ops bundle, not the console's, or the browser mounts the wrong router
     /// and every ops route 404s inside a shell that loaded successfully.
@@ -573,7 +666,11 @@ mod tests {
             "/admin/plugins/demo",
             "/app",
             "/app/home",
-            "/login",
+            // `/login` moved out of this list in G14.2: it used to be answered with
+            // the shell because one bundle rendered everything. Now each
+            // application serves `/login` inside its own base, so the bare path has
+            // no router and is redirected instead - asserted separately in
+            // `a_bare_login_is_redirected_into_the_console_application`.
             "/403",
             "/plugins",
             "/plugins/demo",

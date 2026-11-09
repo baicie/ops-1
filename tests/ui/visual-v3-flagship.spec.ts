@@ -37,7 +37,7 @@ async function login(page: Page) {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 20000 });
   await page.waitForTimeout(600);
 }
 
@@ -261,7 +261,7 @@ for (const viewport of VIEWPORTS) {
         await page.fill('input[type=email]', ADMIN_EMAIL);
         await page.fill('input[type=password]', ADMIN_PASSWORD);
         await page.click('[data-testid=login-submit]');
-        await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20000 });
+        await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 20000 });
         await page.waitForTimeout(700);
 
         if (viewport.w === 1440 && theme === 'light') {

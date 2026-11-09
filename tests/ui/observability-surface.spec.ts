@@ -245,13 +245,13 @@ async function login(page: Page) {
   // that hangs waiting for a form the app will never draw and one that measures the page.
   const email = page.locator('input[type=email]');
   if (!(await email.count())) {
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20_000 });
+    await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 20_000 });
     return;
   }
   await email.fill(ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20_000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 20_000 });
 }
 
 /** The §4.1 measurement contract, read out of one live page. Same shape the v3 harness writes. */

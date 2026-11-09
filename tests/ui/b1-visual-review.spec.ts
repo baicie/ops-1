@@ -44,7 +44,7 @@ async function signIn(page: Page, base: string) {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
 }
 
 async function context(browser: Browser, base: string, width: number, height: number, theme: 'light' | 'dark') {

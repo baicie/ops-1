@@ -84,7 +84,7 @@ async function login(page: Page) {
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   // Locale-independent: the visible label is localized copy.
   await page.click('[data-testid="login-submit"]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 async function openAdmin(page: Page) {

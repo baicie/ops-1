@@ -40,7 +40,7 @@ async function login(page: Page) {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid="login-submit"]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 const verdict = (page: Page) => page.getByTestId('health-pill').getAttribute('data-verdict');
@@ -111,7 +111,7 @@ test('signing out and back in does not inherit the previous body verdict', async
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid="login-submit"]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
   await page.goto('/admin/overview');
   await expect(page.getByTestId('page-header')).toBeVisible();
   await expect.poll(() => verdict(page)).toBe('ready');

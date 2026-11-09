@@ -86,7 +86,7 @@ async function login(page: Page) {
   await page.click('[data-testid="login-submit"]');
   // The shell resumes a default surface after sign-in (not necessarily the admin one), so the
   // caller navigates to /admin/overview itself instead of relying on the landing route.
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 test.beforeAll(() => { fs.mkdirSync(OUT, { recursive: true }); });

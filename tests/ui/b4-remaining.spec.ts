@@ -28,7 +28,7 @@ async function signIn(page: Page) {
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
 }
 
 /** Everything the four findings need, measured from the DOM and nowhere else. */

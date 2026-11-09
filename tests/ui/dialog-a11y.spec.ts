@@ -9,7 +9,7 @@ test('the join-node dialog opens, traps focus, and closes on Escape', async ({ p
   await page.fill('input[type=email]', process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local');
   await page.fill('input[type=password]', process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026');
   await page.click('[data-testid="login-submit"]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 
   await page.goto('/nodes');
   const openButton = page.getByRole('button', { name: /接入节点|Join a node|Join node/ });

@@ -93,7 +93,7 @@ async function signIn(page: Page) {
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 async function stubDetail(page: Page) {

@@ -60,7 +60,7 @@ function RequirePlatformAccess() {
 export function App() {
   return (
     <TooltipProvider>
-      <BrowserRouter basename="/console">
+      <BrowserRouter basename="/admin">
         <AuthProvider>
           <ToastProvider>
             <ExtensionsProvider>

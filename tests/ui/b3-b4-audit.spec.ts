@@ -48,7 +48,7 @@ async function signIn(page: Page) {
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
 }
 
 /** Every character box of a line, so "the menu covers the text" becomes a number. */

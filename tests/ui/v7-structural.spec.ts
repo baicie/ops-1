@@ -30,7 +30,7 @@ async function login(page: Page) {
   await page.fill('input[type=email]', EMAIL);
   await page.fill('input[type=password]', PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 20000 });
 }
 
 async function setLocale(page: Page, locale: string) {

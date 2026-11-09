@@ -10,7 +10,7 @@ async function login(page: Page) {
   await page.fill('input[type=email]', process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local');
   await page.fill('input[type=password]', process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 async function noPageOverflow(page: Page) {
