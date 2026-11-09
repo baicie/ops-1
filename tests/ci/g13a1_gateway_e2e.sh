@@ -134,9 +134,35 @@ step "isolated PostgreSQL"
 docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
 rm -rf /tmp/g13a1-data
 
-docker run -d --name "$PG_CONTAINER" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB_NAME" -p "${DB_PORT}:5432" postgres:17 >/dev/null
-for _ in $(seq 1 60); do docker exec "$PG_CONTAINER" pg_isready -U postgres -d "$DB_NAME" >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$PG_CONTAINER" pg_isready -U postgres -d "$DB_NAME" >/dev/null
+# The first start of a freshly pulled postgres:17 image runs initdb, and during
+# that window `pg_isready` answers 0 the moment the socket exists - then the
+# server enters "rejecting connections" while it finishes, and the NEXT call
+# fails. A wait loop that breaks on the first 0 and then asserts once inherits
+# exactly that race: `g13a1-gateway` failed on PR #72 after the pull, with the
+# container up and no product output to show for it.
+#
+# So the condition is a real query, and the assertion that follows is the same
+# query rather than a weaker probe. `SELECT 1` cannot succeed against a server
+# that is rejecting connections, and the retry window covers initdb.
+pg_ready() {
+  docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -tAc 'SELECT 1' >/dev/null 2>&1
+}
+if ! docker run -d --name "$PG_CONTAINER" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB_NAME" -p "${DB_PORT}:5432" postgres:17 >/dev/null; then
+  echo "postgres:17 container would not start on ${DB_PORT}; docker said:"
+  docker run -d --name "${PG_CONTAINER}-probe" -e POSTGRES_PASSWORD=postgres postgres:17 2>&1 | tail -5
+  docker rm -f "${PG_CONTAINER}-probe" >/dev/null 2>&1 || true
+  exit 2
+fi
+READY=0
+for _ in $(seq 1 120); do
+  if pg_ready; then READY=1; break; fi
+  sleep 1
+done
+if [ "$READY" != "1" ]; then
+  echo "PostgreSQL did not accept a query within 120s. Container logs:"
+  docker logs "$PG_CONTAINER" 2>&1 | tail -20
+  exit 2
+fi
 ok "PostgreSQL on ${DB_PORT}"
 
 step "OCI image and signed bundle"
