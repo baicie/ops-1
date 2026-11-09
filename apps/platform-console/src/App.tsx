@@ -1,3 +1,4 @@
+import React from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@opsweave/platform-client/auth';
 import { ExtensionsProvider, ExtensionRoute } from '@opsweave/ui/extensions';
@@ -74,15 +75,26 @@ function RequirePlatformAccess() {
  */
 function SurfaceEntry() {
   const { user, access, loading } = useAuth();
+  // A workspace-only caller is sent into the OTHER bundle. That is a document
+  // navigation, and it belongs in an effect, not in the render body: a
+  // `location.replace` executed during render runs again on every re-render, and
+  // a second one racing a navigation the user (or a test) already started
+  // interrupts it - `Navigation to /app/incidents is interrupted by another
+  // navigation to /app/home`. The effect runs once, after the decision is made.
+  const externalTarget =
+    !loading && user && !canEnterSurface(access, 'admin') && canEnterSurface(access, 'workspace')
+      ? surfaceEntryPath('workspace')
+      : null;
+  React.useEffect(() => {
+    if (externalTarget) window.location.replace(externalTarget);
+  }, [externalTarget]);
+
   if (loading) return <Splash />;
   if (!user) return <Navigate to="/admin/login" replace />;
   if (canEnterSurface(access, 'admin')) {
     return <Navigate to={surfaceEntryPath('admin')} replace />;
   }
-  if (canEnterSurface(access, 'workspace')) {
-    window.location.replace(surfaceEntryPath('workspace'));
-    return <Splash />;
-  }
+  if (externalTarget) return <Splash />;
   return <Navigate to="/admin/403" replace />;
 }
 
