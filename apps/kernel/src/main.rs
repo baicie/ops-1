@@ -1,3 +1,4 @@
+mod applications;
 mod assets;
 mod audit;
 mod auth;
@@ -17,6 +18,7 @@ mod investigations;
 mod jobs;
 mod logs;
 mod nodes;
+mod ops_observability;
 mod packages;
 mod pipeline;
 mod plugins;

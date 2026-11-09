@@ -73,8 +73,27 @@ export const SURFACE_CAPABILITIES: Record<SurfaceCapability, CapabilityCopy> = {
   // G11 D3: the incident slice is served by the kernel, so the workspace stops calling it missing.
   incidents: { to: '/app/incidents', labelKey: 'workspace.nav.incidents', detailKey: 'workspace.capabilities.incidents.shipped', shipped: true, icon: 'alert', navGroup: 'work', inNavigation: true },
   investigations: { to: '/app/investigations', labelKey: 'workspace.nav.investigations', detailKey: 'workspace.notYet.investigations.missing', shipped: false, icon: 'search', navGroup: 'work', inNavigation: true },
-  observability: { to: '/app/observability', labelKey: 'workspace.nav.observability', detailKey: 'workspace.notYet.observability.missing', shipped: false, icon: 'activity', navGroup: 'discover', inNavigation: true },
+  // G14.4: shipped, and the reason it may say so is the authorization, not the
+  // page. The page used to read the platform console's /api/v1/nodes, which
+  // carries every node's endpoint and inventory and is gated on platform access;
+  // marking it shipped then would have claimed a capability that 403s for the
+  // accounts it is for. It now reads its own granted endpoint, which projects
+  // only liveness, staleness, instance counts and the resource sample - and the
+  // copy states what that is not.
+  observability: { to: '/app/observability', labelKey: 'workspace.nav.observability', detailKey: 'workspace.capabilities.observability.shipped', shipped: true, icon: 'activity', navGroup: 'discover', inNavigation: true },
   resources: { to: '/app/resources', labelKey: 'workspace.nav.resources', detailKey: 'workspace.notYet.resources.missing', shipped: false, icon: 'box', navGroup: 'discover', inNavigation: true },
+  // G14.4: NOT shipped, and the table must not be flipped to say otherwise.
+  //
+  // The page exists and renders, but every read it makes is a PLATFORM API
+  // (/api/v1/plugins, /api/v1/capability-grants, /api/v1/publishers): a telemetry
+  // connector is a plugin that provides a source capability, so the page lists
+  // plugin registrations. Two consequences, both of which forbid `shipped: true`:
+  //   * a workspace operator without platform access gets 403s, not a source list;
+  //   * the sessions that DO get data are reading platform inventory from the ops
+  //     application, which is the boundary ADR-022 fixes as one-way.
+  // Marking it shipped because `pnpm build` succeeds and the route renders is
+  // exactly the substitution the brief forbids. It needs a workspace-scoped
+  // source-registry endpoint before it can claim to be a capability.
   sources: { to: '/app/sources', labelKey: 'workspace.nav.sources', detailKey: 'workspace.notYet.sources.missing', shipped: false, icon: 'upload', navGroup: 'results', inNavigation: false },
   reports: { to: '/app/reports', labelKey: 'workspace.nav.reports', detailKey: 'workspace.notYet.reports.missing', shipped: false, icon: 'file', navGroup: 'results', inNavigation: true },
 };

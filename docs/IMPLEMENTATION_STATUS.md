@@ -398,3 +398,154 @@ what 33 Playwright specs navigate to. Recorded so it cannot be mistaken for work
 **NOT_RUN.** No Playwright browser run: the console route defect above means a
 browser run would fail for that reason, not for the cleanup. No full
 g12/data-foundation harness run (both need Docker, PostgreSQL and a kernel).
+
+## G14.3 Application-scoped authorization (2026-11-09)
+
+Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md) §2.2, §2.5 and the
+G14.3 implementation note.
+
+**Defect closed.** `access.allowedSurfaces` was a navigation declaration with no
+server enforcement. "The ops application is installed" and "this account may use
+it" were the same statement: any authenticated session could call
+`/api/v1/incidents` and be filtered only by workspace membership. A platform
+administrator was therefore an implicit operator of every business application.
+
+**Implemented.**
+
+| Piece | What it does |
+|---|---|
+| `kernel.applications` (0035) | registry: id, display name, surface prefix, required surfaces, enabled |
+| `kernel.application_grants` (0035) | per-user grant with an explicit verb list; empty = "may open", no verbs |
+| `/api/v1/apps/opsweave.ops/*` | separate router behind `require_ops_application`; `403 APPLICATION_FORBIDDEN` without a grant |
+| `/api/v1/applications` | what this caller may open, and what it may not |
+| `GET /api/v1/auth/me` | additive `applications` block |
+
+The migration is behaviour-preserving: the console application goes to the set
+the existing admin-surface predicate already covered; the ops application goes to
+every existing workspace member plus pre-existing admins (who could already reach
+`/app` and read nothing). Nobody gains access; accounts created afterwards start
+with none until granted.
+
+Legacy `/api/v1/incidents/*` keeps its original gate, per ADR-022 §2.6.
+
+**Tests actually run (local, 2026-11-09).**
+
+| Command | Result |
+|---|---|
+| `cargo test -p opsweave-kernel` (real PostgreSQL, migrations 0034+0035) | **270/270 PASS** |
+| `cargo clippy -p opsweave-kernel --all-targets -- -D warnings` | clean |
+| `cargo fmt --all -- --check` | clean |
+
+Two of the 270 are the ruling stated as a test:
+`an_admin_role_does_not_imply_an_application_grant` (admin refused without a
+grant, admitted with one, verb list enforced, revocation effective on the next
+call) and `a_disabled_application_is_refused_even_with_a_grant`.
+
+**NOT_RUN / not done.**
+- Separate origins and the OIDC Authorization Code + PKCE bridge (§2.7) are not
+  implemented. Both applications are still served from one origin, so the cookie
+  session continues to work; the single-origin reverse-proxy bridge remains the
+  documented interim behaviour.
+- The Ops Web client does not yet consult the `applications` block to hide
+  entries it cannot use. The server refuses them, so this is a UX gap, not an
+  authorization hole — but it is a gap and is not claimed as done.
+- No browser run of the two applications against the new gate (Playwright
+  **NOT_RUN**, unchanged from G14.2).
+
+## G14.4 Ops observability product closure (2026-11-09)
+
+Authority: [ADR-022](adr/ADR-022-platform-core-and-applications.md) §2.2, §2.5.
+
+**Defect closed — and it was an authorization gap, not a boolean.** The task named
+`observability` and `sources` as "pages implemented, still `shipped=false`". The
+reason was real and is the reason neither could simply be flipped:
+
+- `Observability` read `GET /api/v1/nodes`, the **platform console's** view. It
+  carries `dataEndpoint`, `labels`, `capabilities` and the runtime adapter
+  version, and its gate is "any authenticated session" — so an operator without
+  platform rights would have seen 403s, and the sessions that did get data would
+  have been reading platform inventory from the ops application.
+- `Sources` reads `/api/v1/plugins`, `/api/v1/capability-grants` and
+  `/api/v1/publishers`. Every one is a platform API, for the same reasons.
+
+**Implemented.**
+
+| Piece | What it does |
+|---|---|
+| `apps/kernel/src/ops_observability.rs` | `GET /api/v1/apps/opsweave.ops/observability/fleet`, behind the ops application grant, projecting only id, name, status, last-seen, staleness, ready/total instances and the resource sample |
+| fleet payload | carries `covers` and `doesNotCover` so the page states what it is NOT (APM, traces, log search, service maps) instead of implying it is a unified observability platform |
+| `FleetNode` / `FleetResponse` | the ops model no longer imports `NodeView`; a page cannot start rendering a node endpoint by accident |
+| `observability` capability | `shipped: true`, with copy that says "node health only" and lists what is missing |
+
+`revoked` stays in `entityState` even though the fleet endpoint filters revoked
+nodes out: the rule is the model's, not the endpoint's, and its tests were updated
+to drive it through `status` rather than the removed `revokedAt` field.
+
+**`sources` remains `shipped: false`, deliberately.** Flipping it would be the
+substitution the brief forbids: the page renders and `pnpm build` passes, but a
+workspace operator gets 403s and the sessions that do get data read platform
+inventory from the ops application. It needs a workspace-scoped source-registry
+endpoint first. The reason is now written at the registry row and in both E2E
+assertions rather than left to be rediscovered.
+
+**Tests actually run (local, 2026-11-09).**
+
+| Command | Result |
+|---|---|
+| `cargo test -p opsweave-kernel` (real PostgreSQL) | **272/272 PASS** (incl. the projection test asserting no `dataEndpoint`/`labels`/`capabilities` leaks) |
+| `cargo clippy -p opsweave-kernel --all-targets -- -D warnings` | clean |
+| `cargo fmt --all -- --check` | clean |
+| `pnpm --filter @opsweave/ops-web test` | **236/236 PASS** |
+| `pnpm --filter @opsweave/ops-web build` | succeeds |
+| ops-web / platform-console / ui / platform-client tests | 236 / 62 / 58 / 113 PASS |
+| `check-i18n` / `check-status-vocabulary` / `check-ui-tokens` / `check-retired-paths` | all pass (2047 keys, 0 retired refs across 942 files) |
+
+**E2E assertions updated with the fact, not around it.** Both specs that assert
+the not-shipped count moved 5 → 4, and their comments now say why observability
+was allowed to move and why sources was not. An assertion whose number changes
+without its reason changing is how a registry stops meaning anything.
+
+**NOT_RUN.** Playwright itself was not executed — the specs' assertions and paths
+were updated, but "the assertion compiles" is not "the browser passed".
+
+**Not done.** The Investigation panel already covers start / status / provider /
+tool calls / hypothesis / evidence citation / human review / TEST_FIXTURE
+labelling and is unchanged by this phase; no new product behaviour was added
+there. Pipeline definitions are still not workspace-owned (G14.1 §4a).
+
+## G14 phase closure (2026-11-09)
+
+Full report: [g14-platform-app-migration-report.md](acceptance/g14-platform-app-migration-report.md).
+
+**Delivered across six stacked PRs** (#65–#70): plugin identity hardening, data-plane
+workspace isolation, bounded reads and concurrent dispatch, the Core/application
+boundary ADR, two independent front-end applications, and application-scoped
+authorization with an ops-owned fleet read.
+
+**Verified locally:** kernel 274/274 against real PostgreSQL; ui/platform-client/
+console/ops-web 58/113/62/236; both applications build and their builds are
+independent (breaking ops-web leaves the console build exiting 0); the B2.1 attack
+suite 7/7 (1/7 pre-fix); the B2.1a isolation suite 3/3 (0/3 pre-fix); the bounded
+reader 7/7 including an endless chunked upstream over a real socket; contracts,
+spec-coverage, PNG budget, i18n, status vocabulary, UI tokens and retired paths all
+pass.
+
+**NOT correctly verified — do not read this as ready:**
+
+- **Playwright was never executed locally.** Spec paths and assertions were updated
+  and the kernel routing has unit tests, but no browser run happened here.
+- **CI state was unconfirmed at the time of writing**; several rounds of failures
+  were fixed and the last push had not completed.
+- **staging core-tier and full-tier were not recorded separately** in this phase.
+- **No throughput benchmark**: the worker concurrency change is verified correct,
+  not measured faster.
+
+**Production conditions unchanged from the baseline:** mTLS, OCI image signature
+verification, real Zabbix, three physical Linux hosts, production secret
+management and OIDC across origins are all still NOT_RUN / NOT_IMPLEMENTED.
+
+**Structural gaps left on purpose**, each with a reason in the report or ADR-022:
+seven of the eight measured `Core → ops` dependency edges, pipeline definitions
+not being workspace-owned, `sources` still reading platform APIs, the Ops Web not
+yet hiding ungranted applications, `incidents.rs`/`investigations.rs` production
+code not split, and the legacy `/api/v1/incidents/*` aliases.

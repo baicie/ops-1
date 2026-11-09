@@ -257,16 +257,28 @@ test('the workspace states what is missing instead of inventing business data', 
   await signIn(page);
 
   // The home page lists every capability this build does not serve end to end, each marked as
-  // such. Five, not six, because `incidents` shipped with G11 D3. Note what "shipped" means here:
-  // it is NOT "the route renders". `observability` and `sources` have real pages reading real
-  // rows and are still counted as not shipped, because neither has a business scope an account
-  // can be granted - pages/workspace.tsx states the criterion on the `shipped` field. So this
-  // number is the registry's own statement (business-workspace.spec.ts asserts the same five),
-  // and it moves when a scope ships - not when a page appears.
+  // such. Four, not five: `observability` moved to shipped in G14.4, and the reason it was
+  // allowed to move is the one this comment has always stated. "Shipped" does NOT mean "the
+  // route renders" - it means a caller can actually reach the data with an authorization it can
+  // be granted. Observability used to read the platform console's `/api/v1/nodes`, which carries
+  // every node's endpoint and inventory and is gated on platform access, so an operator without
+  // platform rights would have seen 403s; it now reads its own granted endpoint that projects
+  // only liveness, staleness, instance counts and the resource sample.
+  //
+  // `sources` stays NOT shipped for exactly that reason, and flipping its boolean would be the
+  // substitution this assertion exists to catch: every read it makes is a platform API
+  // (`/api/v1/plugins`, `/api/v1/capability-grants`, `/api/v1/publishers`), so a workspace
+  // operator without platform access gets 403s and the sessions that do get data are reading
+  // platform inventory from the ops application. It needs a workspace-scoped source-registry
+  // endpoint first. pages/workspace.tsx states the criterion on the `shipped` field.
+  //
+  // So this number is the registry's own statement (business-workspace.spec.ts asserts the same
+  // four), and it moves when a SCOPE ships - not when a page appears.
   await expect(page).toHaveURL(/\/admin\/overview$/);
   await page.goto('/app/home');
   await expect(page.getByTestId('workspace-home')).toBeVisible();
-  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(5);
+  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(4);
+  await expect(page.locator('[data-surface-status="shipped"][data-capability="observability"]')).toHaveCount(1);
   await expect(page.locator('[data-surface-status="shipped"][data-capability="incidents"]')).toHaveCount(1);
 
   // A capability that still has no interface keeps the placeholder: it states the absence and

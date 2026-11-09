@@ -40,7 +40,7 @@ Received: "noData"
 
 ### 2.2 修复
 
-新增 `incidentEvidenceKpiStates(panel, rows)`（[`apps/platform-web/src/incidents.ts`](../../../apps/platform-web/src/incidents.ts)），两张卡共用：
+新增 `incidentEvidenceKpiStates(panel, rows)`（[`apps/ops-web/src/Incidents.tsx`](../../../apps/ops-web/src/Incidents.tsx)），两张卡共用：
 
 | evidence panel state | rows | Evidence KPI | Verified KPI |
 |---|---:|---|---|

@@ -72,7 +72,7 @@ export function App() {
           <ToastProvider>
             <ExtensionsProvider>
               <Routes>
-                <Route path="/app/login" element={<LoginPage />} />
+                <Route path="/app/login" element={<LoginPage surface="workspace" />} />
                 <Route element={<RequireAuth />}>
                   <Route path="/app/403" element={<ForbiddenPage />} />
                   <Route element={<RequireWorkspaceAccess />}>

@@ -141,7 +141,7 @@ The Kernel is one process and one PostgreSQL database; Nodes initiate heartbeat/
 apps/kernel/             Rust Kernel: auth, packages, lifecycle, reconciler, gateway, logs, diagnostics
 apps/node/               Rust Node Runtime: enrollment, Docker CLI adapter, proxy, logs, metrics
 apps/opsctl/             opsctl recovery + bundle/signing CLI
-apps/platform-console/   Platform Console: platform routes only, basename /console
+apps/platform-console/   Platform Console: platform routes only, basename /admin
 apps/ops-web/            Ops Web: workspace routes only, basename /app
 packages/ui/             Shared design system: shadcn primitives, icons, styles
 packages/platform-client/ Shared HTTP client, contract types, i18n catalogs, access model

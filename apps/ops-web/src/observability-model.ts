@@ -1,6 +1,59 @@
 import type { IndicatorState } from '@opsweave/ui/status-indicator';
 import type { MessageKey } from '@opsweave/platform-client/i18n';
-import type { AuditEvent, NodeView } from '@opsweave/platform-client/contracts';
+import type { AuditEvent } from '@opsweave/platform-client/contracts';
+
+/**
+ * One node as the OPS application sees it.
+ *
+ * Not `NodeView`: the platform view carries `dataEndpoint`, `labels`,
+ * `capabilities` and the runtime adapter version - what the Platform Console
+ * needs to operate a node, and none of what answers "is the fleet reporting".
+ * The Ops application reads
+ * `GET /api/v1/apps/opsweave.ops/observability/fleet`, which projects exactly
+ * these fields behind the application grant. Modelling the narrower shape here
+ * means a page cannot accidentally start rendering a node's endpoint.
+ */
+/**
+ * A resource sample as the node agent reports it. Every numeric field is
+ * nullable on purpose: the agent can report a sample without a filesystem
+ * reading, and a missing number must stay missing rather than become 0.
+ */
+export interface NodeSnapshot {
+  sampledAt: string;
+  cpuUtilization?: number | null;
+  memoryUsedBytes?: number | null;
+  memoryTotalBytes?: number | null;
+  filesystemUsedBytes?: number | null;
+  filesystemTotalBytes?: number | null;
+}
+
+export interface FleetNode {
+  id: string;
+  name: string;
+  status: string;
+  lastSeenAt?: string | null;
+  stale: boolean;
+  instancesReady: number;
+  instancesTotal: number;
+  resourceSnapshot?: NodeSnapshot | null;
+  os?: string;
+  arch?: string;
+}
+
+/**
+ * The fleet answer, including what it does NOT cover.
+ *
+ * `doesNotCover` is part of the payload rather than a comment so the page can
+ * render it: node health is not APM, traces or log search, and a surface that
+ * showed only the numbers would be claiming to be a unified observability
+ * platform, which this is not.
+ */
+export interface FleetResponse {
+  nodes: FleetNode[];
+  staleAfterSeconds: number;
+  covers: string[];
+  doesNotCover: string[];
+}
 
 /**
  * The reading layer of `/app/observability`: every judgement the surface makes about a sample,
@@ -68,9 +121,14 @@ export function utilisation(value?: number | null): number | null {
  */
 export type EntityState = 'revoked' | 'unreachable' | 'stale' | 'degraded' | 'ready' | 'unknown';
 
-export function entityState(node: NodeView): EntityState {
-  if (node.revokedAt) return 'revoked';
+export function entityState(node: FleetNode): EntityState {
   const status = (node.status || '').toUpperCase();
+  // Revocation outranks every other answer, including a status column that still
+  // says READY. The fleet endpoint currently filters revoked nodes out, so this
+  // branch is unreachable in practice - it stays because the RULE is the model's,
+  // not the endpoint's: a surface that renders a revoked node as healthy is
+  // wrong however the node got there.
+  if (status === 'REVOKED') return 'revoked';
   if (status === 'UNREACHABLE') return 'unreachable';
   if (node.stale) return 'stale';
   // DEGRADED is a health answer, not an absence of one. The kernel accepts it from the node
@@ -119,7 +177,7 @@ export function indicatorForEntityState(state: EntityState): IndicatorState {
  * Such a node reports UNKNOWN - we are not looking, so we do not know - while a reachable node
  * with no sample reports NO_DATA, because the source exists and simply has nothing yet.
  */
-export function nodeReadings(node: NodeView): Record<MetricKey, Reading> {
+export function nodeReadings(node: FleetNode): Record<MetricKey, Reading> {
   const state = entityState(node);
   if (!stateCanReport(state)) return { cpu: UNKNOWN, memory: UNKNOWN, filesystem: UNKNOWN };
   const snapshot = node.resourceSnapshot;
@@ -151,7 +209,7 @@ export function sampleIsStale(observedAt: string | null | undefined, now = Date.
 }
 
 /** The newest observation across a fleet, or null when nothing has been observed at all. */
-export function newestObservation(nodes: NodeView[]): string | null {
+export function newestObservation(nodes: FleetNode[]): string | null {
   let newest: number | null = null;
   let iso: string | null = null;
   for (const node of nodes) {
@@ -211,7 +269,7 @@ export interface FleetSummary {
   observedAt: string | null;
 }
 
-export function summarise(nodes: NodeView[], now = Date.now()): FleetSummary {
+export function summarise(nodes: FleetNode[], now = Date.now()): FleetSummary {
   const summary: FleetSummary = {
     total: nodes.length,
     reporting: 0,
@@ -284,7 +342,7 @@ export function summarise(nodes: NodeView[], now = Date.now()): FleetSummary {
 
 /** One row of the fleet table: the entity, its state, and what it reported. */
 export interface EntityRow {
-  node: NodeView;
+  node: FleetNode;
   state: EntityState;
   readings: Record<MetricKey, Reading>;
   /**
@@ -303,7 +361,7 @@ export interface EntityRow {
   stale: boolean;
 }
 
-export function entityRows(nodes: NodeView[], now = Date.now()): EntityRow[] {
+export function entityRows(nodes: FleetNode[], now = Date.now()): EntityRow[] {
   return nodes.map((node) => {
     const observedAt = node.resourceSnapshot?.sampledAt ?? null;
     const state = entityState(node);

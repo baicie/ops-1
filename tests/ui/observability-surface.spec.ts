@@ -222,9 +222,52 @@ function eventsPayload() {
   }));
 }
 
+/**
+ * One fleet row as `GET /api/v1/apps/opsweave.ops/observability/fleet` projects it.
+ *
+ * G14.4 moved this page off the platform console's node view onto the ops
+ * application's own granted read, which carries less: no endpoint, no labels, no
+ * capability inventory. Every stub that answers the page has to speak that shape,
+ * which is why this lives at module scope rather than inside `installFixtures`.
+ */
+function fleetNode(spec: typeof NODES[number]) {
+  const full = nodePayload(spec);
+  return {
+    id: full.id,
+    name: full.name,
+    status: full.status,
+    lastSeenAt: full.lastSeenAt,
+    stale: spec.stale,
+    instancesReady: full.instancesReady,
+    instancesTotal: full.instancesTotal,
+    resourceSnapshot: full.resourceSnapshot,
+    os: full.os,
+    arch: full.arch,
+  };
+}
+
 async function installFixtures(page: Page) {
   if (LIVE) return;
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  // G14.4: the ops application reads its own granted projection, not the platform
+  // console's node view. Stubbing only /api/v1/nodes left these pages polling an
+  // unanswered URL and stuck on `loading`, which is why the matrix and a11y specs
+  // timed out. Same fixture data, projected the way the server projects it.
+  await page.route('**/api/v1/apps/opsweave.ops/observability/fleet**', (route) =>
+    route.fulfill(json({
+      nodes: NODES.map(fleetNode),
+      staleAfterSeconds: 90,
+      covers: ['node liveness and staleness'],
+      doesNotCover: ['distributed traces'],
+    })));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*/history**', (route) =>
+    route.fulfill(json(historyPayload())));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*/instances', (route) =>
+    route.fulfill(json(INSTANCES)));
+  await page.route('**/api/v1/apps/opsweave.ops/observability/nodes/*', (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill(json(fleetNode(NODES.find((entry) => entry.id === id) || NODES[0])));
+  });
   await page.route('**/api/v1/nodes', (route) => route.fulfill(json(NODES.map(nodePayload))));
   await page.route('**/api/v1/nodes/*/resource-history*', (route) => route.fulfill(json(historyPayload())));
   await page.route('**/api/v1/nodes/*/instances', (route) => route.fulfill(json(INSTANCES)));
@@ -465,10 +508,18 @@ test('does not print 0/0 when there is no fleet to observe', async ({ browser })
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addInitScript(() => localStorage.setItem('opsweave-locale', 'en'));
   const page = await context.newPage();
-  await page.route('**/api/v1/nodes', (route) => route.fulfill({
+  // A fleet of zero, answered on the endpoint the page actually reads. Stubbing
+  // `/api/v1/nodes` here passed for the wrong reason twice over: the page no longer
+  // calls it, and the real kernel would have answered with its own node anyway.
+  await page.route('**/api/v1/apps/opsweave.ops/observability/fleet**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: '[]',
+    body: JSON.stringify({
+      nodes: [],
+      staleAfterSeconds: 90,
+      covers: ['node liveness and staleness'],
+      doesNotCover: ['distributed traces'],
+    }),
   }));
   await login(page);
   await page.goto('/app/observability');
@@ -532,12 +583,19 @@ test('a failed refresh keeps the rows and names the failure', async ({ browser }
   await page.goto('/app/observability');
   await page.waitForSelector('[data-region=fleet]', { timeout: 20_000 });
 
-  // The most recently added handler wins, so this replaces installFixtures' list route.
+  // The most recently added handler wins, so this replaces installFixtures' fleet route.
   let fail = false;
-  await page.route('**/api/v1/nodes', (route) => route.fulfill({
+  await page.route('**/api/v1/apps/opsweave.ops/observability/fleet**', (route) => route.fulfill({
     status: fail ? 503 : 200,
     contentType: 'application/json',
-    body: fail ? JSON.stringify({ code: 'UNAVAILABLE', message: 'refresh refused' }) : JSON.stringify(NODES.map(nodePayload)),
+    body: fail
+      ? JSON.stringify({ code: 'UNAVAILABLE', message: 'refresh refused' })
+      : JSON.stringify({
+        nodes: NODES.map(fleetNode),
+        staleAfterSeconds: 90,
+        covers: ['node liveness and staleness'],
+        doesNotCover: ['distributed traces'],
+      }),
   }));
   fail = true;
   await page.getByRole('button', { name: copy('action.refresh') }).click();

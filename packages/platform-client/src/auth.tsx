@@ -22,7 +22,21 @@ interface AuthState {
   /** Whether the server declared that grant at all; UX diagnostics only, never authority. */
   accessSource: AccessSource;
   loading: boolean;
-  login(email: string, password: string): Promise<void>;
+  /**
+   * Sign in, and hand back the grant this session was just issued.
+   *
+   * The return value exists so the login page can pick the destination in the
+   * same commit as the session, instead of navigating to `/` and letting the
+   * entry route start a SECOND navigation. That second one is a document
+   * navigation (a caller granted only the workspace is sent into the other
+   * bundle), and while it is pending any navigation the user - or a test -
+   * starts is cancelled by it. Returning the grant removes the intermediate
+   * hub, and with it the window in which two navigations compete.
+   *
+   * Resolving `void` would have kept the old two-hop behaviour, so the type is
+   * the contract here, not an implementation detail.
+   */
+  login(email: string, password: string): Promise<AccessInfo>;
   logout(): Promise<void>;
   refresh(): Promise<void>;
 }
@@ -111,6 +125,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setCsrfToken(result.csrfToken);
     applySession(result);
     setLoading(false);
+    // The grant, not `void`: the caller decides where this session lands, in the
+    // same tick it was issued. See the interface comment.
+    return readAccess(result.access).access;
   }, [applySession]);
 
   const logout = useCallback(async () => {

@@ -38,12 +38,12 @@
 
 ## 规则索引
 - `rules/01-architecture.md`；`02-plugin-runtime.md`；`03-security.md`；`04-distributed.md`；`05-data.md`；`06-ui-ux.md`；`07-testing-release.md`；`08-docs-and-workflow.md`；`11-refactor-retirement-and-cleanup.md`。
-- 任务专用流程位于 `skills/*/SKILL.md`，任何团队成员均可手工遵循。
+- 任务专用流程位于 `docs/blueprint/skills/*/SKILL.md`，任何团队成员均可手工遵循。
 
 ## 2026-10-22 OCI 多语言增补（与原规约同等效力）
 - 0.0.1 Plugin Runtime HTTP/JSON v1 不绑定 Java/Go/TypeScript/Rust/Python；官方 SDK 是可选便利包。修改协议先升级 `contracts/`、用 Java/Go/TS 同一黑盒测试验证。
 - 生产后端 OCI 镜像通过 Digest 固定、签名验证、独立镜像仓库分发；开发本机进程/HMR 只能是 DEV_ONLY。
 - 发布包 Backend Image、Web 静态资产索引、Registry ZIP Bundle 属于不同受信内容；禁止自引用 ZIP 哈希或误用 Tag。
 - Rootless Docker Node Adapter 是 0.0.1 参考实现，不能被业务容器获取 socket；cgroup 资源/用户权限与网络隔离必须实测。
-- 发布到真实两节点前必须通过 [OCI Release Review](skills/oci-release-review/SKILL.md) 和 [Multi-language Conformance](skills/multilang-conformance/SKILL.md)。
+- 发布到真实两节点前必须通过 [OCI Release Review](docs/blueprint/skills/oci-release-review/SKILL.md) 和 [Multi-language Conformance](docs/blueprint/skills/multilang-conformance/SKILL.md)。
 - 新增平台无关强制 Rules：`rules/09-oci-supply-chain.md` 与 `rules/10-language-agnostic.md`；新增 0.0.1 子任务见 `plan/04-001-oci-multilang-acceptance.md`。
