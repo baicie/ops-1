@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/contracts",
+  "crates/http-body-guard",
   "crates/bundle",
   "crates/pipeline-transform",
   "apps/kernel",

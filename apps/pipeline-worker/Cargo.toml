@@ -6,6 +6,7 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+opsweave-http-body-guard = { path = "../../crates/http-body-guard" }
 anyhow.workspace = true
 chrono.workspace = true
 hex.workspace = true

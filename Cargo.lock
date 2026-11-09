@@ -1372,6 +1372,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "opsweave-http-body-guard"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "bytes",
+ "futures",
+ "reqwest",
+ "tokio",
+]
+
+[[package]]
 name = "opsweave-kernel"
 version = "0.0.1"
 dependencies = [
@@ -1390,6 +1401,7 @@ dependencies = [
  "mime_guess",
  "opsweave-bundle",
  "opsweave-contracts",
+ "opsweave-http-body-guard",
  "opsweave-pipeline-transform",
  "rand 0.8.8",
  "regex",
@@ -1424,6 +1436,7 @@ dependencies = [
  "futures",
  "libc",
  "opsweave-contracts",
+ "opsweave-http-body-guard",
  "rand 0.8.8",
  "reqwest",
  "serde",
@@ -1471,6 +1484,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "hex",
+ "opsweave-http-body-guard",
  "opsweave-pipeline-transform",
  "reqwest",
  "serde",

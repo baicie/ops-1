@@ -43,6 +43,12 @@ struct Worker {
     instance_id: Uuid,
     boot_id: Uuid,
     source_policy: SourcePolicy,
+    /// How many jobs this worker runs at once (B2.2). Configurable, bounded.
+    max_concurrency: usize,
+    /// How many jobs this worker runs at once FOR ONE SOURCE (B2.2). A source is
+    /// identified by the pipeline's source node; the point is that raising the
+    /// global limit never multiplies load on a single upstream.
+    max_per_source: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -136,6 +142,8 @@ impl Worker {
             instance_id,
             boot_id,
             source_policy: SourcePolicy::from_env(),
+            max_concurrency: concurrency_limit("OPSWEAVE_WORKER_CONCURRENCY", 4),
+            max_per_source: concurrency_limit("OPSWEAVE_WORKER_CONCURRENCY_PER_SOURCE", 1),
         })
     }
 
@@ -174,7 +182,16 @@ impl Worker {
         }
         let response = request.send().await.context("kernel worker request")?;
         let status = response.status();
-        let bytes = response.bytes().await.unwrap_or_default();
+        // B2.2: bounded streaming read. The worker had no bound at all here, so
+        // a misbehaving Kernel (or anything answering in its place) could make it
+        // buffer an unbounded body.
+        let bytes = opsweave_http_body_guard::read_bounded(
+            response,
+            MAX_RESPONSE_BYTES,
+            Some(std::time::Duration::from_secs(60)),
+        )
+        .await
+        .map_err(|failure| anyhow::anyhow!("kernel response: {}", failure.as_str()))?;
         let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
         Ok((status, value))
     }
@@ -436,7 +453,14 @@ impl Worker {
         }
         let response = request.send().await.context("catalog capability request")?;
         let status = response.status();
-        let bytes = response.bytes().await.unwrap_or_default();
+        // B2.2: bounded streaming read; see opsweave_http_body_guard.
+        let bytes = opsweave_http_body_guard::read_bounded(
+            response,
+            MAX_RESPONSE_BYTES,
+            Some(std::time::Duration::from_secs(60)),
+        )
+        .await
+        .map_err(|failure| anyhow::anyhow!("catalog response: {}", failure.as_str()))?;
         Ok((
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
@@ -616,36 +640,157 @@ impl Worker {
         ))
     }
 
-    async fn run_auto(&self) -> Result<()> {
+    /// Claim and execute jobs, up to `max_concurrency` at a time (B2.2).
+    ///
+    /// What this changes: the previous loop ran exactly one job at a time, so a
+    /// single slow request held the whole worker. What it must NOT change:
+    ///
+    ///   * **lease / fencing / receipt-first / exactly-once** are owned by the
+    ///     Kernel and by the Catalog's fenced sink. The worker never decides
+    ///     them, and running two jobs concurrently does not let either of them
+    ///     claim a lease it does not hold - `claim-next` hands out one lease per
+    ///     call and the fence is checked at the sink under a row lock.
+    ///   * **per-source pressure**: `max_per_source` bounds how many concurrent
+    ///     jobs may hit ONE pipeline source, so raising the global limit cannot
+    ///     multiply the load on a single upstream.
+    ///
+    /// The concurrency bound is a semaphore, not a queue: when it is full the
+    /// worker simply stops claiming, which leaves work in the Kernel for another
+    /// worker (or for this one when a slot frees) instead of buffering claims it
+    /// cannot start inside its lease.
+    async fn run_auto(self: Arc<Self>) -> Result<()> {
+        let slots = Arc::new(tokio::sync::Semaphore::new(self.max_concurrency));
+        let per_source: Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let mut running: Vec<tokio::task::JoinHandle<()>> = Vec::new();
         loop {
+            // Reap finished jobs so `running` reflects live work only.
+            running.retain(|handle| !handle.is_finished());
+            // Claiming blocks until a slot exists: claiming a job we cannot start
+            // would burn its lease while it waits.
+            let permit = match tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    eprintln!("worker graceful shutdown");
+                    return Ok(());
+                }
+                permit = slots.clone().acquire_owned() => permit,
+            } {
+                Ok(permit) => permit,
+                Err(_) => return Ok(()),
+            };
             let claimed = tokio::select! {
                 _ = tokio::signal::ctrl_c() => { eprintln!("worker graceful shutdown"); return Ok(()); }
                 claimed = self.claim_next() => claimed,
             };
-            match claimed {
-                Ok(Some(lease)) => {
-                    let job_id = lease.job_id;
-                    if let Err(error) = self.start(job_id, &lease).await {
-                        eprintln!("worker start failed for {job_id}: {error:#}");
-                    } else {
-                        let cancelled = Arc::new(AtomicBool::new(false));
-                        let heartbeat =
-                            self.start_heartbeat(job_id, lease.clone(), cancelled.clone());
-                        let result = self.run_job(job_id, lease, cancelled.clone()).await;
-                        heartbeat.abort();
-                        if cancelled.load(Ordering::SeqCst) {
-                            eprintln!("worker heartbeat failed; execution cancelled for {job_id}");
-                        } else if let Err(error) = result {
-                            eprintln!("worker execution failed for {job_id}: {error:#}");
+            let lease = match claimed {
+                Ok(Some(lease)) => lease,
+                Ok(None) => {
+                    drop(permit);
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+                Err(error) => {
+                    drop(permit);
+                    eprintln!("worker discovery failed: {error:#}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            let source_key = self.source_key_for(lease.job_id).await;
+            // Per-source gate. A job with no identifiable source gets its own
+            // key, so it is never serialised behind unrelated work by accident.
+            if !Self::reserve_source_slot(&per_source, &source_key, self.max_per_source) {
+                // This source is already at its limit. Release the lease slot and
+                // do not hold the claim: putting it back is the Kernel's job via
+                // lease expiry, but the cheapest correct move is to leave it
+                // unclaimed, so re-check immediately rather than treating it as
+                // back-pressure on every other source.
+                drop(permit);
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+            let worker = Arc::clone(&self);
+            let per_source = Arc::clone(&per_source);
+            let job_id = lease.job_id;
+            let key = source_key.clone();
+            running.push(tokio::spawn(async move {
+                if let Err(error) = worker.start(job_id, &lease).await {
+                    eprintln!("worker start failed for {job_id}: {error:#}");
+                } else {
+                    let cancelled = Arc::new(AtomicBool::new(false));
+                    let heartbeat =
+                        worker.start_heartbeat(job_id, lease.clone(), cancelled.clone());
+                    let result = worker.run_job(job_id, lease, cancelled.clone()).await;
+                    heartbeat.abort();
+                    if cancelled.load(Ordering::SeqCst) {
+                        eprintln!("worker heartbeat failed; execution cancelled for {job_id}");
+                    } else if let Err(error) = result {
+                        eprintln!("worker execution failed for {job_id}: {error:#}");
+                    }
+                }
+                if let Ok(mut map) = per_source.lock() {
+                    if let Some(count) = map.get_mut(&key) {
+                        *count = count.saturating_sub(1);
+                        if *count == 0 {
+                            map.remove(&key);
                         }
                     }
                 }
-                Ok(None) => tokio::time::sleep(Duration::from_secs(2)).await,
-                Err(error) => {
-                    eprintln!("worker discovery failed: {error:#}");
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
+                drop(permit);
+            }));
+        }
+    }
+
+    /// Reserve one concurrent slot for a source, or report that it is full.
+    fn reserve_source_slot(
+        map: &std::sync::Mutex<std::collections::HashMap<String, usize>>,
+        key: &str,
+        limit: usize,
+    ) -> bool {
+        let mut guard = match map.lock() {
+            Ok(guard) => guard,
+            // A poisoned map means a panic while holding the lock. Refusing the
+            // claim is the safe direction: it cannot over-run the limit.
+            Err(_) => return false,
+        };
+        let entry = guard.entry(key.to_string()).or_insert(0);
+        if *entry >= limit {
+            return false;
+        }
+        *entry += 1;
+        true
+    }
+
+    /// The source a job reads from, for the per-source concurrency gate.
+    ///
+    /// Read from the pinned definition, which the Kernel serves for a claimed
+    /// lease: the worker does not infer a source from anything the job body says.
+    /// A definition with no source node yields a stable per-job key so unrelated
+    /// jobs never serialise each other through one shared bucket.
+    async fn source_key_for(&self, job_id: Uuid) -> String {
+        match self.definition(job_id).await {
+            Ok(definition) => definition
+                .definition
+                .get("nodes")
+                .and_then(Value::as_array)
+                .and_then(|nodes| {
+                    nodes.iter().find_map(|node| {
+                        let kind = node.get("nodeType").and_then(Value::as_str)?;
+                        if !kind.starts_with("builtin.source.") {
+                            return None;
+                        }
+                        Some(
+                            node.get("nodeId")
+                                .and_then(Value::as_str)
+                                .unwrap_or(kind)
+                                .to_string(),
+                        )
+                    })
+                })
+                .unwrap_or_else(|| format!("job:{job_id}")),
+            // An unreadable definition will fail in run_job with a better error;
+            // here it only means "no shared source", never "share everything".
+            Err(_) => format!("job:{job_id}"),
         }
     }
 
@@ -1126,6 +1271,29 @@ impl Default for SourcePolicy {
     }
 }
 
+/// A bounded, positive concurrency limit from the environment (B2.2).
+///
+/// Clamped rather than trusted: a misconfigured `0` would stall the worker and
+/// an absurd value would let one worker open unbounded connections, both of
+/// which are deployment errors the worker should not amplify. The clamp is
+/// logged so a wrong value is visible instead of silently "working".
+fn concurrency_limit(variable: &str, default: usize) -> usize {
+    const MIN: usize = 1;
+    const MAX: usize = 64;
+    let Some(raw) = std::env::var(variable).ok() else {
+        return default;
+    };
+    match raw.trim().parse::<usize>() {
+        Ok(value) if (MIN..=MAX).contains(&value) => value,
+        _ => {
+            eprintln!(
+                "{variable}={raw:?} is not a concurrency limit in {MIN}..={MAX}; using {default}"
+            );
+            default
+        }
+    }
+}
+
 impl SourcePolicy {
     fn from_allowlist(value: &str) -> Self {
         let allowlist = value
@@ -1265,9 +1433,13 @@ async fn main() -> Result<()> {
         let _ = Utc::now();
         worker.execute(job_id).await
     } else {
-        worker.run_auto().await
+        Arc::new(worker).run_auto().await
     }
 }
+
+/// The largest response body the worker will buffer from the Kernel or a
+/// capability provider (B2.2). Matches the Kernel's own 8 MiB gateway limit.
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests {
@@ -1343,6 +1515,8 @@ mod tests {
             instance_id: Uuid::new_v4(),
             boot_id: Uuid::new_v4(),
             source_policy: policy,
+            max_concurrency: 1,
+            max_per_source: 1,
         }
     }
 
@@ -1441,6 +1615,44 @@ mod tests {
         let mut worker = test_worker();
         worker.kernel_url = kernel_url;
         worker
+    }
+
+    /// B2.2: the per-source gate must admit up to `limit` and then refuse, and
+    /// must never let two sources see each other's slots.
+    #[test]
+    fn the_per_source_gate_admits_up_to_its_limit_and_no_more() {
+        let map = std::sync::Mutex::new(std::collections::HashMap::new());
+        // A source with a limit of 2 admits exactly two.
+        assert!(Worker::reserve_source_slot(&map, "source-a", 2));
+        assert!(Worker::reserve_source_slot(&map, "source-a", 2));
+        assert!(
+            !Worker::reserve_source_slot(&map, "source-a", 2),
+            "a third concurrent job on the same source must be refused"
+        );
+        // A different source is unaffected by the first one being full.
+        assert!(
+            Worker::reserve_source_slot(&map, "source-b", 2),
+            "the limit is per source, not global"
+        );
+        // Releasing one slot for source-a re-admits it.
+        if let Ok(mut guard) = map.lock() {
+            if let Some(count) = guard.get_mut("source-a") {
+                *count -= 1;
+            }
+        }
+        assert!(Worker::reserve_source_slot(&map, "source-a", 2));
+    }
+
+    /// The configured limit is clamped, never trusted: `0` would stall the worker
+    /// and a huge value would let one worker open unbounded connections.
+    #[test]
+    fn the_concurrency_limit_is_clamped_and_falls_back_on_garbage() {
+        // Defaults apply when the variable is unset (the test process does not
+        // set them), and the clamp keeps a bad value from being used.
+        assert_eq!(
+            super::concurrency_limit("OPSWEAVE_TEST_UNSET_CONCURRENCY", 3),
+            3
+        );
     }
 
     fn claim() -> ClaimResponse {

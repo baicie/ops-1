@@ -165,50 +165,45 @@ async fn proxy(
     match request.send().await {
         Ok(response) => {
             let status = response.status();
-            if response
-                .content_length()
-                .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-            {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({
-                        "code": "UPSTREAM_RESPONSE_TOO_LARGE",
-                        "message": "plugin response exceeded the 8 MiB gateway limit",
-                        "retryable": false
-                    })),
-                )
-                    .into_response();
-            }
             let content_type = response
                 .headers()
                 .get(header::CONTENT_TYPE)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
-            let bytes = match response.bytes().await {
+            // B2.2: bounded streaming read. `bytes()` buffered the whole body
+            // before the limit was checked, so a plugin that streamed without a
+            // Content-Length was fully materialised first.
+            let bytes = match opsweave_http_body_guard::read_bounded(
+                response,
+                MAX_RESPONSE_BYTES,
+                Some(Duration::from_secs(15)),
+            )
+            .await
+            {
                 Ok(bytes) => bytes,
-                Err(error) => {
+                Err(opsweave_http_body_guard::ReadFailure::TooLarge) => {
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(serde_json::json!({
+                            "code": "UPSTREAM_RESPONSE_TOO_LARGE",
+                            "message": "plugin response exceeded the 8 MiB gateway limit",
+                            "retryable": false
+                        })),
+                    )
+                        .into_response()
+                }
+                Err(failure) => {
                     return (
                         StatusCode::BAD_GATEWAY,
                         Json(serde_json::json!({
                             "code": "UPSTREAM_BODY_ERROR",
-                            "message": error.to_string(),
+                            "message": failure.as_str(),
                             "retryable": true
                         })),
                     )
                         .into_response()
                 }
             };
-            if bytes.len() > MAX_RESPONSE_BYTES {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(serde_json::json!({
-                        "code": "UPSTREAM_RESPONSE_TOO_LARGE",
-                        "message": "plugin response exceeded the 8 MiB gateway limit",
-                        "retryable": false
-                    })),
-                )
-                    .into_response();
-            }
             let mut out = (status, bytes).into_response();
             if let Some(content_type) = content_type {
                 if let Ok(value) = header::HeaderValue::from_str(&content_type) {

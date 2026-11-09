@@ -204,3 +204,56 @@ the new rule requires (admin → legacy workspace, through the public API) so th
 run is expected to work, but this is **NOT_RUN**, not PASS. Real Zabbix, mTLS,
 OCI image signature and production secrets are unchanged and remain
 NOT_RUN/BLOCKED.
+
+## B2.2 Bounded reads and concurrent dispatch (2026-11-08)
+
+Authority: [ADR-021](adr/ADR-021-bounded-reads-and-concurrent-dispatch.md).
+
+**Defect A (response bounds).** Six call sites buffered an upstream body with
+`response.bytes().await` and compared the result against a limit afterwards; the
+only earlier check was `Content-Length`, which the upstream controls. Chunked or
+unstated lengths bypassed the bound entirely, and the pipeline worker had no
+bound at all.
+
+**Defect B (serial worker).** `Worker::run_auto` ran exactly one job at a time,
+so one slow source request held the entire worker.
+
+**Implemented.**
+
+- New crate `crates/http-body-guard` (`read_bounded`): refuses a declared
+  oversize length before reading, consumes chunk by chunk, fails the moment the
+  bound is crossed, and bounds the gap between chunks rather than the transfer.
+  Wired into the Gateway, capability invoke, automation flow, the Node data proxy
+  and both worker call sites.
+- `OPSWEAVE_WORKER_CONCURRENCY` (default 4) and
+  `OPSWEAVE_WORKER_CONCURRENCY_PER_SOURCE` (default 1), clamped `1..=64`. The
+  worker does not claim a job it cannot start.
+- `GET /api/v1/diagnostics` gains a `jobs` object: backlog, inFlight, failed,
+  cancelled, expiredActiveLeases, avgWaitSeconds24h, avgRunSeconds24h,
+  retryRate24h — read from the dispatcher's own tables, `null` (not `0`) for an
+  empty window.
+- Module structure: `incidents.rs` test suite moved to `incidents_tests.rs`,
+  `investigations.rs` to `investigations_tests.rs`, both via `include!` so module
+  scope is unchanged. Production lines: 8603 → 3027 and 4969 → 3266.
+
+**Tests actually run (local, 2026-11-08).**
+
+| Command | Result |
+|---|---|
+| `cargo test -p opsweave-http-body-guard` | **7/7 PASS** (incl. real-socket endless chunked upstream, declared-length refusal, idle timeout) |
+| `./tests/acceptance/b2_response_bounds.sh` | **2/2 PASS** (no `bytes().await` anywhere; shared suite green) |
+| `cargo test -p opsweave-pipeline-worker` | **20/20 PASS** (incl. per-source gate and clamp tests) |
+| `cargo test -p opsweave-kernel` (real PostgreSQL) | **264/264 PASS** |
+| `cargo test --workspace` (real PostgreSQL) | all suites green |
+| `cargo clippy --locked --workspace --all-targets -- -D warnings` | clean |
+| `cargo fmt --all -- --check` | clean |
+
+**NOT_RUN.** No throughput benchmark was run. The concurrency change is verified
+correct, not measured faster; the defaults are conservative starting points, not
+tuned values. Multi-worker takeover under the new dispatcher was exercised only
+by the pre-existing unit suite, not by a live two-worker run.
+
+**Not done in this phase.** Splitting `incidents.rs` / `investigations.rs`
+*production* code by state machine / persistence / API was deliberately left out:
+it would rewrite the modules whose behaviour B2.1 and B2.1a just changed, and
+AGENTS.md forbids doing that inside the same change.

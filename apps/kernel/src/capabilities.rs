@@ -924,28 +924,23 @@ pub async fn invoke(
         AppError::unavailable("CAPABILITY_TIMEOUT", "provider request failed or timed out")
     })?;
     let status = upstream.status();
-    if upstream
-        .content_length()
-        .is_some_and(|length| length > MAX_CAPABILITY_RESPONSE_BYTES as u64)
-    {
-        return Err(AppError::bad_gateway(
-            "CAPABILITY_RESPONSE_TOO_LARGE",
-            "capability response exceeded limit",
-        ));
-    }
     let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
-    let bytes = upstream.bytes().await.map_err(|_| {
-        AppError::bad_gateway(
-            "CAPABILITY_RESPONSE_BODY_ERROR",
-            "could not read capability response",
-        )
-    })?;
-    if bytes.len() > MAX_CAPABILITY_RESPONSE_BYTES {
-        return Err(AppError::bad_gateway(
-            "CAPABILITY_RESPONSE_TOO_LARGE",
-            "capability response exceeded limit",
-        ));
-    }
+    // B2.2: bounded streaming read. `bytes()` buffered the whole body before the
+    // limit was checked, so a chunked or no-Content-Length response was fully
+    // materialised first. The read now stops at the bound.
+    let bytes =
+        opsweave_http_body_guard::read_bounded(upstream, MAX_CAPABILITY_RESPONSE_BYTES, None)
+            .await
+            .map_err(|failure| {
+                if failure == opsweave_http_body_guard::ReadFailure::TooLarge {
+                    AppError::bad_gateway(
+                        "CAPABILITY_RESPONSE_TOO_LARGE",
+                        "capability response exceeded limit",
+                    )
+                } else {
+                    AppError::bad_gateway("CAPABILITY_RESPONSE_BODY_ERROR", failure.as_str())
+                }
+            })?;
     let mut response = (status, bytes).into_response();
     if let Some(value) = content_type {
         response.headers_mut().insert(header::CONTENT_TYPE, value);
