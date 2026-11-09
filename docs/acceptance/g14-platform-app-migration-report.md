@@ -1,6 +1,6 @@
 # G14 Platform/Application Split — Migration Report
 
-Status: **code complete, CI unconfirmed, Playwright NOT_RUN**
+Status: **code complete, CI unconfirmed, Playwright 121/123 local (2 pre-existing skips)**
 
 Baseline audited: `8f0431ce` (2026-11-08), verified as `origin/main` HEAD with no open
 PRs and five green workflows before any work began.
@@ -57,14 +57,24 @@ applications do not name each other.
 | `tests/ci/b2_workspace_isolation.test.mjs` | **3/3** (pre-fix: **0/3**) |
 | `crates/http-body-guard` | **7/7**, incl. an endless chunked upstream over a real socket |
 | `tests/reliability/run.sh --all` | **4/4** |
+| **Playwright, the 21 specs the `acceptance` job runs** | **121 passed, 2 skipped, 0 failed** (real Chromium, local kernel, 15.3 min) |
 | contracts / spec-coverage / PNG budget / i18n / status-vocabulary / UI tokens / retired paths | all pass (942 files, 0 retired references) |
 
 ## 4. NOT correctly verified — read this before claiming readiness
 
-- **Playwright was never executed locally.** Spec paths and assertions were updated
-  and the kernel-side routing has unit tests, but no browser run happened here.
-  Every "the E2E is fixed" statement in the PRs means "the assertion and the route
-  agree", not "the browser passed".
+- **Playwright ran here, once, on macOS.** The 21 specs the `acceptance` job runs
+  were executed against a local kernel and a real Chromium: **121 passed, 2
+  skipped, 0 failed** (15.3 min). The two skipped are the pre-existing
+  `incidents-workspace.spec.ts` skip and the D-workspace route-with-no-record
+  skip, both documented in the harness. The Linux CI run is still the authority
+  for the artifacts it regenerates; a macOS screenshot is not a substitute for it,
+  which is why the regenerated `artifacts/ui/**` from this run was discarded
+  rather than committed.
+- **One spec class was wrong and CI caught what reading the code did not.** Two
+  assertions in `observability-surface.spec.ts` still stubbed `/api/v1/nodes`
+  after G14.4 moved the page onto `/api/v1/apps/opsweave.ops/observability/fleet`.
+  They passed locally for the wrong reason and failed on CI, where the kernel
+  answered the unstubbed URL. Both now stub the endpoint the page reads.
 - **CI state is unconfirmed at the time of writing.** Several rounds of failures
   were fixed; the last push had not completed.
 - **No throughput benchmark.** The worker concurrency change is verified correct,
