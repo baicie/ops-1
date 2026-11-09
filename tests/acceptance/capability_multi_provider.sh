@@ -68,7 +68,7 @@ RESOLVE_A="$(curl -fsS "${AUTH[@]}" "$CAP/resolve")"
 SELECTED_A="$(printf '%s' "$RESOLVE_A" | json "d['providerPluginId']")"
 [ "$SELECTED_A" = "$A" ] || bad "expected A selected before alternate activation, got $SELECTED_A"
 GRANT="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
-  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","providerPluginId":"'"$A"'","scope":["dataset:read","dataset:write"]}')"
+  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","providerPluginId":"'"$A"'","scope":["dataset:read","dataset:write","workspace:*"]}')"
 GRANT_ID="$(printf '%s' "$GRANT" | json "d['id']")"
 [ "$(printf '%s' "$GRANT" | json "d['providerPluginId']")" = "$A" ] || bad "grant is not bound to A"
 TOKEN_A="$(current_token)"
@@ -90,7 +90,7 @@ ok "bound Grant rejected natural selection of B and audited"
 
 echo "== unbounded grant follows current selected provider"
 UNBOUND="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
-  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write"]}')"
+  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write","workspace:*"]}')"
 UNBOUND_ID="$(printf '%s' "$UNBOUND" | json "d['id']")"
 TOKEN_CURRENT="$(current_token)"
 CODE_B="$(invoke_datasets "$TOKEN_CURRENT" /tmp/multi-b.json)"
@@ -110,7 +110,7 @@ REVOKE_CODE="$(wait_token_not_authorized "$TOKEN_BEFORE_REVOKE")"
 grep -q 'CAPABILITY_FORBIDDEN' /tmp/multi-revoked.json || bad "revoked Grant did not return CAPABILITY_FORBIDDEN"
 echo "revoke evidence: grant_delete_at=$REVOKE_AT token_before=sha256:$TOKEN_HASH_BEFORE file_after=sha256:$TOKEN_FILE_AFTER response=$REVOKE_CODE"
 curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
-  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write"]}' >/dev/null
+  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write","workspace:*"]}' >/dev/null
 TOKEN_AFTER_RESTORE="$(wait_authorized)"
 TOKEN_HASH_AFTER="$(printf '%s' "$TOKEN_AFTER_RESTORE" | token_hash)"
 echo "restore evidence: token_after=sha256:$TOKEN_HASH_AFTER authorized=200"
@@ -124,5 +124,5 @@ ok "no-provider resolution fails closed"
 
 # Restore the normal unbounded Grant for subsequent tests.
 curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
-  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write"]}' >/dev/null
+  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write","workspace:*"]}' >/dev/null
 echo "Multi Provider Golden Path: PASS"

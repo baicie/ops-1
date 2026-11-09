@@ -22,7 +22,29 @@ trap cleanup EXIT
 echo "== build binaries and frontends"
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl -p opsweave-pipeline-worker
 pnpm install --frozen-lockfile
-pnpm --filter @opsweave/platform-web build >/dev/null
+# Build every web application this tree actually has.
+#
+# Discovered by scanning apps/* rather than naming packages: an enumerated list is
+# a snapshot, and a snapshot is wrong on the other side of any rename - the stack
+# this harness runs on has one web application before the split and two after.
+# Scanning cannot go stale, and a tree with no web application at all fails loudly
+# instead of building nothing and reporting success.
+WEB_APPS=()
+for manifest in apps/*/package.json; do
+  [ -f "$manifest" ] || continue
+  name="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('name',''))" "$manifest")"
+  [ -n "$name" ] || continue
+  # A web application is one that has a build script; a Rust binary or a CLI has
+  # a Cargo.toml and no Vite build.
+  if python3 -c "import json,sys;sys.exit(0 if 'build' in json.load(open(sys.argv[1])).get('scripts',{}) else 1)" "$manifest"; then
+    WEB_APPS+=("$name")
+  fi
+done
+[ "${#WEB_APPS[@]}" -gt 0 ] || { echo "no buildable web application found under apps/"; exit 1; }
+for app in "${WEB_APPS[@]}"; do
+  pnpm --fail-if-no-match --filter "$app" build >/dev/null
+done
+echo "built web applications: ${WEB_APPS[*]}"
 mkdir -p keys
 ./target/debug/opsctl keygen --out-dir keys >/dev/null
 
@@ -49,6 +71,25 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 
 echo "== authenticate and enroll two real Node runtimes"
 ./target/debug/opsctl login --email admin@opsweave.local --password 'OpsWeave!2026' >/dev/null
+# B2.1a: a job is filed under a business workspace, and a dataset lives in one.
+# A freshly migrated database grants membership to nobody - migration 0022's
+# one-time grant only covers accounts that existed when it ran, and the
+# bootstrap admin is created after it (db::init order). This fixture performs the
+# same audited action an installer performs, through the public API, exactly as
+# tests/acceptance/lib/workspace_grant.sh documents. It is a FIXTURE step: the
+# product does not grant anyone a workspace on its own.
+ADMIN_TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
+ADMIN_ID="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$OPSWEAVE_URL/api/v1/auth/me" \
+  | python3 -c 'import json,sys;d=json.load(sys.stdin);print((d.get("user") or d).get("id",""))')"
+[ -n "$ADMIN_ID" ] || { echo "fixture: could not read the admin user id"; exit 1; }
+GRANT_CODE="$(curl -sS -o /tmp/data-ci-grant.json -w '%{http_code}' \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d "{\"userId\":\"$ADMIN_ID\"}" \
+  "$OPSWEAVE_URL/api/v1/business-workspaces/00000000-0000-4000-8000-000000000001/members")"
+case "$GRANT_CODE" in
+  200|201) ;;
+  *) echo "fixture: granting the admin the legacy workspace returned $GRANT_CODE: $(cat /tmp/data-ci-grant.json)"; exit 1 ;;
+esac
 start_node() {
   local name="$1" port="$2" token="$3"
   env \

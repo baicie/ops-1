@@ -946,6 +946,8 @@
   "jobs.submit.note": "草稿不能执行，只能提交不可变的已发布修订。",
   "jobs.submit.publishedRevision": "已发布修订",
   "jobs.submit.submitting": "正在提交…",
+  "jobs.submit.workspace": "业务工作区",
+  "jobs.submit.workspacePlaceholder": "选择工作区",
   "jobs.timeline.empty": "没有记录到事件。",
   "jobs.timeline.fence": "栅栏 {fence}",
   "jobs.timeline.title": "时间线",

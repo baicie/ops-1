@@ -946,6 +946,8 @@
   "jobs.submit.note": "Drafts cannot be executed. Only immutable published revisions can be submitted.",
   "jobs.submit.publishedRevision": "Published revision",
   "jobs.submit.submitting": "Submitting…",
+  "jobs.submit.workspace": "Business workspace",
+  "jobs.submit.workspacePlaceholder": "Select a workspace",
   "jobs.timeline.empty": "No events recorded.",
   "jobs.timeline.fence": "fence {fence}",
   "jobs.timeline.title": "Timeline",

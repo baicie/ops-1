@@ -128,15 +128,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "createdAt",
         "datasetId",
         "name",
         "ownerPluginId",
-        "schemaRevision",
-        "schemaDigest",
-        "storageProvider",
         "retentionPolicy",
-        "createdAt",
-        "updatedAt"
+        "schemaDigest",
+        "schemaRevision",
+        "storageProvider",
+        "updatedAt",
+        "workspaceId"
       ],
       "properties": {
         "datasetId": {
@@ -201,6 +202,10 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "workspaceId": {
+          "type": "string",
+          "format": "uuid"
         }
       }
     },
@@ -441,31 +446,91 @@
           "type": "object",
           "additionalProperties": true
         },
-        "sourceIdentity": { "type": ["string", "null"], "maxLength": 512 },
+        "sourceIdentity": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512
+        },
         "pipeline": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
-          "required": ["pipelineId", "revision"],
+          "required": [
+            "pipelineId",
+            "revision"
+          ],
           "properties": {
-            "pipelineId": { "type": "string", "maxLength": 128 },
-            "revision": { "type": "integer", "minimum": 1 }
+            "pipelineId": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
         "job": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
-          "required": ["jobId"],
+          "required": [
+            "jobId"
+          ],
           "properties": {
-            "jobId": { "type": "string", "format": "uuid" },
-            "attempt": { "type": ["integer", "null"], "minimum": 1 }
+            "jobId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "attempt": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
           }
         },
-        "fencingSequence": { "type": ["integer", "null"], "minimum": 1 },
-        "effectId": { "type": ["string", "null"], "maxLength": 256 },
-        "receiptId": { "type": ["string", "null"], "format": "uuid" },
-        "metadataStatus": { "type": "string", "enum": ["AVAILABLE", "PARTIAL", "NOT_CAPTURED"] },
+        "fencingSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "effectId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "receiptId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "metadataStatus": {
+          "type": "string",
+          "enum": [
+            "AVAILABLE",
+            "PARTIAL",
+            "NOT_CAPTURED"
+          ]
+        },
         "ingestionRunId": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "format": "uuid"
         },
         "dataset": {

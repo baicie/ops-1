@@ -2,7 +2,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { normalizeRuleInput, ruleSetDigest, evaluateRules, QUALITY_RULE_TYPES } from './quality.mjs';
-import { createIdentityResolver, hasScope } from './identity.mjs';
+import { createIdentityResolver, hasScope, resolveWorkspace } from './identity.mjs';
 
 const PLUGIN_ID = process.env.OPSWEAVE_PLUGIN_ID || 'opsweave.data-catalog';
 const VERSION = process.env.OPSWEAVE_PLUGIN_VERSION || '0.0.1';
@@ -79,6 +79,27 @@ function actorOf(who) {
   if (who.kind === 'user') return who.userId;
   if (who.kind === 'automation') return `automation:${who.principalId}`;
   return `workload:${who.pluginId}`;
+}
+
+// B2.1a: every dataset belongs to exactly one business workspace, and a caller
+// reads only the workspaces its signed context names. Without this the identity
+// fix would authenticate correctly and then serve the whole platform.
+//
+// The workspace is resolved per request, never stored on the session: a revoked
+// membership has to be answered with on the next call.
+async function workspaceScope(who, url) {
+  const named = url.searchParams.get('workspaceId') || undefined;
+  const resolved = resolveWorkspace(who, named);
+  if (resolved.error) {
+    // `error` must survive: every caller tests `scope.error` before using the
+    // filter, and a reshaped failure here would silently skip the check.
+    return { error: resolved.error, status: resolved.error === 'WORKSPACE_FORBIDDEN' ? 403 : 400, code: resolved.error, message: resolved.message };
+  }
+  // A caller holding several workspaces may read across all of them; a named
+  // workspace narrows it. This is a filter, never a grant: every value came from
+  // resolveWorkspace, which only returns workspaces the context already names.
+  const allowed = named ? [resolved.workspaceId] : who.workspaces;
+  return { allowed, workspaceId: resolved.workspaceId };
 }
 
 function validateFields(fields) {
@@ -294,6 +315,25 @@ async function initDb() {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS catalog_quality_results_run_rule_idx ON catalog_quality_results (run_id, rule_id);
     CREATE INDEX IF NOT EXISTS catalog_quality_results_run_idx ON catalog_quality_results (run_id);
+  `);
+  // B2.1a: the workspace dimension, added to existing installations without
+  // rewriting history. Same compatible-migration shape as migration 0022: new
+  // column, backfill only, then NOT NULL.
+  //
+  // The backfill puts every pre-existing dataset in the 'legacy' workspace the
+  // Kernel created for pre-scoping rows. This is deliberately the SAME fixed
+  // uuid, so an installation that already granted legacy-workspace membership
+  // (which migration 0022 did for every account that existed then) keeps seeing
+  // its data. It grants nobody anything new: a caller that was not a member of
+  // legacy could not read business rows before this change either.
+  await pool.query(`
+    ALTER TABLE catalog_datasets ADD COLUMN IF NOT EXISTS workspace_id uuid;
+    UPDATE catalog_datasets
+       SET workspace_id = '00000000-0000-4000-8000-000000000001'
+     WHERE workspace_id IS NULL;
+    ALTER TABLE catalog_datasets ALTER COLUMN workspace_id SET NOT NULL;
+    CREATE INDEX IF NOT EXISTS catalog_datasets_workspace_idx
+      ON catalog_datasets (workspace_id, created_at DESC);
   `);
   ready = true;
 }
@@ -538,6 +578,7 @@ async function recoverQualityRuns() {
 function datasetView(row) {
   return {
     datasetId: row.dataset_id, name: row.name, description: row.description || '',
+    workspaceId: row.workspace_id,
     ownerPluginId: row.owner_plugin_id, schemaRevision: row.schema_revision,
     schemaDigest: row.schema_digest, storageProvider: row.storage_provider,
     retentionPolicy: row.retention_policy, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
@@ -608,36 +649,45 @@ async function handle(req, res) {
   if (url.pathname === '/api/data-catalog/governance-summary' && req.method === 'GET') {
     if (!who) return fail(res, 401, 'UNAUTHENTICATED', 'authentication required', requestId);
     if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
+    const scope = await workspaceScope(who, url);
+    if (scope.error) return fail(res, scope.status, scope.code, scope.message, requestId);
+    // Every aggregate below is joined through catalog_datasets so the counts are
+    // the caller's workspaces' counts, not the platform's.
     const counts = await pool.query(`
-      WITH latest_overall AS (
+      WITH visible AS (
+        SELECT dataset_id FROM catalog_datasets WHERE workspace_id = ANY($1::uuid[])
+      ), latest_overall AS (
         SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.run_id
-        FROM catalog_quality_runs r ORDER BY r.dataset_id, r.created_at DESC, r.run_id DESC
+        FROM catalog_quality_runs r JOIN visible v ON v.dataset_id = r.dataset_id
+        ORDER BY r.dataset_id, r.created_at DESC, r.run_id DESC
       ), latest_terminal AS (
         SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.completed_at,r.error_code,r.run_id
-        FROM catalog_quality_runs r
+        FROM catalog_quality_runs r JOIN visible v ON v.dataset_id = r.dataset_id
         WHERE r.status IN ('PASSED','FAILED','ERROR')
         ORDER BY r.dataset_id, COALESCE(r.completed_at,r.created_at) DESC, r.run_id DESC
       )
-      SELECT (SELECT count(*)::int FROM catalog_datasets) AS dataset_count,
+      SELECT (SELECT count(*)::int FROM visible) AS dataset_count,
              (SELECT count(*)::int FROM latest_overall) AS datasets_with_runs,
              (SELECT count(*)::int FROM latest_terminal WHERE status='PASSED') AS passed,
              (SELECT count(*)::int FROM latest_terminal WHERE status='FAILED') AS failed,
              (SELECT count(*)::int FROM latest_terminal WHERE status='ERROR') AS errored,
              (SELECT count(*)::int FROM latest_overall WHERE status IN ('PENDING','RUNNING')) AS pending,
              (SELECT count(*)::int FROM latest_overall WHERE status='CANCELLED') AS cancelled,
-             (SELECT count(*)::int FROM catalog_lineage WHERE occurred_at > now() - interval '24 hours') AS lineage_window_count
-    `);
+             (SELECT count(*)::int FROM catalog_lineage l JOIN visible v ON v.dataset_id = l.dataset_id WHERE l.occurred_at > now() - interval '24 hours') AS lineage_window_count
+    `, [scope.allowed]);
     const failures = await pool.query(`
-      WITH latest_terminal AS (
+      WITH visible AS (
+        SELECT dataset_id FROM catalog_datasets WHERE workspace_id = ANY($1::uuid[])
+      ), latest_terminal AS (
         SELECT DISTINCT ON (r.dataset_id) r.dataset_id,r.status,r.created_at,r.completed_at,r.error_code,r.run_id
-        FROM catalog_quality_runs r
+        FROM catalog_quality_runs r JOIN visible v ON v.dataset_id = r.dataset_id
         WHERE r.status IN ('PASSED','FAILED','ERROR')
         ORDER BY r.dataset_id, COALESCE(r.completed_at,r.created_at) DESC, r.run_id DESC
       )
       SELECT l.run_id,l.dataset_id,d.name AS dataset_name,l.status,l.created_at,l.completed_at,l.error_code
       FROM latest_terminal l JOIN catalog_datasets d ON d.dataset_id=l.dataset_id
       WHERE l.status IN ('FAILED','ERROR') ORDER BY COALESCE(l.completed_at,l.created_at) DESC LIMIT 8
-    `);
+    `, [scope.allowed]);
     const row = counts.rows[0];
     return send(res, 200, {
       datasetCount: row.dataset_count,
@@ -650,12 +700,20 @@ async function handle(req, res) {
   }
   if (url.pathname === '/api/data-catalog/datasets' && req.method === 'GET') {
     if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
-    const result = await pool.query('SELECT * FROM catalog_datasets ORDER BY created_at DESC LIMIT 100');
+    const scope = await workspaceScope(who, url);
+    if (scope.error) return fail(res, scope.status, scope.code, scope.message, requestId);
+    const result = await pool.query('SELECT * FROM catalog_datasets WHERE workspace_id = ANY($1::uuid[]) ORDER BY created_at DESC LIMIT 100', [scope.allowed]);
     return send(res, 200, { items: result.rows.map(datasetView), nextCursor: null }, requestId);
   }
   if (url.pathname === '/api/data-catalog/datasets' && req.method === 'POST') {
     if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+    const scope = await workspaceScope(who, url);
+    if (scope.error) return fail(res, scope.status, scope.code, scope.message, requestId);
     const body = await readJson(req);
+    // A dataset is filed under the workspace resolved from the SIGNED context,
+    // never one named in the body: a caller that could choose would be granting
+    // itself a workspace.
+    const workspaceId = scope.workspaceId;
     const fields = validateFields(body.fields);
     const id = typeof body.datasetId === 'string' ? body.datasetId : crypto.randomUUID();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return fail(res, 400, 'INVALID_REQUEST', 'datasetId must be a UUID', requestId);
@@ -664,7 +722,7 @@ async function handle(req, res) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query('INSERT INTO catalog_datasets (dataset_id,name,description,owner_plugin_id,schema_revision,schema_digest,retention_policy) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, body.name, body.description || '', PLUGIN_ID, revision, digestValue, body.retentionPolicy || { mode: 'RETAIN', maxRecords: 10000, maxBytes: 16777216 }]);
+      await client.query('INSERT INTO catalog_datasets (dataset_id,name,description,owner_plugin_id,schema_revision,schema_digest,retention_policy,workspace_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)', [id, body.name, body.description || '', PLUGIN_ID, revision, digestValue, body.retentionPolicy || { mode: 'RETAIN', maxRecords: 10000, maxBytes: 16777216 }, workspaceId]);
       await client.query('INSERT INTO catalog_schema_revisions (dataset_id,schema_revision,digest,status,fields,published_at) VALUES ($1,$2,$3,\'PUBLISHED\',$4,now())', [id, revision, digestValue, JSON.stringify(fields)]);
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
@@ -673,17 +731,24 @@ async function handle(req, res) {
   }
   if (url.pathname === '/api/data-catalog/entity-types' && req.method === 'GET') {
     if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
+    const scope = await workspaceScope(who, url);
+    if (scope.error) return fail(res, scope.status, scope.code, scope.message, requestId);
     const datasetId = url.searchParams.get('datasetId');
+    // Joined through catalog_datasets: an entity type inherits its dataset's
+    // workspace, so a datasetId from another workspace yields nothing rather than
+    // the other workspace's schema metadata.
     const rows = datasetId
-      ? await pool.query('SELECT * FROM catalog_entity_types WHERE dataset_id=$1 ORDER BY created_at DESC', [datasetId])
-      : await pool.query('SELECT * FROM catalog_entity_types ORDER BY created_at DESC LIMIT 100');
+      ? await pool.query('SELECT e.* FROM catalog_entity_types e JOIN catalog_datasets d ON d.dataset_id=e.dataset_id WHERE e.dataset_id=$1 AND d.workspace_id = ANY($2::uuid[]) ORDER BY e.created_at DESC', [datasetId, scope.allowed])
+      : await pool.query('SELECT e.* FROM catalog_entity_types e JOIN catalog_datasets d ON d.dataset_id=e.dataset_id WHERE d.workspace_id = ANY($1::uuid[]) ORDER BY e.created_at DESC LIMIT 100', [scope.allowed]);
     return send(res, 200, rows.rows.map((row) => ({ entityTypeId: row.entity_type_id, name: row.name, datasetId: row.dataset_id, schemaRevision: row.schema_revision, primaryKeyFields: row.primary_key_fields })), requestId);
   }
   if (url.pathname === '/api/data-catalog/entity-types' && req.method === 'POST') {
     if (!hasScope(who, 'dataset:write')) return fail(res, 403, 'FORBIDDEN', 'dataset:write required', requestId);
+    const scope = await workspaceScope(who, url);
+    if (scope.error) return fail(res, scope.status, scope.code, scope.message, requestId);
     const body = await readJson(req);
     if (!body.name || !body.datasetId || !Array.isArray(body.primaryKeyFields) || !body.primaryKeyFields.length) return fail(res, 400, 'INVALID_REQUEST', 'name, datasetId and primaryKeyFields are required', requestId);
-    const dataset = await pool.query('SELECT schema_revision FROM catalog_datasets WHERE dataset_id=$1', [body.datasetId]);
+    const dataset = await pool.query('SELECT schema_revision FROM catalog_datasets WHERE dataset_id=$1 AND workspace_id = ANY($2::uuid[])', [body.datasetId, scope.allowed]);
     if (!dataset.rows[0]) return fail(res, 404, 'DATASET_NOT_FOUND', 'dataset not found', requestId);
     const row = await pool.query('INSERT INTO catalog_entity_types (entity_type_id,name,dataset_id,schema_revision,primary_key_fields) VALUES ($1,$2,$3,$4,$5) RETURNING *', [crypto.randomUUID(), body.name, body.datasetId, body.schemaRevision || dataset.rows[0].schema_revision, JSON.stringify(body.primaryKeyFields)]);
     return send(res, 201, { entityTypeId: row.rows[0].entity_type_id, name: row.rows[0].name, datasetId: row.rows[0].dataset_id, schemaRevision: row.rows[0].schema_revision, primaryKeyFields: row.rows[0].primary_key_fields }, requestId);
@@ -693,7 +758,13 @@ async function handle(req, res) {
     if (!hasScope(who, 'dataset:read')) return fail(res, 403, 'FORBIDDEN', 'dataset:read required', requestId);
     const datasetId = datasetMatch[1];
     const tail = datasetMatch[2] || '';
-    const dataset = await pool.query('SELECT * FROM catalog_datasets WHERE dataset_id=$1', [datasetId]);
+    const scope = await workspaceScope(who, url);
+    if (scope.error) return fail(res, scope.status, scope.code, scope.message, requestId);
+    // This is the single chokepoint for every dataset sub-resource (schemas,
+    // records, lineage, quality rules and runs): a dataset outside the caller's
+    // workspaces is answered exactly like one that does not exist, so the
+    // response cannot be used to enumerate other tenants' dataset ids.
+    const dataset = await pool.query('SELECT * FROM catalog_datasets WHERE dataset_id=$1 AND workspace_id = ANY($2::uuid[])', [datasetId, scope.allowed]);
     if (!dataset.rows[0]) return fail(res, 404, 'DATASET_NOT_FOUND', 'dataset not found', requestId);
     if (!tail && req.method === 'GET') return send(res, 200, datasetView(dataset.rows[0]), requestId);
     if (tail === 'schemas' && req.method === 'GET') {

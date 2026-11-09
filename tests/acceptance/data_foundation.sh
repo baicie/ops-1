@@ -167,7 +167,7 @@ NO_CAT_CODE="$(curl -sS -o /tmp/data-no-catalog.json -w '%{http_code}' "${AUTH[@
 [ "$NO_CAT_CODE" = "422" ] || bad "missing catalog capability returned $NO_CAT_CODE, expected 422"
 grep -q 'CAPABILITY_FORBIDDEN\|CAPABILITY_UNAVAILABLE' /tmp/data-no-catalog.json || bad "missing catalog did not fail with a capability error"
 api -X POST -H 'content-type: application/json' "$URL/api/v1/capability-grants" \
-  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write"]}' >/dev/null
+  -d '{"name":"data.catalog.v1","major":1,"consumerPluginId":"opsweave.data-integration","scope":["dataset:read","dataset:write","workspace:*"]}' >/dev/null
 ok "missing capability failed closed and was restored"
 
 echo "== lineage and dependency protection"

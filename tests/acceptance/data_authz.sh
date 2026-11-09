@@ -45,6 +45,35 @@ VIEWER_CSRF="$(login_cookie viewer@opsweave.local "$VIEWER_JAR")"
 OPERATOR_CSRF="$(login_cookie operator@opsweave.local "$OPERATOR_JAR")"
 [ -n "$VIEWER_CSRF" ] && [ -n "$OPERATOR_CSRF" ] || bad "role login returned no CSRF token"
 
+# B2.1a: a dataset lives in a business workspace and a caller reads only the
+# workspaces its signed context names. An account created through the public API
+# is a member of NONE until an administrator grants it (migration 0022 grants
+# only the accounts that existed when it ran), so without this step the viewer
+# and operator below would answer 400 WORKSPACE_REQUIRED - correctly, but the
+# script would be testing the wrong thing.
+#
+# The grant is the audited action an installer performs, through the public API,
+# against the legacy workspace the migration created. Membership here is what the
+# B2.1a scope check reads; it is not a bypass.
+LEGACY_WORKSPACE=00000000-0000-4000-8000-000000000001
+grant_legacy() {
+  local email="$1" uid code
+  uid="$(curl -fsS "${ADMIN[@]}" "$URL/api/v1/users" \
+    | python3 -c "import json,sys;print(next((u['id'] for u in json.load(sys.stdin) if u['email']==sys.argv[1]),''))" "$email")"
+  [ -n "$uid" ] || bad "could not read the id of $email"
+  code="$(curl -sS -o /tmp/data-authz-grant.json -w '%{http_code}' "${ADMIN[@]}" -X POST \
+    -H 'content-type: application/json' -d "{\"userId\":\"$uid\"}" \
+    "$URL/api/v1/business-workspaces/$LEGACY_WORKSPACE/members")"
+  case "$code" in 200|201|409) ;; *) bad "grant $email -> $LEGACY_WORKSPACE returned $code: $(cat /tmp/data-authz-grant.json)";; esac
+}
+grant_legacy viewer@opsweave.local
+grant_legacy operator@opsweave.local
+# The admin creates the datasets this script asserts on, so it needs the same
+# membership; the CI harness grants it, but this script must stand alone.
+ME="$(curl -fsS "${ADMIN[@]}" "$URL/api/v1/auth/me" | json "(d.get('user') or d)['id']")"
+curl -sS -o /dev/null -X POST -H 'content-type: application/json' -d "{\"userId\":\"$ME\"}" \
+  "${ADMIN[@]}" "$URL/api/v1/business-workspaces/$LEGACY_WORKSPACE/members"
+
 echo "== Viewer is read-only at the backend"
 DATASET_BODY='{"name":"authz-admin-dataset","description":"authorization fixture","fields":[{"name":"id","type":"string","nullable":false,"ordinal":0}],"retentionPolicy":{"mode":"RETAIN","maxRecords":100,"maxBytes":1048576}}'
 ADMIN_DATASET="$(curl -fsS "${ADMIN[@]}" -X POST -H 'content-type: application/json' -H 'Idempotency-Key: authz-admin-dataset-0001' "$CAT/datasets" -d "$DATASET_BODY")"
