@@ -246,6 +246,11 @@ async fn resolve_in(root: &Path, shell: &Path, path: &str, always_shell: bool) -
     let candidate = root.join(&relative);
     if is_file(&candidate).await {
         Target::File(candidate)
+    } else if is_asset_path(path) {
+        // A mounted application owns its whole prefix, so `always_shell` would
+        // answer a missing bundle with its shell - the same HTML-as-JavaScript
+        // hang the primary resolver had. An asset is a file or it is a 404.
+        Target::Missing
     } else if always_shell && is_file(shell).await {
         Target::ShellAt(shell.to_path_buf())
     } else if is_client_route(path) {
@@ -405,7 +410,27 @@ fn relative_path(path: &str) -> Option<PathBuf> {
     Some(relative)
 }
 
+/// Assets are never client routes, wherever they are mounted.
+///
+/// Without this, a request for a bundle that no longer exists answered `200` with
+/// the shell: `/admin/assets/index-OLD.js` starts with `/admin`, so the prefix
+/// table claimed it, the browser received 613 bytes of HTML where it expected
+/// JavaScript, and the SPA never mounted. The page then hangs rather than fails -
+/// `staging-preview` saw it as `page.goto: Test timeout of 60000ms exceeded` on a
+/// host that answered `/livez` in 50ms. A stale hash in a cached document, or a
+/// deploy that rotated the bundle mid-session, is enough to trigger it.
+///
+/// A missing asset must be a 404: it is a hard error the client can report, and
+/// the alternative is an HTML document parsed as script.
+fn is_asset_path(path: &str) -> bool {
+    let path = path.trim_end_matches('/');
+    path.split('/').any(|segment| segment == "assets")
+}
+
 fn is_client_route(path: &str) -> bool {
+    if is_asset_path(path) {
+        return false;
+    }
     let path = path.trim_end_matches('/');
     CLIENT_ROUTE_PREFIXES.iter().any(|prefix| {
         path == *prefix
@@ -654,6 +679,46 @@ mod tests {
             StatusCode::OK
         );
         // And the primary bundle's own assets still resolve.
+        assert_eq!(
+            get(&app, "/assets/index-abc123.js").await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// A bundle that no longer exists must be a 404, never the shell.
+    ///
+    /// `staging-preview` failed with `page.goto: Test timeout of 60000ms
+    /// exceeded` on a host answering `/livez` in 50 ms, because a request for a
+    /// stale hashed bundle answered `200` with the HTML shell: `/admin/assets/*`
+    /// starts with `/admin`, so the client-route prefix table claimed it, and the
+    /// browser parsed a document as JavaScript and never mounted the app. The
+    /// same hole existed for a mounted application, whose `always_shell` accepted
+    /// every unknown path under its prefix.
+    ///
+    /// An asset is a file or it is missing. Anything else makes a deploy that
+    /// rotates a bundle hash into a page that hangs instead of reporting.
+    #[tokio::test]
+    async fn a_missing_asset_is_not_found_and_never_the_shell() {
+        let fixture = Fixture::new("missing-assets").with_second_bundle("missing-assets");
+        let app = fixture.app();
+
+        for path in [
+            "/admin/assets/index-DOES-NOT-EXIST.js",
+            "/assets/index-DOES-NOT-EXIST.js",
+            "/app/assets/index-DOES-NOT-EXIST.js",
+        ] {
+            let response = get(&app, path).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "{path} must 404; a 200 here hands the browser a document to parse as script"
+            );
+        }
+
+        // The routes either side of it are unaffected: a real client route still
+        // reaches its shell, and a real asset still serves.
+        assert_eq!(get(&app, "/admin/overview").await.status(), StatusCode::OK);
+        assert_eq!(get(&app, "/app/incidents").await.status(), StatusCode::OK);
         assert_eq!(
             get(&app, "/assets/index-abc123.js").await.status(),
             StatusCode::OK
