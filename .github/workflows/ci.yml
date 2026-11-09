@@ -92,6 +92,12 @@ jobs:
       # matches nothing, so four harnesses were green while building zero bundles. This check
       # fails closed on a missing scan root and prints its file count, so a pass cannot be vacuous.
       - run: node tests/ci/check-retired-paths.mjs
+      # The retired-path gate's own counterfactuals. It allowed a fixed set of file
+      # SUFFIXES, so every Dockerfile - which has none - was invisible to it, and
+      # `deployments/staging/Dockerfile` kept building the deleted web package while
+      # this gate reported zero references. The staging image only broke at merge
+      # time, because no PR job builds it. One case here is that exact file shape.
+      - run: node --test tests/ci/check-retired-paths.test.mjs
       # The geometry gate's own fail-closed properties: empty passes, dropped routes, missing
       # matrix combinations and duplicate passes.
       - run: node --test scripts/check-ui-metrics.test.mjs
