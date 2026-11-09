@@ -85,10 +85,34 @@ const EXTENSIONS = new Set([
 const isHistorical = (rel) =>
   HISTORICAL.some((prefix) => rel === prefix || rel.startsWith(prefix + sep));
 
-/** This file names the retired identifiers by definition; it cannot also be a violation. */
-const SELF = 'tests/ci/check-retired-paths.mjs';
+/**
+ * The gate and its counterfactual suite name the retired identifiers by
+ * definition; they cannot also be violations of it. The sibling test file is
+ * exempted by the same rule and for the same reason - it declares the identifier
+ * once (`const RETIRED`) and builds every case around it. Missing it made the gate
+ * fail on itself the first time its own tests were added to the tree.
+ */
+const SELF = new Set([
+  'tests/ci/check-retired-paths.mjs',
+  'tests/ci/check-retired-paths.test.mjs',
+]);
 
-const isText = (name) => EXTENSIONS.has(name.slice(name.lastIndexOf('.')));
+/**
+ * Files with no extension are the ones a deployment depends on most - a
+ * `Dockerfile` IS the build - and a suffix allow-list skipped every one of them.
+ * That is not hypothetical: `deployments/staging/Dockerfile` kept building the
+ * deleted `apps/platform-web` through the whole G14.2 review, and this scanner
+ * reported zero references the whole time. Named exceptions, not "read
+ * everything": a binary with no suffix must not be pulled into a text scan.
+ */
+const EXTENSIONLESS = new Set(['Dockerfile', 'Makefile', 'Procfile', 'Jenkinsfile']);
+
+const isText = (name) => {
+  if (EXTENSIONLESS.has(name)) return true;
+  if (name.startsWith('Dockerfile.')) return true;
+  const dot = name.lastIndexOf('.');
+  return dot > 0 && EXTENSIONS.has(name.slice(dot));
+};
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -131,7 +155,7 @@ for (const file of files) {
   }
   scanned += 1;
   const rel = relative(ROOT, file).split(sep).join('/');
-  if (rel === SELF) continue;
+  if (SELF.has(rel)) continue;
   for (const [needle, replacement] of RETIRED) {
     const lines = text.split('\n');
     lines.forEach((line, index) => {

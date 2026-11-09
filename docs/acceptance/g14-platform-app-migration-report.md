@@ -1,6 +1,6 @@
 # G14 Platform/Application Split — Migration Report
 
-Status: **code complete, CI unconfirmed, Playwright 121/123 local (2 pre-existing skips)**
+Status: **merged to main (c80fda9); two post-merge defects found and fixed in #71**
 
 Baseline audited: `8f0431ce` (2026-11-08), verified as `origin/main` HEAD with no open
 PRs and five green workflows before any work began.
@@ -60,6 +60,23 @@ applications do not name each other.
 | **Playwright, the 21 specs the `acceptance` job runs** | **121 passed, 2 skipped, 0 failed** (real Chromium, local kernel, 15.3 min) |
 | contracts / spec-coverage / PNG budget / i18n / status-vocabulary / UI tokens / retired paths | all pass (942 files, 0 retired references) |
 
+## 3a. What merging revealed
+
+The six PRs were green as PRs and broken as a main branch. Both defects below
+appeared only after merge, and both are recorded because they are the kind a
+green check list hides:
+
+| Defect | Why no PR gate caught it | Fixed |
+|---|---|---|
+| `deployments/staging/Dockerfile` still built and copied the deleted `apps/platform-web`, so the staging image could not build at all | no PR job builds the staging image; `staging-preview` only runs on `main` | the webbuild stage now builds both applications; **`docker build` verified locally** |
+| `check-retired-paths` reported 0 references to the retired path the whole time | it allowed a fixed set of file **suffixes** and `Dockerfile` has none, so every Dockerfile was invisible; its count went 948 → 958 files once widened | `isText` accepts extensionless build files by name; a 7-case counterfactual suite now guards the gate itself |
+| `a_verdict_and_automation_evidence_serialize_without_a_missing_snapshot` failed on main's CI: *"the race never exercised the verdict-success path"* | the test used `tokio::join!` and asserted afterwards that the scheduler had taken a particular branch | each round now states its order and asserts that order's determinate outcome |
+
+The lesson is not "CI was wrong". Both PR-time gates were doing exactly what
+they were written to do — one had never been pointed at a Dockerfile, the other
+depended on scheduling. A check that reports without ever having read the file
+it should read looks identical to a check that read it and found nothing.
+
 ## 4. NOT correctly verified — read this before claiming readiness
 
 - **Playwright ran here, once, on macOS.** The 21 specs the `acceptance` job runs
@@ -75,8 +92,9 @@ applications do not name each other.
   after G14.4 moved the page onto `/api/v1/apps/opsweave.ops/observability/fleet`.
   They passed locally for the wrong reason and failed on CI, where the kernel
   answered the unstubbed URL. Both now stub the endpoint the page reads.
-- **CI state is unconfirmed at the time of writing.** Several rounds of failures
-  were fixed; the last push had not completed.
+- **CI is confirmed for the merged result.** All 17 checks passed on `c80fda9`,
+  the merge of #69. `staging-preview` on that commit failed for the Dockerfile
+  reason in §3a and is fixed in #71; it has not been re-run against the fix.
 - **No throughput benchmark.** The worker concurrency change is verified correct,
   not measured faster. Defaults (4 global, 1 per source) are conservative starting
   points, not tuned values.

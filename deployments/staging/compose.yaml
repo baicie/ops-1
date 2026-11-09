@@ -99,7 +99,10 @@ services:
     environment:
       OPSWEAVE_BIND: 0.0.0.0:${OPSWEAVE_PREVIEW_PORT:-18080}
       OPSWEAVE_DATA_DIR: /app/data
+      # Two applications, two bundles (G14.2). The console serves every
+      # non-/app prefix; /app resolves inside the ops bundle.
       OPSWEAVE_WEB_DIST: /app/web
+      OPSWEAVE_OPS_WEB_DIST: /app/ops-web
       # Plugin containers run on the default bridge; their report-back address
       # is the bridge gateway, never 127.0.0.1 (that would be themselves).
       OPSWEAVE_PLUGIN_DB_HOST: ${DOCKER_BRIDGE_IP:-172.17.0.1}

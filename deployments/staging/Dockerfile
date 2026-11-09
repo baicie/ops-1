@@ -10,7 +10,13 @@ ARG NODE_VERSION=22
 ARG DOCKER_CLI_VERSION=29.6.1
 
 # ---------------------------------------------------------------------------
-# Web Shell (React + Vite). Output: /src/apps/platform-web/dist
+# The two web applications (G14.2). They are separate builds and separate
+# artifacts, and the Kernel serves each from its own mount, so the image must
+# carry both: /app/web is the Platform Console, /app/ops-web the Ops application.
+# Building only one of them is how this stage broke when the single SPA was split:
+# the COPY below then referenced a directory that no longer exists, and nothing in
+# the PR gates built this image to notice. Both filters are therefore explicit.
+#   Outputs: /src/apps/platform-console/dist, /src/apps/ops-web/dist
 # ---------------------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS webbuild
 ENV CI=1 \
@@ -21,7 +27,8 @@ RUN npm install --global pnpm@10.34.3
 WORKDIR /src
 COPY . .
 RUN pnpm install --frozen-lockfile \
- && pnpm --filter @opsweave/platform-web build
+ && pnpm --filter @opsweave/platform-console build \
+ && pnpm --filter @opsweave/ops-web build
 
 # ---------------------------------------------------------------------------
 # Rust binaries. contracts/ is required: apps/kernel/src/pipeline.rs embeds
@@ -73,7 +80,8 @@ COPY --from=rustbuild /src/target/release/opsweave-node /usr/local/bin/opsweave-
 COPY --from=rustbuild /src/target/release/opsctl /usr/local/bin/opsctl
 COPY --from=rustbuild /src/target/release/opsweave-pipeline-worker /usr/local/bin/opsweave-pipeline-worker
 
-COPY --from=webbuild /src/apps/platform-web/dist /app/web
+COPY --from=webbuild /src/apps/platform-console/dist /app/web
+COPY --from=webbuild /src/apps/ops-web/dist /app/ops-web
 
 RUN groupadd --gid "${OPSWEAVE_GID}" opsweave \
  && useradd --uid "${OPSWEAVE_UID}" --gid "${OPSWEAVE_GID}" --create-home \
@@ -82,6 +90,7 @@ RUN groupadd --gid "${OPSWEAVE_GID}" opsweave \
  && chown -R opsweave:opsweave /app
 
 ENV OPSWEAVE_WEB_DIST=/app/web \
+    OPSWEAVE_OPS_WEB_DIST=/app/ops-web \
     OPSWEAVE_DATA_DIR=/app/data
 
 WORKDIR /app

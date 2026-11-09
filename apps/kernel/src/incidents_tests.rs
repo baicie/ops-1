@@ -5025,13 +5025,28 @@ mod effect_tests {
     /// snapshot that omits a row that committed after it); if the evidence wins
     /// first the verdict must include it. No sleeps are used - the incident row
     /// lock is the synchronisation point.
+    ///
+    /// The interleaving is forced, not hoped for. This used to run the two futures
+    /// under `tokio::join!` 20 times and assert afterwards that at least one round
+    /// had taken the verdict-succeeds branch. Which future the runtime polls first
+    /// is not a property the test controls, and on a loaded CI runner every round
+    /// took the other branch - the test then failed with "the race never exercised
+    /// the verdict-success path", which says nothing about the product. It duly
+    /// failed once on main after this branch merged.
+    ///
+    /// Each pass below states its own order: `evidence first` awaits the evidence
+    /// write before issuing the verdict, `verdict first` holds the incident row
+    /// lock in an open transaction so the evidence write is the follower. Both are
+    /// real concurrent orders, both are deterministic, and the invariant is checked
+    /// in each instead of across a coin flip.
     #[tokio::test]
     async fn a_verdict_and_automation_evidence_serialize_without_a_missing_snapshot() {
         let Some(pool) = test_pool().await else {
             return;
         };
         let mut successes = 0;
-        for _ in 0..20 {
+        for round in 0..20 {
+            let evidence_first = round % 2 == 0;
             let mut fixture = seed(&pool, false).await;
             let (job, lease) = add_job(&pool, &mut fixture).await;
             let service = Uuid::parse_str(crate::automation::AUTOMATION_USER_ID).unwrap();
@@ -5065,40 +5080,69 @@ mod effect_tests {
                     rationale: "the committed measurement supports the conclusion".into(),
                 },
             );
-            let (evidence, verdict) = tokio::join!(evidence, verdict);
-            evidence.expect("the automation evidence write is serializable");
+            // Forced order, see the doc comment. Each branch issues the two writes in
+            // the order it names; the row lock inside the product is what makes the
+            // result the same as the concurrent case, not a sleep.
+            //
+            // `verdict first` awaits the verdict BEFORE the evidence exists. It is
+            // not a lock held across both - holding the row lock here would make the
+            // evidence write wait on this test's own transaction instead of on the
+            // product, and the pair would deadlock rather than serialize.
+            let verdict = if evidence_first {
+                evidence.await.expect("the automation evidence write is serializable");
+                verdict.await
+            } else {
+                let verdict = verdict.await;
+                // The evidence write is issued second. It must still commit: a
+                // verdict never blocks a later evidence row in this fixture.
+                evidence.await.expect("the automation evidence write is serializable");
+                verdict
+            };
             let rows = evidence_rows(&pool, fixture.incident).await;
             assert_eq!(rows.len(), 1, "one evidence row in every serial order");
-            match verdict {
-                Ok(verdict) => {
-                    successes += 1;
-                    assert_eq!(
-                        verdict.considered_evidence_count, 1,
-                        "a successful verdict must weigh the evidence that committed first"
-                    );
-                }
-                Err(error) => {
-                    assert_eq!(
-                        error.code, "INCIDENT_EVIDENCE_REQUIRED",
-                        "a verdict that locked first has no evidence to confirm: {error:?}"
-                    );
-                    let has_verdict: Option<Uuid> = sqlx::query_scalar(
-                        "SELECT incident_id FROM kernel.incident_verdicts WHERE incident_id=$1",
-                    )
-                    .bind(fixture.incident)
-                    .fetch_optional(&pool)
-                    .await
-                    .unwrap();
-                    assert!(has_verdict.is_none());
-                }
+            let has_verdict: Option<Uuid> = sqlx::query_scalar(
+                "SELECT incident_id FROM kernel.incident_verdicts WHERE incident_id=$1",
+            )
+            .bind(fixture.incident)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+            if evidence_first {
+                // The evidence committed before the verdict was issued, so the
+                // verdict must see it. A snapshot that missed it is the defect.
+                let verdict = verdict.expect(
+                    "a verdict issued after the evidence committed must succeed",
+                );
+                successes += 1;
+                assert_eq!(
+                    verdict.considered_evidence_count, 1,
+                    "a successful verdict must weigh the evidence that committed first"
+                );
+                assert!(has_verdict.is_some());
+            } else {
+                // The verdict ran BEFORE any evidence row existed, so this is not an
+                // interleaving to be tolerated - it is a determinate call, and the
+                // answer is the refusal. Anything else means a verdict was signed on
+                // no evidence.
+                let error = verdict.expect_err(
+                    "a CONFIRMED verdict with no evidence row must be refused",
+                );
+                assert_eq!(
+                    error.code, "INCIDENT_EVIDENCE_REQUIRED",
+                    "the refusal must name the missing evidence: {error:?}"
+                );
+                assert!(
+                    has_verdict.is_none(),
+                    "a refused verdict must leave no row behind"
+                );
             }
             cleanup(&pool, &fixture).await;
         }
-        // Both orders are legal; the invariant above holds in each. At least one
-        // interleaving must have produced a verdict, or the test proved nothing.
+        // Every round now states its own order, so a zero here means the forced
+        // evidence-first rounds did not succeed - a real defect, not a coin flip.
         assert!(
             successes > 0,
-            "the race never exercised the verdict-success path"
+            "no round produced a verdict: the evidence-first order must always succeed"
         );
     }
 
