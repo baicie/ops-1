@@ -254,8 +254,14 @@ jobs:
           # plugin. The old job pinned #39's SHA, so a green run said nothing
           # about the UI merged into main.
           pnpm --fail-if-no-match --filter @opsweave/platform-console build
-          rm -rf /tmp/g13a1-ui-dist
+          # The spec this job runs opens /app/incidents/<id>, which is the OPS
+          # application. Without its bundle the kernel answers that path with the
+          # console shell and the ops router is not mounted, so the page loads and
+          # then 404s - the exact "page loaded, everything below it missing" shape.
+          pnpm --fail-if-no-match --filter @opsweave/ops-web build
+          rm -rf /tmp/g13a1-ui-dist /tmp/g13a1-ops-dist
           cp -R apps/platform-console/dist /tmp/g13a1-ui-dist
+          cp -R apps/ops-web/dist /tmp/g13a1-ops-dist
       - name: local registry
         run: |
           set -euo pipefail
@@ -314,6 +320,7 @@ jobs:
           export DATABASE_URL="$OPSWEAVE_DATABASE_URL"
           export OPSWEAVE_DATA_DIR="$PWD/data-ci/g13b14"
           export OPSWEAVE_WEB_DIST="$PWD/apps/platform-console/dist"
+          export OPSWEAVE_OPS_WEB_DIST="$PWD/apps/ops-web/dist"
           export OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$OPSWEAVE_ADMIN_EMAIL"
           export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$OPSWEAVE_ADMIN_PASSWORD"
           export OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin'

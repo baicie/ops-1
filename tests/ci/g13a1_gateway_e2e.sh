@@ -85,6 +85,7 @@ start_kernel() { # $1 = plugin secrets JSON, $2 = credential bindings JSON, $3 =
     OPSWEAVE_BIND=0.0.0.0:18185 \
     OPSWEAVE_PUBLIC_URL="$URL" \
     OPSWEAVE_WEB_DIST=/tmp/g13a1-ui-dist \
+    OPSWEAVE_OPS_WEB_DIST=/tmp/g13a1-ops-dist \
     OPSWEAVE_DATA_DIR=/tmp/g13a1-data \
     OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
     OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
