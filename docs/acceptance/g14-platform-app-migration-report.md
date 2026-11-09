@@ -97,6 +97,40 @@ Each of these was true at the baseline and is true now; none is addressed by G14
 | OIDC Authorization Code + PKCE across origins | **NOT_IMPLEMENTED** — both applications still share one origin and one cookie session; the single-origin reverse proxy is the documented interim bridge |
 | Application-registry UI for third-party install | **NOT_IMPLEMENTED** — installation is a `psql` insert today |
 
+## 5a. Branch protection: the actual state, not the recommended one
+
+Measured on 2026-11-09 against `baicie/ops-1`:
+
+```
+$ gh api repos/baicie/ops-1/branches/main/protection
+{"message":"Branch not protected", "status": 404}
+$ gh api repos/baicie/ops-1/rulesets
+[]
+```
+
+**`main` has no branch protection and no repository ruleset.** Nothing prevents a
+direct push to `main`, a force-push, or a merge with red checks. Every gate in
+this phase is a check that *reports*; none of them *blocks*. It is worth being
+explicit about that, because "16 checks green" and "16 checks required" read the
+same in a status list and are not the same guarantee.
+
+This is a repository setting, not a code change, and the brief asked for the
+recommendation to be stated rather than silently assumed. Recommended, in order
+of what actually prevents the failure this phase kept hitting (a green local run
+that was green for the wrong reason):
+
+| Setting | Why this one |
+|---|---|
+| Require status checks to pass before merging, with all 16 jobs named | the only thing that would have stopped a red `acceptance` from being merged |
+| Require branches to be up to date before merging | the stacked PRs here were each rebased by hand; this catches the case where nobody does |
+| Block force-pushes and deletions on `main` | this session force-pushed four feature branches; `main` must not be among them |
+| Require a pull request before merging (0 approvals is fine on a solo repo) | keeps the diff and the check run attached to a reviewable object |
+
+Not recommended as a substitute: required approvals. On a repository with a
+single maintainer a required-approval rule is either dead or routinely
+self-approved, and a rule everybody bypasses is worse than one that is honest
+about not existing.
+
 ## 6. Known structural gaps this phase deliberately left
 
 - **`Core → ops` edges remain.** Eight were measured; one (`workspaces →
