@@ -512,3 +512,40 @@ were updated, but "the assertion compiles" is not "the browser passed".
 tool calls / hypothesis / evidence citation / human review / TEST_FIXTURE
 labelling and is unchanged by this phase; no new product behaviour was added
 there. Pipeline definitions are still not workspace-owned (G14.1 §4a).
+
+## G14 phase closure (2026-11-09)
+
+Full report: [g14-platform-app-migration-report.md](acceptance/g14-platform-app-migration-report.md).
+
+**Delivered across six stacked PRs** (#65–#70): plugin identity hardening, data-plane
+workspace isolation, bounded reads and concurrent dispatch, the Core/application
+boundary ADR, two independent front-end applications, and application-scoped
+authorization with an ops-owned fleet read.
+
+**Verified locally:** kernel 274/274 against real PostgreSQL; ui/platform-client/
+console/ops-web 58/113/62/236; both applications build and their builds are
+independent (breaking ops-web leaves the console build exiting 0); the B2.1 attack
+suite 7/7 (1/7 pre-fix); the B2.1a isolation suite 3/3 (0/3 pre-fix); the bounded
+reader 7/7 including an endless chunked upstream over a real socket; contracts,
+spec-coverage, PNG budget, i18n, status vocabulary, UI tokens and retired paths all
+pass.
+
+**NOT correctly verified — do not read this as ready:**
+
+- **Playwright was never executed locally.** Spec paths and assertions were updated
+  and the kernel routing has unit tests, but no browser run happened here.
+- **CI state was unconfirmed at the time of writing**; several rounds of failures
+  were fixed and the last push had not completed.
+- **staging core-tier and full-tier were not recorded separately** in this phase.
+- **No throughput benchmark**: the worker concurrency change is verified correct,
+  not measured faster.
+
+**Production conditions unchanged from the baseline:** mTLS, OCI image signature
+verification, real Zabbix, three physical Linux hosts, production secret
+management and OIDC across origins are all still NOT_RUN / NOT_IMPLEMENTED.
+
+**Structural gaps left on purpose**, each with a reason in the report or ADR-022:
+seven of the eight measured `Core → ops` dependency edges, pipeline definitions
+not being workspace-owned, `sources` still reading platform APIs, the Ops Web not
+yet hiding ungranted applications, `incidents.rs`/`investigations.rs` production
+code not split, and the legacy `/api/v1/incidents/*` aliases.
