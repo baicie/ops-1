@@ -733,7 +733,7 @@ for (const viewport of VIEWPORTS) {
       await page.fill('input[type=email]', ADMIN_EMAIL);
       await page.fill('input[type=password]', ADMIN_PASSWORD);
       await page.click('[data-testid=login-submit]');
-      await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+      await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
       for (const target of ROUTES) {
         // B1.8: one cold document load (the login above) is enough. A full
         // page.goto per route re-downloads the 1.3 MB bundle and the CSS; the
@@ -819,7 +819,7 @@ test('usable', async ({ browser }) => {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
 
   const open = async (route: string) => {
     await page.goto(BASE + route);
@@ -1001,7 +1001,7 @@ test('row keyboard', async ({ browser }) => {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
 
   const open = async (route: string) => {
     await page.goto(BASE + route);
@@ -1145,7 +1145,7 @@ test('clipped-probe', async ({ browser }) => {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
   await page.goto(BASE + '/admin/jobs');
   await page.waitForSelector('[data-async-state="ready"], [data-async-state="empty"]', { timeout: 20000 }).catch(() => undefined);
   await page.waitForTimeout(400);

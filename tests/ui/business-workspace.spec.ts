@@ -118,9 +118,11 @@ test('the home task space names what is missing instead of rendering a zero', as
   // No KPI wall: no metric card, no table, no count badge on the home page at all.
   await expect(page.locator('[data-testid="metric-card"], [data-metric-card], .ow-metric, table')).toHaveCount(0);
 
-  // Five destinations are still declared as not shipped, one row each; incidents is shipped and
-  // says what it actually exposes instead of what it is waiting for.
-  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(5);
+  // Four destinations are still declared as not shipped, one row each; incidents and
+  // observability are shipped and say what they actually expose instead of what they are waiting
+  // for. Observability moved in G14.4 when it gained a granted endpoint of its own; sources stays
+  // because every read it makes is still a platform API (see dual-surface.spec.ts).
+  await expect(page.locator('[data-surface-status="not-shipped"]')).toHaveCount(4);
   await expect(page.getByTestId('workspace-home').locator('[data-surface-status="not-shipped"][data-capability="sources"]')).toHaveCount(1);
   const shippedRow = page.locator('[data-surface-status="shipped"][data-capability="incidents"]');
   await expect(shippedRow).toHaveCount(1);

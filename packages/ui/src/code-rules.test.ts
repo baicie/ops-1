@@ -1,0 +1,220 @@
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+/**
+ * The source-text half of `docs/design/ui-visual-v3/code-rules.md`.
+ *
+ * Each assertion below stands for one rule that was broken at least once in this tree, in a way
+ * no component test can see: a CSS rule nothing renders, a block pasted twice, an unhandled
+ * clipboard rejection, a status table read by index. They are source-text assertions on purpose -
+ * the same idiom as `styles.token-contract.test.ts`, and cheap enough that nobody skips them.
+ */
+const SRC = __dirname;
+const REPO_ROOT = join(__dirname, '..', '..', '..');
+/**
+ * Where a class may be rendered from (G14.2).
+ *
+ * The design system and its stylesheet live in packages/ui; the two applications
+ * import both. A rule that scanned only the package reported every application
+ * class as an orphan, and a rule that scanned only one application would miss the
+ * other - either way the gate is wrong, and a wrong gate gets deleted. The list is
+ * explicit so adding a root is a visible decision.
+ */
+const ADDITIONAL_SOURCE_ROOTS = [
+  join(REPO_ROOT, 'apps', 'platform-console', 'src'),
+  join(REPO_ROOT, 'apps', 'ops-web', 'src'),
+  join(REPO_ROOT, 'packages', 'platform-client', 'src'),
+].filter((dir) => existsSync(dir));
+/** The two applications, repo-relative: where a page module lives after the G14.2 split. */
+const APPLICATION_SOURCE_ROOTS = ['apps/platform-console/src/', 'apps/ops-web/src/'];
+
+/**
+ * A module at the top level of an application's `src` - the page modules.
+ *
+ * A5's scope was `pages/`, which excluded the studio deliberately (the studio's own
+ * writes are reported in docs/design/ui-visual-v3/code-rules.md, not exempted here).
+ * After the split the pages are top-level modules of each application and the studio
+ * is `apps/platform-console/src/studio/`, so "no further slash" is what preserves the
+ * original scope instead of quietly widening it to the studio.
+ */
+function isPageModule(name: string): boolean {
+  return APPLICATION_SOURCE_ROOTS.some((root) => {
+    if (!name.startsWith(root)) return false;
+    return !name.slice(root.length).includes('/');
+  });
+}
+const css = readFileSync(join(SRC, 'styles.css'), 'utf8');
+const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+/** Every leaf block `selector { declarations }`, with its 1-based line. */
+function leafBlocks(): { selector: string; body: string; line: number }[] {
+  const blocks: { selector: string; body: string; line: number }[] = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(cssNoComments))) {
+    const selector = match[1].trim().replace(/\s+/g, ' ');
+    const line = cssNoComments.slice(0, match.index).split('\n').length;
+    blocks.push({ selector, body: match[2].trim(), line });
+  }
+  return blocks;
+}
+
+/**
+ * Source text keyed by REPO-RELATIVE path (G14.2).
+ *
+ * The key used to be the path below each root, and after the split every root has an
+ * `App.tsx` and a `main.tsx`: the last root silently overwrote the earlier ones, so the
+ * console's App.tsx was never scanned. A key that two files can claim is the same defect
+ * as a scan root that can vanish, so the key is now unique by construction and a
+ * collision fails the suite instead of hiding.
+ */
+function repoRelative(path: string): string {
+  return relative(REPO_ROOT, path).split(sep).join('/');
+}
+
+function sourceText(): Map<string, string> {
+  const files = new Map<string, string>();
+  const add = (path: string) => {
+    const key = repoRelative(path);
+    const existing = files.get(key);
+    if (existing !== undefined) throw new Error('sourceText: two files share the key ' + key);
+    files.set(key, readFileSync(path, 'utf8'));
+  };
+  (function walk(dir: string) {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.(tsx?|json)$/.test(name) && !/\.test\.tsx?$/.test(name)) add(path);
+    }
+  })(SRC);
+  for (const root of ADDITIONAL_SOURCE_ROOTS) {
+    (function walk(dir: string) {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (/\.(tsx?|json)$/.test(name) && !/\.test\.tsx?$/.test(name)) add(path);
+      }
+    })(root);
+  }
+  // A gate that scanned nothing is a failure, not a pass (rules/11).
+  if (files.size === 0) throw new Error('sourceText: scanned 0 files');
+  return files;
+}
+
+/**
+ * Classes a third-party component emits at runtime. They are the only selectors in `styles.css`
+ * whose name is not written by this repository.
+ */
+const THIRD_PARTY_CLASS = /^(react-flow__|rf__|ProseMirror|cm-)/;
+
+describe('code rules: no CSS that nothing can render', () => {
+  it('every class selector is reachable from a source file', () => {
+    const files = sourceText();
+    const text = [...files.values()].join('\n');
+    const orphans = new Set<string>();
+    for (const { selector } of leafBlocks()) {
+      for (const [, name] of selector.matchAll(/\.([a-zA-Z][a-zA-Z0-9_-]*)/g)) {
+        if (THIRD_PARTY_CLASS.test(name) || /^max-|^min-|^\d/.test(name)) continue;
+        if (text.includes(name)) continue;
+        orphans.add(name);
+      }
+    }
+    // A class the templates build (`value-token--${token}`) is not textual and IS reachable.
+    const QUOTE = String.fromCharCode(39);
+    const DOUBLE = String.fromCharCode(34);
+    const dynamic = [...orphans].filter((name) => {
+      const parts = name.split('-');
+      for (let i = 1; i < parts.length; i += 1) {
+        const prefix = parts.slice(0, i).join('-') + '-';
+        // Built by a template (`value-token--${token}`) or by concatenation ('health-' + tone).
+        if (text.includes(prefix + '$' + '{')) return true;
+        if (text.includes(prefix + QUOTE) || text.includes(prefix + DOUBLE)) return true;
+      }
+      return false;
+    });
+    expect([...orphans].filter((name) => !dynamic.includes(name))).toEqual([]);
+  });
+
+  it('no block is a restatement of the block above it', () => {
+    const blocks = leafBlocks();
+    const restated: string[] = [];
+    for (let i = 1; i < blocks.length; i += 1) {
+      const prev = blocks[i - 1];
+      const current = blocks[i];
+      if (current.selector === prev.selector && current.body === prev.body && current.line - prev.line <= 3) {
+        restated.push(current.selector + ' @' + current.line);
+      }
+    }
+    expect(restated).toEqual([]);
+  });
+});
+
+describe('code rules: a promise is either awaited or handled', () => {
+  it('never discards a clipboard write with `void`', () => {
+    const offenders = [...sourceText().entries()]
+      .filter(([, text]) => /void\s+navigator\.clipboard/.test(text))
+      .map(([name]) => name);
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('code rules: a write is verified by a re-read, not by its own response', () => {
+  /**
+   * A5 (§2 of docs/design/ui-visual-v3/code-rules.md). `InstallWizard.deploy()` used to take the
+   * body of `POST /plugins/{id}/deployments` and render it as the result, so the wizard printed
+   * the platform's echo of the request. The rule: a value bound to a write call never reaches a
+   * `set*` render setter. It must go through lib/verify-after-write.ts or lib/deploy-readback.ts,
+   * which return what a fresh GET said.
+   */
+  it('never renders the response body of a write verb', () => {
+    const offenders: string[] = [];
+    // §5 carve-out: an enrollment token is a one-time secret that exists only in the create
+    // response - no GET returns it - so the body is the resource, not an echo of the request.
+    // Keyed to the statement and not to its line number. The number moved the first time an
+    // import was added above it, and an exemption that detaches silently starts flagging the
+    // very code it was written for, in a file nobody edited.
+    const oneTimeSecret = /const result = await api\.post<\{ token: string; expiresAt: string \}>/;
+    for (const [name, text] of sourceText()) {
+      if (/\.test\./.test(name)) continue;
+      // A5 applies to every page of every application (G14.2). Pages used to sit under
+      // one `pages/` directory; after the split they are top-level modules of
+      // apps/platform-console/src and apps/ops-web/src. A directory test would now scan
+      // zero files and pass - the whole rule would disappear, silently.
+      if (!isPageModule(name)) continue;
+      const bound = new Map<string, number>();
+      text.split('\n').forEach((line, index) => {
+        const inline = line.match(/\bset[A-Z]\w*\(\s*await\s+api\.(post|put|patch|delete)\b/);
+        if (inline) offenders.push(name + ':' + (index + 1) + ' renders a write response inline');
+        const m = line.match(/\b(?:const|let)\s+(\w+)\s*=\s*await\s+api\.(post|put|patch|delete)\b/);
+        if (m && !oneTimeSecret.test(line)) bound.set(m[1], index + 1);
+      });
+      for (const [variable, line] of bound) {
+        const rendered = new RegExp('\\bset[A-Z]\\w*\\(\\s*' + variable + '\\s*[,)]');
+        if (rendered.test(text)) offenders.push(name + ':' + line + ' renders ' + variable + ' from a write response');
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('code rules: the status table is read fail-closed', () => {
+  /**
+   * `STATUS_MAP[code].tone` is how two pages crashed on a code the table did not carry. A read
+   * outside `status-tone.ts` is allowed only when the same expression states what happens when
+   * the code is absent: an optional chain, a nullish fallback, or a ternary with `undefined`.
+   */
+  it('every index into STATUS_MAP states its fallback', () => {
+    const offenders: string[] = [];
+    for (const [name, text] of sourceText()) {
+      // The definition itself is where the table lives; the rule is about reads.
+      if (name.endsWith('status-tone.ts')) continue;
+      text.split('\n').forEach((line, index) => {
+        if (!/STATUS_MAP\[/.test(line)) return;
+        if (/\?\.|\?\?|:\s*undefined|&&/.test(line)) return;
+        offenders.push(name + ':' + (index + 1));
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+});

@@ -57,6 +57,7 @@ const KNOWN_UNRUN = new Map([
   ['permission-consistency.spec.ts', 'Cross-surface permission capture; superseded by dual-surface + g12-create-gate for the create path.'],
   ['g12d-probe.spec.ts', 'A probe used while building the D workspace spec; asserts nothing.'],
   ['g11-viewer-write-entries.spec.ts', 'ADR section 4.5 guard; needs its own record fixture and is run by hand with g11-incident-slice.'],
+  ['g14-css-fix-evidence.spec.ts', 'Evidence capture for the 2026-11-09 token fixes; needs the live local stack (Kernel + enqueued nodes + a logged-in admin) and its value is the two committed screenshots, not a CI assertion.'],
   // The visual-audit rounds (V3..V10) are evidence instruments, not product regressions: each
   // captured a before/after pair with an env-selected output folder and a seed this repository's
   // CI does not build. They are kept because they are the measurement, and the behaviour they

@@ -40,7 +40,7 @@ if [ "$RESET" = "1" ]; then
 fi
 
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
-pnpm --filter @opsweave/platform-web build >/dev/null
+pnpm --fail-if-no-match --filter @opsweave/platform-console build && pnpm --fail-if-no-match --filter @opsweave/ops-web build >/dev/null
 
 if [ "$BUILD" = "1" ]; then
   BUILD=1 scripts/build-plugins.sh
@@ -58,7 +58,8 @@ nohup env \
   OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   OPSWEAVE_BOOTSTRAP_ADMIN_NAME="Platform Admin" \
   OPSWEAVE_DATA_DIR="$ROOT/data" \
-  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-web/dist" \
+  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-console/dist" \
+  OPSWEAVE_OPS_WEB_DIST="$ROOT/apps/ops-web/dist" \
   OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \
   OPSWEAVE_DEV_PUBLISHER_PUBLIC_KEY="$PUBLIC_KEY" \
   OPSWEAVE_ALLOW_INSECURE_NODE_TRANSPORT=1 \

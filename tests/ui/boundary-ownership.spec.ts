@@ -40,7 +40,7 @@ async function login(page: Page) {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid="login-submit"]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 const verdict = (page: Page) => page.getByTestId('health-pill').getAttribute('data-verdict');
@@ -107,11 +107,14 @@ test('signing out and back in does not inherit the previous body verdict', async
   await page.unroute('**/api/v1/nodes*');
   await page.getByTestId('user-menu-trigger').click();
   await page.getByRole('menuitem').last().click();
-  await page.waitForURL((url) => url.pathname.startsWith('/login'));
+  // G14.2: signing out lands on the login route of whichever application is
+  // mounted; both end in /login. Matching the suffix is stable across the
+  // /login -> /admin/login redirect the bare path performs.
+  await page.waitForURL((url) => /\/login$/.test(url.pathname));
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid="login-submit"]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
   await page.goto('/admin/overview');
   await expect(page.getByTestId('page-header')).toBeVisible();
   await expect.poll(() => verdict(page)).toBe('ready');

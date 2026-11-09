@@ -19,7 +19,9 @@ on:
   pull_request:
     paths:
       - 'apps/kernel/**'
-      - 'apps/platform-web/**'
+      - 'apps/platform-console/**'
+      - 'apps/ops-web/**'
+      - 'packages/**'
       - 'contracts/**'
       - 'tests/acceptance/g12_*.sh'
       - 'tests/acceptance/g11_*.sh'
@@ -49,7 +51,9 @@ on:
     branches: [main]
     paths:
       - 'apps/kernel/**'
-      - 'apps/platform-web/**'
+      - 'apps/platform-console/**'
+      - 'apps/ops-web/**'
+      - 'packages/**'
       - 'tests/acceptance/g11_*.sh'
       - 'tests/acceptance/g12_*.sh'
       # The suite now includes g11-incident-slice.spec.ts and reads tests/ui/support/**, and the

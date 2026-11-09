@@ -25,8 +25,8 @@ print('sha256:' + hashlib.sha256(raw).hexdigest())
 PY
 }
 echo "== web extensions"
-pnpm --filter @opsweave/data-catalog-web build >/dev/null
-pnpm --filter @opsweave/data-integration-web build >/dev/null
+pnpm --fail-if-no-match --filter @opsweave/data-catalog-web build >/dev/null
+pnpm --fail-if-no-match --filter @opsweave/data-integration-web build >/dev/null
 rm -rf /tmp/data-catalog-web /tmp/data-integration-web
 cp -R plugins/data-catalog/web/dist /tmp/data-catalog-web
 cp -R plugins/data-integration/web/dist /tmp/data-integration-web

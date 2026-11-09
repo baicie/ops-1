@@ -28,7 +28,37 @@ use tower_http::services::{ServeDir, ServeFile};
 const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
 
 /// The shell and every other unhashed file must be revalidated before reuse.
+/// Pre-split entry points that no longer have an application to render them.
+///
+/// Returns the path to redirect to, preserving the query. Kept as a closed table
+/// for the same reason the client-route prefixes are: an open rule ("anything not
+/// a file") would swallow genuine 404s.
+fn legacy_entry_redirect(path: &str, query: Option<&str>) -> Option<String> {
+    let trimmed = path.trim_end_matches('/');
+    let target = match trimmed {
+        "/login" => "/admin/login".to_string(),
+        // The split briefly mounted the platform console under /console. Anything
+        // that recorded that path (a bookmark, a log line, a runbook) still has to
+        // land somewhere real, and /admin is where the console actually lives.
+        // Deep paths keep their tail so a bookmarked page still resolves.
+        "/console" => "/admin".to_string(),
+        other if other.starts_with("/console/") => {
+            format!("/admin/{}", &other["/console/".len()..])
+        }
+        // The pre-split workspace entry: /app still exists, so only the exact
+        // root needs steering, and the ops application resolves it itself.
+        _ => return None,
+    };
+    Some(match query {
+        Some(query) if !query.is_empty() => format!("{target}?{query}"),
+        _ => target,
+    })
+}
+
 const REVALIDATE_CACHE: &str = "no-cache";
+/// The base the Platform Console's bundle is emitted under. Kept in step with
+/// `base` in apps/platform-console/vite.config.ts.
+const PRIMARY_BASE: &str = "/admin";
 
 /// Path prefixes the client router owns; each is answered `200` with the shell.
 ///
@@ -38,6 +68,7 @@ const REVALIDATE_CACHE: &str = "no-cache";
 /// `/nodes`, ...) are listed because the client still redirects them.
 const CLIENT_ROUTE_PREFIXES: &[&str] = &[
     "/admin",
+    "/console",
     "/app",
     "/login",
     "/403",
@@ -55,17 +86,65 @@ const CLIENT_ROUTE_PREFIXES: &[&str] = &[
 ];
 
 /// The web bundle on disk: `index.html` plus whatever the build emitted.
+///
+/// G14.2: there is more than one bundle now. The Platform Console and the Ops
+/// Web are separate applications with separate builds, so a request under
+/// `/console` must be answered with the console's shell and a request under
+/// `/app` with the ops shell. Serving one shell for both would mount the wrong
+/// router and the other application would 404 on its own routes.
+///
+/// `extra` holds the additional mounts; the primary root keeps its existing
+/// behaviour so an installation with one bundle is unchanged.
 #[derive(Clone)]
 pub struct StaticSite {
     root: PathBuf,
     shell: PathBuf,
+    extra: Vec<Mount>,
+}
+
+/// One additional application bundle and the path prefix it owns.
+#[derive(Clone)]
+pub struct Mount {
+    prefix: String,
+    root: PathBuf,
+    shell: PathBuf,
+}
+
+impl Mount {
+    pub fn new(prefix: impl Into<String>, root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
+        let shell = root.join("index.html");
+        Self {
+            prefix: prefix.into(),
+            root,
+            shell,
+        }
+    }
+
+    fn owns(&self, path: &str) -> bool {
+        let trimmed = path.trim_end_matches('/');
+        trimmed == self.prefix
+            || trimmed
+                .strip_prefix(&self.prefix)
+                .is_some_and(|rest| rest.starts_with('/'))
+    }
 }
 
 impl StaticSite {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
         let shell = root.join("index.html");
-        Self { root, shell }
+        Self {
+            root,
+            shell,
+            extra: Vec::new(),
+        }
+    }
+
+    /// Mount another application bundle under `prefix`.
+    pub fn with_mount(mut self, mount: Mount) -> Self {
+        self.extra.push(mount);
+        self
     }
 
     /// Serve the bundle: `ServeDir` for real files, this module for the shell.
@@ -78,6 +157,46 @@ impl StaticSite {
 
     /// What `path` addresses, without serving it.
     async fn resolve(&self, path: &str) -> Target {
+        // A path an additional application owns is resolved inside THAT bundle,
+        // never against the primary one: the two have different `index.html`
+        // files, and picking the wrong one mounts the wrong router.
+        if let Some(mount) = self.extra.iter().find(|mount| mount.owns(path)) {
+            // The mount's own prefix is part of the URL, not of the bundle: a
+            // build emitted under `base: '/app/'` writes `/app/assets/...` into
+            // its shell, and the file on disk is `<root>/assets/...`. Stripping
+            // here is what makes the two agree. Without it every asset of a
+            // mounted application 404s - the page loads and renders nothing.
+            let inner = path
+                .strip_prefix(&mount.prefix)
+                .filter(|rest| !rest.is_empty())
+                .unwrap_or("/");
+            return resolve_in(&mount.root, &mount.shell, inner, true).await;
+        }
+        self.resolve_primary(path).await
+    }
+
+    async fn resolve_primary(&self, path: &str) -> Target {
+        // The primary bundle is emitted with `base: '/admin/'` for the same
+        // reason the ops one is: two applications share an origin. A file is
+        // therefore addressed as `/admin/assets/x` while living at
+        // `<root>/assets/x`, so the base is stripped before the lookup.
+        // Two spellings reach the same bundle: a FILE is addressed under the
+        // bundle's base (`/admin/assets/x` -> `<root>/assets/x`), while a CLIENT
+        // ROUTE keeps its public form (`/admin/overview`, `/admin/plugins/x`).
+        // Trying the base-stripped path first and falling back to the original
+        // keeps both working; stripping unconditionally made every console route
+        // 404 (`/admin/overview` -> `/overview`, which is nobody's route).
+        if let Some(rest) = path.strip_prefix(PRIMARY_BASE) {
+            let rest = if rest.is_empty() { "/" } else { rest };
+            if let Some(relative) = relative_path(rest) {
+                if !relative.as_os_str().is_empty() {
+                    let candidate = self.root.join(&relative);
+                    if is_file(&candidate).await {
+                        return Target::File(candidate);
+                    }
+                }
+            }
+        }
         let Some(relative) = relative_path(path) else {
             return Target::Missing;
         };
@@ -107,9 +226,40 @@ impl StaticSite {
     }
 }
 
+/// Resolve a path inside one bundle root.
+///
+/// `always_shell` is for a mounted application: any path it owns that is not a
+/// real file is one of ITS client routes, because the mount owns the whole
+/// prefix. Without it, a console route added after this code was written would
+/// 404 until someone extended the closed prefix table.
+async fn resolve_in(root: &Path, shell: &Path, path: &str, always_shell: bool) -> Target {
+    let Some(relative) = relative_path(path) else {
+        return Target::Missing;
+    };
+    if relative.as_os_str().is_empty() || relative == Path::new("index.html") {
+        return if is_file(shell).await {
+            Target::ShellAt(shell.to_path_buf())
+        } else {
+            Target::Missing
+        };
+    }
+    let candidate = root.join(&relative);
+    if is_file(&candidate).await {
+        Target::File(candidate)
+    } else if always_shell && is_file(shell).await {
+        Target::ShellAt(shell.to_path_buf())
+    } else if is_client_route(path) {
+        Target::Shell
+    } else {
+        Target::Missing
+    }
+}
+
 enum Target {
     /// `index.html`, for `/`, `/index.html` and every client route.
     Shell,
+    /// A specific bundle's shell, when more than one bundle is mounted.
+    ShellAt(PathBuf),
     /// A file that exists inside the bundle root.
     File(PathBuf),
     /// Nothing serves this path; `ServeDir` answers `404`.
@@ -142,10 +292,23 @@ async fn serve(State(site): State<StaticSite>, request: Request, next: Next) -> 
     }
 
     let path = request.uri().path().to_owned();
+    // G14.2 split the single bundle into two applications, each mounted under its
+    // own base (`/console`, `/app`). A bare `/login` therefore belongs to neither:
+    // both applications serve `/login` INSIDE their base, and the old path has no
+    // router to match it. Bookmarking or landing on it would render an empty shell.
+    //
+    // Signing in is a platform act, so the bare path forwards to the Platform
+    // Console's login and carries the original query (which holds `?next=`). A
+    // redirect and not a rewrite: the browser must end up with a URL that matches
+    // the router that will actually render.
+    if let Some(target) = crate::static_site::legacy_entry_redirect(&path, request.uri().query()) {
+        return axum::response::Redirect::temporary(&target).into_response();
+    }
     let cache_control = HeaderValue::from_static(site.cache_control(&path));
     let (file, shell) = match site.resolve(&path).await {
         Target::Missing => return next.run(request).await,
         Target::Shell => (site.shell.clone(), true),
+        Target::ShellAt(shell) => (shell, true),
         Target::File(file) => (file, false),
     };
 
@@ -156,7 +319,13 @@ async fn serve(State(site): State<StaticSite>, request: Request, next: Next) -> 
 
     // The shell is answered here rather than by `ServeDir`: a client route and a
     // missing file look identical to a directory lookup.
-    let mut response = if shell {
+    // Serve the file we RESOLVED, not the URI we received. `next.run` hands the
+    // original path to `ServeDir`, which for a base-mounted bundle
+    // (`/admin/assets/x`) looks for `<root>/admin/assets/x` and answers 404 even
+    // though `<root>/assets/x` is the file that exists. Resolving and then
+    // delegating only works when the URL and the disk layout are identical;
+    // they are not once an application sets a Vite `base`.
+    let mut response = if shell || is_file(&file).await {
         serve_file(&file, request).await
     } else {
         next.run(request).await
@@ -277,6 +446,7 @@ mod tests {
 
     struct Fixture {
         root: PathBuf,
+        ops_root: Option<PathBuf>,
     }
 
     impl Fixture {
@@ -298,19 +468,44 @@ mod tests {
             .unwrap();
             std::fs::write(root.join("logo.png"), vec![0x89u8; 1500]).unwrap();
             std::fs::write(root.join("fonts/inter.woff2"), vec![0x77u8; 1500]).unwrap();
-            Self { root }
+            Self {
+                root,
+                ops_root: None,
+            }
+        }
+
+        /// A second bundle whose shell is distinguishable from the first, which
+        /// is the whole point of the assertion below.
+        fn with_second_bundle(mut self, name: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("opsweave-static-{}-{name}-ops", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(root.join("assets")).unwrap();
+            std::fs::write(
+                root.join("index.html"),
+                "<!doctype html><html><body><div id=\"root\"></div><script type=\"module\" src=\"/assets/ops-entry.js\"></script></body></html>",
+            )
+            .unwrap();
+            std::fs::write(root.join("assets/ops-entry.js"), BUNDLE_LINE).unwrap();
+            self.ops_root = Some(root);
+            self
         }
 
         fn app(&self) -> Router {
-            StaticSite::new(&self.root)
-                .router()
-                .layer(compression_layer())
+            let mut site = StaticSite::new(&self.root);
+            if let Some(ops) = self.ops_root.clone() {
+                site = site.with_mount(Mount::new("/app", ops));
+            }
+            site.router().layer(compression_layer())
         }
     }
 
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
+            if let Some(ops) = &self.ops_root {
+                let _ = std::fs::remove_dir_all(ops);
+            }
         }
     }
 
@@ -332,6 +527,137 @@ mod tests {
 
     async fn get(app: &Router, path: &str) -> Response {
         request(app, Method::GET, path, &[]).await
+    }
+
+    /// A base-mounted bundle addresses its own assets under the base
+    /// (`/admin/assets/x`, `/app/assets/x`) while the files live at
+    /// `<root>/assets/x`. Resolving the file and then handing the ORIGINAL URI to
+    /// `ServeDir` answered 404 for every one of them: the page loaded, its CSS and
+    /// JS did not, and the result was a blank document whose components "did not
+    /// exist". This is the shape a split breaks in, so it is asserted.
+    #[tokio::test]
+    async fn assets_of_a_base_mounted_bundle_resolve_under_their_base() {
+        let fixture = Fixture::new("base-assets").with_second_bundle("base-assets");
+        let app = fixture.app();
+
+        // The primary bundle's hashed asset, addressed under /admin.
+        let response = get(&app, "/admin/assets/index-abc123.js").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "a primary-bundle asset must resolve under its base, not only at /assets"
+        );
+
+        // The mounted bundle's asset, addressed under /app.
+        let response = get(&app, "/app/assets/ops-entry.js").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "a mounted bundle's asset must resolve inside its own root"
+        );
+
+        // The base-stripped spelling keeps working for the primary bundle.
+        assert_eq!(
+            get(&app, "/assets/index-abc123.js").await.status(),
+            StatusCode::OK
+        );
+
+        // A client route under the base still returns that bundle's shell.
+        let shell = read_body(get(&app, "/admin/overview").await).await;
+        assert!(String::from_utf8_lossy(&shell).contains("/assets/index-abc123.js"));
+    }
+
+    /// A path recorded under the briefly-used `/console` base still lands on the
+    /// console, and a deep path keeps its tail.
+    #[tokio::test]
+    async fn a_console_path_is_forwarded_to_the_console_application() {
+        let fixture = Fixture::new("console-redirect");
+        let app = fixture.app();
+        for (from, to) in [
+            ("/console", "/admin"),
+            ("/console/overview", "/admin/overview"),
+            (
+                "/console/nodes/node-1?tab=logs",
+                "/admin/nodes/node-1?tab=logs",
+            ),
+        ] {
+            let response = get(&app, from).await;
+            assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT, "{from}");
+            assert_eq!(
+                response
+                    .headers()
+                    .get(axum::http::header::LOCATION)
+                    .and_then(|value| value.to_str().ok()),
+                Some(to),
+                "{from}"
+            );
+        }
+    }
+
+    /// The split left `/login` belonging to neither application: each serves it
+    /// INSIDE its base, so the bare path rendered an empty shell. Signing in is a
+    /// platform act, so it forwards to the console's login and keeps the query.
+    #[tokio::test]
+    async fn a_bare_login_is_redirected_into_the_console_application() {
+        let fixture = Fixture::new("legacy-login").with_second_bundle("legacy-login");
+        let app = fixture.app();
+
+        let response = get(&app, "/login?next=/app/incidents").await;
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("/admin/login?next=/app/incidents"),
+            "the query carries the post-login destination and must survive"
+        );
+
+        // A path that is genuinely missing stays a 404: the redirect is a closed
+        // table, not "anything unfound goes to the login page".
+        assert_eq!(
+            get(&app, "/nope-not-a-route").await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    /// G14.2: two applications, two shells. A `/app` route must be answered with
+    /// the ops bundle, not the console's, or the browser mounts the wrong router
+    /// and every ops route 404s inside a shell that loaded successfully.
+    #[tokio::test]
+    async fn a_mounted_application_serves_its_own_shell_not_the_primary_one() {
+        let fixture = Fixture::new("two-bundles").with_second_bundle("two-bundles");
+        let app = fixture.app();
+
+        let console = read_body(get(&app, "/admin/overview").await).await;
+        let console_html = String::from_utf8_lossy(&console);
+        assert!(
+            console_html.contains("/assets/index-abc123.js"),
+            "the primary bundle answers the platform console, got: {console_html}"
+        );
+
+        let ops = read_body(get(&app, "/app/incidents").await).await;
+        let ops_html = String::from_utf8_lossy(&ops);
+        assert!(
+            ops_html.contains("/assets/ops-entry.js"),
+            "an /app route must be answered by the ops bundle's shell, got: {ops_html}"
+        );
+        assert!(
+            !ops_html.contains("/assets/index-abc123.js"),
+            "the ops shell must not be the console's shell"
+        );
+
+        // A deep route the mount owns but the closed prefix table never listed
+        // still reaches the ops shell: the mount owns the whole prefix.
+        assert_eq!(
+            get(&app, "/app/incidents/abc").await.status(),
+            StatusCode::OK
+        );
+        // And the primary bundle's own assets still resolve.
+        assert_eq!(
+            get(&app, "/assets/index-abc123.js").await.status(),
+            StatusCode::OK
+        );
     }
 
     async fn read_body(response: Response) -> Vec<u8> {
@@ -417,7 +743,11 @@ mod tests {
             "/admin/plugins/demo",
             "/app",
             "/app/home",
-            "/login",
+            // `/login` moved out of this list in G14.2: it used to be answered with
+            // the shell because one bundle rendered everything. Now each
+            // application serves `/login` inside its own base, so the bare path has
+            // no router and is redirected instead - asserted separately in
+            // `a_bare_login_is_redirected_into_the_console_application`.
             "/403",
             "/plugins",
             "/plugins/demo",

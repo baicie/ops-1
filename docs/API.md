@@ -9,6 +9,15 @@ All paths are same-origin. User routes accept the `opsweave_session` HttpOnly co
 | POST | `/api/v1/auth/login` | `{ email, password }` → user + CSRF token + session cookie |
 | POST | `/api/v1/auth/logout` | deletes session |
 | GET | `/api/v1/auth/me` | current user + CSRF token |
+| GET | `/api/v1/applications` | applications this account may open, and the ones it may not |
+| GET | `/api/v1/apps/opsweave.ops/incidents` | the ops application's incident surface; requires an application grant |
+| GET | `/api/v1/apps/opsweave.ops/observability/fleet` | node liveness, staleness, instance counts and the resource sample — node health only, not APM/traces/logs |
+
+The `/api/v1/apps/{applicationId}/...` paths require a row in
+`kernel.application_grants` for the calling account and answer
+`403 APPLICATION_FORBIDDEN` without one. A platform role does **not** imply an
+application grant (ADR-022 §2.2). The legacy `/api/v1/incidents/*` paths keep
+their original gate and are permanent aliases for now.
 
 ## Operator surface
 

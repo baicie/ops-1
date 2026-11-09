@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * The admin Overview's two-source honesty (apps/platform-web/src/pages/Overview.tsx:71-80,99).
+ * The admin Overview's two-source honesty (apps/platform-console/src/Overview.tsx:71-80,99).
  *
  * The page reads two sources: /api/v1/overview (every visible number) and the admin-only
  * /api/v1/diagnostics (Kernel identity + database). PARTIAL is *not* a degraded verdict about
@@ -36,7 +36,7 @@ const OUT = path.resolve('../../artifacts/ui/overview-partial');
 // renders from, so the copy assertions follow the locale instead of hardcoding English.
 const LOCALE = process.env.OPSWEAVE_TEST_LOCALE || 'en';
 const CATALOG: Record<string, string> = JSON.parse(
-  fs.readFileSync(path.resolve('../..', 'apps/platform-web/src/i18n/catalogs', LOCALE + '.json'), 'utf8'),
+  fs.readFileSync(path.resolve('../..', 'packages/platform-client/src/i18n/catalogs', LOCALE + '.json'), 'utf8'),
 );
 
 function copy(key: string, params: Record<string, string | number> = {}): string {
@@ -86,7 +86,7 @@ async function login(page: Page) {
   await page.click('[data-testid="login-submit"]');
   // The shell resumes a default surface after sign-in (not necessarily the admin one), so the
   // caller navigates to /admin/overview itself instead of relying on the landing route.
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 test.beforeAll(() => { fs.mkdirSync(OUT, { recursive: true }); });

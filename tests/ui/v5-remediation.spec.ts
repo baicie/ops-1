@@ -28,7 +28,7 @@ type Row = Record<string, unknown>;
 const records: Row[] = [];
 
 function bundleHash(): string {
-  const dir = path.resolve('../../apps/platform-web/dist/assets');
+  const dir = path.resolve('../../apps/platform-console/dist/assets');
   const files = fs.readdirSync(dir).sort();
   const hash = crypto.createHash('sha256');
   for (const file of files) hash.update(fs.readFileSync(path.join(dir, file)));
@@ -48,13 +48,13 @@ async function login(page: Page) {
   try {
     await email.waitFor({ state: 'visible', timeout: 8000 });
   } catch {
-    await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 }).catch(() => undefined);
+    await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 15000 }).catch(() => undefined);
     return;
   }
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.click('[data-testid=login-submit]');
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 30000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 30000 });
 }
 
 /** Theme and locale are preferences, so they are pinned before the app boots. */

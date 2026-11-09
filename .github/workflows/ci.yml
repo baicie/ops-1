@@ -68,16 +68,30 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @opsweave/platform-web typecheck
-      - run: pnpm --filter @opsweave/hello-web typecheck
-      - run: pnpm --filter @opsweave/data-catalog-web typecheck
-      - run: pnpm --filter @opsweave/data-integration-web typecheck
+      # G14.2: two applications and two shared packages. Each is typechecked and
+      # built on its own, so one application cannot mask the other's failure.
+      - run: pnpm --fail-if-no-match --filter @opsweave/platform-client typecheck
+      - run: pnpm --fail-if-no-match --filter @opsweave/ui typecheck
+      - run: pnpm --fail-if-no-match --filter @opsweave/platform-console typecheck
+      - run: pnpm --fail-if-no-match --filter @opsweave/ops-web typecheck
+      - run: pnpm --fail-if-no-match --filter @opsweave/hello-web typecheck
+      - run: pnpm --fail-if-no-match --filter @opsweave/data-catalog-web typecheck
+      - run: pnpm --fail-if-no-match --filter @opsweave/data-integration-web typecheck
       # Fails on a missing message key or a key built from a template literal.
       - run: node scripts/check-i18n.mjs
       # One status vocabulary: a wire code rendered as copy fails the build. It sits beside the
       # i18n gate because both answer the same question - what may a message say?
       - run: node scripts/check-status-vocabulary.mjs
       - run: node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
+      # The token gate's own fail-closed properties: an off-scale spacing literal fails, an
+      # on-scale one stays legal (code-rules B6), a budget key no rule emits is an error, and a
+      # stylesheet that matches zero spacing declarations fails rather than passing.
+      - run: node --test scripts/check-ui-tokens.test.mjs
+      # No live file may name a retired path (rules/11). The pre-G14.2 web package was deleted in
+      # 461d4da and eight executables kept building or serving it; pnpm exits 0 on a filter that
+      # matches nothing, so four harnesses were green while building zero bundles. This check
+      # fails closed on a missing scan root and prints its file count, so a pass cannot be vacuous.
+      - run: node tests/ci/check-retired-paths.mjs
       # The geometry gate's own fail-closed properties: empty passes, dropped routes, missing
       # matrix combinations and duplicate passes.
       - run: node --test scripts/check-ui-metrics.test.mjs
@@ -86,13 +100,14 @@ jobs:
       # the route manifest deliberately has no such axis.
       - run: node scripts/check-ui-metrics.mjs --manifest docs/design/ui-visual-v3/spec/route-manifest.json artifacts/ui/visual-v3/audit
       - run: node scripts/check-ui-metrics.mjs --matrix docs/design/ui-visual-v3/spec/matrix-manifest.json artifacts/ui/observability/metrics
-      - run: pnpm --filter @opsweave/platform-web build
-      - run: pnpm --filter @opsweave/hello-web build
-      - run: pnpm --filter @opsweave/data-catalog-web build
-      - run: pnpm --filter @opsweave/data-integration-web build
+      - run: pnpm --fail-if-no-match --filter @opsweave/platform-console build
+      - run: pnpm --fail-if-no-match --filter @opsweave/ops-web build
+      - run: pnpm --fail-if-no-match --filter @opsweave/hello-web build
+      - run: pnpm --fail-if-no-match --filter @opsweave/data-catalog-web build
+      - run: pnpm --fail-if-no-match --filter @opsweave/data-integration-web build
       - run: node --check plugins/data-catalog/backend/server.mjs
       - run: node --check plugins/data-integration/backend/server.mjs
-  # The vitest suite of apps/platform-web (src/**/*.test.ts) used to run nowhere: the web job
+  # The vitest suites used to run nowhere: the web job
   # above only typechecks and builds, so a green pipeline never proved a unit test passed. It is
   # its own job so a red unit run is reported as such instead of hiding behind a build failure.
   web-unit:
@@ -103,7 +118,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @opsweave/platform-web test
+      - run: pnpm --fail-if-no-match --filter @opsweave/platform-client test
+      - run: pnpm --fail-if-no-match --filter @opsweave/ui test
+      - run: pnpm --fail-if-no-match --filter @opsweave/platform-console test
+      - run: pnpm --fail-if-no-match --filter @opsweave/ops-web test
   # The Zabbix plugin had no CI at all: package.json pointed at a server.test.mjs that did not
   # exist, and node --check does not resolve imports, so the server could not be proven to start.
   # This job binds a real socket and runs a real PostgreSQL, which is the only evidence that the
@@ -239,9 +257,15 @@ jobs:
           # The browser must come from the same tree as the Kernel, Node and
           # plugin. The old job pinned #39's SHA, so a green run said nothing
           # about the UI merged into main.
-          pnpm --filter @opsweave/platform-web build
-          rm -rf /tmp/g13a1-ui-dist
-          cp -R apps/platform-web/dist /tmp/g13a1-ui-dist
+          pnpm --fail-if-no-match --filter @opsweave/platform-console build
+          # The spec this job runs opens /app/incidents/<id>, which is the OPS
+          # application. Without its bundle the kernel answers that path with the
+          # console shell and the ops router is not mounted, so the page loads and
+          # then 404s - the exact "page loaded, everything below it missing" shape.
+          pnpm --fail-if-no-match --filter @opsweave/ops-web build
+          rm -rf /tmp/g13a1-ui-dist /tmp/g13a1-ops-dist
+          cp -R apps/platform-console/dist /tmp/g13a1-ui-dist
+          cp -R apps/ops-web/dist /tmp/g13a1-ops-dist
       - name: local registry
         run: |
           set -euo pipefail
@@ -288,7 +312,8 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       # The browser must come from this commit: the queue panel is what the spec measures.
-      - run: pnpm --filter @opsweave/platform-web build
+      - run: pnpm --fail-if-no-match --filter @opsweave/platform-console build
+      - run: pnpm --fail-if-no-match --filter @opsweave/ops-web build
       - run: cargo build --locked -p opsweave-kernel
       - name: start the kernel on the throw-away database
         run: |
@@ -298,7 +323,8 @@ jobs:
           export OPSWEAVE_PUBLIC_URL="$OPSWEAVE_URL"
           export DATABASE_URL="$OPSWEAVE_DATABASE_URL"
           export OPSWEAVE_DATA_DIR="$PWD/data-ci/g13b14"
-          export OPSWEAVE_WEB_DIST="$PWD/apps/platform-web/dist"
+          export OPSWEAVE_WEB_DIST="$PWD/apps/platform-console/dist"
+          export OPSWEAVE_OPS_WEB_DIST="$PWD/apps/ops-web/dist"
           export OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$OPSWEAVE_ADMIN_EMAIL"
           export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$OPSWEAVE_ADMIN_PASSWORD"
           export OPSWEAVE_BOOTSTRAP_ADMIN_NAME='Platform Admin'

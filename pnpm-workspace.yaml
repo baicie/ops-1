@@ -1,5 +1,7 @@
 packages:
-  - "apps/platform-web"
+  - "packages/*"
+  - "apps/platform-console"
+  - "apps/ops-web"
   - "plugins/hello-ops/web"
   - "tests/ui"
   - "plugins/data-catalog/web"

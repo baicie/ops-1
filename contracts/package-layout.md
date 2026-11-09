@@ -22,4 +22,4 @@ hello-ops.plugin.zip
 
 **兼容性与签名：** Manifest 1.1 是本轮冻结设计草案，替代 1.0 字段 `backend.imageDigest` 与 `healthPath`；真实升级前需要实现 1.0→1.1 拒绝或显式适配策略。Publisher 签名验证、镜像签名和 Payload Hash Fixture 独立于“JSON Schema 通过”；这份设计包内的 `sha256:aaaa...` 等仅为**语法示例，不是真实镜像/可信制品**。
 
-**v0.0.1 接受策略**：仅受信 Publisher 签名包，禁止任意第三方运行；不支持下载无信任验证的远程 ZIP/JS。详见 [OCI 发布链](../docs/21-oci-artifacts-and-signing.md)。
+**v0.0.1 接受策略**：仅受信 Publisher 签名包，禁止任意第三方运行；不支持下载无信任验证的远程 ZIP/JS。详见 [OCI 发布链](../docs/blueprint/21-oci-artifacts-and-signing.md)。

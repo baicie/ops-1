@@ -1,3 +1,4 @@
+use crate::applications;
 use crate::assets;
 use crate::auth::{self, AuthUser};
 use crate::automation;
@@ -12,6 +13,7 @@ use crate::investigations;
 use crate::jobs;
 use crate::logs;
 use crate::nodes;
+use crate::ops_observability;
 use crate::packages;
 use crate::plugins;
 use crate::publishers;
@@ -117,6 +119,9 @@ pub fn build(state: AppState) -> Router {
         .route("/api/v1/auth/logout", post(auth::logout))
         .route("/api/v1/auth/me", get(auth::me))
         .route("/api/v1/health", get(plugins::overview))
+        // G14.3: what this caller may open, and what it may not. A client shows
+        // "no access to X" from this instead of guessing from its own role.
+        .route("/api/v1/applications", get(applications::list_applications))
         .route("/api/v1/overview", get(plugins::overview))
         .route("/api/v1/plugins", get(plugins::list_plugins))
         .route(
@@ -382,9 +387,85 @@ pub fn build(state: AppState) -> Router {
     // shell is not optional: it is the entry point of every page, so it needs the
     // same CSP, `x-request-id` and trace span as an API response, and it gets them
     // from this one stack rather than from a second copy of the header logic.
+    // G14.3: the application-scoped ops surface.
+    //
+    // Same handlers as the legacy paths below, but mounted behind
+    // `require_application`: this is the surface the Ops Web calls, and it is the
+    // one that answers 403 when the caller has no grant for the application.
+    // The legacy /api/v1/incidents paths keep their original gate (authenticated
+    // session + workspace membership) so nothing that worked before this phase
+    // breaks; retiring them needs its own ADR and a client inventory.
+    let ops_application = Router::new()
+        // G14.4: the Ops application's own fleet read. NOT /api/v1/nodes, which
+        // is the platform console's view and carries every node's endpoint and
+        // inventory. See ops_observability for why the projection is separate.
+        .route(
+            "/api/v1/apps/opsweave.ops/observability/fleet",
+            get(ops_observability::fleet),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/observability/nodes/{node_id}",
+            get(ops_observability::node_detail),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/observability/nodes/{node_id}/history",
+            get(ops_observability::node_history),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/observability/nodes/{node_id}/instances",
+            get(ops_observability::node_instances),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents",
+            get(incidents::list_incidents).post(incidents::create_incident),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents/claimable",
+            get(incident_claims::list_claimable),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents/{incident_id}",
+            get(incidents::get_incident),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents/{incident_id}/claim",
+            post(incident_claims::claim_incident),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents/{incident_id}/release",
+            post(incident_claims::release_incident),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents/{incident_id}/evidence",
+            get(incidents::list_evidence).post(incidents::append_evidence),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents/{incident_id}/verdict",
+            get(incidents::get_verdict).post(incidents::create_verdict),
+        )
+        .route(
+            "/api/v1/apps/opsweave.ops/incidents/{incident_id}/close",
+            post(incidents::close_incident),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            applications::require_ops_application,
+        ));
+
     public
         .merge(protected)
-        .fallback_service(static_site::StaticSite::new(state.config.web_dist.clone()).router())
+        .merge(ops_application)
+        .fallback_service({
+            // G14.2: two applications, two bundles, two shells. The Ops Web is
+            // mounted under /app only when its build is present; without it the
+            // console shell keeps answering the legacy paths, which is what an
+            // installation that has not adopted the split sees.
+            let mut site = static_site::StaticSite::new(state.config.web_dist.clone());
+            if let Some(ops) = state.config.ops_web_dist.clone() {
+                site = site.with_mount(static_site::Mount::new("/app", ops));
+            }
+            site.router()
+        })
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
         .layer(middleware::from_fn(security_headers))
         .layer(middleware::from_fn(request_id))

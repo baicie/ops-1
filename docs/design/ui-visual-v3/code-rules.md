@@ -28,7 +28,7 @@
 | B3 | 类型逃逸（`as any` / `: any` / `@ts-ignore`） | 【人工】 | 修复前 24 处，已修 4 |
 | B4 | 每个 Promise 要么 await，要么处理 rejection | 【闸门】`code-rules.test.ts` | 修复前 1 违规，已修 |
 | B5 | 命名与行为一致 | 【人工】 | 1 违规，已修 |
-| B6 | 魔法数字：绕过 token 的字面值 | 【闸门】`check-ui-tokens.mjs` R1–R3 + R7 | R1–R3 无新增；R7 新增两个间距桶并各拧紧一格（435 → 52 / 115 → 108） |
+| B6 | 魔法数字：绕过 token 的字面值 | 【闸门】`check-ui-tokens.mjs` R1–R3 + 间距 R7 | R1–R3 无新增；R7（`spacing-off-scale`）原只是预算、无脚本产出，本轮补实现并有回归测试（见 §7） |
 | C1 | 隐式契约：插值必须真插值（选择器、testid、搜索串） | 【人工】+ 词法扫描 | 修复前 1 违规（`Plugins.tsx` 搜索串漏 $），已修；全仓 156 个源码文件复扫 0 命中 |
 | C2 | 空真测试：断言必须在格式错误时也会失败 | 【人工】 | 2 违规，已修 |
 | C3 | 用户可见文案与后端可见原因走消息目录 | 【闸门】`check-i18n.mjs` | 3 违规 |
@@ -85,8 +85,9 @@
 - **规则**：`check-i18n` / `check-status-vocabulary` / `check-ui-tokens --ratchet ui-debt.json` / `check-ui-metrics` 必须全绿；
   `ui-debt.json` 的数字只许下调，下调后不许再上调。
 - **违反**：改预算让红灯变绿；删规则；把闸门从 CI 摘掉。
-- **判定**：`node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` 输出 6 行 `ok` + `PASS`，
+- **判定**：`node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json` 输出 7 行 `ok` + `PASS`，
   且 `git diff docs/design/ui-visual-v3/spec/ui-debt.json` 里没有数字变大。
+  预算文件里出现任何脚本不产出的键，闸门直接以 exit 2 拒绝运行（`spacing-token-literal` 就是这样被发现的）。
 
 ## 3. 代码卫生（B）
 
@@ -130,8 +131,9 @@
   > 4/8 刻度（4/8/12/16/24/32）> 具名常量（`POLL_INTERVAL_MS`、`RECORD_BREAKPOINT`）> 字面 px。
   radius / 控件高度 / 字号三类必须走 token，其余允许刻度值。
 - **违反**：`font-size: 13.5px`（绕过 type ladder，已由 `styles.token-contract.test.ts` 禁）；`border-radius: 5px`（不在三档内）。
-- **判定**：【闸门】`check-ui-tokens.mjs` 的 R1/R2/R3（今天 119/14/7，全部等于预算，即零新增空间）。
-  刻度外的间距字面值（`gap: 10px` 等 55 处）不在闸门内，属已知技术债，见 §4 说明。
+- **判定**：【闸门】`check-ui-tokens.mjs` 的 `radius-tier` / `control-tier` / `type-tier`（今天 0/0/0，全部等于预算，即零新增空间）
+  与 `spacing-off-scale`（今天 161/161）。刻度内的间距字面值（`gap: 16px`）是 B6 允许的写法，不计违规；
+  计数包含 CSS 声明与 Tailwind 任意值（`mt-[18px]`）两处来源。
 
 ## 4. 契约与测试（C）
 
@@ -193,9 +195,12 @@
   仓库暂时没有调用点也算正常——它们是"可用的零件"，不是"留下的残骸"。
 - **`react-flow__*` 的 CSS**：这些 class 由 `@xyflow/react` 运行时生成，源码里搜不到，删除会导致画布没有边和手柄。
 - **`RECORD_BREAKPOINT`**：零引用，但它与旁边 20 行注释一起是"768 只有一个断点"这条决定的唯一书面记录，保留并在此登记。
-- **间距字面值**：`--ow-space-*` token 存在，但 spec 的四档（radius/type/control/header）没有把间距纳入闸门；
-  344 处"字面值恰好等于某个 token"和 55 处"不在 4/8 刻度上"因此记为技术债，不记为违规。
-- **`check-ui-tokens` 的 6 个桶**：`ui-debt.json` 是它们的预算，桶内数字不算违规，超过预算算。
+- **间距字面值**：`--ow-space-*` token 存在，B6 允许直接用 4/8/12/16/24/32 的刻度值，所以刻度内不算违规。
+  刻度外的（今天 161 处）由 `spacing-off-scale` 记账，只许下调。构成如实列出：148 条 CSS 声明 + 13 个 Tailwind 任意值；
+  其中 78 处是 ≤2px 的光学微调（`gap: 2px`、`margin-top: 1px`），70 处是结构性间距（`padding: 7px 10px`、`margin-left: 64px`）。
+  两者都计入预算，不按视觉意图豁免——豁免等于放松闸门（A8）。
+- **`check-ui-tokens` 的 7 个桶**：`ui-debt.json` 是它们的预算，桶内数字不算违规，超过预算算。
+  未产出任何桶的预算键会让闸门以 exit 2 退出，不再静默记 0。
 
 ## 6. 一次性扫描脚本（判定方法的实现）
 
@@ -213,3 +218,10 @@ B1(b)/B2 这类没有常驻闸门的检查，用两个一次性脚本实现，�
 
 - 2026-11 首版（22 轮迭代后的一次全量代码质量审查）：20 条规则、23 处修复、`code-rules.test.ts` 4 条常驻断言、
   `ui-debt.json` 的 `uppercase-guard` 由 20 拧到 19。
+- 2026-11-09 间距闸门补实现：`ui-debt.json` 从 #15 起就有 `spacing-token-literal: 52` 与 `spacing-off-scale: 108`，
+  但 `check-ui-tokens.mjs` 只声明 6 条规则，两个键从未产出任何计数——预算写着，门禁不存在。
+  本轮把 `spacing-off-scale` 真正实现（CSS 声明 + Tailwind 任意值，忽略 `var()` 与 0），
+  以今天实测 161 起记；`spacing-token-literal` 与 B6 冲突（B6 允许刻度内字面值）故删除而不是实现。
+  同时加三道 fail-closed：预算键无对应规则 exit 2、间距扫描量为 0 exit 2、每次运行打印扫描量。
+  回归测试 `scripts/check-ui-tokens.test.mjs`（6 项）接进 `ci.yml`，四项非空转已实测：注入 17px → 红，
+  新增 `mt-[19px]` → 红，伪造预算键 → exit 2，抹掉所有间距声明 → exit 2。

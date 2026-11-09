@@ -23,7 +23,8 @@ nohup env \
   OPSWEAVE_PUBLIC_URL="$KERNEL_URL" \
   DATABASE_URL="${DATABASE_URL:-postgres://localhost/opsweave?sslmode=disable}" \
   OPSWEAVE_DATA_DIR="$ROOT/data" \
-  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-web/dist" \
+  OPSWEAVE_WEB_DIST="$ROOT/apps/platform-console/dist" \
+  OPSWEAVE_OPS_WEB_DIST="$ROOT/apps/ops-web/dist" \
   OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$ADMIN_EMAIL" \
   OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   OPSWEAVE_DEV_PUBLISHER_ID=trusted-team \

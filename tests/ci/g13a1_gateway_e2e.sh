@@ -85,6 +85,7 @@ start_kernel() { # $1 = plugin secrets JSON, $2 = credential bindings JSON, $3 =
     OPSWEAVE_BIND=0.0.0.0:18185 \
     OPSWEAVE_PUBLIC_URL="$URL" \
     OPSWEAVE_WEB_DIST=/tmp/g13a1-ui-dist \
+    OPSWEAVE_OPS_WEB_DIST=/tmp/g13a1-ops-dist \
     OPSWEAVE_DATA_DIR=/tmp/g13a1-data \
     OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=admin@opsweave.local \
     OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD='OpsWeave!2026' \
@@ -120,7 +121,7 @@ stop_kernel() {
 
 [ -f /tmp/g13a1-ui-dist/index.html ] || {
   echo "missing /tmp/g13a1-ui-dist. Build the UI from the commit under test:"
-  echo "  pnpm --filter @opsweave/platform-web build && rm -rf /tmp/g13a1-ui-dist && cp -R apps/platform-web/dist /tmp/g13a1-ui-dist"
+  echo "  pnpm --filter @opsweave/platform-console --fail-if-no-match build && rm -rf /tmp/g13a1-ui-dist && cp -R apps/platform-console/dist /tmp/g13a1-ui-dist"
   exit 2
 }
 command -v docker >/dev/null || { echo "docker is required"; exit 2; }

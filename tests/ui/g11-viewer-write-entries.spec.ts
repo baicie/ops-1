@@ -65,7 +65,7 @@ const OPERATOR = {
 /** The product default, and the locale this guard judges the copy in. */
 const LOCALE = 'zh-CN' as const;
 
-const CATALOG_DIR = fileURLToPath(new URL('../../apps/platform-web/src/i18n/catalogs/', import.meta.url));
+const CATALOG_DIR = fileURLToPath(new URL('../../packages/platform-client/src/i18n/catalogs/', import.meta.url));
 const catalog = (locale: 'en' | 'zh-CN'): Record<string, string> =>
   JSON.parse(readFileSync(CATALOG_DIR + locale + '.json', 'utf8')) as Record<string, string>;
 
@@ -259,8 +259,15 @@ test('a viewer is told it cannot write, and the kernel still refuses the write i
 
 /** The two pages section 4.5 names as the places a viewer meets a write it cannot make. */
 const WRITE_ENTRY_PAGES = ['Incidents.tsx', 'IncidentDetail.tsx'] as const;
-const PAGE_DIR = fileURLToPath(new URL('../../apps/platform-web/src/pages/', import.meta.url));
-const SRC_DIR = fileURLToPath(new URL('../../apps/platform-web/src/', import.meta.url));
+// G14.2: pages live in their application; a viewer-write rule must read both,
+// because a route that offers a write it cannot perform is a defect wherever it
+// ships.
+const PAGE_DIRS = [
+  fileURLToPath(new URL('../../apps/platform-console/src/', import.meta.url)),
+  fileURLToPath(new URL('../../apps/ops-web/src/', import.meta.url)),
+];
+const PAGE_DIR = PAGE_DIRS[0];
+const SRC_DIR = PAGE_DIRS[0];
 
 /**
  * The copy a component would have to paste in, taken from the catalog rather than retyped here.
@@ -363,7 +370,7 @@ test('the sentences a viewer reads belong to the catalog, and no component sourc
   for (const page of WRITE_ENTRY_PAGES) {
     const source = readFileSync(PAGE_DIR + page, 'utf8');
     expect(source.length, page + ': read as source text').toBeGreaterThan(2000);
-    expectNoHardcodedCopy(source, 'apps/platform-web/src/pages/' + page);
+    expectNoHardcodedCopy(source, 'application source: ' + page);
   }
 
   // 2. Every other component source, so relocating a sentence to a third file does not escape

@@ -8,7 +8,7 @@
  *   node scripts/check-ui-tokens.mjs --ratchet debt.json  migration: counts may not rise
  */
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, relative, resolve } from 'node:path';
+import { join, dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -36,8 +36,16 @@ if (RATCHET === null) {
   console.error('  node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json');
   process.exit(2);
 }
-const SRC = join(ROOT, 'apps', 'platform-web', 'src');
-const cssPath = join(SRC, 'styles.css');
+// G14.2: the stylesheet and the primitives it styles now live in packages/ui,
+// and the two applications consume them. The token rules must scan all three, or
+// a radius tier added in a new application would pass unchecked.
+const UI_SRC = join(ROOT, 'packages', 'ui', 'src');
+const SRC_ROOTS = [
+  UI_SRC,
+  join(ROOT, 'apps', 'platform-console', 'src'),
+  join(ROOT, 'apps', 'ops-web', 'src'),
+].filter((dir) => existsSync(dir));
+const cssPath = join(UI_SRC, 'styles.css');
 if (!existsSync(cssPath)) {
   console.error('check-ui-tokens: ' + relative(ROOT, cssPath) + ' not found (wrong --root?)');
   process.exit(2);
@@ -88,17 +96,25 @@ for (let i = 0; i < body.length; i += 1) {
   }
 }
 const tsxFiles = [];
-(function walk(dir) {
-  for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) walk(p);
-    else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) tsxFiles.push(p);
+for (const root of SRC_ROOTS) {
+  (function walk(dir) {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) tsxFiles.push(p);
+    }
+  })(root);
+}
+const repoRelative = (file) => {
+  for (const root of SRC_ROOTS) {
+    if (file.startsWith(root + sep)) return relative(root, file);
   }
-})(SRC);
+  return relative(ROOT, file);
+};
 for (const file of tsxFiles) {
   readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
     const hits = line.match(/rounded-(sm|md|lg|xl|2xl|3xl|\[[^\]]+\])/g);
-    if (hits) for (const hit of hits) add('radius-tier', relative(SRC, file), i + 1, hit);
+    if (hits) for (const hit of hits) add('radius-tier', repoRelative(file), i + 1, hit);
   });
 }
 
@@ -119,7 +135,7 @@ for (const file of tsxFiles) {
   readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
     if (GLYPH_HEIGHTS.some((g) => line.includes(g + ' '))) return;
     const hits = line.match(/\bh-(6|7|8|9|10|11|12)\b/g);
-    if (hits) for (const hit of hits) add('control-tier', relative(SRC, file), i + 1, hit + ' on a control box');
+    if (hits) for (const hit of hits) add('control-tier', repoRelative(file), i + 1, hit + ' on a control box');
   });
 }
 
@@ -148,14 +164,14 @@ for (let i = 0; i < body.length; i += 1) {
 }
 
 // R4 one page header ---------------------------------------------------------
-const appHeader = join(SRC, 'components', 'app', 'page-header.tsx');
+const appHeader = join(UI_SRC, 'page-header.tsx');
 for (const file of tsxFiles) {
   const text = readFileSync(file, 'utf8');
   if (/export function PageHeader\b/.test(text) && file !== appHeader) {
-    add('one-header', relative(SRC, file), 0, 'second PageHeader implementation');
+    add('one-header', repoRelative(file), 0, 'second PageHeader implementation');
   }
   if (/import \{[^}]*\bPageHeader\b[^}]*\} from '[^']*components\/Ui'/.test(text)) {
-    add('one-header', relative(SRC, file), 0, 'imports PageHeader from components/Ui');
+    add('one-header', repoRelative(file), 0, 'imports PageHeader from components/Ui');
   }
 }
 
@@ -168,7 +184,7 @@ for (let i = 0; i < body.length; i += 1) {
 
 // R6 formatters speak the locale, not English -------------------------------
 const BT = String.fromCharCode(96);
-const formatPath = join(SRC, 'format.ts');
+const formatPath = join(ROOT, 'packages', 'platform-client', 'src', 'format.ts');
 if (existsSync(formatPath)) {
   readFileSync(formatPath, 'utf8').split('\n').forEach((line, i) => {
     if (!/\breturn\b/.test(line)) return;
@@ -179,11 +195,69 @@ if (existsSync(formatPath)) {
   });
 }
 
+// R7 spacing: a literal may be on the 4/8/12/16/24/32 scale, never off it ---
+// B6 (code-rules.md) ranks the sources for a number: semantic token > the 4/8/12/16/24/32
+// scale > a named constant > a raw literal. Radius, control height and font size must use a
+// token (R1-R3); spacing is allowed to use a scale value, so the only violation here is a
+// spacing px value that is on NEITHER. This rule was budgeted in ui-debt.json from #15 onward
+// and never emitted by any script, so the budget guarded nothing: a rule that reports 0 because
+// it does not exist is indistinguishable from a rule that reports 0 because the code is clean.
+const SPACING_PROPS = ['padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+  'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+  'gap', 'row-gap', 'column-gap'];
+const SPACING_SCALE = [4, 8, 12, 16, 24, 32];
+const offScaleTokens = (value) => {
+  // `var(--ow-space-4)` is the good state, not a literal; `calc(...)` and `0` carry no number.
+  const stripped = value.replace(/var\([^)]*\)/g, ' ');
+  return [...stripped.matchAll(/(-?\d+(?:\.\d+)?)px/g)]
+    .map((m) => Math.abs(Number(m[1])))
+    .filter((px) => px !== 0 && !SPACING_SCALE.includes(px));
+};
+let spacingDeclarations = 0;
+for (let i = 0; i < body.length; i += 1) {
+  for (const m of body[i].matchAll(/([a-z-]+)\s*:\s*([^;{}]+);/g)) {
+    if (!SPACING_PROPS.includes(m[1])) continue;
+    spacingDeclarations += 1;
+    const off = offScaleTokens(m[2]);
+    if (off.length) add('spacing-off-scale', 'styles.css', i + 1, m[1] + ': ' + m[2].trim());
+  }
+}
+// The same literal in a utility class is the same defect: `mt-[18px]` is a raw spacing value
+// that no token and no scale step backs.
+const SPACING_UTILITY = /\b(?:p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|gap|gap-x|gap-y)-\[(-?\d+(?:\.\d+)?)px\]/g;
+for (const file of tsxFiles) {
+  readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+    for (const m of line.matchAll(SPACING_UTILITY)) {
+      if (!SPACING_SCALE.includes(Math.abs(Number(m[1])))) {
+        add('spacing-off-scale', repoRelative(file), i + 1, m[0]);
+      }
+    }
+  });
+}
+if (spacingDeclarations === 0) {
+  // rules/11: a gate must report its scan volume and fail when that volume is zero. Zero here
+  // means the selector above stopped matching, not that the stylesheet has no spacing.
+  console.error('check-ui-tokens: R7 scanned 0 spacing declarations in styles.css; the rule is not reading what it thinks it reads.');
+  process.exit(2);
+}
+
 // report ---------------------------------------------------------------------
-const RULES = ['radius-tier', 'control-tier', 'type-tier', 'one-header', 'uppercase-guard', 'format-locale'];
+const RULES = ['radius-tier', 'control-tier', 'type-tier', 'one-header', 'uppercase-guard', 'format-locale',
+  'spacing-off-scale'];
 const counts = Object.fromEntries(RULES.map((r) => [r, 0]));
 for (const f of findings) counts[f.rule] += 1;
 const budget = RATCHET ? JSON.parse(readFileSync(RATCHET, 'utf8')) : null;
+// A key in the budget that no rule ever emits is the failure this repository already shipped
+// once: it reads as a guarded number and guards nothing. Refuse to run rather than print a
+// green line for it.
+if (budget) {
+  const unknown = Object.keys(budget).filter((k) => !RULES.includes(k));
+  if (unknown.length) {
+    console.error('check-ui-tokens: the ratchet file budgets rules that are never emitted: ' + unknown.join(', '));
+    console.error('A budget nothing can exceed is not a gate. Either implement the rule or delete the key.');
+    process.exit(2);
+  }
+}
 let over = 0;
 for (const rule of RULES) {
   const limit = budget ? (budget[rule] || 0) : 0;
@@ -191,6 +265,7 @@ for (const rule of RULES) {
   console.log((counts[rule] > limit ? 'FAIL' : 'ok  ') + '  ' + rule.padEnd(16) + String(counts[rule]).padStart(4) + '  budget ' + limit);
 }
 console.log('');
+console.log('scanned: ' + tsxFiles.length + ' TSX files, ' + spacingDeclarations + ' spacing declarations in styles.css');
 for (const f of findings) {
   if (budget && counts[f.rule] <= (budget[f.rule] || 0)) continue;
   console.log('  ' + f.rule + '  ' + f.file + (f.line ? ':' + f.line : '') + '  ' + f.text);

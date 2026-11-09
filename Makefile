@@ -2,12 +2,12 @@
 build:
 	cargo build -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
 web:
-	pnpm --filter @opsweave/platform-web build
+	pnpm --fail-if-no-match --filter @opsweave/platform-console build && pnpm --fail-if-no-match --filter @opsweave/ops-web build
 test:
 	cargo test --workspace
 	cargo clippy --workspace --all-targets -- -D warnings
-	pnpm --filter @opsweave/platform-web typecheck
-	pnpm --filter @opsweave/hello-web typecheck
+	pnpm -r typecheck
+	pnpm --fail-if-no-match --filter @opsweave/hello-web typecheck
 contract:
 	python3 tests/contract/validate_contracts.py
 demo-up:

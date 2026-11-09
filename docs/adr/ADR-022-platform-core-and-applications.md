@@ -251,3 +251,104 @@ trust boundary stops being conflated with the application boundary.
 - It does not claim any application is installable by a third party today. The
   registry, the install flow and the trust model for third-party applications
   are G14.3's subject.
+
+---
+
+## Implementation note: G14.2 (2026-11-09)
+
+The frontend split described in section 2.7 is now in the tree. What exists,
+precisely:
+
+| Path | Role | Cannot import |
+|---|---|---|
+| `packages/ui` | design system: shadcn primitives, icons, `styles.css`, shared presentational components | any application |
+| `packages/platform-client` | HTTP client, contract types, i18n catalogs, access model, workspace membership hook | any application |
+| `apps/platform-console` | Platform Console: one router, platform routes only, `basename="/console"` | `apps/ops-web`, any Incident type |
+| `apps/ops-web` | Ops application: one router, workspace routes only, `basename="/app"` | `apps/platform-console` |
+
+`apps/platform-web` — the single SPA with two route trees — is deleted. It was
+not kept as a compatibility shell, because a third entry point that renders both
+surfaces would reintroduce exactly the property this phase removes.
+
+**Independence is asserted, not assumed.** Breaking a file in `apps/ops-web` and
+running the console build still exits `0`; the reverse also holds. Neither
+application's `package.json` names the other, and a grep for the name finds
+nothing.
+
+**The Kernel serves both shells.** `StaticSite` gained optional mounts: `/app`
+resolves inside the ops bundle and every other prefix inside the console bundle.
+A mounted prefix answers with that bundle's own `index.html`, so a browser at
+`/app/incidents` mounts the ops router and a browser at `/admin/overview` mounts
+the console router. A unit test builds two distinguishable bundles and asserts
+each route receives its own shell — including a deep ops route the closed prefix
+table never listed, which is why the mount owns its whole prefix rather than
+consulting the table. `OPSWEAVE_OPS_WEB_DIST` is optional: an installation that
+has not adopted the split serves one bundle and behaves as before.
+
+**Consequences for the gates.** Four gates read source paths and had to follow
+the move — i18n, status vocabulary, UI tokens, and the CSS reachability rule.
+Each now scans an explicit list of every application and package. None was
+relaxed: the i18n key count is unchanged (2046, 17 unused) and the token ratchet
+still passes at zero debt. A page that hardcoded copy in the new applications
+would fail exactly as before.
+
+**What G14.2 does not do.** The two applications are separate builds and
+separate artifacts but are still served from **one origin** by the Kernel, so
+the existing cookie session continues to work and no cross-origin identity is
+needed yet. Separate origins, Application-scoped authorization, and the OIDC
+bridge are G14.3. The `useBusinessWorkspaces` hook is shared, but nothing yet
+*enforces* that a caller of `ops.example.com` holds the ops application grant —
+that enforcement is also G14.3.
+
+---
+
+## Implementation note: G14.3 application-scoped authorization (2026-11-09)
+
+The middle question of §2.2 now has a server-side answer.
+
+**Data model** (`apps/kernel/migrations/0035_applications_and_grants.sql`):
+
+| Table | Answers |
+|---|---|
+| `kernel.applications` | what applications exist, where each is mounted, whether enabled |
+| `kernel.application_grants` | may this account open this application, and which verbs does the grant carry |
+
+Deliberately separate from `business_workspace_members`, because they answer
+different questions and either can exist without the other: an account can be
+granted the product and be a member of no workspace (it opens the app and sees
+nothing), and an account can be a workspace member with no application grant
+(it can be named in data but cannot open the product).
+
+**The migration grants nothing new.** The console application is granted to the
+same set the existing admin-surface predicate already covered; the ops
+application is granted to every account that was already a member of at least one
+workspace, plus pre-existing admins (who could reach `/app` before and read
+nothing). Everyone keeps exactly what they had; accounts created afterwards get
+nothing until an administrator grants it.
+
+**Enforcement.** `/api/v1/apps/opsweave.ops/*` is a separate router behind
+`require_ops_application`; it answers `403 APPLICATION_FORBIDDEN` without a
+grant. The legacy `/api/v1/incidents/*` paths keep their original gate so no
+existing client or acceptance script breaks — retiring them still needs its own
+ADR and a client inventory, as §2.6 says.
+
+`403` and not `404` here on purpose: an application's existence is not a secret
+(it is registered, mounted and named in the console), and a 404 would make an
+authorization decision indistinguishable from a typo. Workspace *rows* keep the
+404 rule, because a row's existence is exactly what must not leak.
+
+**`GET /api/v1/auth/me`** gains an additive `applications` block listing what the
+session may open and what it may not. `access.allowedSurfaces` is unchanged and
+remains a navigation declaration; the server gate does not consult it.
+
+**Verified.** `cargo test -p opsweave-kernel` 270/270 against real PostgreSQL,
+including two database tests that state the ruling directly: an `admin` role with
+no grant is refused, a grant admits and carries only its named verbs, revocation
+takes effect on the next call, and a disabled application is refused even to a
+granted caller.
+
+**Not done here.** Separate origins and the OIDC bridge (§2.7) remain open; the
+two applications are still served from one origin by the Kernel, so the existing
+cookie session continues to work. The Ops Web client does not yet read the new
+`applications` block to hide entries it cannot use — that is a UI change with its
+own screenshots and is G14.4/G14.5 territory.

@@ -462,9 +462,20 @@ kill "$CANARY_PID" 2>/dev/null; wait "$CANARY_PID" 2>/dev/null
 
 # The rendering rule, checked from the tree rather than promised in a comment: nothing in the web
 # application injects HTML. The path is derived from this script so the check works from any cwd.
+#
+# Two G14.2 defects are fixed here, both of which made the assertion say nothing:
+#   * it scanned the pre-G14.2 web directory, deleted in 461d4da, so grep failed on a missing path;
+#   * under `set -euo pipefail`, a grep that matches NOTHING makes the `grep | wc` pipeline exit
+#     1 and kills the script AT THE ASSIGNMENT - the assertion never ran, and the step reported
+#     neither pass nor fail. `|| true` makes "no match" (the good outcome) an ordinary value; a
+#     genuinely unreadable directory is now caught by the existence test below instead.
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-INNER_HTML_USES="$(grep -rn 'dangerouslySetInnerHTML' "$REPO_ROOT/apps/platform-web/src" | wc -l | tr -d ' ')"
-check 0 "$INNER_HTML_USES" "X3 no component in the web tree injects HTML (grep dangerouslySetInnerHTML is empty)"
+WEB_ROOTS=("$REPO_ROOT/apps/platform-console/src" "$REPO_ROOT/apps/ops-web/src" "$REPO_ROOT/packages")
+for root in "${WEB_ROOTS[@]}"; do
+  [ -d "$root" ] || { bad "X3 scan root is missing: $root"; exit 1; }
+done
+INNER_HTML_USES="$(grep -rn 'dangerouslySetInnerHTML' "${WEB_ROOTS[@]}" | wc -l | tr -d ' ' || true)"
+check 0 "$INNER_HTML_USES" "X3 no component in either application or the shared packages injects HTML (grep dangerouslySetInnerHTML is empty)"
 
 # ---------------------------------------------------------------------------
 step 'XSS - untrusted payloads are stored verbatim and served as inert text'

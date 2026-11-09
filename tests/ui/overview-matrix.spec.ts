@@ -37,7 +37,7 @@ async function login(page: Page): Promise<void> {
     await page.fill('input[type=password]', ADMIN_PASSWORD);
     await page.click('[data-testid=login-submit]');
   }
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20_000 });
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname), { timeout: 20_000 });
 }
 
 test('overview matrix 1440/1024/390 x light/dark x en/zh-CN', async ({ browser }) => {

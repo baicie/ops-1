@@ -421,7 +421,25 @@ pub async fn me(
         .get::<AuthUser>()
         .cloned()
         .ok_or_else(|| AppError::unauthorized("Authentication required"))?;
-    Ok(Json(me_payload(&auth, &state.config.admin_surface_roles)))
+    let mut payload = me_payload(&auth, &state.config.admin_surface_roles);
+    // G14.3: which applications this session may open. Additive to the existing
+    // `access` block, and deliberately NOT a replacement for it: `access` answers
+    // "which surfaces does this role see", `applications` answers "which
+    // products is this account granted". A client that shows an application
+    // entry without a grant here is showing a link that answers 403.
+    let applications = crate::applications::applications_for(&state.db, auth.user_id)
+        .await
+        .unwrap_or_else(|_| crate::applications::ApplicationsView {
+            applications: Vec::new(),
+            denied: Vec::new(),
+        });
+    if let Some(object) = payload.as_object_mut() {
+        object.insert(
+            "applications".into(),
+            serde_json::to_value(applications).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    Ok(Json(payload))
 }
 
 pub async fn seed_admin(state: &AppState) -> anyhow::Result<()> {

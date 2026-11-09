@@ -45,11 +45,11 @@ TS_BUILD_1="$(sha256_file plugins/hello-ops/backend-ts/server.mjs)"
 TS_BUILD_2="$TS_BUILD_1"
 cargo build -q -p opsweave-opsctl
 echo "== web assets"
-PLUGIN_VERSION="$TS_VERSION" pnpm --filter @opsweave/hello-web build >/dev/null
+PLUGIN_VERSION="$TS_VERSION" pnpm --fail-if-no-match --filter @opsweave/hello-web build >/dev/null
 rm -rf /tmp/hello-web-v1 && cp -R plugins/hello-ops/web/dist /tmp/hello-web-v1
-PLUGIN_VERSION="$TS_V2_VERSION" pnpm --filter @opsweave/hello-web build >/dev/null
+PLUGIN_VERSION="$TS_V2_VERSION" pnpm --fail-if-no-match --filter @opsweave/hello-web build >/dev/null
 rm -rf /tmp/hello-web-v2 && cp -R plugins/hello-ops/web/dist /tmp/hello-web-v2
-PLUGIN_VERSION="$TS_VERSION" pnpm --filter @opsweave/hello-web build >/dev/null
+PLUGIN_VERSION="$TS_VERSION" pnpm --fail-if-no-match --filter @opsweave/hello-web build >/dev/null
 
 echo "== TypeScript OCI images"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION="$TS_VERSION" --build-arg CAPABILITY_DIGEST="$TS_CAP" --build-arg BUILD_DIGEST="$TS_BUILD_1" -t "$REGISTRY/opsweave/hello-ts:$TS_VERSION" plugins/hello-ops/backend-ts >/dev/null

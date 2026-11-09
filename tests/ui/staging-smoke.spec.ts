@@ -29,8 +29,8 @@ type Surface = {
   optional?: boolean;
 };
 
-// Each title is the <h1> rendered by PageHeader (apps/platform-web/src/components/Ui.tsx)
-// from the page modules listed in apps/platform-web/src/App.tsx.
+// Each title is the <h1> rendered by PageHeader (packages/ui/src/Ui.tsx)
+// from the page modules listed in apps/platform-console/src/App.tsx.
 const SURFACES: Surface[] = [
   { name: 'Overview', route: '/', title: 'Overview', screenshot: 'overview.png' },
   { name: 'Nodes', route: '/nodes', title: 'Nodes', screenshot: 'nodes.png' },
@@ -46,7 +46,7 @@ async function login(page: Page) {
   await page.fill('input[type=email]', ADMIN_EMAIL);
   await page.fill('input[type=password]', ADMIN_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'));
+  await page.waitForURL((url) => !/\/login$/.test(url.pathname));
 }
 
 // Declared first and serial, so an unpinned or stale preview fails before any screenshot is taken.

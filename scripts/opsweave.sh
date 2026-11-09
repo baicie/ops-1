@@ -125,7 +125,7 @@ ensure_postgres() {
 }
 
 ensure_build() {
-  if [ "${REBUILD:-0}" = "1" ] || [ ! -x ./target/debug/opsweave-kernel ] || [ ! -f apps/platform-web/dist/index.html ]; then
+  if [ "${REBUILD:-0}" = "1" ] || [ ! -x ./target/debug/opsweave-kernel ] || [ ! -f apps/platform-console/dist/index.html ]; then
     cmd_build
   else
     ok "Rust binaries and Web Shell present"
@@ -281,8 +281,8 @@ cmd_test() {
   python3 tests/contract/validate_contracts.py
   cargo test --locked --workspace
   cargo clippy --locked --workspace --all-targets -- -D warnings
-  pnpm --filter @opsweave/platform-web typecheck
-  pnpm --filter @opsweave/platform-web test:studio
+  pnpm --fail-if-no-match --filter @opsweave/platform-console typecheck && pnpm --fail-if-no-match --filter @opsweave/ops-web typecheck
+  pnpm --fail-if-no-match --filter @opsweave/platform-console test
   ok "local verification complete"
 }
 

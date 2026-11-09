@@ -10,6 +10,10 @@ pub struct Config {
     pub database_url: String,
     pub data_dir: PathBuf,
     pub web_dist: PathBuf,
+    /// The Ops Web bundle (G14.2). Optional: an installation that predates the
+    /// split serves the console only, and `/app` falls back to the primary shell
+    /// exactly as it did before.
+    pub ops_web_dist: Option<PathBuf>,
     pub public_url: String,
     pub bootstrap_admin_email: Option<String>,
     pub bootstrap_admin_password: Option<String>,
@@ -111,7 +115,11 @@ impl Config {
                 "postgres://localhost/opsweave?sslmode=disable",
             ),
             data_dir: PathBuf::from(env_string("OPSWEAVE_DATA_DIR", "./data")),
-            web_dist: PathBuf::from(env_string("OPSWEAVE_WEB_DIST", "apps/platform-web/dist")),
+            web_dist: PathBuf::from(env_string(
+                "OPSWEAVE_WEB_DIST",
+                "apps/platform-console/dist",
+            )),
+            ops_web_dist: env_optional("OPSWEAVE_OPS_WEB_DIST").map(std::path::PathBuf::from),
             public_url: env_string("OPSWEAVE_PUBLIC_URL", "http://127.0.0.1:8081"),
             bootstrap_admin_email: env::var("OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL")
                 .ok()

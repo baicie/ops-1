@@ -11,7 +11,8 @@
 6. 完成后更新实现状态、风险清单、迁移说明和变更摘要；不得伪造通过率、生产就绪声明。
 
 ## 前端与国际化（MUST）
-- 前端统一 **Vite + React + TypeScript + Tailwind CSS + shadcn/ui**；组件以开源 `shadcn-admin` 模板的既有实现为参考，按 shadcn 的 copy-in 模式进仓库（`apps/platform-web/src/components/ui/`），不引运行时组件包；禁止并列引入 MUI/AntD/Chakra 等第二套 UI 框架。
+- 前端统一 **Vite + React + TypeScript + Tailwind CSS + shadcn/ui**；组件以开源 `shadcn-admin` 模板的既有实现为参考，按 shadcn 的 copy-in 模式进仓库（**G14.2 起为共享包 `packages/ui/src/`**，平台控制台与运维应用共同引用），不引运行时组件包；禁止并列引入 MUI/AntD/Chakra 等第二套 UI 框架。
+- **G14.2 起前端分为两个独立应用**：`apps/platform-console`（平台管理）与 `apps/ops-web`（运维业务），各自独立构建产物与路由，**互不 import**；共享层只能是 `packages/ui`、`packages/platform-client`。新增业务应用不得修改 Platform Console 的静态路由，也不得复制 Kernel。
 - 所有用户可见文案 **必须**走 i18n 消息目录（默认 `en` + `zh-CN`），禁止硬编码；缺键与未使用键必须可被校验发现；时间/数字/货币用 `Intl` 格式化。
 - E2E 选择器 **禁止**依赖本地化后的可见文案（用 role、稳定的 accessible name 或 `data-testid`），否则切换语言即碎。
 - 后端返回给用户看的错误必须带稳定错误码，前端按码取本地化文案；不得直接把服务端英文句子渲染给用户。
@@ -36,13 +37,13 @@
 - 所有依赖与容器制品通过锁文件/摘要/可重复构建管理，升级单独审查。
 
 ## 规则索引
-- `rules/01-architecture.md`；`02-plugin-runtime.md`；`03-security.md`；`04-distributed.md`；`05-data.md`；`06-ui-ux.md`；`07-testing-release.md`；`08-docs-and-workflow.md`。
-- 任务专用流程位于 `skills/*/SKILL.md`，任何团队成员均可手工遵循。
+- `rules/01-architecture.md`；`02-plugin-runtime.md`；`03-security.md`；`04-distributed.md`；`05-data.md`；`06-ui-ux.md`；`07-testing-release.md`；`08-docs-and-workflow.md`；`11-refactor-retirement-and-cleanup.md`。
+- 任务专用流程位于 `docs/blueprint/skills/*/SKILL.md`，任何团队成员均可手工遵循。
 
 ## 2026-10-22 OCI 多语言增补（与原规约同等效力）
 - 0.0.1 Plugin Runtime HTTP/JSON v1 不绑定 Java/Go/TypeScript/Rust/Python；官方 SDK 是可选便利包。修改协议先升级 `contracts/`、用 Java/Go/TS 同一黑盒测试验证。
 - 生产后端 OCI 镜像通过 Digest 固定、签名验证、独立镜像仓库分发；开发本机进程/HMR 只能是 DEV_ONLY。
 - 发布包 Backend Image、Web 静态资产索引、Registry ZIP Bundle 属于不同受信内容；禁止自引用 ZIP 哈希或误用 Tag。
 - Rootless Docker Node Adapter 是 0.0.1 参考实现，不能被业务容器获取 socket；cgroup 资源/用户权限与网络隔离必须实测。
-- 发布到真实两节点前必须通过 [OCI Release Review](skills/oci-release-review/SKILL.md) 和 [Multi-language Conformance](skills/multilang-conformance/SKILL.md)。
+- 发布到真实两节点前必须通过 [OCI Release Review](docs/blueprint/skills/oci-release-review/SKILL.md) 和 [Multi-language Conformance](docs/blueprint/skills/multilang-conformance/SKILL.md)。
 - 新增平台无关强制 Rules：`rules/09-oci-supply-chain.md` 与 `rules/10-language-agnostic.md`；新增 0.0.1 子任务见 `plan/04-001-oci-multilang-acceptance.md`。
