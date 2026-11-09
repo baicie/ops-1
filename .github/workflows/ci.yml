@@ -83,6 +83,10 @@ jobs:
       # i18n gate because both answer the same question - what may a message say?
       - run: node scripts/check-status-vocabulary.mjs
       - run: node scripts/check-ui-tokens.mjs --ratchet docs/design/ui-visual-v3/spec/ui-debt.json
+      # The token gate's own fail-closed properties: an off-scale spacing literal fails, an
+      # on-scale one stays legal (code-rules B6), a budget key no rule emits is an error, and a
+      # stylesheet that matches zero spacing declarations fails rather than passing.
+      - run: node --test scripts/check-ui-tokens.test.mjs
       # No live file may name a retired path (rules/11). The pre-G14.2 web package was deleted in
       # 461d4da and eight executables kept building or serving it; pnpm exits 0 on a filter that
       # matches nothing, so four harnesses were green while building zero bundles. This check

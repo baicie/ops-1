@@ -14,7 +14,7 @@
   ],
   "$howToRegenerate": "node tests/ci/check-tracked-png-budget.mjs --print-manifest",
   "totals": {
-    "maxFiles": 408,
+    "maxFiles": 410,
     "maxBytes": 71554236
   },
   "directories": {
@@ -103,6 +103,11 @@
       "maxFiles": 11,
       "filename": "^(r[0-9]+-(light|dark)-(en|zh(-CN)?)__[a-z-]+|state-[a-z-]+)\\.png$",
       "note": "The 11 files artifacts/ui/sources/STATE-MATRIX.md links: two ready/refused captures and the nine state fixtures that matrix names by filename. The other 26 (three-viewport matrix, drawer) are cited nowhere and stayed out of the index."
+    },
+    "artifacts/ui/g14-spacing-gate/shots": {
+      "maxFiles": 2,
+      "filename": "^activity-1440-(light|dark)\\.png$",
+      "note": "The badge-colour fix evidence: the one element whose computed colour changed. 390 and the node chart were captured and dropped — the chart cannot render on macOS (node reports cpu=null) and the badge is the same two colours at 390."
     }
   },
   "knownMissingDocReferences": [

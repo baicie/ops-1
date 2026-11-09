@@ -14,7 +14,7 @@
 - Plugin Manifest 1.1 now requires `backend.runtime=oci`, digest-pinned `imageRef`, versioned `http-json` protocol/port, distinct readiness/liveness; Web Remote requires asset-index and digest. Both `frontend` and `backend` can be null individually but never both null (semantic verifier).
 - `contracts/openapi/plugin-runtime-v1.yaml` plus `plugin-runtime-info` fixtures define language-neutral plugin host endpoints.
 - `frontend-asset-index.v1.schema.json` validates static asset listings; example byte lengths/digests are **fictional syntax samples**, not working executable release assets.
-- Runtime IDs, image digests and signing are attested by trusted Kernel + Node, not accepted from plugin self-report. See [full design](../docs/20-language-agnostic-plugin-runtime.md).
+- Runtime IDs, image digests and signing are attested by trusted Kernel + Node, not accepted from plugin self-report. See [full design](../docs/blueprint/20-language-agnostic-plugin-runtime.md).
 
 ## 0.0.2 Data Foundation contracts (draft)
 

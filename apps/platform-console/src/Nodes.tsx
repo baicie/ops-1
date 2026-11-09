@@ -511,7 +511,7 @@ export function NodeDetailPage() {
                   <line x1="0" y1="40" x2="400" y2="40" />
                   <line x1="0" y1="79.5" x2="400" y2="79.5" />
                 </g>
-                {historySegments(history).map((points, index) => <polyline key={index} fill="none" stroke="var(--accent, #4f8cff)" strokeWidth="2" points={points} vectorEffect="non-scaling-stroke" />)}
+                {historySegments(history).map((points, index) => <polyline key={index} fill="none" stroke="var(--ow-accent)" strokeWidth="2" points={points} vectorEffect="non-scaling-stroke" />)}
               </svg>
             </div>
             <p className="resource-history-axis-time">

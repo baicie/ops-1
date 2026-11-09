@@ -6,7 +6,7 @@
 - MUST：1440/1024/390 × Light/Dark 截图人工审阅，键盘可用、focus visible、主要状态不只靠颜色。
 - MUST：Node/Plugin/Log 有原始 observedAt 和查询失败状态，未知不显示绿，日志 event gap 不显示已追完。
 - SHOULD：表格、日志、画布使用专属高密度组件而非 Card 堆砌，重要操作可从 1–2 个明显位置找到。
-- Gate：通过 `checklists/UI_GATE.md`，视觉修复前后有真实截图与运行日志。
+- Gate：通过 `docs/design/dual-workspace-v2/pack/checklists/visual-review-rubric.md`（评分表）与 `docs/design/dual-workspace-v2/pack/checklists/gate-checklist.md`（PR/Gate 清单），视觉修复前后有真实截图与运行日志。
 
 ## 前端技术栈（MUST）
 

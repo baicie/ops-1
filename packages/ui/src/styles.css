@@ -3443,7 +3443,7 @@ html[lang='zh-CN'] .lang-select { width: auto; max-width: 148px; }
    the 1024 canvas had, and at 390 the same row wrapped into five control rows (244.8px). The
    predicates are a tool you reach for, not a band you read past - so the row keeps search and
    count, and the toggle states how many predicates are on. */
-.activity-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--ow-radius-pill); background: var(--ow-accent); color: var(--ow-accent-foreground); font-size: var(--ow-type-label); font-variant-numeric: tabular-nums; }
+.activity-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--ow-radius-pill); background: var(--ow-accent); color: var(--ow-accent-text); font-size: var(--ow-type-label); font-variant-numeric: tabular-nums; }
 .activity-filter-panel { margin-top: -12px; }
 /* 390: the search keeps the first line; the toggle and the count share the second. Left to
    `flex-wrap` the count's `margin-left:auto` claimed a line of its own, so a two-control row

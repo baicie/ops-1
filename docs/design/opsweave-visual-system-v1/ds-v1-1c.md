@@ -3,7 +3,7 @@
 - 日期：2026-11-05
 - 状态：**PASS（Phase A–E、G 本地与 harness）**；最终 CI 与独立审查结论见 §10 / §11
 - 基线：PR #34 head `d3d5955`（DS-V1-1b）
-- 决策：[ADR-017](../adr/ADR-017-visual-system-v1.md) §D5 / §D7 / §D9
+- 决策：[ADR-017](../../../docs/adr/ADR-017-visual-system-v1.md) §D5 / §D7 / §D9
 - PR：Draft [#34](https://github.com/baicie/ops-1/pull/34)，**不转 Ready**
 
 本批不重做 DS-V1-1/1b，不引入新组件库，不改 Kernel、数据库或业务权限。目标是把上一批遗留的对话框正确性、Boundary 状态所有权、Sources 视觉矩阵与门禁缺口补齐，使 PR #34 达到可审查、可合并的状态。
