@@ -37,7 +37,7 @@ function Splash() {
 function RequireAuth() {
   const { user, loading } = useAuth();
   if (loading) return <Splash />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/admin/login" replace />;
   return <Outlet />;
 }
 
@@ -52,24 +52,24 @@ function RequireAuth() {
 function RequirePlatformAccess() {
   const { user, access, loading } = useAuth();
   if (loading) return <Splash />;
-  if (!user) return <Navigate to="/login" replace />;
-  if (!access?.allowedSurfaces?.includes('admin')) return <Navigate to="/403" replace />;
+  if (!user) return <Navigate to="/admin/login" replace />;
+  if (!access?.allowedSurfaces?.includes('admin')) return <Navigate to="/admin/403" replace />;
   return <Outlet />;
 }
 
 export function App() {
   return (
     <TooltipProvider>
-      <BrowserRouter basename="/admin">
+      <BrowserRouter>
         <AuthProvider>
           <ToastProvider>
             <ExtensionsProvider>
               <Routes>
-                <Route path="/login" element={<LoginPage />} />
+                <Route path="/admin/login" element={<LoginPage />} />
                 <Route element={<RequireAuth />}>
-                  <Route path="/403" element={<ForbiddenPage />} />
+                  <Route path="/admin/403" element={<ForbiddenPage />} />
                   <Route element={<RequirePlatformAccess />}>
-                    <Route path="/" element={<AdminShell />}>
+                    <Route path="/admin" element={<AdminShell />}>
                       <Route index element={<Navigate to="overview" replace />} />
                       <Route path="overview" element={<OverviewPage />} />
                       <Route path="plugins" element={<PluginsPage />} />

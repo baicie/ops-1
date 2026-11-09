@@ -34,7 +34,7 @@ function Splash() {
 function RequireAuth() {
   const { user, loading } = useAuth();
   if (loading) return <Splash />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/app/login" replace />;
   return <Outlet />;
 }
 
@@ -50,16 +50,16 @@ function RequireWorkspaceAccess() {
   const { user, access, loading } = useAuth();
   useRememberSurface('workspace');
   if (loading) return <Splash />;
-  if (!user) return <Navigate to="/login" replace />;
-  if (!access?.allowedSurfaces?.includes('workspace')) return <Navigate to="/403" replace />;
+  if (!user) return <Navigate to="/app/login" replace />;
+  if (!access?.allowedSurfaces?.includes('workspace')) return <Navigate to="/app/403" replace />;
   return <Outlet />;
 }
 
 function SurfaceEntry() {
   const { user, access, loading } = useAuth();
   if (loading) return <Splash />;
-  if (!user) return <Navigate to="/login" replace />;
-  if (!access?.allowedSurfaces?.includes('workspace')) return <Navigate to="/403" replace />;
+  if (!user) return <Navigate to="/app/login" replace />;
+  if (!access?.allowedSurfaces?.includes('workspace')) return <Navigate to="/app/403" replace />;
   void lastSurface();
   return <Navigate to={workspaceEntryPath()} replace />;
 }
@@ -67,17 +67,19 @@ function SurfaceEntry() {
 export function App() {
   return (
     <TooltipProvider>
-      <BrowserRouter basename="/app">
+      <BrowserRouter>
         <AuthProvider>
           <ToastProvider>
             <ExtensionsProvider>
               <Routes>
-                <Route path="/login" element={<LoginPage />} />
+                <Route path="/app/login" element={<LoginPage />} />
                 <Route element={<RequireAuth />}>
-                  <Route path="/403" element={<ForbiddenPage />} />
-                  <Route index element={<SurfaceEntry />} />
+                  <Route path="/app/403" element={<ForbiddenPage />} />
                   <Route element={<RequireWorkspaceAccess />}>
-                    <Route path="/" element={<WorkspaceShell />}>
+                    <Route path="/app" element={<WorkspaceShell />}>
+                      {/* The bare /app picks a landing page; it is an index, not a
+                          sibling of the shell, or two routes claim the same path. */}
+                      <Route index element={<SurfaceEntry />} />
                       <Route path="home" element={<WorkspaceHomePage />} />
                       <Route path="incidents" element={<IncidentsPage />} />
                       <Route path="incidents/:incidentId" element={<IncidentDetailPage />} />
