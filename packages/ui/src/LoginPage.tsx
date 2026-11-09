@@ -26,7 +26,16 @@ import { useT } from '@opsweave/platform-client/i18n';
  * forbidden page rather than being sent somewhere it will only be refused.
  */
 export function signInTarget(access: AccessInfo, from: string): string | null {
-  if (canEnterSurface(access, 'admin')) return from;
+  if (canEnterSurface(access, 'admin')) {
+    // A deep link the guard bounced here (`/admin/jobs/x`) is honoured; anything
+    // else - the default `/`, or a path outside this application - resolves to the
+    // console's own entry. Routing an admin through `/` instead would mount the
+    // entry route, have it navigate again, and leave two navigations in flight for
+    // a page that only needed one.
+    return from.startsWith('/admin/') && !from.startsWith('//')
+      ? from
+      : surfaceEntryPath('admin');
+  }
   if (canEnterSurface(access, 'workspace')) return surfaceEntryPath('workspace');
   return null;
 }
