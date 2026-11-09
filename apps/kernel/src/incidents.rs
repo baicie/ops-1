@@ -2873,17 +2873,8 @@ fn incident_not_found() -> AppError {
         "incident not found",
     )
 }
-/// A business workspace the caller named but cannot enter. 404 and not 403, for the
-/// same reason an out-of-scope incident answers 404: the two answers must not say
-/// which workspace ids exist, and a caller that is refused membership of a workspace
-/// it named already knows the id it typed.
-pub(crate) fn workspace_not_found() -> AppError {
-    AppError::new(
-        StatusCode::NOT_FOUND,
-        "BUSINESS_WORKSPACE_NOT_FOUND",
-        "business workspace not found",
-    )
-}
+/// See `workspaces::workspace_not_found`: the constructor lives in Core.
+pub(crate) use crate::workspaces::workspace_not_found;
 /// A closure of a record that is already closed, by a request that is not a replay
 /// of the closure that happened (no key, or a different one).
 fn already_closed() -> AppError {
