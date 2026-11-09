@@ -13,5 +13,10 @@ export default defineConfig({
       '/internal': 'http://127.0.0.1:18181',
     },
   },
+  // Assets are emitted under this application's own base (G14.2). Both
+  // applications are served from one origin, so Vite's default `/assets` would be
+  // answered by whichever bundle root won - and the other application's hashed
+  // files would 404, leaving a page that loads and renders nothing.
+  base: '/admin/',
   build: { outDir: 'dist', sourcemap: false },
 });

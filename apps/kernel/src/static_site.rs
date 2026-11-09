@@ -56,6 +56,9 @@ fn legacy_entry_redirect(path: &str, query: Option<&str>) -> Option<String> {
 }
 
 const REVALIDATE_CACHE: &str = "no-cache";
+/// The base the Platform Console's bundle is emitted under. Kept in step with
+/// `base` in apps/platform-console/vite.config.ts.
+const PRIMARY_BASE: &str = "/admin";
 
 /// Path prefixes the client router owns; each is answered `200` with the shell.
 ///
@@ -158,12 +161,42 @@ impl StaticSite {
         // never against the primary one: the two have different `index.html`
         // files, and picking the wrong one mounts the wrong router.
         if let Some(mount) = self.extra.iter().find(|mount| mount.owns(path)) {
-            return resolve_in(&mount.root, &mount.shell, path, true).await;
+            // The mount's own prefix is part of the URL, not of the bundle: a
+            // build emitted under `base: '/app/'` writes `/app/assets/...` into
+            // its shell, and the file on disk is `<root>/assets/...`. Stripping
+            // here is what makes the two agree. Without it every asset of a
+            // mounted application 404s - the page loads and renders nothing.
+            let inner = path
+                .strip_prefix(&mount.prefix)
+                .filter(|rest| !rest.is_empty())
+                .unwrap_or("/");
+            return resolve_in(&mount.root, &mount.shell, inner, true).await;
         }
         self.resolve_primary(path).await
     }
 
     async fn resolve_primary(&self, path: &str) -> Target {
+        // The primary bundle is emitted with `base: '/admin/'` for the same
+        // reason the ops one is: two applications share an origin. A file is
+        // therefore addressed as `/admin/assets/x` while living at
+        // `<root>/assets/x`, so the base is stripped before the lookup.
+        // Two spellings reach the same bundle: a FILE is addressed under the
+        // bundle's base (`/admin/assets/x` -> `<root>/assets/x`), while a CLIENT
+        // ROUTE keeps its public form (`/admin/overview`, `/admin/plugins/x`).
+        // Trying the base-stripped path first and falling back to the original
+        // keeps both working; stripping unconditionally made every console route
+        // 404 (`/admin/overview` -> `/overview`, which is nobody's route).
+        if let Some(rest) = path.strip_prefix(PRIMARY_BASE) {
+            let rest = if rest.is_empty() { "/" } else { rest };
+            if let Some(relative) = relative_path(rest) {
+                if !relative.as_os_str().is_empty() {
+                    let candidate = self.root.join(&relative);
+                    if is_file(&candidate).await {
+                        return Target::File(candidate);
+                    }
+                }
+            }
+        }
         let Some(relative) = relative_path(path) else {
             return Target::Missing;
         };
@@ -286,7 +319,13 @@ async fn serve(State(site): State<StaticSite>, request: Request, next: Next) -> 
 
     // The shell is answered here rather than by `ServeDir`: a client route and a
     // missing file look identical to a directory lookup.
-    let mut response = if shell {
+    // Serve the file we RESOLVED, not the URI we received. `next.run` hands the
+    // original path to `ServeDir`, which for a base-mounted bundle
+    // (`/admin/assets/x`) looks for `<root>/admin/assets/x` and answers 404 even
+    // though `<root>/assets/x` is the file that exists. Resolving and then
+    // delegating only works when the URL and the disk layout are identical;
+    // they are not once an application sets a Vite `base`.
+    let mut response = if shell || is_file(&file).await {
         serve_file(&file, request).await
     } else {
         next.run(request).await
@@ -488,6 +527,44 @@ mod tests {
 
     async fn get(app: &Router, path: &str) -> Response {
         request(app, Method::GET, path, &[]).await
+    }
+
+    /// A base-mounted bundle addresses its own assets under the base
+    /// (`/admin/assets/x`, `/app/assets/x`) while the files live at
+    /// `<root>/assets/x`. Resolving the file and then handing the ORIGINAL URI to
+    /// `ServeDir` answered 404 for every one of them: the page loaded, its CSS and
+    /// JS did not, and the result was a blank document whose components "did not
+    /// exist". This is the shape a split breaks in, so it is asserted.
+    #[tokio::test]
+    async fn assets_of_a_base_mounted_bundle_resolve_under_their_base() {
+        let fixture = Fixture::new("base-assets").with_second_bundle("base-assets");
+        let app = fixture.app();
+
+        // The primary bundle's hashed asset, addressed under /admin.
+        let response = get(&app, "/admin/assets/index-abc123.js").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "a primary-bundle asset must resolve under its base, not only at /assets"
+        );
+
+        // The mounted bundle's asset, addressed under /app.
+        let response = get(&app, "/app/assets/ops-entry.js").await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "a mounted bundle's asset must resolve inside its own root"
+        );
+
+        // The base-stripped spelling keeps working for the primary bundle.
+        assert_eq!(
+            get(&app, "/assets/index-abc123.js").await.status(),
+            StatusCode::OK
+        );
+
+        // A client route under the base still returns that bundle's shell.
+        let shell = read_body(get(&app, "/admin/overview").await).await;
+        assert!(String::from_utf8_lossy(&shell).contains("/assets/index-abc123.js"));
     }
 
     /// A path recorded under the briefly-used `/console` base still lands on the
