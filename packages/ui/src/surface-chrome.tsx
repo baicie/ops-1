@@ -165,10 +165,16 @@ function SurfaceSwitcher({ surface, onNavigate }: { surface: Surface; onNavigate
   if (!canEnterSurface(access, other)) return null;
   return (
     <div className="user-menu-switch" role="group" aria-label={t('surface.switch.label')}>
-      <Link
+      {/* A plain anchor, not a <Link>: the two surfaces are separate BUNDLES.
+          A client-side navigation would change the URL while keeping the current
+          application's router mounted - the target application's JavaScript never
+          loads, and the user lands on a path its own router would have handled but
+          whose components do not exist here. Crossing the boundary is a document
+          navigation by definition (ADR-022 section 2.7). */}
+      <a
         className="user-menu-item"
         role="menuitem"
-        to={surfaceEntryPath(other)}
+        href={surfaceEntryPath(other)}
         onClick={onNavigate}
         data-testid={other === 'admin' ? 'surface-switch-admin' : 'surface-switch-workspace'}
       >
@@ -177,7 +183,7 @@ function SurfaceSwitcher({ surface, onNavigate }: { surface: Surface; onNavigate
           <strong>{other === 'admin' ? t('surface.admin.name') : t('surface.workspace.name')}</strong>
           <small>{other === 'admin' ? t('surface.switch.toAdminHint') : t('surface.switch.toWorkspaceHint')}</small>
         </span>
-      </Link>
+      </a>
     </div>
   );
 }
@@ -337,9 +343,9 @@ export function ForbiddenPage() {
               <Icon name="refresh" size={15} /> {retrying ? t('forbidden.retry.working') : t('action.retry')}
             </Button>
             {canReachWorkspace ? (
-              <Link className={buttonVariants({ variant: 'secondary' })} to={surfaceEntryPath('workspace')} data-testid="forbidden-to-workspace">
+              <a className={buttonVariants({ variant: 'secondary' })} href={surfaceEntryPath('workspace')} data-testid="forbidden-to-workspace">
                 {t('forbidden.action.workspace')}
-              </Link>
+              </a>
             ) : null}
             <Button
               variant="secondary"

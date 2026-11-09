@@ -1,9 +1,14 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@opsweave/platform-client/auth';
 import { ExtensionsProvider, ExtensionRoute } from '@opsweave/ui/extensions';
 import { ToastProvider } from '@opsweave/ui/Ui';
 import { TooltipProvider } from '@opsweave/ui/tooltip';
 import { ForbiddenPage } from '@opsweave/ui/surface-chrome';
+import {
+  canEnterSurface,
+  legacyRedirect,
+  surfaceEntryPath,
+} from '@opsweave/platform-client/surface';
 import { useT } from '@opsweave/platform-client/i18n';
 import { AdminShell } from './AdminShell';
 import { LoginPage } from '@opsweave/ui/LoginPage';
@@ -57,6 +62,44 @@ function RequirePlatformAccess() {
   return <Outlet />;
 }
 
+/**
+ * The bare `/` — the one path that has to choose.
+ *
+ * Signing in is a platform act, so `/` is served by the console's bundle; but a
+ * caller may be granted the workspace surface and not the console. Sending that
+ * account to /admin/overview would show it a 403 for a product it never asked
+ * for. The grant decides, and when the destination is the OTHER application
+ * (`/app/...`) a full page navigation is what mounts its router - the two
+ * bundles are separate documents, so there is no client-side route to follow.
+ */
+function SurfaceEntry() {
+  const { user, access, loading } = useAuth();
+  if (loading) return <Splash />;
+  if (!user) return <Navigate to="/admin/login" replace />;
+  if (canEnterSurface(access, 'admin')) {
+    return <Navigate to={surfaceEntryPath('admin')} replace />;
+  }
+  if (canEnterSurface(access, 'workspace')) {
+    window.location.replace(surfaceEntryPath('workspace'));
+    return <Splash />;
+  }
+  return <Navigate to="/admin/403" replace />;
+}
+
+/**
+ * Pre-G04 bookmarks: `/nodes`, `/plugins`, `/jobs` and friends.
+ *
+ * The redirect table lives in the shared client (`legacyRedirect`) because it is
+ * a compatibility promise about URLs, not about a component. A closed list, so
+ * anything unmapped stays a 404 rather than being swallowed into a page.
+ */
+function LegacyOrNotFound() {
+  const { pathname, search } = useLocation();
+  const target = legacyRedirect(pathname, search);
+  if (target) return <Navigate to={target} replace />;
+  return <NotFoundPage />;
+}
+
 export function App() {
   return (
     <TooltipProvider>
@@ -67,6 +110,9 @@ export function App() {
               <Routes>
                 <Route path="/admin/login" element={<LoginPage />} />
                 <Route element={<RequireAuth />}>
+                  {/* `/` is the only path that has to choose between the two
+                      applications, and the grant decides. */}
+                  <Route path="/" element={<SurfaceEntry />} />
                   <Route path="/admin/403" element={<ForbiddenPage />} />
                   <Route element={<RequirePlatformAccess />}>
                     <Route path="/admin" element={<AdminShell />}>
@@ -95,6 +141,7 @@ export function App() {
                     </Route>
                   </Route>
                 </Route>
+                <Route path="*" element={<LegacyOrNotFound />} />
               </Routes>
             </ExtensionsProvider>
           </ToastProvider>
