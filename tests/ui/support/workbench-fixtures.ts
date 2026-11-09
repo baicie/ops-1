@@ -82,6 +82,38 @@ function historyPayload(nodeId: string) {
 }
 
 export async function installFixtures(page: Page) {
+  // G14.4: the ops observability page no longer reads the platform console's
+  // /api/v1/nodes - it reads its own granted projection, which carries only the
+  // health fields. Stubbing the platform endpoint alone left the page polling an
+  // unstubbed URL and stuck on `loading`, which the a11y spec then timed out on.
+  // Same fixture data, projected the way the server projects it.
+  await page.route('**/api/v1/apps/opsweave.ops/observability/fleet**', async (route) => {
+    const nodes = NODES.map((spec) => {
+      const full = nodePayload(spec);
+      return {
+        id: full.id,
+        name: full.name,
+        status: full.status,
+        lastSeenAt: full.lastSeenAt,
+        stale: spec.stale,
+        instancesReady: full.instancesReady,
+        instancesTotal: full.instancesTotal,
+        resourceSnapshot: full.resourceSnapshot,
+        os: full.os,
+        arch: full.arch,
+      };
+    });
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        nodes,
+        staleAfterSeconds: 90,
+        covers: ['node liveness and staleness'],
+        doesNotCover: ['distributed traces'],
+      }),
+    });
+  });
   await page.route('**/api/v1/nodes**', async (route) => {
     const url = new URL(route.request().url());
     const match = url.pathname.match(/\/api\/v1\/nodes\/([^/]+)(\/.*)?$/);
