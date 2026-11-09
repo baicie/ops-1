@@ -64,23 +64,24 @@ function RequirePlatformAccess() {
 }
 
 /**
- * The bare `/` — the one path that has to choose.
+ * The bare `/` for a caller that is ALREADY signed in.
  *
  * Signing in is a platform act, so `/` is served by the console's bundle; but a
- * caller may be granted the workspace surface and not the console. Sending that
- * account to /admin/overview would show it a 403 for a product it never asked
- * for. The grant decides, and when the destination is the OTHER application
- * (`/app/...`) a full page navigation is what mounts its router - the two
- * bundles are separate documents, so there is no client-side route to follow.
+ * caller may be granted the workspace surface and not the console.
+ *
+ * The login form no longer routes through here - `LoginPage` picks its
+ * destination from the grant the login response carried, exactly once, so a
+ * fresh sign-in takes one navigation. What remains is the case a sign-in cannot
+ * cover: a reload or a bookmark on `/` with a session already established.
+ *
+ * That case still needs a document navigation (the two bundles are separate
+ * documents, so there is no client-side route into `/app/...`), and it belongs
+ * in an effect rather than the render body: `location.replace` during render
+ * re-fires on every re-render, and a second one interrupts a navigation already
+ * in flight. The effect runs once, after the decision is final.
  */
 function SurfaceEntry() {
   const { user, access, loading } = useAuth();
-  // A workspace-only caller is sent into the OTHER bundle. That is a document
-  // navigation, and it belongs in an effect, not in the render body: a
-  // `location.replace` executed during render runs again on every re-render, and
-  // a second one racing a navigation the user (or a test) already started
-  // interrupts it - `Navigation to /app/incidents is interrupted by another
-  // navigation to /app/home`. The effect runs once, after the decision is made.
   const externalTarget =
     !loading && user && !canEnterSurface(access, 'admin') && canEnterSurface(access, 'workspace')
       ? surfaceEntryPath('workspace')
@@ -120,7 +121,7 @@ export function App() {
           <ToastProvider>
             <ExtensionsProvider>
               <Routes>
-                <Route path="/admin/login" element={<LoginPage />} />
+                <Route path="/admin/login" element={<LoginPage surface="admin" />} />
                 <Route element={<RequireAuth />}>
                   {/* `/` is the only path that has to choose between the two
                       applications, and the grant decides. */}
