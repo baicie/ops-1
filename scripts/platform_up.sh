@@ -841,11 +841,28 @@ cmd_switch_image() {
   require_docker
   [ -n "$image" ] || die "usage: $label <image-tag-or-@sha256-digest>"
   say "$label to $image"
-  OPSWEAVE_IMAGE="$image" compose pull kernel node
+  # The image may be local (a build) or remote (a registry ref). Pulling a local
+  # tag fails with "pull access denied", which is not an error in that case: the
+  # switch is decided by whether the image exists in the daemon.
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    ok "$image is present locally; not pulling"
+  else
+    compose pull kernel node || die "could not pull $image"
+  fi
+
+  # Kernel and node are replaced WITHOUT their dependencies, in that order: the
+  # node needs a live kernel to re-register against, and recreating postgres or
+  # the registry would drop the data the upgrade is supposed to preserve.
   OPSWEAVE_IMAGE="$image" compose up -d --no-deps kernel
   wait_healthy kernel
   OPSWEAVE_IMAGE="$image" compose up -d --no-deps node
-  wait_healthy node
+  # The node is a separate failure domain: on a host where it cannot reach the
+  # docker socket it never becomes healthy, and that must not turn a successful
+  # kernel switch into a failed $label (same rule as install and restore).
+  if ! wait_healthy_soft node 120; then
+    NODE_STATE="unhealthy"
+    warn "the node did not become healthy after the $label; the kernel switch itself succeeded"
+  fi
 
   local code
   code="$(http_code "$URL/app")"
