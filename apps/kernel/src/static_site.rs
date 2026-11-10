@@ -820,6 +820,8 @@ mod tests {
         }
     }
 
+    /// The console's own client routes. `/app/*` is split out below because it is
+    /// the Ops application's prefix and is build-dependent (P001-A).
     #[tokio::test]
     async fn client_routes_answer_200_with_the_shell() {
         let fixture = Fixture::new("client-routes");
@@ -831,8 +833,6 @@ mod tests {
             "/admin",
             "/admin/overview",
             "/admin/plugins/demo",
-            "/app",
-            "/app/home",
             // `/login` moved out of this list in G14.2: it used to be answered with
             // the shell because one bundle rendered everything. Now each
             // application serves `/login` inside its own base, so the bare path has
@@ -866,6 +866,30 @@ mod tests {
                 "{path}"
             );
             assert_eq!(read_body(response).await, SHELL.as_bytes(), "{path}");
+        }
+    }
+
+    /// P001-A: `/app` is the Ops application's prefix.
+    ///
+    /// The platform-only build refuses it at resolve time, because answering it
+    /// with the CONSOLE shell would mount a router that owns none of those routes
+    /// and render a page that loads and does nothing. Both directions are asserted
+    /// so neither the refusal nor the full build's serving can regress silently.
+    #[tokio::test]
+    async fn the_ops_prefix_answers_according_to_what_this_build_contains() {
+        let fixture = Fixture::new("ops-prefix");
+        let app = fixture.app();
+
+        for path in ["/app", "/app/home", "/app/incidents"] {
+            let response = get(&app, path).await;
+            #[cfg(feature = "business-ops")]
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            #[cfg(not(feature = "business-ops"))]
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "{path} must not be served by a platform-only build"
+            );
         }
     }
 

@@ -110,7 +110,21 @@ and then switched binaries still has `opsweave.ops` rows and grants. Reporting t
 as enabled advertises a surface the binary cannot route.
 
 `applications::servable_application` is now the gate: an application is reported (and
-usable) only when the row says enabled **and** this binary contains its handlers. The
+usable) only when the row says enabled **and** this binary contains its handlers.
+
+It is a **closed list** (`BUILT_APPLICATIONS`), not a subtraction. The first version
+of this change said "everything except `opsweave.ops` when the feature is off", which
+is a blacklist: it answers `true` for every application id nobody has thought of yet,
+so a typo, a future application registered as data, or an invented id would all be
+advertised by a binary that routes none of them. A test caught it
+(`a_missing_application_is_refused_before_any_grant`, which now asserts an unknown id
+is refused in **both** builds). With a closed list the failure mode of forgetting to
+register an application is "refused", never "advertised".
+
+The `test.` prefix stays servable because those ids are this crate's own fixtures,
+used to exercise rules about the *row* (enabled/disabled, grant/no grant) rather than
+about the build. No real id can start with `test.` — migration `0035`'s CHECK requires
+a lowercase dotted name and every built-in uses the `opsweave.` prefix. The
 rows are deliberately **not** deleted or disabled — application registration is
 deployment data (ADR-022 §2.4), and rolling back to the full binary must restore the
 surface without a re-seed.
@@ -159,23 +173,40 @@ All commands below were run in this checkout. Nothing is inferred.
 
 | Suite | Result |
 |---|---|
-| `cargo test -p opsweave-kernel` (full product) | **279 passed**, 0 failed (was 276 on `main`; +3 signing tests) |
-| `cargo test -p opsweave-kernel --no-default-features` | **113 passed**, 0 failed |
-| Repeat runs, full product ×5 | 279/279 each time |
-| Repeat runs, platform-only ×10 | 113/113 each time |
+| `cargo test -p opsweave-kernel` (full product) | **281 passed**, 0 failed (was 276 on `main`; +3 signing, +2 servability) |
+| `cargo test -p opsweave-kernel --no-default-features` | **114 passed**, 0 failed |
+| `cargo test --locked --workspace` | **pass** (all crates) |
+| Repeat runs, full product ×5, platform-only ×3 | all green each time |
+| **both against a real PostgreSQL** (`OPSWEAVE_REQUIRE_TEST_DATABASE=1`) | **281 / 114**, 0 failed |
+
+The database-backed runs matter: an earlier revision of this branch passed
+locally only because `OPSWEAVE_TEST_DATABASE_URL` was unset, so every DB test
+returned early. CI caught two failures that the local run could not see - one
+assertion that assumed `/app` is always served, and one that assumed
+`APPLICATION_FORBIDDEN` is the only refusal. Both are now asserted **per build**,
+which is what the boundary actually means.
 
 Business-only suites (`incidents_tests` 74, `investigations_tests` 43, automation
 worker 17, telemetry 15, …) **still exist and still run** in the full product. None
 was deleted or skipped to make the light build pass; the light build simply does not
 contain them, and the heavy build runs all of them.
 
-**One test had to be gated, and why it is not a relaxation.** `scope`'s
-`the_old_predicate_is_gone_from_the_kernel` reads `incidents.rs` through
-`include_str!`. In a build where that file's module is not compiled, it is a
-source-analysis test about a file the build does not ship. It is gated on
-`business-ops`, so **the product build still runs it against the same file**. The same
-is true of `audit`'s ledger/incident parity test, which compares two implementations
-and one of them is the Ops module.
+**Four tests are gated on `business-ops`, and none is a relaxation.** Each asserts
+something about an Ops module that a platform-only build does not contain:
+
+| Test | Why it cannot run in the light build |
+|---|---|
+| `scope::the_old_predicate_is_gone_from_the_kernel` | reads `incidents.rs` via `include_str!`; the file's module is not compiled |
+| `audit::the_ledger_scope_agrees_with_the_incident_read_predicate` | compares the ledger against `incidents::incident_status` |
+| `applications::database_tests::an_admin_role_does_not_imply_an_application_grant` | exercises the grant ruling through `OPS_APPLICATION`, which the light build refuses as not-built before any grant is read |
+| `static_site::client_routes_answer_200_with_the_shell`'s `/app` entries | `/app` is the Ops prefix; the light build must answer 404 |
+
+**The product build still runs every one of them.** And each gated rule has a
+counterpart asserted in **both** builds, so the light build is not left untested on
+the same subject: `the_ops_prefix_answers_according_to_what_this_build_contains`
+asserts 200-vs-404 per build, and
+`a_missing_application_is_refused_before_any_grant` asserts the
+`APPLICATION_NOT_BUILT` ruling in either.
 
 ### 3.3 Real boot — platform-only
 

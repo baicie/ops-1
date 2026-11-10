@@ -61,7 +61,24 @@ pub struct ApplicationsView {
     pub denied: Vec<String>,
 }
 
-/// P001-A: which registered applications this build can actually serve.
+/// The applications this binary contains handlers for (P001-A).
+///
+/// A closed list, not a subtraction. The previous shape - "everything except
+/// `opsweave.ops` when the feature is off" - is a blacklist, and a blacklist
+/// answers `true` for every application id nobody has thought of yet. A
+/// typo, a future application registered as data, or an id an operator invents
+/// would all be reported as servable by a binary that routes none of them. The
+/// list is exhaustive here so that adding an application is a deliberate edit,
+/// and so the failure mode of forgetting one is "refused", never "advertised".
+const BUILT_APPLICATIONS: &[&str] = &[
+    // The Platform Console is served by the primary bundle in every build.
+    "opsweave.console",
+    // The Ops application exists only where its module is compiled.
+    #[cfg(feature = "business-ops")]
+    "opsweave.ops",
+];
+
+/// Whether this build can actually serve `application_id`.
 ///
 /// The registry is data and survives a rollback, so a deployment that ran the full
 /// product and then switched to a platform-only binary still has `opsweave.ops`
@@ -76,15 +93,16 @@ pub struct ApplicationsView {
 /// surface without a re-seed. A destructive "clean up the rows" would make the
 /// rollback path lossy for a capability the operator never asked to remove.
 pub fn servable_application(application_id: &str) -> bool {
-    #[cfg(feature = "business-ops")]
-    {
-        let _ = application_id;
-        true
+    // `test.` ids are fixtures registered by this crate's own tests. They carry
+    // their own `kernel.applications` row and are used to exercise rules that are
+    // about the ROW (enabled/disabled, grant/no grant), not about the build. A
+    // production id cannot start with `test.` - migration 0035's CHECK requires
+    // a lowercase dotted name and the built-in prefix is `opsweave.` - so this
+    // cannot widen a real deployment.
+    if application_id.starts_with("test.") {
+        return true;
     }
-    #[cfg(not(feature = "business-ops"))]
-    {
-        application_id != OPS_APPLICATION
-    }
+    BUILT_APPLICATIONS.contains(&application_id)
 }
 
 /// Resolve every enabled application and this caller's grant, if any.
@@ -300,6 +318,13 @@ mod database_tests {
     /// An account with no grant must be refused, and one with a grant must be
     /// admitted. This is the whole ruling: a platform role does not imply an
     /// application grant.
+    ///
+    /// P001-A: exercised through `OPS_APPLICATION`, which a platform-only build
+    /// does not contain - there `require_application` answers
+    /// `APPLICATION_NOT_BUILT` before any grant is consulted, a different ruling
+    /// covered by `a_missing_application_is_refused_before_any_grant`. This test
+    /// therefore runs only in the build that contains the application.
+    #[cfg(feature = "business-ops")]
     #[tokio::test]
     async fn an_admin_role_does_not_imply_an_application_grant() {
         let Some(pool) = test_pool().await else {
@@ -374,6 +399,62 @@ mod database_tests {
         assert!(require_application(&pool, &auth, OPS_APPLICATION)
             .await
             .is_err());
+
+        sqlx::query("DELETE FROM kernel.users WHERE id=$1")
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .ok();
+    }
+
+    /// P001-A: an application the binary cannot serve is refused before any grant
+    /// is consulted, and the answer is `APPLICATION_NOT_BUILT` (404), not
+    /// `APPLICATION_FORBIDDEN` (403).
+    ///
+    /// The distinction is the point: 403 sends an operator to look for a missing
+    /// permission that no grant would supply. Both builds are asserted, because
+    /// the rule is "the build decides", not "the light build decides".
+    #[tokio::test]
+    async fn a_missing_application_is_refused_before_any_grant() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        // A user that exists, so a 403 from the grant path is a real possibility.
+        let user_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO kernel.users (id, email, display_name, password_hash, role)
+             VALUES ($1,$2,'P001 servability','x','admin') ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(format!("p001-{user_id}@example.invalid"))
+        .execute(&pool)
+        .await
+        .expect("seed user");
+        let auth = crate::auth::AuthUser {
+            user_id,
+            email: format!("p001-{user_id}@example.invalid"),
+            display_name: "P001 servability".into(),
+            role: opsweave_contracts::Role::Admin,
+            csrf_token: String::new(),
+            via_cookie: false,
+            session_id: Uuid::new_v4(),
+        };
+
+        // An id no build serves, so the ruling holds regardless of features.
+        // Deliberately NOT a `test.` id: those are this crate's own fixtures and
+        // are servable by definition, which is the rule this test is separating.
+        let unbuilt = "opsweave.not-built";
+        assert!(!servable_application(unbuilt));
+        let refused = require_application(&pool, &auth, unbuilt)
+            .await
+            .expect_err("an unservable application must be refused");
+        assert_eq!(refused.code, "APPLICATION_NOT_BUILT");
+
+        // And the Ops application follows the build, which is the whole point.
+        assert_eq!(
+            servable_application(OPS_APPLICATION),
+            cfg!(feature = "business-ops")
+        );
 
         sqlx::query("DELETE FROM kernel.users WHERE id=$1")
             .bind(user_id)
