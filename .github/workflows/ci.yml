@@ -524,7 +524,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --fail-if-no-match --filter @opsweave/platform-console build
+      # Both bundles: the light-build probe needs the console, and the
+      # full-product probe needs the ops shell to prove /app is served BY it.
+      # Building only the console is what made the full-product step fail with
+      # `cp: cannot stat 'apps/ops-web/dist'` on its first CI run.
+      - run: |
+          set -eu
+          pnpm --fail-if-no-match --filter @opsweave/platform-console build
+          pnpm --fail-if-no-match --filter @opsweave/ops-web build
       - name: Build both feature sets
         run: |
           set -eu
