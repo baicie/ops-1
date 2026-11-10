@@ -484,3 +484,129 @@ jobs:
         with: { python-version: '3.12' }
       - run: pip install jsonschema pyyaml
       - run: python3 tests/contract/validate_contracts.py
+
+  # P001-A: the platform-only boundary is a claim until something boots it.
+  #
+  # Why this is its own job and not a line in `rust`: the `rust` job builds the
+  # DEFAULT features, so it cannot observe a build that excludes the Ops
+  # application. Without this, a change that reintroduced a `crate::incidents`
+  # reference in Core - or that left a business route mounted - would compile and
+  # pass every other job, and the platform-only release would be broken on the day
+  # someone tried to ship it.
+  #
+  # It runs against a real PostgreSQL because two of the assertions below are about
+  # what the binary does at startup and what it answers over HTTP, not about what
+  # it compiles to.
+  platform-only:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The console bundle is a *configuration input* to this job, not its
+      # subject: the probe asserts the console shell is still served from a
+      # platform-only binary. Building it here keeps the job self-contained
+      # instead of depending on another job's artifacts.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --fail-if-no-match --filter @opsweave/platform-console build
+      - name: Build both feature sets
+        run: |
+          set -eu
+          cargo build --locked -p opsweave-kernel
+          cargo build --locked -p opsweave-kernel --no-default-features
+      - name: Lint both feature sets
+        run: |
+          set -eu
+          cargo clippy --locked -p opsweave-kernel --all-targets -- -D warnings
+          cargo clippy --locked -p opsweave-kernel --no-default-features --all-targets -- -D warnings
+      - name: Test both feature sets
+        env:
+          OPSWEAVE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
+          OPSWEAVE_REQUIRE_TEST_DATABASE: "1"
+        run: |
+          set -eu
+          cargo test --locked -p opsweave-kernel
+          cargo test --locked -p opsweave-kernel --no-default-features
+      # The binary is the evidence. A route that is merely "not linked into the UI"
+      # still answers; these probes are what tell the difference.
+      - name: Boot the platform-only binary and probe its boundary
+        run: |
+          set -eu
+          cargo build -q --locked -p opsweave-kernel --no-default-features
+          mkdir -p /tmp/p001/data
+          OPSWEAVE_BIND=127.0.0.1:19081 \
+          OPSWEAVE_DATA_DIR=/tmp/p001/data \
+          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable \
+          OPSWEAVE_WEB_DIST=apps/platform-console/dist \
+          OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=platform-only@example.invalid \
+          OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')" \
+          ./target/debug/opsweave-kernel > /tmp/p001/kernel.log 2>&1 &
+          echo $! > /tmp/p001/kernel.pid
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:19081/livez >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          status() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
+          B=http://127.0.0.1:19081
+
+          fail() { echo "::error::$1"; echo "--- kernel log ---"; tail -50 /tmp/p001/kernel.log; exit 1; }
+
+          # The platform's own surface must be present.
+          [ "$(status "$B/livez")" = "200" ]        || fail "/livez is not 200 on a platform-only build"
+          [ "$(status "$B/api/v1/version")" = "200" ] || fail "/api/v1/version is not 200"
+          [ "$(status "$B/")" = "200" ]             || fail "the console shell is not served"
+          [ "$(status "$B/admin/overview")" = "200" ] || fail "a console route is not served"
+
+          # The business surface must be absent, and must SAY it is absent rather
+          # than pretending the caller lacks a permission.
+          [ "$(status -X POST "$B/api/v1/telemetry/events")" = "404" ] \
+            || fail "the event ingest route still answers on a platform-only build"
+          body=$(curl -sS -X POST "$B/api/v1/telemetry/events")
+          case "$body" in
+            *BUSINESS_ROUTE_NOT_BUILT*) ;;
+            *) fail "the ingest 404 does not carry BUSINESS_ROUTE_NOT_BUILT: $body" ;;
+          esac
+
+          # `/app` is the Ops application's prefix. Answering it with the console
+          # shell renders a page that owns none of its routes.
+          [ "$(status "$B/app/incidents")" = "404" ] || fail "/app/incidents is not 404"
+          [ "$(status "$B/app")" = "404" ]           || fail "/app is not 404"
+
+          # No business worker ran. The line is emitted by automation_worker::spawn.
+          if grep -q "automation job worker" /tmp/p001/kernel.log; then
+            fail "the automation worker started on a platform-only build"
+          fi
+
+          # The registered application the binary cannot serve must not be
+          # advertised. Login first: the registry read requires a session.
+          jar=/tmp/p001/jar
+          curl -sS -c "$jar" -X POST -H 'content-type: application/json' \
+            -d "{\"email\":\"platform-only@example.invalid\",\"password\":\"$OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD\"}" \
+            "$B/api/v1/auth/login" >/dev/null || fail "the bootstrap admin could not sign in"
+          apps=$(curl -sS -b "$jar" "$B/api/v1/applications")
+          case "$apps" in
+            *opsweave.ops*) fail "opsweave.ops is advertised by a platform-only build: $apps" ;;
+          esac
+          case "$apps" in
+            *opsweave.console*) ;;
+            *) fail "opsweave.console is missing from the registry: $apps" ;;
+          esac
+
+          kill "$(cat /tmp/p001/kernel.pid)" 2>/dev/null || true
+          echo "platform-only boundary verified"

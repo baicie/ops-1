@@ -60,6 +60,15 @@ const REVALIDATE_CACHE: &str = "no-cache";
 /// `base` in apps/platform-console/vite.config.ts.
 const PRIMARY_BASE: &str = "/admin";
 
+/// `/app` is the Ops application's own surface. A platform-only build has no such
+/// application, so it must not answer that prefix with the CONSOLE shell: the page
+/// would render, mount the console router under a prefix it does not own, and show
+/// a 404 page that looks like a bug. The brief forbids exactly this substitution -
+/// a rendered page standing in for a capability. The prefix is therefore refused
+/// at resolve time in that build (see `resolve_primary`).
+#[cfg(not(feature = "business-ops"))]
+const OPS_SURFACE_PREFIX: &str = "/app";
+
 /// Path prefixes the client router owns; each is answered `200` with the shell.
 ///
 /// A closed table rather than "every path that is not a file": a request for a
@@ -195,6 +204,22 @@ impl StaticSite {
                         return Target::File(candidate);
                     }
                 }
+            }
+        }
+        // P001-A: a platform-only build does not serve the Ops application's
+        // prefix at all. Without this, the console shell answered `/app/...` with
+        // 200 and the browser mounted a router that owns none of those routes -
+        // a page that renders and does nothing, which is the failure mode this
+        // phase exists to remove.
+        #[cfg(not(feature = "business-ops"))]
+        {
+            let trimmed = path.trim_end_matches('/');
+            if trimmed == OPS_SURFACE_PREFIX
+                || trimmed
+                    .strip_prefix(OPS_SURFACE_PREFIX)
+                    .is_some_and(|rest| rest.starts_with('/'))
+            {
+                return Target::Missing;
             }
         }
         let Some(relative) = relative_path(path) else {

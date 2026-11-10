@@ -17,16 +17,23 @@
 //! Every route here is either admin-gated (a write) or scoped to the caller's own
 //! memberships (a read). No route lets a caller name a scope it does not already hold.
 
-use crate::audit;
-use crate::auth::AuthUser;
-use crate::error::{AppError, AppResult};
-use crate::state::AppState;
+use crate::error::AppError;
+#[cfg(feature = "business-ops")]
+use crate::error::AppResult;
+#[cfg(feature = "business-ops")]
+use crate::{audit, auth::AuthUser, state::AppState};
+#[cfg(feature = "business-ops")]
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+#[cfg(feature = "business-ops")]
 use axum::Json;
+#[cfg(feature = "business-ops")]
 use chrono::{DateTime, Utc};
+#[cfg(feature = "business-ops")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "business-ops")]
 use sqlx::FromRow;
+#[cfg(feature = "business-ops")]
 use uuid::Uuid;
 
 /// A business workspace the caller named but cannot enter. 404 and not 403, for the
@@ -38,6 +45,7 @@ use uuid::Uuid;
 /// owns workspace membership depend on the operations domain to build a 404 —
 /// the dependency direction this phase exists to fix, and a constructor that
 /// never needed the domain in the first place.
+#[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
 pub(crate) fn workspace_not_found() -> AppError {
     AppError::new(
         StatusCode::NOT_FOUND,
@@ -49,8 +57,10 @@ pub(crate) fn workspace_not_found() -> AppError {
 /// The subject type membership changes are recorded under. Deliberately its own type
 /// rather than folded into user or workspace writes: who could read what, and when that
 /// changed, is the question this whole phase is about.
+#[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
 pub(crate) const MEMBER_SUBJECT_TYPE: &str = "business_workspace_member";
 
+#[cfg(feature = "business-ops")]
 #[derive(Debug, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct BusinessWorkspaceView {
@@ -64,6 +74,7 @@ pub struct BusinessWorkspaceView {
     pub member: bool,
 }
 
+#[cfg(feature = "business-ops")]
 #[derive(Debug, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct MembershipView {
@@ -72,6 +83,7 @@ pub struct MembershipView {
     pub granted_at: DateTime<Utc>,
 }
 
+#[cfg(feature = "business-ops")]
 /// GET /api/v1/business-workspaces
 ///
 /// The caller's own memberships, plus - for an admin - every workspace's metadata. The
@@ -109,6 +121,7 @@ pub async fn list_workspaces(
     Ok(Json(rows))
 }
 
+#[cfg(feature = "business-ops")]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateWorkspaceRequest {
@@ -116,6 +129,7 @@ pub struct CreateWorkspaceRequest {
     pub name: String,
 }
 
+#[cfg(feature = "business-ops")]
 /// POST /api/v1/business-workspaces (admin)
 pub async fn create_workspace(
     State(state): State<AppState>,
@@ -179,12 +193,14 @@ pub async fn create_workspace(
     ))
 }
 
+#[cfg(feature = "business-ops")]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GrantMemberRequest {
     pub user_id: Uuid,
 }
 
+#[cfg(feature = "business-ops")]
 /// POST /api/v1/business-workspaces/{workspace_id}/members (admin)
 ///
 /// Idempotent: a replay answers 200 with the membership that already exists, because the
@@ -269,6 +285,7 @@ pub async fn add_member(
     ))
 }
 
+#[cfg(feature = "business-ops")]
 /// DELETE /api/v1/business-workspaces/{workspace_id}/members/{user_id} (admin)
 ///
 /// The revocation. It takes effect on the next request and on the next tool call of an
@@ -322,6 +339,12 @@ pub async fn remove_member(
 /// 404 for a workspace id that does not exist, in the same shape an out-of-scope incident
 /// answers with: a caller that may not act on a workspace and a caller that named a
 /// workspace that does not exist get one answer, so neither can probe the other.
+///
+/// P001-A: called only by the workspace HTTP surface, so it is compiled with it.
+/// The `workflow` is that the boundary type (`workspace_not_found`) is in Core and
+/// the caller is not; a platform-only build has no endpoint that can name a
+/// workspace, so there is nothing here to call.
+#[cfg(feature = "business-ops")]
 pub(crate) async fn ensure_workspace(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     workspace_id: Uuid,

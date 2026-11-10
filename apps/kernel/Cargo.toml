@@ -4,6 +4,27 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# P001-A: the Ops business application (incident / evidence / verdict /
+# investigation / automation / telemetry ingest / ops fleet read).
+#
+# ON by default, so every existing build, test suite and deployment is unchanged.
+# Turning it OFF is what makes a Platform-only release: the modules below are not
+# compiled at all, their routes are not mounted, and no business background task
+# starts. This is a compile-time boundary, not a hidden menu - the handlers do not
+# exist in the binary, so there is nothing to reach.
+#
+#   cargo build -p opsweave-kernel --no-default-features
+#
+# What stays in a platform-only build on purpose: the durable job engine
+# (`jobs`) and the typed pipeline contract (`pipeline`) that it validates.
+# ADR-022 §2.1 assigns the generic job engine to Platform Core; the split
+# between that engine and the pipeline *business* capability is a larger
+# refactor recorded as G-30 in docs/acceptance/p001/00-baseline-audit.md, not
+# something this feature pretends to have done.
+default = ["business-ops"]
+business-ops = []
+
 [dependencies]
 opsweave-http-body-guard = { path = "../../crates/http-body-guard" }
 anyhow.workspace = true

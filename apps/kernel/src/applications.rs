@@ -30,6 +30,13 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 /// The operations application's identifier. Other applications are data.
+///
+/// P001-A keeps this in Core on purpose. It is a string, not a handler: the
+/// registry and the gate are generic (`require_application` takes any id), and
+/// this constant is the one value the Ops-owned middleware is wired with. Moving
+/// it to a business module would have had Core name the application from a
+/// distance instead of explicitly, which is worse for the boundary, not better.
+#[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
 pub const OPS_APPLICATION: &str = "opsweave.ops";
 
 /// One application as the caller is allowed to see it.
@@ -54,6 +61,32 @@ pub struct ApplicationsView {
     pub denied: Vec<String>,
 }
 
+/// P001-A: which registered applications this build can actually serve.
+///
+/// The registry is data and survives a rollback, so a deployment that ran the full
+/// product and then switched to a platform-only binary still has `opsweave.ops`
+/// rows and grants in its database. Reporting them as enabled would advertise a
+/// surface the binary cannot route - the same "rendered page for a capability that
+/// is not there" this phase removes. The gate is therefore the build, not the row:
+/// an application is enabled only if BOTH the row says so and this binary contains
+/// its handlers.
+///
+/// The row is deliberately NOT deleted or flipped here. Application registration is
+/// deployment data (ADR-022 §2.4), and a rollback to the full build must restore the
+/// surface without a re-seed. A destructive "clean up the rows" would make the
+/// rollback path lossy for a capability the operator never asked to remove.
+pub fn servable_application(application_id: &str) -> bool {
+    #[cfg(feature = "business-ops")]
+    {
+        let _ = application_id;
+        true
+    }
+    #[cfg(not(feature = "business-ops"))]
+    {
+        application_id != OPS_APPLICATION
+    }
+}
+
 /// Resolve every enabled application and this caller's grant, if any.
 pub async fn applications_for(pool: &PgPool, user_id: Uuid) -> AppResult<ApplicationsView> {
     let rows: Vec<(String, String, String, Option<Vec<String>>)> = sqlx::query_as(
@@ -72,6 +105,9 @@ pub async fn applications_for(pool: &PgPool, user_id: Uuid) -> AppResult<Applica
     let mut applications = Vec::new();
     let mut denied = Vec::new();
     for (application_id, display_name, surface_prefix, permissions) in rows {
+        if !servable_application(&application_id) {
+            continue;
+        }
         match permissions {
             Some(permissions) => applications.push(ApplicationAccess {
                 application_id,
@@ -96,11 +132,23 @@ pub async fn applications_for(pool: &PgPool, user_id: Uuid) -> AppResult<Applica
 /// in the console. Pretending it does not exist would make an authorization
 /// decision indistinguishable from a typo. The workspace rule answers 404 for
 /// rows because a row's existence IS the secret; an application's is not.
+///
+/// P001-A: an application this BINARY cannot serve is refused with
+/// `APPLICATION_NOT_BUILT` (404) before any grant is consulted. It is not an
+/// authorization answer - no grant would change it - and answering 403 would send
+/// an operator to look for a missing permission that does not exist.
 pub async fn require_application(
     pool: &PgPool,
     auth: &AuthUser,
     application_id: &str,
 ) -> AppResult<ApplicationAccess> {
+    if !servable_application(application_id) {
+        return Err(AppError::new(
+            StatusCode::NOT_FOUND,
+            "APPLICATION_NOT_BUILT",
+            "this deployment does not contain that application",
+        ));
+    }
     let row: Option<(String, String, Vec<String>)> = sqlx::query_as(
         r#"
         SELECT a.display_name, a.surface_prefix, g.permissions
@@ -160,6 +208,7 @@ pub async fn require_application_permission(
 /// scoped and the legacy path, so the gate has to live on the route group rather
 /// than inside the handler. `AuthUser` is already in the request extensions by
 /// the time this runs - the auth middleware is outside this layer.
+#[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
 pub async fn require_ops_application(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: axum::extract::Request,

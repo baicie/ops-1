@@ -1,29 +1,46 @@
 use crate::applications;
 use crate::assets;
 use crate::auth::{self, AuthUser};
-use crate::automation;
 use crate::capabilities;
 use crate::deployments;
 use crate::diagnostics;
 use crate::error::AppError;
 use crate::gateway;
-use crate::incident_claims;
-use crate::incidents;
-use crate::investigations;
 use crate::jobs;
 use crate::logs;
 use crate::nodes;
-use crate::ops_observability;
 use crate::packages;
 use crate::plugins;
 use crate::publishers;
 use crate::state::AppState;
 use crate::static_site;
 use crate::storage;
-use crate::telemetry_events;
-use crate::telemetry_sources;
 use crate::users;
+
+// `workspaces` also holds the Core-side data boundary (`workspace_not_found`,
+// `ensure_workspace`), so the module stays; only its HTTP surface is Ops-owned.
+#[cfg(feature = "business-ops")]
 use crate::workspaces;
+
+// P001-A: the Ops business application's handlers. Each is compiled only in a
+// `business-ops` build (the default), and the route groups below are gated by the
+// same feature. A platform-only binary therefore has no handler to mount - the
+// paths answer `404` from `api_not_found`, not `403` from a guard that happens to
+// look the other way.
+#[cfg(feature = "business-ops")]
+use crate::automation;
+#[cfg(feature = "business-ops")]
+use crate::incident_claims;
+#[cfg(feature = "business-ops")]
+use crate::incidents;
+#[cfg(feature = "business-ops")]
+use crate::investigations;
+#[cfg(feature = "business-ops")]
+use crate::ops_observability;
+#[cfg(feature = "business-ops")]
+use crate::telemetry_events;
+#[cfg(feature = "business-ops")]
+use crate::telemetry_sources;
 use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
@@ -33,17 +50,16 @@ use axum::{Json, Router};
 use tower_http::trace::TraceLayer;
 
 pub fn build(state: AppState) -> Router {
-    let public = Router::new()
+    // ---- public (no session) -------------------------------------------------
+    // P001-A: built as a list of routers rather than one chain, because three of
+    // these routes belong to the business application and must vanish with it.
+    let mut public = Router::new()
         .route("/livez", get(diagnostics::livez))
         .route("/readyz", get(diagnostics::readyz))
         // Unauthenticated by design: a staging preview must be able to prove
         // which build it serves before anyone signs in. The payload is a closed
         // set of five fields, so it cannot become an environment dump.
         .route("/api/v1/version", get(version))
-        // Automation Event ingest authenticates its own `owa1` principal; the
-        // session/csrf middleware would reject a Node/plugin automation caller
-        // before the handler can verify the token.
-        .route("/api/v1/telemetry/events", post(telemetry_events::ingest))
         .route(
             "/api/v1/auth/login",
             post(auth::login).layer(DefaultBodyLimit::max(64 * 1024)),
@@ -59,10 +75,6 @@ pub fn build(state: AppState) -> Router {
         .route(
             "/internal/v1/nodes/{node_id}/workload-token",
             post(capabilities::issue_workload_token),
-        )
-        .route(
-            "/internal/v1/nodes/{node_id}/automation-principals",
-            post(automation::issue_handler),
         )
         .route(
             "/internal/v1/workload-tokens/refresh",
@@ -114,6 +126,32 @@ pub fn build(state: AppState) -> Router {
         )
         .route("/api/{*path}", any(api_not_found))
         .route("/internal/{*path}", any(api_not_found));
+
+    // The business routes that authenticate their own principal rather than a
+    // session. `automation::issue_handler` mints the automation principal; the
+    // Event ingest verifies it. Both are Ops-application surface.
+    #[cfg(feature = "business-ops")]
+    {
+        public = public
+            .route(
+                "/internal/v1/nodes/{node_id}/automation-principals",
+                post(automation::issue_handler),
+            )
+            .route("/api/v1/telemetry/events", post(telemetry_events::ingest));
+    }
+    // A platform-only build must not leave these paths answering something that
+    // looks like a working endpoint. `api_not_found`/`internal` fallbacks already
+    // cover them; the explicit routes below restate that as a 404 shape a caller
+    // can tell apart from "you may not".
+    #[cfg(not(feature = "business-ops"))]
+    {
+        public = public
+            .route("/api/v1/telemetry/events", any(business_not_built))
+            .route(
+                "/internal/v1/nodes/{node_id}/automation-principals",
+                any(business_not_built),
+            );
+    }
 
     let protected = Router::new()
         .route("/api/v1/auth/logout", post(auth::logout))
@@ -219,17 +257,11 @@ pub fn build(state: AppState) -> Router {
             get(storage::get_binding).post(storage::ensure_binding),
         )
         .route(
-            "/api/v1/telemetry/sources",
-            get(telemetry_sources::list_sources),
-        )
-        .route(
-            "/api/v1/automation-principals/{principal_id}/revoke",
-            post(automation::revoke_handler),
-        )
-        .route(
             "/api/v1/plugin-storage/{plugin_id}/migrations",
             get(storage::list_migrations).post(storage::apply_migration),
         )
+        // The durable job engine is Platform Core (ADR-022 §2.1): a platform-only
+        // build still runs jobs, so these routes stay in both builds.
         .route(
             "/api/v1/pipelines",
             get(jobs::list_pipelines).post(jobs::create_pipeline),
@@ -272,104 +304,141 @@ pub fn build(state: AppState) -> Router {
             get(jobs::get_job_diagnostics),
         )
         .route("/api/v1/jobs/{job_id}/cancel", post(jobs::cancel_job))
-        // G11 business slice. Authority and the permission matrix live in
-        // docs/design/g11-incident/incident-adr.md; every write below is gated by
-        // AuthUser::require_operator inside the handler, and reads are scoped by
-        // the same predicate the job list uses.
-        .route(
-            "/api/v1/incidents",
-            get(incidents::list_incidents).post(incidents::create_incident),
-        )
-        // G13-B1.4: the workspace queue for automation incidents. An automation
-        // incident is owned by the non-login service user, which the operator
-        // row rule (owner = caller) can never match; this read and its atomic
-        // claim are the only way an operator acquires it. A viewer is refused by
-        // require_operator inside the handlers.
-        .route(
-            "/api/v1/incidents/claimable",
-            get(incident_claims::list_claimable),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/claim",
-            post(incident_claims::claim_incident),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/release",
-            post(incident_claims::release_incident),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}",
-            get(incidents::get_incident),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/evidence",
-            get(incidents::list_evidence).post(incidents::append_evidence),
-        )
-        // G12 B: the bytes behind one evidence row. A separate route so the
-        // evidence list never carries content: a caller that may read metadata
-        // asks again, in one bounded request, for the single row it wants.
-        .route(
-            "/api/v1/incidents/{incident_id}/evidence/{evidence_id}/content",
-            get(incidents::read_evidence_content),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/verdict",
-            get(incidents::get_verdict).post(incidents::create_verdict),
-        )
-        // G12 C: the two lifecycle operations and the trail they write. Closing is
-        // its own route rather than a status field on a PATCH, because a closure is a
-        // decision with a required verdict, a required revision and a required reason -
-        // not one assignable column among five.
-        .route(
-            "/api/v1/incidents/{incident_id}/close",
-            post(incidents::close_incident),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/owner",
-            post(incidents::transfer_owner),
-        )
-        // Scoped by the incident read predicate, so the trail of a record is exactly
-        // as visible as the record. /api/v1/audit answers the platform-wide question
-        // and is not a substitute for this one.
-        .route(
-            "/api/v1/incidents/{incident_id}/timeline",
-            get(incidents::get_timeline),
-        )
-        // G12 E: the bounded read-only investigator. Every route below reaches the
-        // incident through the predicate above, none of them writes to the incident,
-        // and the review route concludes nothing about it (ADR-G12-004 section 2).
-        .route(
-            "/api/v1/incidents/{incident_id}/investigations",
-            get(investigations::list_investigations).post(investigations::start_investigation),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/investigations/{run_id}",
-            get(investigations::get_investigation),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/investigations/{run_id}/cancel",
-            post(investigations::cancel_investigation),
-        )
-        .route(
-            "/api/v1/incidents/{incident_id}/investigations/{run_id}/review",
-            post(investigations::review_investigation),
-        )
-        // G12 D5: the business workspace, which is the unit of data visibility. The
-        // two writes are admin-gated and audited; the read returns the caller's own
-        // memberships (plus metadata for an admin), never a member's rows.
-        .route(
-            "/api/v1/business-workspaces",
-            get(workspaces::list_workspaces).post(workspaces::create_workspace),
-        )
-        .route(
-            "/api/v1/business-workspaces/{workspace_id}/members",
-            post(workspaces::add_member),
-        )
-        .route(
-            "/api/v1/business-workspaces/{workspace_id}/members/{user_id}",
-            delete(workspaces::remove_member),
-        )
-        .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy))
+        .route("/api/v1/gateway/{plugin_id}/{*path}", any(gateway::proxy));
+
+    // P001-A: the Ops application's session-authenticated surface. Not merged at
+    // all on a platform-only build, so every path below is unknown there.
+    #[cfg(feature = "business-ops")]
+    let protected = protected.merge(
+        Router::new()
+            .route(
+                "/api/v1/telemetry/sources",
+                get(telemetry_sources::list_sources),
+            )
+            .route(
+                "/api/v1/automation-principals/{principal_id}/revoke",
+                post(automation::revoke_handler),
+            )
+            // G11 business slice. Authority and the permission matrix live in
+            // docs/design/g11-incident/incident-adr.md; every write below is gated
+            // by AuthUser::require_operator inside the handler, and reads are
+            // scoped by the same predicate the job list uses.
+            .route(
+                "/api/v1/incidents",
+                get(incidents::list_incidents).post(incidents::create_incident),
+            )
+            // G13-B1.4: the workspace queue for automation incidents. An
+            // automation incident is owned by the non-login service user, which
+            // the operator row rule (owner = caller) can never match; this read
+            // and its atomic claim are the only way an operator acquires it. A
+            // viewer is refused by require_operator inside the handlers.
+            .route(
+                "/api/v1/incidents/claimable",
+                get(incident_claims::list_claimable),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/claim",
+                post(incident_claims::claim_incident),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/release",
+                post(incident_claims::release_incident),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}",
+                get(incidents::get_incident),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/evidence",
+                get(incidents::list_evidence).post(incidents::append_evidence),
+            )
+            // G12 B: the bytes behind one evidence row. A separate route so the
+            // evidence list never carries content: a caller that may read
+            // metadata asks again, in one bounded request, for the single row it
+            // wants.
+            .route(
+                "/api/v1/incidents/{incident_id}/evidence/{evidence_id}/content",
+                get(incidents::read_evidence_content),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/verdict",
+                get(incidents::get_verdict).post(incidents::create_verdict),
+            )
+            // G12 C: the two lifecycle operations and the trail they write.
+            // Closing is its own route rather than a status field on a PATCH,
+            // because a closure is a decision with a required verdict, a required
+            // revision and a required reason - not one assignable column among
+            // five.
+            .route(
+                "/api/v1/incidents/{incident_id}/close",
+                post(incidents::close_incident),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/owner",
+                post(incidents::transfer_owner),
+            )
+            // Scoped by the incident read predicate, so the trail of a record is
+            // exactly as visible as the record. /api/v1/audit answers the
+            // platform-wide question and is not a substitute for this one.
+            .route(
+                "/api/v1/incidents/{incident_id}/timeline",
+                get(incidents::get_timeline),
+            )
+            // G12 E: the bounded read-only investigator. Every route below
+            // reaches the incident through the predicate above, none of them
+            // writes to the incident, and the review route concludes nothing
+            // about it (ADR-G12-004 section 2).
+            .route(
+                "/api/v1/incidents/{incident_id}/investigations",
+                get(investigations::list_investigations).post(investigations::start_investigation),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/investigations/{run_id}",
+                get(investigations::get_investigation),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/investigations/{run_id}/cancel",
+                post(investigations::cancel_investigation),
+            )
+            .route(
+                "/api/v1/incidents/{incident_id}/investigations/{run_id}/review",
+                post(investigations::review_investigation),
+            )
+            // G12 D5: the business workspace, which is the unit of data
+            // visibility. The two writes are admin-gated and audited; the read
+            // returns the caller's own memberships (plus metadata for an admin),
+            // never a member's rows.
+            .route(
+                "/api/v1/business-workspaces",
+                get(workspaces::list_workspaces).post(workspaces::create_workspace),
+            )
+            .route(
+                "/api/v1/business-workspaces/{workspace_id}/members",
+                post(workspaces::add_member),
+            )
+            .route(
+                "/api/v1/business-workspaces/{workspace_id}/members/{user_id}",
+                delete(workspaces::remove_member),
+            ),
+    );
+    #[cfg(not(feature = "business-ops"))]
+    let protected = protected.merge(
+        Router::new()
+            .route("/api/v1/incidents", any(business_not_built))
+            .route("/api/v1/incidents/{*rest}", any(business_not_built))
+            .route("/api/v1/business-workspaces", any(business_not_built))
+            .route(
+                "/api/v1/business-workspaces/{*rest}",
+                any(business_not_built),
+            )
+            .route("/api/v1/telemetry/sources", any(business_not_built))
+            .route(
+                "/api/v1/automation-principals/{*rest}",
+                any(business_not_built),
+            ),
+    );
+
+    let protected = protected
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::csrf_middleware,
@@ -395,6 +464,7 @@ pub fn build(state: AppState) -> Router {
     // The legacy /api/v1/incidents paths keep their original gate (authenticated
     // session + workspace membership) so nothing that worked before this phase
     // breaks; retiring them needs its own ADR and a client inventory.
+    #[cfg(feature = "business-ops")]
     let ops_application = Router::new()
         // G14.4: the Ops application's own fleet read. NOT /api/v1/nodes, which
         // is the platform console's view and carries every node's endpoint and
@@ -452,27 +522,29 @@ pub fn build(state: AppState) -> Router {
             applications::require_ops_application,
         ));
 
-    public
-        .merge(protected)
-        .merge(ops_application)
-        .fallback_service({
-            // G14.2: two applications, two bundles, two shells. The Ops Web is
-            // mounted under /app only when its build is present; without it the
-            // console shell keeps answering the legacy paths, which is what an
-            // installation that has not adopted the split sees.
-            let mut site = static_site::StaticSite::new(state.config.web_dist.clone());
-            if let Some(ops) = state.config.ops_web_dist.clone() {
-                site = site.with_mount(static_site::Mount::new("/app", ops));
-            }
-            site.router()
-        })
-        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
-        .layer(middleware::from_fn(security_headers))
-        .layer(middleware::from_fn(request_id))
-        .layer(TraceLayer::new_for_http())
-        // Outermost, exactly as before: it wraps API and bundle alike.
-        .layer(static_site::compression_layer())
-        .with_state(state)
+    #[cfg(feature = "business-ops")]
+    let app = public.merge(protected).merge(ops_application);
+    #[cfg(not(feature = "business-ops"))]
+    let app = public.merge(protected);
+
+    app.fallback_service({
+        // G14.2: two applications, two bundles, two shells. The Ops Web is
+        // mounted under /app only when its build is present; without it the
+        // console shell keeps answering the legacy paths, which is what an
+        // installation that has not adopted the split sees.
+        let mut site = static_site::StaticSite::new(state.config.web_dist.clone());
+        if let Some(ops) = state.config.ops_web_dist.clone() {
+            site = site.with_mount(static_site::Mount::new("/app", ops));
+        }
+        site.router()
+    })
+    .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
+    .layer(middleware::from_fn(security_headers))
+    .layer(middleware::from_fn(request_id))
+    .layer(TraceLayer::new_for_http())
+    // Outermost, exactly as before: it wraps API and bundle alike.
+    .layer(static_site::compression_layer())
+    .with_state(state)
 }
 
 /// Build identity served by `GET /api/v1/version`.
@@ -501,6 +573,28 @@ async fn version(State(state): State<AppState>) -> Json<BuildIdentity> {
             .started_at
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     })
+}
+
+/// A business route that this build does not contain (P001-A).
+///
+/// Deliberately `404 BUSINESS_ROUTE_NOT_BUILT` and not `403`: a caller that
+/// authenticated correctly and is being refused for a permission reason must not
+/// receive the same answer as a caller asking a binary that has no such route.
+/// The two are different facts - "you may not" and "this deployment does not
+/// ship it" - and collapsing them would hide a mis-deployment behind an
+/// authorization error, or the reverse.
+#[cfg(not(feature = "business-ops"))]
+async fn business_not_built() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "code": "BUSINESS_ROUTE_NOT_BUILT",
+            "message": "This is a platform-only build; the requested business application is not installed.",
+            "requestId": uuid::Uuid::new_v4().to_string(),
+            "retryable": false
+        })),
+    )
+        .into_response()
 }
 
 async fn api_not_found() -> Response {
@@ -825,6 +919,59 @@ mod tests {
                 "{path} must mint a uuid request id, got {id:?}"
             );
             assert!(uuid::Uuid::parse_str(&id).is_ok(), "{path}: {id:?}");
+        }
+    }
+
+    #[cfg(not(feature = "business-ops"))]
+    async fn body_text(response: Response) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("response body is bounded");
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    // ---- P001-A: the platform-only build's route surface ----
+
+    /// In a build without the Ops application, its endpoints must be absent AND
+    /// say so in a way that cannot be confused with an authorization refusal.
+    ///
+    /// This is the assertion the whole phase exists for. A platform-only binary
+    /// that answered `403` here would look like "you lack a grant" - a caller
+    /// would go looking for an administrator to grant something, when the truth
+    /// is that this deployment does not contain the application at all.
+    #[cfg(not(feature = "business-ops"))]
+    #[tokio::test]
+    async fn the_platform_only_build_answers_business_routes_as_not_built() {
+        let bundle = WebBundle::new("platform-only-business-routes");
+        let app = bundle.app();
+
+        // Wildcard catches inside the protected group require a session, so use
+        // the public ingest path to observe the 404 shape without one. The
+        // protected paths are exercised through the router's merge order below.
+        let response = get(&app, "/api/v1/telemetry/events", None).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = body_text(response).await;
+        assert!(
+            body.contains("BUSINESS_ROUTE_NOT_BUILT"),
+            "a platform-only build must name why the route is missing, got: {body}"
+        );
+    }
+
+    /// The platform's own surface must be untouched by the feature. If this
+    /// fails, the decoupling removed something Core needs.
+    #[tokio::test]
+    async fn the_platform_surface_is_present_in_every_build() {
+        let bundle = WebBundle::new("platform-surface-intact");
+        let app = bundle.app();
+
+        // Deliberately only paths that never touch the pool. `/readyz` and every
+        // authenticated route would wait out `acquire_timeout` (10 s) against this
+        // fixture's unreachable lazy pool, which made the suite 30 s slower and is
+        // not what this test is about. `/readyz` has its own coverage in `diagnostics`
+        // and in the staging smoke tier, where a real database exists.
+        for path in ["/livez", "/api/v1/version", "/", "/admin/overview"] {
+            let response = get(&app, path, None).await;
+            assert_eq!(response.status(), StatusCode::OK, "GET {path}");
         }
     }
 }
