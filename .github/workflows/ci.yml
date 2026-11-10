@@ -524,7 +524,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --fail-if-no-match --filter @opsweave/platform-console build
+      # Both bundles: the light-build probe needs the console, and the
+      # full-product probe needs the ops shell to prove /app is served BY it.
+      # Building only the console is what made the full-product step fail with
+      # `cp: cannot stat 'apps/ops-web/dist'` on its first CI run.
+      - run: |
+          set -eu
+          pnpm --fail-if-no-match --filter @opsweave/platform-console build
+          pnpm --fail-if-no-match --filter @opsweave/ops-web build
       - name: Build both feature sets
         run: |
           set -eu
@@ -617,3 +624,69 @@ jobs:
 
           kill "$(cat /tmp/p001/kernel.pid)" 2>/dev/null || true
           echo "platform-only boundary verified"
+
+      # The mirror assertion, and the one whose absence let a real regression ship.
+      #
+      # Run 42791913396 deployed a STAGING image that answered `/app` with 404,
+      # because `deployments/staging/Dockerfile` ends with the platform target and
+      # Docker builds the last stage by default. Nothing in CI noticed: the probe
+      # above only ever builds `--no-default-features`, so "the full product still
+      # serves the Ops application" had no gate at all.
+      #
+      # Both halves are needed. A boundary is only correct if the light build
+      # refuses the prefix AND the heavy build serves it; asserting one direction
+      # is how the other one broke.
+      - name: Boot the full product binary and prove the Ops prefix is served
+        run: |
+          set -eu
+          cargo build -q --locked -p opsweave-kernel
+          rm -rf /tmp/p001full && mkdir -p /tmp/p001full/data
+          cp -r apps/platform-console/dist /tmp/p001full/web
+          cp -r apps/ops-web/dist /tmp/p001full/ops-web
+
+          ADMIN_EMAIL=full-product@example.invalid
+          ADMIN_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+          export OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$ADMIN_EMAIL"
+          export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD"
+          export OPSWEAVE_BIND=127.0.0.1:19082 \
+                 OPSWEAVE_DATA_DIR=/tmp/p001full/data \
+                 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable \
+                 OPSWEAVE_WEB_DIST=/tmp/p001full/web \
+                 OPSWEAVE_OPS_WEB_DIST=/tmp/p001full/ops-web
+          ./target/debug/opsweave-kernel > /tmp/p001full/kernel.log 2>&1 &
+          echo $! > /tmp/p001full/kernel.pid
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:19082/livez >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          status() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
+          B=http://127.0.0.1:19082
+          fail() { echo "::error::$1"; echo "--- kernel log ---"; tail -50 /tmp/p001full/kernel.log; exit 1; }
+
+          # The Ops application's prefix must be served by the full product - and
+          # it must be served BY THE OPS BUNDLE. A status check alone cannot tell:
+          # `/app` is also in the console's client-route table, so a console-only
+          # image answers 200 with the WRONG shell, and that is exactly the state
+          # the staging regression shipped. Distinguish on the shell's own script
+          # path, which is built with `base: '/app/'` in the ops bundle.
+          for path in /app /app/home /app/incidents; do
+            [ "$(status "$B$path")" = "200" ] || fail "$path is not 200 on the full product build"
+            shell=$(curl -sS "$B$path")
+            case "$shell" in
+              */app/assets/*) ;;
+              *) fail "$path was not served by the ops bundle (no /app/assets script in the shell)" ;;
+            esac
+          done
+
+          # And its API must exist: a 404 with BUSINESS_ROUTE_NOT_BUILT here would
+          # mean the route table was gated the wrong way round.
+          body=$(curl -sS -X POST "$B/api/v1/telemetry/events")
+          case "$body" in
+            *BUSINESS_ROUTE_NOT_BUILT*) fail "the full product build reports the ingest route as not built" ;;
+          esac
+
+          # The console is still the console on both builds.
+          [ "$(status "$B/admin/overview")" = "200" ] || fail "a console route is not served by the full product build"
+
+          kill "$(cat /tmp/p001full/kernel.pid)" 2>/dev/null || true
+          echo "full-product boundary verified"

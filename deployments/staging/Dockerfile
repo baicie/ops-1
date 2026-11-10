@@ -108,6 +108,14 @@ CMD ["/usr/local/bin/opsweave-kernel"]
 # ---------------------------------------------------------------------------
 # Platform-only runtime (P001-B).
 #
+# NOT the default target. Docker builds the LAST stage in a file, so this one
+# being last made every unqualified `docker build` produce a platform-only image
+# - including the staging deploy, whose /app answer became 404 (run 42791913396).
+# Callers must name `--target runtime` for the full product or `--target
+# platform` for this one; `staging-preview.yml` and `scripts/platform-up` do.
+# Keep this stage last only deliberately, and never add another after it without
+# checking every caller that does not pass --target.
+#
 # The shipped product for a deployment that runs NO business application. It is
 # a separate target rather than a flag on the full image because the difference
 # must be visible in the artifact: this image contains no ops bundle, no pipeline
