@@ -690,3 +690,115 @@ jobs:
 
           kill "$(cat /tmp/p001full/kernel.pid)" 2>/dev/null || true
           echo "full-product boundary verified"
+
+  # P001-B.1: the platform image is a delivery artifact, and until now nothing
+  # built it. `platform-only` proves the BINARY boundary; this proves the IMAGE -
+  # what an operator pulls, its contents, and that it boots.
+  #
+  # It also guards the dependency direction the Dockerfile got wrong: the
+  # platform target used to wait on a full-product web build and a full-product
+  # Rust build, so a broken ops-web or pipeline-worker failed a target that ships
+  # neither. The sabotage step below is that regression's counterfactual, and it
+  # is the reason this job exists rather than a `docker build` one-liner.
+  platform-image-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the platform-only image
+        run: |
+          set -eu
+          docker build -f deployments/staging/Dockerfile --target platform \
+            -t opsweave-platform:ci .
+      - name: Assert the image boundary
+        run: |
+          set -eu
+          IMG=opsweave-platform:ci
+          fail() { echo "::error::$1"; exit 1; }
+
+          # What must be present.
+          for bin in opsweave-kernel opsweave-node opsctl docker; do
+            docker run --rm --entrypoint /bin/sh "$IMG" -c "test -x /usr/local/bin/$bin" \
+              || fail "the image is missing /usr/local/bin/$bin"
+          done
+          docker run --rm --entrypoint /bin/sh "$IMG" -c 'test -f /app/web/index.html' \
+            || fail "the platform console bundle is missing"
+
+          # What must be absent. Each of these is the Ops application's.
+          for path in /usr/local/bin/opsweave-pipeline-worker /app/ops-web; do
+            if docker run --rm --entrypoint /bin/sh "$IMG" -c "test -e $path"; then
+              fail "$path is present in a platform-only image"
+            fi
+          done
+          envs="$(docker image inspect "$IMG" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          case "$envs" in
+            *OPSWEAVE_OPS_WEB_DIST*) fail "OPSWEAVE_OPS_WEB_DIST is set in a platform-only image" ;;
+          esac
+
+          # The kernel must be the platform-only build. Asserted on the binary,
+          # not on a label: a label is a claim, the binary is the thing.
+          cid="$(docker create "$IMG")"
+          docker cp "$cid:/usr/local/bin/opsweave-kernel" /tmp/kernel
+          docker rm "$cid" >/dev/null
+          if ! strings /tmp/kernel | grep -q "BUSINESS_ROUTE_NOT_BUILT"; then
+            fail "the kernel in the image is not a platform-only build"
+          fi
+          if strings /tmp/kernel | grep -q "opsweave.ops/incidents"; then
+            fail "the kernel in the image still contains the Ops application routes"
+          fi
+      - name: The image boots and serves the console
+        run: |
+          set -eu
+          IMG=opsweave-platform:ci
+          docker network create p001 || true
+          docker run -d --name p001-pg --network p001 \
+            -e POSTGRES_DB=opsweave -e POSTGRES_USER=opsweave -e POSTGRES_PASSWORD=ci-pass \
+            postgres:17
+          for _ in $(seq 1 60); do
+            docker exec p001-pg pg_isready -U opsweave -d opsweave >/dev/null 2>&1 && break
+            sleep 1
+          done
+          # A shared user network with a published port, NOT host networking.
+          # The deployment uses host networking because a Node must reach the
+          # Kernel on loopback, but that is not what this job is testing - it is
+          # testing that the image boots and enforces its boundary. A published
+          # port works identically on a Linux runner and on a developer's Docker
+          # Desktop, where host networking is not reachable from the host at all
+          # (found locally while writing this gate).
+          docker run -d --name p001-kernel --network p001 -p 19081:19081 \
+            -e DATABASE_URL="postgres://opsweave:ci-pass@p001-pg:5432/opsweave?sslmode=disable" \
+            -e OPSWEAVE_BIND=0.0.0.0:19081 \
+            -e OPSWEAVE_DATA_DIR=/app/data \
+            -e OPSWEAVE_WEB_DIST=/app/web \
+            -e OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=ci@example.invalid \
+            -e OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=ci-only-not-a-secret \
+            -v /tmp/p001data:/app/data \
+            "$IMG"
+          for _ in $(seq 1 90); do
+            curl -fsS http://127.0.0.1:19081/livez >/dev/null 2>&1 && break
+            sleep 1
+          done
+          code() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
+          [ "$(code http://127.0.0.1:19081/livez)" = "200" ] || { docker logs p001-kernel; exit 1; }
+          [ "$(code http://127.0.0.1:19081/readyz)" = "200" ] || { docker logs p001-kernel; exit 1; }
+          # The boundary, on the running image.
+          [ "$(code http://127.0.0.1:19081/app)" = "404" ] || { echo "::error::/app is not 404"; docker logs p001-kernel; exit 1; }
+          body="$(curl -sS -X POST http://127.0.0.1:19081/api/v1/telemetry/events)"
+          case "$body" in
+            *BUSINESS_ROUTE_NOT_BUILT*) ;;
+            *) echo "::error::ingest is not reported as not-built: $body"; exit 1 ;;
+          esac
+          # And the console, which is what the platform IS for.
+          [ "$(code http://127.0.0.1:19081/admin/overview)" = "200" ] || { echo "::error::the console is not served"; exit 1; }
+          docker logs p001-kernel | tail -5
+      - name: The platform target does not depend on the business build
+        run: |
+          set -eu
+          # The counterfactual for the dependency inversion. If the platform target
+          # still waited on ops-web or the pipeline worker, one of these builds
+          # would fail here - which is exactly how the split was verified.
+          echo "export const BROKEN = ;" >> apps/ops-web/src/main.tsx
+          echo "fn broken( {" >> apps/pipeline-worker/src/main.rs
+          docker build -f deployments/staging/Dockerfile --target platform \
+            -t opsweave-platform:ci-sabotage . \
+            || { echo "::error::the platform image depends on business code it does not ship"; exit 1; }
+          echo "the platform target built with the business application deliberately broken"
