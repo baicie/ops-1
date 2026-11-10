@@ -199,7 +199,6 @@ jobs:
 
           # Data that must survive both directions.
           jar=/tmp/p001b2/jar
-          curl -sS -b "$jar" -H "x-csrf-token: $(sed -n 's/.*"csrfToken":"\([^"]*\)".*/\1/p' /dev/null 2>/dev/null || true)" >/dev/null 2>&1 || true
           before_version="$(curl -sS "$B/api/v1/version" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
           [ "$before_version" = "0.0.1" ] || fail "expected v1 to report 0.0.1, got '$before_version'"
 
@@ -261,11 +260,12 @@ jobs:
 
           # Make the node permanently unhealthy: point it at a socket path that
           # does not exist, so the runtime cannot start its adapter.
+          # `OPSWEAVE_DOCKER_HOST` is what the compose file passes to the node;
+          # pointing it at a path that does not exist makes the runtime fail its
+          # adapter check on every start, which is the condition under test.
+          OPSWEAVE_DOCKER_HOST=unix:///nonexistent/docker.sock \
           OPSWEAVE_IMAGE=opsweave-platform:linux-bond \
           OPSWEAVE_PLATFORM_DIR=/tmp/p001b2/accept \
-          OPSWEAVE_PROJECT=opsweave-p001b2 \
-          OPSWEAVE_PORT=18080 OPSWEAVE_PG_PORT=55432 OPSWEAVE_REGISTRY_PORT=15001 \
-          OPSWEAVE_DOCKER_HOST_OVERRIDE=unix:///nonexistent/docker.sock \
             docker compose -p opsweave-p001b2 up -d --no-deps --force-recreate node >/dev/null 2>&1 || true
           sleep 20
 
