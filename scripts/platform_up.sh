@@ -841,14 +841,39 @@ cmd_switch_image() {
   require_docker
   [ -n "$image" ] || die "usage: $label <image-tag-or-@sha256-digest>"
   say "$label to $image"
-  # The image may be local (a build) or remote (a registry ref). Pulling a local
-  # tag fails with "pull access denied", which is not an error in that case: the
-  # switch is decided by whether the image exists in the daemon.
-  if docker image inspect "$image" >/dev/null 2>&1; then
-    ok "$image is present locally; not pulling"
-  else
-    compose pull kernel node || die "could not pull $image"
-  fi
+  # Which reference is this, and may a local copy stand in for it?
+  #
+  # A DIGEST is immutable: `repo@sha256:...` names exactly one image, so a local
+  # copy of it cannot be stale and skipping the pull is correct and offline-safe.
+  #
+  # A TAG is mutable. `:latest`, `:stable`, or a reused semantic version can be
+  # repointed at any time, so a locally cached copy is possibly NOT what the
+  # operator asked for. Accepting it would let an upgrade silently do nothing
+  # while reporting success. A tag therefore always pulls, and a local-only build
+  # must say so explicitly rather than looking like a registry upgrade.
+  case "$image" in
+    *@sha256:*)
+      if docker image inspect "$image" >/dev/null 2>&1; then
+        ok "digest $image is present locally; a digest cannot be stale, not pulling"
+      else
+        compose pull kernel node || die "could not pull $image"
+      fi
+      ;;
+    *)
+      if [ "${OPSWEAVE_ALLOW_LOCAL_TAG:-0}" = "1" ] \
+         && docker image inspect "$image" >/dev/null 2>&1; then
+        warn "$image is a TAG and is being taken from the local daemon because"
+        warn "  OPSWEAVE_ALLOW_LOCAL_TAG=1. This is a local artifact, not a registry"
+        warn "  upgrade, and it is not digest-pinned. Do not use this in production."
+      else
+        ok "$image is a tag; pulling so a repointed tag is not missed"
+        compose pull kernel node || die "could not pull $image"
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
+          die "$image is not present after a successful pull"
+        fi
+      fi
+      ;;
+  esac
 
   # Kernel and node are replaced WITHOUT their dependencies, in that order: the
   # node needs a live kernel to re-register against, and recreating postgres or
@@ -856,22 +881,40 @@ cmd_switch_image() {
   OPSWEAVE_IMAGE="$image" compose up -d --no-deps kernel
   wait_healthy kernel
   OPSWEAVE_IMAGE="$image" compose up -d --no-deps node
-  # The node is a separate failure domain: on a host where it cannot reach the
-  # docker socket it never becomes healthy, and that must not turn a successful
-  # kernel switch into a failed $label (same rule as install and restore).
+  # The node is a separate failure domain, but "the kernel swapped" is not "the
+  # platform upgraded". A node that cannot reach the docker socket cannot run a
+  # single plugin, so reporting an unqualified success would describe a platform
+  # whose only workload executor is down as fully upgraded:
+  #
+  #   kernel switch failed        -> die, exit 1
+  #   kernel ok, node unhealthy   -> DEGRADED, exit 3
+  #   both ok                     -> success, exit 0
+  #
+  # Exit 3 is deliberate: a scheduler or runbook checking `$?` sees "not 0", and
+  # one that wants to tell a broken upgrade from a partial one can, without
+  # parsing prose.
+  local node_ok=1
   if ! wait_healthy_soft node 120; then
+    node_ok=0
     NODE_STATE="unhealthy"
-    warn "the node did not become healthy after the $label; the kernel switch itself succeeded"
   fi
 
   local code
   code="$(http_code "$URL/app")"
   if [ "$code" != "404" ]; then
-    die "$label produced a build that is not platform-only: GET /app answered $code"
+    die "$label produced a build that is not platform-only: GET $code"
   fi
-  ok "$label complete; the Ops application is still absent"
+
   report
   warn "migrations are forward-only: rolling back across one requires '$(basename "$0") restore <file>'"
+  if [ "$node_ok" = "1" ]; then
+    ok "$label complete: kernel and node both healthy; the Ops application is still absent"
+  else
+    warn "$label is DEGRADED: the kernel was switched and is serving, but the node is not"
+    warn "  healthy. Plugin workloads cannot run. This is NOT a complete upgrade."
+    DEGRADED=1
+    return 3
+  fi
 }
 
 # ---------------------------------------------------------------------------

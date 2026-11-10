@@ -203,10 +203,14 @@ jobs:
           before_version="$(curl -sS "$B/api/v1/version" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
           [ "$before_version" = "0.0.1" ] || fail "expected v1 to report 0.0.1, got '$before_version'"
 
+          # Both images are local builds, so the tag path needs the explicit
+          # opt-in - which is itself the behaviour under test in CI: without it
+          # the installer would try to pull a tag that exists only here.
           OPSWEAVE_IMAGE=opsweave-platform:linux-bond-v2 \
           OPSWEAVE_PLATFORM_DIR=/tmp/p001b2/accept \
           OPSWEAVE_PROJECT=opsweave-p001b2 \
           OPSWEAVE_PORT=18080 OPSWEAVE_PG_PORT=55432 OPSWEAVE_REGISTRY_PORT=15001 \
+          OPSWEAVE_ALLOW_LOCAL_TAG=1 \
             ./scripts/platform_up.sh upgrade opsweave-platform:linux-bond-v2 2>&1 | tail -20 \
             || fail "upgrade refused"
 
@@ -230,6 +234,7 @@ jobs:
           OPSWEAVE_PLATFORM_DIR=/tmp/p001b2/accept \
           OPSWEAVE_PROJECT=opsweave-p001b2 \
           OPSWEAVE_PORT=18080 OPSWEAVE_PG_PORT=55432 OPSWEAVE_REGISTRY_PORT=15001 \
+          OPSWEAVE_ALLOW_LOCAL_TAG=1 \
             ./scripts/platform_up.sh rollback opsweave-platform:linux-bond 2>&1 | tail -20 \
             || fail "rollback refused"
           rolled="$(curl -sS "$B/api/v1/version" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
@@ -240,6 +245,52 @@ jobs:
             "$B/api/v1/auth/login")"
           [ "$code" = "200" ] || fail "the account cannot sign in after the rollback ($code)"
           echo "v1 -> v2 -> v1: version, boundary and identity all verified"
+
+      # ---------------------------------------------------------------------
+      # B4b: an unhealthy node must yield DEGRADED, not a complete success.
+      #
+      # The kernel switch is genuinely attempted, and the node is made unable to
+      # run - by starting it with a docker socket it cannot use. The upgrade must
+      # exit 3 and say DEGRADED; reporting exit 0 here would describe a platform
+      # whose only workload executor is down as fully upgraded.
+      # ---------------------------------------------------------------------
+      - name: An unhealthy node makes the upgrade DEGRADED, not complete
+        run: |
+          set -eu
+          fail() { echo "::error::$1"; docker compose -p opsweave-p001b2 logs --tail 40 node; exit 1; }
+
+          # Make the node permanently unhealthy: point it at a socket path that
+          # does not exist, so the runtime cannot start its adapter.
+          OPSWEAVE_IMAGE=opsweave-platform:linux-bond \
+          OPSWEAVE_PLATFORM_DIR=/tmp/p001b2/accept \
+          OPSWEAVE_PROJECT=opsweave-p001b2 \
+          OPSWEAVE_PORT=18080 OPSWEAVE_PG_PORT=55432 OPSWEAVE_REGISTRY_PORT=15001 \
+          OPSWEAVE_DOCKER_HOST_OVERRIDE=unix:///nonexistent/docker.sock \
+            docker compose -p opsweave-p001b2 up -d --no-deps --force-recreate node >/dev/null 2>&1 || true
+          sleep 20
+
+          set +e
+          OPSWEAVE_IMAGE=opsweave-platform:linux-bond \
+          OPSWEAVE_PLATFORM_DIR=/tmp/p001b2/accept \
+          OPSWEAVE_PROJECT=opsweave-p001b2 \
+          OPSWEAVE_PORT=18080 OPSWEAVE_PG_PORT=55432 OPSWEAVE_REGISTRY_PORT=15001 \
+          OPSWEAVE_ALLOW_LOCAL_TAG=1 \
+            ./scripts/platform_up.sh upgrade opsweave-platform:linux-bond >/tmp/p001b2/degraded.log 2>&1
+          rc=$?
+          set -e
+          echo "upgrade exit code with an unhealthy node: $rc"
+          tail -25 /tmp/p001b2/degraded.log
+
+          [ "$rc" = "3" ] || fail "an unhealthy node must yield exit 3 (DEGRADED), got $rc"
+          grep -qi 'DEGRADED' /tmp/p001b2/degraded.log || fail "the output does not report DEGRADED"
+          grep -qi 'NOT a complete upgrade' /tmp/p001b2/degraded.log \
+            || fail "the output does not state the upgrade is incomplete"
+
+          # And the kernel really did switch: a DEGRADED result is not a lie about
+          # a failed upgrade, it is a qualified success.
+          [ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/livez)" = "200" ] \
+            || fail "the kernel is not serving after a DEGRADED upgrade"
+          echo "unhealthy node -> exit 3 + DEGRADED, kernel still serving"
 
       - name: Collect what failed
         if: failure()
