@@ -9,6 +9,7 @@
 4. 测试必须覆盖成功、拒绝、超时、失联、升级失败、恢复、权限变更；报告真实运行过的命令与结果。
 5. 若 UI 有变化，必须提交交互状态矩阵和真实浏览器截图，手工审查 1440/1024/390 宽度与明暗主题。
 6. 完成后更新实现状态、风险清单、迁移说明和变更摘要；不得伪造通过率、生产就绪声明。
+7. **每次 PR 合入后必须清理分支与 worktree**（MUST）：删除**所有已合入**的本地与远端分支，不止当次那一条；移除已合入的 worktree 并 `git worktree prune`。判定"已合入"**不得**用 `git rev-list --count` 或 `git log --grep`——本仓库只允许 squash 合入，分支永远显示 `ahead=0` 而树仍不同。正确做法：取该分支相对 `git merge-base origin/main <branch>` 的每个改动文件，比对 `git rev-parse <branch>:<file>` 与 `git rev-parse origin/main:<file>`，全部一致才可删；并确认对应 PR 为 `MERGED` 而非 `CLOSED`。详见 `rules/08-docs-and-workflow.md`。
 
 ## 前端与国际化（MUST）
 - 前端统一 **Vite + React + TypeScript + Tailwind CSS + shadcn/ui**；组件以开源 `shadcn-admin` 模板的既有实现为参考，按 shadcn 的 copy-in 模式进仓库（**G14.2 起为共享包 `packages/ui/src/`**，平台控制台与运维应用共同引用），不引运行时组件包；禁止并列引入 MUI/AntD/Chakra 等第二套 UI 框架。
