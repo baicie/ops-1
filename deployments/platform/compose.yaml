@@ -1,0 +1,195 @@
+# OpsWeave Platform-only (P001-B) — a single-host install with NO business
+# application.
+#
+# What this is: PostgreSQL, the OCI registry, the Kernel, and one Node Runtime.
+# The Kernel is built without the Ops application, the image carries no ops
+# bundle and no pipeline worker, and nothing here installs a plugin.
+#
+# What starts INSTALLED: nothing. The first boot creates the bootstrap admin and
+# the platform's own registry rows. `docker compose up -d` is the whole install.
+#
+# Deliberately different from `deployments/staging/compose.yaml`:
+#   * its own image (`--target platform`), so the artifact proves what it is;
+#   * no `OPSWEAVE_OPS_WEB_DIST`, no `OPSWEAVE_NODE_WORKER_ENABLED`, no marker
+#     file to create, no seeded pipeline, no demo source;
+#   * `restart: unless-stopped` on every service, so a host reboot is recovery.
+#
+# Prerequisites on the host: Docker Engine + the Compose plugin. No Rust, Node,
+# Go, Maven or psql. See deployments/platform/README.md.
+#
+# Usage:
+#   ./scripts/platform_up.sh install      # generate env, pull, start, verify
+#   ./scripts/platform_up.sh status
+#   ./scripts/platform_up.sh stop
+#   ./scripts/platform_up.sh upgrade <tag-or-digest>
+#   ./scripts/platform_up.sh backup
+#   ./scripts/platform_up.sh restore <file>
+
+name: opsweave-platform
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL. Reachable from the host loopback only. Plugin containers do not
+  # exist in this profile today; the bridge binding is kept so a plugin added
+  # later can reach the port the Kernel derives from DATABASE_URL without a
+  # compose change.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    env_file:
+      - ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/postgres.env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "127.0.0.1:${OPSWEAVE_PG_PORT:-55432}:5432"
+      - "${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_PG_PORT:-55432}:5432"
+    volumes:
+      # A named volume, not a bind path: it survives `down`, `upgrade` and a
+      # compose file rewrite, which is what makes the upgrade path non-destructive.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # OCI registry for plugin images. Empty on a fresh install, and that is the
+  # expected state: the platform is usable with zero plugins.
+  # ---------------------------------------------------------------------------
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+    ports:
+      - "127.0.0.1:${OPSWEAVE_REGISTRY_PORT:-15001}:5000"
+      - "${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_REGISTRY_PORT:-15001}:5000"
+    volumes:
+      - registry:/var/lib/registry
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5000/v2/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Kernel + Platform Console. Host networking for the same reason as staging:
+  # the Kernel only accepts plaintext node data endpoints on loopback, so a
+  # bridged container's 127.0.0.1 would be itself.
+  # ---------------------------------------------------------------------------
+  kernel:
+    image: ${OPSWEAVE_IMAGE:?set OPSWEAVE_IMAGE to an opsweave-platform image}
+    restart: unless-stopped
+    network_mode: host
+    command: ["/usr/local/bin/opsweave-kernel"]
+    env_file:
+      - ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/kernel.env
+    environment:
+      OPSWEAVE_BIND: 0.0.0.0:${OPSWEAVE_PORT:-18080}
+      OPSWEAVE_DATA_DIR: /app/data
+      # The console only. There is no ops bundle in this image, and the Kernel
+      # answers /app with 404 in a platform-only build.
+      OPSWEAVE_WEB_DIST: /app/web
+      OPSWEAVE_PLUGIN_DB_HOST: ${DOCKER_BRIDGE_IP:-172.17.0.1}
+      OPSWEAVE_PLUGIN_KERNEL_URL: http://${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_PORT:-18080}
+      OPSWEAVE_BUILD_SHA: ${OPSWEAVE_BUILD_SHA:-}
+      OPSWEAVE_BUILD_TIME: ${OPSWEAVE_BUILD_TIME:-}
+      OPSWEAVE_ENVIRONMENT: ${OPSWEAVE_ENVIRONMENT:-PRODUCTION}
+    volumes:
+      - kernel:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:${OPSWEAVE_PORT:-18080}/livez || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
+
+  # ---------------------------------------------------------------------------
+  # Node Runtime. Needs the host docker socket to create plugin containers; it
+  # gets NO database URL and NO bootstrap password (its env file is checked for
+  # both by the install script).
+  #
+  # There is no worker marker file in this profile: the pipeline worker does not
+  # exist in the platform image, so the supervisor has nothing to start.
+  # ---------------------------------------------------------------------------
+  node:
+    image: ${OPSWEAVE_IMAGE:?set OPSWEAVE_IMAGE to an opsweave-platform image}
+    restart: unless-stopped
+    network_mode: host
+    command: ["/usr/local/bin/opsweave-node"]
+    env_file:
+      - ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node.env
+    environment:
+      OPSWEAVE_KERNEL_URL: http://127.0.0.1:${OPSWEAVE_PORT:-18080}
+      OPSWEAVE_DOCKER_HOST: unix:///var/run/docker.sock
+      # Path-identical mount: the Node passes token-mount sources to the HOST
+      # docker daemon, so this path must be the same inside and outside.
+      OPSWEAVE_NODE_STATE_DIR: ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node
+      OPSWEAVE_NODE_DATA_BIND: 127.0.0.1:9101
+      OPSWEAVE_NODE_DATA_ENDPOINT: http://127.0.0.1:9101
+      OPSWEAVE_NODE_WORKER_ENABLED: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node:${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node
+    group_add:
+      - "${DOCKER_GID:-999}"
+    depends_on:
+      kernel:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:9101/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 45s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+volumes:
+  # Kernel data: packages, backups, the cursor secret (in PostgreSQL) and the
+  # plugin package store. Named so `upgrade` keeps it.
+  kernel:
+  pgdata:
+    # Named, and NOT deleted by `compose down`. Removing it is the operator's
+    # explicit act; the install script never does it.
+  registry:

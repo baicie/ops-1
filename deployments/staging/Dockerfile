@@ -46,7 +46,10 @@ RUN cargo build --release --locked --config 'profile.release.strip=true' \
       -p opsweave-kernel \
       -p opsweave-node \
       -p opsweave-opsctl \
-      -p opsweave-pipeline-worker
+      -p opsweave-pipeline-worker \
+ && cargo build --release --locked --config 'profile.release.strip=true' \
+      -p opsweave-kernel --no-default-features \
+ && cp /src/target/release/opsweave-kernel /src/target/platform-only-kernel
 
 # ---------------------------------------------------------------------------
 # Runtime
@@ -97,6 +100,67 @@ WORKDIR /app
 USER opsweave
 
 # Informational only: staging uses host networking (see compose.yaml).
+EXPOSE 8081
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/usr/local/bin/opsweave-kernel"]
+
+# ---------------------------------------------------------------------------
+# Platform-only runtime (P001-B).
+#
+# The shipped product for a deployment that runs NO business application. It is
+# a separate target rather than a flag on the full image because the difference
+# must be visible in the artifact: this image contains no ops bundle, no pipeline
+# worker, and a Kernel built without `business-ops`. An operator can prove what
+# they are running with `docker image inspect`, and a mistaken `OPSWEAVE_IMAGE`
+# cannot silently ship the Ops application.
+#
+#   docker build -f deployments/staging/Dockerfile --target platform -t opsweave-platform:<sha> .
+#
+# Deliberately still present: the docker CLI (the Node role drives plugin
+# containers), `opsctl` (bootstrap and recovery), the console bundle.
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim AS platform
+
+ARG OPSWEAVE_UID=10001
+ARG OPSWEAVE_GID=10001
+
+RUN set -eu; \
+    attempts=0; \
+    until apt-get update -o Acquire::Retries=5 \
+          && apt-get install -y --no-install-recommends -o Acquire::Retries=5 \
+               ca-certificates curl tini; do \
+      attempts=$((attempts + 1)); \
+      if [ "$attempts" -ge 3 ]; then echo "apt failed after 3 attempts" >&2; exit 1; fi; \
+      echo "apt attempt $attempts failed; retrying in 10s" >&2; sleep 10; \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    curl --version >/dev/null && tini --version >/dev/null
+
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+
+# The platform-only Kernel. Copied from the separate path built above, so this
+# stage cannot accidentally pick up the full binary.
+COPY --from=rustbuild /src/target/platform-only-kernel /usr/local/bin/opsweave-kernel
+COPY --from=rustbuild /src/target/release/opsweave-node /usr/local/bin/opsweave-node
+COPY --from=rustbuild /src/target/release/opsctl /usr/local/bin/opsctl
+
+COPY --from=webbuild /src/apps/platform-console/dist /app/web
+
+RUN groupadd --gid "${OPSWEAVE_GID}" opsweave \
+ && useradd --uid "${OPSWEAVE_UID}" --gid "${OPSWEAVE_GID}" --create-home \
+      --shell /usr/sbin/nologin opsweave \
+ && mkdir -p /app/data /app/node-state \
+ && chown -R opsweave:opsweave /app
+
+# No OPSWEAVE_OPS_WEB_DIST: there is no ops bundle to mount, and the Kernel
+# refuses the /app prefix in this build.
+ENV OPSWEAVE_WEB_DIST=/app/web \
+    OPSWEAVE_DATA_DIR=/app/data
+
+WORKDIR /app
+USER opsweave
+
 EXPOSE 8081
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
