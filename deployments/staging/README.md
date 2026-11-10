@@ -13,7 +13,7 @@ Image: `ghcr.io/baicie/opsweave:<40-char-sha>` - never `latest`. Rollback = the 
 ## 1. Build (CI, x86_64 runner)
 
 ```bash
-docker build -f deployments/staging/Dockerfile -t ghcr.io/baicie/opsweave:$GITHUB_SHA .
+docker build -f deployments/staging/Dockerfile --target runtime -t ghcr.io/baicie/opsweave:$GITHUB_SHA .
 docker run --rm --entrypoint /usr/local/bin/opsweave-kernel ghcr.io/baicie/opsweave:$GITHUB_SHA --version
 docker run --rm --entrypoint /usr/local/bin/opsweave-node   ghcr.io/baicie/opsweave:$GITHUB_SHA --version
 docker push ghcr.io/baicie/opsweave:$GITHUB_SHA
@@ -22,9 +22,13 @@ docker push ghcr.io/baicie/opsweave:$GITHUB_SHA
 Local syntax check on any host (native platform, e.g. arm64 on macOS):
 
 ```bash
-docker build -f deployments/staging/Dockerfile -t opsweave-staging:localdev .
+docker build -f deployments/staging/Dockerfile --target runtime -t opsweave-staging:localdev .
 docker run --rm --entrypoint /usr/local/bin/opsweave-node opsweave-staging:localdev --version
 ```
+
+`--target runtime` is required: the file also defines a platform-only target, which
+is LAST and therefore Docker's default. An unqualified build produces the
+platform-only image, whose `/app` answers 404 - that is what broke run 42791913396.
 
 Image contents: `/usr/local/bin/{opsweave-kernel,opsweave-node,opsctl,opsweave-pipeline-worker}`,
 Web assets in `/app/web`, plus the `docker` CLI (the Node drives plugin containers), `curl`, `tini`.

@@ -261,6 +261,11 @@ jobs:
         with:
           context: .
           file: deployments/staging/Dockerfile
+          # Explicit, because Docker builds the LAST stage by default and this
+          # file now ends with the platform-only target. Without this line a
+          # staging deploy silently shipped an image with no ops bundle, and
+          # /app answered 404 on the preview (run 42791913396).
+          target: runtime
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE_REPO }}:${{ steps.target.outputs.sha }}
