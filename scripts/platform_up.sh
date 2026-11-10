@@ -611,19 +611,101 @@ wait_healthy_soft() {
   return 1
 }
 
+# --- credential handling -----------------------------------------------------
+#
+# No secret is ever a process ARGUMENT. `/proc/<pid>/cmdline` - what `ps` prints -
+# is readable by any process of the same user, and this script runs as root on a
+# deployment host. The previous implementation did
+#
+#     python3 -c '...' "$email" "$password"
+#
+# which published the administrator password for the lifetime of that process.
+#
+# The rules, enforced by tests/ci/p001_credential_argv.sh:
+#   * values enter python3 on STDIN, NUL-separated;
+#   * JSON comes from json.dumps, never string concatenation, so quotes,
+#     backslashes, newlines and non-ASCII round-trip. No password character is
+#     forbidden to make escaping easier;
+#   * container-side scratch files live in a per-call `mktemp -d` under /tmp and
+#     are removed from a RETURN trap as well as on the success path, so an
+#     interrupted `docker exec` cannot leave a cookie jar behind.
+
+# {"email":...,"password":...} on stdout, from two NUL-separated STDIN fields.
+# NUL is the separator because a password may contain newlines and quotes; the
+# only byte it cannot contain is NUL itself.
+json_login_payload() {
+  python3 -I -c '
+import json, sys
+raw = sys.stdin.buffer.read().split(b"\0")
+email = raw[0].decode("utf-8", "surrogateescape") if raw else ""
+password = raw[1].decode("utf-8", "surrogateescape") if len(raw) > 1 else ""
+sys.stdout.write(json.dumps({"email": email, "password": password}))
+'
+}
+
+# The `csrfToken` of a JSON document read from STDIN ("" when absent/malformed).
+csrf_from_stdin() {
+  python3 -I -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("csrfToken", ""))
+except Exception:
+    print("")
+'
+}
+
+# The `token` of a JSON document read from STDIN.
+token_from_stdin() {
+  python3 -I -c '
+import json, sys
+raw = sys.stdin.read().strip()
+try:
+    d = json.loads(raw) if raw else {}
+except Exception:
+    d = {}
+sys.stdout.write(d.get("token", "") if isinstance(d, dict) else "")
+'
+}
+
+# A private scratch directory INSIDE the Kernel container, removed by a RETURN
+# trap. Prints the directory on success; prints nothing and returns 1 if the
+# container cannot create one.
+container_scratch() {
+  local cid="$1" dir
+  dir="$(docker exec "$cid" /bin/sh -c 'mktemp -d /tmp/owp.XXXXXX && chmod 700 "$1"' _ /tmp 2>/dev/null || true)"
+  # Validate the shape before it is interpolated into a later `rm -rf`: an empty
+  # string or anything outside /tmp/owp.* is refused.
+  case "$dir" in
+    /tmp/owp.*) printf '%s' "$dir" ;;
+    *) return 1 ;;
+  esac
+}
+
 login_probe() {
-  local email="$1" password="$2" dir code payload
+  local email="$1" password="$2" dir code cid work payload
   dir="$(mktemp -d)" || return 1
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"email":sys.argv[1],"password":sys.argv[2]}))' "$email" "$password")" || { rm -rf "$dir"; return 1; }
+  chmod 700 "$dir"
+  payload="$(printf '%s\0%s' "$email" "$password" | json_login_payload)" \
+    || { rm -rf "$dir"; return 1; }
+
   if [ "$API_CONTEXT" = "container" ]; then
-    local cid; cid="$(compose ps -q kernel 2>/dev/null || true)"
-    printf '%s' "$payload" | docker exec -i "$cid" /bin/sh -c "cat > /tmp/lp.json" 2>/dev/null || true
-    code="$(docker exec "$cid" /bin/sh -c "curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary @/tmp/lp.json $API_URL/api/v1/auth/login" 2>/dev/null || echo 000)"
-    docker exec "$cid" /bin/sh -c 'rm -f /tmp/lp.json' 2>/dev/null || true
+    cid="$(compose ps -q kernel 2>/dev/null || true)"
+    [ -n "$cid" ] || { rm -rf "$dir"; return 1; }
+    work="$(container_scratch "$cid")" || { rm -rf "$dir"; return 1; }
+    # Cleanup runs on EVERY exit from here, not only on the success path.
+    trap 'docker exec "$cid" /bin/sh -c "rm -rf $work" >/dev/null 2>&1 || true' RETURN
+    printf '%s' "$payload" | docker exec -i "$cid" /bin/sh -c "cat > $work/login.json" 2>/dev/null || true
+    code="$(docker exec "$cid" /bin/sh -c "curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary @$work/login.json $API_URL/api/v1/auth/login" 2>/dev/null || echo 000)"
+    docker exec "$cid" /bin/sh -c "rm -rf $work" >/dev/null 2>&1 || true
+    # A RETURN trap is global: it would fire on every later function's return,
+    # with $cid and $work long out of scope. Cleaning up explicitly and disarming
+    # is the only correct use of it inside a helper.
+    trap - RETURN
     rm -rf "$dir"
     [ "$code" = "200" ]
     return $?
   fi
+
   code="$(printf '%s' "$payload" | curl -sS -o /dev/null -w '%{http_code}' -c "$dir/jar" \
     -X POST -H 'content-type: application/json' --data-binary @- \
     "$API_URL/api/v1/auth/login" 2>/dev/null || echo 000)"
@@ -633,54 +715,53 @@ login_probe() {
 
 # Mints a one-time node enrolment token.
 #
-# Two things here are deliberate and were both wrong before:
-#   * the password travels on STDIN, never as an argv entry. A `-d` body on the
-#     command line is readable by every process of the same user through `ps`,
-#     and this password is the platform administrator's.
-#   * response files live in `mktemp -d`, not a fixed `/tmp/<name>`. A predictable
-#     path in a shared /tmp can be pre-created by another user (symlink attack)
-#     or read afterwards; the login body carries a CSRF token.
-# The temp dir is removed on every exit path, success or failure.
+# The password and the token both travel on STDIN; container-side files live in a
+# per-call scratch directory removed by a RETURN trap.
 issue_node_token() {
   local email="$1" password="$2"
-  local dir jar csrf body
+  local dir jar csrf body cid work payload
   dir="$(mktemp -d)" || return 1
+  chmod 700 "$dir"
   jar="$dir/jar"
-  local payload
-  payload="$(python3 -c 'import json,sys; print(json.dumps({"email":sys.argv[1],"password":sys.argv[2]}))' "$email" "$password")" || { rm -rf "$dir"; return 1; }
+  payload="$(printf '%s\0%s' "$email" "$password" | json_login_payload)" \
+    || { rm -rf "$dir"; return 1; }
 
-  # The cookie jar has to live where the NEXT call runs, so the two requests are
+  # The cookie jar must live where the NEXT call runs, so both requests are
   # issued in one context. In container mode that context is the Kernel's own.
   if [ "$API_CONTEXT" = "container" ]; then
-    local cid; cid="$(compose ps -q kernel 2>/dev/null || true)"
-    docker exec -i "$cid" /bin/sh -c "cat > /tmp/login.json" <<< "$payload" 2>/dev/null || true
-    docker exec "$cid" /bin/sh -c "curl -sS -c /tmp/jar -X POST -H 'content-type: application/json' --data-binary @/tmp/login.json $API_URL/api/v1/auth/login -o /tmp/login-resp.json" 2>/dev/null || true
-    csrf="$(docker exec "$cid" /bin/sh -c "sed -n 's/.*\"csrfToken\":\"\([^\"]*\)\".*/\1/p' /tmp/login-resp.json" 2>/dev/null || true)"
-    if [ -z "$csrf" ]; then rm -rf "$dir"; return 1; fi
-    body="$(docker exec "$cid" /bin/sh -c "curl -sS -b /tmp/jar -X POST -H 'x-csrf-token: $csrf' -H 'content-type: application/json' -d '{\"label\":\"${OPSWEAVE_NODE_NAME:-platform-node}\",\"ttlMinutes\":60}' $API_URL/api/v1/nodes/enrollment-tokens" 2>/dev/null || true)"
-    docker exec "$cid" /bin/sh -c 'rm -f /tmp/login.json /tmp/login-resp.json /tmp/jar' 2>/dev/null || true
+    cid="$(compose ps -q kernel 2>/dev/null || true)"
+    [ -n "$cid" ] || { rm -rf "$dir"; return 1; }
+    work="$(container_scratch "$cid")" || { rm -rf "$dir"; return 1; }
+    trap 'docker exec "$cid" /bin/sh -c "rm -rf $work" >/dev/null 2>&1 || true' RETURN
+
+    printf '%s' "$payload" | docker exec -i "$cid" /bin/sh -c "cat > $work/login.json" 2>/dev/null || true
+    docker exec "$cid" /bin/sh -c "curl -sS -c $work/jar -X POST -H 'content-type: application/json' --data-binary @$work/login.json $API_URL/api/v1/auth/login -o $work/resp.json" >/dev/null 2>&1 || true
+    csrf="$(docker exec "$cid" /bin/sh -c "cat $work/resp.json" 2>/dev/null | csrf_from_stdin || true)"
+    if [ -z "$csrf" ]; then
+      docker exec "$cid" /bin/sh -c "rm -rf $work" >/dev/null 2>&1 || true
+      trap - RETURN
+      rm -rf "$dir"
+      return 1
+    fi
+    body="$(docker exec "$cid" /bin/sh -c "curl -sS -b $work/jar -X POST -H 'x-csrf-token: '"$csrf"' -H 'content-type: application/json' -d '{\"label\":\"'"${OPSWEAVE_NODE_NAME:-platform-node}"'\",\"ttlMinutes\":60}' $API_URL/api/v1/nodes/enrollment-tokens" 2>/dev/null || true)"
+    docker exec "$cid" /bin/sh -c "rm -rf $work" >/dev/null 2>&1 || true
+    trap - RETURN
     rm -rf "$dir"
-    python3 -c 'import json,sys
-d=json.loads(sys.argv[1]) if sys.argv[1].strip() else {}
-print(d.get("token",""))' "$body" 2>/dev/null || true
+    token_from_stdin <<< "$body"
     return 0
   fi
 
   printf '%s' "$payload" | curl -sS -c "$jar" -X POST \
       -H 'content-type: application/json' --data-binary @- \
       "$API_URL/api/v1/auth/login" -o "$dir/login.json" 2>/dev/null || true
-  csrf="$(python3 -c 'import json,sys
-try: print(json.load(open(sys.argv[1])).get("csrfToken",""))
-except Exception: print("")' "$dir/login.json" 2>/dev/null || true)"
+  csrf="$(csrf_from_stdin < "$dir/login.json" 2>/dev/null || true)"
   if [ -z "$csrf" ]; then rm -rf "$dir"; return 1; fi
 
   body="$(curl -sS -b "$jar" -X POST -H "x-csrf-token: $csrf" -H 'content-type: application/json' \
     -d "{\"label\":\"${OPSWEAVE_NODE_NAME:-platform-node}\",\"ttlMinutes\":60}" \
     "$API_URL/api/v1/nodes/enrollment-tokens" 2>/dev/null || true)"
   rm -rf "$dir"
-  python3 -c 'import json,sys
-d=json.loads(sys.argv[1]) if sys.argv[1].strip() else {}
-print(d.get("token",""))' "$body" 2>/dev/null || true
+  token_from_stdin <<< "$body"
 }
 
 report() {
@@ -877,6 +958,9 @@ EOF
   printf '  database:  %s (sha256 %s…)\n' "$(grep database_bytes "$tmp/MANIFEST" | cut -d= -f2) bytes" "$(grep database_sha256 "$tmp/MANIFEST" | cut -d= -f2 | cut -c1-12)"
   printf '  packages:  %s files\n' "$file_count"
   printf '  restore with: %s restore %s\n' "$(basename "$0")" "$out"
+  # A RETURN trap outlives the function that armed it; disarm before returning so
+  # it cannot fire in a caller whose $tmp is a different (or absent) variable.
+  trap - RETURN
 }
 
 kernel_image() {
@@ -952,7 +1036,35 @@ cmd_restore() {
   ( cd "$tmp/kernel-data" && { sha256sum -c "$tmp/kernel-data.sha256" >/dev/null 2>&1 \
       || shasum -a 256 -c "$tmp/kernel-data.sha256" >/dev/null 2>&1; } ) \
     || die "kernel package store checksum mismatch; refusing to restore a corrupt backup"
-  ok "archive validates"
+
+  # The manifest is the archive's own description of itself, so it is checked
+  # for the fields a restore DEPENDS on rather than merely for being present. A
+  # manifest that omits format or consistency is an archive from an older or
+  # hand-built producer, and its other claims cannot be trusted either.
+  for field in format created_at image database_bytes kernel_files database_sha256 consistency registry_included; do
+    grep -q "^${field}=" "$tmp/MANIFEST" || die "backup manifest is missing '$field'; refusing to restore"
+  done
+  [ "$(grep '^format=' "$tmp/MANIFEST" | cut -d= -f2)" = "1" ]     || die "unsupported backup format (expected 1)"
+  # The file count recorded at backup time must match what was archived, so a
+  # truncated kernel-data directory is caught before the platform is stopped.
+  declared_files="$(grep '^kernel_files=' "$tmp/MANIFEST" | cut -d= -f2)"
+  archived_files="$(wc -l < "$tmp/kernel-data.sha256" | tr -d ' ')"
+  [ "$declared_files" = "$archived_files" ] \
+    || die "manifest declares $declared_files package files but the archive lists $archived_files"
+  # A database dump smaller than the schema-only floor is a truncated dump that
+  # gzip still decompressed happily.
+  declared_bytes="$(grep '^database_bytes=' "$tmp/MANIFEST" | cut -d= -f2)"
+  actual_bytes="$(wc -c < "$tmp/opsweave.sql.gz" | tr -d ' ')"
+  [ "$declared_bytes" = "$actual_bytes" ] \
+    || die "database dump is $actual_bytes bytes, the manifest recorded $declared_bytes"
+
+  # What this archive CANNOT restore is part of validating it, and is reported
+  # before anything is destroyed rather than after.
+  case "$(grep '^registry_included=' "$tmp/MANIFEST")" in
+    *no*) REGISTRY_RESTORED=no ;;
+    *) REGISTRY_RESTORED=unknown ;;
+  esac
+  ok "archive validates (format $(grep '^format=' "$tmp/MANIFEST" | cut -d= -f2), $archived_files package files, registry: $REGISTRY_RESTORED)"
 
   # --- 2. quiesce every writer -------------------------------------------
   # Kernel and Node both stop before the database is touched. The Kernel writes
@@ -1031,6 +1143,7 @@ print(d["volumes"]["kernel"]["name"])' 2>/dev/null || true)"
   ok "restore complete"
   report
   warn "registry blobs were not part of this backup: installed plugins need their images re-pushed before they can start"
+  trap - RETURN
 }
 
 usage() {

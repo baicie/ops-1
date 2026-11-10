@@ -542,6 +542,12 @@ jobs:
           set -eu
           cargo clippy --locked -p opsweave-kernel --all-targets -- -D warnings
           cargo clippy --locked -p opsweave-kernel --no-default-features --all-targets -- -D warnings
+      # P001-B.2 A1/A2: the installer must never put a credential in a process
+      # argument. The guard is static plus executed, and it FAILS against the
+      # shape it forbids (it caught a real leak and its own false negative while
+      # being written), so a pass here is not vacuous.
+      - name: Installer credential handling
+        run: bash tests/ci/p001_credential_argv.sh
       - name: Test both feature sets
         env:
           OPSWEAVE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave

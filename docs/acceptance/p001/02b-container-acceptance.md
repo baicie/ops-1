@@ -362,3 +362,96 @@ cannot prove — and one, upgrade/rollback, that this phase simply did not cover
 
 `ACCEPTED` requires all nine conditions in the task's §9. Six hold. Three do not.
 **Phase 2 therefore remains `PARTIAL`**, with the gap list above as the work.
+
+---
+
+## 10. Review follow-up (PR #78, before merge)
+
+The review found two credential-handling defects that this phase's own checks
+missed. Both are fixed, and the fix is now guarded by a test that fails without it.
+
+### 10.1 The admin password travelled in `python3` argv
+
+`login_probe` and `issue_node_token` built the login body with
+
+```
+python3 -c '...' "$email" "$password"
+```
+
+so the administrator password was readable by any process of the same user for
+the lifetime of that `python3` — on a script that runs as root on a deployment
+host. The enrolment token took the same path back out (`sys.argv[1]`).
+
+Now: values enter `python3` on **STDIN**, NUL-separated, and leave it the same
+way. JSON is produced by `json.dumps`, so quotes, backslashes, newlines and
+non-ASCII round-trip rather than being forbidden — **no character of the password
+is restricted**.
+
+### 10.2 Container-mode scratch files were fixed paths
+
+`/tmp/login.json`, `/tmp/login-resp.json`, `/tmp/jar` and `/tmp/lp.json` were
+predictable in a shared `/tmp`, shared between concurrent installs, and cleaned
+only by `rm -f ... || true`. They now live in a per-call `mktemp -d /tmp/owp.XXXXXX`
+directory **inside the container**, validated against that shape before it is
+interpolated into `rm -rf`, and removed from a RETURN trap as well as on the
+success path.
+
+That trap exposed a second bug, which the real install caught: a bash `RETURN`
+trap is **not scoped to the function that armed it** — it fires on the return of
+every later function, where `$cid` no longer exists. The install ended with
+`line 312: cid: unbound variable`. Every RETURN trap in the installer is now
+disarmed in the function that armed it, and the guard asserts the counts balance.
+
+### 10.3 The guard, and why it is not vacuous
+
+`tests/ci/p001_credential_argv.sh` (wired into the `platform-only` CI job):
+
+| Check | Passed because |
+|---|---|
+| no credential as an argv to `python3` | static scan, **comments stripped** (the installer documents the old shape) |
+| no `sys.argv` credential read | static scan |
+| stdin helpers exist | `json_login_payload`, `csrf_from_stdin`, `token_from_stdin` |
+| no fixed auth temp paths | five known paths, none present |
+| RETURN traps balanced | armed 4, disarmed 4 |
+| JSON round-trip ×9 | quotes, backslash, newline/tab, CJK+emoji, trailing space, JSON-lookalike, `$()`/backtick |
+| live process argv | a canary password never appears in a spawned process's `ps` output |
+| process-table scan | self-checked both ways: zero for an absent marker, **non-zero for a deliberate leak** |
+| the scan rejects the forbidden shape | negative control |
+| the scan accepts the stdin form | positive control |
+
+Three of its own bugs were found by these controls while writing it: a regex that
+missed the real leak shape, a scanner that matched the explanatory comment, and a
+process scan that counted `grep`'s own argv. Each was fixed and is now asserted.
+
+**Executed after the change**, to show the fix did not break the installer:
+`install exit=0` (350 s, login OK, boundary OK), `backup exit=0`,
+`restore exit=0`.
+
+### 10.4 Restore manifest integrity
+
+The manifest is now validated for the fields a restore depends on rather than for
+existence: `format` (must be `1`), `created_at`, `image`, `database_bytes`,
+`kernel_files`, `database_sha256`, `consistency`, `registry_included`. The
+declared package-file count and dump size must match the archive. Executed:
+
+| Archive | Result |
+|---|---|
+| missing `consistency` | `error backup manifest is missing 'consistency'; refusing to restore` |
+| `kernel_files=5` but 0 archived | `error manifest declares 5 package files but the archive lists 0` |
+| intact | `ok archive validates (format 1, 0 package files, registry: no)` |
+
+### 10.5 The four recovery layers, kept distinct
+
+`kernel_files=0` in every drill above is **not** evidence that plugin recovery
+works, and the document does not claim it:
+
+| Layer | Backed up | Verified |
+|---|---|---|
+| Database | yes (`pg_dump --clean --if-exists`) | **yes** — a user created before a full volume wipe survives the restore |
+| Kernel artifact store | yes (volume archive + checksums) | **structural only** — the count and checksum check ran, against 0 files |
+| OCI registry blobs | **no** — declared in the manifest and printed on restore | **no**, and cannot be claimed |
+| Plugin instances | n/a (none installed) | **NOT_RUN** — belongs to P001-C |
+
+A deployment restored from this archive has its plugins *registered* but their
+images absent; they must be re-pushed from their signed bundles. That is stated
+by `restore` itself, not left for an operator to discover.
