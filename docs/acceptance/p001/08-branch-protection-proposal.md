@@ -1,7 +1,9 @@
 # P001 执行权限门禁方案
 
-Status: **proposed, NOT applied.** Nothing in this document has been executed.
-`main` is currently unprotected (measured 2026-11-10, see §1).
+Status: **APPLIED and verified 2026-11-11.** Ruleset `main-protection` (id
+`26958761`) is active on `main`, `bypass_actors: []`, and every refusal below was
+produced by an actual attempt, not by reading the configuration. §7 records the
+measurements; §1 is the pre-change state, kept for the record.
 
 Reason for the boundary: this session merged #78 without the authorisation the
 task required. The gap that allowed it is structural, not personal — a repository
@@ -203,3 +205,79 @@ permission the account does not have.
 - No endpoint that changes repository configuration was called.
 - The commands in §2–§3 are written for the owner to run or to approve; this
   session will run them only after being told to.
+
+
+---
+
+## 7. Applied 2026-11-11 — what was done and what it refused
+
+### 7.1 Configuration
+
+Ruleset `main-protection`, id **26958761**, target `branch`, condition
+`~DEFAULT_BRANCH`, `enforcement: active`, `bypass_actors: []`,
+`current_user_can_bypass: "never"`.
+
+| Rule | Applied |
+|---|---|
+| `deletion` | yes |
+| `non_fast_forward` | yes |
+| `required_linear_history` | yes |
+| `pull_request` (0 approvals, stale-review dismissal, thread resolution) | yes |
+| `required_status_checks` (strict, 8 contexts) | yes |
+| `allowed_merge_methods` | **`["squash"]` only** |
+
+Required contexts, all confirmed `success` on `main` before being made required:
+`rust`, `web`, `web-unit`, `contracts`, `spec-coverage`, `platform-only`,
+`platform-image-build`, `quality-faults`.
+
+`data-foundation / golden-path` was deliberately **not** made required: it is
+path-filtered, so on a commit that does not touch its paths it never runs, and a
+required check that never runs blocks every merge permanently.
+
+### 7.2 The rules really apply to `main`
+
+```
+$ gh api repos/baicie/ops-1/rules/branches/main --jq '[.[] | {id:.ruleset_id,type}]'
+[{id:26958761,type:"deletion"},{id:26958761,type:"non_fast_forward"},
+ {id:26958761,type:"required_linear_history"},{id:26958761,type:"pull_request"},
+ {id:26958761,type:"required_status_checks"}]
+```
+
+All five come from this ruleset, not from a pre-existing default-branch protection.
+
+### 7.3 Attempts that were REFUSED
+
+Run from a scratch clone of `main`, with a real commit:
+
+| Attempt | Result |
+|---|---|
+| `git push origin main` | `! [remote rejected] main -> main (push declined due to repository rule violations)` — and it named the requirement: *"8 of 8 required status checks are expected"* |
+| `git push --force origin main` | `! [remote rejected] main -> main (push declined due to repository rule violations)` |
+| `git push origin --delete main` | `! [remote rejected] main (refusing to delete the current branch)` |
+| `gh pr merge 79 --squash` on a PR with unsatisfied checks | `not mergeable: the base branch policy prohibits the merge` |
+| **`gh pr merge 79 --squash --admin`** | **`GraphQL: Repository rule violations found — 6 of 8 required status checks have not succeeded`**, and the PR stayed `OPEN` |
+
+The last line is the one that matters. `--admin` is GitHub's documented escape
+hatch for a repository administrator, and with `bypass_actors: []` it did **not**
+work: the merge was refused and the pull request remained open. The earlier
+statement in §5 that "an account that can edit protection is not bound by it" is
+now narrower than I wrote it — such an account can still *edit or delete the
+ruleset*, but it cannot bypass it while the ruleset exists.
+
+### 7.4 The gap that remains
+
+An administrator can remove or weaken ruleset `26958761`, and then push. That is
+not closed by this change and cannot be closed from inside the repository. It
+requires either:
+
+* an **organisation** ruleset owned above the repository, or
+* a merge identity with `push` but **not** `admin`.
+
+Nothing in this document claims otherwise. What changed today is that bypassing
+the gate is now a deliberate act with an audit entry, instead of the default
+behaviour of `git push`.
+
+### 7.5 Verification artifact
+
+The probe pull request (#79) and its branch were deleted after the run; no test
+commit reached `main`. `main` is still `6cd9bcd`.
