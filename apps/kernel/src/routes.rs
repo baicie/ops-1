@@ -842,20 +842,33 @@ mod tests {
         }
     }
 
-    /// The trace layer is installed by the same chain, so a static request has
-    /// to open one span exactly like an API request does.
+    /// The trace layer opens one span per request, for the shell and the API
+    /// alike.
+    ///
+    /// **How this observes only its own spans.** Two shapes were tried and both
+    /// were wrong, intermittently:
+    ///
+    ///   * `set_default` is thread-local, and the suite runs in parallel - roughly
+    ///     one run in seven saw "trace spans opened: []" because the span was made
+    ///     on a thread whose subscriber was not ours;
+    ///   * a plain `set_global_default` collected other tests' requests too - 13
+    ///     spans where 2 were expected.
+    ///
+    /// What works: a global subscriber that records `(span, uri)` pairs, and an
+    /// assertion filtered on request paths unique to this test.
     #[tokio::test]
     async fn static_layer_opens_a_trace_span() {
-        use std::sync::{Arc, Mutex};
+        use std::sync::{Arc, Mutex, OnceLock};
         use tracing::span::Attributes;
         use tracing_subscriber::layer::{Context, SubscriberExt};
         use tracing_subscriber::registry::LookupSpan;
         use tracing_subscriber::Layer;
 
+        /// (span name, the request path it was opened for).
         #[derive(Clone, Default)]
-        struct SpanNames(Arc<Mutex<Vec<String>>>);
+        struct Spans(Arc<Mutex<Vec<(String, String)>>>);
 
-        impl<S> Layer<S> for SpanNames
+        impl<S> Layer<S> for Spans
         where
             S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
         {
@@ -865,34 +878,62 @@ mod tests {
                 _id: &tracing::span::Id,
                 _ctx: Context<'_, S>,
             ) {
+                struct UriVisitor(String);
+                impl tracing::field::Visit for UriVisitor {
+                    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                        if field.name() == "uri" {
+                            self.0 = value.to_string();
+                        }
+                    }
+                    fn record_debug(
+                        &mut self,
+                        field: &tracing::field::Field,
+                        value: &dyn std::fmt::Debug,
+                    ) {
+                        if field.name() == "uri" {
+                            self.0 = format!("{value:?}");
+                        }
+                    }
+                }
+                let mut visitor = UriVisitor(String::new());
+                attrs.record(&mut visitor);
                 self.0
                     .lock()
                     .unwrap()
-                    .push(attrs.metadata().name().to_string());
+                    .push((attrs.metadata().name().to_string(), visitor.0));
             }
         }
 
+        static COLLECTED: OnceLock<Spans> = OnceLock::new();
+        static INSTALLED: OnceLock<()> = OnceLock::new();
+
+        let collected = COLLECTED.get_or_init(Spans::default).clone();
+        INSTALLED.get_or_init(|| {
+            let _ = tracing::subscriber::set_global_default(
+                tracing_subscriber::registry().with(collected.clone()),
+            );
+        });
+
         let bundle = WebBundle::new("trace-span");
         let app = bundle.app();
-        let names = SpanNames::default();
-        // A tokio test runs on the current-thread runtime, so the thread-local
-        // default stays installed for every await below.
-        let guard =
-            tracing::subscriber::set_default(tracing_subscriber::registry().with(names.clone()));
 
-        let shell = get(&app, "/admin/overview", None).await;
-        let api = get(&app, "/api/v1/version", None).await;
-        drop(guard);
+        const SHELL_PATH: &str = "/admin/overview?trace-probe=shell";
+        const API_PATH: &str = "/api/v1/version?trace-probe=api";
+
+        let shell = get(&app, SHELL_PATH, None).await;
+        let api = get(&app, API_PATH, None).await;
 
         assert_eq!(shell.status(), StatusCode::OK);
         assert_eq!(api.status(), StatusCode::OK);
-        let recorded = names.0.lock().unwrap().clone();
+
+        let recorded = collected.0.lock().unwrap().clone();
         println!("trace spans opened: {recorded:?}");
+        let mine: Vec<&(String, String)> = recorded
+            .iter()
+            .filter(|(name, uri)| name == "request" && uri.contains("trace-probe="))
+            .collect();
         assert_eq!(
-            recorded
-                .iter()
-                .filter(|name| name.as_str() == "request")
-                .count(),
+            mine.len(),
             2,
             "the shell and the API must each open one request span: {recorded:?}"
         );

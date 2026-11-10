@@ -777,8 +777,13 @@ jobs:
             -e OPSWEAVE_WEB_DIST=/app/web \
             -e OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=ci@example.invalid \
             -e OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=ci-only-not-a-secret \
-            -v /tmp/p001data:/app/data \
             "$IMG"
+          # No host bind mount for /app/data: a bind-mounted host directory is
+          # root-owned, the image runs as uid 10001, and the Kernel then dies with
+          # "create package store directory: Permission denied" - which is exactly
+          # how this step first failed on the runner. The container gets its own
+          # writable path instead; the volume semantics are the install profile's
+          # subject, not this boot test's.
           for _ in $(seq 1 90); do
             curl -fsS http://127.0.0.1:19081/livez >/dev/null 2>&1 && break
             sleep 1
