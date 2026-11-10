@@ -1,0 +1,30 @@
+# Optional override: the docker-bridge gateway bindings.
+#
+# Applied by `scripts/platform_up.sh` ONLY when the host has a docker bridge
+# gateway that can actually be bound. It is a separate file because Compose
+# cannot express "publish this port if the address exists": a mapping is either
+# there or the whole `up` fails.
+#
+# Why this exists at all: plugin containers run on the default bridge and reach
+# the Kernel and PostgreSQL through the gateway address (172.17.0.1 on a stock
+# Linux daemon). Without the binding, a plugin container cannot reach either.
+#
+# Why it is not unconditional: 172.17.0.1 is a fact about the stock Linux bridge,
+# not about Docker. On Docker Desktop (Linux VM), rootless Docker and any host
+# with a custom bridge the address is not assignable by the host process, and
+# `compose up` aborts with "cannot assign requested address" before any service
+# starts. P001-B.1's first real install failed exactly that way.
+#
+# The values are exported by the install script:
+#   OPSWEAVE_PLUGIN_GATEWAY_IP   e.g. 172.17.0.1
+#   OPSWEAVE_PG_PORT             host port PostgreSQL is published on
+#   OPSWEAVE_REGISTRY_PORT       host port the registry is published on
+
+services:
+  postgres:
+    ports:
+      - "${OPSWEAVE_PLUGIN_GATEWAY_IP:?set OPSWEAVE_PLUGIN_GATEWAY_IP}:${OPSWEAVE_PG_PORT:-55432}:5432"
+
+  registry:
+    ports:
+      - "${OPSWEAVE_PLUGIN_GATEWAY_IP:?set OPSWEAVE_PLUGIN_GATEWAY_IP}:${OPSWEAVE_REGISTRY_PORT:-15001}:5000"

@@ -1,9 +1,17 @@
 # P001 Phase 2 — Platform-only Packaging and Installer
 
-Status: **implemented; container-level acceptance NOT_RUN.** The compose file parses
-and the installer's refusal and generation paths were executed and verified. No
-Docker daemon was available in this session, so **nothing was installed into
-containers**. §5 states exactly what is and is not proven.
+> **Superseded in part by [`02b-container-acceptance.md`](02b-container-acceptance.md)
+> (P001-B.1).** The image now builds, the install runs against real containers, and
+> backup/restore was drilled destructively. That document is the authority for the
+> container-level results; this one remains the record of the design and of what was
+> knowable before a Docker daemon was available.
+
+Status: **implemented; container-level results recorded in 02b.** When this file
+was written no Docker daemon was available and nothing had been installed into
+containers; P001-B.1 later ran the whole flow against real containers and its
+findings changed the design described below (the bridge binding, the database
+address, the node socket). Read 02b for what is now true; §5 here remains the
+list of what was unproven *at that time*.
 
 Depends on: Phase 1 (`docs/acceptance/p001/01-platform-boundary.md`) for a binary
 that has no business surface to install.
@@ -173,9 +181,10 @@ inspected the produced files:
 
 | Item | Status | Why |
 |---|---|---|
-| Published platform-only image with a digest | `NOT_RUN` | no Docker daemon; no registry push |
-| `docker build --target platform` | `NOT_RUN` | same |
-| The full Install → Bootstrap → Login → Node Health → Registry → Diagnostics → Restart → Restore flow on a clean Linux host | `NOT_RUN` | same |
+| `docker build --target platform` | **DONE in P001-B.1** | see 02b §1–§2 |
+| Install → Bootstrap → Login → Registry → Diagnostics → Restart → Restore | **DONE in P001-B.1, on macOS** | see 02b §3–§4; node health is NOT_RUN there (§3.6) |
+| Published platform-only image with a registry digest | `NOT_RUN` | nothing pushed; the digest in 02b is a local image ID |
+| The same flow on a clean **Linux** host | `NOT_RUN` | no Linux host available |
 | A CI job that builds and publishes the `platform` target | `MISSING` | belongs with the release-engineering phase, and needs a registry credential policy |
 | TLS termination | `MISSING` | documented as an operator step; the profile is a Preview until then |
 | `sample` / `conformance` install entry for reference plugins | `MISSING` | Phase 3 |
