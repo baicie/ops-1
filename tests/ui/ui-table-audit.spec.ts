@@ -377,14 +377,75 @@ const pipelineRows = ['host-metrics', 'host-build', 'data-ingest'].map((pipeline
   updatedAt: ago(2 + index),
 }));
 
+/**
+ * The pipeline detail page reads `/api/v1/pipelines/{id}` on every visit. The list
+ * above was stubbed but the detail was not, so the route that the ROUTES table
+ * navigates to by NAME (host-metrics) was the one request this audit always sent to
+ * the live kernel.
+ */
+const pipelineDetail = (pipelineId: string) => {
+  const row = pipelineRows.find((item) => item.pipelineId === pipelineId) ?? pipelineRows[0];
+  return {
+    ...row,
+    latest: null,
+    revisions: [1, 2, 3].map((revision) => ({
+      revision,
+      digest: 'sha256:' + String(revision).repeat(2).padEnd(64, '0'),
+      status: 'PUBLISHED',
+      publishedAt: ago(revision * 3),
+    })),
+  };
+};
+
+/**
+ * The governance page resolves the caller's workspaces before it asks for any
+ * dataset, and `useBusinessWorkspaces` is shared by several audited routes. With no
+ * fixture it too reached the live kernel.
+ */
+const businessWorkspaces = [
+  {
+    workspaceId: '00000000-0000-4000-8000-0000000000a1',
+    key: 'platform',
+    name: 'Platform',
+    createdAt: ago(24 * 30),
+    member: true,
+  },
+];
+
 /** Deterministic answers for every data endpoint the eight audited routes read. */
+/**
+ * `/api/v1/overview` is read by the shell itself (platform status and the sidebar
+ * badge), so EVERY audited route touches it. It had no fixture, which means every
+ * run of this spec sent it to the live kernel - harmless while it answered, and a
+ * session-ending 401 the moment it did not.
+ */
+const overview = {
+  health: 'READY',
+  nodesTotal: nodes.length,
+  nodesReady: nodes.length,
+  pluginsInstalled: plugins.length,
+  pluginsAvailable: plugins.length,
+  instancesReady: plugins.reduce((sum, item) => sum + item.readyInstances, 0),
+  instancesTotal: plugins.reduce((sum, item) => sum + item.totalInstances, 0),
+  activeDeployments: plugins.length,
+  attention: [],
+  recentEvents: auditEvents().slice(0, 5),
+};
+
+/** No plugin contributes UI in this audit: an empty list IS the normal answer. */
+const extensions: unknown[] = [];
+
 const FIXTURES: [RegExp, unknown | ((url: string) => unknown)][] = [
+  [/\/api\/v1\/overview$/, overview],
+  [/\/api\/v1\/extensions$/, extensions],
   [/\/api\/v1\/jobs\?/, { items: jobs, nextCursor: null }],
   [/\/api\/v1\/jobs\/[0-9a-f-]+\/result$/, { status: 'RUNNING', output: { sampled: 42 }, resultDigest: 'sha256:' + '11'.repeat(32), errorCode: null, errorMessage: null }],
   [/\/api\/v1\/jobs\/[0-9a-f-]+\/diagnostics$/, jobDiagnostics],
   [/\/api\/v1\/jobs\/[0-9a-f-]+$/, jobDetail],
   [/\/api\/v1\/audit/, auditEvents()],
   [/\/api\/v1\/pipelines\?/, { items: pipelineRows, nextCursor: null }],
+  [/\/api\/v1\/pipelines\/[^/?]+$/, (url: string) => pipelineDetail(decodeURIComponent(url.split('/pipelines/')[1].split('?')[0]))],
+  [/\/api\/v1\/business-workspaces$/, businessWorkspaces],
   [/\/api\/v1\/nodes$/, nodes],
   [/\/api\/v1\/nodes\/[0-9a-f-]+\/instances$/, nodeInstances],
   [/\/api\/v1\/nodes\/[0-9a-f-]+\/resource-history/, nodeHistory],
@@ -394,17 +455,61 @@ const FIXTURES: [RegExp, unknown | ((url: string) => unknown)][] = [
   [/\/api\/v1\/publishers$/, publishers],
   [/\/api\/v1\/users$/, users],
   [/\/api\/v1\/diagnostics$/, diagnostics],
-  [/\/api\/data-catalog\/datasets$/, { items: datasets }],
-  [/\/api\/data-catalog\/governance-summary$/, governanceSummary],
-  [/\/api\/data-catalog\/datasets\/[^/]+\/quality-runs/, { items: [] }],
-  [/\/api\/data-catalog\/datasets\/[^/]+\/lineage/, { items: [] }],
+  // The gateway prefix is part of the real path: the client builds
+  // `/api/v1/gateway/<pluginId>/<pluginPath>`, and `stub()` matches on `pathname`.
+  // These four patterns used to omit `/api/v1/gateway/...`, so they never matched,
+  // `route.continue()` sent the request to the REAL kernel, the staging Data Catalog
+  // answered 401 ("caller identity required"), and the 401 handler signed the
+  // session out mid-run. The audit then waited out every route against a login page
+  // - which is the `waitForURL` timeout this spec was failing with, and not a
+  // layout violation at all.
+  [/\/api\/v1\/gateway\/opsweave\.data-catalog\/api\/data-catalog\/datasets(\?|$)/, { items: datasets }],
+  [/\/api\/v1\/gateway\/opsweave\.data-catalog\/api\/data-catalog\/governance-summary(\?|$)/, governanceSummary],
+  [/\/api\/v1\/gateway\/opsweave\.data-catalog\/api\/data-catalog\/datasets\/[^/]+\/quality-runs/, { items: [] }],
+  [/\/api\/v1\/gateway\/opsweave\.data-catalog\/api\/data-catalog\/datasets\/[^/]+\/lineage/, { items: [] }],
 ];
 
+/**
+ * Answer every `/api/v1/**` request from a fixture, and FAIL LOUDLY on one that has
+ * no fixture - deliberately not `route.continue()`.
+ *
+ * This spec measures geometry on a host whose real data must never be consulted.
+ * Continuing an unmatched request reaches the live kernel, and the live kernel's
+ * answers have side effects this spec cannot control. That is exactly how it broke:
+ * four Data Catalog patterns were written without the `/api/v1/gateway/` prefix,
+ * never matched, and the real 401 those requests produced signed the session out
+ * mid-run. The audit then spent its budget waiting for routes on a login page, and
+ * the failure looked like a timeout instead of a stub that had a hole in it.
+ *
+ * A missing fixture is a defect in THIS file. Aborting makes it impossible to
+ * mistake for a product failure, and the message names the URL that needs one.
+ */
 async function stub(page: Page) {
   await page.route('**/api/v1/**', async (route) => {
     const url = route.request().url();
-    const hit = FIXTURES.find(([pattern]) => pattern.test(new URL(url).pathname + (url.includes('?') ? '?' : '')));
-    if (!hit) return route.continue();
+    const target = new URL(url).pathname + (url.includes('?') ? '?' : '');
+    // Two classes of request are deliberately real, because the spec is ABOUT them
+    // and neither can answer 401 on a reachable kernel:
+    //   * `/api/v1/auth/*`  - this spec proves the pages behind a live login;
+    //   * `/api/v1/version` - public build identity, read by the shell's badge.
+    // Every OTHER `/api/v1/**` read must come from a fixture: the host's real data is
+    // not what the geometry is measured against, and a live read can answer 401.
+    const pathname = new URL(url).pathname;
+    if (/^\/api\/v1\/auth\//.test(pathname) || pathname === '/api/v1/version') {
+      return route.continue();
+    }
+
+    const hit = FIXTURES.find(([pattern]) => pattern.test(target));
+    if (!hit) {
+      // `route.abort()` rather than a thrown error: a `page.route` handler that
+      // throws still leaves the request unresolved. The message names the fixture.
+      await route.abort('failed');
+      throw new Error(
+        'ui-table-audit: no fixture for ' + target + ' - add one to FIXTURES. ' +
+          'Continuing would reach the real kernel, whose 401 signs the session out and ' +
+          'turns this geometry audit into a login-page timeout.',
+      );
+    }
     const body = typeof hit[1] === 'function' ? (hit[1] as (target: string) => unknown)(url) : hit[1];
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
