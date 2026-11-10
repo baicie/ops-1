@@ -48,8 +48,13 @@ services:
     environment:
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
+      # Loopback only. The docker-bridge gateway binding that plugin containers
+      # need lives in `compose.bridge-gateway.yaml`, applied by the install
+      # script ONLY after it has proved the address is assignable here. A
+      # hardcoded 172.17.0.1 is a Linux-bridge assumption; on Docker Desktop,
+      # rootless Docker or a custom bridge `compose up` then dies with
+      # "cannot assign requested address" before anything starts.
       - "127.0.0.1:${OPSWEAVE_PG_PORT:-55432}:5432"
-      - "${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_PG_PORT:-55432}:5432"
     volumes:
       # A named volume, not a bind path: it survives `down`, `upgrade` and a
       # compose file rewrite, which is what makes the upgrade path non-destructive.
@@ -78,8 +83,9 @@ services:
       REGISTRY_HTTP_ADDR: 0.0.0.0:5000
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
     ports:
+      # See the postgres service: the bridge binding is conditional and lives in
+      # the same override file.
       - "127.0.0.1:${OPSWEAVE_REGISTRY_PORT:-15001}:5000"
-      - "${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_REGISTRY_PORT:-15001}:5000"
     volumes:
       - registry:/var/lib/registry
     healthcheck:
@@ -117,7 +123,14 @@ services:
       OPSWEAVE_PLUGIN_KERNEL_URL: http://${DOCKER_BRIDGE_IP:-172.17.0.1}:${OPSWEAVE_PORT:-18080}
       OPSWEAVE_BUILD_SHA: ${OPSWEAVE_BUILD_SHA:-}
       OPSWEAVE_BUILD_TIME: ${OPSWEAVE_BUILD_TIME:-}
-      OPSWEAVE_ENVIRONMENT: ${OPSWEAVE_ENVIRONMENT:-PRODUCTION}
+      # What /api/v1/version reports, and NOTHING else: no security decision is
+      # derived from it (cookies are `Secure` by public_url, RBAC by role). It
+      # used to default to PRODUCTION, which made a single-host install with no
+      # TLS, no mTLS and no distributed acceptance claim to be a production
+      # deployment - a false statement rendered by a public endpoint.
+      # Empty means UNKNOWN, which is the honest default for an install nobody
+      # has classified. Set it explicitly per deployment.
+      OPSWEAVE_ENVIRONMENT: ${OPSWEAVE_ENVIRONMENT:-}
     volumes:
       - kernel:/app/data
     depends_on:
@@ -166,6 +179,13 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node:${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node
+    # The node's `docker` CLI must reach the daemon through this socket. On a
+    # stock Linux host the socket is group-owned and group_add is enough; on
+    # Docker Desktop the socket is presented inside the container as root:root
+    # regardless of its host ownership, so the mapping below cannot work there
+    # and the node runs as root ONLY when the install script explicitly chose it
+    # (OPSWEAVE_NODE_RUN_AS_ROOT=1, set after probing and reported to the user).
+    user: "${OPSWEAVE_NODE_USER:-10001:10001}"
     group_add:
       - "${DOCKER_GID:-999}"
     depends_on:
