@@ -12,6 +12,10 @@ use uuid::Uuid;
 /// the business write has committed, which turns a failed audit into a 5xx over a row
 /// that exists.
 #[allow(clippy::too_many_arguments)]
+/// P001-A: today's only caller is the business audit path, so this is unused in a
+/// platform-only build. Kept because it is the ledger's generic write primitive,
+/// not an Ops concept (ADR-022 §2.1 assigns audit to Core).
+#[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
 pub async fn record_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     event_type: &str,
@@ -914,6 +918,11 @@ mod tests {
     /// through. If a later phase tightens incidents::Caller::sees_all, this test is what
     /// fails when the ledger stops agreeing with it - instead of the ledger quietly
     /// cancelling the tightening.
+    ///
+    /// P001-A: it compares two implementations, one of which is the Ops module, so it
+    /// runs only in a build that contains that module. The ledger's own scoping is
+    /// asserted by the tests above in both builds.
+    #[cfg(feature = "business-ops")]
     #[tokio::test]
     async fn the_ledger_scope_agrees_with_the_incident_read_predicate() {
         let Some(pool) = test_pool().await else {

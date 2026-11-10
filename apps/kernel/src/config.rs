@@ -61,6 +61,12 @@ pub struct Config {
     /// Endpoint and TLS are NOT duplicated here: the registry copies them from
     /// the matching credential binding at sync time, so the two cannot disagree.
     /// This is metadata only and enables no endpoint; B1 slice 2 adds issuance.
+    ///
+    /// P001-A: parsed in both builds (the variable is deployment configuration, and
+    /// silently ignoring it would be worse than carrying an unread field), but only
+    /// the business build consumes it. The allowance is on the field, so a future
+    /// Core consumer removes it deliberately.
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub automation_sources: Vec<AutomationSource>,
     /// Explicitly enables plaintext/disabled-TLS test endpoints. Production
     /// leaves this false; a binding with `tls: TEST_PLAINTEXT` is still required.
@@ -72,23 +78,30 @@ pub struct Config {
     /// Which provider an investigation uses when its request names none. The default
     /// is the deterministic test fixture, because shipping a default that pointed at a
     /// paid model would spend money nobody asked to spend.
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub investigation_default_provider: String,
     /// Related-context sources THIS deployment authorises for get_related_context.
     ///
     /// Empty is the shipped posture, and it means the tool refuses with
     /// SOURCE_UNAVAILABLE instead of answering an empty page: an empty page would be a
     /// fabricated success for a source that was never read.
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub investigation_related_sources: Vec<String>,
     /// The real provider, when this deployment has one. All three or nothing: a
     /// half-configured provider is a future outage, and resolve_provider refuses it.
     /// The credential is only ever NAMED here - the value is read from the environment
     /// at request time and never stored.
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub investigation_http_base_url: Option<String>,
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub investigation_http_model: Option<String>,
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub investigation_http_display_name: String,
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub investigation_http_credential_env: Option<String>,
     /// Millionths of the account currency per million tokens, when the deployment knows
     /// what a token costs. Absent means the kernel records tokens and claims no price.
+    #[cfg_attr(not(feature = "business-ops"), allow(dead_code))]
     pub investigation_price_micros_per_mtok: Option<i64>,
     pub plugin_db_host: String,
     #[allow(dead_code)]

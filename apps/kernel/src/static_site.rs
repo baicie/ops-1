@@ -60,6 +60,15 @@ const REVALIDATE_CACHE: &str = "no-cache";
 /// `base` in apps/platform-console/vite.config.ts.
 const PRIMARY_BASE: &str = "/admin";
 
+/// `/app` is the Ops application's own surface. A platform-only build has no such
+/// application, so it must not answer that prefix with the CONSOLE shell: the page
+/// would render, mount the console router under a prefix it does not own, and show
+/// a 404 page that looks like a bug. The brief forbids exactly this substitution -
+/// a rendered page standing in for a capability. The prefix is therefore refused
+/// at resolve time in that build (see `resolve_primary`).
+#[cfg(not(feature = "business-ops"))]
+const OPS_SURFACE_PREFIX: &str = "/app";
+
 /// Path prefixes the client router owns; each is answered `200` with the shell.
 ///
 /// A closed table rather than "every path that is not a file": a request for a
@@ -195,6 +204,22 @@ impl StaticSite {
                         return Target::File(candidate);
                     }
                 }
+            }
+        }
+        // P001-A: a platform-only build does not serve the Ops application's
+        // prefix at all. Without this, the console shell answered `/app/...` with
+        // 200 and the browser mounted a router that owns none of those routes -
+        // a page that renders and does nothing, which is the failure mode this
+        // phase exists to remove.
+        #[cfg(not(feature = "business-ops"))]
+        {
+            let trimmed = path.trim_end_matches('/');
+            if trimmed == OPS_SURFACE_PREFIX
+                || trimmed
+                    .strip_prefix(OPS_SURFACE_PREFIX)
+                    .is_some_and(|rest| rest.starts_with('/'))
+            {
+                return Target::Missing;
             }
         }
         let Some(relative) = relative_path(path) else {
@@ -795,6 +820,8 @@ mod tests {
         }
     }
 
+    /// The console's own client routes. `/app/*` is split out below because it is
+    /// the Ops application's prefix and is build-dependent (P001-A).
     #[tokio::test]
     async fn client_routes_answer_200_with_the_shell() {
         let fixture = Fixture::new("client-routes");
@@ -806,8 +833,6 @@ mod tests {
             "/admin",
             "/admin/overview",
             "/admin/plugins/demo",
-            "/app",
-            "/app/home",
             // `/login` moved out of this list in G14.2: it used to be answered with
             // the shell because one bundle rendered everything. Now each
             // application serves `/login` inside its own base, so the bare path has
@@ -841,6 +866,30 @@ mod tests {
                 "{path}"
             );
             assert_eq!(read_body(response).await, SHELL.as_bytes(), "{path}");
+        }
+    }
+
+    /// P001-A: `/app` is the Ops application's prefix.
+    ///
+    /// The platform-only build refuses it at resolve time, because answering it
+    /// with the CONSOLE shell would mount a router that owns none of those routes
+    /// and render a page that loads and does nothing. Both directions are asserted
+    /// so neither the refusal nor the full build's serving can regress silently.
+    #[tokio::test]
+    async fn the_ops_prefix_answers_according_to_what_this_build_contains() {
+        let fixture = Fixture::new("ops-prefix");
+        let app = fixture.app();
+
+        for path in ["/app", "/app/home", "/app/incidents"] {
+            let response = get(&app, path).await;
+            #[cfg(feature = "business-ops")]
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            #[cfg(not(feature = "business-ops"))]
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "{path} must not be served by a platform-only build"
+            );
         }
     }
 

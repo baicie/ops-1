@@ -32,7 +32,18 @@
 //! operator's ability to write and its ability to see are decided separately,
 //! which is the ruling this phase implements.
 
+// P001-A: in a platform-only build (`--no-default-features`) this module has no
+// consumer. It is Core authorization vocabulary (ADR-022 §2.1 puts workspaces and
+// authorization primitives in Core), and the only surface that reads a business
+// row today is the Ops application. Leaving it compiled is deliberate: the next
+// application to own business rows must reuse THIS predicate rather than write a
+// fourth spelling of "may this caller read this row". The dead-code allowance is
+// therefore limited to the build where that is true, and it is stated here so the
+// warning is a recorded boundary and not a suppressed bug.
+#![cfg_attr(not(feature = "business-ops"), allow(dead_code))]
+
 use crate::auth::AuthUser;
+#[cfg_attr(not(feature = "business-ops"), allow(unused_imports))]
 use crate::error::AppResult;
 use opsweave_contracts::Role;
 use sqlx::PgPool;
@@ -318,6 +329,11 @@ mod tests {
     /// The counterfactual's anchor: the predicate this phase replaced must not be
     /// spelled anywhere in the kernel any more. It is a source scan on purpose - a
     /// predicate is text, and a text that came back has come back everywhere.
+    ///
+    /// P001-A: this asserts about `incidents.rs`, which a platform-only build does
+    /// not contain (`include_str!` would not even resolve), so it runs only when
+    /// that module is compiled. For the full product build nothing changed.
+    #[cfg(feature = "business-ops")]
     #[test]
     fn the_old_predicate_is_gone_from_the_kernel() {
         let incidents = include_str!("incidents.rs");

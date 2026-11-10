@@ -30,7 +30,6 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -165,16 +164,17 @@ impl AutomationPrincipal {
 /// Kernel-only Ed25519 signing key, deterministically derived from the cursor
 /// secret. The plugin receives only the public key; the caller-context HMAC key
 /// it already holds cannot produce an `owa2` signature.
+///
+/// P001-A: the derivation itself moved to `crate::signing` (Core), because the
+/// Capability Gateway must publish the public key on a platform-only build too.
+/// This wrapper keeps the claim types' signing in one place and is the only
+/// caller that can name `owa2` claims.
 fn signing_key(state: &AppState) -> SigningKey {
-    let mut hasher = Sha256::new();
-    hasher.update(b"opsweave-automation-signing-v1");
-    hasher.update(state.cursor_secret.as_slice());
-    let seed: [u8; 32] = hasher.finalize().into();
-    SigningKey::from_bytes(&seed)
+    crate::signing::signing_key(state)
 }
 
 pub(crate) fn public_key_hex(state: &AppState) -> String {
-    hex::encode(signing_key(state).verifying_key().to_bytes())
+    crate::signing::public_key_hex(state)
 }
 
 pub(crate) fn sign_claims(state: &AppState, claims: &AutomationClaims) -> AppResult<String> {
@@ -744,6 +744,7 @@ pub async fn revoke(state: &AppState, principal_id: Uuid) -> AppResult<()> {
 mod tests {
     use super::*;
     use hmac::{Hmac, Mac};
+    use sha2::Sha256;
     use sqlx::postgres::PgConnectOptions;
     use sqlx::PgPool;
 
