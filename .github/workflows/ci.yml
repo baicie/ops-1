@@ -550,12 +550,19 @@ jobs:
           set -eu
           cargo build -q --locked -p opsweave-kernel --no-default-features
           mkdir -p /tmp/p001/data
-          OPSWEAVE_BIND=127.0.0.1:19081 \
-          OPSWEAVE_DATA_DIR=/tmp/p001/data \
-          DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable \
-          OPSWEAVE_WEB_DIST=apps/platform-console/dist \
-          OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=platform-only@example.invalid \
-          OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')" \
+
+          # Generated, exported, and never printed. It has to be a shell variable
+          # rather than a per-command prefix: a prefix applies only to that one
+          # command, so the later login read would see it unset (and `set -u`
+          # makes that a hard failure, which is how this step first broke).
+          ADMIN_EMAIL=platform-only@example.invalid
+          ADMIN_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
+          export OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL="$ADMIN_EMAIL"
+          export OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD="$ADMIN_PASSWORD"
+          export OPSWEAVE_BIND=127.0.0.1:19081 \
+                 OPSWEAVE_DATA_DIR=/tmp/p001/data \
+                 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/opsweave?sslmode=disable \
+                 OPSWEAVE_WEB_DIST=apps/platform-console/dist
           ./target/debug/opsweave-kernel > /tmp/p001/kernel.log 2>&1 &
           echo $! > /tmp/p001/kernel.pid
           for _ in $(seq 1 60); do
@@ -597,7 +604,7 @@ jobs:
           # advertised. Login first: the registry read requires a session.
           jar=/tmp/p001/jar
           curl -sS -c "$jar" -X POST -H 'content-type: application/json' \
-            -d "{\"email\":\"platform-only@example.invalid\",\"password\":\"$OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD\"}" \
+            -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
             "$B/api/v1/auth/login" >/dev/null || fail "the bootstrap admin could not sign in"
           apps=$(curl -sS -b "$jar" "$B/api/v1/applications")
           case "$apps" in
