@@ -221,7 +221,12 @@ Two were reported as high severity by a review pass and **independently
 re-verified here**. A third was reported and **refuted** — it is recorded so the
 refutation is auditable.
 
-### F1 — a grant can be created with **no** provider binding, and that binding is then never enforced (HIGH, confirmed)
+### F1 — a grant can be created with **no** provider binding (re-graded: policy question, not a vulnerability)
+
+> **Graded down by `03g-c0-errata.md`.** The code behaviour below is accurate; the
+> HIGH severity and the "blocks C2" conclusion were wrong. `NULL` is a deliberate
+> wildcard, whether it should be allowed is undecided, and C2 cases 5/6 exercise
+> bound grants and are not blocked by this.
 
 ```rust
 let provider = resolve_provider(&state, &payload.name, payload.major).await?;
@@ -254,9 +259,10 @@ tests (provider mismatch → 403) holds only for grants that *supply* a provider
 A grant created without one is never pinned, and `resolve_provider` is free to
 follow capability registration to a different provider after a version switch.
 
-**C2 cases 5/6 cannot be marked PASS until this is fixed**, and the fix is to
-bind `provider.plugin_id` rather than the payload value — with a test that
-creates a grant omitting the field and asserts it is still pinned.
+**Corrected by `03g-c0-errata.md`:** this does **not** block C2 cases 5/6. Those
+exercise grants that supply a provider, so the wildcard is not on their path. The
+open question is a policy one — forbid unbound grants, or document the wildcard —
+and it is for the platform owner to decide, not a defect this audit can close.
 
 ### F2 — assets remain served after uninstall (MEDIUM, confirmed)
 
