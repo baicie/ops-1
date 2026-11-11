@@ -191,6 +191,29 @@ It is a logic fix plus a self-check, and the live three-language run stays
 
 ---
 
+## 4b. A CI outage that looked like a code failure
+
+The first full CI run on this branch reported nine red jobs at once —
+`rust`, `acceptance`, `g13a-roundtrip`, `g13a1-gateway`, `g13b14-claim`,
+`g13b16-effect`, `g13b17-principal`, `golden-path`, `runtime-golden-path`.
+
+That pattern is what a broken change looks like, and it was not one:
+
+- the failing logs each carried **20** `Temporary failure resolving
+  'security.ubuntu.com'` lines — the runner could not resolve DNS, so `rustup`
+  and `apt` never installed;
+- `platform-only`, the job that runs this phase's own guards, **failed and then
+  passed on rerun with no code change**;
+- twelve jobs passed in the same run, including `linux-runtime` and
+  `platform-image-build`;
+- locally, `cargo build` succeeded and `cargo test -p opsweave-kernel` gave
+  **281 passed, 0 failed**.
+
+Recorded so that a future reader does not treat this run as evidence about the
+code in either direction. The reruns are the evidence; the outage is not.
+
+---
+
 ## 5. What is still NOT done
 
 | Item | Status |
