@@ -368,11 +368,19 @@ jobs:
           cp /tmp/p001b2/*.log /tmp/p001b2/diagnostics/ 2>/dev/null || true
           cat /tmp/p001b2/diagnostics/logs.txt | tail -60
 
+      # The evidence of a SUCCESSFUL run is the step log itself; the files only
+      # exist on the paths the acceptance wrote. `if-no-files-found: ignore`
+      # because a green run legitimately produces fewer files than a red one -
+      # failing the job on that would report a broken acceptance for a passing
+      # one, which is how this artifact step first failed after every assertion
+      # had passed.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: p001-b2-linux-acceptance
-          path: /tmp/p001b2/
+          path: |
+            /tmp/p001b2/
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Tear down
