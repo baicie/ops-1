@@ -230,38 +230,20 @@ jobs:
           v1="$(docker image inspect opsweave-platform:linux-bond --format '{{.Id}}')"
           echo "v1 image: $v1"
 
-          # A real change with a real build: the version string the binary
-          # reports differs, and the resulting image digest differs with it.
+          # A real change with a real build, done INSIDE the image build.
           #
-          # The edit is undone from a trap, not from the success path: if the
-          # runner is killed mid-build the worktree would otherwise keep
-          # `version = "0.0.2"` and every later step would build the wrong thing.
-          # The bump needs BOTH files: the Dockerfile builds with `--locked`, so a
-          # `Cargo.toml` version that disagrees with `Cargo.lock` fails the build
-          # with "cannot update the lock file ... because --locked was passed".
-          # That is why the first attempt died in 1.6 seconds.
-          cp Cargo.toml /tmp/p001b2/Cargo.toml.orig
-          cp Cargo.lock /tmp/p001b2/Cargo.lock.orig
-          restore_cargo() {
-            cp /tmp/p001b2/Cargo.toml.orig Cargo.toml
-            cp /tmp/p001b2/Cargo.lock.orig Cargo.lock
-          }
-          trap restore_cargo EXIT
-          python3 -c "import pathlib; p = pathlib.Path('Cargo.toml'); s = p.read_text(); p.write_text(s.replace('version = \"0.0.1\"', 'version = \"0.0.2\"', 1))"
-          grep -q '^version = "0.0.2"' Cargo.toml || fail "the version edit did not apply"
-          cargo update --workspace --offline >/dev/null 2>&1 \
-            || { echo "::error::could not relock after the version bump"; exit 1; }
-          grep -q 'version = "0.0.2"' Cargo.lock || fail "Cargo.lock did not follow the bump"
-
+          # Two earlier attempts failed, and the reasons are worth keeping: editing
+          # Cargo.toml on the host breaks `--locked` ("cannot update the lock file
+          # because --locked was passed"), and the runner has no cargo to relock
+          # with. The Dockerfile now takes `OPSWEAVE_VERSION_OVERRIDE` and rewrites
+          # both files in the stage where cargo exists; no host toolchain, no
+          # worktree mutation, nothing to restore.
           docker build -f deployments/staging/Dockerfile --target platform \
+            --build-arg OPSWEAVE_VERSION_OVERRIDE=0.0.2 \
             -t opsweave-platform:linux-bond-v2 . >/tmp/p001b2/v2-build.log 2>&1 || {
               tail -30 /tmp/p001b2/v2-build.log
               echo "::error::the v2 image did not build"; exit 1
             }
-          restore_cargo
-          trap - EXIT
-          git diff --quiet -- Cargo.toml Cargo.lock \
-            || fail "Cargo.toml/Cargo.lock were not restored after the v2 build"
           v2="$(docker image inspect opsweave-platform:linux-bond-v2 --format '{{.Id}}')"
           echo "v2 image: $v2"
           [ "$v1" != "$v2" ] || fail "v1 and v2 are the same image; that is a relabel, not an upgrade"

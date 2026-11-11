@@ -61,6 +61,22 @@ COPY contracts ./contracts
 COPY crates ./crates
 COPY apps ./apps
 # The platform-only kernel plus the two platform roles. No pipeline worker.
+#
+# `--build-arg OPSWEAVE_VERSION_OVERRIDE=0.0.2` produces a genuinely different
+# build from the same tree: the workspace version is bumped and the lock file is
+# relocked INSIDE this stage, where cargo exists. That is what the acceptance run
+# needs to have two real versions to upgrade between - editing Cargo.toml on the
+# host and leaving Cargo.lock alone fails with "cannot update the lock file
+# because --locked was passed", and the host has no cargo to relock with.
+ARG OPSWEAVE_VERSION_OVERRIDE=""
+RUN set -eu; \
+    if [ -n "$OPSWEAVE_VERSION_OVERRIDE" ]; then \
+      sed -i "s/^version = \"[0-9][0-9.]*\"$/version = \"$OPSWEAVE_VERSION_OVERRIDE\"/" Cargo.toml; \
+      sed -i "s/^version = \"0\.0\.1\"$/version = \"$OPSWEAVE_VERSION_OVERRIDE\"/" Cargo.lock; \
+      v=$(grep -c "^version = \"$OPSWEAVE_VERSION_OVERRIDE\"$" Cargo.lock); \
+      [ "$v" -ge 7 ] || { echo "lock rewrite touched $v entries, expected 7" >&2; exit 1; }; \
+      ! grep -q "^version = \"0\.0\.1\"$" Cargo.lock || { echo "a 0.0.1 lock entry survived" >&2; exit 1; }; \
+    fi
 RUN cargo build --release --locked --config 'profile.release.strip=true' \
       -p opsweave-kernel --no-default-features \
       -p opsweave-node \
