@@ -272,6 +272,45 @@ unchanged.
 their original shape — 5 failures, exit 1 — and to pass again when restored. Its
 own inputs are asserted present, so a rename cannot turn the assertions vacuous.
 
+**The fix broke a caller, and that is evidence it works.** `data-foundation`'s
+`legacy-regression` job went red on the fix with
+
+```
+Error: API 409 Conflict returned VERSION_ALREADY_ACTIVE:
+  dev.opsweave.hello@0.0.1 is already the active version
+```
+
+`e2e_platform.sh:96-97` ran `deploy 0.0.1 --wait` then `activate 0.0.1`
+immediately after `rollback 0.0.1`. Those two commands **were the workaround for
+D1** — the old rollback only redeployed, so the caller finished the job by hand.
+With rollback now activating, the explicit activate collides with the state it
+just created. Both lines were removed; leaving rollback alone in that step also
+means the assertion goes red if it ever stops activating again, instead of being
+repaired by a manual activate.
+
+### 3.5 One local failure that is not explained yet
+
+Running `e2e_platform.sh` against the isolated platform after the fix:
+
+```
+PASS  upgrade routes to v2
+PASS  rollback routes to v1        <- the assertion under test
+...
+FAIL  re-enabled Java plugin
+PASS=20 FAIL=1
+```
+
+`re-enabled Java plugin` is the **last** step: `disable` → `enable` → `deploy` →
+`activate` on `dev.opsweave.hello-java`. The gateway answered 502/503 and no Java
+container was left running. Java had passed earlier in the same run
+(`PASS dev.opsweave.hello-java serves Runtime v1`), so this is a restart problem,
+not admission or routing.
+
+It is **not attributed**. The rollback change does not touch that section, and
+this run is the first on this branch, so there is no before/after to compare it
+with. It is recorded here rather than dismissed, and CI will show whether it
+reproduces.
+
 **Not fixed, and recorded:** `rollback` still writes no audit entry (A11) and
 still has no idempotency receipt. Those are separate from D1 and remain open.
 
