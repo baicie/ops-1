@@ -378,8 +378,15 @@ jobs:
         if: always()
         with:
           name: p001-b2-linux-acceptance
+          # `/tmp/p001b2/accept/node` is owned by uid 10001 - that ownership is
+          # the fix this acceptance proves, so the uploader (the runner user)
+          # cannot read it: "EACCES: permission denied, open
+          # node-identity.json". Excluded rather than chowned, because changing
+          # it back would undo the thing under test.
           path: |
-            /tmp/p001b2/
+            /tmp/p001b2/*.log
+            /tmp/p001b2/diagnostics/
+            /tmp/p001b2/*.png
           if-no-files-found: ignore
           retention-days: 7
 
