@@ -216,8 +216,12 @@ jobs:
       # ---------------------------------------------------------------------
       - name: Upgrade and roll back between two real image versions
         run: |
-          set -eu
-          fail() { echo "::error::$1"; docker compose -p opsweave-p001b2 logs --tail 60 kernel; exit 1; }
+          # `-x` because this step failed once with NO output at all: `set -e`
+          # exits on the first failing command, and if that command is a
+          # substitution (`v1="$(...)"`) the step dies before printing anything.
+          # A silent failure in a gate is worse than a noisy one.
+          set -eux
+          fail() { echo "::error::$1"; docker compose -p opsweave-p001b2 logs --tail 60 kernel || true; exit 1; }
           B=http://127.0.0.1:18080
 
           # v1 is the image just installed. v2 is a SECOND, different image built
