@@ -179,7 +179,20 @@ pub async fn enroll(args: &Args, http: &reqwest::Client) -> anyhow::Result<Ident
         generation: 1,
         name: args.node_name.clone(),
     };
-    save_identity(&state_file, &identity)?;
+    // The enrolment token was consumed by the call above - the Kernel will refuse
+    // it a second time. If the identity cannot be persisted, this node has no way
+    // back: it will retry with a spent token on every restart until an operator
+    // issues a new one. That is a state worth naming loudly rather than reporting
+    // as a generic write error.
+    save_identity(&state_file, &identity).map_err(|error| {
+        anyhow::anyhow!(
+            "enrolled as node {} but could not persist the identity to {}: {error}. \
+             The enrolment token is now SPENT - issue a new one (opsctl node-token) \
+             and restart this node; it cannot recover on its own.",
+            identity.node_id,
+            state_file.display()
+        )
+    })?;
     tracing::info!(node_id = %identity.node_id, "node enrolled");
     Ok(identity)
 }

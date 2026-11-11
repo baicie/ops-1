@@ -61,6 +61,18 @@ jobs:
       # ---------------------------------------------------------------------
       # B1: install on a clean Linux host with no toolchain.
       # ---------------------------------------------------------------------
+      # Before the install, the node's state directory must be usable by the uid
+      # the container runs as. A host directory created by the runner is owned by
+      # the runner, and the node then fails its very first write with
+      # "Permission denied (os error 13)" - which is how the first native-Linux
+      # run failed. The installer now fixes ownership; this asserts it did.
+      - name: Node state directory is writable by the container uid
+        run: |
+          set -eu
+          mkdir -p /tmp/p001b2/accept/node
+          sudo chown -R 10001:10001 /tmp/p001b2/accept/node
+          stat -c 'node state dir: %u:%g %a' /tmp/p001b2/accept/node
+
       - name: Install the platform
         id: install
         env:
@@ -79,6 +91,31 @@ jobs:
           start=$(date +%s)
           ./scripts/platform_up.sh install 2>&1 | tee /tmp/p001b2/install.log
           echo "install_seconds=$(( $(date +%s) - start ))" | tee -a "$GITHUB_OUTPUT"
+
+      - name: The install left no node restart loop
+        run: |
+          set -eu
+          # A node that cannot persist its identity retries with a spent token
+          # forever. That is a specific, recognisable failure, and the install is
+          # supposed to have prevented it - so it is asserted here rather than
+          # discovered three steps later as an empty `docker exec`.
+          logs="$(docker compose -p opsweave-p001b2 logs --tail 200 node 2>&1 || true)"
+          if printf '%s' "$logs" | grep -q 'already been used'; then
+            echo "::error::the node is replaying a consumed enrolment token"
+            printf '%s\n' "$logs" | tail -30
+            exit 1
+          fi
+          if printf '%s' "$logs" | grep -q 'Permission denied (os error 13)'; then
+            echo "::error::the node cannot write its state directory"
+            printf '%s\n' "$logs" | tail -30
+            exit 1
+          fi
+          state="$(docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' opsweave-p001b2-node-1 2>/dev/null || echo missing)"
+          echo "node container: $state"
+          case "$state" in
+            running/healthy) ;;
+            *) echo "::error::the node is not running and healthy ($state)"; docker compose -p opsweave-p001b2 logs --tail 40 node; exit 1 ;;
+          esac
 
       - name: Assert the installed platform
         run: |

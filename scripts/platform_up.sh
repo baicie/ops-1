@@ -346,7 +346,26 @@ cmd_install() {
   if [ ! -d "$PLATFORM_DIR" ]; then
     mkdir -p "$PLATFORM_DIR" 2>/dev/null || die "cannot create $PLATFORM_DIR (run as root, or set OPSWEAVE_PLATFORM_DIR)"
   fi
-  mkdir -p "$PLATFORM_DIR/node"
+  # The node's state directory is BIND-MOUNTED into a container that runs as uid
+  # 10001, and it is created here by whoever runs the installer. Without the
+  # ownership fix the node dies on its first write with
+  # `Error: Permission denied (os error 13)` - which is exactly how the first
+  # native-Linux acceptance run failed. `sudo` is used only when the directory is
+  # not already owned correctly and we are not root, and a failure is reported
+  # rather than swallowed: an install that cannot prepare this directory will
+  # produce a node that never enrols.
+  mkdir -p "$PLATFORM_DIR/node" "$PLATFORM_DIR/kernel-data"
+  if [ "$(id -u)" = "0" ]; then
+    chown -R 10001:10001 "$PLATFORM_DIR/node" "$PLATFORM_DIR/kernel-data"
+  elif [ "$(stat -c '%u' "$PLATFORM_DIR/node" 2>/dev/null || echo 0)" != "10001" ]; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo chown -R 10001:10001 "$PLATFORM_DIR/node" "$PLATFORM_DIR/kernel-data" \
+        || die "could not give the node's state directory to uid 10001; the node would fail to write its identity"
+    else
+      warn "cannot chown $PLATFORM_DIR/node to 10001 and sudo is unavailable."
+      warn "  The node will fail with 'Permission denied' when it writes its identity."
+    fi
+  fi
 
   local host="${OPSWEAVE_HOST:-$(hostname -f 2>/dev/null || hostname)}"
   local pg_password bridge_ip db_host docker_gid
@@ -520,7 +539,16 @@ EOF
     rm -f "$PLATFORM_DIR/node.env.bak"
     chmod 600 "$PLATFORM_DIR/node.env"
   fi
-  OPSWEAVE_IMAGE="$image" compose up -d node
+  # --force-recreate, not a plain `up -d`.
+  #
+  # `node.env` is an env_file, and Compose does NOT recreate a container when only
+  # an env_file changes - the running container keeps the environment it was
+  # created with. After a failed first attempt that environment holds an
+  # already-consumed enrolment token, so every restart replays it and the Kernel
+  # refuses with "Enrollment token has already been used" forever: the node can
+  # never recover without a human. That is exactly what the first native-Linux
+  # acceptance run produced - a restart loop of 401s.
+  OPSWEAVE_IMAGE="$image" compose up -d --force-recreate node
   # A node that cannot reach the docker socket never becomes healthy, and that is
   # a fact about the HOST, not a failed install: identity, the console, the
   # registry and diagnostics all work without a node. Reporting it as success
