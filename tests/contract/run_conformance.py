@@ -50,12 +50,19 @@ def probe(plugin_id):
     if not deployment or not deployment["instances"]:
         check(False, f"{plugin_id}: no active instance")
         return
+    # Count what is actually probed. The loop used to `continue` past every
+    # non-READY instance and every instance without a host port, so a deployment
+    # whose instances were all UNHEALTHY or all port-less executed zero
+    # assertions and the script exited 0 - a green run that tested nothing. The
+    # final count is reported and must be at least one.
+    probed = 0
     for instance in deployment["instances"]:
         if instance["state"] != "READY":
             continue
         port = instance.get("hostPort")
         if not port:
             continue
+        probed += 1
         base = f"http://127.0.0.1:{port}"
         def local(path, method="GET", body=None):
             data = json.dumps(body).encode() if body is not None else None
@@ -81,7 +88,10 @@ def probe(plugin_id):
         check(ready_status == 200, f"{plugin_id}: readiness 200")
         unknown_status, _ = local("/api/does-not-exist")
         check(unknown_status == 404, f"{plugin_id}: unknown path 404")
-    print(f"  probed {plugin_id}@{active} on {len(deployment['instances'])} instance(s)")
+    check(probed > 0,
+          f"{plugin_id}: at least one READY instance with a host port was probed "
+          f"(found {probed} of {len(deployment['instances'])})")
+    print(f"  probed {plugin_id}@{active} on {probed} of {len(deployment['instances'])} instance(s)")
 
 for plugin in ["dev.opsweave.hello", "dev.opsweave.hello-go", "dev.opsweave.hello-java"]:
     probe(plugin)
@@ -110,4 +120,63 @@ check(echo.get("deliveredUnsignedRole") is None, "gateway strips the unsigned ca
 check(echo.get("deliveredSignedContext") is True, "gateway delivers a Kernel-signed user context")
 
 print(f"\nRuntime conformance: {len(failures)} failure(s)")
+# --- self-check: the zero-instance path must FAIL ---------------------------
+#
+# The probe loop used to `continue` past every non-READY instance and every
+# instance without a host port, so a deployment whose instances were all
+# UNHEALTHY executed zero assertions and the script exited 0 - a green run that
+# tested nothing. It now counts what it probes and fails when that is zero.
+#
+# This self-check proves the predicate is real, without needing a platform:
+# it evaluates the same filter over a synthetic deployment and requires the
+# result to be zero, and it requires probe() to contain the assertion that
+# turns that zero into a failure.
+def _probeable(instances):
+    n = 0
+    for instance in instances:
+        if instance["state"] != "READY":
+            continue
+        if not instance.get("hostPort"):
+            continue
+        n += 1
+    return n
+
+_zero_cases = [
+    ("no instances at all", []),
+    ("all unhealthy", [{"state": "UNHEALTHY", "hostPort": 1}]),
+    ("ready without a host port", [{"state": "READY"}]),
+    ("mixed, none probeable", [{"state": "UNHEALTHY", "hostPort": 1}, {"state": "READY"}]),
+]
+for label, instances in _zero_cases:
+    if _probeable(instances) != 0:
+        print(f"self-check broken: {label} produced a probeable instance")
+        sys.exit(1)
+
+# And probe() must still turn a zero count into a recorded failure. A substring
+# search is not enough: the first version searched for "check(probed > 0" and
+# that text also appears in this comment, so deleting the assertion still left
+# the self-check green. Parse the function and look for a comparison against
+# probed instead.
+import ast as _ast
+
+_tree = _ast.parse(open(__file__).read())
+_probe_fn = next((n for n in _ast.walk(_tree)
+                  if isinstance(n, _ast.FunctionDef) and n.name == "probe"), None)
+if _probe_fn is None:
+    print("self-check broken: probe() is gone")
+    sys.exit(1)
+# A comparison that mentions `probed`, not merely a reference to it: the loop
+# itself increments the counter, so a bare Name node proves nothing.
+_compares_probed = any(
+    isinstance(node, _ast.Compare)
+    and any(isinstance(side, _ast.Name) and side.id == "probed"
+            for side in [node.left, *node.comparators])
+    for node in _ast.walk(_probe_fn)
+)
+if not _compares_probed:
+    print("self-check broken: probe() no longer compares the probed count, so a "
+          "zero-instance deployment would pass silently again")
+    sys.exit(1)
+print("self-check: a deployment with no probeable instance cannot pass silently")
+
 sys.exit(1 if failures else 0)
