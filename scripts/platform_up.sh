@@ -316,7 +316,6 @@ assert_service_env_boundary() {
 # install
 # ---------------------------------------------------------------------------
 cmd_install() {
-  echo "PROBE: deliberate failure" >&2; return 42   # PROBE
   require_docker
 
   local image="${OPSWEAVE_IMAGE:-}"
