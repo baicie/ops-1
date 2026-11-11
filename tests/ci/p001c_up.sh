@@ -29,7 +29,12 @@ mkdir -p "$STATE"/{data,node-a,node-b}
 echo "== reset ONLY the isolated database and state"
 dropdb --if-exists --force "$DB" 2>/dev/null || true
 createdb "$DB"
-rm -rf "$STATE"/data/*
+# The node state dirs must go with the database, not just data/. A node that
+# keeps its identity across a control-plane rebuild presents credentials the new
+# kernel has never seen: the heartbeat answers `404 node not found`, the lease
+# expires, and the node quarantines itself while the script waits for READY
+# nodes that will never appear. Observed exactly that on the second run.
+rm -rf "$STATE"/data/* "$STATE"/node-a/* "$STATE"/node-b/*
 # Only containers this script's own nodes created, matched by the plugin label.
 docker ps -aq --filter label=opsweave.managed=true | xargs -r docker rm -f >/dev/null 2>&1 || true
 
