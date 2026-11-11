@@ -236,11 +236,23 @@ jobs:
           # The edit is undone from a trap, not from the success path: if the
           # runner is killed mid-build the worktree would otherwise keep
           # `version = "0.0.2"` and every later step would build the wrong thing.
+          # The bump needs BOTH files: the Dockerfile builds with `--locked`, so a
+          # `Cargo.toml` version that disagrees with `Cargo.lock` fails the build
+          # with "cannot update the lock file ... because --locked was passed".
+          # That is why the first attempt died in 1.6 seconds.
           cp Cargo.toml /tmp/p001b2/Cargo.toml.orig
-          restore_cargo() { cp /tmp/p001b2/Cargo.toml.orig Cargo.toml; }
+          cp Cargo.lock /tmp/p001b2/Cargo.lock.orig
+          restore_cargo() {
+            cp /tmp/p001b2/Cargo.toml.orig Cargo.toml
+            cp /tmp/p001b2/Cargo.lock.orig Cargo.lock
+          }
           trap restore_cargo EXIT
-          sed -i 's/^version = "0.0.1"/version = "0.0.2"/' Cargo.toml
+          python3 -c "import pathlib; p = pathlib.Path('Cargo.toml'); s = p.read_text(); p.write_text(s.replace('version = \"0.0.1\"', 'version = \"0.0.2\"', 1))"
           grep -q '^version = "0.0.2"' Cargo.toml || fail "the version edit did not apply"
+          cargo update --workspace --offline >/dev/null 2>&1 \
+            || { echo "::error::could not relock after the version bump"; exit 1; }
+          grep -q 'version = "0.0.2"' Cargo.lock || fail "Cargo.lock did not follow the bump"
+
           docker build -f deployments/staging/Dockerfile --target platform \
             -t opsweave-platform:linux-bond-v2 . >/tmp/p001b2/v2-build.log 2>&1 || {
               tail -30 /tmp/p001b2/v2-build.log
@@ -248,7 +260,8 @@ jobs:
             }
           restore_cargo
           trap - EXIT
-          git diff --quiet -- Cargo.toml || fail "Cargo.toml was not restored after the v2 build"
+          git diff --quiet -- Cargo.toml Cargo.lock \
+            || fail "Cargo.toml/Cargo.lock were not restored after the v2 build"
           v2="$(docker image inspect opsweave-platform:linux-bond-v2 --format '{{.Id}}')"
           echo "v2 image: $v2"
           [ "$v1" != "$v2" ] || fail "v1 and v2 are the same image; that is a relabel, not an upgrade"
