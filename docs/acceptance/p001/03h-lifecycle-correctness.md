@@ -209,8 +209,24 @@ That pattern is what a broken change looks like, and it was not one:
 - locally, `cargo build` succeeded and `cargo test -p opsweave-kernel` gave
   **281 passed, 0 failed**.
 
+On the rerun the same thing happened to the same seven jobs, and the pattern is
+now unambiguous — **every failure failed at the identical step**:
+
+```
+Run sudo apt-get update && sudo apt-get install -y postgresql-client
+  -> 20 "Temporary failure resolving 'security.ubuntu.com'" per job
+```
+
+`rust`, `acceptance`, `golden-path`, `runtime-golden-path`, `g13a-roundtrip`,
+`g13a1-gateway`, `g13b14-claim` — all seven stopped in that line. **No Rust code
+was compiled and no test ran in any of them.**
+
 Recorded so that a future reader does not treat this run as evidence about the
-code in either direction. The reruns are the evidence; the outage is not.
+code in either direction. The green jobs are evidence; the outage is not.
+
+**What this does block:** `rust` is a required check, so the PR cannot merge
+while it is red, whatever the cause. That is the rule working as designed. The
+resolution is a rerun once the runner's DNS recovers, not a change to the code.
 
 ---
 
