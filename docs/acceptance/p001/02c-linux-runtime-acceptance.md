@@ -1,9 +1,12 @@
 # P001-B.2 — Code review, before the Linux acceptance runs
 
-Status: **NOT_RUN as acceptance.** The Linux workflow exists and is committed; it
-has never executed on a Linux host. This document reviews what the branch
-contains, what it can and cannot prove, and the two behaviours the review asked
-for.
+Status: **RUN and PASSING on a native Linux host** — workflow
+`platform-linux-acceptance` run **42945036358**, every step green (§7). This
+document reviews what the branch contains, what it proves, and — in §8 — what it
+still does not.
+
+It is **CI evidence on an Ubuntu 24.04 runner**, not a three-host or production
+acceptance, and §8 keeps that distinction rather than blurring it.
 
 Branch `test/p001-b2-linux-runtime-acceptance` @ `9e3e8e9`, based on `main` `6cd9bcd`.
 
@@ -169,3 +172,128 @@ The two §5 items that would have failed on first execution were fixed before th
 review was published rather than left for the run to discover; the two that
 remain (an interrupted v2 build leaving `Cargo.toml` edited, and the missing
 `push:` trigger) are real and are listed as work, not as accepted.
+
+
+---
+
+## 7. The run: 42945036358 (2026-11-11, all steps green)
+
+### 7.1 Environment, measured by the run itself
+
+| Item | Value |
+|---|---|
+| Kernel / arch | `Linux 7.0.0-1017-azure x86_64` |
+| Runner | `ubuntu-24.04` (GitHub-hosted) |
+| Docker | reported by the step; socket owner `root:docker` gid **118** |
+| Install duration | **28 s** |
+
+### 7.2 Results, step by step
+
+| Step | Result |
+|---|---|
+| Record the environment | success |
+| Build the platform-only image | success |
+| Node state directory writable by container uid | success |
+| **Install the platform** | success — 28 s, no host Rust/Node/Go/Maven |
+| The install left no node restart loop | success |
+| Assert the installed platform | success — `/livez` 200, `/readyz` 200, `/app` **404**, console 200, ingest `BUSINESS_ROUTE_NOT_BUILT`, login OK, registry lists only `opsweave.console` |
+| **Node reaches the docker socket as an unprivileged user** | success |
+| **The node enrolled, reports health, and can create a container** | success |
+| **Upgrade and roll back between two real image versions** | success |
+| **An unhealthy node makes the upgrade DEGRADED** | success |
+
+### 7.3 The socket result, in numbers
+
+| Measurement | Value |
+|---|---|
+| Detected gid (host socket) | **118** |
+| Node runtime uid | **10001** |
+| Node runtime groups | `10001 118` |
+| Socket inside the container | `0:118 660` |
+| Assertion | `the node reaches the daemon as uid 10001 (not root)` |
+
+This is the class of defect the macOS phase could not reach: on Docker Desktop
+the socket appears inside containers as `root:root`, so `--group-add` cannot help
+and the node had to be declared DEGRADED. On Linux the group mapping works and the
+node runs unprivileged.
+
+### 7.4 Two genuinely different images
+
+| | Image ID |
+|---|---|
+| v1 | `sha256:eb1f71fdb9fa0a9c8618e48fad87f84adebc964f5f73b8ca261f05b29d00902a` |
+| v2 | `sha256:58fc45981a5490ba2e5c289f0a6cdd758bd421906b6ec201a6c2cc648791cf66` |
+
+Built from the same tree with `--build-arg OPSWEAVE_VERSION_OVERRIDE=0.0.2`, which
+rewrites the workspace version in `Cargo.toml` and all seven `Cargo.lock` entries
+**inside the build stage**, where cargo exists. Verified locally that this is a
+real change and not a relabel:
+
+```
+image                         "0.0.1" literals  "0.0.2" literals  binary sha256
+opsweave-platform:ci                  6                 1          c16deb6522d3…
+opsweave-platform:v2test              4                 3          ac423625ba71…
+```
+
+The counts invert and the binaries differ; a tag rename cannot produce that. The
+workflow additionally asserts `[ "$v1" != "$v2" ]` on image ids.
+
+### 7.5 Upgrade, rollback, identity, DEGRADED
+
+| Assertion | Result |
+|---|---|
+| before upgrade the kernel reports `0.0.1` | pass |
+| after upgrade it reports `0.0.2` | pass |
+| the upgraded image is still platform-only (`/app` = 404) | pass |
+| the pre-upgrade account still authenticates after the upgrade | pass |
+| after rollback it reports `0.0.1` | pass |
+| the account still authenticates after the rollback | pass |
+| node identity hash unchanged across a restart | pass |
+| a node that cannot become healthy yields **exit 3 + `DEGRADED`** | pass |
+| the kernel still serves after a DEGRADED upgrade | pass |
+
+---
+
+## 8. What this run still does NOT prove
+
+| Claim | Status | Why |
+|---|---|---|
+| Three-host distributed deployment | **NOT_RUN, and cannot be claimed** | one GitHub runner is not a distributed deployment; the task says so and this document agrees |
+| Rootless Docker | **NOT_RUN** | the runner's daemon is rootful; the socket is `root:docker` |
+| mTLS kernel↔node | **NOT_RUN** | not implemented in this phase |
+| Node certificate rotation / revocation | **NOT_RUN** | same |
+| Image signature / SBOM / vulnerability gate | **NOT_RUN** | nothing is signed and nothing is pushed to a registry |
+| Digest-pinned upgrade from a registry | **NOT_RUN** | both images are local builds; the digest path is exercised only in the unit-level guard |
+| Migration-incompatible upgrade | **NOT_RUN** | v1→v2 changes no schema |
+| Rollback across a migration | **NOT_RUN** | migrations are forward-only; `restore` is the only path, drilled in 02b |
+| Plugin install from the registry (OCI pull) | **NOT_RUN** | the node creates a container from a locally present image; it does not pull a signed plugin bundle |
+| Quarantine / fencing under partition | **NOT_RUN** | belongs to the distributed phase |
+
+### 8.1 Defects this run found — all real, all fixed
+
+| # | Defect | How it surfaced |
+|---|---|---|
+| 1 | Node state directory not owned by uid 10001 | install succeeded, node died with `Permission denied (os error 13)` |
+| 2 | A consumed enrolment token made the node permanently unrecoverable | restart loop of `Enrollment token has already been used`, 10+ attempts |
+| 3 | `upgrade` did not recreate the node on an `env_file` change | the retry loop survived a correct re-run |
+| 4 | `--locked` build fails when only `Cargo.toml` is bumped | v2 build died in 1.6 s |
+| 5 | `cargo update --offline` needs a registry index | second v2 attempt, exit 101 inside the build |
+| 6 | The "break the node" mechanisms were undone by the recreate under test | DEGRADED assertion saw a healthy node and `got 0` |
+| 7 | `upload-artifact` fails when a green run produces no files | every assertion passed, job red |
+| 8 | `upload-artifact` cannot read `node-identity.json` (uid 10001) | job red after a fully passing run |
+
+Defects 1–3 are product defects a macOS host could not reach. 4–8 are defects in
+the acceptance harness itself, found by running it.
+
+---
+
+## 9. Position
+
+Phase 2's Linux-runtime condition is now met **with CI evidence**: a clean-host
+install, a node that enrols unbprivileged and creates a container, a real two-
+version upgrade and rollback, and a DEGRADED outcome when the node cannot run.
+
+It is **not** a production or distributed acceptance, and §8 says so item by item.
+Phase 2 therefore moves from `PARTIAL` to **`PARTIAL (Linux runtime verified;
+distributed conditions outstanding)`** — the remaining gaps are the ones that need
+infrastructure this project does not have.
