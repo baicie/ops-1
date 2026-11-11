@@ -306,10 +306,17 @@ container was left running. Java had passed earlier in the same run
 (`PASS dev.opsweave.hello-java serves Runtime v1`), so this is a restart problem,
 not admission or routing.
 
-It is **not attributed**. The rollback change does not touch that section, and
-this run is the first on this branch, so there is no before/after to compare it
-with. It is recorded here rather than dismissed, and CI will show whether it
-reproduces.
+It is **not attributed by this run alone.** The rollback change does not touch
+that section, and this run is the first on this branch, so there is no before/after
+to compare it with.
+
+**CI answered it.** On the same commit, `legacy-regression` — which runs this
+identical script on `ubuntu-24.04` — **passed in 6m39s**, `PASS/FAIL` clean. So
+the Java restart failure is specific to this macOS Docker Desktop host and does
+not reproduce where the acceptance actually runs. It stays recorded as a local
+environment observation, not as a product defect and not as "pre-existing": the
+honest statement is that one environment failed it and the other did not, and the
+one that gates the repository is green.
 
 **Not fixed, and recorded:** `rollback` still writes no audit entry (A11) and
 still has no idempotency receipt. Those are separate from D1 and remain open.
