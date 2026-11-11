@@ -281,3 +281,5 @@ behaviour of `git push`.
 
 The probe pull request (#79) and its branch were deleted after the run; no test
 commit reached `main`. `main` is still `6cd9bcd`.
+
+<!-- probe: a docs-only change matched none of the old paths filter -->
