@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# P001-C1.1 Phase 1 counterfactual: the harness must not touch a foreign
+# OpsWeave installation that shares the Docker daemon.
+#
+# This is the assertion the old `docker ps -aq --filter label=opsweave.managed=true
+# | xargs -r docker rm -f` could not pass. It is written as an attack on our own
+# harness rather than as a happy-path check: it plants a container that looks
+# exactly like something we might want to clean up, runs the full start/teardown
+# cycle around it, and requires it to be untouched.
+#
+# Planted "other installation":
+#   * labelled opsweave.managed=true          (the label the old sweep matched)
+#   * labelled opsweave.node-id=<foreign>     (structurally identical to ours)
+#   * a real running container with state
+#
+# It must survive: not stopped, not removed, not restarted, no label or config
+# change. A second case plants a container whose node-id EQUALS a would-be run's
+# and proves the ownership check refuses rather than deleting.
+set -uo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT"
+export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
+
+fails=0
+pass() { printf 'PASS  %s\n' "$*"; }
+fail() { printf 'FAIL  %s\n' "$*"; fails=$((fails + 1)); }
+
+FOREIGN="p001c11-foreign-$$"
+FOREIGN_NODE="00000000-0000-4000-8000-$(printf '%012d' $$)"
+cleanup_foreign() { docker rm -f "$FOREIGN" >/dev/null 2>&1 || true; }
+trap cleanup_foreign EXIT
+
+echo
+echo "== CASE 1: a run with REAL containers cleans up only its own"
+FOREIGN_NODE="00000000-0000-4000-8000-$(printf '%012d' $$)"
+docker run -d --name "$FOREIGN" \
+  --label opsweave.managed=true \
+  --label "opsweave.node-id=$FOREIGN_NODE" \
+  --label opsweave.plugin-id=dev.opsweave.foreign \
+  alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1 || {
+    echo "could not plant the foreign container; this check would be vacuous" >&2; exit 1; }
+FOREIGN_ID="$(docker inspect -f '{{.Id}}' "$FOREIGN" 2>/dev/null || echo '')"
+FOREIGN_START="$(docker inspect -f '{{.State.StartedAt}}' "$FOREIGN" 2>/dev/null || echo '')"
+[ -n "$FOREIGN_ID" ] || { echo "foreign container did not start" >&2; exit 1; }
+echo "   planted $FOREIGN (node-id $FOREIGN_NODE)"
+
+OUT="$(OPSWEAVE_TEST_RUN_INDEX=9 ./tests/ci/p001c_up.sh 2>&1)" || {
+  echo "   the run did not start:"; printf '%s\n' "$OUT" | tail -5; exit 1; }
+RUN_ID="$(printf '%s\n' "$OUT" | sed -n 's/^RUN_ID=//p' | tail -1)"
+DIR="/tmp/p001c-${RUN_ID}"
+[ -n "$RUN_ID" ] || { echo "no RUN_ID printed" >&2; exit 1; }
+
+PORT="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['kernelPort'])" "$DIR/run.json")"
+URL="http://127.0.0.1:${PORT}"
+
+# A run with no containers proves nothing about a sweep. Deploy a real plugin.
+HOME="$DIR/home" ./target/debug/opsctl --url "$URL" install \
+  dist/plugins/hello-ops-0.0.1.plugin.zip >/dev/null 2>&1
+HOME="$DIR/home" ./target/debug/opsctl --url "$URL" deploy dev.opsweave.hello 0.0.1 \
+  --replicas 2 --selector role=node --wait >/dev/null 2>&1
+
+OWN="$(python3 - "$DIR/run.json" <<'PY'
+import json, subprocess, sys
+ids = json.load(open(sys.argv[1])).get("nodeIds", [])
+total = 0
+for nid in ids:
+    out = subprocess.run(["docker", "ps", "-aq", "--filter", f"label=opsweave.node-id={nid}"],
+                         capture_output=True, text=True).stdout.split()
+    total += len(out)
+print(total)
+PY
+)"
+if [ "${OWN:-0}" -ge 1 ]; then
+  pass "the run created $OWN container(s) of its own"
+else
+  fail "the run created no containers; a cleanup check against it would be vacuous"
+fi
+
+# RESTART the same run. This is the step that matters and the one an earlier
+# version of this guard was missing: the cleanup branch only executes when a run
+# record already exists, so a first-start test never reaches it. That is exactly
+# how this guard once passed while the global `opsweave.managed=true` sweep was
+# still in the script.
+if OPSWEAVE_TEST_RUN_INDEX=9 ./tests/ci/p001c_up.sh --run-id "$RUN_ID" >/tmp/p001c11-restart 2>&1; then
+  pass "restarting the same run exercised the cleanup branch"
+else
+  fail "restarting the same run failed"
+  tail -5 /tmp/p001c11-restart
+fi
+
+./tests/ci/p001c_teardown.sh "$RUN_ID" --purge >/dev/null 2>&1 || true
+
+AFTER_ID="$(docker inspect -f '{{.Id}}' "$FOREIGN" 2>/dev/null || echo '')"
+AFTER_START="$(docker inspect -f '{{.State.StartedAt}}' "$FOREIGN" 2>/dev/null || echo '')"
+[ "$AFTER_ID" = "$FOREIGN_ID" ] \
+  && pass "the foreign container still exists, same id" \
+  || fail "the foreign container was removed"
+[ "$AFTER_START" = "$FOREIGN_START" ] \
+  && pass "the foreign container was not restarted" \
+  || fail "the foreign container was stopped or restarted"
+
+OWN_AFTER="$(python3 - "$DIR/run.json" <<'PY'
+import json, os, subprocess, sys
+path = sys.argv[1]
+if not os.path.exists(path):
+    print(0); raise SystemExit
+ids = json.load(open(path)).get("nodeIds", [])
+print(sum(len(subprocess.run(["docker","ps","-aq","--filter",f"label=opsweave.node-id={n}"],
+      capture_output=True, text=True).stdout.split()) for n in ids))
+PY
+)"
+[ "${OWN_AFTER:-0}" = "0" ] \
+  && pass "the run's own containers were all removed" \
+  || fail "the run left $OWN_AFTER of its own containers behind"
+
+docker rm -f "$FOREIGN" >/dev/null 2>&1 || true
+
+echo
+echo "== CASE 2: the same daemon keeps a second foreign container intact"
+FOREIGN2="p001c11-foreign2-$$"
+docker run -d --name "$FOREIGN2" --label opsweave.managed=true \
+  alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1
+ID2="$(docker inspect -f '{{.Id}}' "$FOREIGN2" 2>/dev/null || echo '')"
+if [ -n "$RUN_ID" ]; then
+  ./tests/ci/p001c_teardown.sh "$RUN_ID" --purge >/dev/null 2>&1 || true
+fi
+[ "$(docker inspect -f '{{.Id}}' "$FOREIGN2" 2>/dev/null || echo '')" = "$ID2" ] \
+  && pass "a second foreign container also survived" \
+  || fail "a second foreign container was removed"
+docker rm -f "$FOREIGN2" >/dev/null 2>&1 || true
+
+echo
+echo "== CASE 3: a teardown that cannot identify its target refuses to act"
+BAD="nonexistent-run-id-$$"
+if ./tests/ci/p001c_teardown.sh "$BAD" --purge >/tmp/p001c11-bad 2>&1; then
+  fail "teardown accepted a run id with no run record"
+else
+  grep -q BLOCKED /tmp/p001c11-bad && pass "teardown refuses an unknown run and says BLOCKED" \
+    || fail "teardown refused but did not report BLOCKED: $(head -1 /tmp/p001c11-bad)"
+fi
+rm -f /tmp/p001c11-bad
+
+echo
+if [ "$fails" -ne 0 ]; then
+  echo "$fails check(s) failed"
+  exit 1
+fi
+echo "test harness does not reach outside its own run"
