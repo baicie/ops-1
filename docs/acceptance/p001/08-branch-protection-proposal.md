@@ -1,6 +1,7 @@
 # P001 执行权限门禁方案
 
-Status: **APPLIED and verified 2026-11-11.** Ruleset `main-protection` (id
+Status: **APPLIED and verified 2026-11-11**, extended with a ninth required
+check the same day (§8). Ruleset `main-protection` (id
 `26958761`) is active on `main`, `bypass_actors: []`, and every refusal below was
 produced by an actual attempt, not by reading the configuration. §7 records the
 measurements; §1 is the pre-change state, kept for the record.
@@ -281,3 +282,67 @@ behaviour of `git push`.
 
 The probe pull request (#79) and its branch were deleted after the run; no test
 commit reached `main`. `main` is still `6cd9bcd`.
+
+---
+
+## 8. `linux-runtime` added as a ninth required check (2026-11-11)
+
+### 8.1 Why it could not be added earlier
+
+Two conditions had to hold, and only one of them was about passing.
+
+1. **It had to pass on `main` once.** Done: run **42949520364**, all 11 steps
+   green. A required check that has never run on the default branch is a guess.
+
+2. **It had to run on every pull request.** It did not. The workflow was
+   `pull_request: paths:` — and a path-filtered workflow **cannot** be a required
+   check at all: on a PR that does not match, the check never reports and GitHub
+   holds the merge at *Expected — Waiting for status to be reported* forever.
+   **16 of the last 20 merged PRs did not match the filter**, so requiring it as
+   written would have permanently blocked all 16.
+
+   The filter was also backwards. It listed `deployments/platform/**`, the
+   staging Dockerfile and `scripts/platform_up.sh`, but **not** `apps/**`,
+   `crates/**`, `Cargo.toml` or `Cargo.lock` — all of which the image compiles.
+   A PR changing the kernel never ran the Linux acceptance; a PR editing a README
+   under `deployments/platform/` did.
+
+   Fixed in PR **#81**: `pull_request:` has no filter, matching `ci.yml` and
+   `reliability.yml`. A guard in the `platform-only` job fails if `paths` /
+   `paths-ignore` is ever put back; it was verified to fail on a reintroduced
+   filter, not only to pass without one.
+
+### 8.2 The ruleset change
+
+`linux-runtime` appended to the existing eight contexts in ruleset `26958761`.
+Nothing else changed — same rules, same `bypass_actors: []`, same
+`current_user_can_bypass: "never"`, same `squash`-only merge methods.
+
+### 8.3 Verified by attempting what it is meant to stop
+
+Configuration is not a control. Probe PR **#82**, touching one file under `docs/`
+— **none of the old filter paths**:
+
+| Attempt | Result |
+|---|---|
+| Does `linux-runtime` even appear on a docs-only PR? | **yes** — `event: pull_request`, before the fix it would not have existed |
+| With a deliberate failure injected into `scripts/platform_up.sh`, does it fail? | **yes** — `The install left no node restart loop` failed, the remaining assertions skipped |
+| `gh pr merge 82 --squash` | refused; merge state `BLOCKED` |
+| **`gh pr merge 82 --squash --admin`** | **`GraphQL: Repository rule violations found — 3 of 9 required status checks have not succeeded: 1 failing`**, PR stayed `OPEN` |
+
+The last line is the point: `--admin` is GitHub's documented escape hatch for an
+administrator, and it did not work. The count is now **9**, which is the new
+context being enforced.
+
+### 8.4 Cleanup
+
+The injected failure was reverted, the probe branch deleted on both sides, and PR
+#82 closed. `main` is `5e5c939` and contains no probe commit — verified with
+`git show HEAD:scripts/platform_up.sh | grep -c PROBE` → `0`.
+
+### 8.5 The gap this still does not close
+
+An administrator can remove or weaken ruleset `26958761` and then push. §7.4
+already says so and it is unchanged. What is now true is that **the specific
+check `linux-runtime` cannot be bypassed through `--admin` while the ruleset
+exists** — the same property §7.3 measured for the other eight.
