@@ -1,14 +1,18 @@
-# P001-B.2 — Code review, before the Linux acceptance runs
+# P001-B.2 — Linux runtime acceptance, review and run
 
 Status: **RUN and PASSING on a native Linux host** — workflow
-`platform-linux-acceptance` run **42945036358**, every step green (§7). This
-document reviews what the branch contains, what it proves, and — in §8 — what it
-still does not.
+`platform-linux-acceptance` run **42945036358**, every step green (§7).
+
+**This file has two halves and they are deliberately not merged.** §1–§6 are the
+code review as it stood *before* anything executed; §7–§9 are the run and the
+position *after*. Where the two disagree the run wins, and the review sections are
+annotated in place rather than rewritten, because the gap between what was
+predicted and what actually broke is itself part of the evidence.
 
 It is **CI evidence on an Ubuntu 24.04 runner**, not a three-host or production
 acceptance, and §8 keeps that distinction rather than blurring it.
 
-Branch `test/p001-b2-linux-runtime-acceptance` @ `9e3e8e9`, based on `main` `6cd9bcd`.
+Branch `test/p001-b2-linux-runtime-acceptance`, head `3f067d3`, based on `main` `6cd9bcd`.
 
 ---
 
@@ -93,9 +97,10 @@ tests/ci/p001_credential_argv.sh         PASS   (A1/A2 guard from #78)
 tests/ci/p001_upgrade_behaviour.sh       PASS   (this commit)
 ```
 
-### 3.3 Live assertions that exist but have not run
+### 3.3 Live assertions, as written before the run
 
-`platform-linux-acceptance.yml` contains, and has never executed:
+`platform-linux-acceptance.yml` contains the following. **At review time none had
+executed**; all of them ran green in §7, and the step-name column is unchanged.
 
 | Step | Asserts |
 |---|---|
@@ -113,16 +118,21 @@ tags — the workflow asserts `[ "$v1" != "$v2" ]` on image ids precisely becaus
 
 ---
 
-## 4. What this branch does NOT prove
+## 4. The pre-run gap list (superseded by §8)
 
-| Claim | Status | Why |
+> **This section is the review as written before the workflow ever executed, and
+> four of its rows are now false.** It is kept rather than deleted because the
+> difference between what was predicted and what happened is part of the evidence.
+> **§8 is the authoritative, post-run list** — read that one.
+
+| Claim | Status at review time | Why |
 |---|---|---|
-| Linux install works | **NOT_RUN** | the workflow is committed, never executed |
-| The node reaches the socket unprivileged | **NOT_RUN** | same |
-| OCI container creation from the node | **NOT_RUN** | same |
-| v1→v2→v1 | **NOT_RUN** | same |
-| DEGRADED behaviour, live | **NOT_RUN** | same; only the source shape is verified |
-| Digest-pinned upgrade from a registry | **NOT_RUN** | nothing has been pushed to a registry; no digest upgrade has been performed |
+| Linux install works | **NOT_RUN** → now **PASS** (§7) | the workflow is committed, never executed |
+| The node reaches the socket unprivileged | **NOT_RUN** → now **PASS** (§7.3) | same |
+| OCI container creation from the node | **NOT_RUN** → now **PASS** (§7.2) | same |
+| v1→v2→v1 | **NOT_RUN** → now **PASS** (§7.4, §7.5) | same |
+| DEGRADED behaviour, live | **NOT_RUN** → now **PASS** (§7.5) | same; only the source shape was verified |
+| Digest-pinned upgrade from a registry | **NOT_RUN** — still, and this one did not change | nothing has been pushed to a registry; no digest upgrade has been performed |
 | Three-host / production acceptance | **NOT_RUN, and cannot be claimed** | an Ubuntu runner is CI evidence; the task says so explicitly and this document does not blur it |
 | Migration-incompatible upgrade | **NOT_RUN** | v1→v2 changes no schema. A real migration boundary needs a version whose migrations conflict, which does not exist yet |
 | Rollback after a migration | **NOT_RUN** | migrations are forward-only; `restore` is the only path and it was drilled in 02b, not here |
@@ -134,9 +144,10 @@ requires `restore <file>`"), but a statement is not a test.
 
 ---
 
-## 5. Known weaknesses in the workflow itself, before it runs
+## 5. Weaknesses in the workflow, as reviewed before it ran (annotated after)
 
 Written down because a gate nobody has run should not read as a gate that works.
+Each item now carries what actually became of it.
 
 1. ~~**`OPSWEAVE_DOCKER_HOST_OVERRIDE` is not a variable the installer reads.**~~
    **Fixed before this review was published.** The compose file now reads
@@ -146,20 +157,30 @@ Written down because a gate nobody has run should not read as a gate that works.
    socket, set resolves to the override.
 2. ~~**`sed -n ... /dev/null` in the upgrade step** is leftover scaffolding.~~
    **Fixed** — deleted.
-3. **The v2 build edits `Cargo.toml` in place.** If the build is interrupted the
-   worktree keeps `version = "0.0.2"`. The `|| { mv Cargo.toml.bak Cargo.toml; }`
-   handles a build failure but not a runner kill.
-4. **`platform-linux-acceptance` triggers on `pull_request` with a `paths` filter**
-   that includes `scripts/platform_up.sh` — good — but it will also run on `main`
-   pushes only if a `push:` trigger is added, which it currently has not. As
-   written it can never be a required check for `main`.
+3. ~~**The v2 build edits `Cargo.toml` in place.**~~ **This was never true, and the
+   review was wrong to list it.** The workflow never wrote to the host
+   `Cargo.toml`: `grep -n 'Cargo.toml.bak\|mv Cargo' platform-linux-acceptance.yml`
+   returns nothing. What the review had half-remembered is the *first* attempt,
+   which was abandoned precisely because host editing breaks `--locked`. The
+   running version does the rewrite inside the build stage via
+   `--build-arg OPSWEAVE_VERSION_OVERRIDE` (§7.4), so the worktree is never
+   mutated and there is nothing to restore.
+4. ~~**A missing `push:` trigger means it can never be a required check.**~~
+   **Fixed during the run** in `da165d7` — `push: branches: [main]` is present
+   (`platform-linux-acceptance.yml:26-27`). It is still **not** registered as a
+   required check on `main`, and should not be until it has passed there once;
+   see §9.
 
-These are listed as work for the authorised continuation, not as things this
-review quietly accepted.
+**The predicted failure list was wrong on 3 of 4.** The four things that actually
+broke first were not on it: the node state directory's ownership, a spent
+enrolment token, an `env_file` change that did not recreate the node, and a
+`--locked` build with only `Cargo.toml` bumped (§8.1, defects 1–4). A review of a
+workflow cannot substitute for running it, which is why the run is the evidence
+and this section is the annotation.
 
 ---
 
-## 6. Position
+## 6. Position as reviewed, before the run (superseded by §9)
 
 The branch contains a Linux acceptance workflow that covers the three defect
 classes a macOS host cannot reach, and two installer behaviours that were
@@ -167,11 +188,8 @@ genuinely wrong (a tag that could silently not upgrade, and a node failure
 reported as complete success). Both behaviours are asserted at the source, with
 counterfactuals, and the live assertions are written.
 
-**None of the Linux acceptance has run.** Phase 2 stays `PARTIAL` until it does.
-The two §5 items that would have failed on first execution were fixed before this
-review was published rather than left for the run to discover; the two that
-remain (an interrupted v2 build leaving `Cargo.toml` edited, and the missing
-`push:` trigger) are real and are listed as work, not as accepted.
+At review time none of the Linux acceptance had run, and Phase 2 stayed `PARTIAL`
+for that reason. §7 records the run and §9 states where Phase 2 stands now.
 
 
 ---
@@ -297,3 +315,11 @@ It is **not** a production or distributed acceptance, and §8 says so item by it
 Phase 2 therefore moves from `PARTIAL` to **`PARTIAL (Linux runtime verified;
 distributed conditions outstanding)`** — the remaining gaps are the ones that need
 infrastructure this project does not have.
+
+### 9.1 Open, and not claimed
+
+| Item | State |
+|---|---|
+| `platform-linux-acceptance` as a required check on `main` | **not registered.** The `push:` trigger exists, but the workflow has not yet passed on `main` once, so making it required now would gate every merge on an unproven check. Sequence: land it → it passes on `main` → then add it to the ruleset |
+| The v2 `--build-arg OPSWEAVE_VERSION_OVERRIDE` path | **local builds only.** It is exercised on every run, but only between two locally built images; nothing in the run reads a digest from a registry |
+| Digest-pinned upgrade | **NOT_RUN**, unchanged from §4 |
