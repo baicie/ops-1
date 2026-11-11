@@ -309,18 +309,34 @@ jobs:
           set -eu
           fail() { echo "::error::$1"; docker compose -p opsweave-p001b2 logs --tail 40 node; exit 1; }
 
-          # Make the node permanently unhealthy: point it at a socket path that
-          # does not exist, so the runtime cannot start its adapter.
-          # `OPSWEAVE_DOCKER_HOST` is what the compose file passes to the node;
-          # pointing it at a path that does not exist makes the runtime fail its
-          # adapter check on every start, which is the condition under test.
-          OPSWEAVE_DOCKER_HOST=unix:///nonexistent/docker.sock \
-          OPSWEAVE_IMAGE=opsweave-platform:linux-bond \
-          OPSWEAVE_PLATFORM_DIR=/tmp/p001b2/accept \
-            docker compose -p opsweave-p001b2 up -d --no-deps --force-recreate node >/dev/null 2>&1 || true
-          sleep 20
+          # Make the node unable to become healthy ACROSS a recreate, because the
+          # upgrade recreates it.
+          #
+          # Two earlier attempts failed here and the reasons matter:
+          #   * `OPSWEAVE_DOCKER_HOST=unix:///nonexistent` on a one-off
+          #     `compose up` does not survive - `platform_up.sh upgrade` runs its
+          #     own `compose up`, without that variable, and the node came back
+          #     healthy ("Up 27 seconds (healthy)"), so the assertion compared a
+          #     successful upgrade against an expectation of DEGRADED;
+          #   * stopping the container is undone by the same recreate.
+          #
+          # A compose OVERRIDE file is the mechanism that survives, because the
+          # installer composes with `-f base -f override` and the override wins.
+          # The node is given a command that fails immediately, so every recreate
+          # produces a container that never becomes healthy.
+          # `entrypoint` alone is not enough: the base file also sets `command`,
+          # which Compose would append to the new entrypoint. Both are replaced,
+          # and the container exits immediately.
+          printf '%s\n' \
+            'services:' \
+            '  node:' \
+            '    entrypoint: ["/bin/sh", "-c", "echo broken-for-degraded-test >&2; exit 1"]' \
+            '    command: []' \
+            > /tmp/p001b2/compose.broken-node.yaml
+          export OPSWEAVE_COMPOSE_OVERRIDE=/tmp/p001b2/compose.broken-node.yaml
 
           set +e
+          OPSWEAVE_COMPOSE_OVERRIDE=/tmp/p001b2/compose.broken-node.yaml \
           OPSWEAVE_IMAGE=opsweave-platform:linux-bond \
           OPSWEAVE_PLATFORM_DIR=/tmp/p001b2/accept \
           OPSWEAVE_PROJECT=opsweave-p001b2 \

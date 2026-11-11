@@ -67,7 +67,13 @@ compose() {
   load_gateway_decision
   local args=()
   local f
-  for f in "${COMPOSE_FILES[@]}"; do args+=(-f "$f"); done
+  # An optional extra override, applied LAST so it wins. Used by the acceptance
+  # run to break one service deliberately; a deployment leaves it unset.
+  local files=("${COMPOSE_FILES[@]}")
+  if [ -n "${OPSWEAVE_COMPOSE_OVERRIDE:-}" ]; then
+    files+=("$OPSWEAVE_COMPOSE_OVERRIDE")
+  fi
+  for f in "${files[@]}"; do args+=(-f "$f"); done
   OPSWEAVE_PLATFORM_DIR="$PLATFORM_DIR" \
   OPSWEAVE_PORT="$PORT" \
   OPSWEAVE_PG_PORT="$PG_PORT" \
