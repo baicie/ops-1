@@ -531,7 +531,36 @@ async fn main() -> Result<()> {
                     }),
                 )
                 .await?;
+
+            // The Kernel can only redeploy a target that is not READY any more; it
+            // cannot activate what it has just asked to be rebuilt. It reports that
+            // in the response instead of pretending the rollback finished, and the
+            // remaining work happens here: wait, then activate.
+            //
+            // Without this, `rollback` printed a 200 body and left the previous
+            // version serving. Measured 2026-11-11: three gateway polls still
+            // answered 0.0.2 after a "successful" rollback to 0.0.1, and only a
+            // second manual invocation moved the route.
+            let needs_activation = result["pendingActivation"].as_bool().unwrap_or(false);
             println!("{}", serde_json::to_string_pretty(&result)?);
+            if needs_activation {
+                println!("  waiting for {version} to become READY …");
+                wait_for_ready(&api, &plugin, &version, 300).await?;
+                let activated = api
+                    .post(
+                        &format!("/api/v1/plugins/{plugin}/activations"),
+                        json!({
+                            "version": version,
+                            "expectedRevision": expected,
+                        }),
+                    )
+                    .await?;
+                println!(
+                    "activated {plugin}@{version} revision={} status={}",
+                    activated["generation"].as_i64().unwrap_or(0),
+                    activated["status"].as_str().unwrap_or("")
+                );
+            }
         }
         Command::Uninstall { plugin } => {
             let api = Api::new()?;

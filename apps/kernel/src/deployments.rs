@@ -947,9 +947,42 @@ pub async fn rollback(
             cpu_millis: None,
             memory_mib: None,
         };
-        create_deployment_inner(&state, &auth, &plugin_id, &create)
-            .await
-            .map(|(status, value)| (status, Json(value)))
+        let (status, value) = create_deployment_inner(&state, &auth, &plugin_id, &create).await?;
+        // A rollback to a version whose previous deployment is DRAINING, DISABLED,
+        // FAILED or DEGRADED can only REDEPLOY it: `activate_inner` refuses anything
+        // that is not READY, and the redeploy is asynchronous, so there is no instant
+        // at which this request could have activated it.
+        //
+        // This used to return that redeploy response unchanged, which is a 200 with a
+        // plausible body and no activation. An operator running `rollback` during an
+        // incident saw success and kept the old version serving - measured on
+        // 2026-11-11: the gateway answered 0.0.2 on three polls after a "successful"
+        // rollback to 0.0.1, and a SECOND call, with v1 now READY, was the one that
+        // actually activated.
+        //
+        // The response now says so, and `opsctl rollback` waits for READY and issues
+        // the activation itself. Anything reading this API directly gets the flag
+        // rather than a silent no-op.
+        let mut body = value;
+        if let Some(object) = body.as_object_mut() {
+            object.insert("rollbackActivated".into(), Value::Bool(false));
+            object.insert(
+                "pendingActivation".into(),
+                Value::Bool(matches!(
+                    status,
+                    StatusCode::CREATED | StatusCode::ACCEPTED | StatusCode::OK
+                )),
+            );
+            object.insert(
+                "nextStep".into(),
+                Value::String(
+                    "wait for the deployment to reach READY, then POST /activations with \
+                     expectedRevision to switch the route"
+                        .into(),
+                ),
+            );
+        }
+        Ok((status, Json(body)))
     }
 }
 

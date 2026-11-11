@@ -554,6 +554,13 @@ jobs:
       # asserted in platform-linux-acceptance where a daemon and two images exist.
       - name: Installer upgrade behaviour
         run: bash tests/ci/p001_upgrade_behaviour.sh
+      # P001-C1 D1: `rollback` used to return a success-shaped 200 after only
+      # redeploying, so the route never moved and the operator had to run it a
+      # second time. Both halves are asserted: the Kernel now reports that it did
+      # not activate, and opsctl finishes the job. Verified to fail when either
+      # is reverted.
+      - name: Rollback must activate, or say it did not
+        run: bash tests/ci/p001c_rollback_activates.sh
       - name: Test both feature sets
         env:
           OPSWEAVE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
