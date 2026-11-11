@@ -169,7 +169,10 @@ services:
       - ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node.env
     environment:
       OPSWEAVE_KERNEL_URL: http://127.0.0.1:${OPSWEAVE_PORT:-18080}
-      OPSWEAVE_DOCKER_HOST: unix:///var/run/docker.sock
+      # The daemon socket the node drives. Overridable ONLY so an acceptance run
+      # can point it at a path that does not exist and prove the DEGRADED path;
+      # a deployment leaves this unset and gets the standard socket.
+      OPSWEAVE_DOCKER_HOST: ${OPSWEAVE_DOCKER_HOST:-unix:///var/run/docker.sock}
       # Path-identical mount: the Node passes token-mount sources to the HOST
       # docker daemon, so this path must be the same inside and outside.
       OPSWEAVE_NODE_STATE_DIR: ${OPSWEAVE_PLATFORM_DIR:-/srv/opsweave-platform}/node

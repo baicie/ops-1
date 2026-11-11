@@ -67,7 +67,13 @@ compose() {
   load_gateway_decision
   local args=()
   local f
-  for f in "${COMPOSE_FILES[@]}"; do args+=(-f "$f"); done
+  # An optional extra override, applied LAST so it wins. Used by the acceptance
+  # run to break one service deliberately; a deployment leaves it unset.
+  local files=("${COMPOSE_FILES[@]}")
+  if [ -n "${OPSWEAVE_COMPOSE_OVERRIDE:-}" ]; then
+    files+=("$OPSWEAVE_COMPOSE_OVERRIDE")
+  fi
+  for f in "${files[@]}"; do args+=(-f "$f"); done
   OPSWEAVE_PLATFORM_DIR="$PLATFORM_DIR" \
   OPSWEAVE_PORT="$PORT" \
   OPSWEAVE_PG_PORT="$PG_PORT" \
@@ -346,7 +352,26 @@ cmd_install() {
   if [ ! -d "$PLATFORM_DIR" ]; then
     mkdir -p "$PLATFORM_DIR" 2>/dev/null || die "cannot create $PLATFORM_DIR (run as root, or set OPSWEAVE_PLATFORM_DIR)"
   fi
-  mkdir -p "$PLATFORM_DIR/node"
+  # The node's state directory is BIND-MOUNTED into a container that runs as uid
+  # 10001, and it is created here by whoever runs the installer. Without the
+  # ownership fix the node dies on its first write with
+  # `Error: Permission denied (os error 13)` - which is exactly how the first
+  # native-Linux acceptance run failed. `sudo` is used only when the directory is
+  # not already owned correctly and we are not root, and a failure is reported
+  # rather than swallowed: an install that cannot prepare this directory will
+  # produce a node that never enrols.
+  mkdir -p "$PLATFORM_DIR/node" "$PLATFORM_DIR/kernel-data"
+  if [ "$(id -u)" = "0" ]; then
+    chown -R 10001:10001 "$PLATFORM_DIR/node" "$PLATFORM_DIR/kernel-data"
+  elif [ "$(stat -c '%u' "$PLATFORM_DIR/node" 2>/dev/null || echo 0)" != "10001" ]; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo chown -R 10001:10001 "$PLATFORM_DIR/node" "$PLATFORM_DIR/kernel-data" \
+        || die "could not give the node's state directory to uid 10001; the node would fail to write its identity"
+    else
+      warn "cannot chown $PLATFORM_DIR/node to 10001 and sudo is unavailable."
+      warn "  The node will fail with 'Permission denied' when it writes its identity."
+    fi
+  fi
 
   local host="${OPSWEAVE_HOST:-$(hostname -f 2>/dev/null || hostname)}"
   local pg_password bridge_ip db_host docker_gid
@@ -520,7 +545,16 @@ EOF
     rm -f "$PLATFORM_DIR/node.env.bak"
     chmod 600 "$PLATFORM_DIR/node.env"
   fi
-  OPSWEAVE_IMAGE="$image" compose up -d node
+  # --force-recreate, not a plain `up -d`.
+  #
+  # `node.env` is an env_file, and Compose does NOT recreate a container when only
+  # an env_file changes - the running container keeps the environment it was
+  # created with. After a failed first attempt that environment holds an
+  # already-consumed enrolment token, so every restart replays it and the Kernel
+  # refuses with "Enrollment token has already been used" forever: the node can
+  # never recover without a human. That is exactly what the first native-Linux
+  # acceptance run produced - a restart loop of 401s.
+  OPSWEAVE_IMAGE="$image" compose up -d --force-recreate node
   # A node that cannot reach the docker socket never becomes healthy, and that is
   # a fact about the HOST, not a failed install: identity, the console, the
   # registry and diagnostics all work without a node. Reporting it as success
@@ -841,20 +875,80 @@ cmd_switch_image() {
   require_docker
   [ -n "$image" ] || die "usage: $label <image-tag-or-@sha256-digest>"
   say "$label to $image"
-  OPSWEAVE_IMAGE="$image" compose pull kernel node
+  # Which reference is this, and may a local copy stand in for it?
+  #
+  # A DIGEST is immutable: `repo@sha256:...` names exactly one image, so a local
+  # copy of it cannot be stale and skipping the pull is correct and offline-safe.
+  #
+  # A TAG is mutable. `:latest`, `:stable`, or a reused semantic version can be
+  # repointed at any time, so a locally cached copy is possibly NOT what the
+  # operator asked for. Accepting it would let an upgrade silently do nothing
+  # while reporting success. A tag therefore always pulls, and a local-only build
+  # must say so explicitly rather than looking like a registry upgrade.
+  case "$image" in
+    *@sha256:*)
+      if docker image inspect "$image" >/dev/null 2>&1; then
+        ok "digest $image is present locally; a digest cannot be stale, not pulling"
+      else
+        compose pull kernel node || die "could not pull $image"
+      fi
+      ;;
+    *)
+      if [ "${OPSWEAVE_ALLOW_LOCAL_TAG:-0}" = "1" ] \
+         && docker image inspect "$image" >/dev/null 2>&1; then
+        warn "$image is a TAG and is being taken from the local daemon because"
+        warn "  OPSWEAVE_ALLOW_LOCAL_TAG=1. This is a local artifact, not a registry"
+        warn "  upgrade, and it is not digest-pinned. Do not use this in production."
+      else
+        ok "$image is a tag; pulling so a repointed tag is not missed"
+        compose pull kernel node || die "could not pull $image"
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
+          die "$image is not present after a successful pull"
+        fi
+      fi
+      ;;
+  esac
+
+  # Kernel and node are replaced WITHOUT their dependencies, in that order: the
+  # node needs a live kernel to re-register against, and recreating postgres or
+  # the registry would drop the data the upgrade is supposed to preserve.
   OPSWEAVE_IMAGE="$image" compose up -d --no-deps kernel
   wait_healthy kernel
   OPSWEAVE_IMAGE="$image" compose up -d --no-deps node
-  wait_healthy node
+  # The node is a separate failure domain, but "the kernel swapped" is not "the
+  # platform upgraded". A node that cannot reach the docker socket cannot run a
+  # single plugin, so reporting an unqualified success would describe a platform
+  # whose only workload executor is down as fully upgraded:
+  #
+  #   kernel switch failed        -> die, exit 1
+  #   kernel ok, node unhealthy   -> DEGRADED, exit 3
+  #   both ok                     -> success, exit 0
+  #
+  # Exit 3 is deliberate: a scheduler or runbook checking `$?` sees "not 0", and
+  # one that wants to tell a broken upgrade from a partial one can, without
+  # parsing prose.
+  local node_ok=1
+  if ! wait_healthy_soft node 120; then
+    node_ok=0
+    NODE_STATE="unhealthy"
+  fi
 
   local code
   code="$(http_code "$URL/app")"
   if [ "$code" != "404" ]; then
-    die "$label produced a build that is not platform-only: GET /app answered $code"
+    die "$label produced a build that is not platform-only: GET $code"
   fi
-  ok "$label complete; the Ops application is still absent"
+
   report
   warn "migrations are forward-only: rolling back across one requires '$(basename "$0") restore <file>'"
+  if [ "$node_ok" = "1" ]; then
+    ok "$label complete: kernel and node both healthy; the Ops application is still absent"
+  else
+    warn "$label is DEGRADED: the kernel was switched and is serving, but the node is not"
+    warn "  healthy. Plugin workloads cannot run. This is NOT a complete upgrade."
+    DEGRADED=1
+    return 3
+  fi
 }
 
 # ---------------------------------------------------------------------------

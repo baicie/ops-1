@@ -548,6 +548,12 @@ jobs:
       # being written), so a pass here is not vacuous.
       - name: Installer credential handling
         run: bash tests/ci/p001_credential_argv.sh
+      # The two upgrade behaviours the review named: a mutable tag must never be
+      # satisfied by a local copy, and an unhealthy node must yield DEGRADED
+      # rather than a complete success. Source-shaped here; the live behaviour is
+      # asserted in platform-linux-acceptance where a daemon and two images exist.
+      - name: Installer upgrade behaviour
+        run: bash tests/ci/p001_upgrade_behaviour.sh
       - name: Test both feature sets
         env:
           OPSWEAVE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/opsweave
