@@ -20,6 +20,11 @@ on:
       - 'deployments/staging/Dockerfile'
       - 'scripts/platform_up.sh'
       - '.github/workflows/platform-linux-acceptance.yml'
+  # Also on main, so this can become a required check. A workflow that only runs
+  # on pull requests can never be one, and an acceptance nobody gates on is a
+  # document rather than a control.
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -186,13 +191,23 @@ jobs:
 
           # A real change with a real build: the version string the binary
           # reports differs, and the resulting image digest differs with it.
-          sed -i.bak 's/^version = "0.0.1"/version = "0.0.2"/' Cargo.toml
+          #
+          # The edit is undone from a trap, not from the success path: if the
+          # runner is killed mid-build the worktree would otherwise keep
+          # `version = "0.0.2"` and every later step would build the wrong thing.
+          cp Cargo.toml /tmp/p001b2/Cargo.toml.orig
+          restore_cargo() { cp /tmp/p001b2/Cargo.toml.orig Cargo.toml; }
+          trap restore_cargo EXIT
+          sed -i 's/^version = "0.0.1"/version = "0.0.2"/' Cargo.toml
+          grep -q '^version = "0.0.2"' Cargo.toml || fail "the version edit did not apply"
           docker build -f deployments/staging/Dockerfile --target platform \
             -t opsweave-platform:linux-bond-v2 . >/tmp/p001b2/v2-build.log 2>&1 || {
-              mv Cargo.toml.bak Cargo.toml
-              echo "::error::the v2 image did not build"; tail -30 /tmp/p001b2/v2-build.log; exit 1
+              tail -30 /tmp/p001b2/v2-build.log
+              echo "::error::the v2 image did not build"; exit 1
             }
-          mv Cargo.toml.bak Cargo.toml
+          restore_cargo
+          trap - EXIT
+          git diff --quiet -- Cargo.toml || fail "Cargo.toml was not restored after the v2 build"
           v2="$(docker image inspect opsweave-platform:linux-bond-v2 --format '{{.Id}}')"
           echo "v2 image: $v2"
           [ "$v1" != "$v2" ] || fail "v1 and v2 are the same image; that is a relabel, not an upgrade"
