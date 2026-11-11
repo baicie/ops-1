@@ -14,15 +14,31 @@ name: platform-linux-acceptance
 #
 # It runs on a pull request so the acceptance itself is gated, not just written.
 on:
+  # NO `paths:` filter, deliberately.
+  #
+  # It had one until now, and it was wrong twice over:
+  #
+  #   1. It listed only `deployments/platform/**`, the staging Dockerfile,
+  #      `scripts/platform_up.sh` and this file - and NOT `apps/**`, `crates/**`,
+  #      `Cargo.toml` or `Cargo.lock`. The image does `COPY apps ./apps` and
+  #      builds `opsweave-kernel` and `opsweave-node`, so a PR that changed the
+  #      kernel was never exercised here, while one that edited a README under
+  #      `deployments/platform/` was. It ran on the least relevant changes and
+  #      skipped the most relevant ones.
+  #
+  #   2. A path-filtered workflow can never be a required status check. On a PR
+  #      that does not match, the check does not run, and GitHub then reports
+  #      "Expected - Waiting for status to be reported" forever. 16 of the last
+  #      20 merged PRs did not match the old filter, so requiring it would have
+  #      blocked those permanently.
+  #
+  # `ci.yml` and `reliability.yml` already run on every pull request for the same
+  # reason, and the checks they feed are the ones that are required. This now
+  # matches them.
   pull_request:
-    paths:
-      - 'deployments/platform/**'
-      - 'deployments/staging/Dockerfile'
-      - 'scripts/platform_up.sh'
-      - '.github/workflows/platform-linux-acceptance.yml'
-  # Also on main, so this can become a required check. A workflow that only runs
-  # on pull requests can never be one, and an acceptance nobody gates on is a
-  # document rather than a control.
+  # On main as well, so the result of every merge is observable and this can be
+  # a required check. A workflow that only runs on pull requests can never be
+  # one, and an acceptance nobody gates on is a document rather than a control.
   push:
     branches: [main]
   workflow_dispatch:

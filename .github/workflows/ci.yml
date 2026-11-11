@@ -637,6 +637,43 @@ jobs:
           kill "$(cat /tmp/p001/kernel.pid)" 2>/dev/null || true
           echo "platform-only boundary verified"
 
+      # `platform-linux-acceptance` is a required check on `main`. A required
+      # check that is path-filtered never reports on a PR that does not match,
+      # and GitHub then holds the merge at "Expected - Waiting for status to be
+      # reported" forever. This guard exists so the filter cannot come back
+      # quietly: it caught the old one, which fired on `deployments/platform/**`
+      # but not on `apps/**`, so a kernel change was never exercised while a
+      # README edit was.
+      - name: The Linux acceptance workflow must run on every pull request
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import sys, yaml
+
+          path = ".github/workflows/platform-linux-acceptance.yml"
+          doc = yaml.safe_load(open(path))
+          key = next((k for k in doc if str(k).lower() in ("on", "true")), None)
+          if key is None:
+              sys.exit(f"{path}: no trigger block")
+          triggers = doc[key]
+
+          if not isinstance(triggers, dict) or "pull_request" not in triggers:
+              sys.exit(f"{path}: pull_request is not a trigger")
+
+          pr = triggers["pull_request"]
+          if isinstance(pr, dict):
+              for forbidden in ("paths", "paths-ignore"):
+                  if forbidden in pr:
+                      sys.exit(
+                          f"{path}: pull_request has a `{forbidden}` filter. "
+                          "A path-filtered workflow cannot be a required check: "
+                          "it never reports on a non-matching PR, and the merge "
+                          "stays blocked at 'Expected'. See the trigger comment."
+                      )
+
+          print("pull_request runs unconditionally")
+          PY
+
       # The mirror assertion, and the one whose absence let a real regression ship.
       #
       # Run 42791913396 deployed a STAGING image that answered `/app` with 404,
