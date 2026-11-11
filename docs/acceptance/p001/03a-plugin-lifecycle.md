@@ -1,13 +1,14 @@
 # P001-C1 — TypeScript Plugin Golden Path
 
-Status: **PARTIAL.** The lifecycle ran end to end against a real Node, real
-containers and a real OCI registry. Two defects were found; one of them means
-**rollback does not work as advertised on its first call**, and C1 cannot be
-called PASS until it is fixed.
+Status: **PARTIAL, improved.** The lifecycle ran end to end against a real Node,
+real containers and a real OCI registry. **D1 (`rollback` did not roll back on
+its first call) was found, fixed and re-measured — §3.4.** One defect remains
+open: **D4, frontend assets are still served after uninstall** (§4), which is a
+stale-content exposure rather than the production-significant defect D1 was.
 
 | Fact | Value |
 |---|---|
-| Code under test | `1ad7589` (C0 baseline) + the two changes in this branch |
+| Code under test | `1ad7589` (C0 baseline) + the changes in this branch |
 | Host | macOS 15.7 / arm64, Docker Desktop 29.7.2 |
 | Kernel | `0.0.1`, `http://127.0.0.1:18281`, database `p001c` |
 | Nodes | 2 (`node-a` :9201, `node-b` :9202), both `READY` |
@@ -178,9 +179,10 @@ Gateway after uninstall: `503 CAPABILITY_UNAVAILABLE`. Correct.
 
 ---
 
-## 3. Defect D1 — `rollback` does not roll back on its first call
+## 3. Defect D1 — `rollback` did not roll back on its first call (FIXED)
 
-**This is the finding that keeps C1 at PARTIAL.**
+> **Status: fixed and verified.** The defect is described first because the
+> description is the evidence; §3.4 is the fix and the measurement after it.
 
 `opsctl rollback dev.opsweave.hello 0.0.1 --replicas 2` returned success-shaped
 JSON — `"statusReason": "Redeploy requested"` — and the gateway kept serving
@@ -232,8 +234,92 @@ body, and walks away has **not rolled back**. The audit trail does not record th
 rollback either (C0 finding A11: no `audit::record` in this handler), so there is
 no later signal that it did nothing.
 
-C1 stays PARTIAL until either the third branch activates (and reports that it is
-activating), or the API refuses and tells the caller to deploy-then-activate.
+### 3.4 The fix, and the measurement after it
+
+Two halves, because either alone leaves the trap open.
+
+**Kernel** (`deployments.rs`, the redeploy branch): the response now carries
+
+```json
+{ "rollbackActivated": false,
+  "pendingActivation": true,
+  "nextStep": "wait for the deployment to reach READY, then POST /activations with expectedRevision to switch the route" }
+```
+
+The handler still cannot activate what it has just asked to be rebuilt — the
+redeploy is asynchronous — so it says so instead of returning the redeploy body
+unchanged.
+
+**`opsctl rollback`**: reads `pendingActivation`, waits for `READY` via the same
+`wait_for_ready` that `deploy --wait` uses, then issues the activation itself.
+
+**Measured on the fixed build, one call, no manual second step:**
+
+```
+=== BEFORE: 0.0.2 ===
+  rollbackActivated: false
+  pendingActivation: true
+  nextStep: "wait for the deployment to reach READY, then POST /activations …"
+  waiting for 0.0.1 to become READY …
+  activated dev.opsweave.hello@0.0.1 revision=3 status=ACTIVE
+=== AFTER: 0.0.1 ===
+```
+
+**Regression:** `cargo test -p opsweave-kernel` → **281 passed, 0 failed**.
+
+**Guard:** `tests/ci/p001c_rollback_activates.sh`, 11 checks, wired into the
+`platform-only` job. It was verified to **fail** by reverting both halves to
+their original shape — 5 failures, exit 1 — and to pass again when restored. Its
+own inputs are asserted present, so a rename cannot turn the assertions vacuous.
+
+**The fix broke a caller, and that is evidence it works.** `data-foundation`'s
+`legacy-regression` job went red on the fix with
+
+```
+Error: API 409 Conflict returned VERSION_ALREADY_ACTIVE:
+  dev.opsweave.hello@0.0.1 is already the active version
+```
+
+`e2e_platform.sh:96-97` ran `deploy 0.0.1 --wait` then `activate 0.0.1`
+immediately after `rollback 0.0.1`. Those two commands **were the workaround for
+D1** — the old rollback only redeployed, so the caller finished the job by hand.
+With rollback now activating, the explicit activate collides with the state it
+just created. Both lines were removed; leaving rollback alone in that step also
+means the assertion goes red if it ever stops activating again, instead of being
+repaired by a manual activate.
+
+### 3.5 One local failure that is not explained yet
+
+Running `e2e_platform.sh` against the isolated platform after the fix:
+
+```
+PASS  upgrade routes to v2
+PASS  rollback routes to v1        <- the assertion under test
+...
+FAIL  re-enabled Java plugin
+PASS=20 FAIL=1
+```
+
+`re-enabled Java plugin` is the **last** step: `disable` → `enable` → `deploy` →
+`activate` on `dev.opsweave.hello-java`. The gateway answered 502/503 and no Java
+container was left running. Java had passed earlier in the same run
+(`PASS dev.opsweave.hello-java serves Runtime v1`), so this is a restart problem,
+not admission or routing.
+
+It is **not attributed by this run alone.** The rollback change does not touch
+that section, and this run is the first on this branch, so there is no before/after
+to compare it with.
+
+**CI answered it.** On the same commit, `legacy-regression` — which runs this
+identical script on `ubuntu-24.04` — **passed in 6m39s**, `PASS/FAIL` clean. So
+the Java restart failure is specific to this macOS Docker Desktop host and does
+not reproduce where the acceptance actually runs. It stays recorded as a local
+environment observation, not as a product defect and not as "pre-existing": the
+honest statement is that one environment failed it and the other did not, and the
+one that gates the repository is green.
+
+**Not fixed, and recorded:** `rollback` still writes no audit entry (A11) and
+still has no idempotency receipt. Those are separate from D1 and remain open.
 
 ---
 
@@ -288,17 +374,25 @@ and C1's scope is the plugin path.
 ## 7. Position
 
 The TypeScript golden path **runs**: build, push, digest-pin, sign, upload,
-verify, stage, deploy, ready, activate, gateway call, disable, enable, uninstall,
-all against real containers, with the route-switch behaviour proved by polling
-rather than asserted.
+verify, stage, deploy, ready, activate, gateway call, disable, enable, rollback,
+uninstall — all against real containers, with the route-switch behaviour proved
+by polling rather than asserted.
 
-Two defects block PASS:
+Defects, by outcome:
 
-- **D1 `rollback` silently does not roll back on its first call.** This is a
-  production-significant defect and the reason the phase is PARTIAL.
-- **D4 assets survive uninstall**, contradicting the state the platform reports.
+| # | Defect | Outcome |
+|---|---|---|
+| **D0** | `build-plugins.sh` aborted on any host with a cached JRE; no bundle was ever signed | **fixed** |
+| **D1** | `rollback` returned 200 without switching the route; the first call never worked | **fixed and re-measured** (§3.4) |
+| **D3** | `demo_up.sh` cannot run beside existing data — it drops the database and deletes `data/` | **recorded, not fixed** (scope) |
+| **D4** | frontend assets stay served after uninstall | **open** — C1 stays PARTIAL on this |
+| **D5** | `p001c_up.sh` did not reset node identities with the database, so a second run stalled in quarantine | **fixed** (`#86`) |
 
-One defect was found and fixed to get this far (**D0, the `JRE_SOURCE` build
-abort**), and one was found and deliberately not fixed (**D3, `demo_up.sh`**).
+C1 → **PARTIAL (lifecycle and rollback verified; D4 open; browser, capability
+provides/requires, grants, incompatible upgrade, and Java/Go lifecycles not yet
+exercised — C2/C3/C4).**
 
-C1 → **PARTIAL (lifecycle runs; rollback defect open)**.
+D4 is not a reason to distrust the lifecycle: it is stale content served after
+the backend is stopped, not code execution, and §4 records it precisely. But a
+plugin reported `UNINSTALLED` whose frontend still returns `200` is a
+contradiction in the platform's own state, and it stays open until fixed.

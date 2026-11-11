@@ -93,8 +93,18 @@ section "upgrade and rollback"
 BODY="$(gateway dev.opsweave.hello /api/hello)"
 echo "$BODY" | grep -q '0.0.2' && ok "upgrade routes to v2" || bad "upgrade routes to v2"
 "$OPSCTL" --url "$KERNEL_URL" rollback dev.opsweave.hello 0.0.1 --expected-revision 2 --replicas 2 >/dev/null
-"$OPSCTL" --url "$KERNEL_URL" deploy dev.opsweave.hello 0.0.1 --replicas 2 --selector role=node --wait
-"$OPSCTL" --url "$KERNEL_URL" activate dev.opsweave.hello 0.0.1
+# Steps 96-97 used to be here: `deploy 0.0.1 --wait` then `activate 0.0.1`.
+#
+# They were the workaround for a defect, not part of the contract. `rollback`
+# only redeployed a target whose deployment was no longer READY and returned a
+# 200 anyway, so the caller had to deploy and activate by hand afterwards. With
+# that fixed (P001-C1 D1) `opsctl rollback` waits for READY and activates, and
+# the explicit activate now fails with VERSION_ALREADY_ACTIVE - which is how
+# this job caught the change.
+#
+# The rollback is deliberately left as the only command here: if it ever stops
+# activating again, this assertion sees the old version serving and goes red,
+# instead of being masked by a manual activate that repairs it afterwards.
 BODY="$(gateway dev.opsweave.hello /api/hello)"
 echo "$BODY" | grep -q '0.0.1' && ok "rollback routes to v1" || bad "rollback routes to v1"
 
