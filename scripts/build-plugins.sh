@@ -81,6 +81,14 @@ if [ -e plugins/hello-java/jre/bin/java ] && [ "$(head -c 4 plugins/hello-java/j
   echo "discarding the cached Java plugin JRE: bin/java is not a Linux ELF executable" >&2
   rm -rf plugins/hello-java/jre
 fi
+# Declared OUTSIDE the build branch below. It used to be assigned only when the
+# JRE had to be produced, so a checkout that already carried a cached
+# `plugins/hello-java/jre` skipped the assignment entirely and the two later
+# `($JRE_SOURCE)` log lines aborted the whole build under `set -u`:
+#   scripts/build-plugins.sh: line 167: JRE_SOURCE: unbound variable
+# The images had already been built and exported by then, so the failure landed
+# after all the expensive work and no bundle was ever signed.
+JRE_SOURCE="cached"
 if [ ! -x plugins/hello-java/jre/bin/java ]; then
   mkdir -p plugins/hello-java/jre
   JRE_SOURCE=""
