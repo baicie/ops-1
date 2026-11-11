@@ -10,7 +10,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use opsweave_contracts::{ManifestV11, ResourceRequirements};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::FromRow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use tokio::time::{interval, Duration as TokioDuration};
@@ -895,6 +895,59 @@ pub async fn uninstall(
     Ok(Json(serde_json::json!({"ok": true, "dataRetained": true})))
 }
 
+/// Read the ACTIVE activation for a plugin, if any.
+async fn active_version_of(state: &AppState, plugin_id: &str) -> AppResult<(Option<String>, Option<i64>)> {
+    let active: Option<ActivationRow> = sqlx::query_as::<_, ActivationRow>(
+        "SELECT * FROM kernel.activation_revisions WHERE plugin_id=$1 AND status='ACTIVE'",
+    )
+    .bind(plugin_id)
+    .fetch_optional(&state.db)
+    .await?;
+    Ok(match active {
+        Some(row) => (Some(row.version), Some(row.generation)),
+        None => (None, None),
+    })
+}
+
+/// Attach the uniform rollback outcome to a body produced by any branch.
+///
+/// `completed` is not passed in: it is computed from the database after the
+/// branch has run, so no branch can claim to have finished by returning a
+/// success-shaped payload. `effectiveVersion` and `effectiveRevision` are read
+/// from the ACTIVE activation row, which is exactly what the gateway routes on.
+async fn rollback_response(
+    state: &AppState,
+    plugin_id: &str,
+    target_version: &str,
+    mut body: Value,
+    pending_activation: bool,
+    next_step: Option<&str>,
+) -> AppResult<Value> {
+    let (effective_version, effective_revision) = active_version_of(state, plugin_id).await?;
+    let completed = effective_version.as_deref() == Some(target_version);
+    if let Some(object) = body.as_object_mut() {
+        object.insert("targetVersion".into(), Value::String(target_version.to_string()));
+        object.insert(
+            "effectiveVersion".into(),
+            effective_version.map(Value::String).unwrap_or(Value::Null),
+        );
+        object.insert(
+            "effectiveRevision".into(),
+            effective_revision.map(Value::from).unwrap_or(Value::Null),
+        );
+        object.insert("rollbackCompleted".into(), Value::Bool(completed));
+        object.insert("pendingActivation".into(), Value::Bool(pending_activation && !completed));
+        object.insert(
+            "nextStep".into(),
+            match next_step {
+                Some(step) if !completed => Value::String(step.to_string()),
+                _ => Value::Null,
+            },
+        );
+    }
+    Ok(body)
+}
+
 pub async fn rollback(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -902,6 +955,40 @@ pub async fn rollback(
     Json(payload): Json<RollbackRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     auth.require_operator()?;
+
+    // Idempotency: rolling back to the version that is already effective is a
+    // completed rollback, not an error. It is also the state a retried request
+    // lands in after the first attempt succeeded, so refusing it would turn a
+    // retry into a false failure.
+    let (effective_before, revision_before) = active_version_of(&state, &plugin_id).await?;
+    if effective_before.as_deref() == Some(payload.target_version.as_str()) {
+        let mut body = json!({ "status": "ACTIVE" });
+        if let Some(object) = body.as_object_mut() {
+            object.insert("idempotent".into(), Value::Bool(true));
+        }
+        let body = rollback_response(&state, &plugin_id, &payload.target_version, body, false, None)
+            .await?;
+        let _ = revision_before;
+        return Ok((StatusCode::OK, Json(body)));
+    }
+
+    // Reject a stale expectedRevision BEFORE doing any work.
+    //
+    // `activate_inner` checks it too, but only after a redeploy has run - so a
+    // caller holding an outdated revision waited out a full redeploy to be told
+    // the request was never valid. Measured 2026-11-11: the state-machine test
+    // sat in `deploy --wait` for minutes before the 409 finally arrived.
+    if revision_before.unwrap_or(0) != payload.expected_revision {
+        return Err(AppError::conflict(
+            "REVISION_CONFLICT",
+            format!(
+                "expectedRevision {} does not match current active revision {}",
+                payload.expected_revision,
+                revision_before.unwrap_or(0)
+            ),
+        ));
+    }
+
     let target = sqlx::query_as::<_, DeploymentRow>(
         "SELECT * FROM kernel.plugin_deployments WHERE plugin_id=$1 AND version=$2",
     )
@@ -909,7 +996,13 @@ pub async fn rollback(
     .bind(&payload.target_version)
     .fetch_optional(&state.db)
     .await?;
+
     let Some(target) = target else {
+        // No deployment for that version yet. Create one and say plainly that it
+        // is not active - the caller, or `opsctl rollback`, must activate it once
+        // it is READY. Refusing outright would make "rollback to a version that
+        // was never deployed here" impossible, which is wrong: the package only
+        // has to be staged.
         let package =
             crate::packages::get_package(&state, &plugin_id, &payload.target_version).await?;
         let manifest: ManifestV11 = serde_json::from_value(package.manifest)
@@ -922,67 +1015,75 @@ pub async fn rollback(
             cpu_millis: Some(manifest.resources.cpu_millis),
             memory_mib: Some(manifest.resources.memory_mib),
         };
-        return create_deployment_inner(&state, &auth, &plugin_id, &create)
-            .await
-            .map(|(status, value)| (status, Json(value)));
-    };
-    if target.status == "READY" {
-        let activate = ActivateRequest {
-            version: target.version.clone(),
-            expected_revision: payload.expected_revision,
-        };
-        activate_inner(&state, &auth, &plugin_id, &activate)
-            .await
-            .map(|(status, value)| (status, Json(value)))
-    } else if matches!(target.status.as_str(), "PENDING" | "PREPARING") {
-        let body =
-            serde_json::to_value(deployment_view(&state, target).await?).map_err(AppError::from)?;
-        Ok((StatusCode::ACCEPTED, Json(body)))
-    } else {
-        let create = CreateDeploymentRequest {
-            version: payload.target_version,
-            desired_replicas: payload.desired_replicas.unwrap_or(2),
-            node_selector: BTreeMap::new(),
-            max_instances_per_node: Some(1),
-            cpu_millis: None,
-            memory_mib: None,
-        };
         let (status, value) = create_deployment_inner(&state, &auth, &plugin_id, &create).await?;
-        // A rollback to a version whose previous deployment is DRAINING, DISABLED,
-        // FAILED or DEGRADED can only REDEPLOY it: `activate_inner` refuses anything
-        // that is not READY, and the redeploy is asynchronous, so there is no instant
-        // at which this request could have activated it.
-        //
-        // This used to return that redeploy response unchanged, which is a 200 with a
-        // plausible body and no activation. An operator running `rollback` during an
-        // incident saw success and kept the old version serving - measured on
-        // 2026-11-11: the gateway answered 0.0.2 on three polls after a "successful"
-        // rollback to 0.0.1, and a SECOND call, with v1 now READY, was the one that
-        // actually activated.
-        //
-        // The response now says so, and `opsctl rollback` waits for READY and issues
-        // the activation itself. Anything reading this API directly gets the flag
-        // rather than a silent no-op.
-        let mut body = value;
-        if let Some(object) = body.as_object_mut() {
-            object.insert("rollbackActivated".into(), Value::Bool(false));
-            object.insert(
-                "pendingActivation".into(),
-                Value::Bool(matches!(
-                    status,
-                    StatusCode::CREATED | StatusCode::ACCEPTED | StatusCode::OK
-                )),
-            );
-            object.insert(
-                "nextStep".into(),
-                Value::String(
-                    "wait for the deployment to reach READY, then POST /activations with \
-                     expectedRevision to switch the route"
-                        .into(),
-                ),
-            );
+        let body = rollback_response(
+            &state,
+            &plugin_id,
+            &payload.target_version,
+            value,
+            true,
+            Some("the deployment did not exist; wait for it to reach READY, then activate it"),
+        )
+        .await?;
+        return Ok((status, Json(body)));
+    };
+
+    match target.status.as_str() {
+        // Already built and healthy: switch the route now.
+        "READY" => {
+            let activate = ActivateRequest {
+                version: target.version.clone(),
+                expected_revision: payload.expected_revision,
+            };
+            let (status, value) = activate_inner(&state, &auth, &plugin_id, &activate).await?;
+            let body = rollback_response(&state, &plugin_id, &payload.target_version, value, false, None)
+                .await?;
+            Ok((status, Json(body)))
         }
-        Ok((status, Json(body)))
+        // Being built right now. Report the state truthfully; do not claim to have
+        // activated something that is not READY, and do not start a second build.
+        "PENDING" | "PREPARING" => {
+            let body =
+                serde_json::to_value(deployment_view(&state, target).await?).map_err(AppError::from)?;
+            let body = rollback_response(
+                &state,
+                &plugin_id,
+                &payload.target_version,
+                body,
+                true,
+                Some("the deployment is still starting; wait for READY, then activate it"),
+            )
+            .await?;
+            Ok((StatusCode::ACCEPTED, Json(body)))
+        }
+        // Everything else (ACTIVE, DISABLED, DRAINING, FAILED, DEGRADED) has to be
+        // redeployed before it can be activated. `activate_inner` refuses anything
+        // that is not READY, and the redeploy is asynchronous, so this call cannot
+        // finish the rollback - it says so instead of returning a bare 200.
+        other => {
+            let create = CreateDeploymentRequest {
+                version: payload.target_version.clone(),
+                desired_replicas: payload.desired_replicas.unwrap_or(2),
+                node_selector: BTreeMap::new(),
+                max_instances_per_node: Some(1),
+                cpu_millis: None,
+                memory_mib: None,
+            };
+            let (status, value) = create_deployment_inner(&state, &auth, &plugin_id, &create).await?;
+            let body = rollback_response(
+                &state,
+                &plugin_id,
+                &payload.target_version,
+                value,
+                true,
+                Some(&format!(
+                    "the target deployment was {other}; it must be redeployed and reach READY \
+                     before activation can switch the route"
+                )),
+            )
+            .await?;
+            Ok((status, Json(body)))
+        }
     }
 }
 
