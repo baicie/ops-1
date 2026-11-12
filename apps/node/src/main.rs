@@ -35,7 +35,12 @@ async fn main() -> anyhow::Result<()> {
     // Before any container is created: every container this installation makes
     // must carry a label that distinguishes it from an installation which
     // inherited the same node id. See DockerAdapter::INSTALLATION_LABEL.
-    let installation_id = runtime::load_or_create_installation_id(&args)?;
+    // Fails closed on `INSTALLATION_IDENTITY_CONFLICT`: a state directory that
+    // is a copy of the one its identity was minted in cannot be told apart from
+    // the original, and two installations sharing an ownership token delete each
+    // other's containers. The operator resolves it once, explicitly. ADR-023.
+    let installation_id = runtime::load_or_create_installation_id(&args)
+        .context("the Node cannot establish which containers it owns, so it will not start")?;
     let docker = docker.with_installation_id(installation_id.clone());
     let identity = runtime::enroll(&args, &http).await?;
     let node_id = identity.node_id;

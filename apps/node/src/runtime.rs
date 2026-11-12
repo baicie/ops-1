@@ -1,6 +1,7 @@
 use crate::config::Args;
 use crate::docker::{container_name, ContainerInfo, DockerAdapter, Ownership};
 use crate::logs::{parse_docker_log_line, parse_level, LogBuffer};
+use anyhow::Context;
 use chrono::Utc;
 use opsweave_contracts::{
     DesiredNodeState, DesiredWorkload, InstanceObservation, InstanceState, LogChannel,
@@ -205,47 +206,366 @@ fn state_file(args: &Args) -> PathBuf {
     args.state_dir.join("node-identity.json")
 }
 
-/// Read, or mint, this installation's ownership token.
-///
-/// Deliberately stored next to the enrolment identity rather than in the
-/// database. A restored database - or a copied state directory - is precisely
-/// how two installations come to share a node id, so a token kept in either
-/// would be reproduced along with the collision and prove nothing. The token
-/// identifies the install whose data directory this is; two installs pointed at
-/// one state directory are the same installation by definition, and that is the
-/// only case where sharing it is correct.
-///
-/// Existing installations have no token on upgrade. One is minted lazily and
-/// that is safe: containers created before it carry no installation label, so
-/// they read as foreign and are never swept - they must be removed deliberately
-/// once. `03h-lifecycle-correctness.md` records the migration steps.
-pub fn load_or_create_installation_id(args: &Args) -> anyhow::Result<String> {
-    let path = args.state_dir.join("installation-id");
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        let token = existing.trim();
-        if is_valid_installation_id(token) {
-            return Ok(token.to_string());
+/// What the operator says a mismatched binding means. See ADR-023 §2.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityAction {
+    /// Unset: a mismatch is a hard error.
+    None,
+    /// The directory moved or was restored over. Keep the id, re-record the
+    /// binding.
+    Accept,
+    /// This directory is a clone. Mint a new id; the original keeps its
+    /// containers.
+    Reinitialize,
+}
+
+impl IdentityAction {
+    pub fn from_env() -> anyhow::Result<Self> {
+        match std::env::var("OPSWEAVE_INSTALLATION_ID_ACTION") {
+            Err(std::env::VarError::NotPresent) => Ok(Self::None),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                anyhow::bail!("OPSWEAVE_INSTALLATION_ID_ACTION is not valid UTF-8")
+            }
+            Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+                "" => Ok(Self::None),
+                "accept" => Ok(Self::Accept),
+                "reinitialize" => Ok(Self::Reinitialize),
+                other => anyhow::bail!(
+                    "OPSWEAVE_INSTALLATION_ID_ACTION={other:?} is not a recognised action; \
+                     use `accept` (this directory is the same installation, moved or restored) \
+                     or `reinitialize` (this directory is a clone and is a new installation)"
+                ),
+            },
         }
+    }
+}
+
+/// Device and inode of a state directory, the two values a copy cannot preserve.
+#[cfg(unix)]
+fn directory_identity(dir: &Path) -> anyhow::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(dir)
+        .with_context(|| format!("stat the node state directory {}", dir.display()))?;
+    Ok((meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn directory_identity(dir: &Path) -> anyhow::Result<(u64, u64)> {
+    // The binding still exists off Unix so the file format is portable, but it
+    // cannot detect a clone there. Say so rather than pretending.
+    tracing::warn!(
+        dir = %dir.display(),
+        "installation identity binding cannot detect a copied state directory on this \
+         platform; a clone will share this installation's ownership token"
+    );
+    Ok((0, 0))
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallationBinding {
+    installation_id: String,
+    state_dir_device: u64,
+    state_dir_inode: u64,
+    #[serde(default)]
+    recorded_at: Option<String>,
+}
+
+fn binding_path(args: &Args) -> PathBuf {
+    args.state_dir.join("installation-binding.json")
+}
+
+fn write_binding(args: &Args, token: &str) -> anyhow::Result<()> {
+    let (device, inode) = directory_identity(&args.state_dir)?;
+    let binding = InstallationBinding {
+        installation_id: token.to_string(),
+        state_dir_device: device,
+        state_dir_inode: inode,
+        recorded_at: Some(chrono::Utc::now().to_rfc3339()),
+    };
+    // The binding is a *record*, not a claim: `accept` rewrites it and a
+    // concurrent mint reads the winner's id and records it. Replace it
+    // atomically. The identity file is the opposite - it must never be
+    // replaced, which is what `write_private`'s create_new enforces.
+    let path = binding_path(args);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // A fixed `.tmp` name made concurrent starts fight: one rename moved the
+    // temporary file out from under another writer, which then failed with
+    // ENOENT - and the identity it had just minted had no binding at all.
+    // Unique per write, so each rename is independent.
+    let temporary = path.with_extension(format!("tmp.{}", Uuid::new_v4()));
+    std::fs::write(&temporary, serde_json::to_vec_pretty(&binding)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&temporary, &path)
+        .with_context(|| format!("write the installation binding at {}", path.display()))?;
+    Ok(())
+}
+
+/// Write a file that only this user can read, atomically, without ever
+/// replacing an existing one.
+///
+/// `create_new` alone is not enough, and CI proved it: it reserves the *name*
+/// atomically but fills it in a second step, so a concurrent Node that lost the
+/// reserved the name and read it before `write_all` landed saw an EMPTY file and
+/// failed with `is not a valid installation id ("")`. Measured on the first CI
+/// run of `concurrent_mints_agree_on_one_identity`.
+///
+/// The content is written to a unique temporary file, synced, and then published
+/// with `hard_link`, which fails with `AlreadyExists` when the target is there.
+/// A reader therefore only ever sees a complete file: the name either points at
+/// fully-written content or does not exist.
+fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension(format!("pub.{}", Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| -> anyhow::Result<()> {
+        let mut file = options.open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error)
+            .with_context(|| format!("write the temporary file for {}", path.display()));
+    }
+    // Publish. `hard_link` is the atomic "create only if absent" primitive that
+    // also carries the complete content, which `create_new` + `write` does not.
+    let published = std::fs::hard_link(&temporary, path);
+    let _ = std::fs::remove_file(&temporary);
+    published.with_context(|| format!("publish {}", path.display()))?;
+    Ok(())
+}
+
+/// Read, mint, or re-adopt this installation's ownership token.
+///
+/// The token is stored next to the enrolment identity rather than in the
+/// database: a restored database is one of the ways two installations come to
+/// share a node id, so a token kept there would be reproduced with the
+/// collision and prove nothing.
+///
+/// A token alone is not enough. A full `cp -a` of the state directory carries
+/// the token *and* the node identity, and then the clone answers "yes" to every
+/// ownership question. The binding records the device and inode the token was
+/// minted in - values a copy cannot preserve - so a clone is detected rather
+/// than trusted. See ADR-023.
+pub fn load_or_create_installation_id(args: &Args) -> anyhow::Result<String> {
+    load_or_create_installation_id_with(args, IdentityAction::from_env()?)
+}
+
+pub fn load_or_create_installation_id_with(
+    args: &Args,
+    action: IdentityAction,
+) -> anyhow::Result<String> {
+    let path = args.state_dir.join("installation-id");
+    // Only `NotFound` means "absent". Every other read error used to fall
+    // through to "mint a new one", which on an unreadable directory silently
+    // produced a second identity and orphaned everything the first owned.
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(value) => Some(value),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "cannot read the existing installation identity at {}; refusing to mint \
+                     a second one, which would orphan every container this installation owns",
+                    path.display()
+                )
+            })
+        }
+    };
+
+    let Some(existing) = existing else {
+        return mint_installation_id(args, &path);
+    };
+    let token = existing.trim();
+    if !is_valid_installation_id(token) {
         anyhow::bail!(
-            "{} exists but is not a valid installation id ({:?}); \
-             refusing to mint a second one, because that would orphan every \
-             container this installation already owns",
+            "{} exists but is not a valid installation id ({:?}); refusing to mint a second \
+             one, because that would orphan every container this installation already owns",
             path.display(),
             token
         );
     }
+    let token = token.to_string();
+
+    let (device, inode) = directory_identity(&args.state_dir)?;
+    let binding = read_binding(args)?;
+    match binding {
+        Some(binding)
+            if binding.installation_id == token
+                && binding.state_dir_device == device
+                && binding.state_dir_inode == inode =>
+        {
+            Ok(token)
+        }
+        Some(binding) if binding.installation_id != token => {
+            // Identity file and binding disagree. One of them was edited or
+            // partially restored; neither can be trusted to say what this
+            // installation may delete.
+            anyhow::bail!(
+                "INSTALLATION_IDENTITY_CONFLICT: {} carries installation id {token} but the \
+                 binding in {} names {}. Refusing to guess which is this installation's. \
+                 Restore both files from the same backup, or set \
+                 OPSWEAVE_INSTALLATION_ID_ACTION=reinitialize to treat this directory as a \
+                 new installation.",
+                path.display(),
+                binding_path(args).display(),
+                binding.installation_id
+            )
+        }
+        Some(binding) => {
+            // Same token, different directory: this is a copy of the state dir
+            // the identity was minted in (or a restore into a new place). Which
+            // one it is cannot be read off disk - only the operator knows.
+            match action {
+                IdentityAction::None => anyhow::bail!(
+                    "INSTALLATION_IDENTITY_CONFLICT: {} was created in a directory with \
+                     device/inode {}/{} but is now read from {}/{}. This directory is a COPY \
+                     of the one the identity was minted in - a backup restored elsewhere, or \
+                     a full clone - and two installations sharing one ownership token can \
+                     delete each other's containers. Nothing was changed.\n  \
+                     If this is the same installation moved or restored over: \
+                     OPSWEAVE_INSTALLATION_ID_ACTION=accept\n  \
+                     If this is a clone that must be its own installation: \
+                     OPSWEAVE_INSTALLATION_ID_ACTION=reinitialize\n\
+                     See ADR-023.",
+                    path.display(),
+                    binding.state_dir_device,
+                    binding.state_dir_inode,
+                    device,
+                    inode
+                ),
+                IdentityAction::Accept => {
+                    tracing::warn!(
+                        installation_id = %token,
+                        "this state directory is a copy; accepting the existing installation \
+                         identity for it. Containers of the copy's original installation are \
+                         now indistinguishable from this one's."
+                    );
+                    write_binding(args, &token)?;
+                    Ok(token)
+                }
+                IdentityAction::Reinitialize => {
+                    tracing::warn!(
+                        previous = %token,
+                        "reinitializing: this state directory is a clone and becomes a new \
+                         installation. Containers created with the previous identity are left \
+                         to the installation that still owns them."
+                    );
+                    // Both files must go, or the next start reads the old token
+                    // (or the old binding) again and asks the same question.
+                    // Removed identity-first: a crash between the two leaves a
+                    // binding with no identity, which mints cleanly, rather than
+                    // an identity with a stale binding, which does not.
+                    std::fs::remove_file(&path).with_context(|| {
+                        format!("remove the inherited identity at {}", path.display())
+                    })?;
+                    let binding = binding_path(args);
+                    match std::fs::remove_file(&binding) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => {
+                            return Err(error).with_context(|| {
+                                format!("remove the inherited binding at {}", binding.display())
+                            })
+                        }
+                    }
+                    mint_installation_id(args, &path)
+                }
+            }
+        }
+        None => {
+            // Pre-C1.2.1 state directory: identity but no binding. It cannot be
+            // verified, so adopt the directory it is in. This is the only silent
+            // path, and ADR-023 §2.3 records why it exists and what it cannot
+            // detect.
+            tracing::warn!(
+                installation_id = %token,
+                "no installation binding found; adopting {} as the directory this identity \
+                 belongs to. A clone made before this version cannot be detected.",
+                args.state_dir.display()
+            );
+            write_binding(args, &token)?;
+            Ok(token)
+        }
+    }
+}
+
+fn read_binding(args: &Args) -> anyhow::Result<Option<InstallationBinding>> {
+    let path = binding_path(args);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("read the installation binding at {}", path.display()))
+        }
+    };
+    let binding = serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "the installation binding at {} is not valid JSON; it cannot say which directory \
+             this identity belongs to",
+            path.display()
+        )
+    })?;
+    Ok(Some(binding))
+}
+
+fn mint_installation_id(args: &Args, path: &Path) -> anyhow::Result<String> {
+    assert!(
+        !path.exists(),
+        "mint_installation_id must not be called when an identity exists"
+    );
     let token = Uuid::new_v4().to_string();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    match write_private(path, token.as_bytes()) {
+        Ok(()) => {}
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+        {
+            // Another Node won the mint. Use its value rather than the one we
+            // generated and failed to persist - the previous implementation
+            // returned the loser's id and left the daemon labelled with it.
+            let winner = std::fs::read_to_string(path)
+                .with_context(|| format!("read the identity at {}", path.display()))?;
+            let winner = winner.trim();
+            if !is_valid_installation_id(winner) {
+                anyhow::bail!(
+                    "{} was created concurrently and is not a valid installation id ({:?})",
+                    path.display(),
+                    winner
+                );
+            }
+            tracing::info!(
+                installation_id = %winner,
+                "another Node minted this installation identity first; adopting it"
+            );
+            write_binding(args, winner)?;
+            return Ok(winner.to_string());
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("create the installation identity at {}", path.display()))
+        }
     }
-    let temporary = path.with_extension("tmp");
-    std::fs::write(&temporary, &token)?;
-    std::fs::rename(&temporary, &path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    write_binding(args, &token)?;
     tracing::info!(
         installation_id = %token,
         path = %path.display(),
@@ -1623,7 +1943,11 @@ mod tests {
             .as_ref()
             .is_some_and(|error| error.contains("lifecycle")));
         drop(guard);
-        tokio::time::timeout(Duration::from_secs(15), task)
+        // 15s was a latency budget. Under `cargo test` this file's cases run
+        // concurrently and each spawns shells; on a loaded machine the retry
+        // loop's own 20ms cadence is not the thing being measured here, the
+        // convergence is. Give it room and keep it a hang detector.
+        tokio::time::timeout(Duration::from_secs(60), task)
             .await
             .expect("retry task did not converge")
             .unwrap();
