@@ -192,6 +192,75 @@ if [ -n "$B_NODE_AFTER" ] && [ "$B_NODE_AFTER" != "$A_NODE" ]; then
     || fail "the clone's node id is not registered with the Kernel"
 fi
 
+# --- the credential half ---------------------------------------------------
+# `NodeView` deliberately does not expose credentials, so equality is asserted
+# behaviourally: the clone's new credential must NOT authenticate as A's node
+# id. If the clone had kept A's credential this call would succeed, and that is
+# precisely the sharing this phase is about.
+B_CREDENTIAL="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['credential'])" \
+  "$STATE_B/node-identity.json" 2>/dev/null || echo '')"
+A_CREDENTIAL="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['credential'])" \
+  "$DIR/node-a/node-identity.json" 2>/dev/null || echo '')"
+if [ -n "$B_CREDENTIAL" ] && [ "$B_CREDENTIAL" != "$A_CREDENTIAL" ]; then
+  pass "the clone holds a different control credential from A"
+else
+  fail "the clone inherited A's control credential"
+fi
+# Drive the real endpoint: A's node id with the clone's credential must be
+# rejected. A heartbeat is the cheapest authenticated call.
+# A body the endpoint accepts. `resourceSnapshot` is required, and a malformed
+# body returns 422 AFTER authentication - which would make a 422 look like a
+# rejection of the credential when it is a rejection of the payload. This was
+# the first version of this check and it was wrong.
+# The generation must match what the Kernel already knows: A's real supervisor is
+# running and advances it, and a stale value is refused with 409
+# STALE_NODE_GENERATION - a rejection of the number, not of the credential.
+A_GENERATION="$(node_field "$A_NODE" generation)"
+[ -n "$A_GENERATION" ] || A_GENERATION=1
+HB_BODY='{"generation":'"$A_GENERATION"',"status":"READY","observedAt":"2026-11-12T00:00:00Z","dataEndpoint":"http://127.0.0.1:1","runtimeAdapterVersion":"t","os":"linux","arch":"arm64","labels":{},"capabilities":[],"instances":[],"resourceSnapshot":{"sampledAt":"2026-11-12T00:00:00Z","cpuUtilization":0.0,"memoryUsedBytes":0,"memoryTotalBytes":0,"cpuCores":1,"filesystemUsedBytes":0,"filesystemTotalBytes":0}}'
+# Prove the body itself is accepted for the RIGHT node first, or the 401/403
+# assertion below would be vacuous.
+A_SELF="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 \
+  -H "Authorization: Bearer $A_CREDENTIAL" -H 'Content-Type: application/json' \
+  -X POST "$URL/internal/v1/nodes/$A_NODE/heartbeat" -d "$HB_BODY" 2>/dev/null || echo '000')"
+case "$A_SELF" in
+  200) pass "control: A's own credential is accepted for A (HTTP 200)" ;;
+  *)   fail "control failed: A's own credential got HTTP $A_SELF for A; the credential check below would prove nothing" ;;
+esac
+CODE="$(curl -sS -o /dev/null -w '%{http_code}' -m 10 \
+  -H "Authorization: Bearer $B_CREDENTIAL" -H 'Content-Type: application/json' \
+  -X POST "$URL/internal/v1/nodes/$A_NODE/heartbeat" \
+  -d "$HB_BODY" \
+  2>/dev/null || echo '000')"
+case "$CODE" in
+  401|403) pass "the clone's credential is rejected for A's node id (HTTP $CODE)" ;;
+  200)     fail "the clone's credential was ACCEPTED for A's node id (HTTP 200): the credential is shared" ;;
+  *)       fail "inconclusive: the Kernel answered $CODE for the clone's credential; the body is accepted for A, so this is not a payload problem" ;;
+esac
+
+# --- the desired-workload half --------------------------------------------
+# Two distinct node ids mean two distinct desired lists. Assert the Kernel
+# answers them separately rather than handing both the same rows.
+A_DESIRED="$(curl -sS -m 10 -H "Authorization: Bearer $A_CREDENTIAL" \
+  -H 'Content-Type: application/json' -X POST "$URL/internal/v1/nodes/$A_NODE/heartbeat" \
+  -d "$HB_BODY" \
+  2>/dev/null | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("nodeId",""))
+except Exception: print("")' 2>/dev/null || echo '')"
+if [ -n "$A_DESIRED" ]; then
+  if [ "$A_DESIRED" = "$A_NODE" ]; then
+    pass "the Kernel answers A's heartbeat for A's node id"
+  else
+    fail "A's heartbeat returned nodeId $A_DESIRED, expected $A_NODE"
+  fi
+  # Both control heartbeats above wrote A's row, including data_endpoint.
+  # Re-read it now, so the overwrite check below measures the clone's effect
+  # and not this test's own control traffic.
+  A_ENDPOINT="$(node_field "$A_NODE" dataEndpoint)"
+else
+  echo "   (A's heartbeat response was not parseable; the desired-workload identity check is NOT_RUN)"
+fi
+
 # A must be untouched by any of this.
 [ "$(node_field "$A_NODE" id)" = "$A_NODE" ] \
   && pass "A's node row still exists" \

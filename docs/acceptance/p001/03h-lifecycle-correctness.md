@@ -686,6 +686,25 @@ bare unique violation would be a guess. ADR-023 records the documented step —
 set `OPSWEAVE_NODE_NAME` when reinitializing a clone. It is a residual risk, not
 a closed item.
 
+### Three defects in the assertion itself
+
+The credential and desired-workload checks had to be written twice. All three
+mistakes were mine, and all three would have produced a green that meant nothing:
+
+1. The first version treated HTTP **422** as a credential rejection. 422 is a
+   payload error returned *after* authentication succeeds. The control that
+   proved it: A's **own** credential got 422 for A.
+2. The body said `"status":"ready"`; the contract's `NodeStatus` is uppercase
+   (`READY`). Another 422.
+3. The body said `"generation":1` while A's live supervisor had advanced the
+   row, so the control got **409 STALE_NODE_GENERATION** — a rejection of the
+   number, not the credential.
+
+Fixed by reading the node's current generation from the Kernel and by adding a
+control assertion that A's own credential returns **200** before the clone's is
+required to return 401. Without that control, a wrong payload shape would have
+made every credential assertion pass by accident.
+
 ### Task B — the demo cleaned one installation and reported success
 
 `demo_installation_id()` returned the **first** identity it found. `demo_up.sh`
@@ -704,6 +723,9 @@ sweep and never reports success.
 | Assertion | Broken implementation | Fixed |
 |---|---|---|
 | after reinitialize the clone has its own Kernel node id | **FAIL** — `still holds A's Kernel node id` | PASS |
+| the clone holds a **different control credential** | **FAIL** — `the clone inherited A's control credential` | PASS |
+| the clone's credential is rejected for A's node id | **FAIL** — accepted, because they are the same credential | PASS, HTTP 401 |
+| the Kernel answers A's heartbeat for A's node id | n/a (control) | PASS |
 | A's data endpoint is not overwritten | **FAIL** — `9251 -> 21637` | PASS |
 | a re-enrolment without a fresh token is refused | n/a (new) | PASS |
 | the inherited identity is restored byte for byte | n/a (new) | PASS |
@@ -717,7 +739,8 @@ sweep and never reports success.
 
 | Scope | Evidence |
 |---|---|
-| Kernel identity split | `p001c122_clone_node_identity.sh` against a **real** Kernel + PostgreSQL: 12 checks PASS |
+| Kernel identity split | `p001c122_clone_node_identity.sh` against a **real** Kernel + PostgreSQL: **15 checks PASS**, twice |
+| Distinct credentials (behavioural) | same script: A's own credential 200, the clone's 401 for A's node id |
 | Docker identity | `state_dir_clone.rs` 7 tests PASS |
 | No-token refusal and restore | same script, 3 checks PASS |
 | Demo multi-installation cleanup | `p001c121_demo_safety.sh` CASE 3b/3c, 8 checks PASS |
