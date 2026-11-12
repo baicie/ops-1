@@ -120,10 +120,28 @@ demo_stop_containers() {
   local mode="${1:-purge}"
   local install_id
   if ! install_id="$(demo_installation_id)"; then
-    echo "BLOCKED: no installation identity under $(demo_data_dir)" >&2
-    echo "         Nothing was removed. Containers cannot be attributed to this checkout," >&2
-    echo "         so stopping them would be a guess." >&2
-    echo "         To see what is there:" >&2
+    # No identity can mean two very different things, and conflating them made
+    # this refuse the ordinary first run (caught by CI: `legacy-regression`).
+    #
+    #   first run            nothing has ever been started under this checkout;
+    #                        there is nothing to own and nothing to remove.
+    #   lost identity        containers exist that belonged to this checkout and
+    #                        can no longer be attributed - a partial restore or a
+    #                        wiped state directory.
+    #
+    # The daemon distinguishes them: if no OpsWeave container exists at all, the
+    # first case holds and cleanup is a correct no-op. If any exists, ownership
+    # cannot be established and removing it would be a guess.
+    local existing
+    existing="$(docker ps -aq --filter "label=opsweave.managed=true" 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "${existing:-0}" = "0" ]; then
+      echo "   no installation identity and no OpsWeave containers: nothing to stop"
+      return 0
+    fi
+    echo "BLOCKED: no installation identity under $(demo_data_dir)," >&2
+    echo "         but $existing OpsWeave container(s) exist on this daemon." >&2
+    echo "         They cannot be attributed to this checkout, so removing them" >&2
+    echo "         would be a guess. To see them:" >&2
     echo "           docker ps -a --filter label=opsweave.managed=true" >&2
     return 1
   fi

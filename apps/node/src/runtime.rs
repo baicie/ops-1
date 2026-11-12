@@ -308,13 +308,24 @@ fn write_binding(args: &Args, token: &str) -> anyhow::Result<()> {
 }
 
 /// Write a file that only this user can read, atomically, without ever
-/// replacing an existing one. `create_new` is what makes the mint safe against a
-/// concurrent Node: the loser gets `AlreadyExists` and re-reads the winner.
+/// replacing an existing one.
+///
+/// `create_new` alone is not enough, and CI proved it: it reserves the *name*
+/// atomically but fills it in a second step, so a concurrent Node that lost the
+/// reserved the name and read it before `write_all` landed saw an EMPTY file and
+/// failed with `is not a valid installation id ("")`. Measured on the first CI
+/// run of `concurrent_mints_agree_on_one_identity`.
+///
+/// The content is written to a unique temporary file, synced, and then published
+/// with `hard_link`, which fails with `AlreadyExists` when the target is there.
+/// A reader therefore only ever sees a complete file: the name either points at
+/// fully-written content or does not exist.
 fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::io::Write;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let temporary = path.with_extension(format!("pub.{}", Uuid::new_v4()));
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -322,9 +333,22 @@ fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options.open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
+    let result = (|| -> anyhow::Result<()> {
+        let mut file = options.open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error)
+            .with_context(|| format!("write the temporary file for {}", path.display()));
+    }
+    // Publish. `hard_link` is the atomic "create only if absent" primitive that
+    // also carries the complete content, which `create_new` + `write` does not.
+    let published = std::fs::hard_link(&temporary, path);
+    let _ = std::fs::remove_file(&temporary);
+    published.with_context(|| format!("publish {}", path.display()))?;
     Ok(())
 }
 

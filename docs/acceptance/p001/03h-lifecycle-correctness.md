@@ -550,13 +550,48 @@ on the last command; that happened to preserve the exit status because nothing
 ran afterwards, but it was one edit away from turning a failed acceptance run
 green.
 
+### Two defects CI caught that local runs did not
+
+Both were found by the first CI run of this phase, and both are recorded because
+they are the point of running CI at all.
+
+**1. `create_new` reserves the name, not the content.** `write_private` created
+the identity file with `O_CREAT|O_EXCL` and *then* wrote it. The loser of the
+mint re-read the name in between and got an empty file:
+
+```
+called `Result::unwrap()` on an `Err` value:
+  .../installation-id was created concurrently and is not a valid installation id ("")
+```
+
+It reproduced locally about once in twenty runs and deterministically in CI. The
+file is now written to a unique temporary path, synced, and published with
+`hard_link`, which fails with `AlreadyExists` when the target is present. A
+reader only ever observes a complete file.
+
+Counterfactual: restoring the `create_new` version made
+`concurrent_mints_agree_on_one_identity` fail 1/20 locally and on CI; the
+`hard_link` version passed 25/25.
+
+**2. The first run is not a lost identity.** `demo_stop_containers` refused
+whenever no installation identity existed, which also refused the ordinary first
+run - `legacy-regression` failed with `BLOCKED: no installation identity under
+/data`. A fresh checkout has no containers by definition, so the correct
+behaviour is a no-op. The two states are now distinguished by the daemon: no
+OpsWeave containers at all means first run; containers without an attributable
+identity means refusal.
+
+This is the failure mode the brief warned about - a safety check tightened past
+the point where it blocks legitimate work. It was caught by CI, not by review.
+
 ### Counterfactuals
 
 | Assertion | Broken implementation | Fixed |
 |---|---|---|
 | a full clone cannot claim the original (`state_dir_clone.rs`) | **FAIL** — `a full clone resolved silently` | PASS |
 | a restore needs an explicit accept | **FAIL** | PASS |
-| 8 concurrent mints agree on one identity | **FAIL** against the fixed-`.tmp` code (`ENOENT`) | PASS |
+| 8 concurrent mints agree on one identity | **FAIL** against the fixed-`.tmp` code (`ENOENT`) and 1/20 against `create_new` (`""`) | PASS, 25/25 |
+| a first run is a no-op, not a refusal | **FAIL** — `legacy-regression`: `BLOCKED: no installation identity` | PASS |
 | an unreadable identity is an error, not a new identity | **FAIL** | PASS |
 | the clone's sweep excludes the original's container | **FAIL** | PASS |
 | a foreign listener survives `demo_down.sh` | **FAIL** — `the unrelated process was killed` | PASS |

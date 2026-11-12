@@ -91,8 +91,12 @@ printf '{"nodeId":"11111111-1111-4111-8111-111111111111"}' \
 cp "$ROOT/scripts/demo_common.sh" "$FAKE/repo/scripts/"
 cat > "$FAKE/bin/docker" <<'FAKE_DOCKER'
 #!/bin/sh
-# Any `rm` here means the script decided to delete something it cannot attribute.
+# The daemon already holds an OpsWeave container that this checkout can no
+# longer attribute - a partial restore, or a state directory that was wiped.
+# That is the case where guessing is dangerous, and it is distinct from a first
+# run, where there is nothing on the daemon at all.
 case "$1" in
+  ps) echo "orphaned-container" ;;
   rm) echo "RM-CALLED $*" >> "$MARKER" ;;
 esac
 exit 0
@@ -117,6 +121,41 @@ if [ ! -s "$MARKER" ]; then
   pass "no container was removed on a guess"
 else
   fail "a container was removed without ownership: $(cat "$MARKER")"
+fi
+
+# --- CASE 2b: a first run has nothing to stop and must not be blocked ------
+#
+# The first version of the ownership guard refused whenever no identity existed,
+# which also refused the ordinary first run - caught by CI in `legacy-regression`
+# as `BLOCKED: no installation identity`. A first run has no containers by
+# definition, so it is a no-op, not a refusal.
+echo
+echo "== CASE 2b: a first run is a no-op, not a refusal"
+FAKE="$WORK/fake2b"
+mkdir -p "$FAKE/bin" "$FAKE/repo/data" "$FAKE/repo/scripts"
+cp "$ROOT/scripts/demo_common.sh" "$FAKE/repo/scripts/"
+cat > "$FAKE/bin/docker" <<'FAKE_DOCKER'
+#!/bin/sh
+# An empty daemon: nothing has ever been started here.
+case "$1" in
+  ps) : ;;
+  rm) echo "RM-CALLED $*" >&2; exit 9 ;;
+esac
+exit 0
+FAKE_DOCKER
+chmod +x "$FAKE/bin/docker"
+OUT="$(cd "$FAKE/repo" && PATH="$FAKE/bin:$PATH" ROOT="$FAKE/repo" \
+  bash -c '. "$ROOT/scripts/demo_common.sh"; demo_stop_containers purge' 2>&1)"
+CODE=$?
+if [ "$CODE" -eq 0 ]; then
+  pass "a first run proceeds instead of refusing"
+else
+  fail "a first run was refused (exit $CODE): $OUT"
+fi
+if printf '%s' "$OUT" | grep -q "nothing to stop"; then
+  pass "it says there was nothing to stop"
+else
+  fail "it did not explain the no-op: $OUT"
 fi
 
 # --- CASE 3: two demos share the daemon -------------------------------------
