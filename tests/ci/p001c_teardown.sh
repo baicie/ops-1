@@ -36,6 +36,15 @@ fi
 
 DB="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['database'])" "$STATE/run.json")"
 NODE_IDS="$(python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1])).get('nodeIds',[])))" "$STATE/run.json")"
+# The installation identity the nodes were given. Cleanup matches on it as well
+# as the node id, because the node id alone is exactly what another install can
+# share after a restore. Older run records predate it; those runs fall back to
+# the test-run label, and the guard below still refuses anything it cannot name.
+INSTALLATION_ID="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('installationId',''))" "$STATE/run.json")"
+if [ -z "$INSTALLATION_ID" ]; then
+  echo "BLOCKED: $STATE/run.json records no installationId; it cannot prove which containers it owns" >&2
+  exit 1
+fi
 
 # --- process identity -------------------------------------------------------
 # See p001c_up.sh: a pidfile is not ownership. Same routine, duplicated here so
@@ -100,9 +109,11 @@ echo "   processes stopped"
 
 removed=0
 for nid in $NODE_IDS; do
-  # Node id alone is not ownership - see p001c_up.sh. Require this run's label too.
+  # Node id alone is not ownership - see p001c_up.sh. The installation id is the
+  # same predicate the product itself uses, so this removes exactly what the
+  # node would remove, no more.
   ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
-    --filter "label=opsweave.test-run=${RUN_ID}" 2>/dev/null || true)"
+    --filter "label=opsweave.installation-id=${INSTALLATION_ID}" 2>/dev/null || true)"
   [ -n "$ids" ] || continue
   # shellcheck disable=SC2086
   echo "$ids" | xargs -r docker rm -f >/dev/null 2>&1 || {

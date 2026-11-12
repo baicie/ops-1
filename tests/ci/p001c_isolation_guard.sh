@@ -123,59 +123,131 @@ AFTER_START="$(docker inspect -f '{{.State.StartedAt}}' "$FOREIGN" 2>/dev/null |
   || fail "the foreign container was stopped or restarted"
 
 echo
-echo "== CASE 2: a container sharing our node-id but NOT our run label survives"
+echo "== CASE 2: a same-node-id container from another install survives restart AND teardown"
 #
 # Node ids are not ownership. They survive a database restore, a copied state
 # directory, or a test that reuses one, so an unrelated install can legitimately
 # carry the same opsweave.node-id. A cleanup scoped to "my node id" would delete
-# that install's containers - which is exactly what the first version of this
-# harness did, and what this case exists to catch.
-COLLIDE="p001c11-collide-$$"
-COLLIDE_NODE="$(printf '%s' "$OWN_NODES" | awk '{print $1}')"
-if [ -z "$COLLIDE_NODE" ]; then
-  fail "no node id captured; the collision case cannot run"
-else
-  # Same node-id as ours, deliberately WITHOUT opsweave.test-run=$RUN_ID.
-  docker run -d --name "$COLLIDE" \
-    --label opsweave.managed=true \
-    --label "opsweave.node-id=$COLLIDE_NODE" \
-    alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1
-  CID="$(docker inspect -f '{{.Id}}' "$COLLIDE" 2>/dev/null || echo '')"
-  if [ -z "$CID" ]; then
-    fail "could not plant the colliding container"
-  else
-    # It must match the node-id filter (proving the collision is real) and must
-    # NOT match the dual filter (proving the run label is what disambiguates).
-    BY_NODE="$(docker ps -aq --filter "label=opsweave.node-id=$COLLIDE_NODE" 2>/dev/null | wc -l | tr -d ' ')"
-    BY_BOTH="$(docker ps -aq --filter "label=opsweave.node-id=$COLLIDE_NODE" \
-      --filter "label=opsweave.test-run=${RUN_ID}" 2>/dev/null | wc -l | tr -d ' ')"
-    [ "$BY_NODE" -ge 1 ] \
-      && pass "the collision is real: $BY_NODE container(s) answer to node-id $COLLIDE_NODE alone" \
-      || fail "collision did not reproduce (node-id matched $BY_NODE)"
-    [ "$BY_BOTH" = "0" ] \
-      && pass "the dual filter excludes it ($BY_BOTH matched)" \
-      || fail "the dual filter still matched $BY_BOTH colliding container(s)"
+# that install's containers.
+#
+# The previous version of this case ran teardown a SECOND time, after CASE 1 had
+# already purged the run record - so teardown refused before it ever reached the
+# container-ownership decision, and the case proved nothing about containers.
+# This version keeps a VALID run record and drives the real lifecycle twice:
+#
+#   fresh run -> plant a colliding container (same node id, foreign install id)
+#             -> restart that run   (exercises the restart cleanup branch)
+#             -> stop the run       (exercises the teardown removal branch)
+#             -> the run's own containers are gone, the colliding one is intact
+#
+# It is not a `docker ps --filter` check: both branches actually execute.
 
-    # Teardown already ran in CASE 1; the colliding container did not exist then.
-    # Run it again: with the run record gone it must refuse, and either way the
-    # colliding container must survive an attempted cleanup.
-    # Not under $DIR: CASE 1's --purge already deleted it, so writing there would
-    # fail and the grep below would read a file that never existed.
-    COLLIDE_OUT="$(mktemp)"
-    ./tests/ci/p001c_teardown.sh "$RUN_ID" --purge >"$COLLIDE_OUT" 2>&1
-    COLLIDE_CODE=$?
-    [ "$COLLIDE_CODE" -ne 0 ] \
-      && pass "teardown refuses once the run record is gone (exit $COLLIDE_CODE)" \
-      || fail "teardown succeeded with no run record; it cannot prove ownership"
-    grep -q BLOCKED "$COLLIDE_OUT" \
-      && pass "the refusal is reported as BLOCKED" \
-      || fail "the refusal did not say BLOCKED"
-    [ "$(docker inspect -f '{{.Id}}' "$COLLIDE" 2>/dev/null || echo '')" = "$CID" ] \
-      && pass "the colliding container survived the attempted cleanup" \
-      || fail "the colliding container was removed"
-    rm -f "$COLLIDE_OUT"
-    docker rm -f "$COLLIDE" >/dev/null 2>&1 || true
+COLLIDE="p001c11-collide-$$"
+COLLIDE_INSTALL="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+
+# A run of its own, so this case is not entangled with CASE 1's purge.
+OUT2="$(OPSWEAVE_TEST_RUN_INDEX=10 ./tests/ci/p001c_up.sh 2>&1)" || {
+  echo "   the second run did not start:"; printf '%s\n' "$OUT2" | tail -5; fail "CASE 2 run failed"; }
+RUN2="$(printf '%s\n' "$OUT2" | sed -n 's/^RUN_ID=//p' | tail -1)"
+DIR2="/tmp/p001c-${RUN2}"
+if [ -z "$RUN2" ] || [ ! -f "$DIR2/run.json" ]; then
+  fail "CASE 2 could not start its own run; the collision cannot be tested"
+else
+  PORT2="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['kernelPort'])" "$DIR2/run.json")"
+  URL2="http://127.0.0.1:${PORT2}"
+  HOME="$DIR2/home" ./target/debug/opsctl --url "$URL2" install \
+    dist/plugins/hello-ops-0.0.1.plugin.zip >/dev/null 2>&1
+  HOME="$DIR2/home" ./target/debug/opsctl --url "$URL2" deploy dev.opsweave.hello 0.0.1 \
+    --replicas 2 --selector role=node --wait >/dev/null 2>&1
+
+  NODE2="$(python3 -c "import json,sys;ids=json.load(open(sys.argv[1])).get('nodeIds',[]);print(ids[0] if ids else '')" "$DIR2/run.json")"
+  INSTALL2="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('installationId',''))" "$DIR2/run.json")"
+  OWN2_BEFORE="$(docker ps -aq --filter "label=opsweave.node-id=${NODE2}" \
+    --filter "label=opsweave.installation-id=${INSTALL2}" 2>/dev/null | wc -l | tr -d ' ')"
+
+  if [ -z "$NODE2" ] || [ -z "$INSTALL2" ]; then
+    fail "CASE 2 run recorded no node/installation id; the case cannot run"
+  elif [ "${OWN2_BEFORE:-0}" -lt 1 ]; then
+    fail "CASE 2 run created no containers; a cleanup check against it would be vacuous"
+  else
+    pass "CASE 2 run has $OWN2_BEFORE container(s) of its own and a valid run record"
+
+    # Plant the colliding container: SAME node id, different installation id.
+    docker run -d --name "$COLLIDE" \
+      --label opsweave.managed=true \
+      --label "opsweave.node-id=$NODE2" \
+      --label "opsweave.installation-id=$COLLIDE_INSTALL" \
+      alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1
+    COLLIDE_ID="$(docker inspect -f '{{.Id}}' "$COLLIDE" 2>/dev/null || echo '')"
+    COLLIDE_START="$(docker inspect -f '{{.State.StartedAt}}' "$COLLIDE" 2>/dev/null || echo '')"
+    COLLIDE_LABELS="$(docker inspect -f '{{json .Config.Labels}}' "$COLLIDE" 2>/dev/null || echo '')"
+    if [ -z "$COLLIDE_ID" ]; then
+      fail "could not plant the colliding container"
+    else
+      BY_NODE="$(docker ps -aq --filter "label=opsweave.node-id=$NODE2" 2>/dev/null | wc -l | tr -d ' ')"
+      BY_INSTALL="$(docker ps -aq --filter "label=opsweave.node-id=$NODE2" \
+        --filter "label=opsweave.installation-id=${INSTALL2}" 2>/dev/null | wc -l | tr -d ' ')"
+      [ "$BY_NODE" -gt "$BY_INSTALL" ] \
+        && pass "the collision is real: $BY_NODE container(s) share the node id, $BY_INSTALL are ours" \
+        || fail "collision did not reproduce (node-id $BY_NODE vs installation $BY_INSTALL)"
+
+      NODE2_CONTAINERS="$(docker ps -q --filter "label=opsweave.node-id=${NODE2}" \
+        --filter "label=opsweave.installation-id=${INSTALL2}" 2>/dev/null | head -1)"
+      if [ -n "$NODE2_CONTAINERS" ]; then
+        LABELLED="$(docker inspect -f '{{index .Config.Labels "opsweave.installation-id"}}' "$NODE2_CONTAINERS" 2>/dev/null || echo '')"
+        [ "$LABELLED" = "$INSTALL2" ] \
+          && pass "a container the node created carries its installation label" \
+          || fail "the node created a container with installation label '$LABELLED', expected $INSTALL2"
+      fi
+
+      # --- restart: the cleanup branch actually runs ------------------------
+      if OPSWEAVE_TEST_RUN_INDEX=10 ./tests/ci/p001c_up.sh --run-id "$RUN2" \
+           >"$DIR2"/restart.log 2>&1; then
+        pass "CASE 2 restart exercised the cleanup branch with a valid run record"
+      else
+        fail "CASE 2 restart failed"
+        tail -5 "$DIR2"/restart.log
+      fi
+      [ "$(docker inspect -f '{{.Id}}' "$COLLIDE" 2>/dev/null || echo '')" = "$COLLIDE_ID" ] \
+        && pass "the colliding container survived the restart cleanup" \
+        || fail "the restart cleanup removed another install's container"
+
+      # --- the NODE's own create path, against the colliding container ------
+      #
+      # Restart and teardown prove the harness does not over-reach. They do NOT
+      # exercise `create_and_start`, which is the product code that used to
+      # `docker rm -f` the name before creating. That path is covered by
+      # `apps/node/tests/container_ownership.rs` (real daemon, compiled adapter).
+      # The assertion below is the cheapest honest check that the product still
+      # carries the gate at all, and it fails loudly if the label disappears from
+      # a container the node creates.
+
+      # --- teardown: the removal branch actually runs -----------------------
+      TD_OUT="$(mktemp)"
+      if ./tests/ci/p001c_teardown.sh "$RUN2" >"$TD_OUT" 2>&1; then
+        pass "CASE 2 teardown ran against a valid run record"
+      else
+        fail "CASE 2 teardown failed: $(tail -1 "$TD_OUT")"
+      fi
+      LEFT="$(docker ps -aq --filter "label=opsweave.node-id=${NODE2}" \
+        --filter "label=opsweave.installation-id=${INSTALL2}" 2>/dev/null | wc -l | tr -d ' ')"
+      [ "$LEFT" = "0" ] \
+        && pass "CASE 2 teardown removed this run's own containers" \
+        || fail "CASE 2 teardown left $LEFT of this run's containers behind"
+      [ "$(docker inspect -f '{{.Id}}' "$COLLIDE" 2>/dev/null || echo '')" = "$COLLIDE_ID" ] \
+        && pass "the colliding container survived teardown" \
+        || fail "teardown removed another install's container"
+      [ "$(docker inspect -f '{{.State.StartedAt}}' "$COLLIDE" 2>/dev/null || echo '')" = "$COLLIDE_START" ] \
+        && pass "the colliding container was not restarted" \
+        || fail "the colliding container was stopped or restarted"
+      [ "$(docker inspect -f '{{json .Config.Labels}}' "$COLLIDE" 2>/dev/null || echo '')" = "$COLLIDE_LABELS" ] \
+        && pass "the colliding container's labels are unchanged" \
+        || fail "the colliding container's labels changed"
+      rm -f "$TD_OUT"
+    fi
   fi
+  ./tests/ci/p001c_teardown.sh "$RUN2" --purge >/dev/null 2>&1 || true
+  docker rm -f "$COLLIDE" >/dev/null 2>&1 || true
 fi
 
 echo

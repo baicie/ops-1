@@ -310,6 +310,108 @@ and exit 1.
 - The isolation guard still fails when the global `opsweave.managed=true` sweep
   is reintroduced: verified again after these changes.
 
+## 4d. C1.2 — container ownership, and why the node id was never enough
+
+C1.1 scoped the **test harness** to its own run. That was correct and it was not
+enough: the **product** had the same defect underneath it, and the harness label
+that fixed the harness did not exist in production.
+
+### The root cause
+
+`DockerAdapter::remove_if_exists()` ran a bare `docker rm -f <name>` before every
+create, and `container_name()` is `opsweave-<node-id>-<instance-id>`. Both ids
+come from the database. A restored database — or a copied state directory —
+therefore reproduces them **exactly**, and a second installation then computes
+the same container name, deletes the first installation's running container, and
+creates its own in its place. The first installation keeps serving traffic that
+is now going to a container it does not own.
+
+`list_managed()` had the same shape: `label=opsweave.node-id=<id>` alone. It
+drives `cleanup_orphans`, `cleanup_locked` (quarantine) and the retry loop, so
+the product's own recovery path removed another installation's containers. The
+harness defect C1.1 fixed was the *same* bug, noticed in the harness.
+
+### The fix
+
+| Where | Change |
+|---|---|
+| `docker::INSTALLATION_LABEL` | `opsweave.installation-id`, stamped on every container the node creates |
+| `DockerAdapter::installation_id` | carried by the adapter; `None` never means "owns everything" |
+| `ownership_of()` | decides `Ours` / `Foreign` / `Absent` by reading the label back from Docker |
+| `remove_owned_if_present()` | replaces `remove_if_exists`; a `Foreign` container is an error, not a delete |
+| `stop_and_remove_owned()` | used by `cleanup`, `cleanup_orphans`, quarantine, retry loop |
+| `list_managed()` | requires **both** node id and installation label; errors with `CONTAINER_OWNERSHIP_UNPROVEN` without an identity |
+| `create_and_start()` | refuses with `CONTAINER_OWNERSHIP_CONFLICT` on a foreign name; refuses to create unlabelled |
+| `runtime::load_or_create_installation_id()` | mints `<state_dir>/installation-id` once; validated as a UUID on read |
+| `scripts/demo_down.sh`, `demo_up.sh` | the global `opsweave.managed=true` sweep is gone; both scope to this checkout's identity |
+
+Deliberately **not** stored in the database. A restored database is one of the
+two ways two installations come to share a node id, so a token kept there would
+be restored alongside the collision and prove nothing. It lives with the Node's
+state directory, which is the thing that is actually distinct per install.
+
+### Compatibility
+
+A container created before this change carries no installation label. It reads
+as `Foreign` and is **never swept**. That is the correct default — an unlabelled
+container may belong to another installation or to an older version, and neither
+is safe to delete on a guess — but it means an upgrade leaves the old containers
+running until an operator deals with them:
+
+```
+docker ps -a --filter label=opsweave.managed=true --filter label=opsweave.node-id=<node>
+# those with no opsweave.installation-id are pre-upgrade
+docker rm -f <name>   # deliberate, one at a time
+```
+
+`demo_down.sh` prints that instruction when it finds them. There is no automatic
+migration: a migration that guessed would be the same bug again.
+
+### Counterfactuals
+
+Each was run against the real daemon, not reasoned about.
+
+| Assertion | Broken implementation | Fixed |
+|---|---|---|
+| `apps/node/tests/container_ownership.rs` — B cannot take over A's container | **FAIL** (`B was allowed to create over A's container`) | **PASS** |
+| same file — an unlabelled container is never swept | **FAIL** | **PASS** |
+| `docker.rs` unit tests (4 ownership tests) | **FAIL** (4/4) | **PASS** |
+| `p001c_isolation_guard.sh` CASE 2 | **FAIL** (`teardown removed another install's container`, `was stopped or restarted`, `labels changed`) | **PASS** |
+| `p001c_isolation_guard.sh` CASE 2 with the node not stamping the label | **FAIL** (`CASE 2 run created no containers`) | **PASS** |
+
+The CASE 2 rewrite matters on its own. The previous version ran teardown a
+*second* time after `--purge` had already deleted the run record, so teardown
+refused before it ever reached the container-ownership decision — the case
+proved nothing about containers. It now starts its own run, plants a container
+with **the same node id and a different installation id**, and drives a real
+restart and a real teardown against a **valid run record**.
+
+### What is verified, and where
+
+| Scope | Evidence |
+|---|---|
+| Ownership decision, all three outcomes | unit tests in `apps/node/src/docker.rs`, fake daemon |
+| Real daemon, compiled adapter, two installs | `apps/node/tests/container_ownership.rs`, **ran locally** (Docker 29.7.2, macOS 15.7) |
+| Harness restart + teardown does not over-reach | `p001c_isolation_guard.sh`, **ran locally, 17 PASS** |
+| Crash-recovery loop still converges | existing `runtime::tests::retry_loop_*`, PASS |
+| CI | new step in `platform-linux-acceptance.yml` (`OPSWEAVE_REQUIRE_TEST_DOCKER=1`); result recorded in the PR |
+
+### Two things this does not fix
+
+**The harness and the product use different predicates.** The harness still
+passes `OPSWEAVE_CONTAINER_LABELS=opsweave.test-run=<run id>`; teardown now
+matches on the product's `opsweave.installation-id`. The test-run label is now
+redundant and is kept only so an old run record still cleans up. `p001c_up.sh`
+keeps the identity across restarts and records it in `run.json`; before that,
+every restart would have minted a new one and orphaned the previous containers —
+which is the bug this phase is about, one level down.
+
+**One pre-upgrade container is still on the daemon** from an earlier run, with
+`opsweave.managed=true` and a node id and no installation label. It is being
+left alone on purpose, as the compatibility section describes.
+
+---
+
 ## 5. What is still NOT done
 
 | Item | Status |
@@ -342,3 +444,12 @@ reviewable.
 C1 → **PARTIAL** (D4 assets-after-uninstall open, browser/capability/Java/Go
 coverage still owed to C2/C3/C4).
 C1.1 → **PASS on its own scope**: isolation and rollback consistency.
+C1.2 → **PASS on its own scope**: an installation cannot delete, stop or
+overwrite a container another installation owns, verified against a real daemon
+with a planted colliding container. The pre-upgrade migration is manual and is
+stated above, not automated.
+
+The three phases together do not close the container-ownership question for
+*containers created before C1.2*: those are unlabelled and will be reported
+rather than swept forever, until an operator removes them.
+

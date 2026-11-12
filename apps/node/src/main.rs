@@ -1,15 +1,14 @@
+// The library target (`src/lib.rs`) carries the same modules so integration
+// tests can drive the real adapter. Declaring them again here would compile two
+// copies and, worse, let `main` and the tests drift apart.
 mod api;
-mod config;
-mod docker;
-mod logs;
-mod runtime;
 mod worker_supervisor;
 
-use crate::config::Args;
-use crate::docker::DockerAdapter;
-use crate::runtime::Shared;
 use anyhow::Context;
 use clap::Parser;
+use opsweave_node::config::Args;
+use opsweave_node::docker::DockerAdapter;
+use opsweave_node::runtime::{self, Shared};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::RwLock;
@@ -33,6 +32,11 @@ async fn main() -> anyhow::Result<()> {
         .version()
         .await
         .context("Docker Engine is required by the OCI reference adapter")?;
+    // Before any container is created: every container this installation makes
+    // must carry a label that distinguishes it from an installation which
+    // inherited the same node id. See DockerAdapter::INSTALLATION_LABEL.
+    let installation_id = runtime::load_or_create_installation_id(&args)?;
+    let docker = docker.with_installation_id(installation_id.clone());
     let identity = runtime::enroll(&args, &http).await?;
     let node_id = identity.node_id;
     let empty_desired = opsweave_contracts::DesiredNodeState {
