@@ -274,6 +274,9 @@ async fn a_container_with_no_installation_label_is_never_swept() {
 /// and it used to do so without asking who owned it - which is enough for a
 /// second installation sharing a node id, because it runs the same plugin
 /// version and therefore the same image.
+///
+/// This drives `adoptable()`, the decision `run_once` now delegates to, so the
+/// assertion fails if the ownership check is removed from that path.
 #[tokio::test]
 async fn a_running_container_with_the_same_name_and_image_is_not_adopted() {
     let installation_a = uuid::Uuid::new_v4().to_string();
@@ -292,23 +295,73 @@ async fn a_running_container_with_the_same_name_and_image_is_not_adopted() {
         &[("opsweave.installation-id", &installation_a)],
     );
     let before_id = inspect(&name, "{{.Id}}");
-
-    // The adoption predicate in `run_once` is "running and image matches";
-    // ownership is what it must also require. `ownership_of` is that check.
     assert_eq!(inspect(&name, "{{.Config.Image}}"), "alpine:3");
     assert_eq!(inspect(&name, "{{.State.Running}}"), "true");
-    assert_eq!(
-        adapter_b.ownership_of(&name).await.unwrap(),
-        Ownership::Foreign,
-        "B would adopt A's container: the name and image match, but it is not B's"
+
+    // The predicate `run_once` uses, with a real ContainerInfo as inspect returns.
+    let info = adapter_b
+        .inspect(&name)
+        .await
+        .unwrap()
+        .expect("container exists");
+    assert!(info.running);
+    assert_eq!(info.image, "alpine:3");
+    let shared = shared_around(adapter_b);
+    let adopted =
+        opsweave_node::runtime::adoptable(&shared, &name, Some(info), "alpine:3", instance_id)
+            .await;
+    assert!(
+        adopted.is_none(),
+        "B adopted A's container: the name and image match, but it is not B's"
     );
 
     // And B's removal path leaves it alone.
     assert_eq!(
-        adapter_b.stop_and_remove_owned(&name).await.unwrap(),
+        shared.docker.stop_and_remove_owned(&name).await.unwrap(),
         Ownership::Foreign
     );
     assert_eq!(inspect(&name, "{{.Id}}"), before_id);
 
     let _ = docker(&["rm", "-f", &name]);
+}
+
+/// A `Shared` with only the Docker adapter populated. `adoptable` reads nothing
+/// else, and building the whole struct here would need a Kernel URL that this
+/// test deliberately does not start.
+fn shared_around(adapter: DockerAdapter) -> std::sync::Arc<opsweave_node::runtime::Shared> {
+    use opsweave_node::config::Args;
+    use std::collections::HashMap;
+    let args = <Args as clap::Parser>::parse_from(["opsweave-node", "--data-bind", "127.0.0.1:0"]);
+    let node_id = uuid::Uuid::new_v4();
+    std::sync::Arc::new(opsweave_node::runtime::Shared {
+        args,
+        http: reqwest::Client::new(),
+        docker: adapter,
+        docker_version: "test".into(),
+        identity: tokio::sync::RwLock::new(opsweave_node::runtime::Identity {
+            node_id,
+            credential: "test".into(),
+            data_token: "test".into(),
+            generation: 1,
+            name: "test".into(),
+        }),
+        desired: tokio::sync::RwLock::new(opsweave_contracts::DesiredNodeState {
+            node_id,
+            node_generation: 1,
+            heartbeat_interval_seconds: 5,
+            max_instances: 1,
+            desired: vec![],
+        }),
+        runtimes: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+        tasks: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        lifecycle: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+        metrics: std::sync::Arc::new(std::sync::Mutex::new(
+            opsweave_node::runtime::MetricsState::default(),
+        )),
+        quarantined: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        quarantine_error: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        lease_deadline: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        shutdown: std::sync::Arc::new(tokio::sync::watch::channel(false).0),
+        extra_container_labels: vec![],
+    })
 }

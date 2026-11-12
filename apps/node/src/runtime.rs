@@ -1,5 +1,5 @@
 use crate::config::Args;
-use crate::docker::{container_name, DockerAdapter, Ownership};
+use crate::docker::{container_name, ContainerInfo, DockerAdapter, Ownership};
 use crate::logs::{parse_docker_log_line, parse_level, LogBuffer};
 use chrono::Utc;
 use opsweave_contracts::{
@@ -867,6 +867,48 @@ async fn fetch_workload_env(
     Ok(body.env)
 }
 
+/// Decide whether a container that already holds this instance's name may be
+/// adopted.
+///
+/// Same name and same image is **not** proof of ownership: two installations
+/// that share a node id run the same plugin version, so the image matches by
+/// construction. Adopting on that alone makes this node report another
+/// installation's container as its own, and then remove it on the next
+/// reconcile.
+///
+/// Split out of `run_once` so the decision can be exercised directly: the
+/// integration test would otherwise have to stand up a Kernel to reach it.
+pub async fn adoptable(
+    shared: &Arc<Shared>,
+    name: &str,
+    existing: Option<ContainerInfo>,
+    image_ref: &str,
+    instance_id: Uuid,
+) -> Option<ContainerInfo> {
+    let info = existing?;
+    if !info.running || info.image != image_ref {
+        return None;
+    }
+    match shared.docker.ownership_of(name).await {
+        Ok(Ownership::Ours) => Some(info),
+        Ok(_) => {
+            tracing::warn!(
+                %instance_id,
+                container = %info.id,
+                "a running container with this name belongs to another installation; \
+                 not adopting it"
+            );
+            None
+        }
+        Err(error) => {
+            // Cannot prove ownership, so cannot adopt. Falling through to create
+            // makes the collision explicit rather than silent.
+            tracing::warn!(%instance_id, error = %error, "could not establish container ownership; not adopting");
+            None
+        }
+    }
+}
+
 async fn run_once(
     shared: &Arc<Shared>,
     runtime: &InstanceRuntime,
@@ -883,38 +925,7 @@ async fn run_once(
     // for up to the full pull timeout. The create/start critical section is
     // still serialized with quarantine and re-checks the flag after the pull.
     let existing = shared.docker.inspect(&name).await.unwrap_or(None);
-    // Same name AND same image is not proof of ownership: two installations
-    // that share a node id run the same plugin version, so the image matches by
-    // construction. Adopting on that alone would make this node report another
-    // installation's container as its own - and then clean it up on the next
-    // reconcile.
-    let existing = match existing {
-        Some(info) if info.running && info.image == *image_ref => {
-            match shared.docker.ownership_of(&name).await {
-                Ok(Ownership::Ours) => Some(info),
-                Ok(_) => {
-                    tracing::warn!(
-                        instance = %workload.instance_id,
-                        container = %info.id,
-                        "a running container with this name belongs to another installation; \
-                         not adopting it"
-                    );
-                    None
-                }
-                Err(error) => {
-                    // Cannot prove ownership, so cannot adopt. Falling through to
-                    // create makes the collision explicit rather than silent.
-                    tracing::warn!(
-                        instance = %workload.instance_id,
-                        error = %error,
-                        "could not establish container ownership; not adopting"
-                    );
-                    None
-                }
-            }
-        }
-        _ => None,
-    };
+    let existing = adoptable(shared, &name, existing, image_ref, workload.instance_id).await;
     let (container_id, host_port) = match existing {
         Some(info) => {
             let _lifecycle = shared.lifecycle.lock().await;

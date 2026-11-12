@@ -375,6 +375,7 @@ Each was run against the real daemon, not reasoned about.
 |---|---|---|
 | `apps/node/tests/container_ownership.rs` — B cannot take over A's container | **FAIL** (`B was allowed to create over A's container`) | **PASS** |
 | same file — an unlabelled container is never swept | **FAIL** | **PASS** |
+| same file — a same-name, same-image container is not adopted | **FAIL** (`B adopted A's container`) | **PASS** |
 | `docker.rs` unit tests (4 ownership tests) | **FAIL** (4/4) | **PASS** |
 | `p001c_isolation_guard.sh` CASE 2 | **FAIL** (`teardown removed another install's container`, `was stopped or restarted`, `labels changed`) | **PASS** |
 | `p001c_isolation_guard.sh` CASE 2 with the node not stamping the label | **FAIL** (`CASE 2 run created no containers`) | **PASS** |
@@ -392,7 +393,7 @@ restart and a real teardown against a **valid run record**.
 |---|---|
 | Ownership decision, all three outcomes | unit tests in `apps/node/src/docker.rs`, fake daemon |
 | Real daemon, compiled adapter, two installs | `apps/node/tests/container_ownership.rs`, **ran locally** (Docker 29.7.2, macOS 15.7) |
-| Harness restart + teardown does not over-reach | `p001c_isolation_guard.sh`, **ran locally, 17 PASS** |
+| Harness restart + teardown does not over-reach | `p001c_isolation_guard.sh`, **ran locally, all PASS** (count in §1.5) |
 | Crash-recovery loop still converges | existing `runtime::tests::retry_loop_*`, PASS |
 | CI | new step in `platform-linux-acceptance.yml` (`OPSWEAVE_REQUIRE_TEST_DOCKER=1`); result recorded in the PR |
 
