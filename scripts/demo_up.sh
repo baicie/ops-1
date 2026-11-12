@@ -13,11 +13,19 @@ BUILD="${BUILD:-0}"
 DB="${OPSWEAVE_DB:-opsweave}"
 DATABASE_URL="${OPSWEAVE_DATABASE_URL:-postgres://localhost/${DB}?sslmode=disable}"
 
-kill_port() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | xargs -r kill 2>/dev/null || true; }
+# shellcheck source=scripts/demo_common.sh
+. "$ROOT/scripts/demo_common.sh"
 
 echo "== stop previous local platform processes"
-kill_port "$KERNEL_PORT"; kill_port 9101; kill_port 9102
-sleep 1
+blocked=0
+for port in "$KERNEL_PORT" 9101 9102; do
+  demo_kill_port "$port" || blocked=1
+done
+if [ "$blocked" -ne 0 ]; then
+  echo "BLOCKED: a process this checkout did not start holds one of the demo ports." >&2
+  echo "         Nothing was reset or removed. Resolve the port or set OPSWEAVE_PORT." >&2
+  exit 1
+fi
 
 if [ ! -f keys/publisher.key ]; then
   cargo build -q -p opsweave-opsctl
@@ -32,20 +40,28 @@ if [ "${OPSWEAVE_SKIP_REGISTRY:-0}" != "1" ] && ! docker ps --format '{{.Names}}
 fi
 
 if [ "$RESET" = "1" ]; then
+  # Order is load-bearing and was wrong before C1.2.1.
+  #
+  # The old block ran `rm -rf data` and only then looked for
+  # `data/node-*/installation-id` to decide which containers to remove. The wipe
+  # had already deleted those files, so the loop never ran: every reset left the
+  # previous run's containers on the daemon while telling the operator it had
+  # cleaned up. Ownership is now read FIRST, containers are removed, and only
+  # then is the state directory destroyed.
+  echo "== stop this installation's containers (before any state is deleted)"
+  if ! demo_stop_containers purge; then
+    echo "BLOCKED: refusing to reset the database and state directory while" >&2
+    echo "         containers of this installation may still be running." >&2
+    exit 1
+  fi
+
   echo "== reset control-plane database and local state"
+  # Both are this checkout's own resources: the demo database name is fixed and
+  # the data directory is inside the repository. Nothing outside `$ROOT/data`
+  # and `$DB` is touched.
   dropdb --if-exists --force "$DB" 2>/dev/null || true
   createdb "$DB"
-  rm -rf data
-  # Only this checkout's containers. See demo_down.sh for why the global
-  # `opsweave.managed=true` sweep was removed: it is not installation-scoped.
-  for inst in node-a node-b; do
-    id_file="$ROOT/data/$inst/installation-id"
-    [ -f "$id_file" ] || continue
-    install_id="$(cat "$id_file")"
-    [ -n "$install_id" ] || continue
-    docker ps -aq --filter "label=opsweave.installation-id=$install_id" \
-      | xargs -r docker rm -f >/dev/null 2>&1 || true
-  done
+  rm -rf "$ROOT/data"
 fi
 
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl

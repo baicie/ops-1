@@ -8,16 +8,81 @@ cd "$ROOT"
 export OPSWEAVE_URL="http://127.0.0.1:18181"
 export OPSWEAVE_DATA_CATALOG_SELECTOR="zone=node-a"
 export OPSWEAVE_DATA_INTEGRATION_SELECTOR="zone=node-b"
-PIDS=()
+# --- environment precondition (P001-C1.2.1 Task C) -------------------------
+# This harness removes OpsWeave containers. Before C1.2.1 it removed *every*
+# OpsWeave container on the daemon - `label=opsweave.managed=true` is stamped by
+# every installation in the world. Two things changed:
+#
+#   1. Cleanup is scoped to the installation identities this run created under
+#      `$ROOT/data-ci`, which the nodes mint themselves.
+#   2. Because this runs on a shared developer machine as easily as on a CI
+#      runner, it refuses to start when the daemon already carries OpsWeave
+#      containers it cannot attribute to this run. That turns "the harness ate
+#      somebody's demo" into "the harness refused to start", which is the
+#      failure mode we want.
+#
+# `OPSWEAVE_CI_ALLOW_SHARED_DAEMON=1` downgrades that refusal to a warning for
+# the dedicated-runner case, where the containers really are leftovers of an
+# earlier run of this same script.
+STATE_CI="$ROOT/data-ci"
 cleanup() {
+  local code=$?
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
   if [ -f /tmp/data-kernel.pid ]; then kill "$(cat /tmp/data-kernel.pid)" 2>/dev/null || true; fi
   for pidfile in /tmp/node-a.pid /tmp/node-b.pid; do
     if [ -f "$pidfile" ]; then kill "$(cat "$pidfile")" 2>/dev/null || true; fi
   done
-  docker ps -aq --filter label=opsweave.managed=true | xargs -r docker rm -f >/dev/null 2>&1 || true
+  # Only this run's installations. A container with no installation label is
+  # reported, never removed: it may belong to another install or predate the
+  # label. The previous global sweep is gone.
+  local removed=0 foreign=0
+  for inst in node-a node-b; do
+    local id_file="$STATE_CI/$inst/installation-id"
+    [ -f "$id_file" ] || continue
+    local install_id; install_id="$(cat "$id_file" 2>/dev/null || true)"
+    [ -n "$install_id" ] || continue
+    local ids; ids="$(docker ps -aq --filter "label=opsweave.installation-id=$install_id" 2>/dev/null || true)"
+    if [ -n "$ids" ]; then
+      # shellcheck disable=SC2086
+      echo "$ids" | xargs -r docker rm -f >/dev/null 2>&1 && removed=$((removed + 1))
+    fi
+  done
+  # Anything OpsWeave-shaped that is NOT attributable to this run is reported.
+  foreign="$(docker ps -a --filter label=opsweave.managed=true --format '{{.Names}}' 2>/dev/null \
+    | while read -r n; do
+        [ -n "$n" ] || continue
+        lbl="$(docker inspect -f '{{index .Config.Labels "opsweave.installation-id"}}' "$n" 2>/dev/null || true)"
+        ours=0
+        for inst in node-a node-b; do
+          f="$STATE_CI/$inst/installation-id"
+          [ -f "$f" ] || continue
+          [ "$lbl" = "$(cat "$f")" ] && ours=1
+        done
+        [ "$ours" = "0" ] && printf '%s\n' "$n"
+      done || true)"
+  if [ -n "$foreign" ]; then
+    echo "NOTE: containers not attributable to this run were left alone:" >&2
+    printf '%s\n' "$foreign" | sed 's/^/  /' >&2
+  fi
+  # The exit code is the acceptance result. Cleanup must not overwrite it: the
+  # old `|| true` on the sweep hid nothing (it was the last command), but a
+  # future edit that made cleanup the last thing to run would turn a failed
+  # assertion into a green run. Restore it explicitly.
+  exit "$code"
 }
 trap cleanup EXIT
+
+# Refuse a daemon that already has OpsWeave containers from something else.
+existing="$(docker ps -aq --filter label=opsweave.managed=true 2>/dev/null | wc -l | tr -d ' ')"
+if [ "${existing:-0}" -gt 0 ] && [ "${OPSWEAVE_CI_ALLOW_SHARED_DAEMON:-0}" != "1" ]; then
+  echo "BLOCKED: $existing OpsWeave container(s) already exist on this daemon." >&2
+  echo "         This harness removes containers, and it can only prove ownership of" >&2
+  echo "         the ones it creates. Run it on a dedicated runner/daemon, clean those" >&2
+  echo "         up first, or set OPSWEAVE_CI_ALLOW_SHARED_DAEMON=1 if they are leftovers" >&2
+  echo "         of a previous run of this same script." >&2
+  docker ps -a --filter label=opsweave.managed=true --format '  {{.Names}}  {{.Status}}' >&2
+  exit 1
+fi
 
 echo "== build binaries and frontends"
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl -p opsweave-pipeline-worker

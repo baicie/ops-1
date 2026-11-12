@@ -72,7 +72,7 @@ jobs:
           echo "kernel.pipeline_jobs exists: $present"
           test "$present" = "t"
       - run: python3 tests/contract/validate_typed_pipeline.py
-      - run: tests/ci/data_foundation_ci.sh
+      - run: OPSWEAVE_CI_ALLOW_SHARED_DAEMON=1 tests/ci/data_foundation_ci.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:

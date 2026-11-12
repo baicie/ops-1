@@ -44,7 +44,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm --filter @opsweave/ui-tests exec playwright install --with-deps chromium
-      - run: RUN_BROWSER_SMOKE=1 tests/ci/data_foundation_ci.sh
+      # A GitHub-hosted runner is dedicated to this job, so the container sweep
+      # is scoped to this run's installation ids and leftovers from a retried
+      # attempt are allowed. On a shared daemon the script refuses instead.
+      - run: RUN_BROWSER_SMOKE=1 OPSWEAVE_CI_ALLOW_SHARED_DAEMON=1 tests/ci/data_foundation_ci.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:

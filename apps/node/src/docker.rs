@@ -229,6 +229,21 @@ pub enum Ownership {
     Absent,
 }
 
+/// The result of asking the daemon "is this mine?", including the immutable
+/// container id.
+///
+/// The id is the point. `ownership_of` decides by name, and a name can be
+/// reassigned between the decision and the delete: another installation can
+/// remove the container we judged ours and create its own under the same name,
+/// and the `docker rm -f <name>` then destroys the newcomer. Every destructive
+/// call therefore takes this struct and targets `container_id`, which Docker
+/// never reuses. See `remove_owned_if_present`.
+#[derive(Debug, Clone)]
+pub struct OwnershipProbe {
+    pub outcome: Ownership,
+    pub container_id: Option<String>,
+}
+
 impl DockerAdapter {
     pub fn new(binary: String, host: String) -> Self {
         Self {
@@ -248,6 +263,73 @@ impl DockerAdapter {
         self.installation_id
             .as_ref()
             .map(|id| format!("{INSTALLATION_LABEL}={id}"))
+    }
+
+    /// Like `ownership_of`, but also returns the id the decision was made about.
+    ///
+    /// One `docker inspect` returns both the label and the id, so the id cannot
+    /// drift from the label between two calls. Callers that are about to
+    /// *destroy* the container must use this and then act on the id.
+    pub async fn probe_ownership(&self, name: &str) -> anyhow::Result<OwnershipProbe> {
+        let Some(ours) = self.installation_id.as_deref() else {
+            let info = self.inspect(name).await?;
+            return Ok(match info {
+                Some(info) => OwnershipProbe {
+                    outcome: Ownership::Foreign,
+                    container_id: Some(info.id),
+                },
+                None => OwnershipProbe {
+                    outcome: Ownership::Absent,
+                    container_id: None,
+                },
+            });
+        };
+        // A hang detector, not a latency budget: under `cargo test` this file's
+        // tests fork this many shells at once, and 10s was reached before the
+        // child ever exec'd.
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.command()
+                .args([
+                    "inspect",
+                    name,
+                    "--format",
+                    &format!("{{{{.Id}}}}|{{{{index .Config.Labels \"{INSTALLATION_LABEL}\"}}}}"),
+                ])
+                .output(),
+        )
+        .await
+        .context("docker inspect ownership timed out")?
+        .context("run docker inspect ownership")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let lower = stderr.to_ascii_lowercase();
+            if lower.contains("no such object") || lower.contains("no such container") {
+                return Ok(OwnershipProbe {
+                    outcome: Ownership::Absent,
+                    container_id: None,
+                });
+            }
+            return Err(anyhow!(
+                "docker inspect failed while checking ownership of {name}: {}",
+                bounded(stderr.trim())
+            ));
+        }
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let (id, label) = raw.split_once('|').unwrap_or((raw.as_str(), ""));
+        if id.is_empty() {
+            return Err(anyhow!(
+                "docker inspect returned no container id for {name}; refusing to act on it"
+            ));
+        }
+        Ok(OwnershipProbe {
+            outcome: if label.trim() == ours {
+                Ownership::Ours
+            } else {
+                Ownership::Foreign
+            },
+            container_id: Some(id.to_string()),
+        })
     }
 
     /// Decide whether `name` belongs to this installation.
@@ -435,7 +517,7 @@ impl DockerAdapter {
                     "--format",
                     "{{json .NetworkSettings.Ports}}",
                 ],
-                5,
+                30,
             )
             .await?;
         let value: serde_json::Value = match serde_json::from_str(&raw) {
@@ -474,25 +556,48 @@ impl DockerAdapter {
     /// error, not a silent skip: continuing would make `docker create` fail on
     /// the duplicate name anyway, with a message that does not explain why.
     pub async fn remove_owned_if_present(&self, name: &str) -> anyhow::Result<Ownership> {
-        match self.ownership_of(name).await? {
+        let probe = self.probe_ownership(name).await?;
+        match probe.outcome {
             Ownership::Absent => Ok(Ownership::Absent),
             Ownership::Foreign => Ok(Ownership::Foreign),
             Ownership::Ours => {
-                let _ = tokio::time::timeout(
+                // Target the immutable id, not the name. Between the probe and
+                // the delete the name can be reassigned: another installation
+                // removes our container and creates its own under the same
+                // name, and `rm -f <name>` then destroys *their* container.
+                // Docker never reuses a container id, so the id cannot be
+                // redirected. See ADR-023 and `OwnershipProbe`.
+                let id = probe.container_id.as_deref().ok_or_else(|| {
+                    anyhow!("ownership probe for {name} returned no container id")
+                })?;
+                let output = tokio::time::timeout(
                     std::time::Duration::from_secs(10),
-                    self.command().args(["rm", "-f", name]).output(),
+                    self.command().args(["rm", "-f", id]).output(),
                 )
-                .await;
-                // Removing is the whole point of the call, so verify rather than
-                // trusting the exit status of a `rm -f` that reports "no such
-                // container" and "still in use" the same way to us.
-                match self.ownership_of(name).await? {
-                    Ownership::Absent => Ok(Ownership::Ours),
-                    _ => anyhow::bail!(
-                        "CONTAINER_OWNERSHIP_BLOCKED: {name} belongs to this installation \
-                         ({INSTALLATION_LABEL}) but could not be removed; refusing to create \
-                         over it"
+                .await
+                .context("docker rm timed out")?
+                .context("run docker rm")?;
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let lower = stderr.to_ascii_lowercase();
+                    // Already gone is success: the container we judged ours was
+                    // removed, whether by us or by whoever got there first.
+                    if !(lower.contains("no such container") || lower.contains("no such object")) {
+                        anyhow::bail!(
+                            "CONTAINER_OWNERSHIP_BLOCKED: {name} ({id}) belongs to this \
+                             installation ({INSTALLATION_LABEL}) but could not be removed: {}",
+                            bounded(stderr.trim())
+                        );
+                    }
+                }
+                // Re-probe by ID: if a *different* container now holds the name,
+                // that is not our doing and not a failure of this call.
+                match self.probe_ownership(name).await? {
+                    probe if probe.container_id.as_deref() == Some(id) => anyhow::bail!(
+                        "CONTAINER_OWNERSHIP_BLOCKED: {name} ({id}) belongs to this \
+                         installation but still exists after rm; refusing to create over it"
                     ),
+                    _ => Ok(Ownership::Ours),
                 }
             }
         }
@@ -658,6 +763,8 @@ impl DockerAdapter {
         })?;
         let node_filter = format!("label=opsweave.node-id={node_id}");
         let installation_filter = format!("label={INSTALLATION_LABEL}={installation}");
+        // A hang detector, not a latency budget: `cargo test` runs this file's
+        // cases concurrently and each forks a shell per docker call.
         let raw = self
             .run_with_timeout(
                 &[
@@ -672,7 +779,7 @@ impl DockerAdapter {
                     "--format",
                     "{{.Names}}",
                 ],
-                10,
+                30,
             )
             .await?;
         Ok(raw
@@ -690,7 +797,8 @@ impl DockerAdapter {
     /// "it was not ours" is a correct no-op. What must never happen is deleting
     /// somebody else's container because it happened to share a name.
     pub async fn stop_and_remove_owned(&self, name: &str) -> anyhow::Result<Ownership> {
-        match self.ownership_of(name).await? {
+        let probe = self.probe_ownership(name).await?;
+        match probe.outcome {
             Ownership::Absent => return Ok(Ownership::Absent),
             Ownership::Foreign => {
                 tracing::warn!(
@@ -701,7 +809,40 @@ impl DockerAdapter {
             }
             Ownership::Ours => {}
         }
-        self.stop_and_remove(name).await?;
+        // By id, for the same reason as `remove_owned_if_present`: the name can
+        // be reassigned between the decision and the stop.
+        let id = probe
+            .container_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("ownership probe for {name} returned no container id"))?;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.command().args(["stop", "--time", "5", id]).output(),
+        )
+        .await;
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.command().args(["rm", "-f", id]).output(),
+        )
+        .await
+        .context("docker rm timed out")?
+        .context("run docker rm")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let lower = stderr.to_ascii_lowercase();
+            if !(lower.contains("no such container") || lower.contains("no such object")) {
+                return Err(anyhow!(
+                    "could not remove container {name} ({id}): {}",
+                    bounded(stderr.trim())
+                ));
+            }
+        }
+        if let Some(info) = self.inspect(id).await? {
+            if info.running {
+                anyhow::bail!("container {name} ({id}) is still running after stop/remove");
+            }
+            anyhow::bail!("container {name} ({id}) still exists after stop/remove");
+        }
         Ok(Ownership::Ours)
     }
 
@@ -854,6 +995,7 @@ case "$1" in
   inspect)
     [ -d "$STORE/$name" ] || {{ echo "Error: No such object: $name" >&2; exit 1; }}
     case "$fmt" in
+      *'{{{{.Id}}}}|'*)           printf '%s|%s\n' "$(cat "$STORE/$name/id" 2>/dev/null)" "$(cat "$STORE/$name/label" 2>/dev/null)" ;;
       *Config.Labels*)         cat "$STORE/$name/label" 2>/dev/null ;;
       *State.Running*)         cat "$STORE/$name/running" 2>/dev/null || echo true ;;
       *NetworkSettings.Ports*) echo '{{"80/tcp":[{{"HostIp":"127.0.0.1","HostPort":"32768"}}]}}' ;;
@@ -883,8 +1025,23 @@ case "$1" in
     printf '%s' "$name"
     ;;
   start) : ;;
-  stop)  if [ -d "$STORE/$name" ]; then echo false > "$STORE/$name/running"; fi ;;
-  rm)    rm -rf "$STORE/$name" ;;
+  # Docker accepts either a name or an id here. The adapter targets the
+  # immutable id, so the stub resolves it back to the store entry exactly as the
+  # daemon does - which is what makes the TOCTOU test meaningful.
+  stop|rm)
+    target="$name"
+    if [ ! -d "$STORE/$target" ]; then
+      for d in "$STORE"/*; do
+        [ -d "$d" ] || continue
+        if [ "$(cat "$d/id" 2>/dev/null)" = "$name" ]; then target="$(basename "$d")"; break; fi
+      done
+    fi
+    if [ "$1" = "rm" ]; then
+      rm -rf "$STORE/$target"
+    elif [ -d "$STORE/$target" ]; then
+      echo false > "$STORE/$target/running"
+    fi
+    ;;
   ps)
     for d in "$STORE"/*; do
       [ -d "$d" ] || continue
@@ -1197,7 +1354,10 @@ esac
         ];
         let error = format!(
             "{:#}",
-            retry_exec_busy(|| adapter.run_with_timeout(&args, 5))
+            // 5s was a latency budget; this file's tests fork many shells at
+            // once and the child sometimes has not exec'd yet. The timeout is a
+            // hang detector, so it only has to be longer than a loaded fork.
+            retry_exec_busy(|| adapter.run_with_timeout(&args, 60))
                 .await
                 .unwrap_err()
         );

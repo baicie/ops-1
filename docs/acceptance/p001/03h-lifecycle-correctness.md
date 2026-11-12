@@ -429,6 +429,165 @@ on purpose, as the compatibility section describes.
 
 ---
 
+## 4e. C1.2.1 — a clone is not the original, and a stop is not a guess
+
+C1.2 gave each installation an `opsweave.installation-id` and stamped it on every
+container. That fixed two installations that were created **independently**. It
+does not fix two installations where one state directory is a byte-for-byte copy
+of the other's, which is the ordinary result of `cp -a`, `rsync -a` or untarring
+a backup.
+
+### The reproduction, before any fix
+
+`apps/node/tests/state_dir_clone.rs` seeds a state directory, starts nothing,
+resolves A's identity, then `cp -a`s it to B. Both carry the same
+`node-identity.json` and the same `installation-id`, so B's adapter asks
+`ownership_of` about A's running container and gets:
+
+```
+left: Ours
+right: Foreign
+REGRESSION (C1.2.1 Task A): a full state-dir clone answered Ours for a container
+it did not create.
+```
+
+That is the whole defect: on the daemon the original and the clone are the same
+installation, so the clone can delete, stop and take over the original's
+containers. `list_managed` lists them for the same reason.
+
+### What can and cannot be distinguished
+
+| Event | On disk | Identity must persist? |
+|---|---|---|
+| restart | same directory, same inode | **yes** |
+| in-place `mv`, one filesystem | same inode, new path | **yes** |
+| restore into a new place | new inode, original may still run | **yes, if the original is gone** |
+| full clone (`cp -a`) | new inode, original still runs | **no** |
+
+Restore and clone are the **same bytes**, so no amount of reading the state
+directory separates them. Only the operator knows which it is. ADR-023 records
+the decision: bind the identity to the device+inode it was minted in, and fail
+closed when the directory no longer matches, with a one-time explicit choice.
+
+### The fix
+
+`<state_dir>/installation-binding.json` records the installation id and the
+device/inode of the directory it was minted in. `cp -a` allocates a new inode;
+a restart and an in-place `mv` do not. A mismatch is `INSTALLATION_IDENTITY_CONFLICT`,
+and `OPSWEAVE_INSTALLATION_ID_ACTION` resolves it once:
+
+| Value | Meaning |
+|---|---|
+| unset | refuse to start; nothing changed |
+| `accept` | same installation, moved or restored; keep the id |
+| `reinitialize` | this directory is a clone; mint a new id, leave the original's containers to the original |
+
+Pre-C1.2.1 directories have an identity but no binding. They adopt their current
+directory and log it. **That is the one silent path, and it has a stated
+boundary:** a clone made *before* the upgrade is undetectable, because both
+copies adopt their own directories and keep the shared id. It is a residual
+risk, not a fixed case.
+
+### Three defects found inside `load_or_create_installation_id`
+
+The brief asked for these specifically; all three were real.
+
+| # | Defect | Consequence |
+|---|---|---|
+| 1 | `if let Ok(existing) = read_to_string(...)` treated **every** read error as "absent" | an `EACCES` on the state directory silently minted a second identity and orphaned everything the first owned |
+| 2 | fixed `installation-id.tmp` | two concurrent starts shared the temporary file; one rename moved it out from under the other |
+| 3 | no `create_new` | the loser returned an id it had failed to persist, and the daemon was labelled with it |
+
+Now: only `NotFound` means absent, the identity file is created with `O_CREAT|O_EXCL`
+and a loser re-reads the winner's value, and the binding uses a unique temporary
+name. `concurrent_mints_agree_on_one_identity` runs eight simultaneous starts and
+requires one identity and agreement with the file — it **failed** against the
+fixed-`.tmp` implementation that this section documents.
+
+### Task D — the check and the delete were two different objects
+
+`remove_owned_if_present` decided by **name** and then ran `docker rm -f <name>`.
+Between the two the name can be reassigned: another installation removes the
+container we judged ours and creates its own under the same name, and the delete
+then destroys theirs.
+
+`probe_ownership` now returns the label **and** the immutable container id from a
+single `docker inspect`, and every destructive call (`rm`, `stop`) targets the id.
+Docker never reuses an id, so it cannot be redirected. "Already gone" is success;
+a surviving id is `CONTAINER_OWNERSHIP_BLOCKED`.
+
+### Task B — the demo scripts
+
+Two defects, both confirmed by reading before changing:
+
+1. **`demo_up.sh` read ownership after destroying it.** `RESET=1` ran `rm -rf data`
+   and only then looked for `data/node-*/installation-id`. The wipe had already
+   deleted those files, so the cleanup loop never ran and every reset left the
+   previous run's containers on the daemon while reporting a clean reset.
+2. **Both scripts killed whatever held the demo ports.** `lsof -t | xargs kill`
+   assumes the listener is ours. It is not when a second checkout, a colleague, or
+   a stale process holds 18181.
+
+`scripts/demo_common.sh` now owns both operations:
+
+- `demo_kill_port` kills a listener only when its command line proves this
+  checkout started it, waits for the port to free, and returns BLOCKED otherwise.
+- `demo_stop_containers` removes only containers carrying this installation's
+  label, and reports (never removes) containers it cannot attribute.
+- `demo_up.sh` stops containers **before** `rm -rf`, and aborts the reset if the
+  stop could not be proven.
+
+### Task C — the Data Foundation harness
+
+`tests/ci/data_foundation_ci.sh` ended with the global
+`label=opsweave.managed=true` sweep. It now removes only the installation ids
+this run created under `data-ci/`, reports anything it cannot attribute, and
+refuses to start on a daemon that already carries OpsWeave containers unless
+`OPSWEAVE_CI_ALLOW_SHARED_DAEMON=1` says the runner is dedicated.
+
+The cleanup trap now ends with `exit "$code"`. The old code ended with `|| true`
+on the last command; that happened to preserve the exit status because nothing
+ran afterwards, but it was one edit away from turning a failed acceptance run
+green.
+
+### Counterfactuals
+
+| Assertion | Broken implementation | Fixed |
+|---|---|---|
+| a full clone cannot claim the original (`state_dir_clone.rs`) | **FAIL** — `a full clone resolved silently` | PASS |
+| a restore needs an explicit accept | **FAIL** | PASS |
+| 8 concurrent mints agree on one identity | **FAIL** against the fixed-`.tmp` code (`ENOENT`) | PASS |
+| an unreadable identity is an error, not a new identity | **FAIL** | PASS |
+| the clone's sweep excludes the original's container | **FAIL** | PASS |
+| a foreign listener survives `demo_down.sh` | **FAIL** — `the unrelated process was killed` | PASS |
+| `demo_up.sh` stops before it wipes | **FAIL** — `wipes state before stopping containers` | PASS |
+| a failed container removal is reported | **FAIL** — `a failed removal was reported as success` | PASS |
+| a foreign installation's container survives the CI trap | **FAIL** | PASS |
+| a shared daemon is refused with BLOCKED | **FAIL** | PASS |
+| the acceptance exit code survives the trap | **FAIL** — rewritten to 0 | PASS |
+
+### Compatibility and migration
+
+- **Restoring a backup into a new path needs one explicit start** with
+  `OPSWEAVE_INSTALLATION_ID_ACTION=accept`. Before this phase it needed nothing and
+  silently inherited the original's ownership.
+- **Cloning a state directory now needs `reinitialize`**, which mints a new
+  identity. The original keeps its containers.
+- **Clones made before this version remain undetectable.** Stated above; not
+  claimed as closed.
+- **Pre-C1.2 containers are still unlabelled** and still never swept.
+
+### Residual risk
+
+| Risk | Status |
+|---|---|
+| A state-dir clone **made before** C1.2.1 is undetectable | **open**, boundary stated in ADR-023 §2.3 |
+| Non-Unix platforms cannot check the device/inode | binding is written with 0/0 and logs a warning; **a clone is not detected there** |
+| `data_foundation_ci.sh` still kills whatever holds 18181/9101/9102 | **unchanged** — this phase scoped its *container* sweep only |
+| Concurrent processes that both hold a valid binding for one directory | out of scope; they are the same installation by definition |
+
+---
+
 ## 5. What is still NOT done
 
 | Item | Status |
