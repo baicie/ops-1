@@ -58,6 +58,13 @@ async fn main() -> anyhow::Result<()> {
         quarantine_error: Arc::new(StdMutex::new(None)),
         lease_deadline: Arc::new(StdMutex::new(None)),
         shutdown: Arc::new(shutdown_tx),
+        extra_container_labels: args
+            .container_labels
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
     });
 
     let listener = tokio::net::TcpListener::bind(&args.data_bind)

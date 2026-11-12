@@ -103,6 +103,24 @@ impl IntoResponse for AppError {
 
 impl From<sqlx::Error> for AppError {
     fn from(error: sqlx::Error) -> Self {
+        // A unique-violation is a conflict the caller can act on, not an internal
+        // fault. Two operators activating the same plugin at once both compute the
+        // same next generation; the loser hits
+        // `activation_revisions_plugin_id_generation_key` and used to receive a
+        // 500 Internal Server Error, which reads as "the kernel is broken" rather
+        // than "someone else got there first, re-read the revision".
+        //
+        // Measured 2026-11-11: two simultaneous `opsctl rollback` calls to the same
+        // target produced one success and one 500 with that constraint name in the
+        // kernel log.
+        if let Some(db_error) = error.as_database_error() {
+            if db_error.is_unique_violation() {
+                return Self::conflict(
+                    "CONFLICT",
+                    "another request changed this resource first; re-read it and retry",
+                );
+            }
+        }
         Self::internal(error)
     }
 }

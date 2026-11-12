@@ -32,48 +32,56 @@ fail() { printf 'FAIL  %s\n' "$*"; fails=$((fails + 1)); }
 [ -f "$CLI" ] || { echo "FAIL  no opsctl source at $CLI"; exit 1; }
 
 # The rollback body, from its signature to the next item.
+# The envelope is applied by rollback_response(), which sits above rollback().
+# Extract both: checking only rollback() would miss the fields entirely, which is
+# exactly what happened when the envelope was introduced and this guard's first
+# version reported six missing fields that were present two functions up.
 BLOCK="$(mktemp)"
 trap 'rm -f "$BLOCK"' EXIT
-awk '/^pub async fn rollback\(/{f=1} f{print} f&&/^}/{if(++c==1)exit}' "$KERNEL" > "$BLOCK"
+awk '/^async fn rollback_response\(/{f=1} f{print} f&&/^}/{if(++c==1){f=0;c=0}} /^pub async fn rollback\(/{g=1} g{print} g&&/^}/{exit}' "$KERNEL" > "$BLOCK"
 
 if [ ! -s "$BLOCK" ]; then
   echo "FAIL  could not extract the rollback function from $KERNEL"
   exit 1
 fi
 
-# 1. The redeploy branch must report that it did not activate.
-if grep -q 'rollbackActivated' "$BLOCK"; then
-  pass "rollback reports whether it activated"
+# 1. Every branch must emit the same outcome envelope, and `rollbackCompleted`
+#    must be computed from the ACTIVE revision rather than asserted by the branch.
+for field in targetVersion effectiveVersion effectiveRevision rollbackCompleted pendingActivation nextStep; do
+  if grep -q "\"$field\"" "$BLOCK"; then
+    pass "rollback emits $field"
+  else
+    fail "rollback does not emit $field"
+  fi
+done
+
+if grep -q 'active_version_of' "$KERNEL"; then
+  pass "rollbackCompleted is read back from the ACTIVE activation"
 else
-  fail "rollback can return without saying it did not activate"
+  fail "rollbackCompleted is not derived from the database"
 fi
 
-if grep -q 'pendingActivation' "$BLOCK"; then
-  pass "rollback flags a pending activation"
+# `rollbackCompleted` must not be set to a literal true anywhere - that is how a
+# branch would claim success without checking.
+# `completed` must come from comparing the effective version to the target.
+# An earlier version of this check searched for one exact insert() shape, so
+# rewriting the computation as `let completed = true;` slipped past it.
+if grep -qE 'let completed = (true|false);' "$KERNEL"; then
+  fail "rollbackCompleted is a literal instead of a comparison"
+elif grep -q 'let completed = effective_version.as_deref() == Some(target_version);' "$KERNEL"; then
+  pass "rollbackCompleted is computed by comparing effective and target versions"
 else
-  fail "rollback does not flag the activation it still needs"
+  fail "rollbackCompleted is not computed from the effective version"
 fi
 
-if grep -q 'nextStep' "$BLOCK"; then
-  pass "rollback names the next step"
-else
-  fail "rollback does not tell the caller what remains"
-fi
-
-# The flag must be set on the branch that only redeploys. Setting it in the
-# READY branch - which does activate - would invert the meaning.
-if grep -q 'rollbackActivated".into(), Value::Bool(false)' "$BLOCK"; then
-  pass "the redeploy branch marks rollbackActivated=false"
-else
-  fail "the redeploy branch does not mark itself as not-activated"
-fi
-
-# 2. opsctl must act on the flag rather than print and exit.
-if grep -q 'pendingActivation' "$CLI"; then
-  pass "opsctl reads pendingActivation"
-else
-  fail "opsctl ignores pendingActivation and would print a 200 and exit"
-fi
+# 2. opsctl must act on the outcome, not print and exit.
+for needle in pendingActivation rollbackCompleted; do
+  if grep -q "$needle" "$CLI"; then
+    pass "opsctl reads $needle"
+  else
+    fail "opsctl does not read $needle"
+  fi
+done
 
 if grep -q 'wait_for_ready(&api, &plugin, &version' "$CLI"; then
   pass "opsctl waits for the target to become READY"
@@ -87,28 +95,12 @@ else
   fail "opsctl never activates after a redeploy"
 fi
 
-# --- Counterfactual ---------------------------------------------------------
-# A guard that cannot fail is not a guard. Verified by hand on 2026-11-11:
-# reverting BOTH fixes to their original shape makes this script exit 1 with
-# five failures ("can return without saying it did not activate", "does not flag
-# the activation it still needs", "does not tell the caller what remains", "the
-# redeploy branch does not mark itself as not-activated", "opsctl ignores
-# pendingActivation"); restoring them exits 0.
-#
-# The check below is the part of that which can run unattended: the strings this
-# script greps for must actually exist in the tree, so a rename cannot quietly
-# turn every assertion into a vacuous pass.
-for needle in 'rollbackActivated' 'pendingActivation' 'nextStep'; do
-  if grep -q "$needle" "$KERNEL"; then
-    pass "guard input present in the kernel: $needle"
-  else
-    fail "guard input missing from the kernel: $needle (assertions above were vacuous)"
-  fi
-done
-if grep -q 'pendingActivation' "$CLI"; then
-  pass "guard input present in opsctl: pendingActivation"
+# The CLI must verify the route after acting; printing the first response is how
+# a "successful" rollback used to leave the old version serving.
+if grep -q 'is not the active version\|did not complete:' "$CLI"; then
+  pass "opsctl refuses to report success without the target being active"
 else
-  fail "guard input missing from opsctl: pendingActivation (assertions above were vacuous)"
+  fail "opsctl can report success without checking the active version"
 fi
 
 echo

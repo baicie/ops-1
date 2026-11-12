@@ -373,7 +373,14 @@ impl DockerAdapter {
         node_id: uuid::Uuid,
         extra_env: &std::collections::BTreeMap<String, String>,
         token_file: Option<&Path>,
+        extra_labels: &[String],
     ) -> anyhow::Result<String> {
+        // Eight parameters, all of them inputs to a single docker create. The
+        // caller-supplied labels are grouped with env and the token file as
+        // "what this call adds to the container" rather than being a separate
+        // concept; they are kept as distinct parameters because merging them
+        // would need a new type purely to satisfy an arity lint.
+        #![allow(clippy::too_many_arguments)]
         validate_env_budget(extra_env)?;
         let name = container_name(node_id, workload.instance_id);
         self.remove_if_exists(&name).await;
@@ -387,6 +394,9 @@ impl DockerAdapter {
         let plugin_label = format!("opsweave.plugin-id={}", workload.plugin_id);
         let version_label = format!("opsweave.version={}", workload.version);
         let node_label = format!("opsweave.node-id={node_id}");
+        // Caller-supplied labels, so an install can mark its own containers even
+        // when another install shares its node id (a restored database, a copied
+        // state dir). See OPSWEAVE_CONTAINER_LABELS.
         let env_instance = format!("OPSWEAVE_INSTANCE_ID={}", workload.instance_id);
         let env_plugin = format!("OPSWEAVE_PLUGIN_ID={}", workload.plugin_id);
         let env_version = format!("OPSWEAVE_VERSION={}", workload.version);
@@ -435,6 +445,15 @@ impl DockerAdapter {
             "--env".to_string(),
             env_version.clone(),
         ];
+        for label in extra_labels {
+            // Reject a malformed label rather than letting docker create the
+            // container with a label nobody can query for later.
+            if !label.contains('=') {
+                anyhow::bail!("container label {label:?} is not key=value");
+            }
+            args.push("--label".to_string());
+            args.push(label.clone());
+        }
         for (key, value) in extra_env {
             args.push("--env".to_string());
             args.push(format!("{key}={value}"));

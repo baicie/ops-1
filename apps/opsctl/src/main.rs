@@ -541,26 +541,57 @@ async fn main() -> Result<()> {
             // version serving. Measured 2026-11-11: three gateway polls still
             // answered 0.0.2 after a "successful" rollback to 0.0.1, and only a
             // second manual invocation moved the route.
-            let needs_activation = result["pendingActivation"].as_bool().unwrap_or(false);
+            // The Kernel reports `rollbackCompleted`, not just "pendingActivation":
+            // it reads the ACTIVE revision back and says whether the route really
+            // moved. Trusting a pending flag alone would let a branch that neither
+            // activates nor needs to (the idempotent case) look unfinished.
+            let completed = result["rollbackCompleted"].as_bool().unwrap_or(false);
             println!("{}", serde_json::to_string_pretty(&result)?);
-            if needs_activation {
-                println!("  waiting for {version} to become READY …");
-                wait_for_ready(&api, &plugin, &version, 300).await?;
-                let activated = api
-                    .post(
-                        &format!("/api/v1/plugins/{plugin}/activations"),
-                        json!({
-                            "version": version,
-                            "expectedRevision": expected,
-                        }),
-                    )
-                    .await?;
-                println!(
-                    "activated {plugin}@{version} revision={} status={}",
-                    activated["generation"].as_i64().unwrap_or(0),
-                    activated["status"].as_str().unwrap_or("")
-                );
+            if !completed {
+                if result["pendingActivation"].as_bool().unwrap_or(false) {
+                    println!("  waiting for {version} to become READY …");
+                    wait_for_ready(&api, &plugin, &version, 300).await?;
+                    let activated = api
+                        .post(
+                            &format!("/api/v1/plugins/{plugin}/activations"),
+                            json!({
+                                "version": version,
+                                "expectedRevision": expected,
+                            }),
+                        )
+                        .await?;
+                    println!(
+                        "activated {plugin}@{version} revision={} status={}",
+                        activated["generation"].as_i64().unwrap_or(0),
+                        activated["status"].as_str().unwrap_or("")
+                    );
+                } else {
+                    // Neither completed nor pending: report it, and do not exit 0
+                    // as though the rollback had happened.
+                    bail!(
+                        "rollback to {version} did not complete: effective version is {}",
+                        result["effectiveVersion"].as_str().unwrap_or("<none>")
+                    );
+                }
             }
+            // Re-read the plugin and confirm the route is where we say it is. This
+            // is the assertion that makes the CLI's "success" mean something.
+            let detail = api.get(&format!("/api/v1/plugins/{plugin}")).await?;
+            let effective = detail["activeVersion"].as_str().unwrap_or("");
+            if effective != version {
+                bail!("rollback reported completion but the active version is {effective}, not {version}");
+            }
+            // Print the outcome AFTER the work is done. The body above is the
+            // Kernel's first answer, which for a redeploy branch says
+            // `rollbackCompleted: false` - true at that instant, and misleading as
+            // the last thing a successful command prints. Callers (and the state
+            // machine test) read the final line.
+            let final_body = serde_json::json!({
+                "targetVersion": version,
+                "effectiveVersion": effective,
+                "rollbackCompleted": true,
+            });
+            println!("{}", serde_json::to_string_pretty(&final_body)?);
         }
         Command::Uninstall { plugin } => {
             let api = Api::new()?;
