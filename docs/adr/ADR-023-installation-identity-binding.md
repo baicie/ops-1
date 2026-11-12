@@ -259,14 +259,23 @@ The write path, and why each step is where it is:
 | `rename` over the destination | atomic; a reader sees the old file or the new one |
 | `fsync` the parent directory | without it the rename is only a page-cache intention, and a power cut can leave the **old** content under the name |
 
-The fourth step was missing before C1.2.4. It now applies to three operations
+The fourth step was missing before C1.2.4. It now applies to the operations
 that carry the recovery argument:
 
 * `write_atomic` - the reinitialize marker
 * `save_identity` - the newly enrolled Kernel identity, which the marker's
   removal depends on
-* `remove_durable` - clearing the marker, and the destructive deletes inside a
-  migration
+* `remove_durable` - clearing the marker, and the delete of `installation-id`
+  while continuing an interrupted migration (the step whose incompleteness was
+  the C1.2.4 defect)
+
+The delete of `installation-binding.json` and of the inherited files inside the
+first `reinitialize` still use plain `remove_file`. That is deliberate and it is
+the weaker claim: a resurrected binding is detected (`read_binding` returns a
+value that does not attest the identity on disk) and a resurrected inherited
+identity is detected (`current == inheritedInstallationId`), so both fail closed
+rather than proceeding. Their durability is a convenience, not a safety
+property.
 
 **Limits, stated rather than implied.** On a filesystem that does not support
 directory `fsync` (some network and FUSE filesystems), or on a platform without
