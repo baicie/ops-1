@@ -21,24 +21,40 @@
 # repository; a state directory outside it is a different installation.
 demo_data_dir() { printf '%s/data' "$ROOT"; }
 
-# Read the installation identity the nodes will use, if it exists.
+# Every installation identity this checkout's demo owns, one per line.
 #
-# Returns 0 and prints the id, or returns 1 and prints nothing. It deliberately
-# does NOT mint one: a stop script has no business creating an identity.
-demo_installation_id() {
-  local id_file
-  for id_file in "$(demo_data_dir)/node-a/installation-id" "$(demo_data_dir)/node-b/installation-id"; do
-    if [ -f "$id_file" ]; then
-      local value
-      value="$(cat "$id_file" 2>/dev/null || true)"
-      if [ -n "$value" ]; then
-        printf '%s\n' "$value"
-        return 0
-      fi
-    fi
+# demo_up.sh gives each node its own state directory, so node-a and node-b
+# normally hold DIFFERENT installation ids. This used to return the first one it
+# found and stop, which meant `demo_stop_containers` cleaned node-a and silently
+# left node-b's containers running - a reset that reported success and did not
+# finish. It now collects the whole set; duplicates collapse, because two nodes
+# sharing an id is possible (a copied state directory) and removing that
+# installation twice is pointless.
+#
+# Returns 0 and prints the ids, or returns 1 and prints nothing when there are
+# none. It deliberately does NOT mint one: a stop script has no business
+# creating an identity.
+demo_installation_ids() {
+  local dir id_file value
+  local -a found=()
+  for dir in node-a node-b; do
+    id_file="$(demo_data_dir)/$dir/installation-id"
+    [ -f "$id_file" ] || continue
+    value="$(cat "$id_file" 2>/dev/null || true)"
+    [ -n "$value" ] || continue
+    local duplicate=0
+    local existing
+    for existing in ${found[@]+"${found[@]}"}; do
+      [ "$existing" = "$value" ] && duplicate=1
+    done
+    [ "$duplicate" = "1" ] || found+=("$value")
   done
-  return 1
+  [ "${#found[@]}" -gt 0 ] || return 1
+  printf '%s\n' "${found[@]}"
 }
+
+# The first identity, for callers that only need to name one in a message.
+demo_installation_id() { demo_installation_ids 2>/dev/null | head -1; }
 
 # Is `pid` a process this checkout started?
 #
@@ -118,8 +134,8 @@ demo_kill_port() {
 # `$1` = "purge" to remove, "list" to only report.
 demo_stop_containers() {
   local mode="${1:-purge}"
-  local install_id
-  if ! install_id="$(demo_installation_id)"; then
+  local install_ids
+  if ! install_ids="$(demo_installation_ids)"; then
     # No identity can mean two very different things, and conflating them made
     # this refuse the ordinary first run (caught by CI: `legacy-regression`).
     #
@@ -145,25 +161,44 @@ demo_stop_containers() {
     echo "           docker ps -a --filter label=opsweave.managed=true" >&2
     return 1
   fi
-  local ids
-  ids="$(docker ps -aq --filter "label=opsweave.installation-id=$install_id" 2>/dev/null || true)"
-  if [ -z "$ids" ]; then
-    echo "   no containers belong to installation $install_id"
-    return 0
-  fi
-  if [ "$mode" = "list" ]; then
-    echo "   installation $install_id owns:"
+  # EVERY installation this checkout owns, not just the first. node-a and
+  # node-b have separate state directories and therefore separate identities;
+  # taking one and returning left the other's containers running behind a
+  # message that said the stop succeeded.
+  local install_id ids removed=0 with_containers=0
+  while IFS= read -r install_id; do
+    [ -n "$install_id" ] || continue
+    ids="$(docker ps -aq --filter "label=opsweave.installation-id=$install_id" 2>/dev/null || true)"
+    if [ -z "$ids" ]; then
+      echo "   no containers belong to installation $install_id"
+      continue
+    fi
+    with_containers=$((with_containers + 1))
+    if [ "$mode" = "list" ]; then
+      echo "   installation $install_id owns:"
+      # shellcheck disable=SC2086
+      docker ps -a --filter "label=opsweave.installation-id=$install_id" \
+        --format '     {{.Names}}  {{.Status}}'
+      continue
+    fi
     # shellcheck disable=SC2086
-    docker ps -a --filter "label=opsweave.installation-id=$install_id" \
-      --format '     {{.Names}}  {{.Status}}'
+    if ! echo "$ids" | xargs -r docker rm -f >/dev/null 2>&1; then
+      echo "BLOCKED: could not remove the containers of installation $install_id;" >&2
+      echo "         not widening the sweep" >&2
+      return 1
+    fi
+    local count
+    count="$(printf '%s\n' "$ids" | wc -l | tr -d ' ')"
+    removed=$((removed + count))
+    echo "   removed $count container(s) of installation $install_id"
+  done <<< "$install_ids"
+  if [ "$mode" = "list" ]; then
     return 0
   fi
-  # shellcheck disable=SC2086
-  if ! echo "$ids" | xargs -r docker rm -f >/dev/null 2>&1; then
-    echo "BLOCKED: could not remove this installation's containers; not widening the sweep" >&2
-    return 1
+  if [ "$with_containers" = "0" ]; then
+    return 0
   fi
-  echo "   removed $(printf '%s\n' "$ids" | wc -l | tr -d ' ') container(s) of installation $install_id"
+  echo "   removed $removed container(s) across this checkout's installation(s)"
   # Say what was NOT removed, so an old container is never a silent leftover.
   local unlabelled
   unlabelled="$(docker ps -a --filter "label=opsweave.managed=true" --format '{{.Names}}' 2>/dev/null \

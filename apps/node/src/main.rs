@@ -39,10 +39,37 @@ async fn main() -> anyhow::Result<()> {
     // is a copy of the one its identity was minted in cannot be told apart from
     // the original, and two installations sharing an ownership token delete each
     // other's containers. The operator resolves it once, explicitly. ADR-023.
-    let installation_id = runtime::load_or_create_installation_id(&args)
+    let installation = runtime::load_or_create_installation_id(&args)
         .context("the Node cannot establish which containers it owns, so it will not start")?;
-    let docker = docker.with_installation_id(installation_id.clone());
-    let identity = runtime::enroll(&args, &http).await?;
+    let docker = docker.with_installation_id(installation.installation_id.clone());
+    // `reinitialize` means this directory is a clone, so the Kernel identity in
+    // it - node id, control credential, data token, generation - belongs to the
+    // installation it was copied from. Keeping it makes two processes heartbeat
+    // one node row: they overwrite each other's generation, last_seen_at and
+    // data_endpoint, and both receive the same desired workloads. ADR-023 §2.2a.
+    //
+    // The inherited file is not deleted up front. It is set aside, the new
+    // enrolment is obtained, and only then is it replaced - so a failed
+    // enrolment leaves the directory exactly as it was and can be retried. It
+    // never falls back to the shared credential.
+    let previous_identity = if installation.discard_node_identity {
+        runtime::set_aside_node_identity(&args).context(
+            "reinitialize could not set aside the inherited Kernel identity; nothing was              changed and the directory is still the one it was",
+        )?
+    } else {
+        None
+    };
+    let identity = match runtime::enroll(&args, &http).await {
+        Ok(identity) => identity,
+        Err(error) => {
+            if let Some(previous) = previous_identity {
+                runtime::restore_node_identity(&args, &previous);
+            }
+            return Err(error).context(
+                "reinitialize needs a NEW enrolment token: the one this clone inherited was                  spent by the original enrolment and the Kernel refuses it twice. The previous                  identity has been restored, so this directory is unchanged and can be retried                  with OPSWEAVE_ENROLLMENT_TOKEN set to a fresh token",
+            );
+        }
+    };
     let node_id = identity.node_id;
     let empty_desired = opsweave_contracts::DesiredNodeState {
         node_id,

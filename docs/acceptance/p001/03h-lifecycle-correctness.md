@@ -623,6 +623,117 @@ the point where it blocks legitimate work. It was caught by CI, not by review.
 
 ---
 
+## 4f. C1.2.2 — a clone is not the original *node* either
+
+C1.2.1 separated the Docker ownership identity. It left the **Kernel** identity
+alone, and that is the other half of the same clone: `node-identity.json` holds
+the node id, the control credential, the data token and the generation.
+
+### The reproduction, before the fix
+
+`tests/ci/p001c122_clone_node_identity.sh` clones node-a's live state directory
+on a running platform and reinitializes it. Against C1.2.1:
+
+```
+A node=8c820e19-5447-439f-a2e0-08bab78250ee  endpoint=http://127.0.0.1:9251
+PASS  the clone minted a different Docker installation id
+FAIL  the clone loaded A's Kernel identity instead of enrolling afresh
+FAIL  A's data endpoint moved http://127.0.0.1:9251 -> http://127.0.0.1:21637
+```
+
+The clone did not merely *share* A's node row — its heartbeat **overwrote A's
+`data_endpoint`**. Two processes with one node id alternate `generation`,
+`last_seen_at` and `data_endpoint` on every heartbeat, both receive the same
+`DesiredWorkload` list, and both may create instances for it. Separating the
+container identity alone therefore fixed the container half of the collision and
+none of the node half.
+
+### The fix
+
+`IdentityAction::Reinitialize` now means **a new installation in both senses**.
+`load_or_create_installation_id` returns whether the Kernel identity must be
+discarded, and `main` acts on it:
+
+| Question | Answer |
+|---|---|
+| What is discarded? | `installation-id`, `installation-binding.json`, `node-identity.json` |
+| What is required? | a **new** enrolment token — the inherited one was spent by the original |
+| Credential / data token / generation | all new, from `POST /api/v1/node-enrollment/redeem` |
+| When is state destroyed? | **after** the new enrolment succeeds, never before |
+| If enrolment fails? | the original files are restored byte for byte; the node exits non-zero |
+
+The inherited identity is read, set aside, and only replaced once the
+replacement exists. A failed enrolment puts it back, so the directory is exactly
+what it was and the operation is retryable. It never falls back to the shared
+credential.
+
+`accept` is unchanged and means the opposite: this directory **is** the same
+installation, moved or restored, and keeps its Kernel identity.
+
+### The operational trap the fix exposes
+
+`kernel.nodes.name` is `UNIQUE`, and the inherited name belongs to the original.
+A clone enrolled without `OPSWEAVE_NODE_NAME` is rejected with the Kernel's
+generic
+
+```
+node enrollment failed (409 Conflict): {"code":"CONFLICT", ...}
+```
+
+which does not explain itself. This is **not fixed**: the Kernel cannot know
+that two enrolments are one clone, and deriving a `CONFLICT` explanation from a
+bare unique violation would be a guess. ADR-023 records the documented step —
+set `OPSWEAVE_NODE_NAME` when reinitializing a clone. It is a residual risk, not
+a closed item.
+
+### Task B — the demo cleaned one installation and reported success
+
+`demo_installation_id()` returned the **first** identity it found. `demo_up.sh`
+gives node-a and node-b separate state directories, so they normally hold
+different ids — and `demo_stop_containers` removed node-a's containers and left
+node-b's running, behind a message that said the stop had succeeded.
+
+`demo_installation_ids()` now returns the whole set, deduplicated (two nodes can
+legitimately share an id after a copied directory, and removing one installation
+twice is pointless). `demo_stop_containers` iterates it. One installation
+failing to remove aborts the others and returns non-zero; it never widens the
+sweep and never reports success.
+
+### Counterfactuals
+
+| Assertion | Broken implementation | Fixed |
+|---|---|---|
+| after reinitialize the clone has its own Kernel node id | **FAIL** — `still holds A's Kernel node id` | PASS |
+| A's data endpoint is not overwritten | **FAIL** — `9251 -> 21637` | PASS |
+| a re-enrolment without a fresh token is refused | n/a (new) | PASS |
+| the inherited identity is restored byte for byte | n/a (new) | PASS |
+| it does not fall back to the shared credential | n/a (new) | PASS |
+| A1 (node-a) and B1 (node-b) are both removed | **FAIL** — `B1 survived: only the first installation was cleaned` | PASS |
+| C1 (another installation) survives | PASS (both) | PASS |
+| both installations are named in the report | **FAIL** — only `aaaa…` listed | PASS |
+| a duplicated identity is reported once | n/a (new) | PASS |
+
+### Verified where
+
+| Scope | Evidence |
+|---|---|
+| Kernel identity split | `p001c122_clone_node_identity.sh` against a **real** Kernel + PostgreSQL: 12 checks PASS |
+| Docker identity | `state_dir_clone.rs` 7 tests PASS |
+| No-token refusal and restore | same script, 3 checks PASS |
+| Demo multi-installation cleanup | `p001c121_demo_safety.sh` CASE 3b/3c, 8 checks PASS |
+| Workspace | `cargo test --locked --workspace` |
+
+### Residual risk
+
+| Risk | Status |
+|---|---|
+| A clone made **before** C1.2.1 is undetectable | **open** — ADR-023 §2.3, unchanged |
+| Non-Unix platforms cannot check device/inode | **open** — unchanged |
+| A clone re-enrolled without `OPSWEAVE_NODE_NAME` fails on the UNIQUE name | **open**, documented in ADR-023 §2.2a |
+| Two processes sharing one state directory with a valid binding | out of scope, unchanged |
+
+---
+
 ## 5. What is still NOT done
 
 | Item | Status |

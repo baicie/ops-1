@@ -206,6 +206,16 @@ fn state_file(args: &Args) -> PathBuf {
     args.state_dir.join("node-identity.json")
 }
 
+/// The outcome of establishing this installation's Docker ownership identity.
+#[derive(Debug, Clone)]
+pub struct InstallationIdentity {
+    pub installation_id: String,
+    /// True when the operator chose `reinitialize`. The state directory is a
+    /// clone, so the Kernel node identity in it belongs to the original and must
+    /// not be reused. ADR-023 §2.2a.
+    pub discard_node_identity: bool,
+}
+
 /// What the operator says a mismatched binding means. See ADR-023 §2.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityAction {
@@ -364,14 +374,14 @@ fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// ownership question. The binding records the device and inode the token was
 /// minted in - values a copy cannot preserve - so a clone is detected rather
 /// than trusted. See ADR-023.
-pub fn load_or_create_installation_id(args: &Args) -> anyhow::Result<String> {
+pub fn load_or_create_installation_id(args: &Args) -> anyhow::Result<InstallationIdentity> {
     load_or_create_installation_id_with(args, IdentityAction::from_env()?)
 }
 
 pub fn load_or_create_installation_id_with(
     args: &Args,
     action: IdentityAction,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<InstallationIdentity> {
     let path = args.state_dir.join("installation-id");
     // Only `NotFound` means "absent". Every other read error used to fall
     // through to "mint a new one", which on an unreadable directory silently
@@ -391,7 +401,11 @@ pub fn load_or_create_installation_id_with(
     };
 
     let Some(existing) = existing else {
-        return mint_installation_id(args, &path);
+        let minted = mint_installation_id(args, &path)?;
+        return Ok(InstallationIdentity {
+            installation_id: minted,
+            discard_node_identity: false,
+        });
     };
     let token = existing.trim();
     if !is_valid_installation_id(token) {
@@ -412,7 +426,10 @@ pub fn load_or_create_installation_id_with(
                 && binding.state_dir_device == device
                 && binding.state_dir_inode == inode =>
         {
-            Ok(token)
+            Ok(InstallationIdentity {
+                installation_id: token,
+                discard_node_identity: false,
+            })
         }
         Some(binding) if binding.installation_id != token => {
             // Identity file and binding disagree. One of them was edited or
@@ -459,7 +476,10 @@ pub fn load_or_create_installation_id_with(
                          now indistinguishable from this one's."
                     );
                     write_binding(args, &token)?;
-                    Ok(token)
+                    Ok(InstallationIdentity {
+                        installation_id: token,
+                        discard_node_identity: false,
+                    })
                 }
                 IdentityAction::Reinitialize => {
                     tracing::warn!(
@@ -486,7 +506,13 @@ pub fn load_or_create_installation_id_with(
                             })
                         }
                     }
-                    mint_installation_id(args, &path)
+                    let minted = mint_installation_id(args, &path)?;
+                    Ok(InstallationIdentity {
+                        installation_id: minted,
+                        // The Kernel identity in this directory belongs to the
+                        // installation this one was cloned from.
+                        discard_node_identity: true,
+                    })
                 }
             }
         }
@@ -502,7 +528,10 @@ pub fn load_or_create_installation_id_with(
                 args.state_dir.display()
             );
             write_binding(args, &token)?;
-            Ok(token)
+            Ok(InstallationIdentity {
+                installation_id: token,
+                discard_node_identity: false,
+            })
         }
     }
 }
@@ -579,6 +608,65 @@ fn mint_installation_id(args: &Args, path: &Path) -> anyhow::Result<String> {
 /// read so a truncated or hand-edited file cannot become a label wildcard.
 fn is_valid_installation_id(value: &str) -> bool {
     Uuid::parse_str(value).is_ok()
+}
+
+/// Move the inherited Kernel identity aside so a fresh enrolment can happen.
+///
+/// Returns the bytes that were moved, so the caller can put them back if the
+/// enrolment fails. `None` means there was no identity to move, which is a
+/// normal first-run state and not an error.
+pub fn set_aside_node_identity(args: &Args) -> anyhow::Result<Option<Vec<u8>>> {
+    let path = state_file(args);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "read the inherited Kernel identity at {} before replacing it",
+                    path.display()
+                )
+            })
+        }
+    };
+    std::fs::remove_file(&path).with_context(|| {
+        format!(
+            "set aside the inherited Kernel identity at {}",
+            path.display()
+        )
+    })?;
+    tracing::warn!(
+        path = %path.display(),
+        "set aside the inherited Kernel identity; this clone must enrol as a new node"
+    );
+    Ok(Some(bytes))
+}
+
+/// Put back an identity that `set_aside_node_identity` moved.
+///
+/// Best effort by design: it runs on the failure path, where the caller is about
+/// to exit with the original error. A restore that fails is logged; it must not
+/// replace the reason the node could not start.
+pub fn restore_node_identity(args: &Args, bytes: &[u8]) {
+    let path = state_file(args);
+    if let Err(error) = std::fs::write(&path, bytes) {
+        tracing::error!(
+            path = %path.display(),
+            error = %error,
+            "could not restore the previous Kernel identity; the directory is left as it was \
+             after being set aside, and a fresh enrolment token is required"
+        );
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    tracing::warn!(
+        path = %path.display(),
+        "restored the previous Kernel identity after the re-enrolment failed"
+    );
 }
 
 fn load_identity(path: &Path) -> anyhow::Result<Option<Identity>> {
