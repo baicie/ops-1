@@ -395,9 +395,9 @@ restart and a real teardown against a **valid run record**.
 | Real daemon, compiled adapter, two installs | `apps/node/tests/container_ownership.rs`, **ran locally** (Docker 29.7.2, macOS 15.7) |
 | Harness restart + teardown does not over-reach | `p001c_isolation_guard.sh`, **ran locally**, all checks PASS |
 | Crash-recovery loop still converges | existing `runtime::tests::retry_loop_*`, PASS |
-| CI | new step in `platform-linux-acceptance.yml` (`OPSWEAVE_REQUIRE_TEST_DOCKER=1`); result recorded in the PR |
+| CI, native Linux | `linux-runtime` job on `3f58524`: **success**, 18 steps. Includes `One installation cannot take over another's container` (`OPSWEAVE_REQUIRE_TEST_DOCKER=1`, real daemon) plus build → install → unprivileged socket → upgrade/rollback → DEGRADED |
 
-### Two things this does not fix
+### Three things this does not fix
 
 **The harness and the product use different predicates.** The harness still
 passes `OPSWEAVE_CONTAINER_LABELS=opsweave.test-run=<run id>`; teardown now
@@ -414,6 +414,14 @@ cleaned node-a's containers and silently left node-b's behind forever. Both
 nodes now share one id, minted once and preserved across restarts. It is the
 same failure the phase is about - a cleanup predicate that does not cover
 everything it claims - and it survived two green guard runs before being read.
+
+**One sweep was left as it was, deliberately.** `tests/ci/data_foundation_ci.sh`
+still ends with `docker ps -aq --filter label=opsweave.managed=true | xargs -r
+docker rm -f`. It is a CI script that runs only on a dedicated ephemeral runner,
+so its blast radius is the runner, not a developer or production host - and
+changing it mid-CI would have invalidated four in-flight jobs for no safety
+gain. It is the same defect class and should be scoped the same way the demo
+scripts now are; recorded here rather than silently fixed in the wrong phase.
 
 **One pre-upgrade container is still on the daemon** from an earlier run, with
 `opsweave.managed=true`, a node id, and no installation label. It is left alone
