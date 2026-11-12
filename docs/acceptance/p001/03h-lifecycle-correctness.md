@@ -393,7 +393,7 @@ restart and a real teardown against a **valid run record**.
 |---|---|
 | Ownership decision, all three outcomes | unit tests in `apps/node/src/docker.rs`, fake daemon |
 | Real daemon, compiled adapter, two installs | `apps/node/tests/container_ownership.rs`, **ran locally** (Docker 29.7.2, macOS 15.7) |
-| Harness restart + teardown does not over-reach | `p001c_isolation_guard.sh`, **ran locally, all PASS** (count in §1.5) |
+| Harness restart + teardown does not over-reach | `p001c_isolation_guard.sh`, **ran locally**, all checks PASS |
 | Crash-recovery loop still converges | existing `runtime::tests::retry_loop_*`, PASS |
 | CI | new step in `platform-linux-acceptance.yml` (`OPSWEAVE_REQUIRE_TEST_DOCKER=1`); result recorded in the PR |
 
@@ -407,9 +407,17 @@ keeps the identity across restarts and records it in `run.json`; before that,
 every restart would have minted a new one and orphaned the previous containers —
 which is the bug this phase is about, one level down.
 
+**The harness had the same bug one level down, and it was found by writing this
+section.** The first version of the `p001c_up.sh` change minted one installation
+id *per node* but recorded only node-a's in `run.json`, so teardown would have
+cleaned node-a's containers and silently left node-b's behind forever. Both
+nodes now share one id, minted once and preserved across restarts. It is the
+same failure the phase is about - a cleanup predicate that does not cover
+everything it claims - and it survived two green guard runs before being read.
+
 **One pre-upgrade container is still on the daemon** from an earlier run, with
-`opsweave.managed=true` and a node id and no installation label. It is being
-left alone on purpose, as the compatibility section describes.
+`opsweave.managed=true`, a node id, and no installation label. It is left alone
+on purpose, as the compatibility section describes.
 
 ---
 
