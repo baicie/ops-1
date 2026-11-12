@@ -37,6 +37,38 @@ fi
 DB="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['database'])" "$STATE/run.json")"
 NODE_IDS="$(python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1])).get('nodeIds',[])))" "$STATE/run.json")"
 
+# --- process identity -------------------------------------------------------
+# See p001c_up.sh: a pidfile is not ownership. Same routine, duplicated here so
+# teardown can run standalone.
+proc_start_token() {
+  local pid="$1"
+  if [ -r "/proc/$pid/stat" ]; then
+    local stat; stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || return 1
+    local rest="${stat##*) }"
+    set -- $rest
+    printf 'proc:%s\n' "${20}"
+  else
+    # lstart has one-second resolution, so a fast PID recycle could collide.
+    # The command name is added to narrow it: an unrelated process reusing the
+    # number in the same second would also have to share the binary name.
+    local ls; ls="$(ps -o lstart=,comm= -p "$pid" 2>/dev/null)" || return 1
+    [ -n "$ls" ] || return 1
+    printf 'ps:%s\n' "$(printf '%s' "$ls" | tr -s ' ')"
+  fi
+}
+
+pid_owns_fingerprint() {
+  local pidf="$1" pid recorded current
+  pid="$(cat "$pidf" 2>/dev/null)" || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  [ -f "$pidf.start" ] || return 1
+  recorded="$(cat "$pidf.start" 2>/dev/null)"
+  [ -n "$recorded" ] || return 1
+  current="$(proc_start_token "$pid" 2>/dev/null)" || return 1
+  [ "$recorded" = "$current" ]
+}
+
 echo "== stopping run $RUN_ID"
 stopped_pids=""
 for p in node-a node-b kernel; do
@@ -44,11 +76,18 @@ for p in node-a node-b kernel; do
   [ -f "$pidfile" ] || continue
   pid="$(cat "$pidfile" 2>/dev/null || echo '')"
   case "$pid" in ''|*[!0-9]*) continue ;; esac
-  if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    stopped_pids="$stopped_pids $pid"
+  if ! pid_owns_fingerprint "$pidfile"; then
+    # Either the process is gone or the PID now names something else. Never
+    # signal a PID we cannot prove is ours; report it instead of guessing.
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "   pid $pid is alive but not this run's process; leaving it alone" >&2
+    fi
+    rm -f "$pidfile" "$pidfile.start"
+    continue
   fi
-  rm -f "$pidfile"
+  kill "$pid" 2>/dev/null || true
+  stopped_pids="$stopped_pids $pid"
+  rm -f "$pidfile" "$pidfile.start"
 done
 for pid in $stopped_pids; do
   for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
@@ -61,7 +100,9 @@ echo "   processes stopped"
 
 removed=0
 for nid in $NODE_IDS; do
-  ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" 2>/dev/null || true)"
+  # Node id alone is not ownership - see p001c_up.sh. Require this run's label too.
+  ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
+    --filter "label=opsweave.test-run=${RUN_ID}" 2>/dev/null || true)"
   [ -n "$ids" ] || continue
   # shellcheck disable=SC2086
   echo "$ids" | xargs -r docker rm -f >/dev/null 2>&1 || {

@@ -230,6 +230,86 @@ resolution is a rerun once the runner's DNS recovers, not a change to the code.
 
 ---
 
+## 4c. C1.1 review fixes — seven defects found by reading the tests, not the code
+
+A review of this phase found seven places where a test could pass without
+proving what it claimed. All seven are fixed, and each has a counterfactual.
+
+| # | Defect | Evidence it was real |
+|---|---|---|
+| B1 | `isolation_guard` read `run.json` **after** `--purge` deleted it, so "own containers removed" printed 0 unconditionally | the `if not os.path.exists(path): print(0)` branch was the only one reachable |
+| B2 | teardown killed any PID in a stale pidfile — `kill -0` proves a process exists, not that it is ours | PIDs are recycled; a leftover file after a reboot names an unrelated process |
+| B3 | CASE 2 planted a container with a *different* node-id and called it a collision | it asserted nothing the old code could fail |
+| B4 | `RUN_ID` came from env/argv unvalidated, and scratch files used fixed `/tmp/p001c11-*` names | two concurrent runs overwrote each other's output |
+| B5 | concurrency asserted "at least one exited 0" | that passes when the second request corrupts state |
+| B6 | the idempotent short-circuit ran **before** the `expectedRevision` check | a stale CAS was answered `200 idempotent` |
+| B7 | conformance self-check inspected the AST | an assertion that exists only in the AST is not one that fires |
+
+### B2 — process identity
+
+Each pidfile now carries a start fingerprint (`/proc/<pid>/stat` field 22 on
+Linux, `ps -o lstart=,comm=` on macOS) captured at launch. Teardown refuses to
+signal a PID whose fingerprint no longer matches, and says so.
+
+### B3 — the collision is real, and it needed a code change
+
+Node ids are **not ownership**. They survive a database restore or a copied
+state directory, so two unrelated installs can share one. The cleanup was scoped
+to `label=opsweave.node-id=<id>` alone, which would delete the other install's
+containers.
+
+Fixed by giving the node a caller-supplied label: `OPSWEAVE_CONTAINER_LABELS`,
+stamped on every container it creates. Cleanup now matches **node id AND**
+`opsweave.test-run=<RUN_ID>`.
+
+Measured, with a container planted that carries the run's node id but not its
+run label:
+
+```
+PASS  the collision is real: 1 container(s) answer to node-id <id> alone
+PASS  the dual filter excludes it (0 matched)
+PASS  the colliding container survived the attempted cleanup
+```
+
+### B6 — ordering, and what it broke
+
+`rollback` to the version that is **already active**, with an **outdated**
+`expectedRevision`, returned `200 {idempotent: true}`. The caller's
+compare-and-swap was silently ignored and the answer confirmed a belief about the
+current revision that was false.
+
+The revision check moved above the short-circuit. Verified by section C of the
+state-machine test, which now refuses in **0 s** instead of after a redeploy.
+
+### B5 — concurrency, and the assertion that was wrong twice
+
+Two identical rollbacks now classify as `success` + `conflict`. The initial
+version of this phase asserted that both must succeed; that was wrong, because
+whichever commits second legitimately finds a consumed `expectedRevision`. The
+correction is recorded in the test itself.
+
+A second correction: the classifier now accepts `409 CONFLICT` as well as
+`REVISION_CONFLICT`. Both are correct CAS refusals - one from the pre-flight
+check, one from the unique-index mapping added in this phase - and the property
+under test is that neither is a 500.
+
+### B7 — behaviour, not syntax
+
+`probe()` now has `probeable_instances()` extracted so the test can drive the
+real function with synthetic deployments: no instances, all `UNHEALTHY`, `READY`
+without a host port, a mixed set, and a `STOPPED` instance. Each must produce a
+recorded failure; a probeable instance must not.
+
+Counterfactual: restoring the original skip-everything loop makes it print
+`self-check broken: a probeable instance still tripped the zero-instance failure`
+and exit 1.
+
+### What the review did not change
+
+- No required check was weakened, no ruleset touched, no workflow trimmed.
+- The isolation guard still fails when the global `opsweave.managed=true` sweep
+  is reintroduced: verified again after these changes.
+
 ## 5. What is still NOT done
 
 | Item | Status |

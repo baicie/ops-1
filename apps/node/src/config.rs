@@ -21,6 +21,15 @@ pub struct Args {
     pub node_name: String,
     #[arg(long, env = "OPSWEAVE_NODE_LABELS", default_value = "role=node")]
     pub labels: String,
+    /// Extra `key=value` labels stamped on every container this node creates.
+    ///
+    /// Exists so a caller that runs several installs against one Docker daemon
+    /// can tell its containers apart. `opsweave.node-id` is not enough on its
+    /// own: node ids survive a database restore or a copied state directory, so
+    /// two unrelated installs can legitimately share one - and then a cleanup
+    /// scoped to "my node id" deletes the other install's containers.
+    #[arg(long, env = "OPSWEAVE_CONTAINER_LABELS", default_value = "")]
+    pub container_labels: String,
     #[arg(
         long,
         env = "OPSWEAVE_NODE_DATA_BIND",

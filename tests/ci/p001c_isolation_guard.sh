@@ -18,7 +18,7 @@
 # and proves the ownership check refuses rather than deleting.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
 
 fails=0
@@ -81,14 +81,37 @@ fi
 # record already exists, so a first-start test never reaches it. That is exactly
 # how this guard once passed while the global `opsweave.managed=true` sweep was
 # still in the script.
-if OPSWEAVE_TEST_RUN_INDEX=9 ./tests/ci/p001c_up.sh --run-id "$RUN_ID" >/tmp/p001c11-restart 2>&1; then
+if OPSWEAVE_TEST_RUN_INDEX=9 ./tests/ci/p001c_up.sh --run-id "$RUN_ID" >"$DIR"/restart.log 2>&1; then
   pass "restarting the same run exercised the cleanup branch"
 else
   fail "restarting the same run failed"
-  tail -5 /tmp/p001c11-restart
+  tail -5 "$DIR"/restart.log
 fi
 
-./tests/ci/p001c_teardown.sh "$RUN_ID" --purge >/dev/null 2>&1 || true
+# Capture the node ids BEFORE teardown. `--purge` deletes the state dir, so
+# reading run.json afterwards always found nothing and printed 0 - a green
+# "own containers removed" no matter what teardown had actually done.
+OWN_NODES="$(python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1])).get('nodeIds',[])))" "$DIR/run.json")"
+[ -n "$OWN_NODES" ] || { echo "no node ids recorded; this check would be vacuous" >&2; exit 1; }
+
+TEARDOWN_OUT="$(./tests/ci/p001c_teardown.sh "$RUN_ID" --purge 2>&1)"
+TEARDOWN_CODE=$?
+if [ "$TEARDOWN_CODE" -eq 0 ]; then
+  pass "teardown exited 0"
+else
+  fail "teardown exited $TEARDOWN_CODE: $(printf '%s' "$TEARDOWN_OUT" | tail -1)"
+fi
+
+# Query docker directly with the ids captured above, not through the file that
+# teardown just deleted.
+own_left=0
+for nid in $OWN_NODES; do
+  n="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" --filter "label=opsweave.test-run=${RUN_ID}" 2>/dev/null | wc -l | tr -d ' ')"
+  own_left=$((own_left + n))
+done
+[ "$own_left" = "0" ] \
+  && pass "none of this run's containers remain" \
+  || fail "the run left $own_left of its own containers behind"
 
 AFTER_ID="$(docker inspect -f '{{.Id}}' "$FOREIGN" 2>/dev/null || echo '')"
 AFTER_START="$(docker inspect -f '{{.State.StartedAt}}' "$FOREIGN" 2>/dev/null || echo '')"
@@ -99,46 +122,73 @@ AFTER_START="$(docker inspect -f '{{.State.StartedAt}}' "$FOREIGN" 2>/dev/null |
   && pass "the foreign container was not restarted" \
   || fail "the foreign container was stopped or restarted"
 
-OWN_AFTER="$(python3 - "$DIR/run.json" <<'PY'
-import json, os, subprocess, sys
-path = sys.argv[1]
-if not os.path.exists(path):
-    print(0); raise SystemExit
-ids = json.load(open(path)).get("nodeIds", [])
-print(sum(len(subprocess.run(["docker","ps","-aq","--filter",f"label=opsweave.node-id={n}"],
-      capture_output=True, text=True).stdout.split()) for n in ids))
-PY
-)"
-[ "${OWN_AFTER:-0}" = "0" ] \
-  && pass "the run's own containers were all removed" \
-  || fail "the run left $OWN_AFTER of its own containers behind"
-
-docker rm -f "$FOREIGN" >/dev/null 2>&1 || true
-
 echo
-echo "== CASE 2: the same daemon keeps a second foreign container intact"
-FOREIGN2="p001c11-foreign2-$$"
-docker run -d --name "$FOREIGN2" --label opsweave.managed=true \
-  alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1
-ID2="$(docker inspect -f '{{.Id}}' "$FOREIGN2" 2>/dev/null || echo '')"
-if [ -n "$RUN_ID" ]; then
-  ./tests/ci/p001c_teardown.sh "$RUN_ID" --purge >/dev/null 2>&1 || true
+echo "== CASE 2: a container sharing our node-id but NOT our run label survives"
+#
+# Node ids are not ownership. They survive a database restore, a copied state
+# directory, or a test that reuses one, so an unrelated install can legitimately
+# carry the same opsweave.node-id. A cleanup scoped to "my node id" would delete
+# that install's containers - which is exactly what the first version of this
+# harness did, and what this case exists to catch.
+COLLIDE="p001c11-collide-$$"
+COLLIDE_NODE="$(printf '%s' "$OWN_NODES" | awk '{print $1}')"
+if [ -z "$COLLIDE_NODE" ]; then
+  fail "no node id captured; the collision case cannot run"
+else
+  # Same node-id as ours, deliberately WITHOUT opsweave.test-run=$RUN_ID.
+  docker run -d --name "$COLLIDE" \
+    --label opsweave.managed=true \
+    --label "opsweave.node-id=$COLLIDE_NODE" \
+    alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1
+  CID="$(docker inspect -f '{{.Id}}' "$COLLIDE" 2>/dev/null || echo '')"
+  if [ -z "$CID" ]; then
+    fail "could not plant the colliding container"
+  else
+    # It must match the node-id filter (proving the collision is real) and must
+    # NOT match the dual filter (proving the run label is what disambiguates).
+    BY_NODE="$(docker ps -aq --filter "label=opsweave.node-id=$COLLIDE_NODE" 2>/dev/null | wc -l | tr -d ' ')"
+    BY_BOTH="$(docker ps -aq --filter "label=opsweave.node-id=$COLLIDE_NODE" \
+      --filter "label=opsweave.test-run=${RUN_ID}" 2>/dev/null | wc -l | tr -d ' ')"
+    [ "$BY_NODE" -ge 1 ] \
+      && pass "the collision is real: $BY_NODE container(s) answer to node-id $COLLIDE_NODE alone" \
+      || fail "collision did not reproduce (node-id matched $BY_NODE)"
+    [ "$BY_BOTH" = "0" ] \
+      && pass "the dual filter excludes it ($BY_BOTH matched)" \
+      || fail "the dual filter still matched $BY_BOTH colliding container(s)"
+
+    # Teardown already ran in CASE 1; the colliding container did not exist then.
+    # Run it again: with the run record gone it must refuse, and either way the
+    # colliding container must survive an attempted cleanup.
+    # Not under $DIR: CASE 1's --purge already deleted it, so writing there would
+    # fail and the grep below would read a file that never existed.
+    COLLIDE_OUT="$(mktemp)"
+    ./tests/ci/p001c_teardown.sh "$RUN_ID" --purge >"$COLLIDE_OUT" 2>&1
+    COLLIDE_CODE=$?
+    [ "$COLLIDE_CODE" -ne 0 ] \
+      && pass "teardown refuses once the run record is gone (exit $COLLIDE_CODE)" \
+      || fail "teardown succeeded with no run record; it cannot prove ownership"
+    grep -q BLOCKED "$COLLIDE_OUT" \
+      && pass "the refusal is reported as BLOCKED" \
+      || fail "the refusal did not say BLOCKED"
+    [ "$(docker inspect -f '{{.Id}}' "$COLLIDE" 2>/dev/null || echo '')" = "$CID" ] \
+      && pass "the colliding container survived the attempted cleanup" \
+      || fail "the colliding container was removed"
+    rm -f "$COLLIDE_OUT"
+    docker rm -f "$COLLIDE" >/dev/null 2>&1 || true
+  fi
 fi
-[ "$(docker inspect -f '{{.Id}}' "$FOREIGN2" 2>/dev/null || echo '')" = "$ID2" ] \
-  && pass "a second foreign container also survived" \
-  || fail "a second foreign container was removed"
-docker rm -f "$FOREIGN2" >/dev/null 2>&1 || true
 
 echo
 echo "== CASE 3: a teardown that cannot identify its target refuses to act"
 BAD="nonexistent-run-id-$$"
-if ./tests/ci/p001c_teardown.sh "$BAD" --purge >/tmp/p001c11-bad 2>&1; then
+BAD_OUT="$(mktemp)"
+if ./tests/ci/p001c_teardown.sh "$BAD" --purge >"$BAD_OUT" 2>&1; then
   fail "teardown accepted a run id with no run record"
 else
-  grep -q BLOCKED /tmp/p001c11-bad && pass "teardown refuses an unknown run and says BLOCKED" \
-    || fail "teardown refused but did not report BLOCKED: $(head -1 /tmp/p001c11-bad)"
+  grep -q BLOCKED "$BAD_OUT" && pass "teardown refuses an unknown run and says BLOCKED" \
+    || fail "teardown refused but did not report BLOCKED: $(head -1 "$BAD_OUT")"
 fi
-rm -f /tmp/p001c11-bad
+rm -f "$BAD_OUT"
 
 echo
 if [ "$fails" -ne 0 ]; then

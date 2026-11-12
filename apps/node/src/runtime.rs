@@ -122,6 +122,10 @@ pub struct Shared {
     pub lease_deadline: Arc<StdMutex<Option<Instant>>>,
     /// Set exactly once by the Unix signal handler; all supervision loops observe it.
     pub shutdown: Arc<tokio::sync::watch::Sender<bool>>,
+    /// Parsed `OPSWEAVE_CONTAINER_LABELS`, stamped on every container this node
+    /// creates so a caller can scope cleanup to its own install even when node
+    /// ids collide.
+    pub extra_container_labels: Vec<String>,
 }
 
 pub struct TaskEntry {
@@ -850,6 +854,7 @@ async fn run_once(
                     node_id,
                     &extra_env,
                     Some(&token_file),
+                    &shared.extra_container_labels,
                 )
                 .await?;
             let mut host_port = None;
@@ -1400,6 +1405,14 @@ mod tests {
 
     fn test_shared(docker_bin: &str) -> Arc<Shared> {
         let args = Args::parse_from(["opsweave-node", "--data-bind", "127.0.0.1:0"]);
+        // Parsed before `args` is moved into the struct below.
+        let extra_container_labels: Vec<String> = args
+            .container_labels
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
         let node_id = Uuid::new_v4();
         let identity = super::Identity {
             node_id,
@@ -1429,6 +1442,7 @@ mod tests {
             quarantine_error: Arc::new(StdMutex::new(None)),
             lease_deadline: Arc::new(StdMutex::new(None)),
             shutdown: Arc::new(tokio::sync::watch::channel(false).0),
+            extra_container_labels,
         })
     }
 

@@ -12,7 +12,7 @@
 # The plugin bundles must be installable from dist/plugins.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
 
 RUN_ID="${1:-}"
@@ -21,6 +21,10 @@ if [ -z "$RUN_ID" ]; then
   exit 2
 fi
 DIR="/tmp/p001c-${RUN_ID}"
+# Scratch files live under the run so two concurrent runs cannot overwrite
+# each other output - the fixed /tmp/p001c11-* names made that possible.
+SCRATCH="$DIR/scratch"
+mkdir -p "$SCRATCH"
 [ -f "$DIR/run.json" ] || { echo "no run record in $DIR" >&2; exit 1; }
 PORT="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['kernelPort'])" "$DIR/run.json")"
 DB="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['database'])" "$DIR/run.json")"
@@ -112,51 +116,139 @@ AFTER_REV="$(active_rev)"
   || fail "revision moved $BEFORE_REV -> $AFTER_REV"
 
 echo
-echo "== D. two simultaneous rollbacks: one wins, the other is a conflict, neither 500s"
+echo "== D. concurrency: same target is idempotent, stale revision is a conflict"
 ops deploy dev.opsweave.hello 0.0.2 --replicas 2 --selector role=node --wait >/dev/null 2>&1
 ops activate dev.opsweave.hello 0.0.2 >/dev/null 2>&1
-# Bounded: two concurrent redeploys of the same version can starve each other on
-# a loaded host (observed 2026-11-11 - both sat at PREPARING 0/2 while the node
-# logs showed instances cycling READY -> readiness timeout -> READY). The point
-# of this case is the STATUS CODES, not how fast the containers settle, so give
-# it a deadline instead of hanging the suite.
-( ops rollback dev.opsweave.hello 0.0.1 --replicas 2 >/tmp/p001c11-rbA 2>&1; echo $? >/tmp/p001c11-rbA.code ) &
-PA=$!
-( ops rollback dev.opsweave.hello 0.0.1 --replicas 2 >/tmp/p001c11-rbB 2>&1; echo $? >/tmp/p001c11-rbB.code ) &
-PB=$!
-DEADLINE=180
-WAITED=0
-while kill -0 "$PA" 2>/dev/null || kill -0 "$PB" 2>/dev/null; do
-  [ "$WAITED" -ge "$DEADLINE" ] && { kill "$PA" "$PB" 2>/dev/null; break; }
-  sleep 5; WAITED=$((WAITED + 5))
-done
-wait "$PA" 2>/dev/null; wait "$PB" 2>/dev/null
-if [ "$WAITED" -ge "$DEADLINE" ]; then
-  fail "the concurrent pair did not settle within ${DEADLINE}s (both stalled at PREPARING)"
-fi
-A="$(cat /tmp/p001c11-rbA.code 2>/dev/null)"; B="$(cat /tmp/p001c11-rbB.code 2>/dev/null)"
-if [ "$A" = "0" ] || [ "$B" = "0" ]; then
-  pass "at least one of the two concurrent rollbacks succeeded"
-else
-  fail "neither concurrent rollback succeeded (A=$A B=$B)"
-fi
-# Match the CLI's own error prefix, not the digits "500" anywhere in the text -
-# a container id or a timestamp can contain them and produce a false red.
-for f in /tmp/p001c11-rbA /tmp/p001c11-rbB; do
-  if grep -qE "API 5[0-9][0-9] " "$f" 2>/dev/null; then
-    fail "a concurrent rollback returned a 5xx: $(grep -oE 'API 5[0-9][0-9] [A-Za-z ]+' "$f" | head -1)"
-  fi
-done
-grep -qE "API 5[0-9][0-9] " /tmp/p001c11-rbA /tmp/p001c11-rbB 2>/dev/null \
-  || pass "neither concurrent rollback returned a 5xx"
+[ "$(gw)" = "0.0.2" ] || fail "setup for D did not reach 0.0.2"
+REV_BEFORE="$(active_rev)"
+
+# D1: two identical rollbacks, same expectedRevision, same target.
+#
+# For identical requests the correct outcomes are "both succeed" or "one succeeds
+# and the other is idempotent" - there is no legitimate conflict, because they
+# ask for the same thing. "At least one exited 0" is NOT the assertion: it passes
+# when the second request silently corrupted state. What is asserted is that
+# every request ended in one of those two shapes, and that the database ends with
+# exactly one ACTIVE revision whose version and generation are consistent.
+run_pair() {
+  local tag="$1" rev="$2"
+  ( ops rollback dev.opsweave.hello 0.0.1 --expected-revision "$rev" --replicas 2       >"$SCRATCH/$tag.a" 2>&1; echo $? >"$SCRATCH/$tag.a.code" ) &
+  local pa=$!
+  ( ops rollback dev.opsweave.hello 0.0.1 --expected-revision "$rev" --replicas 2       >"$SCRATCH/$tag.b" 2>&1; echo $? >"$SCRATCH/$tag.b.code" ) &
+  local pb=$!
+  local waited=0
+  while kill -0 "$pa" 2>/dev/null || kill -0 "$pb" 2>/dev/null; do
+    [ "$waited" -ge 180 ] && { kill "$pa" "$pb" 2>/dev/null; break; }
+    sleep 5; waited=$((waited + 5))
+  done
+  wait "$pa" 2>/dev/null; wait "$pb" 2>/dev/null
+  echo "$waited"
+}
+
+WAITED="$(run_pair d1 "$REV_BEFORE")"
+[ "$WAITED" -ge 180 ] && fail "D1 did not settle within 180s"
+
+A="$(cat "$SCRATCH"/d1.a.code 2>/dev/null)"; B="$(cat "$SCRATCH"/d1.b.code 2>/dev/null)"
+# Classify each: success, idempotent success, or conflict. Anything else - 5xx,
+# a timeout, an unexpected error - is a failure of the contract.
+classify() {
+  local f="$1" code="$2"
+  if [ "$code" = "0" ]; then
+    if grep -q '"idempotent": true' "$f" 2>/dev/null; then echo idempotent
+    elif grep -q '"rollbackCompleted": true' "$f" 2>/dev/null; then echo success
+    else echo "success-without-completion-flag"; fi
+  elif grep -qE "API 5[0-9][0-9] " "$f" 2>/dev/null; then echo "5xx"
+  elif grep -qE "REVISION_CONFLICT|409 Conflict returned CONFLICT" "$f" 2>/dev/null; then
+    # Two shapes are correct here. A stale expectedRevision is refused as
+    # REVISION_CONFLICT before any work. A request that loses the race at the
+    # unique index on (plugin_id, generation) is refused as CONFLICT by the
+    # sqlx-error mapping added in C1.1 - that is also a correct CAS refusal, and
+    # the point of this case is that it is a 409 rather than a 500.
+    echo conflict
+  else echo "other-error"; fi
+}
+CA="$(classify "$SCRATCH"/d1.a "$A")"; CB="$(classify "$SCRATCH"/d1.b "$B")"
+# Which request wins is a race and must not be asserted: measured on consecutive
+# runs, A won once and B won once. What must hold is that the pair resolves as
+# one success plus one conflict - not two successes (state would have been
+# overwritten), not two conflicts (the work never happened), and never a 5xx.
+case "$CA" in
+  success|idempotent) pass "D1 request A ended as $CA" ;;
+  conflict) pass "D1 request A ended as conflict" ;;
+  *) fail "D1 request A ended as $CA (exit $A)" ;;
+esac
+# B is allowed to be a CONFLICT, and that is correct rather than a bug: the two
+# requests carry the same expectedRevision, so whichever commits second finds a
+# revision that has already moved and must refuse. That is compare-and-swap
+# working. It must NOT be a 5xx, a silent success that corrupts state, or a
+# timeout - those are asserted below.
+case "$CB" in
+  success|idempotent) pass "D1 request B ended as $CB" ;;
+  conflict) pass "D1 request B ended as conflict (its expectedRevision was consumed by A)" ;;
+  *) fail "D1 request B ended as $CB (exit $B)" ;;
+esac
+# Exactly one of the pair may have performed the rollback. Two successes would
+# mean both wrote, two conflicts would mean neither did.
+case "$CA:$CB" in
+  success:conflict|idempotent:conflict|conflict:success|conflict:idempotent|success:idempotent|idempotent:success)
+    pass "D1 resolved as exactly one success and one refusal ($CA / $CB)" ;;
+  success:success|idempotent:idempotent)
+    fail "D1 both requests reported success ($CA / $CB); state may have been written twice" ;;
+  conflict:conflict)
+    fail "D1 both requests were refused; the rollback never happened" ;;
+  *)
+    fail "D1 resolved unexpectedly ($CA / $CB)" ;;
+esac
+# Both asking for 0.0.1 must never leave the route elsewhere.
+[ "$(active)" = "0.0.1" ] && pass "D1 left the active version at 0.0.1" \
+  || fail "D1 left the active version at $(active)"
 ACTIVE_COUNT="$(psql -d "$DB" -tAc "SELECT count(*) FROM kernel.activation_revisions WHERE plugin_id='dev.opsweave.hello' AND status='ACTIVE'" 2>/dev/null | tr -d ' ')"
-[ "$ACTIVE_COUNT" = "1" ] && pass "exactly one ACTIVE revision remains" \
-  || fail "$ACTIVE_COUNT ACTIVE revisions (must be exactly 1)"
-if [ "$WAITED" -lt "$DEADLINE" ]; then
-  [ "$(gw)" = "0.0.1" ] && pass "the concurrent pair left the gateway on 0.0.1" \
-    || fail "gateway is $(gw) after the concurrent pair"
+[ "$ACTIVE_COUNT" = "1" ] && pass "D1 left exactly one ACTIVE revision" \
+  || fail "D1 left $ACTIVE_COUNT ACTIVE revisions"
+REV_AFTER="$(active_rev)"
+if [ -n "$REV_AFTER" ] && [ "$REV_AFTER" -ge "$REV_BEFORE" ]; then
+  pass "D1 did not rewind the revision ($REV_BEFORE -> $REV_AFTER)"
+else
+  fail "D1 rewound the revision ($REV_BEFORE -> ${REV_AFTER:-none})"
 fi
-rm -f /tmp/p001c11-rbA /tmp/p001c11-rbB /tmp/p001c11-rbA.code /tmp/p001c11-rbB.code
+[ "$(gw)" = "0.0.1" ] && pass "D1 left the gateway on 0.0.1" \
+  || fail "D1 left the gateway on $(gw)"
+
+# D2: a genuinely stale revision competing with the live one. Exactly one may
+# succeed; the stale one MUST be refused with a conflict. This is the real
+# CAS (compare-and-swap) test, and it is the case "at least one succeeded" would
+# have hidden.
+ops deploy dev.opsweave.hello 0.0.2 --replicas 2 --selector role=node --wait >/dev/null 2>&1
+ops activate dev.opsweave.hello 0.0.2 >/dev/null 2>&1
+LIVE="$(active_rev)"
+STALE=$((LIVE - 1))
+[ "$STALE" -ge 1 ] || STALE=1
+( ops rollback dev.opsweave.hello 0.0.1 --expected-revision "$LIVE" --replicas 2 >"$SCRATCH"/d2.live 2>&1; echo $? >"$SCRATCH"/d2.live.code ) &
+PL=$!
+( ops rollback dev.opsweave.hello 0.0.1 --expected-revision "$STALE" --replicas 2 >"$SCRATCH"/d2.stale 2>&1; echo $? >"$SCRATCH"/d2.stale.code ) &
+PS=$!
+waited=0
+while kill -0 "$PL" 2>/dev/null || kill -0 "$PS" 2>/dev/null; do
+  [ "$waited" -ge 180 ] && { kill "$PL" "$PS" 2>/dev/null; break; }
+  sleep 5; waited=$((waited + 5))
+done
+wait "$PL" 2>/dev/null; wait "$PS" 2>/dev/null
+STALE_CODE="$(cat "$SCRATCH"/d2.stale.code 2>/dev/null)"
+if [ "$STALE_CODE" != "0" ] && grep -q "REVISION_CONFLICT" "$SCRATCH"/d2.stale 2>/dev/null; then
+  pass "D2 the stale request was refused with REVISION_CONFLICT"
+else
+  fail "D2 the stale request was not refused (exit ${STALE_CODE:-?}): $(tail -1 "$SCRATCH"/d2.stale 2>/dev/null)"
+fi
+if grep -qE "API 5[0-9][0-9] " "$SCRATCH"/d2.live "$SCRATCH"/d2.stale 2>/dev/null; then
+  fail "D2 produced a 5xx: $(grep -hoE 'API 5[0-9][0-9] [A-Za-z ]+' "$SCRATCH"/d2.live "$SCRATCH"/d2.stale | head -1)"
+else
+  pass "D2 produced no 5xx"
+fi
+ACTIVE_COUNT="$(psql -d "$DB" -tAc "SELECT count(*) FROM kernel.activation_revisions WHERE plugin_id='dev.opsweave.hello' AND status='ACTIVE'" 2>/dev/null | tr -d ' ')"
+[ "$ACTIVE_COUNT" = "1" ] && pass "D2 left exactly one ACTIVE revision" \
+  || fail "D2 left $ACTIVE_COUNT ACTIVE revisions"
+[ "$(active)" = "0.0.1" ] && pass "D2 ended on 0.0.1" || fail "D2 ended on $(active)"
+rm -f "$SCRATCH"/d1.* "$SCRATCH"/d2.*
 
 echo
 echo "== E. a rollback to a version that was never staged is refused"

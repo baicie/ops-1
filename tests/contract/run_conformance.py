@@ -38,6 +38,16 @@ def check(condition, message):
 def canonical_provides(provides):
     return json.dumps(provides, sort_keys=True, separators=(",", ":")).encode()
 
+def probeable_instances(instances):
+    """The instances this run can actually reach.
+
+    Named and separate so it can be driven with synthetic input: the zero-case
+    test below calls the real probe() against these shapes rather than inspecting
+    source text, because an assertion that only exists in the AST is not an
+    assertion that fires.
+    """
+    return [i for i in instances if i.get("state") == "READY" and i.get("hostPort")]
+
 def probe(plugin_id):
     status, detail = request(f"/api/v1/plugins/{plugin_id}")
     if status != 200:
@@ -55,15 +65,11 @@ def probe(plugin_id):
     # whose instances were all UNHEALTHY or all port-less executed zero
     # assertions and the script exited 0 - a green run that tested nothing. The
     # final count is reported and must be at least one.
+    probeable = probeable_instances(deployment["instances"])
     probed = 0
-    for instance in deployment["instances"]:
-        if instance["state"] != "READY":
-            continue
-        port = instance.get("hostPort")
-        if not port:
-            continue
+    for instance in probeable:
         probed += 1
-        base = f"http://127.0.0.1:{port}"
+        base = f"http://127.0.0.1:{instance['hostPort']}"
         def local(path, method="GET", body=None):
             data = json.dumps(body).encode() if body is not None else None
             req = urllib.request.Request(base + path, data=data, method=method)
@@ -120,63 +126,80 @@ check(echo.get("deliveredUnsignedRole") is None, "gateway strips the unsigned ca
 check(echo.get("deliveredSignedContext") is True, "gateway delivers a Kernel-signed user context")
 
 print(f"\nRuntime conformance: {len(failures)} failure(s)")
-# --- self-check: the zero-instance path must FAIL ---------------------------
+# --- zero-instance behaviour test -------------------------------------------
 #
-# The probe loop used to `continue` past every non-READY instance and every
-# instance without a host port, so a deployment whose instances were all
-# UNHEALTHY executed zero assertions and the script exited 0 - a green run that
-# tested nothing. It now counts what it probes and fails when that is zero.
+# The probe loop used to skip every non-READY instance and every instance without
+# a host port, then report the total count as though it had probed them. A
+# deployment whose instances were all UNHEALTHY ran zero assertions and the
+# script exited 0.
 #
-# This self-check proves the predicate is real, without needing a platform:
-# it evaluates the same filter over a synthetic deployment and requires the
-# result to be zero, and it requires probe() to contain the assertion that
-# turns that zero into a failure.
-def _probeable(instances):
-    n = 0
-    for instance in instances:
-        if instance["state"] != "READY":
-            continue
-        if not instance.get("hostPort"):
-            continue
-        n += 1
-    return n
+# This drives the REAL probe function against synthetic plugin details and
+# asserts on the failures it records, not on the shape of the source. An earlier
+# version inspected the AST and was satisfied by a comparison that the code no
+# longer performed at the point that mattered.
+def _run_probe_on(detail, status=200):
+    """Call probe() with request() stubbed to return `detail`."""
+    global request, failures
+    saved_request, saved_failures = request, failures
+    failures = []
+    request = lambda path, method="GET", body=None, extra=None: (status, detail)
+    try:
+        probe("dev.opsweave.selfcheck")
+        return list(failures)
+    finally:
+        request, failures = saved_request, saved_failures
 
-_zero_cases = [
-    ("no instances at all", []),
+_manifest = {"provides": [{"name": "x", "major": 1}], "resources": {}}
+
+def _detail(instances):
+    return {
+        "manifest": _manifest,
+        "packageVersions": ["0.0.1"],
+        "activeVersion": "0.0.1",
+        "deployments": [{"version": "0.0.1", "instances": instances}],
+    }
+
+_cases = [
+    ("no instances", []),
     ("all unhealthy", [{"state": "UNHEALTHY", "hostPort": 1}]),
     ("ready without a host port", [{"state": "READY"}]),
     ("mixed, none probeable", [{"state": "UNHEALTHY", "hostPort": 1}, {"state": "READY"}]),
+    ("stopped with a port", [{"state": "STOPPED", "hostPort": 1}]),
 ]
-for label, instances in _zero_cases:
-    if _probeable(instances) != 0:
-        print(f"self-check broken: {label} produced a probeable instance")
+for label, instances in _cases:
+    got = _run_probe_on(_detail(instances))
+    if not got:
+        print(f"self-check broken: {label!r} produced no failure; a deployment that "
+              f"cannot be probed must fail")
+        sys.exit(1)
+    # Two gates can stop a probeable instance from existing, and both are
+    # legitimate: probe() fails early with "no active instance" when the
+    # deployment has none, and later with "at least one READY instance" when it
+    # has some but none are reachable. Either is a failure; silence is not.
+    if not any(("at least one READY instance" in f) or ("no active instance" in f)
+               for f in got):
+        print(f"self-check broken: {label!r} failed for another reason: {got[:2]}")
         sys.exit(1)
 
-# And probe() must still turn a zero count into a recorded failure. A substring
-# search is not enough: the first version searched for "check(probed > 0" and
-# that text also appears in this comment, so deleting the assertion still left
-# the self-check green. Parse the function and look for a comparison against
-# probed instead.
-import ast as _ast
+# And the control: a probeable instance must NOT trip the zero-instance failure.
+# Without this, the assertions above would pass if probe() failed unconditionally.
+#
+# The loopback port is closed, so the runtime probes will fail - that is fine and
+# expected here. What is asserted is only that the zero-instance complaint is
+# absent, which is what distinguishes "found nothing to probe" from "probed and
+# the probe failed".
+_control = _run_probe_on(_detail([{"state": "READY", "hostPort": 9}]))
+if any("at least one READY instance" in f for f in _control):
+    print("self-check broken: a probeable instance still tripped the zero-instance "
+          "failure, so that failure does not distinguish the two cases")
+    sys.exit(1)
 
-_tree = _ast.parse(open(__file__).read())
-_probe_fn = next((n for n in _ast.walk(_tree)
-                  if isinstance(n, _ast.FunctionDef) and n.name == "probe"), None)
-if _probe_fn is None:
-    print("self-check broken: probe() is gone")
+# A plugin detail that is not 200 must produce a failure rather than silence.
+_api_case = _run_probe_on({}, status=500)
+if not _api_case:
+    print("self-check broken: a non-200 plugin detail produced no failure")
     sys.exit(1)
-# A comparison that mentions `probed`, not merely a reference to it: the loop
-# itself increments the counter, so a bare Name node proves nothing.
-_compares_probed = any(
-    isinstance(node, _ast.Compare)
-    and any(isinstance(side, _ast.Name) and side.id == "probed"
-            for side in [node.left, *node.comparators])
-    for node in _ast.walk(_probe_fn)
-)
-if not _compares_probed:
-    print("self-check broken: probe() no longer compares the probed count, so a "
-          "zero-instance deployment would pass silently again")
-    sys.exit(1)
-print("self-check: a deployment with no probeable instance cannot pass silently")
+
+print(f"self-check: {len(_cases)} unprobeable shapes each fail; a probeable one does not")
 
 sys.exit(1 if failures else 0)

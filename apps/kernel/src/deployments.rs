@@ -896,7 +896,10 @@ pub async fn uninstall(
 }
 
 /// Read the ACTIVE activation for a plugin, if any.
-async fn active_version_of(state: &AppState, plugin_id: &str) -> AppResult<(Option<String>, Option<i64>)> {
+async fn active_version_of(
+    state: &AppState,
+    plugin_id: &str,
+) -> AppResult<(Option<String>, Option<i64>)> {
     let active: Option<ActivationRow> = sqlx::query_as::<_, ActivationRow>(
         "SELECT * FROM kernel.activation_revisions WHERE plugin_id=$1 AND status='ACTIVE'",
     )
@@ -926,7 +929,10 @@ async fn rollback_response(
     let (effective_version, effective_revision) = active_version_of(state, plugin_id).await?;
     let completed = effective_version.as_deref() == Some(target_version);
     if let Some(object) = body.as_object_mut() {
-        object.insert("targetVersion".into(), Value::String(target_version.to_string()));
+        object.insert(
+            "targetVersion".into(),
+            Value::String(target_version.to_string()),
+        );
         object.insert(
             "effectiveVersion".into(),
             effective_version.map(Value::String).unwrap_or(Value::Null),
@@ -936,7 +942,10 @@ async fn rollback_response(
             effective_revision.map(Value::from).unwrap_or(Value::Null),
         );
         object.insert("rollbackCompleted".into(), Value::Bool(completed));
-        object.insert("pendingActivation".into(), Value::Bool(pending_activation && !completed));
+        object.insert(
+            "pendingActivation".into(),
+            Value::Bool(pending_activation && !completed),
+        );
         object.insert(
             "nextStep".into(),
             match next_step {
@@ -956,28 +965,21 @@ pub async fn rollback(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     auth.require_operator()?;
 
-    // Idempotency: rolling back to the version that is already effective is a
-    // completed rollback, not an error. It is also the state a retried request
-    // lands in after the first attempt succeeded, so refusing it would turn a
-    // retry into a false failure.
     let (effective_before, revision_before) = active_version_of(&state, &plugin_id).await?;
-    if effective_before.as_deref() == Some(payload.target_version.as_str()) {
-        let mut body = json!({ "status": "ACTIVE" });
-        if let Some(object) = body.as_object_mut() {
-            object.insert("idempotent".into(), Value::Bool(true));
-        }
-        let body = rollback_response(&state, &plugin_id, &payload.target_version, body, false, None)
-            .await?;
-        let _ = revision_before;
-        return Ok((StatusCode::OK, Json(body)));
-    }
 
-    // Reject a stale expectedRevision BEFORE doing any work.
+    // Reject a stale expectedRevision BEFORE doing any work, and before the
+    // idempotent short-circuit below.
     //
-    // `activate_inner` checks it too, but only after a redeploy has run - so a
+    // Order matters, and this is the case that proves it: a caller asking to roll
+    // back to a version that is ALREADY active, but holding an OUTDATED
+    // expectedRevision, used to get a 200 { idempotent: true }. Their
+    // compare-and-swap was silently ignored and the answer "nothing to do"
+    // confirmed a belief about the current revision that was false. Every other
+    // path checked the revision; this one did not.
+    //
+    // `activate_inner` also checks it, but only after a redeploy has run, so a
     // caller holding an outdated revision waited out a full redeploy to be told
-    // the request was never valid. Measured 2026-11-11: the state-machine test
-    // sat in `deploy --wait` for minutes before the 409 finally arrived.
+    // the request was never valid. Measured 2026-11-11: minutes, then a 409.
     if revision_before.unwrap_or(0) != payload.expected_revision {
         return Err(AppError::conflict(
             "REVISION_CONFLICT",
@@ -987,6 +989,28 @@ pub async fn rollback(
                 revision_before.unwrap_or(0)
             ),
         ));
+    }
+
+    // Idempotency: rolling back to the version that is already effective is a
+    // completed rollback, not an error. A retried request lands here after the
+    // first attempt succeeded, so refusing it would turn a retry into a false
+    // failure. `expectedRevision` has already been verified above, so reaching
+    // this point means the caller's view of the world was accurate.
+    if effective_before.as_deref() == Some(payload.target_version.as_str()) {
+        let mut body = json!({ "status": "ACTIVE" });
+        if let Some(object) = body.as_object_mut() {
+            object.insert("idempotent".into(), Value::Bool(true));
+        }
+        return rollback_response(
+            &state,
+            &plugin_id,
+            &payload.target_version,
+            body,
+            false,
+            None,
+        )
+        .await
+        .map(|body| (StatusCode::OK, Json(body)));
     }
 
     let target = sqlx::query_as::<_, DeploymentRow>(
@@ -1036,15 +1060,22 @@ pub async fn rollback(
                 expected_revision: payload.expected_revision,
             };
             let (status, value) = activate_inner(&state, &auth, &plugin_id, &activate).await?;
-            let body = rollback_response(&state, &plugin_id, &payload.target_version, value, false, None)
-                .await?;
+            let body = rollback_response(
+                &state,
+                &plugin_id,
+                &payload.target_version,
+                value,
+                false,
+                None,
+            )
+            .await?;
             Ok((status, Json(body)))
         }
         // Being built right now. Report the state truthfully; do not claim to have
         // activated something that is not READY, and do not start a second build.
         "PENDING" | "PREPARING" => {
-            let body =
-                serde_json::to_value(deployment_view(&state, target).await?).map_err(AppError::from)?;
+            let body = serde_json::to_value(deployment_view(&state, target).await?)
+                .map_err(AppError::from)?;
             let body = rollback_response(
                 &state,
                 &plugin_id,
@@ -1069,7 +1100,8 @@ pub async fn rollback(
                 cpu_millis: None,
                 memory_mib: None,
             };
-            let (status, value) = create_deployment_inner(&state, &auth, &plugin_id, &create).await?;
+            let (status, value) =
+                create_deployment_inner(&state, &auth, &plugin_id, &create).await?;
             let body = rollback_response(
                 &state,
                 &plugin_id,

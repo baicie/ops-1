@@ -52,6 +52,20 @@ if [ -z "$RUN_ID" ]; then
   RUN_ID="$(date -u +%Y%m%d%H%M%S)-$$-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 fi
 
+# A run id reaches a database name, a filesystem path and a shell word, so it is
+# validated before any of those are built. Without this, a caller-supplied id
+# could contain "/" or ";" and escape its own namespace.
+case "$RUN_ID" in
+  *[!A-Za-z0-9._-]*)
+    echo "invalid RUN_ID '$RUN_ID': only [A-Za-z0-9._-] are allowed" >&2; exit 2 ;;
+esac
+if [ "${#RUN_ID}" -lt 8 ] || [ "${#RUN_ID}" -gt 80 ]; then
+  echo "invalid RUN_ID length ${#RUN_ID}: must be 8..80 characters" >&2; exit 2
+fi
+case "$RUN_ID" in
+  .|..|.*) echo "invalid RUN_ID '$RUN_ID': must not start with a dot" >&2; exit 2 ;;
+esac
+
 # Ports are derived, not fixed, so two runs can coexist. RUN_INDEX is a small
 # integer the caller may pin; by default it comes from the run id so two runs
 # started in the same second still differ.
@@ -61,7 +75,13 @@ NODE_A_PORT=$((9201 + RUN_INDEX * 10))
 NODE_B_PORT=$((9202 + RUN_INDEX * 10))
 
 DB="p001c_${RUN_ID//[^a-zA-Z0-9]/_}"
-[ ${#DB} -le 63 ] || DB="${DB:0:63}"
+# PostgreSQL truncates identifiers at 63 bytes, and silent truncation is how two
+# different run ids would collide on one database. Refuse instead of trimming.
+if [ "${#DB}" -gt 63 ]; then
+  echo "RUN_ID '$RUN_ID' yields a ${#DB}-character database name; the limit is 63." >&2
+  echo "Use a shorter id; truncating would let two runs share one database." >&2
+  exit 2
+fi
 STATE="/tmp/p001c-${RUN_ID}"
 HOME_DIR="$STATE/home"
 KERNEL_URL="http://127.0.0.1:${KERNEL_PORT}"
@@ -69,12 +89,61 @@ DATABASE_URL="postgres://localhost/${DB}?sslmode=disable"
 ADMIN_EMAIL=admin@opsweave.local
 ADMIN_PASSWORD='OpsWeave!2026'
 # The label every container of this run carries. Nothing else can have it.
-RUN_LABEL="opsweave.test-run=${RUN_ID}"
 
 # Credentials live under the run's own HOME, never the user's. 0700 dir, 0600 files.
 umask 077
 mkdir -p "$HOME_DIR" "$STATE"/{data,node-a,node-b,logs}
 chmod 700 "$HOME_DIR"
+
+# --- process identity -------------------------------------------------------
+# A pidfile alone is not ownership: PIDs are recycled, so `kill -0 $pid` can be
+# true for an unrelated process that inherited the number after ours exited.
+# Each pidfile therefore carries a fingerprint captured at start, and teardown
+# refuses to signal a PID whose fingerprint no longer matches.
+#
+# The fingerprint is the process start time, which is stable for the life of a
+# process and different for a recycled PID.
+proc_start_token() {
+  local pid="$1"
+  if [ -r "/proc/$pid/stat" ]; then
+    # Field 22 of /proc/<pid>/stat is starttime in clock ticks since boot.
+    local stat; stat="$(cat "/proc/$pid/stat" 2>/dev/null)" || return 1
+    # comm may contain spaces/parens; split on the LAST ')'
+    local rest="${stat##*) }"
+    # rest starts at field 3 (state); starttime is field 22 -> index 20 here
+    set -- $rest
+    printf 'proc:%s\n' "${20}"
+  else
+    # macOS: lstart is a stable human-readable start timestamp.
+    # lstart has one-second resolution, so a fast PID recycle could collide.
+    # The command name is added to narrow it: an unrelated process reusing the
+    # number in the same second would also have to share the binary name.
+    local ls; ls="$(ps -o lstart=,comm= -p "$pid" 2>/dev/null)" || return 1
+    [ -n "$ls" ] || return 1
+    printf 'ps:%s\n' "$(printf '%s' "$ls" | tr -s ' ')"
+  fi
+}
+
+write_fingerprint() {
+  local pidf="$1" pid token
+  pid="$(cat "$pidf" 2>/dev/null)" || return 0
+  token="$(proc_start_token "$pid" 2>/dev/null)" || token=""
+  printf '%s' "$token" > "$pidf.start"
+  chmod 600 "$pidf.start" 2>/dev/null || true
+}
+
+pid_owns_fingerprint() {
+  local pidf="$1" pid recorded current
+  pid="$(cat "$pidf" 2>/dev/null)" || return 1
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$pid" 2>/dev/null || return 1
+  [ -f "$pidf.start" ] || return 1
+  recorded="$(cat "$pidf.start" 2>/dev/null)"
+  [ -n "$recorded" ] || return 1
+  current="$(proc_start_token "$pid" 2>/dev/null)" || return 1
+  [ "$recorded" = "$current" ]
+}
+
 
 # --- ownership guard --------------------------------------------------------
 # Before removing anything, prove the target exists AND belongs to this run.
@@ -95,6 +164,12 @@ stop_pidfile() {
   [ -f "$pidfile" ] || return 0
   local pid; pid="$(cat "$pidfile" 2>/dev/null || echo '')"
   case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  if ! pid_owns_fingerprint "$pidfile"; then
+    # The PID is gone, or the number now belongs to something else. Either way
+    # this is not ours to signal.
+    rm -f "$pidfile" "$pidfile.start"
+    return 0
+  fi
   kill "$pid" 2>/dev/null || true
   for _ in $(seq 1 50); do
     kill -0 "$pid" 2>/dev/null || { rm -f "$pidfile"; return 0; }
@@ -107,6 +182,23 @@ stop_pidfile() {
 for p in kernel node-a node-b; do
   # Only this run's pidfiles are read; the paths are namespaced by RUN_ID.
   stop_pidfile "$STATE/$p.pid" "$p"
+done
+
+# Ports are derived from RUN_INDEX, which is deterministic per run id - so a
+# leftover process from an earlier run can hold the same port and the kernel then
+# dies with "Address already in use" several steps later. Check before starting
+# anything and name the holder, so the operator can see what to stop.
+# Always succeeds: an empty result means "free", and `set -e` must not treat a
+# free port as an error. `|| true` is inside the substitution so the caller's
+# assignment stays a success.
+port_holder() { lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | head -1 || true; }
+for candidate_port in "$KERNEL_PORT" "$NODE_A_PORT" "$NODE_B_PORT"; do
+  holder="$(port_holder "$candidate_port")"
+  if [ -n "$holder" ]; then
+    echo "BLOCKED: port $candidate_port is held by pid $holder ($(ps -p "$holder" -o comm= 2>/dev/null))." >&2
+    echo "         It is probably a leftover process from an earlier run; stop it and retry." >&2
+    exit 1
+  fi
 done
 
 echo "== run $RUN_ID (ports ${KERNEL_PORT}/${NODE_A_PORT}/${NODE_B_PORT}, db ${DB})"
@@ -140,7 +232,11 @@ except Exception:
 PY
 )"
   for nid in $old_nodes; do
-    ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" 2>/dev/null || true)"
+    # Both filters. The node id alone is not ownership: it survives a database
+    # restore or a copied state directory, so an unrelated install can share it.
+    # The run label is set only by this run's nodes.
+    ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
+      --filter "label=opsweave.test-run=${RUN_ID}" 2>/dev/null || true)"
     if [ -n "$ids" ]; then
       echo "== remove leftover containers of previous node $nid"
       # shellcheck disable=SC2086
@@ -173,7 +269,9 @@ nohup env \
   OPSWEAVE_PLUGIN_SOURCE_ALLOWED_HOSTS=host.docker.internal \
   OPSWEAVE_LOG_FORMAT=json \
   ./target/debug/opsweave-kernel > "$STATE/logs/kernel.log" 2>&1 &
-echo $! > "$STATE/kernel.pid"
+PIDF="$STATE/kernel.pid"
+echo $! > "$PIDF"
+write_fingerprint "$PIDF"
 
 for _ in $(seq 1 60); do
   curl -fsS "$KERNEL_URL/livez" >/dev/null 2>&1 && break
@@ -202,9 +300,12 @@ start_node() {
     OPSWEAVE_NODE_DATA_BIND="127.0.0.1:${port}" \
     OPSWEAVE_NODE_DATA_ENDPOINT="http://127.0.0.1:${port}" \
     OPSWEAVE_NODE_STATE_DIR="$STATE/$name" \
+    OPSWEAVE_CONTAINER_LABELS="opsweave.test-run=${RUN_ID}" \
     OPSWEAVE_DOCKER_HOST="${OPSWEAVE_DOCKER_HOST:-unix:///var/run/docker.sock}" \
     ./target/debug/opsweave-node > "$STATE/logs/$name.log" 2>&1 &
-  echo $! > "$STATE/$name.pid"
+  local pidf="$STATE/$name.pid"
+  echo $! > "$pidf"
+  write_fingerprint "$pidf"
 }
 
 echo "== enroll two nodes"
