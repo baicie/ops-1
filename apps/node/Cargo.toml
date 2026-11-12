@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# The binary alone has no importable surface, so integration tests under
+# `tests/` could not drive the real DockerAdapter. A thin library target
+# re-exports the same modules; `main.rs` is unchanged and still owns the entry
+# point.
+[lib]
+name = "opsweave_node"
+path = "src/lib.rs"
+
 [dependencies]
 opsweave-http-body-guard = { path = "../../crates/http-body-guard" }
 anyhow.workspace = true

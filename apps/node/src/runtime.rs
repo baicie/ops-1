@@ -1,5 +1,5 @@
 use crate::config::Args;
-use crate::docker::{container_name, DockerAdapter};
+use crate::docker::{container_name, ContainerInfo, DockerAdapter, Ownership};
 use crate::logs::{parse_docker_log_line, parse_level, LogBuffer};
 use chrono::Utc;
 use opsweave_contracts::{
@@ -203,6 +203,62 @@ pub async fn enroll(args: &Args, http: &reqwest::Client) -> anyhow::Result<Ident
 
 fn state_file(args: &Args) -> PathBuf {
     args.state_dir.join("node-identity.json")
+}
+
+/// Read, or mint, this installation's ownership token.
+///
+/// Deliberately stored next to the enrolment identity rather than in the
+/// database. A restored database - or a copied state directory - is precisely
+/// how two installations come to share a node id, so a token kept in either
+/// would be reproduced along with the collision and prove nothing. The token
+/// identifies the install whose data directory this is; two installs pointed at
+/// one state directory are the same installation by definition, and that is the
+/// only case where sharing it is correct.
+///
+/// Existing installations have no token on upgrade. One is minted lazily and
+/// that is safe: containers created before it carry no installation label, so
+/// they read as foreign and are never swept - they must be removed deliberately
+/// once. `03h-lifecycle-correctness.md` records the migration steps.
+pub fn load_or_create_installation_id(args: &Args) -> anyhow::Result<String> {
+    let path = args.state_dir.join("installation-id");
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let token = existing.trim();
+        if is_valid_installation_id(token) {
+            return Ok(token.to_string());
+        }
+        anyhow::bail!(
+            "{} exists but is not a valid installation id ({:?}); \
+             refusing to mint a second one, because that would orphan every \
+             container this installation already owns",
+            path.display(),
+            token
+        );
+    }
+    let token = Uuid::new_v4().to_string();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, &token)?;
+    std::fs::rename(&temporary, &path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    tracing::info!(
+        installation_id = %token,
+        path = %path.display(),
+        "minted an installation identity; containers created before this point carry no \
+         installation label and will be reported rather than swept"
+    );
+    Ok(token)
+}
+
+/// A UUID, which is what `load_or_create_installation_id` writes. Validated on
+/// read so a truncated or hand-edited file cannot become a label wildcard.
+fn is_valid_installation_id(value: &str) -> bool {
+    Uuid::parse_str(value).is_ok()
 }
 
 fn load_identity(path: &Path) -> anyhow::Result<Option<Identity>> {
@@ -495,7 +551,7 @@ async fn cleanup_locked(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> Re
     let mut failures: Vec<String> = Vec::new();
     for runtime in &runtimes {
         let name = container_name(node_id, runtime.workload.instance_id);
-        if let Err(error) = shared.docker.stop_and_remove(&name).await {
+        if let Err(error) = shared.docker.stop_and_remove_owned(&name).await {
             failures.push(format!("{name}: {error}"));
         }
     }
@@ -503,7 +559,7 @@ async fn cleanup_locked(shared: &Arc<Shared>, node_id: Uuid, reason: &str) -> Re
         match shared.docker.list_managed(node_id).await {
             Ok(names) => {
                 for name in names {
-                    if let Err(error) = shared.docker.stop_and_remove(&name).await {
+                    if let Err(error) = shared.docker.stop_and_remove_owned(&name).await {
                         failures.push(format!("{name}: {error}"));
                     }
                 }
@@ -811,6 +867,48 @@ async fn fetch_workload_env(
     Ok(body.env)
 }
 
+/// Decide whether a container that already holds this instance's name may be
+/// adopted.
+///
+/// Same name and same image is **not** proof of ownership: two installations
+/// that share a node id run the same plugin version, so the image matches by
+/// construction. Adopting on that alone makes this node report another
+/// installation's container as its own, and then remove it on the next
+/// reconcile.
+///
+/// Split out of `run_once` so the decision can be exercised directly: the
+/// integration test would otherwise have to stand up a Kernel to reach it.
+pub async fn adoptable(
+    shared: &Arc<Shared>,
+    name: &str,
+    existing: Option<ContainerInfo>,
+    image_ref: &str,
+    instance_id: Uuid,
+) -> Option<ContainerInfo> {
+    let info = existing?;
+    if !info.running || info.image != image_ref {
+        return None;
+    }
+    match shared.docker.ownership_of(name).await {
+        Ok(Ownership::Ours) => Some(info),
+        Ok(_) => {
+            tracing::warn!(
+                %instance_id,
+                container = %info.id,
+                "a running container with this name belongs to another installation; \
+                 not adopting it"
+            );
+            None
+        }
+        Err(error) => {
+            // Cannot prove ownership, so cannot adopt. Falling through to create
+            // makes the collision explicit rather than silent.
+            tracing::warn!(%instance_id, error = %error, "could not establish container ownership; not adopting");
+            None
+        }
+    }
+}
+
 async fn run_once(
     shared: &Arc<Shared>,
     runtime: &InstanceRuntime,
@@ -827,8 +925,9 @@ async fn run_once(
     // for up to the full pull timeout. The create/start critical section is
     // still serialized with quarantine and re-checks the flag after the pull.
     let existing = shared.docker.inspect(&name).await.unwrap_or(None);
+    let existing = adoptable(shared, &name, existing, image_ref, workload.instance_id).await;
     let (container_id, host_port) = match existing {
-        Some(info) if info.running && info.image == *image_ref => {
+        Some(info) => {
             let _lifecycle = shared.lifecycle.lock().await;
             ensure_node_active(shared).await?;
             let host_port = info
@@ -837,7 +936,7 @@ async fn run_once(
             tracing::info!(instance = %workload.instance_id, container = %info.id, "adopting running container");
             (info.id, host_port)
         }
-        _ => {
+        None => {
             shared.docker.pull(image_ref).await?;
             let _lifecycle = shared.lifecycle.lock().await;
             ensure_node_active(shared).await?;
@@ -1076,7 +1175,7 @@ async fn cleanup_orphans(shared: &Arc<Shared>) {
         for name in names {
             if !wanted.contains(&name) {
                 tracing::info!(container = %name, "removing managed container absent from desired state");
-                if let Err(error) = shared.docker.stop_and_remove(&name).await {
+                if let Err(error) = shared.docker.stop_and_remove_owned(&name).await {
                     tracing::warn!(container = %name, error = %error, "orphan cleanup failed");
                 }
             }
@@ -1087,7 +1186,7 @@ async fn cleanup_orphans(shared: &Arc<Shared>) {
 async fn cleanup(shared: &Arc<Shared>, workload: &DesiredWorkload) {
     let node_id = shared.identity.read().await.node_id;
     let name = container_name(node_id, workload.instance_id);
-    if let Err(error) = shared.docker.stop_and_remove(&name).await {
+    if let Err(error) = shared.docker.stop_and_remove_owned(&name).await {
         tracing::warn!(container = %name, error = %error, "workload cleanup failed");
     }
 }
@@ -1424,7 +1523,11 @@ mod tests {
         Arc::new(Shared {
             args,
             http: reqwest::Client::new(),
-            docker: DockerAdapter::new(docker_bin.to_string(), "unix://unused".into()),
+            // Production always stamps an installation identity in main.rs, and
+            // cleanup cannot converge without one - it would loop forever on a
+            // sweep it can never prove. The helper mirrors that.
+            docker: DockerAdapter::new(docker_bin.to_string(), "unix://unused".into())
+                .with_installation_id(Uuid::new_v4().to_string()),
             docker_version: "test".into(),
             identity: RwLock::new(identity),
             desired: RwLock::new(DesiredNodeState {

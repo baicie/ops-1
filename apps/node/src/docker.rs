@@ -185,10 +185,29 @@ fn validate_env_budget(extra_env: &BTreeMap<String, String>) -> anyhow::Result<(
     Ok(())
 }
 
+/// The label that makes a container ours.
+///
+/// `opsweave.node-id` is not ownership. It survives a database restore, a
+/// copied state directory and any test that reuses one, so two unrelated
+/// installations legitimately carry the same value - and a sweep scoped to
+/// "my node id" then deletes the other installation's containers.
+///
+/// `opsweave.installation-id` is minted once per *installation* (the Node's
+/// state directory, which is also where its enrolment identity lives) and
+/// travels with every container it creates. It is deliberately NOT stored in
+/// the database: restoring a database is exactly one of the ways two installs
+/// come to share a node id, so a value kept there would be restored along with
+/// it and prove nothing.
+pub const INSTALLATION_LABEL: &str = "opsweave.installation-id";
+
 #[derive(Debug, Clone)]
 pub struct DockerAdapter {
     pub binary: String,
     pub host: String,
+    /// This installation's ownership token, or `None` when the caller has not
+    /// established one. `None` never means "own everything": every removal path
+    /// refuses rather than acting on an unprovable target.
+    pub installation_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -199,9 +218,94 @@ pub struct ContainerInfo {
     pub host_port: Option<u16>,
 }
 
+/// Why a container may or may not be acted on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ownership {
+    /// Created by this installation: safe to stop and remove.
+    Ours,
+    /// Exists, but belongs to another installation (or predates the label).
+    Foreign,
+    /// No such container.
+    Absent,
+}
+
 impl DockerAdapter {
     pub fn new(binary: String, host: String) -> Self {
-        Self { binary, host }
+        Self {
+            binary,
+            host,
+            installation_id: None,
+        }
+    }
+
+    pub fn with_installation_id(mut self, installation_id: impl Into<String>) -> Self {
+        self.installation_id = Some(installation_id.into());
+        self
+    }
+
+    /// The `--label` argument this installation stamps on every container.
+    pub fn installation_label(&self) -> Option<String> {
+        self.installation_id
+            .as_ref()
+            .map(|id| format!("{INSTALLATION_LABEL}={id}"))
+    }
+
+    /// Decide whether `name` belongs to this installation.
+    ///
+    /// A container without the label is `Foreign`, not `Ours`: an unlabelled
+    /// container is either from another installation or from a version that
+    /// predates this label, and neither is safe to delete on a guess. Such a
+    /// container is reported by name so an operator can migrate or remove it
+    /// deliberately; see `03h-lifecycle-correctness.md` for the migration note.
+    pub async fn ownership_of(&self, name: &str) -> anyhow::Result<Ownership> {
+        let Some(ours) = self.installation_id.as_deref() else {
+            // Without an identity we cannot distinguish ours from anyone else's.
+            // Report it as foreign rather than pretending to own it: the caller
+            // turns that into a refusal, never into a delete.
+            //
+            // This deliberately does NOT error, unlike `list_managed`. The two
+            // answer different questions: "may I delete this one container?"
+            // has a safe answer when unproven (no), while "is anything of mine
+            // left?" does not - an empty list there would read as "clean" and
+            // let quarantine report a success it never established.
+            let exists = self.inspect(name).await?.is_some();
+            return Ok(if exists {
+                Ownership::Foreign
+            } else {
+                Ownership::Absent
+            });
+        };
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            self.command()
+                .args([
+                    "inspect",
+                    name,
+                    "--format",
+                    &format!("{{{{index .Config.Labels \"{INSTALLATION_LABEL}\"}}}}"),
+                ])
+                .output(),
+        )
+        .await
+        .context("docker inspect ownership timed out")?
+        .context("run docker inspect ownership")?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let lower = stderr.to_ascii_lowercase();
+            if lower.contains("no such object") || lower.contains("no such container") {
+                return Ok(Ownership::Absent);
+            }
+            return Err(anyhow!(
+                "docker inspect failed while checking ownership of {name}: {}",
+                bounded(stderr.trim())
+            ));
+        }
+        let found = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(if found == ours {
+            Ownership::Ours
+        } else {
+            Ownership::Foreign
+        })
     }
 
     fn command(&self) -> Command {
@@ -357,12 +461,41 @@ impl DockerAdapter {
         Ok(None)
     }
 
-    pub async fn remove_if_exists(&self, name: &str) {
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            self.command().args(["rm", "-f", name]).output(),
-        )
-        .await;
+    /// Remove `name` before recreating it - but only if this installation owns it.
+    ///
+    /// The name is derived from `node_id` and `instance_id` only, and both can
+    /// be reproduced by a second installation (a restored database carries the
+    /// node row; the instance rows come back with it). A bare `docker rm -f`
+    /// here therefore destroys the other installation's running container and
+    /// hands its traffic to a container this one just created.
+    ///
+    /// Returns the outcome so the caller can distinguish "nothing was there"
+    /// from "something was there and I refuse to touch it". A refusal is an
+    /// error, not a silent skip: continuing would make `docker create` fail on
+    /// the duplicate name anyway, with a message that does not explain why.
+    pub async fn remove_owned_if_present(&self, name: &str) -> anyhow::Result<Ownership> {
+        match self.ownership_of(name).await? {
+            Ownership::Absent => Ok(Ownership::Absent),
+            Ownership::Foreign => Ok(Ownership::Foreign),
+            Ownership::Ours => {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    self.command().args(["rm", "-f", name]).output(),
+                )
+                .await;
+                // Removing is the whole point of the call, so verify rather than
+                // trusting the exit status of a `rm -f` that reports "no such
+                // container" and "still in use" the same way to us.
+                match self.ownership_of(name).await? {
+                    Ownership::Absent => Ok(Ownership::Ours),
+                    _ => anyhow::bail!(
+                        "CONTAINER_OWNERSHIP_BLOCKED: {name} belongs to this installation \
+                         ({INSTALLATION_LABEL}) but could not be removed; refusing to create \
+                         over it"
+                    ),
+                }
+            }
+        }
     }
 
     pub async fn create_and_start(
@@ -383,7 +516,30 @@ impl DockerAdapter {
         #![allow(clippy::too_many_arguments)]
         validate_env_budget(extra_env)?;
         let name = container_name(node_id, workload.instance_id);
-        self.remove_if_exists(&name).await;
+        // Ownership is decided before anything is removed. `Foreign` is a hard
+        // failure: the installation that owns this name is running, and taking
+        // it over would be exactly the cross-installation collision this guard
+        // exists to prevent.
+        match self.remove_owned_if_present(&name).await? {
+            Ownership::Absent | Ownership::Ours => {}
+            Ownership::Foreign => {
+                anyhow::bail!(
+                    "CONTAINER_OWNERSHIP_CONFLICT: a container named {name} already exists and \
+                     was not created by this installation (no matching {INSTALLATION_LABEL}). \
+                     It was left running. Another OpsWeave installation sharing this node id \
+                     owns it - give each installation its own node identity, or remove that \
+                     container deliberately if it is a leftover."
+                )
+            }
+        }
+        let installation_label = self.installation_label();
+        if installation_label.is_none() {
+            anyhow::bail!(
+                "CONTAINER_OWNERSHIP_UNPROVEN: this Node has no installation identity, so it \
+                 cannot mark the container it is about to create; a container without \
+                 {INSTALLATION_LABEL} cannot be safely cleaned up later"
+            );
+        }
         let cpu = format!("{:.3}", workload.resources.cpu_millis as f64 / 1000.0);
         let memory = format!("{}m", workload.resources.memory_mib);
         let publish = format!("127.0.0.1::{container_port}");
@@ -454,6 +610,10 @@ impl DockerAdapter {
             args.push("--label".to_string());
             args.push(label.clone());
         }
+        if let Some(label) = installation_label {
+            args.push("--label".to_string());
+            args.push(label);
+        }
         for (key, value) in extra_env {
             args.push("--env".to_string());
             args.push(format!("{key}={value}"));
@@ -479,8 +639,25 @@ impl DockerAdapter {
         Ok(id)
     }
 
+    /// Every container this *installation* manages on `node_id`.
+    ///
+    /// Both filters are required. The node id alone matches a second install
+    /// that inherited the same identity through a restored database or a copied
+    /// state directory; the installation label is what makes the result ours.
+    /// Without an installation identity the set is empty rather than
+    /// everything - a sweep that cannot prove ownership must remove nothing.
     pub async fn list_managed(&self, node_id: uuid::Uuid) -> anyhow::Result<Vec<String>> {
-        let filter = format!("label=opsweave.node-id={node_id}");
+        // Not an empty list: an empty list reads as "nothing left to clean up",
+        // which would let quarantine report a success it never established. A
+        // node that cannot prove ownership has to say so and stay blocked.
+        let installation = self.installation_id.as_deref().ok_or_else(|| {
+            anyhow!(
+                "CONTAINER_OWNERSHIP_UNPROVEN: this Node has no installation identity, so it \
+                 cannot enumerate the containers it owns; refusing to sweep"
+            )
+        })?;
+        let node_filter = format!("label=opsweave.node-id={node_id}");
+        let installation_filter = format!("label={INSTALLATION_LABEL}={installation}");
         let raw = self
             .run_with_timeout(
                 &[
@@ -489,7 +666,9 @@ impl DockerAdapter {
                     "--filter",
                     "label=opsweave.managed=true",
                     "--filter",
-                    &filter,
+                    &node_filter,
+                    "--filter",
+                    &installation_filter,
                     "--format",
                     "{{.Names}}",
                 ],
@@ -502,6 +681,28 @@ impl DockerAdapter {
             .filter(|line| !line.is_empty())
             .map(str::to_string)
             .collect())
+    }
+
+    /// Stop and remove `name`, but only if this installation owns it.
+    ///
+    /// A foreign or absent container is not an error here: callers use this on
+    /// best-effort cleanup paths (`cleanup`, `cleanup_orphans`, quarantine) where
+    /// "it was not ours" is a correct no-op. What must never happen is deleting
+    /// somebody else's container because it happened to share a name.
+    pub async fn stop_and_remove_owned(&self, name: &str) -> anyhow::Result<Ownership> {
+        match self.ownership_of(name).await? {
+            Ownership::Absent => return Ok(Ownership::Absent),
+            Ownership::Foreign => {
+                tracing::warn!(
+                    container = %name,
+                    "refusing to stop a container this installation does not own"
+                );
+                return Ok(Ownership::Foreign);
+            }
+            Ownership::Ours => {}
+        }
+        self.stop_and_remove(name).await?;
+        Ok(Ownership::Ours)
     }
 
     pub async fn stop_and_remove(&self, name: &str) -> anyhow::Result<()> {
@@ -590,6 +791,324 @@ where
 mod tests {
 
     use super::{retry_exec_busy, DockerAdapter};
+
+    // ---- container ownership -------------------------------------------------
+    //
+    // These run against a fake `docker` binary that keeps a real little container
+    // store on disk, rather than asserting the shape of an argv vector. The
+    // property under test is behavioural - "does the foreign container survive
+    // the call?" - and an argv assertion cannot answer that: it passes just as
+    // happily when `rm -f` is still there a line later.
+
+    use super::{Ownership, INSTALLATION_LABEL};
+
+    /// A `docker` stand-in with a store at `$STORE/<name>/<field>`.
+    ///
+    /// Supports exactly what DockerAdapter calls: `inspect --format` for the
+    /// three formats it uses, `create`, `start`, `rm`, `stop`, `ps`. Argument
+    /// order is ignored; it searches for `--format` and the container name.
+    fn fake_docker(dir: &std::path::Path) -> (String, std::path::PathBuf) {
+        let store = dir.join("store");
+        std::fs::create_dir_all(&store).unwrap();
+        let script = dir.join("docker");
+        // Keep the shell simple: the adapter always puts the container name last
+        // for inspect/rm/stop/start, and after `--name` for create.
+        let body = format!(
+            r#"#!/bin/sh
+STORE="{store}"
+LABEL_KEY="{inst}"
+fmt=""; name=""; expect=""
+for a in "$@"; do
+  case "$expect" in
+    fmtv)   fmt="$a"; expect=""; continue ;;
+    name)   name="$a"; expect=""; continue ;;
+    value)  expect=""; continue ;;
+  esac
+  case "$a" in
+    --format) expect=fmtv ;;
+    --name)   case "$1" in create) expect=name ;; esac ;;
+    --env|--label|--filter|--mount|--publish|--memory|--memory-swap|--cpus|--time|--user) expect=value ;;
+    --pids-limit|--cap-drop|--security-opt|--tmpfs|--restart) expect=value ;;
+  esac
+done
+# Positional container name: last argument that is not a flag. Flags with
+# values have already been skipped above by the `expect` machine, so scanning
+# again with it is enough for inspect/rm/stop/start.
+positional=""; expect=""
+for a in "$@"; do
+  case "$expect" in
+    fmtv|name|value) expect=""; continue ;;
+  esac
+  case "$a" in
+    --format) expect=fmtv ;;
+    --name)   expect=name ;;
+    --env|--label|--filter|--mount|--publish|--memory|--memory-swap|--cpus|--time|--user) expect=value ;;
+    --pids-limit|--cap-drop|--security-opt|--tmpfs|--restart) expect=value ;;
+    -*) ;;
+    *) positional="$a" ;;
+  esac
+done
+[ -n "$name" ] || name="$positional"
+
+case "$1" in
+  inspect)
+    [ -d "$STORE/$name" ] || {{ echo "Error: No such object: $name" >&2; exit 1; }}
+    case "$fmt" in
+      *Config.Labels*)         cat "$STORE/$name/label" 2>/dev/null ;;
+      *State.Running*)         cat "$STORE/$name/running" 2>/dev/null || echo true ;;
+      *NetworkSettings.Ports*) echo '{{"80/tcp":[{{"HostIp":"127.0.0.1","HostPort":"32768"}}]}}' ;;
+      *) printf '%s|true|%s\n' "$(cat "$STORE/$name/id" 2>/dev/null)" "$(cat "$STORE/$name/image" 2>/dev/null)" ;;
+    esac
+    ;;
+  create)
+    if [ -d "$STORE/$name" ]; then
+      echo "Error: Conflict. The container name \"/$name\" is already in use" >&2
+      exit 125
+    fi
+    mkdir -p "$STORE/$name"
+    echo "cid-$name" > "$STORE/$name/id"
+    echo "true" > "$STORE/$name/running"
+    : > "$STORE/$name/label"
+    prev=""
+    for a in "$@"; do
+      case "$prev" in
+        --label)
+          case "$a" in
+            "$LABEL_KEY"=*) printf '%s' "${{a#*=}}" > "$STORE/$name/label" ;;
+          esac
+          ;;
+      esac
+      prev="$a"
+    done
+    printf '%s' "$name"
+    ;;
+  start) : ;;
+  stop)  if [ -d "$STORE/$name" ]; then echo false > "$STORE/$name/running"; fi ;;
+  rm)    rm -rf "$STORE/$name" ;;
+  ps)
+    for d in "$STORE"/*; do
+      [ -d "$d" ] || continue
+      keep=1
+      prev=""
+      for a in "$@"; do
+        case "$prev" in
+          --filter)
+            case "$a" in
+              "label=$LABEL_KEY"=*)
+                want="${{a#label=$LABEL_KEY=}}"
+                have=$(cat "$d/label" 2>/dev/null || echo "")
+                [ "$want" = "$have" ] || keep=0
+                ;;
+            esac
+            ;;
+        esac
+        prev="$a"
+      done
+      if [ "$keep" = "1" ]; then basename "$d"; fi
+    done
+    ;;
+  version) echo 29.0.0 ;;
+  *) : ;;
+esac
+exit 0
+"#,
+            store = store.display(),
+            inst = INSTALLATION_LABEL
+        );
+        std::fs::write(&script, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (script.to_string_lossy().into_owned(), store)
+    }
+
+    #[tokio::test]
+    async fn a_foreign_container_with_the_same_name_is_never_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (binary, store) = fake_docker(dir.path());
+        let name = "opsweave-shared-name";
+
+        // The other installation already runs a container under this name.
+        std::fs::create_dir_all(store.join(name)).unwrap();
+        std::fs::write(store.join(name).join("id"), "foreign-id").unwrap();
+        std::fs::write(store.join(name).join("running"), "true").unwrap();
+        std::fs::write(store.join(name).join("label"), "install-b").unwrap();
+
+        let ours =
+            DockerAdapter::new(binary, "unix://unused".into()).with_installation_id("install-a");
+        let outcome = retry_exec_busy(|| ours.remove_owned_if_present(name))
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, Ownership::Foreign, "it is not ours to remove");
+        assert!(
+            store.join(name).join("id").exists(),
+            "the other installation's container was deleted"
+        );
+        assert_eq!(
+            std::fs::read_to_string(store.join(name).join("id")).unwrap(),
+            "foreign-id",
+            "the surviving container is not the original one"
+        );
+        assert_eq!(
+            std::fs::read_to_string(store.join(name).join("label")).unwrap(),
+            "install-b",
+            "the surviving container's ownership label changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn our_own_container_is_removed_and_a_missing_one_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let (binary, store) = fake_docker(dir.path());
+        let name = "opsweave-ours";
+        std::fs::create_dir_all(store.join(name)).unwrap();
+        std::fs::write(store.join(name).join("id"), "ours-id").unwrap();
+        std::fs::write(store.join(name).join("running"), "true").unwrap();
+        std::fs::write(store.join(name).join("label"), "install-a").unwrap();
+
+        let ours =
+            DockerAdapter::new(binary, "unix://unused".into()).with_installation_id("install-a");
+        assert_eq!(
+            retry_exec_busy(|| ours.remove_owned_if_present(name))
+                .await
+                .unwrap(),
+            Ownership::Ours
+        );
+        assert!(
+            !store.join(name).exists(),
+            "our own stale container should have been removed"
+        );
+        // Absent is a normal state on the first deploy.
+        assert_eq!(
+            retry_exec_busy(|| ours.remove_owned_if_present(name))
+                .await
+                .unwrap(),
+            Ownership::Absent
+        );
+    }
+
+    #[tokio::test]
+    async fn create_refuses_a_name_another_installation_owns() {
+        use opsweave_contracts::{
+            DesiredAction, DesiredBackend, DesiredWorkload, ResourceRequirements,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let (binary, store) = fake_docker(dir.path());
+        let node_id = uuid::Uuid::new_v4();
+        let instance_id = uuid::Uuid::new_v4();
+        let name = super::container_name(node_id, instance_id);
+        std::fs::create_dir_all(store.join(&name)).unwrap();
+        std::fs::write(store.join(&name).join("id"), "foreign-id").unwrap();
+        std::fs::write(store.join(&name).join("label"), "install-b").unwrap();
+
+        let ours =
+            DockerAdapter::new(binary, "unix://unused".into()).with_installation_id("install-a");
+        let workload = DesiredWorkload {
+            instance_id,
+            deployment_id: uuid::Uuid::new_v4(),
+            plugin_id: "dev.opsweave.hello".into(),
+            version: "0.0.1".into(),
+            generation: 1,
+            action: DesiredAction::Start,
+            backend: DesiredBackend {
+                image_ref: "example/image@sha256:abc".into(),
+                container_port: 80,
+                capability_digest: "sha256:abc".into(),
+                readiness_path: "/ready".into(),
+                liveness_path: "/live".into(),
+                startup_path: None,
+                api_prefix: "/api".into(),
+            },
+            resources: ResourceRequirements {
+                cpu_millis: 500,
+                memory_mib: 128,
+            },
+            labels: Default::default(),
+        };
+        let empty_env = Default::default();
+        let error = retry_exec_busy(|| {
+            ours.create_and_start(
+                &workload,
+                "example/image@sha256:abc",
+                80,
+                node_id,
+                &empty_env,
+                None,
+                &[],
+            )
+        })
+        .await
+        .unwrap_err();
+        let text = format!("{error:#}");
+        assert!(text.contains("CONTAINER_OWNERSHIP_CONFLICT"), "{text}");
+        assert!(
+            store.join(&name).join("id").exists(),
+            "the create path deleted another installation's container"
+        );
+        assert_eq!(
+            std::fs::read_to_string(store.join(&name).join("label")).unwrap(),
+            "install-b"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_managed_requires_the_installation_label() {
+        let dir = tempfile::tempdir().unwrap();
+        let (binary, store) = fake_docker(dir.path());
+        let node_id = uuid::Uuid::new_v4();
+        // Same node id, two installations.
+        for (name, label) in [("a-owned", "install-a"), ("b-owned", "install-b")] {
+            std::fs::create_dir_all(store.join(name)).unwrap();
+            std::fs::write(store.join(name).join("label"), label).unwrap();
+        }
+        let ours = DockerAdapter::new(binary.clone(), "unix://unused".into())
+            .with_installation_id("install-a");
+        let names = retry_exec_busy(|| ours.list_managed(node_id))
+            .await
+            .unwrap();
+        assert_eq!(names, vec!["a-owned".to_string()]);
+
+        // With no identity the sweep must ERROR, not return an empty list: an
+        // empty list is indistinguishable from "clean", and quarantine would
+        // then report a success it never established.
+        let anonymous = DockerAdapter::new(binary, "unix://unused".into());
+        let error = retry_exec_busy(|| anonymous.list_managed(node_id))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("CONTAINER_OWNERSHIP_UNPROVEN"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_and_remove_owned_leaves_a_foreign_container_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let (binary, store) = fake_docker(dir.path());
+        let name = "opsweave-foreign";
+        std::fs::create_dir_all(store.join(name)).unwrap();
+        std::fs::write(store.join(name).join("id"), "foreign-id").unwrap();
+        std::fs::write(store.join(name).join("running"), "true").unwrap();
+        std::fs::write(store.join(name).join("label"), "install-b").unwrap();
+
+        let ours =
+            DockerAdapter::new(binary, "unix://unused".into()).with_installation_id("install-a");
+        assert_eq!(
+            retry_exec_busy(|| ours.stop_and_remove_owned(name))
+                .await
+                .unwrap(),
+            Ownership::Foreign
+        );
+        assert_eq!(
+            std::fs::read_to_string(store.join(name).join("running")).unwrap(),
+            "true",
+            "a foreign container was stopped"
+        );
+        assert!(store.join(name).join("id").exists());
+    }
 
     #[tokio::test]
     async fn stop_and_remove_reports_a_surviving_container() {
@@ -734,7 +1253,8 @@ esac
 
     #[tokio::test]
     async fn list_managed_simple_command() {
-        let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into());
+        let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into())
+            .with_installation_id(uuid::Uuid::new_v4().to_string());
         // The timeout exists to catch a hang, not to measure latency: 2s was
         // flaky on loaded CI runners where fork/exec of the fake binary can
         // take longer than the assertion budget.

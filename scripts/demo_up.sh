@@ -36,7 +36,16 @@ if [ "$RESET" = "1" ]; then
   dropdb --if-exists --force "$DB" 2>/dev/null || true
   createdb "$DB"
   rm -rf data
-  docker ps -a --filter label=opsweave.managed=true --format '{{.Names}}' | xargs -r docker rm -f >/dev/null 2>&1 || true
+  # Only this checkout's containers. See demo_down.sh for why the global
+  # `opsweave.managed=true` sweep was removed: it is not installation-scoped.
+  for inst in node-a node-b; do
+    id_file="$ROOT/data/$inst/installation-id"
+    [ -f "$id_file" ] || continue
+    install_id="$(cat "$id_file")"
+    [ -n "$install_id" ] || continue
+    docker ps -aq --filter "label=opsweave.installation-id=$install_id" \
+      | xargs -r docker rm -f >/dev/null 2>&1 || true
+  done
 fi
 
 cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl

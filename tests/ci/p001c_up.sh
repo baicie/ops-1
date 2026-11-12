@@ -209,7 +209,29 @@ if [ "$RESTART" = "0" ]; then
 else
   echo "== reuse ${DB}"
 fi
+# The node state dirs are cleared for a clean platform, but the installation
+# identity must survive: it is what makes this run's containers distinguishable
+# from another install's. A new identity on every restart would orphan every
+# container the previous incarnation created - the containers stay on the daemon
+# carrying the old id, and the new node correctly refuses to touch them forever.
+#
+# Captured before the wipe, restored after. Only `--purge` removes it, together
+# with the containers it names.
+saved_install_id=""
+if [ -f "$STATE/node-a/installation-id" ]; then
+  saved_install_id="$(cat "$STATE/node-a/installation-id")"
+fi
 rm -rf "$STATE"/data/* "$STATE"/node-a/* "$STATE"/node-b/*
+# ONE id for both nodes, minted once. Two ids here would be a real defect: the
+# run record stores a single installationId, so teardown would clean only the
+# node whose id it recorded and leave the other's containers behind forever.
+if [ -z "$saved_install_id" ]; then
+  saved_install_id="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+fi
+for inst in node-a node-b; do
+  printf '%s' "$saved_install_id" > "$STATE/$inst/installation-id"
+  chmod 600 "$STATE/$inst/installation-id"
+done
 
 # Containers created by a PREVIOUS incarnation of this run carry the node ids
 # recorded in run.json. That is the only thing removed here: a specific set of
@@ -335,11 +357,15 @@ if [ -z "$NODE_IDS" ]; then
   exit 1
 fi
 
-python3 - "$STATE/run.json" "$RUN_ID" "$DB" "$KERNEL_PORT" "$NODE_A_PORT" "$NODE_B_PORT" "$NODE_IDS" <<'PY'
+python3 - "$STATE/run.json" "$RUN_ID" "$DB" "$KERNEL_PORT" "$NODE_A_PORT" "$NODE_B_PORT" "$NODE_IDS" \
+  "$(cat "$STATE/node-a/installation-id")" <<'PY'
 import json, sys
-path, run_id, db, kp, na, nb, ids = sys.argv[1:8]
+path, run_id, db, kp, na, nb, ids, installation = sys.argv[1:9]
+# `installationId` is recorded so teardown can use the same ownership filter the
+# product uses, instead of a test-only label that production never stamps.
 json.dump({"runId": run_id, "database": db, "kernelPort": int(kp),
-           "nodePorts": [int(na), int(nb)], "nodeIds": ids.split()},
+           "nodePorts": [int(na), int(nb)], "nodeIds": ids.split(),
+           "installationId": installation},
           open(path, "w"), indent=1)
 PY
 chmod 600 "$STATE/run.json"

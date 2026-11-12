@@ -161,6 +161,24 @@ jobs:
       # ---------------------------------------------------------------------
       # B2: the docker socket, as the Node sees it.
       # ---------------------------------------------------------------------
+      # P001-C1.2: container ownership, against this job's real daemon.
+      #
+      # Two installations on one daemon can legitimately share a node id (a
+      # restored database, a copied state directory), and they then compute the
+      # same container name. Before this phase the node ran `docker rm -f <name>`
+      # before creating, so the second install destroyed the first's running
+      # container and took over its traffic.
+      #
+      # `OPSWEAVE_REQUIRE_TEST_DOCKER=1` turns "no daemon" into a failure rather
+      # than a skip, so this step can never report a green that asserted nothing.
+      # The tests are in `apps/node/tests/` and drive the compiled adapter.
+      - name: One installation cannot take over another's container
+        env:
+          OPSWEAVE_REQUIRE_TEST_DOCKER: "1"
+        run: |
+          set -eu
+          cargo test --locked -p opsweave-node --test container_ownership -- --test-threads=1 --nocapture
+
       - name: Node reaches the docker socket as an unprivileged user
         id: socket
         run: |
