@@ -84,6 +84,61 @@ The operator resolves it once, explicitly, with an environment variable:
 
 Both are one-time. Neither is a default.
 
+### 2.2a `reinitialize` covers the Kernel identity too (C1.2.2)
+
+`reinitialize` as first shipped only re-minted the Docker ownership token. It
+left `node-identity.json` alone, and that file holds the node id, the control
+credential, the data token and the generation. Measured against a real Kernel:
+
+```
+A node=8c820e19…  endpoint=http://127.0.0.1:9251
+clone reinitialized, installation id changed, Kernel node id unchanged
+A endpoint=http://127.0.0.1:21637      <- the clone overwrote A's endpoint
+```
+
+Two processes heartbeating one node row alternate `generation`, `last_seen_at`
+and `data_endpoint`; both receive the same `DesiredWorkload` list and both may
+create instances for it. Separating the Docker identity alone therefore fixes
+only the container half of the collision.
+
+**`reinitialize` now means: this directory is a new installation, in both
+senses.** It mints a new installation id *and* discards the inherited Kernel
+identity, so the node must enrol afresh.
+
+| Question | Answer |
+|---|---|
+| What is discarded? | `installation-id`, `installation-binding.json`, `node-identity.json` |
+| What is required? | a **new** enrolment token; the inherited one was spent by the original enrolment and the Kernel refuses it twice |
+| Node credential / data token / generation | all new, issued by `POST /api/v1/node-enrollment/redeem` |
+| When is state destroyed? | **after** the new enrolment succeeds, never before |
+| If enrolment fails? | the original files are untouched and the node exits non-zero — it can be retried, and it never falls back to the shared credential |
+
+The inherited identity is not deleted up front: it is read, the replacement is
+obtained, and only then are the old files replaced. A failure therefore leaves a
+directory that is still exactly what it was.
+
+**The clone also needs a name of its own.** `kernel.nodes.name` is `UNIQUE`, and
+the inherited name belongs to the original. Enrolling a clone without setting
+`OPSWEAVE_NODE_NAME` fails with the Kernel's generic
+
+```
+node enrollment failed (409 Conflict): {"code":"CONFLICT", ...}
+```
+
+which does not say why. This is a real operational trap and it is not fixed
+here: the Kernel cannot know that two enrolments are one clone, and inventing a
+`CONFLICT` explanation from a bare unique violation would be a guess. The
+documented step is to set `OPSWEAVE_NODE_NAME` when reinitializing a clone.
+
+`accept` is unchanged and means the opposite: this directory **is** the same
+installation, moved or restored. It keeps the Kernel identity as well.
+
+### 2.2b A node identity is not proof of a distinct process
+
+Even with separate node ids, two nodes can be misconfigured onto one state
+directory. That is a different failure and is not solved here: it is the
+"concurrent processes sharing one directory" case §2.2 leaves out of scope.
+
 ### 2.3 Pre-C1.2.1 state directories adopt in place
 
 An installation that has `installation-id` but no binding predates this ADR. It

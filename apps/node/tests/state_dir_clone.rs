@@ -173,7 +173,8 @@ async fn a_full_state_dir_clone_cannot_claim_the_original_installation() {
         &args_for(&state_a),
         opsweave_node::runtime::IdentityAction::None,
     )
-    .expect("A's own state directory must resolve");
+    .expect("A's own state directory must resolve")
+    .installation_id;
     assert_eq!(
         token_a, installation_a,
         "A must keep the id it was seeded with"
@@ -213,17 +214,24 @@ async fn a_full_state_dir_clone_cannot_claim_the_original_installation() {
             &args_for(&state_a),
             opsweave_node::runtime::IdentityAction::None,
         )
-        .unwrap(),
+        .unwrap()
+        .installation_id,
         token_a,
         "B's refusal must not disturb A's identity"
     );
 
     // The operator decides B is a clone. It gets its own identity.
-    let token_b = opsweave_node::runtime::load_or_create_installation_id_with(
+    let reinit = opsweave_node::runtime::load_or_create_installation_id_with(
         &args_for(&state_b),
         opsweave_node::runtime::IdentityAction::Reinitialize,
     )
     .expect("reinitialize must succeed");
+    let token_b = reinit.installation_id;
+    // The Kernel identity is the other half, and C1.2.1 left it shared.
+    assert!(
+        reinit.discard_node_identity,
+        "reinitialize must also discard the inherited Kernel node identity"
+    );
     assert_ne!(
         token_b, token_a,
         "after reinitialize the clone must not keep the original's token"
@@ -283,14 +291,16 @@ fn a_restart_keeps_its_identity() {
         &args_for(&state),
         opsweave_node::runtime::IdentityAction::None,
     )
-    .unwrap();
+    .unwrap()
+    .installation_id;
     for _ in 0..3 {
         assert_eq!(
             opsweave_node::runtime::load_or_create_installation_id_with(
                 &args_for(&state),
                 opsweave_node::runtime::IdentityAction::None,
             )
-            .unwrap(),
+            .unwrap()
+            .installation_id,
             first,
             "a restart re-minted the identity, which would orphan its own containers"
         );
@@ -311,7 +321,8 @@ fn an_in_place_move_keeps_its_identity() {
         &args_for(&from),
         opsweave_node::runtime::IdentityAction::None,
     )
-    .unwrap();
+    .unwrap()
+    .installation_id;
     let to = work.path().join("data/moved");
     std::fs::rename(&from, &to).unwrap();
     assert_eq!(
@@ -319,7 +330,8 @@ fn an_in_place_move_keeps_its_identity() {
             &args_for(&to),
             opsweave_node::runtime::IdentityAction::None,
         )
-        .expect("an in-place move must not be treated as a clone"),
+        .expect("an in-place move must not be treated as a clone")
+        .installation_id,
         first
     );
 }
@@ -339,7 +351,8 @@ fn a_restore_into_a_new_directory_needs_an_explicit_accept() {
         &args_for(&original),
         opsweave_node::runtime::IdentityAction::None,
     )
-    .unwrap();
+    .unwrap()
+    .installation_id;
     let restored = work.path().join("restore/node-a");
     clone_state_dir(&original, &restored);
 
@@ -356,7 +369,8 @@ fn a_restore_into_a_new_directory_needs_an_explicit_accept() {
             &args_for(&restored),
             opsweave_node::runtime::IdentityAction::Accept,
         )
-        .unwrap(),
+        .unwrap()
+        .installation_id,
         token,
         "accept must keep the identity"
     );
@@ -366,7 +380,8 @@ fn a_restore_into_a_new_directory_needs_an_explicit_accept() {
             &args_for(&restored),
             opsweave_node::runtime::IdentityAction::None,
         )
-        .unwrap(),
+        .unwrap()
+        .installation_id,
         token
     );
 }
@@ -391,6 +406,7 @@ fn concurrent_mints_agree_on_one_identity() {
                 opsweave_node::runtime::IdentityAction::None,
             )
             .unwrap()
+            .installation_id
         }));
     }
     let ids: std::collections::BTreeSet<String> =
@@ -440,5 +456,48 @@ fn an_unreadable_identity_file_is_an_error_not_a_new_identity() {
     assert!(
         path.is_dir(),
         "the unreadable path was replaced, which is exactly the silent re-mint"
+    );
+}
+
+/// A failed re-enrolment must leave the directory exactly as it was.
+///
+/// `reinitialize` sets the inherited Kernel identity aside before enrolling, so
+/// a network failure or a rejected token could otherwise destroy a working
+/// installation. ADR-023 §2.2a requires the old files to be restorable, and the
+/// node must never fall back to the shared credential.
+#[test]
+fn setting_aside_and_restoring_a_kernel_identity_is_lossless() {
+    let work = tempfile::tempdir().unwrap();
+    let state = seed_state_dir(
+        &work.path().join("data/node-a"),
+        uuid::Uuid::new_v4(),
+        &uuid::Uuid::new_v4().to_string(),
+    );
+    let before = std::fs::read(state.join("node-identity.json")).unwrap();
+
+    let previous = opsweave_node::runtime::set_aside_node_identity(&args_for(&state))
+        .expect("setting aside must succeed");
+    assert!(
+        !state.join("node-identity.json").exists(),
+        "the inherited identity must be moved out of the way before enrolling"
+    );
+    let previous = previous.expect("there was an identity to set aside");
+
+    opsweave_node::runtime::restore_node_identity(&args_for(&state), &previous);
+    assert_eq!(
+        std::fs::read(state.join("node-identity.json")).unwrap(),
+        before,
+        "a failed re-enrolment must restore the previous identity byte for byte"
+    );
+
+    // With nothing there, setting aside is a normal first-run no-op.
+    let empty = tempfile::tempdir().unwrap();
+    let empty_state = empty.path().join("data/node-c");
+    std::fs::create_dir_all(&empty_state).unwrap();
+    assert!(
+        opsweave_node::runtime::set_aside_node_identity(&args_for(&empty_state))
+            .unwrap()
+            .is_none(),
+        "a directory with no identity is not an error"
     );
 }

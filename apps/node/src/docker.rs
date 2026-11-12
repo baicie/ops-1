@@ -902,6 +902,22 @@ pub fn container_name(node_id: uuid::Uuid, instance_id: uuid::Uuid) -> String {
 /// forked child until it execs, and `execve` then fails with ETXTBSY. This is a
 /// harness race, not product behaviour; the product never retries Docker. The
 /// retry is bounded, and only that OS error is retried.
+/// Serialises the Docker-adapter tests.
+///
+/// They fork a shell once per Docker call, and several run at once. Individually
+/// each fork completes in milliseconds; a dozen together on a loaded machine does
+/// not, and the adapter's timeouts then fire on a child that had not exec'd yet -
+/// which reads as a product failure and is not. One lock for the whole file costs
+/// a few seconds and makes those timeouts real hang detectors again.
+#[cfg(test)]
+async fn serial_docker_test() -> tokio::sync::MutexGuard<'static, ()> {
+    // Async, not std: the guard is held across the awaits inside each test, and
+    // a `std::sync::MutexGuard` there is a blocking-across-await bug that
+    // clippy correctly refuses.
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    LOCK.lock().await
+}
+
 #[cfg(test)]
 fn is_text_file_busy(error: &anyhow::Error) -> bool {
     error
@@ -941,7 +957,7 @@ mod tests {
     // the call?" - and an argv assertion cannot answer that: it passes just as
     // happily when `rm -f` is still there a line later.
 
-    use super::{Ownership, INSTALLATION_LABEL};
+    use super::{serial_docker_test, Ownership, INSTALLATION_LABEL};
 
     /// A `docker` stand-in with a store at `$STORE/<name>/<field>`.
     ///
@@ -1083,6 +1099,7 @@ exit 0
 
     #[tokio::test]
     async fn a_foreign_container_with_the_same_name_is_never_removed() {
+        let _serial = serial_docker_test().await;
         let dir = tempfile::tempdir().unwrap();
         let (binary, store) = fake_docker(dir.path());
         let name = "opsweave-shared-name";
@@ -1118,6 +1135,7 @@ exit 0
 
     #[tokio::test]
     async fn our_own_container_is_removed_and_a_missing_one_is_not_an_error() {
+        let _serial = serial_docker_test().await;
         let dir = tempfile::tempdir().unwrap();
         let (binary, store) = fake_docker(dir.path());
         let name = "opsweave-ours";
@@ -1149,6 +1167,7 @@ exit 0
 
     #[tokio::test]
     async fn create_refuses_a_name_another_installation_owns() {
+        let _serial = serial_docker_test().await;
         use opsweave_contracts::{
             DesiredAction, DesiredBackend, DesiredWorkload, ResourceRequirements,
         };
@@ -1213,6 +1232,7 @@ exit 0
 
     #[tokio::test]
     async fn list_managed_requires_the_installation_label() {
+        let _serial = serial_docker_test().await;
         let dir = tempfile::tempdir().unwrap();
         let (binary, store) = fake_docker(dir.path());
         let node_id = uuid::Uuid::new_v4();
@@ -1243,6 +1263,7 @@ exit 0
 
     #[tokio::test]
     async fn stop_and_remove_owned_leaves_a_foreign_container_running() {
+        let _serial = serial_docker_test().await;
         let dir = tempfile::tempdir().unwrap();
         let (binary, store) = fake_docker(dir.path());
         let name = "opsweave-foreign";
@@ -1269,6 +1290,7 @@ exit 0
 
     #[tokio::test]
     async fn stop_and_remove_reports_a_surviving_container() {
+        let _serial = serial_docker_test().await;
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("docker");
         std::fs::write(
@@ -1298,7 +1320,8 @@ exit 0
 #[cfg(test)]
 mod run_tests {
     use super::{
-        redacted_command, retry_exec_busy, validate_env_budget, DockerAdapter, MAX_ENV_ENTRY_BYTES,
+        redacted_command, retry_exec_busy, serial_docker_test, validate_env_budget, DockerAdapter,
+        MAX_ENV_ENTRY_BYTES,
     };
     use std::collections::BTreeMap;
 
@@ -1319,6 +1342,7 @@ mod run_tests {
     }
     #[tokio::test]
     async fn docker_create_stderr_is_redacted_before_it_reaches_logs() {
+        let _serial = serial_docker_test().await;
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("docker");
         std::fs::write(
@@ -1413,6 +1437,7 @@ esac
 
     #[tokio::test]
     async fn list_managed_simple_command() {
+        let _serial = serial_docker_test().await;
         let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into())
             .with_installation_id(uuid::Uuid::new_v4().to_string());
         // The timeout exists to catch a hang, not to measure latency: 2s was
@@ -1429,6 +1454,7 @@ esac
 
     #[tokio::test]
     async fn run_simple_command() {
+        let _serial = serial_docker_test().await;
         let adapter = DockerAdapter::new("/usr/bin/true".into(), "unix://unused".into());
         let result = tokio::time::timeout(std::time::Duration::from_secs(15), adapter.run(&["x"]))
             .await

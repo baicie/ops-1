@@ -232,6 +232,115 @@ else
   fail "stopping A removed B's container"
 fi
 
+# --- CASE 3b: BOTH of this checkout's installations are cleaned -------------
+#
+# The brief's case, and the defect it names: `demo_installation_id()` returned
+# the first identity it found and stopped, so `demo_stop_containers` removed
+# node-a's containers and left node-b's running. A third installation on the
+# same daemon must be untouched either way.
+#
+#   node-a -> installation A, container A1
+#   node-b -> installation B, container B1
+#   other  -> installation C, container C1
+#
+# After the stop: A1 and B1 gone, C1 intact.
+echo
+echo "== CASE 3b: node-a AND node-b are cleaned, a third installation is not"
+FAKE="$WORK/fake3b"
+mkdir -p "$FAKE/bin" "$FAKE/repo/data/node-a" "$FAKE/repo/data/node-b" "$FAKE/repo/scripts" "$FAKE/store"
+cp "$ROOT/scripts/demo_common.sh" "$FAKE/repo/scripts/"
+ID_A="aaaaaaaa-1111-4111-8111-111111111111"
+ID_B="bbbbbbbb-2222-4222-8222-222222222222"
+ID_C="cccccccc-3333-4333-8333-333333333333"
+printf '%s' "$ID_A" > "$FAKE/repo/data/node-a/installation-id"
+printf '%s' "$ID_B" > "$FAKE/repo/data/node-b/installation-id"
+for pair in "a1:$ID_A" "b1:$ID_B" "c1:$ID_C"; do
+  name="${pair%%:*}"; label="${pair##*:}"
+  mkdir -p "$FAKE/store/$name"
+  printf '%s' "$label" > "$FAKE/store/$name/label"
+  printf '%s-id' "$name" > "$FAKE/store/$name/id"
+done
+cat > "$FAKE/bin/docker" <<'FAKE_DOCKER'
+#!/bin/sh
+case "$1" in
+  ps)
+    for d in "$STORE"/*; do
+      [ -d "$d" ] || continue
+      keep=1; prev=""
+      for a in "$@"; do
+        case "$prev" in
+          --filter)
+            case "$a" in
+              "label=opsweave.installation-id="*)
+                want="${a#label=opsweave.installation-id=}"
+                [ "$want" = "$(cat "$d/label")" ] || keep=0 ;;
+            esac ;;
+        esac
+        prev="$a"
+      done
+      [ "$keep" = "1" ] && printf '%s
+' "$(basename "$d")"
+    done ;;
+  rm)
+    for a in "$@"; do
+      case "$a" in -*) ;; *)
+        for d in "$STORE"/*; do
+          [ -d "$d" ] || continue
+          if [ "$a" = "$(basename "$d")" ] || [ "$a" = "$(cat "$d/id" 2>/dev/null)" ]; then
+            rm -rf "$d"
+          fi
+        done ;;
+      esac
+    done ;;
+  inspect)
+    last=""; for a in "$@"; do case "$a" in -*) ;; *) last="$a" ;; esac; done
+    for d in "$STORE"/*; do
+      [ -d "$d" ] || continue
+      if [ "$last" = "$(basename "$d")" ]; then cat "$d/label"; exit 0; fi
+    done
+    echo "<no value>" ;;
+esac
+exit 0
+FAKE_DOCKER
+chmod +x "$FAKE/bin/docker"
+OUT="$(cd "$FAKE/repo" && PATH="$FAKE/bin:$PATH" STORE="$FAKE/store" ROOT="$FAKE/repo" \
+  bash -c '. "$ROOT/scripts/demo_common.sh"; demo_stop_containers purge' 2>&1)"
+CODE=$?
+[ "$CODE" -eq 0 ] && pass "the stop succeeded" || fail "the stop failed (exit $CODE): $OUT"
+[ ! -d "$FAKE/store/a1" ] && pass "A1 (node-a) was removed" || fail "A1 survived: node-a was not cleaned"
+[ ! -d "$FAKE/store/b1" ] && pass "B1 (node-b) was removed" || fail "B1 survived: only the first installation was cleaned"
+[ -d "$FAKE/store/c1" ] && pass "C1 (another installation) survived" || fail "C1 was removed: the sweep over-reached"
+if printf '%s' "$OUT" | grep -q "removed 1 container(s) of installation $ID_A" \
+   && printf '%s' "$OUT" | grep -q "removed 1 container(s) of installation $ID_B"; then
+  pass "both installations are named in the report"
+else
+  fail "the report does not name both installations: $OUT"
+fi
+
+# Both nodes carrying the SAME id must not make the script remove it twice or
+# report two removals for one installation.
+echo
+echo "== CASE 3c: the same identity in both state directories is deduplicated"
+printf '%s' "$ID_A" > "$FAKE/repo/data/node-b/installation-id"
+mkdir -p "$FAKE/store/a2" "$FAKE/store/b2"
+printf '%s' "$ID_A" > "$FAKE/store/a2/label"
+printf '%s' "$ID_A" > "$FAKE/store/b2/label"
+printf 'a2-id' > "$FAKE/store/a2/id"
+printf 'b2-id' > "$FAKE/store/b2/id"
+OUT="$(cd "$FAKE/repo" && PATH="$FAKE/bin:$PATH" STORE="$FAKE/store" ROOT="$FAKE/repo" \
+  bash -c '. "$ROOT/scripts/demo_common.sh"; demo_installation_ids' 2>&1)"
+if [ "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')" = "1" ]; then
+  pass "a duplicated identity is reported once"
+else
+  fail "the collector returned $(printf '%s\n' "$OUT" | wc -l | tr -d ' ') identities for one id: $OUT"
+fi
+OUT="$(cd "$FAKE/repo" && PATH="$FAKE/bin:$PATH" STORE="$FAKE/store" ROOT="$FAKE/repo" \
+  bash -c '. "$ROOT/scripts/demo_common.sh"; demo_stop_containers purge' 2>&1)"
+[ ! -d "$FAKE/store/a2" ] && [ ! -d "$FAKE/store/b2" ] \
+  && pass "both containers of the shared identity were removed in one pass" \
+  || fail "a container of the shared identity survived"
+[ -d "$FAKE/store/c1" ] && pass "the third installation still survived" || fail "C1 was removed"
+
 # --- CASE 4: a labelled container survives when its removal fails ----------
 #
 # The old code ended every removal with `|| true`, so a failed `docker rm` was
