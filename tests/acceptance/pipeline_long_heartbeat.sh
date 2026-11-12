@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 # A job that runs >70s proves the independent heartbeat task keeps the Lease alive.
+#
+# The job has 1001 records and the worker commits 500 per batch, so there are 3
+# batches and the delay fires twice - between batch 1/2 and 2/3. At 30s that is
+# ~60s of sleeping, which is SHORTER than the 75s observation window below, so on
+# a fast machine the job finished first and line 31 failed with
+# "job completed before long-running proof". Measured on run 43146267562: the
+# preceding Kernel-restart case alone took 62s there, and this case still
+# finished inside 75s.
+#
+# 55s gives ~110s of delay, comfortably past the window, and stays inside the
+# job's own timeoutSeconds=300. Raising the observation window instead would not
+# fix the race - it would only move it.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 URL="${OPSWEAVE_URL:-http://127.0.0.1:18181}"
@@ -16,7 +28,7 @@ load_worker node-b
 env OPSWEAVE_WORKER_KERNEL_URL="$URL" OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-b/node-identity.json" \
   OPSWEAVE_WORKER_INSTANCE_ID="$W_INSTANCE_ID" OPSWEAVE_WORKER_NODE_GENERATION="$W_NODE_GEN" \
   OPSWEAVE_WORKER_JOB_ID="$JOB" OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1" \
-  OPSWEAVE_WORKER_BATCH_DELAY_MS=30000 \
+  OPSWEAVE_WORKER_BATCH_DELAY_MS=55000 \
   ./target/debug/opsweave-pipeline-worker >/tmp/long-heartbeat.log 2>&1 &
 WORKER_PID=$!
 KERNEL_PID="$(cat /tmp/data-kernel.pid)"
