@@ -87,7 +87,7 @@ permissions:
 
 jobs:
   acceptance:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The harness builds the kernel and the web bundle, runs four script suites and then twelve
     # browser specs. Measured locally at roughly 12 minutes cold; the three flagship specs add
     # about two minutes, and 45 is the same ceiling the data-foundation job uses for a comparable

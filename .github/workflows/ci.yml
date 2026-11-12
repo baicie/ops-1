@@ -5,7 +5,7 @@ on:
     branches: [main]
 jobs:
   rust:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # apps/kernel's DB-backed tests (src/jobs.rs, mod terminalization_tests) skip only when
     # OPSWEAVE_TEST_DATABASE_URL is genuinely unset; a set-but-unusable URL (bad syntax,
     # unreachable server, rejected migrations) panics. This job also sets
@@ -204,7 +204,7 @@ jobs:
   # process and a real PostgreSQL, and checks that the bytes the plugin signed
   # are the bytes the Kernel verified, stored and served.
   g13a-roundtrip:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
@@ -238,7 +238,7 @@ jobs:
   # collect dialog, not a fixture. Upstream Zabbix is a local fixture and the
   # run says so; REAL_ZABBIX remains NOT_RUN.
   g13a1-gateway:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       OPSWEAVE_REGISTRY: 127.0.0.1:5001
       # The Node process (on the host) pulls the image; only the plugin
@@ -289,7 +289,7 @@ jobs:
   # Without this job the acceptance script would be a file nothing runs - the defect
   # tests/ci/check-spec-coverage.mjs exists to refuse.
   g13b14-claim:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
@@ -355,7 +355,7 @@ jobs:
   # exact state a crash leaves behind; the real Kernel worker must recover it
   # from the receipt without calling any plugin.
   g13b16-effect:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
@@ -404,7 +404,7 @@ jobs:
   # revocation and a disabled source stop it with a stable terminal reason. The
   # real Kernel worker loop is the system under test; no Node/Zabbix is used.
   g13b17-principal:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
