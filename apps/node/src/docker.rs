@@ -262,6 +262,12 @@ impl DockerAdapter {
             // Without an identity we cannot distinguish ours from anyone else's.
             // Report it as foreign rather than pretending to own it: the caller
             // turns that into a refusal, never into a delete.
+            //
+            // This deliberately does NOT error, unlike `list_managed`. The two
+            // answer different questions: "may I delete this one container?"
+            // has a safe answer when unproven (no), while "is anything of mine
+            // left?" does not - an empty list there would read as "clean" and
+            // let quarantine report a success it never established.
             let exists = self.inspect(name).await?.is_some();
             return Ok(if exists {
                 Ownership::Foreign
