@@ -216,6 +216,100 @@ pub struct InstallationIdentity {
     pub discard_node_identity: bool,
 }
 
+/// A reinitialize that has begun but not committed.
+///
+/// Written to disk BEFORE any identity file is touched, and removed only after
+/// the new Kernel identity is durably persisted. Every start reads it first, so
+/// a crash, a failed enrolment or a killed process leaves a directory that says
+/// "this was mid-reinitialize" rather than one that silently looks settled.
+///
+/// Why this exists: the first implementation relied on restoring the old
+/// `node-identity.json` from memory when enrolment failed. That restore does not
+/// run if the process dies, and it also never undid the new `installation-id`
+/// and binding - so the next start found a matching binding, concluded the
+/// directory was settled, and loaded the *original's* Kernel identity. Measured
+/// before the fix: a failed reinitialize followed by a plain restart rewrote
+/// node A's data endpoint.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationRecord {
+    /// Identity inherited from the installation this directory was cloned from.
+    pub inherited_installation_id: String,
+    pub started_at: String,
+}
+
+fn migration_path(args: &Args) -> PathBuf {
+    args.state_dir.join("reinitialize-in-progress.json")
+}
+
+/// Read a pending reinitialize, if any.
+pub fn pending_migration(args: &Args) -> anyhow::Result<Option<MigrationRecord>> {
+    let path = migration_path(args);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "read the reinitialize marker at {}; this directory may be mid-migration \
+                     and cannot be started until it is known",
+                    path.display()
+                )
+            })
+        }
+    };
+    let record = serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "the reinitialize marker at {} is not valid; this directory may be mid-migration",
+            path.display()
+        )
+    })?;
+    Ok(Some(record))
+}
+
+/// Record that a reinitialize has started. Durable before it returns.
+fn begin_migration(args: &Args, inherited_installation_id: &str) -> anyhow::Result<()> {
+    let record = MigrationRecord {
+        inherited_installation_id: inherited_installation_id.to_string(),
+        started_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let path = migration_path(args);
+    write_atomic(&path, &serde_json::to_vec_pretty(&record)?).with_context(|| {
+        format!(
+            "record the start of reinitialize at {}; nothing was changed",
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Clear the marker: the new identity is committed and durable.
+pub fn commit_migration(args: &Args) -> anyhow::Result<()> {
+    let path = migration_path(args);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error)
+            .with_context(|| format!("clear the reinitialize marker at {}", path.display())),
+    }
+}
+
+/// Write `bytes` to `path` atomically, replacing whatever was there.
+fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_extension(format!("tmp.{}", Uuid::new_v4()));
+    std::fs::write(&temporary, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&temporary, path).with_context(|| format!("publish {}", path.display()))?;
+    Ok(())
+}
+
 /// What the operator says a mismatched binding means. See ADR-023 §2.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityAction {
@@ -383,6 +477,21 @@ pub fn load_or_create_installation_id_with(
     action: IdentityAction,
 ) -> anyhow::Result<InstallationIdentity> {
     let path = args.state_dir.join("installation-id");
+
+    // A pending reinitialize overrides everything below.
+    //
+    // Without this, a failed migration left a NEW installation-id and a NEW
+    // binding that matched their own directory, so the binding comparison
+    // concluded the directory was settled and returned
+    // `discard_node_identity: false` - and the node then loaded the *original's*
+    // Kernel identity. The marker is written before any file is touched and
+    // cleared only after the new identity is durable, so its presence means
+    // "this directory is mid-reinitialize" regardless of what the other files
+    // now say.
+    if let Some(record) = pending_migration(args)? {
+        return finish_or_continue_migration(args, action, record, &path);
+    }
+
     // Only `NotFound` means "absent". Every other read error used to fall
     // through to "mint a new one", which on an unreadable directory silently
     // produced a second identity and orphaned everything the first owned.
@@ -488,6 +597,12 @@ pub fn load_or_create_installation_id_with(
                          installation. Containers created with the previous identity are left \
                          to the installation that still owns them."
                     );
+                    // Durable record FIRST. Everything below is destructive, and
+                    // without a marker a failure halfway leaves a directory that
+                    // looks settled - which is exactly how a failed reinitialize
+                    // used to end with the next start adopting the original's
+                    // Kernel identity.
+                    begin_migration(args, &token)?;
                     // Both files must go, or the next start reads the old token
                     // (or the old binding) again and asks the same question.
                     // Removed identity-first: a crash between the two leaves a
@@ -533,6 +648,76 @@ pub fn load_or_create_installation_id_with(
                 discard_node_identity: false,
             })
         }
+    }
+}
+
+/// A start that finds a pending reinitialize.
+///
+/// No path through this function may end with the inherited Kernel identity in
+/// use. Every branch either continues the migration (`discard_node_identity:
+/// true`) or refuses.
+fn finish_or_continue_migration(
+    args: &Args,
+    action: IdentityAction,
+    record: MigrationRecord,
+    path: &Path,
+) -> anyhow::Result<InstallationIdentity> {
+    let current = std::fs::read_to_string(path).ok();
+    let current = current.as_deref().map(str::trim).unwrap_or("");
+    tracing::warn!(
+        inherited = %record.inherited_installation_id,
+        current = %current,
+        started_at = %record.started_at,
+        "this directory has an unfinished reinitialize; continuing it"
+    );
+    if action == IdentityAction::Accept {
+        // `accept` means "this is the same installation, moved or restored".
+        // That contradicts a half-finished clone migration; guessing which the
+        // operator meant is how identities get mixed.
+        anyhow::bail!(
+            "INSTALLATION_MIGRATION_IN_PROGRESS: this directory has an unfinished \
+             reinitialize (started {}). OPSWEAVE_INSTALLATION_ID_ACTION=accept would keep \
+             the inherited identity, which is the opposite of what this directory was \
+             being migrated to. Finish the reinitialize with a new enrolment token, or \
+             restore the directory from a backup taken before it began.",
+            record.started_at
+        );
+    }
+    if current.is_empty() {
+        // The previous attempt died between removing the identity and minting
+        // the next one. Start that step again and continue as a clone.
+        finish_migration_remove_binding(args)?;
+        let minted = mint_installation_id(args, path)?;
+        return Ok(InstallationIdentity {
+            installation_id: minted,
+            discard_node_identity: true,
+        });
+    }
+    if !is_valid_installation_id(current) {
+        anyhow::bail!(
+            "INSTALLATION_MIGRATION_IN_PROGRESS: {} holds {current:?}, which is not a valid \
+             installation id, and a reinitialize started at {} never finished. Refusing to \
+             guess which identity this directory should have.",
+            path.display(),
+            record.started_at
+        );
+    }
+    // Either still the inherited id (the mint never happened) or a new one
+    // (it did). Both are mid-migration, so the Kernel identity must be
+    // re-established rather than inherited.
+    Ok(InstallationIdentity {
+        installation_id: current.to_string(),
+        discard_node_identity: true,
+    })
+}
+
+fn finish_migration_remove_binding(args: &Args) -> anyhow::Result<()> {
+    let binding = binding_path(args);
+    match std::fs::remove_file(&binding) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error)
+            .with_context(|| format!("remove the inherited binding at {}", binding.display())),
     }
 }
 
