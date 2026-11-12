@@ -501,3 +501,186 @@ fn setting_aside_and_restoring_a_kernel_identity_is_lossless() {
         "a directory with no identity is not an error"
     );
 }
+
+// ---- P001-C1.2.3: a failed reinitialize must not settle into a usable state --
+//
+// The first implementation restored only `node-identity.json` when enrolment
+// failed. The new `installation-id` and binding stayed, so the next start found
+// a binding that matched its own directory, concluded the directory was
+// settled, and loaded the ORIGINAL's Kernel identity. Measured before the fix:
+// a failed reinitialize followed by a plain restart rewrote node A's data
+// endpoint.
+
+fn write_marker(dir: &Path, inherited: &str) {
+    std::fs::write(
+        dir.join("reinitialize-in-progress.json"),
+        serde_json::json!({
+            "inheritedInstallationId": inherited,
+            "startedAt": "2026-11-12T00:00:00Z",
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+/// Force this directory to look like a clone: a binding that names a different
+/// directory, which is what `cp -a` produces.
+#[cfg(unix)]
+fn make_it_a_clone(state: &Path, installation_id: &str) {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(state).unwrap();
+    std::fs::write(
+        state.join("installation-binding.json"),
+        serde_json::json!({
+            "installationId": installation_id,
+            "stateDirDevice": meta.dev(),
+            "stateDirInode": meta.ino() + 1,
+            "recordedAt": "2026-11-12T00:00:00Z",
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+/// The exact sequence the defect needs: reinitialize, fail, start again with no
+/// token and no repair.
+#[test]
+fn a_failed_reinitialize_is_not_settled_on_the_next_start() {
+    let work = tempfile::tempdir().unwrap();
+    let state = seed_state_dir(
+        &work.path().join("data/node-a"),
+        uuid::Uuid::new_v4(),
+        &uuid::Uuid::new_v4().to_string(),
+    );
+    let inherited = opsweave_node::runtime::load_or_create_installation_id_with(
+        &args_for(&state),
+        opsweave_node::runtime::IdentityAction::None,
+    )
+    .unwrap()
+    .installation_id;
+    make_it_a_clone(&state, &inherited);
+
+    let first = opsweave_node::runtime::load_or_create_installation_id_with(
+        &args_for(&state),
+        opsweave_node::runtime::IdentityAction::Reinitialize,
+    )
+    .unwrap();
+    assert!(first.discard_node_identity);
+    assert_ne!(first.installation_id, inherited, "a new id must be minted");
+    assert!(
+        opsweave_node::runtime::pending_migration(&args_for(&state))
+            .unwrap()
+            .is_some(),
+        "the reinitialize must leave a durable marker until it is committed"
+    );
+
+    // Second start, same directory, no repair, no token.
+    let second = opsweave_node::runtime::load_or_create_installation_id_with(
+        &args_for(&state),
+        opsweave_node::runtime::IdentityAction::None,
+    )
+    .unwrap();
+    assert!(
+        second.discard_node_identity,
+        "the second start treated a half-finished reinitialize as settled, which is \
+         what let it load the original's Kernel identity"
+    );
+    assert_eq!(second.installation_id, first.installation_id);
+
+    opsweave_node::runtime::commit_migration(&args_for(&state)).unwrap();
+    assert!(opsweave_node::runtime::pending_migration(&args_for(&state))
+        .unwrap()
+        .is_none());
+    let settled = opsweave_node::runtime::load_or_create_installation_id_with(
+        &args_for(&state),
+        opsweave_node::runtime::IdentityAction::None,
+    )
+    .unwrap();
+    assert!(
+        !settled.discard_node_identity,
+        "a committed migration must not keep asking for a new Kernel identity"
+    );
+    assert_eq!(settled.installation_id, first.installation_id);
+}
+
+/// Every crash point leaves a state that either continues the migration or
+/// refuses - never one that silently inherits.
+#[cfg(unix)]
+#[test]
+fn every_crash_point_is_unsafe_to_settle() {
+    for point in ["after_marker", "after_mint", "identity_missing"] {
+        let work = tempfile::tempdir().unwrap();
+        let state = seed_state_dir(
+            &work.path().join("data/node-a"),
+            uuid::Uuid::new_v4(),
+            &uuid::Uuid::new_v4().to_string(),
+        );
+        let inherited = opsweave_node::runtime::load_or_create_installation_id_with(
+            &args_for(&state),
+            opsweave_node::runtime::IdentityAction::None,
+        )
+        .unwrap()
+        .installation_id;
+
+        match point {
+            "after_marker" => write_marker(&state, &inherited),
+            "after_mint" => {
+                let fresh = uuid::Uuid::new_v4().to_string();
+                std::fs::write(state.join("installation-id"), &fresh).unwrap();
+                make_it_a_clone(&state, &fresh);
+                write_marker(&state, &inherited);
+            }
+            _ => {
+                std::fs::remove_file(state.join("installation-id")).unwrap();
+                write_marker(&state, &inherited);
+            }
+        }
+
+        match opsweave_node::runtime::load_or_create_installation_id_with(
+            &args_for(&state),
+            opsweave_node::runtime::IdentityAction::None,
+        ) {
+            Ok(identity) => assert!(
+                identity.discard_node_identity,
+                "crash point {point} was treated as settled: the node would load the \
+                 inherited Kernel identity"
+            ),
+            Err(error) => {
+                let text = format!("{error:#}");
+                assert!(
+                    text.contains("INSTALLATION_MIGRATION_IN_PROGRESS")
+                        || text.contains("INSTALLATION_IDENTITY_CONFLICT"),
+                    "crash point {point} failed without saying why: {text}"
+                );
+            }
+        }
+    }
+}
+
+/// `accept` and `reinitialize` must stay distinct.
+#[test]
+fn accept_and_reinitialize_do_not_mix() {
+    let work = tempfile::tempdir().unwrap();
+    let state = seed_state_dir(
+        &work.path().join("data/node-a"),
+        uuid::Uuid::new_v4(),
+        &uuid::Uuid::new_v4().to_string(),
+    );
+    let inherited = opsweave_node::runtime::load_or_create_installation_id_with(
+        &args_for(&state),
+        opsweave_node::runtime::IdentityAction::None,
+    )
+    .unwrap()
+    .installation_id;
+    write_marker(&state, &inherited);
+
+    let error = opsweave_node::runtime::load_or_create_installation_id_with(
+        &args_for(&state),
+        opsweave_node::runtime::IdentityAction::Accept,
+    )
+    .expect_err("accept must not silently resolve a pending reinitialize");
+    assert!(
+        format!("{error:#}").contains("INSTALLATION_MIGRATION_IN_PROGRESS"),
+        "unexpected error: {error:#}"
+    );
+}

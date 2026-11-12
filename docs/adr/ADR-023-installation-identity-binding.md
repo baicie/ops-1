@@ -113,9 +113,41 @@ identity, so the node must enrol afresh.
 | When is state destroyed? | **after** the new enrolment succeeds, never before |
 | If enrolment fails? | the original files are untouched and the node exits non-zero — it can be retried, and it never falls back to the shared credential |
 
-The inherited identity is not deleted up front: it is read, the replacement is
-obtained, and only then are the old files replaced. A failure therefore leaves a
-directory that is still exactly what it was.
+**Corrected by C1.2.3.** The paragraph that used to stand here claimed a
+failure left the directory "exactly what it was". That was false, and it was
+measured false: only `node-identity.json` was restored. The new `installation-id`
+and `installation-binding.json` stayed, so the next start found a binding that
+matched its own directory, concluded the migration was settled, and loaded the
+**original's** Kernel identity - rewriting node A's data endpoint from 9321 to
+21902 in the measurement.
+
+A failed reinitialize is now an explicit, durable state:
+
+```
+<state_dir>/reinitialize-in-progress.json
+  { "inheritedInstallationId": "...", "startedAt": "..." }
+```
+
+Written before any identity file is touched, cleared only after the new Kernel
+identity is enrolled and persisted. Every start consults it before anything
+else, so the outcome does not depend on recovery code happening to run.
+
+| Crash point | What the next start does |
+|---|---|
+| marker written, nothing else | continues the migration |
+| new identity minted, marker present | continues; does **not** treat the new binding as settled |
+| identity file missing | mints, then continues |
+| enrolled but not committed | continues; re-establishes rather than inheriting |
+| committed | normal start |
+
+`accept` against a pending migration is refused: `accept` means "same
+installation", which is the opposite of what the directory was being migrated
+to, and choosing between them would be a guess.
+
+There is no in-memory restore of the installation identity on failure. Putting
+the inherited id back would recreate the collision, so the directory stays
+mid-migration and the error says exactly which files are new and which were set
+aside.
 
 **The clone also needs a name of its own.** `kernel.nodes.name` is `UNIQUE`, and
 the inherited name belongs to the original. Enrolling a clone without setting

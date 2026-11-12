@@ -60,13 +60,37 @@ async fn main() -> anyhow::Result<()> {
         None
     };
     let identity = match runtime::enroll(&args, &http).await {
-        Ok(identity) => identity,
+        Ok(identity) => {
+            // The new Kernel identity is now on disk. Only here is the
+            // migration committed: every earlier point leaves the marker in
+            // place, so a crash between enrolling and this line is recoverable
+            // (the next start finds the marker and re-establishes the identity
+            // instead of inheriting the original's).
+            if installation.discard_node_identity {
+                runtime::commit_migration(&args).context(
+                    "the new Kernel identity was enrolled and persisted, but the \
+                     reinitialize marker could not be cleared. The next start will treat \
+                     this directory as mid-migration and re-establish the identity; it \
+                     will not fall back to the inherited one",
+                )?;
+            }
+            identity
+        }
         Err(error) => {
+            // Deliberately NO restore of the installation identity: it is already
+            // the new one, and putting the inherited one back would recreate the
+            // very state this phase exists to prevent. The marker stays, so the
+            // next start continues the migration instead of settling.
             if let Some(previous) = previous_identity {
                 runtime::restore_node_identity(&args, &previous);
             }
             return Err(error).context(
-                "reinitialize needs a NEW enrolment token: the one this clone inherited was                  spent by the original enrolment and the Kernel refuses it twice. The previous                  identity has been restored, so this directory is unchanged and can be retried                  with OPSWEAVE_ENROLLMENT_TOKEN set to a fresh token",
+                "reinitialize failed AFTER the installation identity was re-minted. This \
+                 directory is NOT in its original state: installation-id and \
+                 installation-binding.json are new, node-identity.json was set aside, and \
+                 reinitialize-in-progress.json records the unfinished migration. It will not \
+                 fall back to the inherited Kernel identity. Re-run with \
+                 OPSWEAVE_ENROLLMENT_TOKEN set to a fresh token to finish.",
             );
         }
     };

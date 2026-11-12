@@ -660,7 +660,7 @@ discarded, and `main` acts on it:
 | What is required? | a **new** enrolment token — the inherited one was spent by the original |
 | Credential / data token / generation | all new, from `POST /api/v1/node-enrollment/redeem` |
 | When is state destroyed? | **after** the new enrolment succeeds, never before |
-| If enrolment fails? | the original files are restored byte for byte; the node exits non-zero |
+| If enrolment fails? | **corrected in §4g**: only `node-identity.json` was restored, so the directory is NOT what it was. C1.2.3 replaced this with a durable migration marker |
 
 The inherited identity is read, set aside, and only replaced once the
 replacement exists. A failed enrolment puts it back, so the directory is exactly
@@ -728,7 +728,7 @@ sweep and never reports success.
 | the Kernel answers A's heartbeat for A's node id | n/a (control) | PASS |
 | A's data endpoint is not overwritten | **FAIL** — `9251 -> 21637` | PASS |
 | a re-enrolment without a fresh token is refused | n/a (new) | PASS |
-| the inherited identity is restored byte for byte | n/a (new) | PASS |
+| the inherited `node-identity.json` is restored byte for byte | n/a (new) | PASS — but only that file, which is the defect §4g fixes |
 | it does not fall back to the shared credential | n/a (new) | PASS |
 | A1 (node-a) and B1 (node-b) are both removed | **FAIL** — `B1 survived: only the first installation was cleaned` | PASS |
 | C1 (another installation) survives | PASS (both) | PASS |
@@ -754,6 +754,116 @@ sweep and never reports success.
 | Non-Unix platforms cannot check device/inode | **open** — unchanged |
 | A clone re-enrolled without `OPSWEAVE_NODE_NAME` fails on the UNIQUE name | **open**, documented in ADR-023 §2.2a |
 | Two processes sharing one state directory with a valid binding | out of scope, unchanged |
+
+---
+
+## 4g. C1.2.3 — a failed reinitialize is a state, not an accident
+
+C1.2.2 made `reinitialize` discard the Kernel identity as well as the Docker
+one, and relied on an in-memory restore when enrolment failed. That restore was
+incomplete and conditional on the process still being alive.
+
+### The defect, measured
+
+The reproduction does exactly what the brief forbids substituting around: clone,
+fail once, then start again **without** deleting the directory, **without**
+re-copying it, **without** repairing a file and **without** a token.
+
+After the first (failed) start the directory held:
+
+```
+installation-id            1c9e7d81…   NEW  (A's is fd4f3842…)
+installation-binding.json  81d45240…   NEW
+node-identity.json         93e348d4…   IDENTICAL TO A'S
+```
+
+The next start compared the new binding against its own directory, matched,
+concluded the directory was settled, and returned `discard_node_identity:
+false`:
+
+```
+INFO  loaded node identity  node_id=20f478dd-…  generation=2
+```
+
+That is A's node id. The clone then heartbeated as A and rewrote its endpoint:
+
+```
+A endpoint before: http://127.0.0.1:9321
+A endpoint after : http://127.0.0.1:21902
+RESULT: A OVERWRITTEN BY THE CLONE
+```
+
+### The fix
+
+A durable marker, `<state_dir>/reinitialize-in-progress.json`, written **before**
+any identity file is touched and cleared only after the new Kernel identity is
+enrolled and persisted. Every start reads it first; it overrides the binding
+comparison, so "the binding matches" can no longer be read as "the migration
+finished".
+
+| Crash point | Next start |
+|---|---|
+| marker written, nothing else | continues the migration |
+| new identity minted, marker present | continues; does not settle |
+| identity file missing | mints, then continues |
+| enrolled but not committed | continues; re-establishes instead of inheriting |
+| committed (marker cleared) | normal start |
+
+`accept` against a pending migration is refused — it means "same installation",
+the opposite of what the directory was being migrated to.
+
+There is deliberately **no** in-memory restore of the installation identity.
+Restoring the inherited id is what recreated the collision. The directory stays
+mid-migration and the error now describes what is actually on disk instead of
+claiming a clean revert.
+
+### Acceptance scenarios
+
+| Scenario | Result |
+|---|---|
+| **A.** failed reinitialize, then a plain start | does not load A's identity; A's endpoint unchanged |
+| **B.** retry with a fresh token, same directory, no repair | enrols; nodeId / credential / dataToken / installation-id **all four independent** |
+| **C.** crash at each of three points | never adopts the inherited identity; continues or refuses |
+| **D.** restart / accept / first enrol / container ownership | unchanged, all PASS |
+
+B, measured:
+
+```
+nodeId           A=20f478dd-…   B=7a429c74-…   independent
+credential       A=ow_node_rR…  B=ow_node_B3…  independent
+dataToken        A=ow_data_H2…  B=ow_data_Qb…  independent
+installation-id  A=249b93d5-…   B=5e58418c-…   independent
+marker cleared: migration committed
+```
+
+### Counterfactuals
+
+| Assertion | Broken implementation | Fixed |
+|---|---|---|
+| a failed reinitialize is not settled on the next start | **FAIL** | PASS |
+| every crash point refuses or continues | **FAIL** ×2 | PASS |
+| accept and reinitialize do not mix | **FAIL** | PASS |
+| end-to-end: the second start does not adopt A | **FAIL** — `A OVERWRITTEN BY THE CLONE` | PASS, `A untouched` |
+
+The end-to-end counterfactual was run with a binary built from `origin/main` in a
+separate worktree, so it measures the released code rather than a reverted
+working tree. Removing the marker check failed three of the ten tests in
+`state_dir_clone.rs`; restoring it passed ten.
+
+### What changed in the documentation
+
+ADR-023 said a failure left the directory "exactly what it was". That was false
+and is corrected in place, with the measurement that disproved it. The claim is
+withdrawn, not softened.
+
+### Residual risk
+
+| Risk | Status |
+|---|---|
+| A crash between two file operations still leaves a partial state | handled: every partial state is one the next start continues or refuses |
+| A clone made **before** C1.2.1 is undetectable | **open**, unchanged (ADR-023 §2.3) |
+| Non-Unix platforms cannot check device/inode | **open**, unchanged |
+| Kernel consumed the token but the local write failed | the node exits naming the state; a fresh token is required. It is **not** a lossless automatic retry, and the message says so |
 
 ---
 
