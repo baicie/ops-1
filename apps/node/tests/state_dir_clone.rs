@@ -140,6 +140,23 @@ fn seed_state_dir(dir: &Path, node_id: uuid::Uuid, installation_id: &str) -> Pat
     dir.to_path_buf()
 }
 
+/// Replace `node-identity.json` with a different node, as a successful
+/// `reinitialize` enrolment does.
+fn write_node_identity(dir: &Path, node_id: uuid::Uuid) {
+    std::fs::write(
+        dir.join("node-identity.json"),
+        serde_json::json!({
+            "nodeId": node_id,
+            "credential": "ow_node_clone_test",
+            "dataToken": "ow_data_clone_test",
+            "generation": 1,
+            "name": "node-b",
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
 /// Build `Args` for a state directory without starting anything.
 fn args_for(state_dir: &Path) -> opsweave_node::config::Args {
     use clap::Parser;
@@ -587,6 +604,12 @@ fn a_failed_reinitialize_is_not_settled_on_the_next_start() {
     );
     assert_eq!(second.installation_id, first.installation_id);
 
+    // C1.2.4: `commit_migration` no longer clears the marker on the strength of
+    // the caller saying so. It requires the Kernel half to be new as well, which
+    // is what the enrolment between these two lines does in `main`. Without
+    // this, a directory whose Docker identity was migrated but whose node
+    // identity was not would settle - and then resume as the original node.
+    write_node_identity(&state, uuid::Uuid::new_v4());
     opsweave_node::runtime::commit_migration(&args_for(&state)).unwrap();
     assert!(opsweave_node::runtime::pending_migration(&args_for(&state))
         .unwrap()
