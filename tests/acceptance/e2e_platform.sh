@@ -266,8 +266,29 @@ expect_fail "a tampered manifest is refused at admission" 400 SIGNATURE_OR_BUNDL
   --data-binary @/tmp/opsweave-tampered.plugin.zip "$KERNEL_URL/api/v1/plugins/packages"
 
 section "deploy v1 to two replicas"
-must "v1 deploys to two replicas and both reach READY" \
-  "$OPSCTL" --url "$KERNEL_URL" deploy "$PLUGIN" "$V1" --replicas 2 --selector role=node --wait
+# A re-deploy of a version that is ALREADY the active one is refused with
+# VERSION_ALREADY_ACTIVE (apps/kernel/src/deployments.rs:290) - and that refusal
+# is correct: there is nothing to do. Treating it as a failure, as this script
+# first did, reported a product that was behaving properly as broken, and it is
+# what turned the data-foundation legacy-regression job red.
+#
+# So the deploy is classified rather than simply required:
+#   success                -> the deployment was created or resumed
+#   VERSION_ALREADY_ACTIVE -> it is already active, which is what we wanted
+#   anything else          -> a real failure, with its own message
+DEPLOY_OUT="$EVIDENCE_DIR/deploy-v1.out"
+DEPLOY_ERR="$EVIDENCE_DIR/deploy-v1.err"
+if "$OPSCTL" --url "$KERNEL_URL" deploy "$PLUGIN" "$V1" --replicas 2 --selector role=node --wait \
+     >"$DEPLOY_OUT" 2>"$DEPLOY_ERR"; then
+  ok "v1 deploys to two replicas and both reach READY"
+elif grep -q 'VERSION_ALREADY_ACTIVE' "$DEPLOY_OUT" "$DEPLOY_ERR" 2>/dev/null; then
+  # Legitimate: a previous run in this environment already activated v1. The
+  # deployment is not re-created, so the replica and route assertions below are
+  # what actually establish the state.
+  ok "v1 was already the active version (VERSION_ALREADY_ACTIVE) - no deploy needed"
+else
+  bad "v1 deploy failed: $(head -3 "$DEPLOY_ERR" 2>/dev/null | tr '\n' ' ')"
+fi
 DETAIL_JSON="$(detail)"
 V1_INSTANCES="$(instances_of "$DETAIL_JSON" "$V1")"
 V1_READY="$(ready_count "$DETAIL_JSON" "$V1")"
@@ -383,10 +404,23 @@ section "activate v1"
 # Before activation the route must NOT serve v1: deploy and activate are
 # separate, and a route that switches on deploy makes the activation assertion
 # below meaningless.
-CODE_BEFORE="$(gateway_code "$PLUGIN" /api/hello)"
-[ "$CODE_BEFORE" != "200" ] \
-  && ok "before activation the gateway does not serve v1 (HTTP $CODE_BEFORE)" \
-  || bad "the gateway served the plugin before activation (HTTP $CODE_BEFORE)"
+#
+# The precondition is that v1 is not ALREADY active. On a fresh platform it is
+# not, and the assertion runs. In the data-foundation environment a previous run
+# leaves v1 active, and then "the gateway serves v1 before activation" is the
+# correct state, not a defect - asserting the opposite is what made that job red.
+# The distinction is read from the control plane, not guessed.
+ACTIVE_NOW="$(active_version)"
+if [ "$ACTIVE_NOW" = "$V1" ]; then
+  echo "   SKIP  v1 is already active on this platform (control plane says $ACTIVE_NOW);"
+  echo "         the pre-activation assertion does not apply, and is reported as SKIPPED"
+  echo "         rather than passed or failed"
+else
+  CODE_BEFORE="$(gateway_code "$PLUGIN" /api/hello)"
+  [ "$CODE_BEFORE" != "200" ] \
+    && ok "before activation the gateway does not serve v1 (HTTP $CODE_BEFORE)" \
+    || bad "the gateway served the plugin before activation (HTTP $CODE_BEFORE)"
+fi
 must "v1 activates" "$OPSCTL" --url "$KERNEL_URL" activate "$PLUGIN" "$V1"
 BODY="$(gateway "$PLUGIN" /api/hello)"
 echo "$BODY" | python3 -c '

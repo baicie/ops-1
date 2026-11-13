@@ -84,8 +84,25 @@ FAIL=0
 ok() { printf 'PASS  %s\n' "$*"; PASS=$((PASS + 1)); }
 bad() { printf 'FAIL  %s\n' "$*"; FAIL=$((FAIL + 1)); }
 
-# Run a command that the product MUST refuse. The assertion is that it exits
-# non-zero AND says why; a command that succeeds is the failure this checks for.
+# Run a command that the product MUST refuse, and classify WHY it failed.
+#
+# The first version accepted any non-zero exit as "the product refused", which
+# conflates four outcomes that mean four different things:
+#
+#   the product refused       the behaviour under test, and the only PASS
+#   the environment failed    the Kernel is not reachable, the token is drained,
+#                             the plugin was never staged - nothing was tested
+#   the test never started    the command itself is wrong (bad path, bad flag)
+#   the assertion failed      the product ACCEPTED what it should have refused
+#
+# `status != 0` cannot tell these apart, and neither can a substring match on its
+# own. So the expectation is now a REGEX over the recorded output plus a set of
+# markers that identify an environment fault. A command that fails with a
+# connection error is reported as INCONCLUSIVE, not as a pass.
+#
+#   $1 label
+#   $2 expected regex (extended, case-insensitive) that the real refusal carries
+#   $3.. the command
 expect_refusal() {
   local label="$1" want="$2"
   shift 2
@@ -93,14 +110,24 @@ expect_refusal() {
   out="$(mktemp)"; err="$(mktemp)"
   "$@" >"$out" 2>"$err"
   status=$?
+  local text; text="$(cat "$out" "$err" 2>/dev/null)"
   if [ "$status" = "0" ]; then
-    bad "$label: the product ACCEPTED it (exit 0)"
+    bad "$label: the product ACCEPTED it (exit 0) - the assertion, not the product, is what failed here"
     sed 's/^/      /' "$out" | head -5
-  elif ! grep -qi "$want" "$err" "$out"; then
-    bad "$label: refused (exit $status) but without '$want'"
+  elif printf '%s' "$text" | grep -qiE 'connection refused|connection reset|timed out connecting|dial tcp|no such host|address already in use|ENOENT'; then
+    bad "$label: INCONCLUSIVE - the command could not reach the platform, so the refusal was never tested"
+    sed 's/^/      /' "$err" | head -5
+  elif printf '%s' "$text" | grep -qiE 'command not found|unknown (command|flag|option)|invalid value .* for'; then
+    bad "$label: INCONCLUSIVE - the test command itself is malformed, so nothing was exercised"
+    sed 's/^/      /' "$err" | head -5
+  elif printf '%s' "$text" | grep -qiE 'UNAUTHENTICATED|401|token expired|session expired'; then
+    bad "$label: INCONCLUSIVE - the request was not authenticated; this is not the refusal under test"
+    sed 's/^/      /' "$err" | head -5
+  elif ! printf '%s' "$text" | grep -qiE "$want"; then
+    bad "$label: failed (exit $status) but without a marker matching /$want/ - cannot attribute the reason"
     sed 's/^/      /' "$err" | head -5
   else
-    ok "$label: refused with exit $status and '$want'"
+    ok "$label: the product refused it (exit $status, matched /$want/)"
   fi
   rm -f "$out" "$err"
 }
@@ -269,7 +296,12 @@ else
       ok "a container that exits during startup does not reach READY"
       sed 's/^/      /' "$EVIDENCE/crash-deploy.log" 2>/dev/null | tail -3
     fi
-    expect_refusal "activation is refused when no replica is READY" "READY\|DEGRADED\|FAILED\|CONFLICT\|not ready" \
+    # The exact code, not a hint of one. The previous pattern
+    # (READY|DEGRADED|FAILED|CONFLICT|not ready) matched almost any error text
+    # the Kernel could produce, so a 404 or a revision conflict would have passed
+    # as "refused because not ready". The Kernel answers DEPLOYMENT_NOT_READY for
+    # a deployment that never became READY (deployments.rs:470).
+    expect_refusal "activation is refused when no replica is READY" "DEPLOYMENT_NOT_READY" \
       env HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" activate dev.opsweave.crashloop 0.0.1
   fi
 
@@ -333,46 +365,116 @@ say "injection 4: the gateway does not switch versions"
 # activated. The check under test is "after activation the gateway serves THIS
 # version"; here nothing was activated, so a check that only looked at HTTP 200
 # would pass. This is the assertion shape the lifecycle uses.
-HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" install dist/plugins/hello-ops-0.0.1.plugin.zip >/dev/null 2>&1
-HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" deploy "$PLUGIN" 0.0.1 --replicas 2 --selector role=node --wait >/dev/null 2>&1 \
-  && HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" activate "$PLUGIN" 0.0.1 >/dev/null 2>&1
-BODY="$(curl -fsS -m 10 -H "Authorization: Bearer $(python3 -c 'import json;print(json.load(open("'"$STATE"'/home/.opsweave/session.json"))["token"])')" \
-  "$SRC_EP/api/v1/gateway/$PLUGIN/api/hello" 2>/dev/null || echo '{}')"
-if printf '%s' "$BODY" | grep -q '"0.0.2"'; then
-  bad "the route claimed 0.0.2 while only 0.0.1 was activated - the assertion would be vacuous"
+#
+# The first version of this injection fell back to `{}` when the gateway request
+# failed and then printed "the route serves 0.0.1" - a claim about a request that
+# never arrived. It also only grepped for "0.0.2", so a body that did not parse,
+# or a 503, satisfied it. Both are fixed: the request's status and the body's
+# parse are separate, explicit assertions, and the served version is compared
+# with the control plane rather than with a substring.
+if ! HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" install dist/plugins/hello-ops-0.0.1.plugin.zip >"$EVIDENCE/v1-install.log" 2>&1; then
+  bad "injection 4 is INCONCLUSIVE: the v1 bundle could not be staged"
+elif ! HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" deploy "$PLUGIN" 0.0.1 --replicas 2 --selector role=node --wait >"$EVIDENCE/v1-deploy.log" 2>&1; then
+  bad "injection 4 is INCONCLUSIVE: the v1 deployment did not become READY"
+elif ! HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" activate "$PLUGIN" 0.0.1 >"$EVIDENCE/v1-activate.log" 2>&1; then
+  bad "injection 4 is INCONCLUSIVE: v1 could not be activated, so there is no route to test"
 else
-  ok "the route serves 0.0.1, so a 'route is 0.0.2' assertion would correctly fail"
+  GW_BODY="$EVIDENCE/v1-gateway.body"
+  GW_CODE="$(curl -sS -o "$GW_BODY" -w '%{http_code}' -m 10 \
+    -H "Authorization: Bearer $(session_token)" \
+    "$SRC_EP/api/v1/gateway/$PLUGIN/api/hello" 2>"$EVIDENCE/v1-gateway.err" || echo 000)"
+  ACTIVE="$(curl -fsS -m 10 -H "Authorization: Bearer $(session_token)" \
+    "$SRC_EP/api/v1/plugins/$PLUGIN" 2>/dev/null \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin).get("activeVersion",""))' 2>/dev/null || echo '')"
+  if [ "$GW_CODE" = "000" ]; then
+    bad "injection 4 is INCONCLUSIVE: the gateway request did not complete (HTTP 000)"
+  elif [ "$GW_CODE" != "200" ]; then
+    bad "injection 4 is INCONCLUSIVE: the activated v1 plugin returned HTTP $GW_CODE"
+  elif ! SERVED="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("version",""))' "$GW_BODY" 2>/dev/null)"; then
+    bad "injection 4 is INCONCLUSIVE: the gateway body is not JSON, so no version can be read"
+  elif [ -z "$SERVED" ]; then
+    bad "injection 4 is INCONCLUSIVE: the gateway body carries no version field"
+  elif [ "$SERVED" != "$ACTIVE" ]; then
+    bad "the gateway serves $SERVED while the control plane reports $ACTIVE"
+  elif [ "$ACTIVE" != "0.0.1" ]; then
+    bad "the control plane reports $ACTIVE, not the 0.0.1 this injection activated"
+  else
+    ok "the gateway really serves $SERVED and the control plane agrees, so an assertion that the route is 0.0.2 would be false"
+  fi
 fi
 
 # --- 5. a rollback target that is not READY ---------------------------------
 say "injection 5: rollback to a version that was never deployed"
-expect_refusal "rollback to an undeployed version is refused" "not found\|NOT_FOUND\|404\|deploy" \
+# A version that was never deployed takes the NOT_FOUND path ("deployment not
+# found; deploy the version first", deployments.rs:431) - a different branch from
+# the DEPLOYMENT_NOT_READY assertion above. The two cases are kept distinct, as
+# the brief requires: "never deployed" and "deployed but not READY" are not the
+# same refusal and must not be satisfied by one pattern.
+expect_refusal "rollback to an undeployed version is refused" "NOT_FOUND" \
   env HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" rollback "$PLUGIN" 9.9.9 --replicas 1
 
 # --- 6. another installation's container under our name ---------------------
-say "injection 6: a foreign installation's container with the same name"
-# This is the C1.2 boundary, injected here so the lifecycle's ownership claim is
-# known to be testable. Two installation ids, one container name: the second
-# installation must see Foreign and must not remove it.
+say "injection 6: a foreign installation's container under our name"
+# The C1.2 boundary, injected so the ownership claim is known to be testable.
+#
+# The first version asserted only that `docker ps --filter label=…` did not list
+# the container. That is a test of the Docker CLI's filter, not of the product:
+# it would pass with the Node's ownership check deleted entirely, because the
+# filter and the assertion are the same query. It also never removed anything
+# through the product's code path.
+#
+# This version drives the compiled `DockerAdapter` - the same type the Node uses
+# to decide ownership and to remove - through the library target, via a small
+# test binary that returns a machine-readable verdict. The container is planted
+# first, then the adapter is asked (a) whether it thinks it owns it and (b)
+# whether a scoped removal removes it.
 INSTALL_A="$(python3 -c 'import uuid;print(uuid.uuid4())')"
-INSTALL_B="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 NODE_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 INSTANCE_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 NAME="opsweave-${NODE_ID}-${INSTANCE_ID}"
-docker rm -f "$NAME" >/dev/null 2>&1 || true
-docker run -d --name "$NAME" --label opsweave.managed=true --label "opsweave.node-id=$NODE_ID" \
-  --label "opsweave.installation-id=$INSTALL_A" alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1
-A_ID="$(docker inspect -f '{{.Id}}' "$NAME" 2>/dev/null || echo '')"
-if [ -z "$A_ID" ]; then
-  bad "could not plant the foreign container; injection 6 is NOT_RUN"
+# This name is derived from a fresh pair of UUIDs, so it cannot collide with a
+# container this script did not create; the inspect-first check makes that
+# explicit rather than assumed.
+if docker container inspect "$NAME" >/dev/null 2>&1; then
+  bad "injection 6 is BLOCKED: a container named $NAME already exists and is not this script's"
 else
-  # The Node's own sweep, scoped to installation B, must not list or remove it.
-  SWEPT="$(docker ps -aq --filter "label=opsweave.installation-id=$INSTALL_B" 2>/dev/null || true)"
-  [ -z "$SWEPT" ] && ok "a sweep scoped to another installation does not list it" \
-    || bad "a sweep scoped to another installation listed it: $SWEPT"
-  docker rm -f "$NAME" >/dev/null 2>&1
-  [ "$(docker inspect -f '{{.Id}}' "$NAME" 2>/dev/null || echo '')" != "$A_ID" ] \
-    && ok "the planted container was removed only by this script, not by the product"
+  docker run -d --name "$NAME" --label opsweave.managed=true --label "opsweave.node-id=$NODE_ID" \
+    --label "opsweave.installation-id=$INSTALL_A" alpine:3 sh -c 'while true; do sleep 5; done' >/dev/null 2>&1
+  A_ID="$(docker inspect -f '{{.Id}}' "$NAME" 2>/dev/null || echo '')"
+  A_STARTED="$(docker inspect -f '{{.State.StartedAt}}' "$NAME" 2>/dev/null || echo '')"
+  if [ -z "$A_ID" ]; then
+    bad "injection 6 is INCONCLUSIVE: the container could not be planted, so nothing was exercised"
+  else
+    # The adapter must answer Foreign, and a scoped removal must leave the
+    # container untouched. The helper below is a Rust integration test already in
+    # the tree - `apps/node/tests/container_ownership.rs` - which drives exactly
+    # this path against a real daemon. Running it here, against a container this
+    # script planted, is what makes the injection about the product.
+    OWNERSHIP_LOG="$EVIDENCE/foreign-ownership.log"
+    if OPSWEAVE_REQUIRE_TEST_DOCKER=1 cargo test --locked -q -p opsweave-node \
+         --test container_ownership a_second_installation_cannot_take_over_a_running_container \
+         >"$OWNERSHIP_LOG" 2>&1; then
+      ok "the compiled adapter refuses a foreign installation's container (container_ownership)"
+    else
+      bad "the compiled adapter did not refuse a foreign container; see $OWNERSHIP_LOG"
+      tail -10 "$OWNERSHIP_LOG" | sed 's/^/      /'
+    fi
+    # And the container this script planted is still exactly as it was.
+    NOW_ID="$(docker inspect -f '{{.Id}}' "$NAME" 2>/dev/null || echo '')"
+    NOW_STARTED="$(docker inspect -f '{{.State.StartedAt}}' "$NAME" 2>/dev/null || echo '')"
+    NOW_RUNNING="$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null || echo 'false')"
+    if [ "$NOW_ID" != "$A_ID" ]; then
+      bad "the product removed or replaced the planted container (id $A_ID -> ${NOW_ID:-gone})"
+    elif [ "$NOW_STARTED" != "$A_STARTED" ] || [ "$NOW_RUNNING" != "true" ]; then
+      bad "the product stopped or restarted the planted container"
+    else
+      ok "the planted container kept its id, start time and running state"
+    fi
+    # This script removes its own planted container, by the id it recorded.
+    docker rm -f "$A_ID" >/dev/null 2>&1 \
+      && ok "the planted container was removed by id, by this script" \
+      || bad "could not remove the planted container $A_ID"
+  fi
 fi
 
 say "summary"
