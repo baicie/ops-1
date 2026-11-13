@@ -235,6 +235,18 @@ pub struct InstallationIdentity {
 pub struct MigrationRecord {
     /// Identity inherited from the installation this directory was cloned from.
     pub inherited_installation_id: String,
+    /// The Kernel node id inherited with it, when the migration recorded one.
+    ///
+    /// A migration is only finished when BOTH halves are new. The installation
+    /// id alone is not enough: C1.2.3's crash path could leave a fresh
+    /// `installation-id` beside the original's `node-identity.json`, and
+    /// clearing the marker there would settle the directory into the original's
+    /// Kernel identity - the very defect C1.2.2 and C1.2.3 exist to close.
+    /// `None` means it was not recorded (a marker written by C1.2.3, or before
+    /// this field existed), in which case the installation identity is checked
+    /// on its own.
+    #[serde(default)]
+    pub inherited_node_id: Option<String>,
     pub started_at: String,
 }
 
@@ -271,6 +283,7 @@ pub fn pending_migration(args: &Args) -> anyhow::Result<Option<MigrationRecord>>
 fn begin_migration(args: &Args, inherited_installation_id: &str) -> anyhow::Result<()> {
     let record = MigrationRecord {
         inherited_installation_id: inherited_installation_id.to_string(),
+        inherited_node_id: node_id_on_disk(args),
         started_at: chrono::Utc::now().to_rfc3339(),
     };
     let path = migration_path(args);
@@ -283,31 +296,165 @@ fn begin_migration(args: &Args, inherited_installation_id: &str) -> anyhow::Resu
     Ok(())
 }
 
+/// The Kernel node id the directory carries right now, if it carries one.
+///
+/// Recorded at the start of a migration and re-read before committing it, so
+/// `commit_migration` can tell whether the Kernel half actually happened. A
+/// missing or unreadable file is `None`: this is a record, not a gate, and
+/// `begin_migration` must not fail because the file it is about to set aside is
+/// already gone.
+fn node_id_on_disk(args: &Args) -> Option<String> {
+    let bytes = std::fs::read(state_file(args)).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    value.get("nodeId")?.as_str().map(str::to_string)
+}
+
 /// Clear the marker: the new identity is committed and durable.
+///
+/// Refuses unless BOTH halves of the migration are new. Clearing the marker is
+/// the one operation that makes a half-migrated directory look settled, so it is
+/// the one place worth checking twice:
+///
+///   * `installation-id` must exist, be valid, and differ from the inherited id.
+///     Otherwise the clone keeps the original's Docker ownership token and every
+///     cleanup scoped to that token reaches the original's containers.
+///   * `node-identity.json` must not still hold the inherited node id.
+///     Otherwise the next start resumes as the original node - the defect C1.2.3
+///     fixed on the failure path, closed here on the success path.
+///
+/// A marker written by C1.2.3 has no `inheritedNodeId`, so the second check is
+/// skipped for it; the first still holds, and `commit_migration` is only reached
+/// after an enrolment that replaced the identity. ADR-023 §2.5.
 pub fn commit_migration(args: &Args) -> anyhow::Result<()> {
+    let Some(record) = pending_migration(args)? else {
+        // Nothing to commit. The marker is already gone, which is the state the
+        // caller wants, so this is a success rather than an error.
+        return Ok(());
+    };
+    let identity_path = args.state_dir.join("installation-id");
+    let current = std::fs::read_to_string(&identity_path)
+        .with_context(|| format!("read {}", identity_path.display()))?;
+    let current = current.trim();
+    if !is_valid_installation_id(current) {
+        anyhow::bail!(
+            "INSTALLATION_MIGRATION_IN_PROGRESS: {} holds {current:?}, not an installation id, \
+             so the migration cannot be committed",
+            identity_path.display()
+        );
+    }
+    if current == record.inherited_installation_id {
+        anyhow::bail!(
+            "INSTALLATION_MIGRATION_IN_PROGRESS: the migration cannot be committed while {} \
+             still holds the INHERITED installation id {}. The clone would keep the original's \
+             Docker ownership token, so a cleanup scoped to that token would reach the \
+             original's containers. Continue the migration instead.",
+            identity_path.display(),
+            record.inherited_installation_id
+        );
+    }
+    if let Some(inherited_node_id) = record.inherited_node_id.as_deref() {
+        if node_id_on_disk(args).as_deref() == Some(inherited_node_id) {
+            anyhow::bail!(
+                "INSTALLATION_MIGRATION_IN_PROGRESS: the migration cannot be committed while {} \
+                 still holds the inherited Kernel node identity {}. The next start would resume \
+                 as the original node. Enrol as a new node first.",
+                state_file(args).display(),
+                inherited_node_id
+            );
+        }
+    }
     let path = migration_path(args);
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    remove_durable(&path)
+        .with_context(|| format!("clear the reinitialize marker at {}", path.display()))
+}
+
+/// Remove a file and make the removal durable.
+///
+/// `remove_file` alone returns once the directory entry is gone from the page
+/// cache. A power cut before the directory is written back can bring the marker
+/// back, and bringing back a marker is only annoying - but the same call is used
+/// for the identity files during a migration, where bringing one back means the
+/// clone keeps the original's token. Sync the parent so "the file is gone" is a
+/// fact and not a buffered intention.
+fn remove_durable(path: &Path) -> anyhow::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).with_context(|| format!("remove {}", path.display())),
+    }
+    sync_dir_of(path)
+}
+
+/// Flush a directory so renames and unlinks inside it survive power loss.
+///
+/// POSIX gives no ordering between a file's contents and its directory entry
+/// unless the directory itself is synced. This is the step that makes the
+/// reinitialize marker precede the destructive work that follows it.
+///
+/// Off Unix, and on filesystems where a directory cannot be opened for syncing,
+/// this is a no-op - and then the durability claim in ADR-023 §2.5 does not
+/// hold. It says so rather than implying otherwise.
+#[cfg(unix)]
+fn sync_dir_of(path: &Path) -> anyhow::Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    match std::fs::File::open(parent) {
+        Ok(dir) => dir
+            .sync_all()
+            .with_context(|| format!("sync the directory {}", parent.display())),
         Err(error) => Err(error)
-            .with_context(|| format!("clear the reinitialize marker at {}", path.display())),
+            .with_context(|| format!("open the directory {} to sync it", parent.display())),
     }
 }
 
-/// Write `bytes` to `path` atomically, replacing whatever was there.
+#[cfg(not(unix))]
+fn sync_dir_of(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
+/// Write `bytes` to `path` atomically and durably, replacing whatever was there.
+///
+/// Order, and why each step is where it is:
+///
+///   1. write the whole content to a uniquely named temporary file
+///   2. `sync_all` it - the content must be on disk before any name points at it
+///   3. `rename` over the destination - atomic; a reader sees old or new, never
+///      a half-written file
+///   4. sync the parent directory - without this the rename is only a page-cache
+///      intention and a power cut can leave the OLD content under the name
+///
+/// Step 4 is the one that was missing. Under normal exit and SIGKILL the page
+/// cache is still the kernel's, so a rename that returned is visible to every
+/// process and survives the process dying; only power loss needs the sync. The
+/// distinction is in ADR-023 §2.5, and the shift from one to the other is what
+/// "durable" means here.
 fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    use std::io::Write;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let temporary = path.with_extension(format!("tmp.{}", Uuid::new_v4()));
-    std::fs::write(&temporary, bytes)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600));
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| -> anyhow::Result<()> {
+        let mut file = options.open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error)
+            .with_context(|| format!("write the temporary file for {}", path.display()));
     }
     std::fs::rename(&temporary, path).with_context(|| format!("publish {}", path.display()))?;
-    Ok(())
+    sync_dir_of(path)
 }
 
 /// What the operator says a mismatched binding means. See ADR-023 §2.2.
@@ -703,8 +850,90 @@ fn finish_or_continue_migration(
         );
     }
     // Either still the inherited id (the mint never happened) or a new one
-    // (it did). Both are mid-migration, so the Kernel identity must be
-    // re-established rather than inherited.
+    // (it did) - except that the first case must NOT be returned as-is.
+    //
+    // C1.2.3 returned whatever was on disk here. When the process died between
+    // `begin_migration()` and `remove_file(installation-id)`, that was the
+    // INHERITED id: the clone finished its reinitialize keeping the original's
+    // Docker ownership token, so every cleanup scoped to that token - the demo's
+    // `demo_stop_containers`, the CI trap - reached the original's containers.
+    // The Kernel half was replaced at the same time, which made the node look
+    // isolated while the Docker half was not.
+    //
+    // Re-establishing the identity is exactly what the interrupted step would
+    // have done, so doing it here is idempotent rather than a new path.
+    if current == record.inherited_installation_id {
+        tracing::warn!(
+            inherited = %record.inherited_installation_id,
+            "the unfinished reinitialize still carries the inherited installation identity; \
+             completing the step it was interrupted at: minting this installation's own"
+        );
+        remove_durable(path)?;
+        finish_migration_remove_binding(args)?;
+        let minted = mint_installation_id(args, path)?;
+        return Ok(InstallationIdentity {
+            installation_id: minted,
+            discard_node_identity: true,
+        });
+    }
+    // A new id is on disk. Before trusting it, ask whether a binding attests it
+    // TO THIS DIRECTORY - and if one does not, whether we can explain that.
+    //
+    // The lemma that makes the safe answer simple: while the marker is present
+    // the node never reaches supervision. `commit_migration` refuses unless the
+    // migration is complete, and `main` propagates that refusal, so no container
+    // can carry an id that was minted during an uncommitted migration. An id
+    // that no binding attests to this directory therefore owns nothing, and
+    // replacing it can orphan nothing.
+    //
+    // The one state worth refusing is the one the node itself never writes: an
+    // identity and a binding that attest the same directory but name each other
+    // differently, with neither being the inherited id. That is an edited
+    // directory, and guessing which half is true is how identities get mixed.
+    let (device, inode) = directory_identity(&args.state_dir)?;
+    let attested = match read_binding(args)? {
+        Some(binding)
+            if binding.installation_id == current
+                && binding.state_dir_device == device
+                && binding.state_dir_inode == inode =>
+        {
+            true
+        }
+        Some(binding)
+            if binding.installation_id != record.inherited_installation_id
+                && binding.state_dir_device == device
+                && binding.state_dir_inode == inode =>
+        {
+            anyhow::bail!(
+                "INSTALLATION_MIGRATION_IN_PROGRESS: {} holds installation id {current} but the \
+                 binding names {}. Neither is the inherited id, so this is not a state the \
+                 migration produces. Refusing to guess which identity this directory should \
+                 have. Restore it from a backup, or delete installation-id and \
+                 installation-binding.json to have the migration mint a new identity.",
+                path.display(),
+                binding.installation_id
+            )
+        }
+        _ => false,
+    };
+    if !attested {
+        tracing::warn!(
+            installation_id = %current,
+            "the unfinished reinitialize's identity is not attested by a binding for this \
+             directory; minting one it can be held to"
+        );
+        remove_durable(path)?;
+        finish_migration_remove_binding(args)?;
+        let minted = mint_installation_id(args, path)?;
+        return Ok(InstallationIdentity {
+            installation_id: minted,
+            discard_node_identity: true,
+        });
+    }
+    // Both the installation half and the Kernel half must be new before the
+    // marker may be cleared. The Kernel half is checked by `commit_migration` -
+    // the caller that owns the enrolment - because this function runs before
+    // the enrolment and cannot know its outcome.
     Ok(InstallationIdentity {
         installation_id: current.to_string(),
         discard_node_identity: true,
@@ -864,18 +1093,13 @@ fn load_identity(path: &Path) -> anyhow::Result<Option<Identity>> {
 }
 
 fn save_identity(path: &Path, identity: &Identity) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension("tmp");
-    std::fs::write(&temporary, serde_json::to_vec_pretty(identity)?)?;
-    std::fs::rename(temporary, path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    // Durable, not merely atomic. The reinitialize marker may only be cleared
+    // after this returns, and clearing it is what makes the directory settled -
+    // so if this rename were still only a page-cache intention, a power cut
+    // could restore the INHERITED node identity under a cleared marker, which
+    // is precisely the state C1.2.3 exists to make unreachable.
+    write_atomic(path, &serde_json::to_vec_pretty(identity)?)
+        .with_context(|| format!("persist the node identity at {}", path.display()))
 }
 
 pub async fn lease_watchdog(shared: Arc<Shared>) {

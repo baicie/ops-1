@@ -867,6 +867,140 @@ withdrawn, not softened.
 
 ---
 
+## 4h. C1.2.4 — an interrupted migration cannot keep the original's Docker identity
+
+### The defect
+
+`finish_or_continue_migration()` returned whatever `installation-id` held while
+the migration marker was present. When the process died between `begin_migration()`
+and the first `remove_file`, that value was the **inherited** id:
+
+```rust
+// before
+Ok(InstallationIdentity {
+    installation_id: current.to_string(),   // == inheritedInstallationId
+    discard_node_identity: true,
+})
+```
+
+The clone then completed its reinitialize with a fresh Kernel identity and the
+original's Docker ownership token. The Kernel row was new, so the node *looked*
+isolated; every cleanup scoped to that token still reached A's containers.
+
+### Reproduced on `7581ee6`
+
+The state was planted exactly as a crash leaves it - marker written, identity not
+yet removed - and the node started with a fresh enrolment token.
+
+```
+== A node=fd189952… install=c19db612-015e-4fbd-8648-0aab05109e60
+   planted the migration marker; installation-id is still A's
+FAIL  the clone finished the migration holding A's installation id (c19db612-…)
+PASS  the clone's Kernel identity is its own (649c98f0-…)
+```
+
+Both halves measured in one run: **new Kernel node, old Docker token**. That is
+the failure mode C1.2.2 warned about, in the direction C1.2.3 left open.
+
+Whether this is exploitable through the demo depends on the state directory
+layout. `demo_up.sh` gives node-a and node-b separate directories, so the
+`data/node-*/installation-id` scan does not see a clone inside the demo. The
+exposure is to any cleanup that is handed an installation id directly - a
+restored or copied deployment directory, a script that reads one id, an operator
+who copies a directory in place - and the safety property above does not depend
+on knowing which of those is in use.
+
+### The fix
+
+Three changes, all inside the migration state machine:
+
+| Change | Effect |
+|---|---|
+| `finish_or_continue_migration` never returns `inheritedInstallationId` | the interrupted step is completed: remove, then mint |
+| the marker records `inheritedNodeId` | commit can tell whether the Kernel half happened |
+| `commit_migration` checks both halves | the marker cannot be cleared over a stale identity, on either side |
+
+An identity that no binding attests to this directory is **replaced, not
+adopted** (scenario C2 below). The argument is in ADR-023 §2.2a: while the marker
+is present the node never reaches supervision, so an id minted during an
+uncommitted migration owns no container and replacing it orphans nothing.
+
+### Persistence
+
+`write_atomic` and `commit_migration` did not sync the parent directory, and
+`save_identity` was a bare rename. The recovery argument assumes the marker is
+there when the process is not, so the write path now syncs file **and** parent
+for the marker, the enrolled identity, and the marker's removal. What each level
+actually guarantees - and what a process-kill test does *not* prove - is in
+ADR-023 §2.5. **No power-loss test was run and none is claimed**; the third
+level is a design property of the write path.
+
+### Regression matrix
+
+Each scenario asserts the final installation id differs from
+`inheritedInstallationId`, not just the `discard_node_identity` flag.
+
+| # | State on disk | Expected | Result |
+|---|---|---|---|
+| A | marker + inherited id | mints its own; never returns the inherited | PASS |
+| B | marker, identity removed | mints; binding names it | PASS |
+| C | marker, unattested id, no binding | replaced, re-bound; stable on the next start | PASS |
+| C2 | marker, id bound to **another** directory | replaced, re-bound to this one | PASS |
+| D | both files new, Kernel identity old | commit **refused**, marker kept, id unchanged | PASS |
+| D' | Kernel new, inherited Docker id | commit **refused**, naming the id | PASS |
+| E | both new, commit not reached | commit succeeds, marker gone | PASS |
+| F | after commit, restart | ordinary start, no marker, same id | PASS |
+| G | `accept` against a pending reinitialize | **refused**; identity unchanged | PASS |
+| H | first install / restart | unchanged | PASS |
+| Docker | clone finishes migration, A's container live | `Foreign`, not swept, not removed; A's id/StartedAt/Running/labels unchanged | PASS |
+
+### Counterfactuals
+
+Run against `origin/main` (`7581ee6`) in a separate worktree, so they measure the
+released code:
+
+| Assertion | On `7581ee6` | Fixed |
+|---|---|---|
+| A: the interrupted migration returns the inherited id | **FAIL** | PASS |
+| C: an unattested identity is not adopted | **FAIL** | PASS |
+| C2: an identity bound elsewhere is not adopted | **FAIL** (on the guarded build) | PASS |
+| D: commit refuses a stale Kernel identity | **FAIL** | PASS |
+| D': commit refuses the inherited Docker id | **FAIL** | PASS |
+| Docker: the clone cannot reach A's container | **FAIL** (`the clone continued the migration with the original's Docker identity`) | PASS |
+| e2e: the clone's installation id differs from A's | **FAIL** (binary built from `7581ee6`) | PASS |
+
+The C2 row records a hole in the first version of this round's own tests: with
+the inherited-id guard disabled, only one test failed, and with the binding
+attestation disabled **none** did - the existing scenario C removed the binding
+file, so the attestation branch was never reached. C2 was added to reach it, and
+it fails when the check is removed. Two guards, two tests; neither is assumed
+because the other passes.
+
+### Verified where
+
+| Run | Environment | Result |
+|---|---|---|
+| `migration_identity.rs` | real Docker daemon | 10 passed |
+| `migration_durability.rs` | filesystem | 4 passed |
+| `state_dir_clone.rs` | filesystem + Docker | 10 passed |
+| `container_ownership.rs` | real Docker daemon | 3 passed |
+| `p001c124_migration_identity.sh` | real Kernel + PostgreSQL | 7 checks PASS |
+| `p001c123_reinit_recovery.sh` (C1.2.3 regression) | real Kernel + PostgreSQL | 6 checks PASS |
+| `p001c121_demo_safety.sh` | shell | all PASS |
+| `p001c121_data_foundation_scope.sh` | shell + Docker | all PASS |
+| `p001c_rollback_activates.sh` (C1.1 regression) | shell | PASS |
+
+### Residual risk
+
+| Risk | Status |
+|---|---|
+| Power loss is not tested; the fsync ordering is a design property | **open**, stated in ADR-023 §2.5. No process-kill test is offered as evidence for it |
+| A filesystem without directory `fsync` | `sync_dir_of` errors rather than proceeding; the assurance is absent there and the node refuses |
+| A clone made **before** C1.2.1 is undetectable | **open**, unchanged (ADR-023 §2.3) |
+| Non-Unix platforms cannot check device/inode | **open**, unchanged |
+| A clone enrolled without `OPSWEAVE_NODE_NAME` fails on the UNIQUE name | **open**, unchanged (ADR-023 §2.2a) |
+---
+
 ## 5. What is still NOT done
 
 | Item | Status |
@@ -902,7 +1036,10 @@ C1.1 → **PASS on its own scope**: isolation and rollback consistency.
 C1.2 → **PASS on its own scope**: an installation cannot delete, stop or
 overwrite a container another installation owns, verified against a real daemon
 with a planted colliding container. The pre-upgrade migration is manual and is
-stated above, not automated.
+stated above, not automated. C1.2.4 closes the last path by which a *reinitialized
+clone* could end up holding the original's ownership token: a migration
+interrupted before its first delete. Its durability argument is a design
+property (§4h, ADR-023 §2.5), not a power-loss measurement.
 
 The three phases together do not close the container-ownership question for
 *containers created before C1.2*: those are unlabelled and will be reported

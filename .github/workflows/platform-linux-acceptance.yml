@@ -179,6 +179,22 @@ jobs:
           set -eu
           cargo test --locked -p opsweave-node --test container_ownership -- --test-threads=1 --nocapture
 
+      # P001-C1.2.4: a reinitialize interrupted before its first delete must not
+      # finish holding the original's ownership token. The unit half runs against
+      # the filesystem; the last test in the file drives the real adapter, and
+      # `migration_durability` asserts the intermediate states a crash can leave.
+      #
+      # These are here rather than in the default `cargo test` job because the
+      # assertions about a clone are only meaningful against a daemon that
+      # actually enforces the labels - the same reason `container_ownership` runs
+      # in this job.
+      - name: An interrupted reinitialize cannot keep the original's installation id
+        env:
+          OPSWEAVE_REQUIRE_TEST_DOCKER: "1"
+        run: |
+          set -eu
+          cargo test --locked -p opsweave-node --test migration_identity --test migration_durability -- --test-threads=1 --nocapture
+
       - name: Node reaches the docker socket as an unprivileged user
         id: socket
         run: |

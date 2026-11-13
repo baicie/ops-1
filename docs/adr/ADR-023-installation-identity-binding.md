@@ -149,6 +149,41 @@ the inherited id back would recreate the collision, so the directory stays
 mid-migration and the error says exactly which files are new and which were set
 aside.
 
+**Corrected by C1.2.4.** C1.2.3 made the marker override the binding comparison,
+which stopped a half-finished migration from looking settled. It then returned
+whatever `installation-id` held - including the case where the process died after
+writing the marker and before removing the inherited identity, so the clone
+finished its reinitialize **holding the original's Docker ownership token** while
+receiving a fresh Kernel identity. The Kernel half looked isolated; the Docker
+half was not, so every cleanup scoped to that token (`demo_stop_containers`, the
+CI trap) still reached the original's containers.
+
+The marker now records the inherited Kernel node id as well, and both halves are
+checked before the migration may be considered complete:
+
+| Half | Requirement | Enforced by |
+|---|---|---|
+| Docker | `installation-id` exists, is a UUID, and **differs** from `inheritedInstallationId` | continuing the migration |
+| Docker | the binding attests that id **to this directory** (device+inode) | continuing the migration |
+| Kernel | `node-identity.json` does not still hold `inheritedNodeId` | `commit_migration` |
+
+`commit_migration` refuses to clear the marker while either half is old. That is
+the only operation that makes a half-migrated directory look settled, so it is
+the one place worth checking twice, and `main` propagates the refusal rather than
+starting supervision.
+
+An identity that no binding attests to this directory is **replaced, not
+adopted**. The argument is that while the marker is present the node never
+reaches supervision, so no container can carry an id minted during an
+uncommitted migration; such an id owns nothing and replacing it orphans nothing.
+Keeping it would end the migration with a file nothing vouches for, and a
+container labelled with it would be unreachable by this installation forever.
+
+The one state both halves refuse to resolve is one the node never writes: an
+identity and a binding that attest the same directory but name each other
+differently, with neither being the inherited id. That is an edited directory,
+and the error says so instead of guessing.
+
 **The clone also needs a name of its own.** `kernel.nodes.name` is `UNIQUE`, and
 the inherited name belongs to the original. Enrolling a clone without setting
 `OPSWEAVE_NODE_NAME` fails with the Kernel's generic
@@ -196,6 +231,58 @@ residual risk in `03h-lifecycle-correctness.md`, not claimed as fixed.
    never persisted.
 3. There was no `create_new`. The final file is now created with
    `O_CREAT|O_EXCL`, and a loser re-reads the winner's value.
+
+### 2.5 What the persistence actually guarantees (C1.2.4)
+
+The recovery argument above depends on the marker being there when the process
+is not. That claim has to be stated at the right level, because "durable" is
+routinely used for something weaker.
+
+| Level | What survives | What provides it |
+|---|---|---|
+| normal process exit | everything the process wrote | nothing special; it is the kernel's page cache |
+| `SIGKILL` | the same | same - `SIGKILL` discards no page-cache state |
+| power loss / kernel panic | only what reached the disk | `fsync` on the file **and** on its parent directory |
+
+Only the third level needs a sync, and only a sync can claim the third level. **A
+test that kills a process and calls the result "durable" is measuring the first
+two levels and reporting the third.** Nothing in this repository simulates power
+loss; the third column is a design property of the write path, recorded here as
+such.
+
+The write path, and why each step is where it is:
+
+| Step | Why |
+|---|---|
+| write complete content to a unique temporary file | a reader must never see a partial file under the final name |
+| `fsync` the temporary file | its content must be on disk before any name points at it |
+| `rename` over the destination | atomic; a reader sees the old file or the new one |
+| `fsync` the parent directory | without it the rename is only a page-cache intention, and a power cut can leave the **old** content under the name |
+
+The fourth step was missing before C1.2.4. It now applies to the operations
+that carry the recovery argument:
+
+* `write_atomic` - the reinitialize marker
+* `save_identity` - the newly enrolled Kernel identity, which the marker's
+  removal depends on
+* `remove_durable` - clearing the marker, and the delete of `installation-id`
+  while continuing an interrupted migration (the step whose incompleteness was
+  the C1.2.4 defect)
+
+The delete of `installation-binding.json` and of the inherited files inside the
+first `reinitialize` still use plain `remove_file`. That is deliberate and it is
+the weaker claim: a resurrected binding is detected (`read_binding` returns a
+value that does not attest the identity on disk) and a resurrected inherited
+identity is detected (`current == inheritedInstallationId`), so both fail closed
+rather than proceeding. Their durability is a convenience, not a safety
+property.
+
+**Limits, stated rather than implied.** On a filesystem that does not support
+directory `fsync` (some network and FUSE filesystems), or on a platform without
+`device`/`inode` (see §2.3), the third column does not hold. `sync_dir_of`
+reports the failure instead of swallowing it, so the node refuses rather than
+proceeding under a guarantee it does not have. Off Unix the call is a no-op and
+the durability claim does not apply.
 
 ## 3. Consequences
 
