@@ -105,7 +105,6 @@ pub struct Config {
     pub investigation_price_micros_per_mtok: Option<i64>,
     pub plugin_db_host: String,
     #[allow(dead_code)]
-    #[allow(dead_code)]
     pub plugin_kernel_url: String,
     pub plugin_source_allowed_hosts: String,
     /// Full 40-char lowercase commit SHA of the running build; absent when the

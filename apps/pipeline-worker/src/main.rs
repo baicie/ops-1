@@ -1419,10 +1419,11 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
         );
         return is_public_v4(v4);
     }
-    if segments[0..6].iter().all(|segment| *segment == 0) {
-        return false;
-    }
-    true
+    // `::/96`, the deprecated IPv4-compatible block. This is the same test the
+    // `if` used to spell as `{ return false } true`; clippy 1.100's
+    // `needless_bool` rejects that shape, and the negated predicate below is
+    // exactly equivalent.
+    !segments[0..6].iter().all(|segment| *segment == 0)
 }
 
 #[tokio::main]
@@ -1498,6 +1499,26 @@ mod tests {
                 "{value} should be public"
             );
         }
+    }
+
+    /// `::/96` is the deprecated IPv4-compatible block, and it is the only
+    /// branch that now ends in a bare negated predicate.
+    ///
+    /// Clippy 1.100 rewrote that tail from `if all(..) { return false } true`
+    /// to `!all(..)`; the two must agree for every input, including these
+    /// addresses that reach the branch and the public one that must not.
+    #[test]
+    fn the_ipv4_compatible_block_is_blocked() {
+        for value in ["::0.0.0.1", "::1.2.3.4", "::192.168.1.1"] {
+            let address: IpAddr = value.parse().unwrap();
+            assert!(
+                matches!(address, IpAddr::V6(_)),
+                "{value} did not parse as IPv6, so it does not exercise this branch"
+            );
+            assert!(!is_public_ip(address), "{value} should be blocked as ::/96");
+        }
+        // The branch must not swallow ordinary global unicast.
+        assert!(is_public_ip("2001:4860:4860::8888".parse().unwrap()));
     }
 
     fn test_worker() -> Worker {
