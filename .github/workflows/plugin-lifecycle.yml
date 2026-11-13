@@ -169,6 +169,18 @@ jobs:
           pnpm --fail-if-no-match --filter @opsweave/platform-console build
           pnpm --fail-if-no-match --filter @opsweave/ops-web build
 
+      # `scripts/build-plugins.sh` signs every bundle with `keys/publisher.key`,
+      # and the file does not exist in a fresh checkout - it is generated. Without
+      # it the bundle step dies with `io error: No such file or directory`, which
+      # says nothing about a missing key. `demo_up.sh` generates it lazily for the
+      # demo; a CI job has to do it explicitly, as data-foundation already does.
+      - name: Generate the publisher signing key
+        run: |
+          set -eu
+          ./target/debug/opsctl keygen --out-dir keys
+          test -f keys/publisher.key
+          test -f keys/publisher.pub
+
       - name: Prepare PostgreSQL for the harness
         env:
           PGHOST: 127.0.0.1
