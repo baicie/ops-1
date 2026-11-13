@@ -1228,6 +1228,32 @@ name is inspected first: this script's own (labelled) is reused, anyone else's
 stops the run with an explanation. Cleanup removes only a registry this script
 created.
 
+### Two failures the first real Linux run produced
+
+Once the workflow parsed, it started a job - and the job found two more defects.
+
+**The `VERSION_ALREADY_ACTIVE` fix was applied to one call site.** It went into
+the TypeScript deploy and the Go and Java deploys in the same script kept using
+`must`, so `legacy-regression` reported `PASS=43 FAIL=2` twice. A condition that
+applies to every deploy cannot be fixed per call site; it now lives in one helper,
+`deploy_or_already_active`, and all four deploy sites use it.
+
+**The job lacked the Java toolchain.** The first run that started a job BLOCKED at
+"the plugin bundles could not be built":
+
+```
+maven-compiler-plugin: Fatal error compiling: error: release version 21 not supported
+```
+
+`scripts/build-plugins.sh` builds all three reference plugins, so the job needs Go
+and Java even though the lifecycle it drives is the TypeScript one. The comment
+that said "npm/go/maven are not needed for the TS path" was wrong for the same
+reason and was corrected rather than deleted: the **lifecycles** are C3's, the
+**toolchains** are needed here.
+
+That BLOCKED is the design working. A missing prerequisite stopped the run with
+its reason in the log; it did not degrade to a pass.
+
 ### A product finding the revision surfaced
 
 The first push turned `data-foundation`'s `legacy-regression` job red with
