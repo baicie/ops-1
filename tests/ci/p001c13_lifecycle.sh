@@ -56,7 +56,6 @@ TRAP_ARMED=0
 # Remove only what this run recorded. Idempotent, so EXIT after an explicit
 # teardown is a no-op rather than a second removal attempt.
 cleanup_owned_resources() {
-  local code="$1"
   trap - EXIT TERM INT
   # The platform: `p001c_teardown.sh` is scoped by run id and reports BLOCKED on
   # anything it cannot attribute. Its failure does NOT change the acceptance code
@@ -79,7 +78,12 @@ cleanup_owned_resources() {
     }
     CREATED_REGISTRY=0
   fi
-  exit "$code"
+  # This function does NOT exit. The first version ended with `exit "$code"`,
+  # which was right when the only caller was the EXIT trap and wrong the moment
+  # the verdict called it explicitly: the run exited 0 from inside the cleanup,
+  # before the verdict was printed at all. Whether to exit is the caller's
+  # decision; this only removes things and records whether it worked.
+  return 0
 }
 
 on_signal() {
@@ -93,7 +97,10 @@ on_signal() {
 arm_traps() {
   [ "$TRAP_ARMED" = "1" ] && return 0
   TRAP_ARMED=1
-  trap 'cleanup_owned_resources $?' EXIT
+  # The trap exits with the code it was entered with, AFTER cleanup. `$?` is
+  # captured first because the first command in the trap would otherwise reset it.
+  # shellcheck disable=SC2154  # rc is assigned by this trap itself, before use
+  trap 'rc=$?; cleanup_owned_resources; exit $rc' EXIT
   trap 'on_signal TERM' TERM
   trap 'on_signal INT' INT
 }
@@ -288,6 +295,43 @@ echo "   before the run: $(cat "$EVIDENCE/isolation-before.txt")"
 INSTALL_IDS="$(for f in "$STATE"/node-*/installation-id; do [ -f "$f" ] && tr -d '\n' <"$f" && echo; done | sort -u | tr '\n' ' ')"
 [ -n "$INSTALL_IDS" ] || fatal "the nodes minted no installation identity; ownership cannot be established"
 echo "   installation ids of this run: $INSTALL_IDS"
+# --- containers left by a PREVIOUS run of this harness ----------------------
+#
+# `p001c_up.sh` cleans up after itself only when it is restarted with the same
+# run id. A different run id - the normal case, since each run generates one from
+# the clock and the pid - leaves its containers behind, and this driver's own
+# teardown will then remove them as part of "this run's platform" while the
+# isolation comparison, correctly, sees a container that existed before the run
+# and no longer exists after it.
+#
+# That is a real signal, not noise: something removed a container this run did
+# not create. Rather than suppressing it, the run refuses to start when it finds
+# such a container. Deleting it here would be exactly the "clean up by scanning
+# for a label" the brief forbids, and ignoring it would hide the only evidence
+# that a previous run did not finish.
+ORPHANS="$(python3 - "$DOCKER_BEFORE" "$INSTALL_IDS" <<'PY'
+import json, sys
+rows = json.load(open(sys.argv[1]))
+ours = set(sys.argv[2].split())
+# A container is an orphan of a previous run when it is OpsWeave-managed, carries
+# an installation id, and that id is not one this run minted.
+found = [r for r in rows
+         if r["managed"] == "true" and r["installationId"] and r["installationId"] not in ours]
+for r in found:
+    print("%s %s installation=%s" % (r["id"][:12], r["name"], r["installationId"]))
+PY
+)"
+if [ -n "$ORPHANS" ]; then
+  echo "BLOCKED: this daemon holds container(s) from an earlier harness run:" >&2
+  printf '%s\n' "$ORPHANS" | sed 's/^/      /' >&2
+  echo "         They are not this run's, and this run's teardown would remove them." >&2
+  echo "         Remove them deliberately, one at a time, then re-run:" >&2
+  printf '%s\n' "$ORPHANS" | awk '{print "           docker rm -f " $1}' >&2
+  echo "         (They are not swept automatically: a label filter cannot tell them" >&2
+  echo "          from another installation's live containers.)" >&2
+  fatal "refusing to start with another run's containers present"
+fi
+
 # --- the lifecycle ----------------------------------------------------------
 say "run the TypeScript lifecycle"
 LIFECYCLE_LOG="$EVIDENCE/lifecycle.log"
@@ -423,13 +467,27 @@ if [ "$KEEP" = "1" ]; then
 fi
 FUNCTIONAL_STATUS="$LIFECYCLE_STATUS"
 
-say "result"
-# Cleanup is part of the verdict, not a footnote. Two independent facts are
-# reported, and PASS requires both: a run that leaves its database, its state
-# directory or its registry behind is not a clean acceptance, and a run whose
-# cleanup failed must not be summarised as one.
+say "cleanup and result"
+# ORDER MATTERS, and the first version got it wrong.
+#
+# It printed the verdict and `exit 0` BEFORE the trap ran, so the cleanup happened
+# afterwards and its failure was printed below a line that already said PASS. That
+# is the defect this whole phase exists to remove, reproduced in the very script
+# meant to prevent it: a green verdict followed by evidence against it.
+#
+# Cleanup now runs FIRST, its real exit status is recorded, and only then is the
+# verdict computed. A run whose resources were not removed is not a pass.
+FUNCTIONAL_STATUS="${FUNCTIONAL_STATUS:-$LIFECYCLE_STATUS}"
+echo "   cleaning up this run's resources"
+cleanup_owned_resources
+
+echo
 echo "   functional: $([ "$FUNCTIONAL_STATUS" = "0" ] && echo PASS || echo "FAIL (exit $FUNCTIONAL_STATUS)")"
-echo "   cleanup:    $([ "$CLEANUP_STATUS" = "0" ] && echo PASS || echo "FAIL (teardown reported a problem)")"
+if [ "$CLEANUP_STATUS" = "0" ]; then
+  echo "   cleanup:    PASS"
+else
+  echo "   cleanup:    FAIL (a resource this run created could not be removed)"
+fi
 
 if [ "$FUNCTIONAL_STATUS" = "0" ] && [ "$CLEANUP_STATUS" = "0" ]; then
   echo "PASS  the full TypeScript lifecycle completed in one isolated run, and this run's"
