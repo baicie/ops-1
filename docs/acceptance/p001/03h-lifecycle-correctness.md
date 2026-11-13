@@ -1273,7 +1273,8 @@ a legitimate state.
 | macOS, teardown shim (exit 3) | **exit 1**, functional PASS + cleanup FAIL both reported |
 | macOS, SIGTERM mid-run | **exit 130**, no registry, no database left |
 | macOS, negatives | **11/11 PASS**, every refusal pinned to its real code |
-| GitHub-hosted Linux | see the run link on PR #96 |
+| GitHub-hosted Linux, `plugin-lifecycle` | **SUCCESS** — lifecycle **50/50**, negatives **11/11**, `preserved 2 pre-existing container(s)`, functional PASS + cleanup PASS. Run [43407821518](https://github.com/baicie/ops-1/actions/runs/43407821518) |
+| GitHub-hosted Linux, `legacy-regression` | **SUCCESS** at `86ac5f6` after the shared `deploy_or_already_active` helper |
 
 ### Still open after the revision
 
