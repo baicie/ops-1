@@ -27,6 +27,66 @@ mkdir -p "$EVIDENCE"
 fatal() { printf 'BLOCKED: %s\n' "$*" >&2; exit 1; }
 say() { printf '\n### %s\n' "$*"; }
 
+# --- lifecycle of this script's own resources -------------------------------
+#
+# Same rules as tests/ci/p001c13_lifecycle.sh, and for the same reasons:
+#
+#   * every resource is recorded at the moment this script creates it, by its
+#     immutable container id - never discovered afterwards by a name or a label;
+#   * the trap runs on EXIT, TERM and INT, so an interrupted run still cleans up;
+#   * cleanup failure is a SEPARATE fact from the functional result, and the
+#     script exits non-zero when either failed. The previous version ended with
+#     `[ "$FAIL" = "0" ] || exit 1` followed by an unconditional teardown, so
+#     `PASS=11 FAIL=0` printed and the script still exited 0 if the teardown had
+#     silently failed.
+RUN_ID=""
+REGISTRY_CID=""
+CLEANUP_STATUS=0
+FUNCTIONAL_STATUS=0
+TRAP_ARMED=0
+
+cleanup_owned_resources() {
+  trap - EXIT TERM INT
+  # The isolated platform: scoped by run id, reports BLOCKED on anything it cannot
+  # attribute. Its failure does not change the functional verdict but is recorded.
+  if [ -n "$RUN_ID" ]; then
+    if ! tests/ci/p001c_teardown.sh "$RUN_ID" --purge >"$EVIDENCE/teardown.log" 2>&1; then
+      echo "cleanup: p001c_teardown.sh failed for $RUN_ID; see $EVIDENCE/teardown.log" >&2
+      tail -20 "$EVIDENCE/teardown.log" >&2 || true
+      CLEANUP_STATUS=1
+    fi
+    RUN_ID=""
+  fi
+  # The registry, by the id this script recorded when it created it. Not by name:
+  # a name is a claim about the present, an id is a fact about the object.
+  if [ -n "$REGISTRY_CID" ]; then
+    if docker rm -f "$REGISTRY_CID" >/dev/null 2>&1; then
+      echo "cleanup: removed the registry container $REGISTRY_CID (created by this script)" >&2
+    else
+      echo "cleanup: could not remove the registry container $REGISTRY_CID" >&2
+      CLEANUP_STATUS=1
+    fi
+    REGISTRY_CID=""
+  fi
+  return 0
+}
+
+on_signal() {
+  echo >&2
+  echo "interrupted by SIG$1; cleaning up this run's resources" >&2
+  exit 130
+}
+
+arm_traps() {
+  [ "$TRAP_ARMED" = "1" ] && return 0
+  TRAP_ARMED=1
+  # shellcheck disable=SC2154  # rc is assigned by this trap itself
+  trap 'rc=$?; cleanup_owned_resources; exit $rc' EXIT
+  trap 'on_signal TERM' TERM
+  trap 'on_signal INT' INT
+}
+arm_traps
+
 command -v docker >/dev/null 2>&1 || fatal "docker CLI is not installed"
 docker info >/dev/null 2>&1 || fatal "the Docker daemon is not reachable"
 command -v createdb >/dev/null 2>&1 || fatal "PostgreSQL client tools are not installed"
@@ -44,12 +104,38 @@ fi
 say "build the plugin bundles"
 REGISTRY_PORT="${OPSWEAVE_TEST_REGISTRY_PORT:-5014}"
 REGISTRY_NAME="opsweave-p001c13n-registry-$REGISTRY_PORT"
-started_registry=0
-if ! docker ps --format '{{.Names}}' | grep -qx "$REGISTRY_NAME"; then
-  docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1 || true
-  docker run -d --name "$REGISTRY_NAME" -p "127.0.0.1:${REGISTRY_PORT}:5000" registry:2 >/dev/null \
-    || fatal "could not start a local registry"
-  started_registry=1
+# A container with this name may belong to another run, another checkout or a
+# colleague. The previous version ran `docker rm -f "$REGISTRY_NAME"` before it
+# had established ownership of anything - a destructive operation on an unknown
+# resource, at the very start of the run. Ownership is now an explicit question:
+#
+#   absent            -> create it and RECORD ITS ID; the id is what cleanup uses
+#   present, ours     -> reuse it (a re-run of this same script)
+#   present, not ours -> stop. This script cannot prove it owns that container,
+#                        and using the name would mean deleting it.
+if docker container inspect "$REGISTRY_NAME" >/dev/null 2>&1; then
+  OWNER="$(docker inspect -f '{{index .Config.Labels "opsweave.p001c13.registry"}}' "$REGISTRY_NAME" 2>/dev/null || echo '')"
+  if [ "$OWNER" != "yes" ]; then
+    fatal "a container named $REGISTRY_NAME already exists and was not created by this
+         script (no opsweave.p001c13.registry=yes label). Refusing to remove it: this run
+         cannot prove it owns that container. Remove it deliberately, or set
+         OPSWEAVE_TEST_REGISTRY_PORT to a free port."
+  fi
+  REGISTRY_CID="$(docker inspect -f '{{.Id}}' "$REGISTRY_NAME" 2>/dev/null || echo '')"
+  [ -n "$REGISTRY_CID" ] || fatal "could not read the id of the existing registry container"
+  if [ "$(docker inspect -f '{{.State.Running}}' "$REGISTRY_CID" 2>/dev/null || echo false)" != "true" ]; then
+    fatal "the registry $REGISTRY_NAME exists, is this script's, and is not running.
+         Remove it with: docker rm -f $REGISTRY_CID   (it carries the p001c13 label, so
+         removing it removes nothing else), then re-run."
+  fi
+  echo "   reusing this script's registry $REGISTRY_NAME ($REGISTRY_CID)"
+else
+  REGISTRY_CID="$(docker run -d --name "$REGISTRY_NAME" \
+    --label "opsweave.p001c13.registry=yes" \
+    -p "127.0.0.1:${REGISTRY_PORT}:5000" registry:2 2>"$EVIDENCE/registry.err")" \
+    || fatal "could not start a local registry on 127.0.0.1:${REGISTRY_PORT}: $(head -2 "$EVIDENCE/registry.err")"
+  [ -n "$REGISTRY_CID" ] || fatal "docker run returned no container id for the registry"
+  echo "   started registry $REGISTRY_NAME ($REGISTRY_CID)"
   for _ in $(seq 1 30); do
     curl -fsS -m 2 "http://127.0.0.1:${REGISTRY_PORT}/v2/" >/dev/null 2>&1 && break
     sleep 1
@@ -58,7 +144,7 @@ fi
 if ! OPSWEAVE_REGISTRY="localhost:${REGISTRY_PORT}" BUILD=1 \
   scripts/build-plugins.sh >"$EVIDENCE/build.log" 2>&1; then
   tail -30 "$EVIDENCE/build.log" >&2 || true
-  [ "$started_registry" = "1" ] && docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1 || true
+  # No hand-removal: the EXIT trap owns the registry and removes it by id.
   fatal "the plugin bundles could not be built"
 fi
 
@@ -67,7 +153,6 @@ UP_LOG="$EVIDENCE/platform-up.log"
 RUN_ID="$(tests/ci/p001c_up.sh 2>"$UP_LOG" | sed -n 's/^RUN_ID=//p' | tail -1)"
 if [ -z "$RUN_ID" ]; then
   tail -30 "$UP_LOG" >&2 || true
-  [ "$started_registry" = "1" ] && docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1 || true
   fatal "the isolated platform did not start"
 fi
 STATE="/tmp/p001c-${RUN_ID}"
@@ -429,6 +514,9 @@ say "injection 6: a foreign installation's container under our name"
 # first, then the adapter is asked (a) whether it thinks it owns it and (b)
 # whether a scoped removal removes it.
 INSTALL_A="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+# The identity the probe uses. It is deliberately NOT A: it stands for the
+# second installation whose sweep must not reach A's container.
+INSTALL_B="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 NODE_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 INSTANCE_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
 NAME="opsweave-${NODE_ID}-${INSTANCE_ID}"
@@ -445,20 +533,51 @@ else
   if [ -z "$A_ID" ]; then
     bad "injection 6 is INCONCLUSIVE: the container could not be planted, so nothing was exercised"
   else
-    # The adapter must answer Foreign, and a scoped removal must leave the
-    # container untouched. The helper below is a Rust integration test already in
-    # the tree - `apps/node/tests/container_ownership.rs` - which drives exactly
-    # this path against a real daemon. Running it here, against a container this
-    # script planted, is what makes the injection about the product.
+    # The real DockerAdapter, pointed at THE CONTAINER THIS SCRIPT PLANTED.
+    #
+    # The previous version ran `apps/node/tests/container_ownership.rs` here and
+    # said it drove "a container this script planted". It did not: that test
+    # builds its own container from its own random ids and never sees this one.
+    # The claim was wrong, and re-wording it would have been worse than fixing it.
+    # The adapter is now asked directly, through the `ownership_probe` example,
+    # about $NAME - the exact container this script created, with installation A's
+    # label, probed with installation B's identity.
     OWNERSHIP_LOG="$EVIDENCE/foreign-ownership.log"
-    if OPSWEAVE_REQUIRE_TEST_DOCKER=1 cargo test --locked -q -p opsweave-node \
-         --test container_ownership a_second_installation_cannot_take_over_a_running_container \
+    cargo build --locked -q -p opsweave-node --example ownership_probe \
+      >"$EVIDENCE/ownership-probe-build.log" 2>&1 \
+      || bad "the ownership probe could not be built; see $EVIDENCE/ownership-probe-build.log"
+    # Probe with an identity that is NOT A's. `INSTALL_A` is the label on the
+    # planted container; B is a fresh id, which is the "second installation"
+    # whose sweep must not reach A's container.
+    if "$ROOT/target/debug/examples/ownership_probe" \
+         --installation "$INSTALL_B" --container "$NAME" --remove \
          >"$OWNERSHIP_LOG" 2>&1; then
-      ok "the compiled adapter refuses a foreign installation's container (container_ownership)"
+      :
     else
-      bad "the compiled adapter did not refuse a foreign container; see $OWNERSHIP_LOG"
-      tail -10 "$OWNERSHIP_LOG" | sed 's/^/      /'
+      PROBE_STATUS=$?
+      bad "the adapter did not answer Foreign for the planted container (probe exit $PROBE_STATUS)"
+      sed 's/^/      /' "$OWNERSHIP_LOG" | head -5
     fi
+    # Assert on what the probe actually printed, not only on its exit code: the
+    # exit code alone would pass if the probe crashed before printing anything.
+    if grep -qx 'ownership=foreign' "$OWNERSHIP_LOG"; then
+      ok "the compiled adapter reports the planted container as foreign to installation B"
+    else
+      bad "the adapter did not report the planted container as foreign: \
+$(grep -m1 ownership= "$OWNERSHIP_LOG" 2>/dev/null || echo 'no ownership line')"
+    fi
+    if grep -qx 'remove_result=foreign' "$OWNERSHIP_LOG"; then
+      ok "the guarded removal refused to remove the planted container"
+    else
+      bad "the guarded removal did not report 'foreign' for the planted container: \
+$(grep -m1 remove_result= "$OWNERSHIP_LOG" 2>/dev/null || echo 'no remove_result line')"
+    fi
+    if grep -qx 'still_running=true' "$OWNERSHIP_LOG"; then
+      ok "the planted container was still running after the guarded removal"
+    else
+      bad "the planted container was not running after the guarded removal"
+    fi
+
     # And the container this script planted is still exactly as it was.
     NOW_ID="$(docker inspect -f '{{.Id}}' "$NAME" 2>/dev/null || echo '')"
     NOW_STARTED="$(docker inspect -f '{{.State.StartedAt}}' "$NAME" 2>/dev/null || echo '')"
@@ -479,11 +598,40 @@ fi
 
 say "summary"
 echo "PASS=$PASS FAIL=$FAIL"
+FUNCTIONAL_STATUS=0
+[ "$FAIL" = "0" ] || FUNCTIONAL_STATUS=1
 
-say "tear down"
-tests/ci/p001c_teardown.sh "$RUN_ID" --purge >"$EVIDENCE/teardown.log" 2>&1 \
-  || echo "   teardown reported a problem; see $EVIDENCE/teardown.log" >&2
-[ "$started_registry" = "1" ] && docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1 || true
+# Cleanup runs FIRST, then the verdict is computed from both facts. The previous
+# version printed the summary, ran the teardown with `|| echo`, and then exited on
+# FAIL alone - so a failed teardown still produced exit 0 next to "PASS=11
+# FAIL=0". That is the same defect the main driver had, and it is why both now
+# share one shape: cleanup, record, then decide.
+say "cleanup"
+cleanup_owned_resources
 
-[ "$FAIL" = "0" ] || exit 1
-echo "every injected failure was detected"
+echo
+if [ "$FUNCTIONAL_STATUS" = "0" ]; then
+  echo "   injections: PASS (every injected failure was detected)"
+else
+  echo "   injections: FAIL ($FAIL injection(s) not detected)"
+fi
+if [ "$CLEANUP_STATUS" = "0" ]; then
+  echo "   cleanup:    PASS"
+else
+  echo "   cleanup:    FAIL (a resource this run created could not be removed)"
+fi
+
+if [ "$FUNCTIONAL_STATUS" = "0" ] && [ "$CLEANUP_STATUS" = "0" ]; then
+  echo "every injected failure was detected, and this run's resources were removed"
+  exit 0
+fi
+if [ "$FUNCTIONAL_STATUS" = "0" ]; then
+  echo "FAIL  every injection was detected but this run's resources were NOT fully removed;"
+  echo "      see $EVIDENCE/teardown.log. Not reported as a pass."
+  exit 1
+fi
+echo "FAIL  an injected failure was NOT detected"
+if [ "$CLEANUP_STATUS" != "0" ]; then
+  echo "      cleanup ALSO failed; both problems are recorded above"
+fi
+exit 1

@@ -191,7 +191,16 @@ csrf() { python3 -c 'import json;print(json.load(open("'"$HOME"'/.opsweave/sessi
 auth=(-H "Authorization: Bearer $(token)")
 
 gateway() { curl -fsS -m 15 --retry 8 --retry-delay 1 --retry-all-errors -H "Authorization: Bearer $(token)" "$KERNEL_URL/api/v1/gateway/$1$2"; }
-gateway_code() { curl -sS -o /tmp/opsweave-gw-body -w '%{http_code}' -m 15 -H "Authorization: Bearer $(token)" "$KERNEL_URL/api/v1/gateway/$1$2"; }
+# A curl that cannot complete prints nothing for `%{http_code}`, so an empty
+# result means "no response", not "no request". It is normalised to 000 here so
+# every caller sees one value for that condition - and every caller must treat
+# 000 as INCONCLUSIVE rather than as an answer.
+gateway_code() {
+  local code
+  code="$(curl -sS -o /tmp/opsweave-gw-body -w '%{http_code}' -m 15 \
+    -H "Authorization: Bearer $(token)" "$KERNEL_URL/api/v1/gateway/$1$2" 2>/dev/null)" || true
+  printf '%s' "${code:-000}"
+}
 
 # Read one field out of the plugin detail. Everything below is asserted against
 # what the Kernel reports, not against what a command printed.
@@ -535,52 +544,189 @@ done
 
 section "uninstall"
 # Instance ids and node ids BEFORE the uninstall, so "the backend stopped" is
-# measured against containers that provably existed.
+# measured against instances that provably existed.
 BEFORE_JSON="$(detail)"
+[ -n "$BEFORE_JSON" ] || bad "the plugin detail could not be read before the uninstall"
 BEFORE_INSTANCES="$(instances_of "$BEFORE_JSON" "$V1" | cut -d: -f1 | tr '\n' ' ')"
 record "preUninstallInstances=$BEFORE_INSTANCES"
+
+# --- what this section gets wrong when it is careless ------------------------
+#
+# The first version asserted `UCODE != 200` and treated that as "the route
+# stopped". Every one of these also satisfies `!= 200` and is NOT an uninstall:
+#   * HTTP 000 - curl never completed a request
+#   * a connection error or a timeout
+#   * 401 / 403 - the session died, so no request reached the plugin
+# A refused route is a SPECIFIC answer: 503 CAPABILITY_UNAVAILABLE
+# (apps/kernel/src/gateway.rs:52, the empty route list). Only that is evidence.
 must "the plugin uninstalls" "$OPSCTL" --url "$KERNEL_URL" uninstall "$PLUGIN"
 
-# The route must stop serving it.
 UCODE="$(gateway_code "$PLUGIN" /api/hello)"
-[ "$UCODE" != "200" ] && ok "after uninstall the gateway no longer serves the plugin (HTTP $UCODE)" \
-  || bad "the gateway still served the plugin after uninstall"
-# Data retained: the Kernel says so explicitly. This is the contract C1.3 keeps;
-# it is NOT a claim that the data is reachable, only that it was not dropped.
-# A failed read here is a failed assertion, not a shrug: if the Kernel cannot
-# answer, "the plugin is UNINSTALLED" was never established.
-UNINSTALL_BODY="$(curl -fsS -m 15 "${auth[@]}" "$KERNEL_URL/api/v1/plugins/$PLUGIN" 2>/dev/null || echo '{"readFailed":true}')"
-echo "$UNINSTALL_BODY" | grep -q '"UNINSTALLED"' \
-  && ok "the Kernel records the plugin as UNINSTALLED" \
-  || bad "the Kernel does not record UNINSTALLED: $(printf '%s' "$UNINSTALL_BODY" | head -c 200)"
-# The instances are told to stop. The Node's reconcile removes them; the state
-# is read back rather than assumed, with a bounded wait because the loop is
-# asynchronous.
-STOPPED=0
-for _ in $(seq 1 60); do
-  STOPPED=1
-  for iid in $BEFORE_INSTANCES; do
-    state="$(detail | python3 -c '
+case "$UCODE" in
+  000)
+    bad "INCONCLUSIVE: the gateway request after uninstall did not complete (HTTP 000); \
+a missing response is not a stopped route"
+    ;;
+  200)
+    bad "the gateway still served the plugin after uninstall (HTTP 200)"
+    ;;
+  401|403)
+    bad "INCONCLUSIVE: the gateway refused the request as unauthenticated (HTTP $UCODE); \
+this says nothing about the plugin's routing"
+    ;;
+  503)
+    if grep -q 'CAPABILITY_UNAVAILABLE' /tmp/opsweave-gw-body 2>/dev/null; then
+      ok "after uninstall the gateway refuses the plugin with 503 CAPABILITY_UNAVAILABLE"
+    else
+      bad "after uninstall the gateway returned 503 but not CAPABILITY_UNAVAILABLE: \
+$(head -c 200 /tmp/opsweave-gw-body 2>/dev/null)"
+    fi
+    ;;
+  *)
+    bad "after uninstall the gateway returned HTTP $UCODE, which is not the documented \
+refusal (503 CAPABILITY_UNAVAILABLE)"
+    ;;
+esac
+
+# --- the Kernel's own record ------------------------------------------------
+# A failed read is a failed assertion, not a shrug. The plugin detail is parsed
+# as JSON; a body that does not parse cannot establish anything.
+UNINSTALL_BODY="$(curl -sS -o "$EVIDENCE_DIR/uninstall-detail.json" -w '%{http_code}' -m 15 \
+  "${auth[@]}" "$KERNEL_URL/api/v1/plugins/$PLUGIN" 2>"$EVIDENCE_DIR/uninstall-detail.err" || echo 000)"
+if [ "$UNINSTALL_BODY" = "000" ]; then
+  bad "INCONCLUSIVE: the plugin detail could not be read after uninstall (HTTP 000)"
+elif [ "$UNINSTALL_BODY" != "200" ]; then
+  bad "INCONCLUSIVE: the plugin detail returned HTTP $UNINSTALL_BODY after uninstall, so \
+the installation state was never read"
+elif ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$EVIDENCE_DIR/uninstall-detail.json" 2>/dev/null; then
+  bad "INCONCLUSIVE: the plugin detail is not valid JSON after uninstall"
+else
+  USTATE="$(python3 -c '
 import json, sys
-iid = sys.argv[1]
-d = json.load(sys.stdin)
+d = json.load(open(sys.argv[1]))
+print(d.get("state", ""))
+' "$EVIDENCE_DIR/uninstall-detail.json" 2>/dev/null || echo "")"
+  case "$USTATE" in
+    UNINSTALLED) ok "the Kernel records the plugin as UNINSTALLED" ;;
+    "")          bad "the plugin detail carries no state field" ;;
+    *)           bad "the Kernel records state $USTATE, not UNINSTALLED" ;;
+  esac
+fi
+
+# --- the control plane's instance terminal state ----------------------------
+#
+# What a Node does with a stopped instance is its own reconcile loop, so this is
+# bounded. Three outcomes, and the previous version collapsed two of them:
+#
+#   the instance is absent from a VALID detail          -> stopped
+#   the instance is in a contract-terminal state        -> stopped
+#   the detail could not be read, or did not parse      -> INCONCLUSIVE
+#
+# It used to fall back to `echo GONE` when the read or the parse failed, which
+# reported an unreadable control plane as a clean stop. A read failure is the
+# opposite of evidence.
+TERMINAL_RE='STOPPED|FAILED|EXITED|DISABLED|UNINSTALLED'
+STOP_VERDICT=""
+for _ in $(seq 1 60); do
+  DETAIL_NOW="$(detail)"
+  if [ -z "$DETAIL_NOW" ]; then STOP_VERDICT="unreadable"; break; fi
+  STATE_LIST="$(printf '%s' "$DETAIL_NOW" | python3 -c '
+import json, sys
+iids = sys.argv[1].split()
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print("PARSE_FAILED"); raise SystemExit
+seen = {}
 for dep in d.get("deployments") or []:
     for i in dep.get("instances") or []:
-        if i.get("id") == iid:
-            print(i.get("state"))
-            raise SystemExit
-print("GONE")
-' "$iid" 2>/dev/null || echo GONE)"
-    case "$state" in
-      READY|STARTING) STOPPED=0 ;;
+        if i.get("id") in iids:
+            seen[i["id"]] = i.get("state")
+# An instance absent from a valid detail is reported as ABSENT, which is a real
+# observation and not a read failure.
+print(" ".join("%s=%s" % (iid, seen.get(iid, "ABSENT")) for iid in iids))
+' $BEFORE_INSTANCES 2>/dev/null)"
+  case "$STATE_LIST" in
+    ""|PARSE_FAILED) STOP_VERDICT="unreadable"; break ;;
+  esac
+  STOP_VERDICT="pending"
+  STILL=0
+  for pair in $STATE_LIST; do
+    st="${pair#*=}"
+    case "$st" in
+      ABSENT) ;;
+      *) if printf '%s' "$st" | grep -qE "^($TERMINAL_RE)$"; then :; else STILL=1; fi ;;
     esac
   done
-  [ "$STOPPED" = "1" ] && break
+  if [ "$STILL" = "0" ]; then STOP_VERDICT="stopped"; break; fi
   sleep 1
 done
-[ "$STOPPED" = "1" ] \
-  && ok "no instance of the uninstalled plugin is still READY or STARTING" \
-  || bad "an instance was still READY/STARTING 60s after uninstall"
+case "$STOP_VERDICT" in
+  stopped)
+    ok "every pre-uninstall instance is absent from a valid detail or in a terminal state"
+    ;;
+  unreadable)
+    bad "INCONCLUSIVE: the plugin detail could not be read or parsed during the 60s window, \
+so the instance terminal state was never established (absence was NOT inferred)"
+    ;;
+  *)
+    bad "an instance was still not terminal 60s after uninstall"
+    ;;
+esac
+
+# --- and the physical containers --------------------------------------------
+#
+# The control plane going terminal is NOT the container being gone, and the brief
+# is explicit that one must not stand in for the other. The physical fact is read
+# from the daemon by the container ids the Kernel recorded for these instances
+# (InstanceView.containerId) - not by an installation-id label filter, which would
+# sweep in containers this plugin never owned.
+#
+# This driver does not remove anything here. Removal is the teardown's job,
+# through the ownership-checked path.
+#
+# A container still present is REPORTED, not asserted away: the Node's reconcile
+# removes it on its own schedule, and this section is about the control plane's
+# contract. Saying "stopped" for a container that is still running would be the
+# substitution this rewrite exists to remove.
+# Re-read rather than reuse the loop's last value, which is only set if the loop
+# ran at least once.
+DETAIL_AFTER_UNINSTALL="$(detail)"
+CID_LIST="$(printf '%s' "$DETAIL_AFTER_UNINSTALL" | python3 -c '
+import json, sys
+iids = sys.argv[1].split()
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+for dep in d.get("deployments") or []:
+    for i in dep.get("instances") or []:
+        if i.get("id") in iids and i.get("containerId"):
+            print(i["containerId"])
+' ${BEFORE_INSTANCES:-} 2>/dev/null || true)"
+if [ -z "$CID_LIST" ]; then
+  echo "   NOTE  the Kernel reported no containerId for the pre-uninstall instances, so the"
+  echo "         physical container state was NOT measured. The control-plane assertion above"
+  echo "         stands on its own and is not evidence about the containers."
+  record "physicalContainerCheck=not-measured"
+else
+  PH_LEFT=0
+  PH_TOTAL=0
+  for cid in $CID_LIST; do
+    PH_TOTAL=$((PH_TOTAL + 1))
+    if docker inspect -f '{{.State.Running}}' "$cid" >/dev/null 2>&1; then
+      PH_LEFT=$((PH_LEFT + 1))
+    fi
+  done
+  record "containersAfterUninstall=$PH_LEFT/$PH_TOTAL"
+  if [ "$PH_LEFT" -eq 0 ]; then
+    ok "the physical containers of the uninstalled instances are gone from the daemon"
+  else
+    echo "   NOTE  $PH_LEFT of $PH_TOTAL physical container(s) are still present after uninstall."
+    echo "         The control plane reports them stopped; removal is the Node's reconcile and"
+    echo "         is verified by the teardown, not asserted here. Recorded, not excused."
+  fi
+fi
 
 section "the run cleaned up only what it created"
 # Ownership is the installation id, and nothing else. This asserts that the
