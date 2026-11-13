@@ -1155,6 +1155,111 @@ only after it is stable on `main`. These runs are the evidence for that decision
 | Go and Java full lifecycles | **NOT_RUN** — C3. This run proves each serves Runtime v1 through the Gateway; it does not run their upgrade/rollback/disable/uninstall |
 | Three-host, rootless, mTLS | **NOT_RUN** — P001-E |
 
+### Review revision (C1.3, PR #96)
+
+Four defects were found reviewing this phase's own work. All four were
+reproduced before being fixed.
+
+**1. The workflow never ran.** Pushing the branch produced run `43394795219`:
+`conclusion=failure`, **`jobCount=0`**. Not a config error and not Docker or
+Postgres - the workflow had only `workflow_dispatch` and `pull_request`, so a
+push matched no workflow, and GitHub recorded that as a failed run that looked
+exactly like a red acceptance in the checks list. A `push: main` trigger was
+added, unfiltered on purpose: on `main` it is the record that the lifecycle
+passed on the merged commit, and filtering it would let a merge that changed a
+shared crate be recorded as having no acceptance at all. The PR path filter was
+also missing `scripts/assemble_plugin.py` and `scripts/demo_up.sh`.
+
+**2. The Docker isolation check could not fail.** Its "before" set was built by
+filtering for this run's installation ids - empty by construction, because the
+run had just started - and its "foreign" set was recomputed from whatever was on
+the daemon at the END, so a container the run had deleted was simply absent from
+the list to be checked. It printed "every foreign container survived" over an
+empty set.
+
+It now snapshots **every** container before the run with its immutable id,
+ownership label and state, and afterwards looks up each recorded id: removed,
+stopped or renamed is a FAIL naming the id. A failed snapshot is BLOCKED, never
+empty. Zero pre-existing containers is reported as **INSUFFICIENT** - a
+dedicated CI daemon is always in that state, and saying "isolation verified"
+about it is the vacuous green this phase removes.
+
+That change immediately paid for itself: the next run reported
+`REMOVED 64a4c9ee opsweave-…` - a container from a **previous run id**. The
+comparison was right, and the cause was real: `p001c_up.sh` only cleans up a
+previous run with the *same* run id, so every different run leaves containers
+behind and the next run's teardown removes them.
+
+**3. The six negatives accepted the wrong outcomes.** `expect_refusal` treated
+any non-zero exit as "the product refused", conflating four different things:
+the product refusing (the only PASS), the platform being unreachable, the test
+command being malformed, and the assertion itself failing. It now classifies all
+four, and an unreachable kernel, a drained token or a bad command is
+**INCONCLUSIVE**, not a pass.
+
+| Was | Now |
+|---|---|
+| any non-zero exit | the exact error code: `SIGNATURE_OR_BUNDLE_INVALID`, `DEPLOYMENT_NOT_READY`, `NOT_FOUND` |
+| `READY\|DEGRADED\|FAILED\|CONFLICT\|not ready` | `DEPLOYMENT_NOT_READY` only |
+| `not found\|NOT_FOUND\|404\|deploy` | `NOT_FOUND` only - kept distinct from the not-ready branch |
+| HTTP 000 counted as "not routed to" | INCONCLUSIVE |
+| a body that did not parse fell back to `{}` | explicit assertions on status, parse, version and the control plane |
+| `docker ps --filter label` asserted the CLI agrees with itself | the compiled `DockerAdapter` test runs, and the planted container keeps its id, start time and running state |
+
+**4. Cleanup ran after the verdict.** The script printed
+`PASS … resources were removed` and `exit 0` **before** the trap ran, so a
+teardown failure was printed underneath a line that already said PASS. That is
+this phase's own defect, reproduced in the script meant to prevent it. Cleanup
+now runs first and the verdict is computed from its real status.
+
+Proved with a teardown shim that exits 3:
+
+```
+functional: PASS
+cleanup:    FAIL (a resource this run created could not be removed)
+FAIL  the lifecycle passed but this run's resources were NOT fully removed
+DRIVER_EXIT=1
+```
+
+And SIGTERM mid-run: exit 130, no registry left, no database left.
+
+**The registry is no longer `docker rm -f`'d before use.** A container with the
+name is inspected first: this script's own (labelled) is reused, anyone else's
+stops the run with an explanation. Cleanup removes only a registry this script
+created.
+
+### A product finding the revision surfaced
+
+The first push turned `data-foundation`'s `legacy-regression` job red with
+`VERSION_ALREADY_ACTIVE` on all three plugins. That is **correct product
+behaviour** - re-deploying the already-active version is refused
+(`deployments.rs:290`) - and the script was wrong to call it a failure. A deploy
+now distinguishes success from `VERSION_ALREADY_ACTIVE` from a real error, and
+the "the gateway does not serve v1 before activation" assertion is **skipped and
+says so** when the control plane reports v1 already active, instead of failing on
+a legitimate state.
+
+### Verified in this revision
+
+| Where | Result |
+|---|---|
+| macOS, full lifecycle | **50/50 PASS**, `preserved 8 pre-existing container(s)`, cleanup PASS |
+| macOS, teardown shim (exit 3) | **exit 1**, functional PASS + cleanup FAIL both reported |
+| macOS, SIGTERM mid-run | **exit 130**, no registry, no database left |
+| macOS, negatives | **11/11 PASS**, every refusal pinned to its real code |
+| GitHub-hosted Linux | see the run link on PR #96 |
+
+### Still open after the revision
+
+| Item | Status |
+|---|---|
+| `runtime-golden-path` (`job completed before long-running proof`) | **flaky, pre-existing.** The same branch passed this job at 08:38 and failed at 09:08 with no code change between them, and this PR touches no pipeline or data-foundation code |
+| Real plugin frontend in a browser (D4) | **NOT_RUN** — C4 |
+| capability/grant negatives, incompatible upgrade | **NOT_RUN** — C2 |
+| OCI **image** signature | **NOT_RUN and cannot be** — not implemented |
+| Go/Java full lifecycles | **NOT_RUN** — C3 |
+| three-host, rootless, mTLS | **NOT_RUN** — P001-E |
+
 ### Position
 
 C1.3 → **PASS on its own scope**: the TypeScript lifecycle completes in one
