@@ -73,6 +73,43 @@ mkdir -p "$EVIDENCE_DIR"
 # is diagnosable from the artifact without a re-run.
 ev() { printf '%s/%02d-%s' "$EVIDENCE_DIR" "$((PASS + FAIL + 1))" "$(printf '%s' "$STEP" | tr ' /' '__' | tr -cd 'A-Za-z0-9_-')"; }
 
+# Deploy a version, treating "it is already the active version" as success.
+#
+# The Kernel refuses a re-deploy of the version that is already ACTIVE with
+# VERSION_ALREADY_ACTIVE (apps/kernel/src/deployments.rs:290), and it is right to:
+# there is nothing to do. Treating that refusal as a failure is what turned the
+# data-foundation legacy-regression job red - and it did so three times, because
+# the fix was first applied to the TypeScript plugin only and the Go and Java
+# deploys in the loop below kept using `must`. A per-call fix for a condition that
+# applies to every deploy is how that happens, so the classification lives here
+# once.
+#
+#   success                -> the deployment was created or resumed
+#   VERSION_ALREADY_ACTIVE -> it is already active, which is what the caller wanted
+#   anything else          -> a real failure, reported with its own message
+deploy_or_already_active() {
+  local label="$1"
+  shift
+  local out err
+  out="$(mktemp)"; err="$(mktemp)"
+  printf '$ %s\n' "$*" >"$(ev).cmd"
+  if "$@" >"$out" 2>"$err"; then
+    sed 's/^/      /' "$out" | tail -3
+    rm -f "$out" "$err"
+    ok "$label"
+    return 0
+  fi
+  if grep -q 'VERSION_ALREADY_ACTIVE' "$out" "$err" 2>/dev/null; then
+    rm -f "$out" "$err"
+    ok "$label (already the active version - no deploy needed)"
+    return 0
+  fi
+  bad "$label"
+  sed 's/^/      /' "$err" | head -10
+  rm -f "$out" "$err"
+  return 1
+}
+
 # Run a command that MUST succeed.
 #
 # `set -e` is deliberately not used: a failing assertion has to record FAIL and
@@ -276,19 +313,8 @@ section "deploy v1 to two replicas"
 #   success                -> the deployment was created or resumed
 #   VERSION_ALREADY_ACTIVE -> it is already active, which is what we wanted
 #   anything else          -> a real failure, with its own message
-DEPLOY_OUT="$EVIDENCE_DIR/deploy-v1.out"
-DEPLOY_ERR="$EVIDENCE_DIR/deploy-v1.err"
-if "$OPSCTL" --url "$KERNEL_URL" deploy "$PLUGIN" "$V1" --replicas 2 --selector role=node --wait \
-     >"$DEPLOY_OUT" 2>"$DEPLOY_ERR"; then
-  ok "v1 deploys to two replicas and both reach READY"
-elif grep -q 'VERSION_ALREADY_ACTIVE' "$DEPLOY_OUT" "$DEPLOY_ERR" 2>/dev/null; then
-  # Legitimate: a previous run in this environment already activated v1. The
-  # deployment is not re-created, so the replica and route assertions below are
-  # what actually establish the state.
-  ok "v1 was already the active version (VERSION_ALREADY_ACTIVE) - no deploy needed"
-else
-  bad "v1 deploy failed: $(head -3 "$DEPLOY_ERR" 2>/dev/null | tr '\n' ' ')"
-fi
+deploy_or_already_active "v1 deploys to two replicas and both reach READY" \
+  "$OPSCTL" --url "$KERNEL_URL" deploy "$PLUGIN" "$V1" --replicas 2 --selector role=node --wait
 DETAIL_JSON="$(detail)"
 V1_INSTANCES="$(instances_of "$DETAIL_JSON" "$V1")"
 V1_READY="$(ready_count "$DETAIL_JSON" "$V1")"
@@ -382,7 +408,7 @@ for plugin in dev.opsweave.hello-go dev.opsweave.hello-java; do
     "$OPSCTL" --url "$KERNEL_URL" install "dist/plugins/${plugin#dev.opsweave.}-$V1.plugin.zip"
 done
 for plugin in dev.opsweave.hello-go dev.opsweave.hello-java; do
-  if must "$plugin deploys" \
+  if deploy_or_already_active "$plugin deploys" \
       "$OPSCTL" --url "$KERNEL_URL" deploy "$plugin" 0.0.1 --replicas 1 --selector role=node --wait; then
     must "$plugin activates" "$OPSCTL" --url "$KERNEL_URL" activate "$plugin" 0.0.1
     BODY="$(gateway "$plugin" /api/hello)"
@@ -436,7 +462,7 @@ print(d["instanceId"])
 record "v1GatewayInstance=$(cat /tmp/opsweave-v1-instance 2>/dev/null || echo '')"
 
 section "deploy v2 WITHOUT activating - the route must stay on v1"
-must "v2 deploys to two replicas and both reach READY" \
+deploy_or_already_active "v2 deploys to two replicas and both reach READY" \
   "$OPSCTL" --url "$KERNEL_URL" deploy "$PLUGIN" "$V2" --replicas 2 --selector role=node --wait
 DETAIL_JSON="$(detail)"
 V2_READY="$(ready_count "$DETAIL_JSON" "$V2")"
@@ -498,7 +524,7 @@ section "enable restores service"
 must "the plugin re-enables" "$OPSCTL" --url "$KERNEL_URL" enable "$PLUGIN"
 # Enabling a disabled plugin returns it to STAGED; the deployment must be
 # brought back and activated, which is what a re-enable means operationally.
-must "the re-enabled v1 deployment reaches READY again" \
+deploy_or_already_active "the re-enabled v1 deployment reaches READY again" \
   "$OPSCTL" --url "$KERNEL_URL" deploy "$PLUGIN" "$V1" --replicas 2 --selector role=node --wait
 must "v1 activates again after enable" "$OPSCTL" --url "$KERNEL_URL" activate "$PLUGIN" "$V1"
 ENABLED=0
