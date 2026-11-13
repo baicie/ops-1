@@ -1287,6 +1287,75 @@ a legitimate state.
 | Go/Java full lifecycles | **NOT_RUN** — C3 |
 | three-host, rootless, mTLS | **NOT_RUN** — P001-E |
 
+### Final review revision — three false positives in the revision itself
+
+The revision above removed several ways a test could pass without testing. It
+left three more, all in its own work.
+
+**The uninstall assertion accepted any non-200.** It read `UCODE != 200`, so HTTP
+**000** (a request that never completed), a timeout, and **401/403** (the session
+died, so nothing reached the plugin) all counted as "the route stopped". The
+refusal is a specific answer — **503 `CAPABILITY_UNAVAILABLE`**
+(`gateway.rs:52`, the empty route list) — and only that is evidence now. `000`
+and the auth codes are reported as **INCONCLUSIVE**.
+
+`gateway_code` also returned an **empty string** when curl could not complete, so
+`case ""` fell through to the catch-all and a missing response was described as
+an unexpected status. It normalises to `000`.
+
+**The instance poll turned a read failure into a clean stop.** It fell back to
+`echo GONE` when the plugin detail could not be read or parsed, which is the
+opposite of evidence. It now distinguishes three outcomes:
+
+| Observation | Verdict |
+|---|---|
+| instance absent from a **valid** detail | stopped |
+| instance in a contract-terminal state (`STOPPED`/`FAILED`/`EXITED`/`DISABLED`/`UNINSTALLED`) | stopped |
+| detail unreadable, or JSON does not parse | **INCONCLUSIVE** |
+
+Verified against all five shapes: unreadable **FAIL**, bad JSON **FAIL**, still
+`READY` **FAIL**, `STOPPED` **PASS**, absent **PASS**.
+
+**Control plane and daemon are now measured separately.** The physical check used
+an installation-id label filter, which would sweep in containers the plugin never
+owned. It reads the `containerId` the Kernel recorded for those instances. What it
+finds is **reported**, not asserted away: a container still running after
+uninstall is a `NOTE`, because removal is the Node's reconcile and is the
+teardown's business — saying "stopped" about a container that is still running is
+the substitution this rewrite exists to remove.
+
+### Negative suite: ownership, teardown, and borrowed evidence
+
+| Defect | Fix |
+|---|---|
+| `docker rm -f "$REGISTRY_NAME"` before establishing ownership | inspect first; ours is reused by id, anyone else's stops the run |
+| no container id recorded | the id is captured at creation and cleanup targets it |
+| `PASS=11 FAIL=0` then an unconditional teardown | cleanup runs first; the exit code requires **both** |
+| no signal handling | `EXIT`/`TERM`/`INT` all clean up |
+| injection 6 claimed the adapter checked the planted container | `apps/node/examples/ownership_probe.rs` points the real `DockerAdapter` at **that** container |
+
+Injection 6's claim was **false**: it said the compiled adapter had checked "a
+container this script planted", then ran `container_ownership`, which builds its
+own container from its own random ids and never sees the planted one. It now
+prints `ownership=foreign`, `remove_result=foreign`, `still_running=true` for the
+exact container the script created, and the assertions read those lines. Verified
+both ways: probed with identity **A** it answers `ours` and exits 3.
+
+### This revision's counterfactuals
+
+| Injected condition | Result |
+|---|---|
+| a container already holds the registry name (no label) | **BLOCKED**; the planted container survives, by id |
+| teardown exits 3 | `injections: PASS` + `cleanup: FAIL` → **exit 1** |
+| SIGTERM mid-run | **exit 130**, registry removed by id, **0** databases left |
+| gateway unreachable | **INCONCLUSIVE**, not "uninstalled" |
+| plugin detail unreadable / not JSON | **INCONCLUSIVE**, absence not inferred |
+
+### Local results
+
+Full lifecycle **51/51** (the physical-container assertion is new), negatives
+**13/13**, `preserved 8 pre-existing container(s)`, functional PASS + cleanup PASS.
+
 ### Position
 
 C1.3 → **PASS on its own scope**: the TypeScript lifecycle completes in one
