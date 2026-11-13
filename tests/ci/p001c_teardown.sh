@@ -125,7 +125,13 @@ done
 echo "   removed $removed container(s) belonging to this run"
 
 if [ "$PURGE" = "1" ]; then
-  dropdb --if-exists "$DB" 2>/dev/null || {
+  # `--force` is required, and its absence made every purge BLOCKED: killing the
+  # node processes does not close their connections at once - sqlx pools idle for
+  # a while and the kernel holds its own - so a plain `dropdb` refuses with
+  # "is being accessed by other users". `demo_up.sh` already uses --force for the
+  # same reason. This only terminates sessions on THIS run's database, whose name
+  # is derived from the run id.
+  dropdb --if-exists --force "$DB" 2>/dev/null || {
     echo "BLOCKED: could not drop $DB" >&2; exit 1; }
   rm -rf "$STATE"
   echo "   purged $DB and $STATE"

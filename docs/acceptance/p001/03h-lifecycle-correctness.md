@@ -1001,6 +1001,172 @@ because the other passes.
 | A clone enrolled without `OPSWEAVE_NODE_NAME` fails on the UNIQUE name | **open**, unchanged (ADR-023 §2.2a) |
 ---
 
+## 4i. C1.3 — one lifecycle run that can fail
+
+### The defect this phase was about
+
+`tests/acceptance/e2e_platform.sh` ran deploy, activate, rollback and the
+multi-language deploy under `|| true`:
+
+```bash
+"$OPSCTL" --url "$KERNEL_URL" deploy dev.opsweave.hello 0.0.1 ... || true
+"$OPSCTL" --url "$KERNEL_URL" activate dev.opsweave.hello 0.0.1 >/dev/null 2>&1 || true
+```
+
+Six such lines. Two consequences, both measured in this phase:
+
+1. **A failed deploy is reported as a failed gateway.** The script's only
+   verdict was `[ "$FAIL" = "0" ]` on assertions downstream of the deploy, so a
+   deploy that never happened surfaced as "the gateway does not serve v1" (503)
+   - a message that names the wrong component.
+2. **`2>&1 >/dev/null` discarded the reason.** The redirection order is wrong:
+   stderr went to the *terminal's* stdout and stdout to `/dev/null`, so even the
+   `|| true` had nothing left to print.
+
+It was not theoretical. When this phase's driver first ran the script on a fresh
+isolated platform, Go and Java were never staged, so both deploys returned
+`404 package not found`. Under the old script that produced two green lines
+followed by a confusing gateway failure; the new script named the step:
+
+```
+FAIL  dev.opsweave.hello-go deploys (exit 1)
+      Error: API 404 Not Found returned NOT_FOUND: package dev.opsweave.hello-go@0.0.1 not found
+```
+
+### The three categories, made explicit
+
+Every command is now one of these, and the kind is visible in the code:
+
+| Kind | Used for | Failure behaviour |
+|---|---|---|
+| `must` | deploy, activate, rollback, disable, enable, uninstall, install | fails **at that step**, with the captured stderr, and the run continues so every step reports |
+| `expect_fail <status> <code>` | a step that must be refused (tampered manifest, forged cursor, rollback to an undeployed version) | asserts the **exact status** and a **stable error code**; a success is itself a failure |
+| `cleanup` | teardown only | reported, never changes the verdict, cannot mask the original error |
+
+`expect_fail` deliberately does not accept "non-zero". A typo in the plugin id, a
+drained token and a real validation refusal all exit non-zero; only one of them
+is the behaviour under test.
+
+### What the run now proves
+
+50 assertions, one isolated platform, in this order (each one read back from the
+Kernel or the Gateway, never inferred from a command's exit code):
+
+| # | Step | Asserted by |
+|---|---|---|
+| 1 | admin signs in, kernel live/ready, ≥2 READY nodes | status endpoints |
+| 2 | v1 and v2 bundles staged from a real signature | `opsctl install` + `must` |
+| 3 | a tampered manifest is refused | HTTP 400 `SIGNATURE_OR_BUNDLE_INVALID` |
+| 4 | v1 deploys to 2 replicas, both READY, on 2 different nodes | plugin detail `instances[]` |
+| 5 | **before activation the Gateway does not serve v1** | HTTP 503 |
+| 6 | v1 activates; the Gateway serves v1 from a real instance | response `version` + `instanceId` |
+| 7 | the Kernel reports v1 active | `activeVersion` |
+| 8 | **v2 deploys and is READY but is not activated** | plugin detail |
+| 9 | **all 10 requests still route to v1** | 10 Gateway calls, not one sample |
+| 10 | v2 activates; all 10 route to v2 | 10 Gateway calls |
+| 11 | rollback to v1; all 10 route to v1; control plane agrees | 10 calls + `activeVersion` |
+| 12 | disable → 503 `CAPABILITY_UNAVAILABLE`; instances **not** destroyed | status + 503 code + plugin detail |
+| 13 | enable → deployment READY again, activates, 10/10 succeed | deploy + activate + 10 calls |
+| 14 | uninstall → route stops, Kernel records `UNINSTALLED`, no instance still READY/STARTING | status + 60 s bounded poll |
+| 15 | live logs: status event, log event, forged cursor refused 400 `INVALID_REQUEST` | SSE stream + status |
+| 16 | viewer: denied logs (403) and diagnostics (403) | status codes |
+| 17 | Go and Java: staged, deployed, activated, serve a Runtime v1 identity | Gateway response `runtime.language` |
+| 18 | container ownership: only this run's containers remain | `docker ps` filtered by installation id |
+
+Item 9 is the assertion C1 never made. Item 12's second half is the one a
+`503`-only check would miss: a disable that destroyed the deployment would also
+return 503.
+
+### Proven able to fail
+
+`tests/ci/p001c13_negatives.sh` injects six conditions and asserts the product
+refuses each. Run against the isolated platform, **10/10 assertions pass**, and
+the six are real conditions rather than edited assertions:
+
+| Injection | What was built | Detected by |
+|---|---|---|
+| 1 | a bundle re-zipped with a different `imageRef`, not re-signed | `install` → `SIGNATURE_OR_BUNDLE_INVALID`; **control**: the genuine bundle is accepted |
+| 2 | a real pushed image that answers liveness and exits | deploy stays `DEGRADED 0/1 (1 failed)` and times out; activation is refused |
+| 3 | a real pushed image that answers liveness and never readiness | deployment stays `PREPARING` for 60 s; Gateway 503 |
+| 4 | only v1 activated | an assertion that the route is v2 would be false |
+| 5 | rollback to a version never deployed | `NOT_FOUND` |
+| 6 | another installation's container under our name | a sweep scoped to our id does not list it |
+
+Two defects in this suite were found by running it, and both were the exact
+class it exists to catch:
+
+- **Injection 2 passed for the wrong reason.** The manifest was written before
+  `$CRASH_IMAGE` existed, so the bundle was never created, the deploy failed with
+  `plugin not found`, and the assertion "a crash-looping deployment does not
+  report success" went green. The manifest is now written *after* the image is
+  pushed, from its real digest.
+- **Injection 3's READY check grepped the response for the word `READY`** and
+  matched an instance/node state rather than the deployment's, declaring it ready
+  while the next line printed `PREPARING`. It now parses the `status` field.
+
+A third, in the driver: the foreign-container check read its list through
+`docker ps | while …`, a pipeline subshell, so `FOREIGN_SAFE=0` was set in a
+process that had already exited and **the check could never fail**. The list is
+now materialised first. Proved with a stub daemon: the old form prints "every
+foreign container survived" for a container that was removed, the new form
+detects it.
+
+### Isolation
+
+- Its own database (`p001c_<runid>`), dropped with `--force` — see the teardown
+  defect below.
+- Its own HOME, ports derived from the run id, its own node state directories and
+  installation identity, its own registry on a dedicated port.
+- **It refuses a daemon that already holds OpsWeave containers** unless
+  `OPSWEAVE_CI_ALLOW_SHARED_DAEMON=1`. This is not politeness: the driver removes
+  containers, and on a shared daemon it cannot prove which are its own.
+- The teardown removes containers **by this run's installation id**, drops this
+  run's database, and reports — never removes — what it cannot attribute.
+
+### A teardown defect this phase found
+
+`tests/ci/p001c_teardown.sh` ran `dropdb --if-exists` without `--force`, so
+every purge failed with *"database is being accessed by other users"*: killing
+the node processes does not close their sqlx pools at once. The error was
+reported as `BLOCKED` and the run's database leaked. Fixed with `--force`, which
+`demo_up.sh` already used for the same reason.
+
+### CI
+
+`.github/workflows/plugin-lifecycle.yml` runs the lifecycle and then the
+negatives on every pull request that can change them, with PostgreSQL 17 as a
+service, a dedicated registry port, and real Docker. It fails closed: a missing
+daemon is a red step before anything runs, and the driver `BLOCKED`s rather than
+degrading. Evidence (`lifecycle.json` plus one command/exit/stdout/stderr file
+per step) is uploaded as an artifact.
+
+**It is not a required check**, and this document does not propose making it one
+yet: the rule this repository already follows is that a check becomes required
+only after it is stable on `main`. These runs are the evidence for that decision.
+
+### What is still not verified
+
+| Claim | Status |
+|---|---|
+| Frontend assets in a browser (D4: still served after uninstall) | **NOT_RUN / open** — C4 |
+| Capability provides/requires at runtime, grant/revoke | **NOT_RUN** — C2 |
+| Incompatible upgrade refused | **NOT_RUN** — C2 case 10 |
+| OCI **image** signature | **NOT_RUN and cannot be** — not implemented; the bundle signature is not an image signature (P-09) |
+| Go and Java full lifecycles | **NOT_RUN** — C3. This run proves each serves Runtime v1 through the Gateway; it does not run their upgrade/rollback/disable/uninstall |
+| Three-host, rootless, mTLS | **NOT_RUN** — P001-E |
+
+### Position
+
+C1.3 → **PASS on its own scope**: the TypeScript lifecycle completes in one
+isolated run (50/50), six injected failures are each detected, container
+ownership is measured on the daemon, and the suite is wired to a PR-checked
+workflow.
+
+C1 overall stays **PARTIAL**: D4 (assets after uninstall) is untouched by this
+phase, and the brief says not to introduce a retention policy here.
+
+---
+
 ## 5. What is still NOT done
 
 | Item | Status |
@@ -1030,8 +1196,9 @@ It is **not** the full lifecycle acceptance (Phase 3), and the workflow wiring
 (Phase 6 in the brief) is deliberately left for the next step so that this stays
 reviewable.
 
-C1 → **PARTIAL** (D4 assets-after-uninstall open, browser/capability/Java/Go
-coverage still owed to C2/C3/C4).
+C1 → **PARTIAL** (D4 assets-after-uninstall open; the TypeScript lifecycle now
+has a gate (§4i) but the three-language MATRIX, capability/grant negatives and
+browser coverage are still owed to C2/C3/C4).
 C1.1 → **PASS on its own scope**: isolation and rollback consistency.
 C1.2 → **PASS on its own scope**: an installation cannot delete, stop or
 overwrite a container another installation owns, verified against a real daemon

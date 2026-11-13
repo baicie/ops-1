@@ -20,6 +20,12 @@ data-test/
 
 artifacts/reliability/
 artifacts/staging-preview/
+# P001-C1.3 lifecycle acceptance writes one evidence file per step (command,
+# exit code, stdout, stderr) plus the structured lifecycle.json. They are
+# uploaded as a workflow artifact; committing them would put raw logs and image
+# digests from one machine into the tree.
+artifacts/p001c13/
+artifacts/p001c13-negatives/
 
 # ---- Local UI captures kept out of the index on purpose ----
 # These are per-run evidence and state-matrix captures that docs cite by directory.
