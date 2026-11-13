@@ -89,7 +89,13 @@ jobs:
       # A dedicated port per workflow keeps this job from colliding with
       # data-foundation's 5002 registry when both run on one host.
       OPSWEAVE_TEST_REGISTRY_PORT: "5015"
-      no_proxy: "127.0.0.1,localhost,::1"
+      # `NO_PROXY` alone. A YAML mapping treats keys case-insensitively for
+      # duplicate detection, so declaring both `no_proxy` and `NO_PROXY` is a
+      # parse error: "job.env.NO_PROXY is already defined". GitHub rejected the
+      # whole workflow on it - every push produced conclusion=failure with
+      # jobCount=0 - and the workflow was listed by its file path instead of its
+      # name, which is the tell that it never parsed. The lowercase form is set
+      # by the scripts themselves where they need it.
       NO_PROXY: "127.0.0.1,localhost,::1"
       # npm/go/maven are not needed for the TS path; leaving them out keeps the
       # job honest about which language it exercises. The Go and Java lifecycles
