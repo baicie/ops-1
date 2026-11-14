@@ -72,7 +72,22 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda pair: request("POST", "/internal/v1/pipeline-jobs/claim-next", pair[1], pair[0]), identities))
     single_statuses = [status for status, _ in results]
-    if single_statuses.count(200) != 1 or any(s not in (200, 204) for s in single_statuses):
+    # The assertion is "this Job was claimed exactly once", NOT "exactly one
+    # request returned 200".
+    #
+    # `claim-next` hands out ANY claimable Job, and earlier cases in this file
+    # leave Jobs behind: `claim concurrency 2/8/16/32` and `multi-0..7` are
+    # CLAIMED, and a CLAIMED Job becomes claimable again once its lease expires
+    # or the reaper touches it. So 8 concurrent `claim-next` calls can
+    # legitimately receive more than one 200 - for DIFFERENT Jobs.
+    #
+    # Measured on PR #105 (run 43618899517):
+    #     statuses=[200, 200, 204, ...] leases=[<one worker>@1] current_fence=1
+    # Two 200s, ONE lease on this Job, fence 1. I read that as a double claim and
+    # reported it as a P0. It was this assertion counting someone else's Job.
+    #
+    # The lease row is the fact that matters, so the lease row is what is checked.
+    if any(s not in (200, 204) for s in single_statuses):
         # Say WHAT was double-claimed, not only how many said yes.
         #
         # Measured on PR #105 (run 43617558035):
@@ -89,6 +104,12 @@ def main():
             f"claim-next single statuses={single_statuses} "
             f"leases=[{leases}] current_fence={fence}"
         )
+    # The property: THIS Job holds exactly one lease.
+    leases_for_job = psql(
+        f"SELECT count(*) FROM kernel.pipeline_job_leases WHERE job_id='{next_job}';"
+    )
+    if leases_for_job != "1":
+        failures.append(f"claim-next single job has {leases_for_job} lease rows, expected 1")
     if psql(f"SELECT status FROM kernel.pipeline_jobs WHERE job_id='{next_job}';") != "CLAIMED":
         failures.append("claim-next single job was not claimed")
     # Claim-Next with several queued Jobs must distribute them exactly once.
