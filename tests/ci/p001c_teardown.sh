@@ -55,11 +55,18 @@ if [ "$recorded" != "$RUN_ID" ]; then
 fi
 
 DB="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['database'])" "$STATE/run.json")"
+# The node ids this run enrolled, for the log only.
+#
+# They are NOT the ownership predicate - see the OWNED_IDS block below, which
+# explains how matching on them produced a false "you swept a foreign container"
+# alarm for a run that swept nothing.
 NODE_IDS="$(python3 -c "import json,sys;print(' '.join(json.load(open(sys.argv[1])).get('nodeIds',[])))" "$STATE/run.json")"
-# The installation identity the nodes were given. Cleanup matches on it as well
-# as the node id, because the node id alone is exactly what another install can
-# share after a restore. Older run records predate it; those runs fall back to
-# the test-run label, and the guard below still refuses anything it cannot name.
+# The installation identity the nodes were given, and the only ownership
+# predicate this script uses. It is a fresh UUID per run (p001c_up.sh mints one),
+# so it cannot collide with another checkout's or another installation's
+# containers - unlike the node id, which survives a restore or a copied state
+# directory, and unlike `opsweave.managed=true`, which every OpsWeave node in the
+# world also sets.
 INSTALLATION_ID="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('installationId',''))" "$STATE/run.json")"
 if [ -z "$INSTALLATION_ID" ]; then
   echo "BLOCKED: $STATE/run.json records no installationId; it cannot prove which containers it owns" >&2
@@ -98,18 +105,35 @@ if ! BEFORE_ALL="$(snapshot_containers)"; then
 fi
 
 OWNED_IDS=""
-for nid in $NODE_IDS; do
-  # Node id alone is not ownership - see p001c_up.sh. The installation id is the
-  # same predicate the product itself uses, so this removes exactly what the
-  # node would remove, no more.
-  if ! ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
-      --filter "label=opsweave.installation-id=${INSTALLATION_ID}" 2>&1)"; then
-    echo "BLOCKED: could not query containers of node $nid. Nothing was changed." >&2
-    echo "         daemon said: ${ids:-<no output>}" >&2
-    exit 2
-  fi
-  OWNED_IDS="$OWNED_IDS $ids"
-done
+# The installation id IS the ownership predicate; the node ids are a check on it.
+#
+# This used to query `label=opsweave.node-id=<nid> AND label=opsweave.installation-id=<iid>`
+# once per node id recorded in run.json. That misses every container created by a
+# Node that was restarted under a new node id during the run, and it produced a
+# false isolation alarm:
+#
+#   run 20261114221326-11298-538025ea, `full TypeScript lifecycle`:
+#
+#     FAIL: containers this run did not own disappeared during teardown:
+#           17c17ebe... 83f3722e...
+#            That is the sweep this script exists to avoid.
+#
+# Nothing swept anything. Those two were this run's own plugin containers,
+# recreated by node-a after `supervisor_instance_generation_sigterm.sh` restarted
+# it; their `opsweave.node-id` was the restarted Node's id, which run.json does
+# not name. So teardown deleted them as "owned" while its foreign-container
+# snapshot listed them as "not owned" - the two halves of this script disagreed
+# about the same container, and the loud half was wrong.
+#
+# The installation id is the same predicate the product uses to decide what it
+# may remove (ADR-023, and `p001c_up.sh` says so too). A container carrying this
+# run's installation id belongs to this run whatever node id it also carries.
+if ! ids="$(docker ps -aq --filter "label=opsweave.installation-id=${INSTALLATION_ID}" 2>&1)"; then
+  echo "BLOCKED: could not query containers of installation $INSTALLATION_ID. Nothing was changed." >&2
+  echo "         daemon said: ${ids:-<no output>}" >&2
+  exit 2
+fi
+OWNED_IDS="$ids"
 # De-duplicated and whitespace-normalised, so the count below is ids, not lines.
 OWNED_IDS="$(printf '%s\n' $OWNED_IDS | sort -u | tr '\n' ' ')"
 
