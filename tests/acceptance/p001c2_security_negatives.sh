@@ -41,14 +41,144 @@ EVIDENCE="${OPSWEAVE_C2_EVIDENCE:-/tmp/p001c2-negatives.log}"
 PASS=0
 FAIL=0
 BLOCKED=0
+# A case that ran and could not establish its property. It is NOT a pass and NOT
+# a product failure: the suite measured nothing about the thing it was written
+# to measure. Kept separate from BLOCKED because BLOCKED means "the environment
+# was not there" and this means "the environment was there and the observation
+# was inconclusive".
+INCONCLUSIVE=0
+# Cases this run deliberately did not execute, with a reason. A NOT_RUN case is
+# never counted as passing, and the summary below says how many there are - the
+# old script's `exit 0` when FAIL and BLOCKED were both 0 made "eight of twelve
+# scenarios did not run" look identical to "all twelve passed".
+NOT_RUN=0
+NOT_RUN_REASONS=""
 ok()      { PASS=$((PASS+1)); echo "PASS  $*"; echo "PASS  $*" >>"$EVIDENCE"; }
 bad()     { FAIL=$((FAIL+1)); echo "FAIL  $*"; echo "FAIL  $*" >>"$EVIDENCE"; }
 blocked() { BLOCKED=$((BLOCKED+1)); echo "BLOCKED  $*"; echo "BLOCKED  $*" >>"$EVIDENCE"; }
+inconclusive() { INCONCLUSIVE=$((INCONCLUSIVE+1)); echo "INCONCLUSIVE  $*"; echo "INCONCLUSIVE  $*" >>"$EVIDENCE"; }
+notrun()  {
+  NOT_RUN=$((NOT_RUN+1))
+  local reason="${2:-no reason given}"
+  echo "NOT_RUN  $1  ($reason)"
+  echo "NOT_RUN  $1  ($reason)" >>"$EVIDENCE"
+  NOT_RUN_REASONS="$NOT_RUN_REASONS
+  - $1: $reason"
+}
 note()    { echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
+
+# --- fixture cleanup --------------------------------------------------------
+#
+# Every resource this run created is named here and nowhere else. The previous
+# version also revoked "the first ACTIVE grant it could see", which may have
+# belonged to another suite; nothing like that remains.
+#
+# Written as a FUNCTION and installed as a trap, not as a tail block. A cleanup
+# that only runs when the script reaches its last line does not run at all when
+# the case it is cleaning up after hangs, when CI cancels the job, or when the
+# shell is interrupted - which is exactly when a leftover account and a live
+# grant are most likely. EXIT covers the normal path and `set -e` aborts; TERM
+# and INT cover a cancelled job.
+#
+# Cleanup failures are recorded in $EVIDENCE and in FAIL rather than swallowed:
+# a teardown that cannot say what it left behind is how a suite quietly poisons
+# the database for the next run.
+CLEANED=0
+cleanup_fixtures() {
+  # Idempotent: the EXIT trap may run after the tool has already been called by
+  # hand, and running twice must not double-count failures.
+  [ "$CLEANED" = "0" ] || return 0
+  CLEANED=1
+
+  for leftover in "${OWN_GRANT_ID:-}" "${OWN2:-}"; do
+    [ -n "$leftover" ] || continue
+    CODE="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$leftover")"
+    case "$CODE" in
+      200|204) note "cleanup: revoked this run's leftover grant $leftover" ;;
+      404)     note "cleanup: grant $leftover was already gone" ;;
+      *)       echo "FAIL  cleanup: this run's grant $leftover could not be revoked (HTTP $CODE)" >>"$EVIDENCE"
+               FAIL=$((FAIL+1)) ;;
+    esac
+  done
+
+  if [ "$VIEWER_CREATED" = "1" ] && [ -n "$VIEWER_ID" ]; then
+    code="$(call "$ADMIN_TOKEN" PATCH "/api/v1/users/$VIEWER_ID" '{"disabled":true}')"
+    case "$code" in
+      200|204) note "cleanup: disabled the viewer this run created ($VIEWER_ID)" ;;
+      *)
+        echo "FAIL  cleanup: the viewer this run created ($VIEWER_ID) could not be disabled (HTTP $code)" >>"$EVIDENCE"
+        FAIL=$((FAIL+1)) ;;
+    esac
+  elif [ "$VIEWER_CREATED" = "1" ]; then
+    echo "FAIL  cleanup: a viewer was created but no id was recorded; it cannot be cleaned up by id" >>"$EVIDENCE"
+    FAIL=$((FAIL+1))
+  else
+    # Not a failure: the fixture was never created. This branch exists so the
+    # absence of a cleanup is a stated fact rather than a silent non-event.
+    note "cleanup: no viewer fixture was created by this run, so none was disabled"
+  fi
+
+  # The dataset case 7 wrote, if it landed.
+  #
+  # Verified before deleting, not assumed. The id contains this run's tag, so a
+  # collision is not expected - but "the name looks like mine" is the same
+  # reasoning that let the old code revoke an arbitrary grant. The check is that
+  # a listing under the caller's OWN workspace contains the id; a dataset that
+  # is not there is not this run's to delete, whatever it is called.
+  if [ -n "${FORGED_DATASET_CREATED:-}" ]; then
+    OWN_LISTING="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+      "$URL$CATALOG_PATH?workspaceId=$WS_A" 2>/dev/null || true)"
+    if ! printf '%s' "$OWN_LISTING" | grep -qF "$FORGED_DATASET"; then
+      echo "FAIL  cleanup: $FORGED_DATASET was written but is not listed under this run's workspace," >>"$EVIDENCE"
+      echo "      so it was NOT deleted: deleting a resource this run cannot show it owns is the" >>"$EVIDENCE"
+      echo "      mistake this cleanup exists to avoid. Check by hand." >>"$EVIDENCE"
+      FAIL=$((FAIL+1))
+      return 0
+    fi
+    dcode="$(call "$ADMIN_TOKEN" DELETE "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets/$FORGED_DATASET" '{}')"
+    case "$dcode" in
+      200|201|204) note "cleanup: deleted the dataset this run wrote ($FORGED_DATASET)" ;;
+      404)         note "cleanup: dataset $FORGED_DATASET was already gone" ;;
+      *)           echo "FAIL  cleanup: the dataset this run wrote ($FORGED_DATASET) could not be deleted (HTTP $dcode)" >>"$EVIDENCE"
+                   FAIL=$((FAIL+1)) ;;
+    esac
+  fi
+}
+
+# `trap ... EXIT TERM INT` with the same handler: on TERM/INT the handler runs,
+# then the shell exits; EXIT fires afterwards and the CLEANED guard keeps it to
+# one pass.
+# One handler, both jobs. Installing `trap ... EXIT` twice does not chain - the
+# second registration REPLACES the first - so a scratch-directory trap at the top
+# of the file would have been silently discarded by the fixture trap below it,
+# leaving every run's response bodies on disk. Measured: `trap -p EXIT` after the
+# second registration shows only the second command.
+final_cleanup() {
+  cleanup_fixtures
+  [ -n "${SCRATCH:-}" ] && rm -rf "$SCRATCH"
+  return 0
+}
+
+on_signal() {
+  cleanup_fixtures
+  # A cancelled run is not a passing run. 130/143 are the conventional codes.
+  case "$1" in
+    TERM) exit 143 ;;
+    INT)  exit 130 ;;
+    *)    exit 1 ;;
+  esac
+}
+
 
 # A value only this run can produce. Used to tag every resource this suite
 # creates, so cleanup can never touch another suite's grant or account.
 RUN_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+# Per-run scratch. These files used to be fixed paths under /tmp (`$SCRATCH/body`,
+# `$SCRATCH/race-code`), so two runs on one machine - or a run overlapping a
+# cancelled one - wrote each other's response bodies. The symptom was a case
+# reading a body that belonged to a different request, which reads as a product
+# finding. Nothing outside this directory is written by this script.
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/p001c2-${RUN_TAG}.XXXXXX")"
 ADMIN_TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])' 2>/dev/null || true)"
 [ -n "$ADMIN_TOKEN" ] || { echo "BLOCKED: no ~/.opsweave/session.json" >&2; exit 3; }
 
@@ -58,14 +188,14 @@ jf() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)" 2>/dev/null
 # One HTTP call, classified. Prints "<status> <body>".
 call() { # token-or-empty, method, path, [body]
   local tok="$1" method="$2" path="$3" body="${4:-}"
-  local args=(-sS -o /tmp/c2-body -w '%{http_code}' -m 15 -X "$method")
+  local args=(-sS -o "$SCRATCH/body" -w '%{http_code}' -m 15 -X "$method")
   [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
   [ -n "$body" ] && args+=(-H 'content-type: application/json' --data-binary "$body")
   local code
   code="$(curl "${args[@]}" "$URL$path" 2>/dev/null)" || code="000"
   printf '%s' "${code:-000}"
 }
-body_code() { jf "d.get('code','')" </tmp/c2-body 2>/dev/null || true; }
+body_code() { jf "d.get('code','')" <$SCRATCH/body 2>/dev/null || true; }
 
 # `expect_refusal <label> <status> <code> <token> <method> <path> [body]`
 #
@@ -122,6 +252,16 @@ expect_refusal() {
 WS_A="00000000-0000-4000-8000-000000000001"
 WS_B="00000000-0000-4000-8000-0000000000b2"
 PLUGIN="dev.opsweave.data-catalog"
+
+# --- arm the fixture cleanup -----------------------------------------------
+#
+# Deliberately here and not at the top: `cleanup_fixtures` calls `call`, which is
+# defined above, and needs ADMIN_TOKEN, PLANE and the workspace ids. A trap armed
+# before those exist would run a handler that references an undefined function -
+# which is a cleanup that fails precisely when it is needed.
+trap final_cleanup EXIT
+trap 'on_signal TERM' TERM
+trap 'on_signal INT' INT
 # The plugin's own route, read from plugins/data-catalog/backend/server.mjs:701,
 # not guessed. The Gateway prefixes the plugin id.
 CATALOG_PATH="/api/v1/gateway/$PLUGIN/api/data-catalog/datasets"
@@ -182,12 +322,45 @@ expect_refusal "1 unauthenticated gateway call" 401 UNAUTHENTICATED "" GET "$CAT
 #
 # A `viewer` may read; it must not create users. The fixture is created here and
 # removed at the end, so a leftover account cannot change a later run.
+#
 # ---------------------------------------------------------------------------
-VIEWER_EMAIL="c2-viewer-$RANDOM@opsweave.local"
+# Ownership of the fixture
+# ---------------------------------------------------------------------------
+# The cleanup used to re-find the account BY EMAIL at the end and disable
+# whatever it found:
+#
+#     VIEWER_EMAIL="c2-viewer-$RANDOM@opsweave.local"
+#     ...
+#     UID_TO_DELETE="$(... | next(u['id'] for u in users if u['email']==VIEWER_EMAIL))"
+#     PATCH /api/v1/users/$UID_TO_DELETE {"disabled":true}
+#
+# Two problems, and the second is the dangerous one:
+#
+#   * `$RANDOM` is 15 bits. Two runs of this suite on one database can pick the
+#     same address, and so can a developer's leftover fixture from last week.
+#   * Nothing recorded whether THIS run created the account. If the create failed
+#     with a conflict, the cleanup still disabled whatever account owned that
+#     address - which may be another run's, or a human's.
+#
+# So the id is captured from the CREATE RESPONSE and the cleanup acts only on
+# that id. If the create did not succeed, there is nothing to clean up and the
+# cleanup says so.
+VIEWER_EMAIL="c2-viewer-$(date -u +%Y%m%dT%H%M%SZ)-$$@opsweave.local"
 VIEWER_PASS="C2Viewer!2026"
+VIEWER_ID=""
+VIEWER_TOKEN=""
+VIEWER_CREATED=0
 CREATE="$(call "$ADMIN_TOKEN" POST /api/v1/users \
   "{\"email\":\"$VIEWER_EMAIL\",\"displayName\":\"C2 Viewer\",\"password\":\"$VIEWER_PASS\",\"role\":\"viewer\"}")"
 if [ "$CREATE" = "201" ] || [ "$CREATE" = "200" ]; then
+  VIEWER_CREATED=1
+  # The id comes from the response this request produced, not from a later
+  # lookup that could match a different row.
+  VIEWER_ID="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/v1/users" 2>/dev/null \
+    | python3 -c "import json,sys;print(next((u['id'] for u in json.load(sys.stdin) if u.get('email')=='$VIEWER_EMAIL'),''))" 2>/dev/null || true)"
+  if [ -z "$VIEWER_ID" ]; then
+    blocked "2 insufficient role: the viewer was created but its id could not be read back, so it cannot be cleaned up by id"
+  fi
   # The session token is NOT in the login response body: `/api/v1/auth/login`
   # sets it as an `HttpOnly` cookie (`auth.rs`, `opsweave_session=…`) and returns
   # only `csrf_token`. Reading `d['token']` therefore always produced nothing,
@@ -213,11 +386,10 @@ if [ "$CREATE" = "201" ] || [ "$CREATE" = "200" ]; then
   else
     expect_refusal "2 viewer creating an admin" 403 FORBIDDEN "$VIEWER_TOKEN" POST /api/v1/users \
       '{"email":"c2-should-not-exist@opsweave.local","displayName":"x","password":"X!2026aaaa","role":"admin"}'
-    note "2 viewer fixture: $VIEWER_EMAIL (deleted below)"
+    note "2 viewer fixture: $VIEWER_EMAIL id=$VIEWER_ID (disabled below, by id)"
   fi
 else
   blocked "2 insufficient role: could not create the viewer fixture (HTTP $CREATE)"
-  VIEWER_TOKEN=""
 fi
 
 # ---------------------------------------------------------------------------
@@ -255,7 +427,7 @@ expect_refusal "4 unheld capability" 403 CAPABILITY_FORBIDDEN \
 # fails as the admin (case 4) must still fail.
 # ---------------------------------------------------------------------------
 FORGED=(-H "X-OpsWeave-User-Id: 00000000-0000-4000-8000-00000000dead" -H "X-OpsWeave-User-Role: superadmin")
-code="$(curl -sS -o /tmp/c2-body -w '%{http_code}' -m 15 "${FORGED[@]}" \
+code="$(curl -sS -o $SCRATCH/body -w '%{http_code}' -m 15 "${FORGED[@]}" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   "$URL/api/v1/capabilities/not.held.v1/1/resolve" 2>/dev/null)" || code="000"
 # Same four-way classification as expect_refusal. An earlier version called any
@@ -294,9 +466,13 @@ FORGED_BODY="{\"datasetId\":\"$FORGED_DATASET\",\"workspaceId\":\"$WS_B\",\"fiel
 WRITE_CODE="$(call "$ADMIN_TOKEN" POST "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" "$FORGED_BODY")"
 case "$WRITE_CODE" in
   200|201)
+    # Recorded so the trapped cleanup can delete it. Before this the dataset was
+    # written and only mentioned in a log line - a row this run created and
+    # never removed, tagged with an address no later run would think to look for.
+    FORGED_DATASET_CREATED=1
     FILED_WS="$(python3 -c '
 import json,sys
-try: d=json.load(open("/tmp/c2-body"))
+try: d=json.load(open("$SCRATCH/body"))
 except Exception: d={}
 print(d.get("workspaceId") or (d.get("dataset") or {}).get("workspaceId") or "")' 2>/dev/null || true)"
     if [ "$FILED_WS" = "$WS_B" ]; then
@@ -304,7 +480,29 @@ print(d.get("workspaceId") or (d.get("dataset") or {}).get("workspaceId") or "")
     elif [ -n "$FILED_WS" ]; then
       ok "7: a body-supplied workspace was ignored; the dataset was filed under $FILED_WS"
     else
-      note "7: the write succeeded but the response did not name a workspace; the forged field was not honoured, which is the property, but this run cannot quote where it landed"
+      # The write was accepted and filed somewhere. Not knowing where is not the
+      # same as it being correct: "it did not name $WS_B therefore it must be
+      # fine" is an inference, not an observation. So go and LOOK - read the
+      # dataset back through the same API and see which workspace lists it.
+      #
+      # This branch used to be a `note` and the case still counted as executed,
+      # which made "the response was unhelpful" indistinguishable from "the
+      # forged workspace was ignored".
+      FOUND_IN=""
+      for probe_ws in "$WS_A" "$WS_B"; do
+        LISTING="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" \
+          "$URL$CATALOG_PATH?workspaceId=$probe_ws" 2>/dev/null || true)"
+        if printf '%s' "$LISTING" | grep -qF "$FORGED_DATASET"; then FOUND_IN="$probe_ws"; break; fi
+      done
+      if [ "$FOUND_IN" = "$WS_B" ]; then
+        bad "7: the write did not name a workspace, and reading it back shows it was filed under the FORGED workspace $WS_B"
+      elif [ "$FOUND_IN" = "$WS_A" ]; then
+        ok "7: the response named no workspace, but reading it back shows it was filed under the caller's own workspace"
+      else
+        # Payload and a landing place both unknown. That is INCONCLUSIVE, not a
+        # pass: this case proves nothing about where a forged field sends data.
+        inconclusive "7: the write succeeded, the response named no workspace, and the dataset was not found under either workspace - the landing place is unproven"
+      fi
     fi
     ;;
   403)
@@ -334,10 +532,11 @@ esac
 # `COVERED_ELSEWHERE` is printed with the exact command that covers it, so the
 # claim can be checked rather than taken on trust.
 if [ "${OPSWEAVE_C2_ALLOW_DESTRUCTIVE:-0}" != "1" ]; then
-  echo "NOT_RUN  8 disable: not executed here (opt in with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1)"
-  echo "NOT_RUN  8: covered by tests/acceptance/e2e_platform.sh (disable -> 503 CAPABILITY_UNAVAILABLE)" >>"$EVIDENCE"
-  echo "NOT_RUN  9 uninstall: not executed here"
-  echo "NOT_RUN  9: covered by tests/acceptance/e2e_platform.sh (uninstall -> 503 CAPABILITY_UNAVAILABLE)" >>"$EVIDENCE"
+  # Counted, not merely printed. A NOT_RUN that only reaches stdout is a NOT_RUN
+  # the verdict cannot see, which is how "eight of twelve did not run" used to
+  # exit 0.
+  notrun "8 disable" "opt in with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1; e2e_platform.sh covers disable -> 503 CAPABILITY_UNAVAILABLE"
+  notrun "9 uninstall" "opt in with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1; e2e_platform.sh covers uninstall -> 503 CAPABILITY_UNAVAILABLE"
   echo "COVERED_ELSEWHERE  8/9 -> tests/acceptance/e2e_platform.sh"
   echo "COVERED_ELSEWHERE  8/9 -> tests/acceptance/e2e_platform.sh" >>"$EVIDENCE"
 else
@@ -384,9 +583,7 @@ fi
 # manifest has no such field, so "refuse an incompatible upgrade" cannot be
 # exercised. Stated, not skipped.
 # ---------------------------------------------------------------------------
-echo "NOT_RUN  10 incompatible upgrade (no incompatibility declaration exists in the manifest schema)"
-echo "NOT_RUN  10 incompatible upgrade" >>"$EVIDENCE"
-note "10: contracts/ manifest has no field expressing an incompatible upgrade; asserting a refusal would test a fabricated input"
+notrun "10 incompatible upgrade" "contracts/ manifest has no field expressing an incompatible upgrade; asserting a refusal would test a fabricated input"
 
 # ---------------------------------------------------------------------------
 # 12. Revocation semantics: SEQUENTIAL and CONCURRENT are different claims.
@@ -405,7 +602,7 @@ note "10: contracts/ manifest has no field expressing an incompatible upgrade; a
 FIXTURE_TAG="c2-${RUN_TAG}"
 CREATE_GRANT_BODY="{\"name\":\"data.catalog.v1\",\"major\":1,\"consumerPluginId\":\"$PLUGIN\",\"providerPluginId\":\"$PLUGIN\",\"scope\":[\"dataset:read\"]}"
 CREATE_CODE="$(call "$ADMIN_TOKEN" POST /api/v1/capability-grants "$CREATE_GRANT_BODY")"
-OWN_GRANT_ID="$(jf "d.get('id') or d.get('grantId') or ''" </tmp/c2-body 2>/dev/null || true)"
+OWN_GRANT_ID="$(jf "d.get('id') or d.get('grantId') or ''" <$SCRATCH/body 2>/dev/null || true)"
 if [ "$CREATE_CODE" != "200" ] && [ "$CREATE_CODE" != "201" ]; then
   blocked "12: could not create this run's own grant (HTTP $CREATE_CODE); no existing grant is touched"
 elif [ -z "$OWN_GRANT_ID" ]; then
@@ -435,25 +632,51 @@ else
   #
   # A second grant is created because 12a consumed the first one.
   CREATE2="$(call "$ADMIN_TOKEN" POST /api/v1/capability-grants "$CREATE_GRANT_BODY")"
-  OWN2="$(jf "d.get('id') or d.get('grantId') or ''" </tmp/c2-body 2>/dev/null || true)"
+  OWN2="$(jf "d.get('id') or d.get('grantId') or ''" <$SCRATCH/body 2>/dev/null || true)"
   if [ "$CREATE2" != "200" ] && [ "$CREATE2" != "201" ]; then
     blocked "12b: could not create a second grant for the concurrency case (HTTP $CREATE2)"
   elif [ -z "$OWN2" ]; then
     blocked "12b: no id returned for the second grant"
   else
-    curl -sS -o /tmp/c2-race-body -w '%{http_code}' -m 15 \
-      -H "Authorization: Bearer $ADMIN_TOKEN" \
-      "$URL/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" >/tmp/c2-race-code 2>/dev/null &
+    # Overlap has to be SHOWN, not assumed. Starting two processes from the same
+    # shell does not prove the request reached its authorisation check before the
+    # revoke committed; it proves two processes existed. The marker below is
+    # written by the request as it is being sent, and the revoke is not issued
+    # until the marker appears - so "the request had started" is an observation.
+    #
+    # What this still does NOT prove is that the request was PAST its
+    # authorisation check at the moment the revoke committed. That is not
+    # observable from outside without a hook in the product, so the case is
+    # labelled OBSERVED_ATTEMPT and its verdict says so rather than claiming a
+    # concurrency guarantee.
+    RACE_MARKER="$SCRATCH/race-started"
+    rm -f "$RACE_MARKER"
+    (
+      : >"$RACE_MARKER"
+      curl -sS -o $SCRATCH/race-body -w '%{http_code}' -m 15 \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        "$URL/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" >$SCRATCH/race-code 2>/dev/null
+    ) &
     RACE_PID=$!
+    OVERLAP=0
+    for _ in $(seq 1 200); do
+      [ -f "$RACE_MARKER" ] && { OVERLAP=1; break; }
+      sleep 0.01
+    done
+    rm -f "$RACE_MARKER"
     REVOKE2="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$OWN2")"
     wait "$RACE_PID" 2>/dev/null || true
-    RACE_CODE="$(cat /tmp/c2-race-code 2>/dev/null || echo 000)"
-    case "$RACE_CODE" in
-      200) note "12b: the in-flight request succeeded - it was authorised before the revoke committed (documented outcome)" ;;
-      403) note "12b: the in-flight request was refused - the revoke committed first (documented outcome)" ;;
-      000) blocked "12b: the in-flight request did not complete (HTTP 000)" ;;
-      *)   bad "12b: the in-flight request returned $RACE_CODE, which is neither documented outcome" ;;
-    esac
+    RACE_CODE="$(cat $SCRATCH/race-code 2>/dev/null || echo 000)"
+    if [ "$OVERLAP" != "1" ]; then
+      inconclusive "12b: the request never signalled that it had started before the revoke was issued, so no overlap was demonstrated"
+    else
+      case "$RACE_CODE" in
+        200) note "12b: OBSERVED_ATTEMPT - the request was in flight and succeeded; it was authorised before the revoke committed (documented outcome)" ;;
+        403) note "12b: OBSERVED_ATTEMPT - the request was in flight and was refused; the revoke committed first (documented outcome)" ;;
+        000) blocked "12b: the in-flight request did not complete (HTTP 000)" ;;
+        *)   bad "12b: the in-flight request returned $RACE_CODE, which is neither documented outcome" ;;
+      esac
+    fi
     case "$REVOKE2" in
       200|204) ok "12b: the concurrent revoke was acknowledged" ;;
       *)       blocked "12b: the concurrent revoke returned $REVOKE2" ;;
@@ -462,38 +685,56 @@ else
   fi
 fi
 
-# --- fixture cleanup --------------------------------------------------------
-#
-# Every resource this run created is named here and nowhere else. The previous
-# version also revoked "the first ACTIVE grant it could see", which may have
-# belonged to another suite; nothing like that remains.
-#
-# Leftover grants: 12a and 12b revoke their own before finishing, but a case
-# that fails midway leaves one ACTIVE. Revoking by the id this run recorded is
-# safe - it can only name a grant this run created.
-for leftover in "${OWN_GRANT_ID:-}" "${OWN2:-}"; do
-  [ -n "$leftover" ] || continue
-  CODE="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$leftover")"
-  case "$CODE" in
-    200|204) note "cleanup: revoked this run's leftover grant $leftover" ;;
-    404)     note "cleanup: grant $leftover was already gone" ;;
-    *)       echo "FAIL  cleanup: this run's grant $leftover could not be revoked (HTTP $CODE)" >>"$EVIDENCE"
-             FAIL=$((FAIL+1)) ;;
-  esac
-done
-
-if [ -n "${VIEWER_EMAIL:-}" ]; then
-  UID_TO_DELETE="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/v1/users" 2>/dev/null \
-    | python3 -c "import json,sys;print(next((u['id'] for u in json.load(sys.stdin) if u.get('email')=='$VIEWER_EMAIL'),''))" 2>/dev/null || true)"
-  if [ -n "$UID_TO_DELETE" ]; then
-    code="$(call "$ADMIN_TOKEN" PATCH "/api/v1/users/$UID_TO_DELETE" '{"disabled":true}')"
-    note "cleanup: viewer $VIEWER_EMAIL disabled (HTTP $code)"
-  fi
-fi
-
-echo
-echo "== C2 negatives: PASS=$PASS FAIL=$FAIL BLOCKED=$BLOCKED =="
+echo "== C2 negatives: PASS=$PASS FAIL=$FAIL BLOCKED=$BLOCKED INCONCLUSIVE=$INCONCLUSIVE NOT_RUN=$NOT_RUN =="
 echo "evidence: $EVIDENCE"
-[ "$FAIL" -eq 0 ] || exit 1
-[ "$BLOCKED" -eq 0 ] || exit 2
+
+# ---------------------------------------------------------------------------
+# The verdict.
+#
+# Five outcomes, because "the exit code was 0" was doing work it could not do.
+# The old tail was:
+#
+#     [ "$FAIL" -eq 0 ] || exit 1
+#     [ "$BLOCKED" -eq 0 ] || exit 2
+#     exit 0
+#
+# so a run where eight of twelve scenarios were `note`d or never executed was
+# indistinguishable from one where all twelve asserted. The exit code is now a
+# verdict, and a run that did not cover everything is not a full pass.
+#
+#   0  STRICT_PASS            every scenario asserted, nothing inconclusive
+#   1  FAIL                   a product assertion did not hold
+#   2  BLOCKED                the environment was not there
+#   3  PASS_WITH_COVERAGE_GAPS  nothing failed, but some cases were NOT_RUN
+#   4  INCONCLUSIVE           a case ran and could not establish its property
+#
+# BLOCKED and FAIL win over the softer verdicts: an environment problem and a
+# product defect are both more urgent than a coverage note.
+if [ "$NOT_RUN" -gt 0 ]; then
+  echo
+  echo "NOT_RUN this run ($NOT_RUN case(s)); these are NOT passes:$NOT_RUN_REASONS"
+fi
+if [ "$FAIL" -ne 0 ]; then
+  echo "verdict: FAIL"
+  exit 1
+fi
+if [ "$BLOCKED" -ne 0 ]; then
+  echo "verdict: BLOCKED"
+  exit 2
+fi
+if [ "$INCONCLUSIVE" -ne 0 ]; then
+  echo "verdict: INCONCLUSIVE ($INCONCLUSIVE case(s) measured nothing conclusive)"
+  exit 4
+fi
+if [ "$NOT_RUN" -ne 0 ]; then
+  echo "verdict: PASS_WITH_COVERAGE_GAPS ($NOT_RUN case(s) did not run)"
+  exit 3
+fi
+if [ "$PASS" -eq 0 ]; then
+  # Nothing asserted at all. Not a pass - this is the shape a broken suite takes
+  # when every case fails its precondition and the counters stay at zero.
+  echo "verdict: INCONCLUSIVE (no case asserted anything)"
+  exit 4
+fi
+echo "verdict: STRICT_PASS"
 exit 0
