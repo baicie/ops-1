@@ -403,29 +403,80 @@ else
 fi
 
 # ===========================================================================
-# 5. The Kernel does not come back.
+# 5. A duplicate Effect.
+#
+# The acceptance asserts exactly 3 receipts. This case inserts a fourth for the
+# same job and requires the assertion to notice, so "exactly 3" is a real check
+# rather than a number that happens to match.
+# ===========================================================================
+echo "== 5: a duplicated effect receipt =="
+JOB5="$(start_long_job 800)" || bad "5: could not start the job"
+STATUS5="$(wait_status "$JOB5" 120)" || true
+stop_worker
+if [ "$STATUS5" != "SUCCEEDED" ]; then
+  # QUEUED and RUNNING mean different things and only one of them is about this
+  # test. QUEUED is "no worker claimed it" - a setup or credential problem, and
+  # a reason to look here. RUNNING is "a worker claimed it and did not finish in
+  # time" - which is about the workload and the budget, not about duplicates.
+  report_job_not_running "$JOB5" "$STATUS5"
+  if [ "$STATUS5" = "QUEUED" ]; then
+    note "5: the job was never claimed (QUEUED) - this is a setup problem, not a product finding"
+  else
+    note "5: the job reached $STATUS5 but not SUCCEEDED within the budget"
+  fi
+  bad "5: could not establish a baseline job to duplicate an effect on"
+else
+  BASE="$(q "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB5';")"
+  [ "$BASE" = "3" ] || bad "5: baseline receipt count is $BASE, expected 3"
+  # Copy one receipt under a new key, if the table allows it.
+  q "INSERT INTO plugin_opsweave_data_catalog.catalog_effect_receipts
+       SELECT * FROM plugin_opsweave_data_catalog.catalog_effect_receipts
+       WHERE job_id='$JOB5' LIMIT 1;" >/dev/null 2>&1
+  AFTER="$(q "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB5';")"
+  if [ "$AFTER" = "$BASE" ]; then
+    note "5: the table's primary key refused the duplicate; that is the product preventing it, not the test"
+    ok "5: a duplicate receipt cannot be inserted at all (unique constraint holds)"
+  else
+    [ "$AFTER" != "3" ] \
+      && ok "5: the exactly-3 assertion would fail on a duplicated receipt (now $AFTER)" \
+      || bad "5: the duplicate was accepted but the count is still 3"
+  fi
+fi
+
+# ===========================================================================
+# 6. The Kernel does not come back.
+#
+# LAST AMONG THE CASES THAT NEED A LIVE PLATFORM, and deliberately so. Freezing
+# the Kernel for longer than the node lease (30 s, `config.rs:60`) makes each Node
+# quarantine itself and STOP heartbeating - `runtime.rs:1154` breaks out of the
+# heartbeat loop, which is the correct safety behaviour (a Node that cannot tell
+# whether it was taken over must not keep acting). Nothing restores it.
+#
+# Measured on run 43613134315: case 5, which then ran after this one, failed with
+# `claim failed (403 Forbidden): node is not READY`. That was this case's side
+# effect reported as case 5's own failure. Case 5 now runs first.
 #
 # The happy path asserts that the heartbeat RESUMES after the outage. Without a
 # resume the job must not succeed. This case stops the Kernel and leaves it
 # stopped longer than the lease TTL, then restores it: the job must NOT come out
 # SUCCEEDED on a lease that was never renewed.
 # ===========================================================================
-echo "== 5: an outage that outlives the lease TTL =="
-JOB5="$(start_long_job 40000)" || bad "5: could not start the job"
-STATUS5="$(wait_status "$JOB5" 30)" || true
-if [ "$STATUS5" != "RUNNING" ]; then
-  bad "5: the job did not reach RUNNING (got $STATUS5)"
+echo "== 6: an outage that outlives the lease TTL =="
+JOB6="$(start_long_job 40000)" || bad "6: could not start the job"
+STATUS6="$(wait_status "$JOB6" 30)" || true
+if [ "$STATUS6" != "RUNNING" ]; then
+  bad "6: the job did not reach RUNNING (got $STATUS6)"
   stop_worker
 else
-  LEASE5="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB5';")"
+  LEASE6="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB6';")"
   kill -STOP "$KERNEL_PID"
   # Longer than LEASE_TTL (60 s): whatever happens, the lease cannot still be
   # ACTIVE and valid after this.
   sleep 70
   kill -CONT "$KERNEL_PID"
   sleep 3
-  LEASE_STATE="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE5';")"
-  JOB_STATE="$(q "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB5';")"
+  LEASE_STATE="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE6';")"
+  JOB_STATE="$(q "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB6';")"
   stop_worker
   # This case stops the Kernel for longer than the NODE heartbeat TTL as well as
   # the lease TTL, so the Nodes go stale and are not READY when it ends.
@@ -440,66 +491,34 @@ else
   # WAITS for the platform to recover before returning, and fails if it does not.
   # Leaving a broken platform for the next case is how one case's PASS hides the
   # next case's setup failure.
-  READY_BACK=""
-  for _ in $(seq 1 90); do
-    READY_BACK="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/nodes" 2>/dev/null \
-      | python3 -c 'import json,sys
-try: d=json.load(sys.stdin)
-except Exception: print(""); raise SystemExit
-print(sum(1 for n in d if n.get("status")=="READY" and not n.get("stale")))' 2>/dev/null || true)"
-    [ "${READY_BACK:-0}" -ge 1 ] && break
-    sleep 1
-  done
-  if [ "${READY_BACK:-0}" -ge 1 ]; then
-    note "5: $READY_BACK node(s) READY again after the outage"
-  else
-    bad "5: no node returned to READY within 90 s after the outage; later cases cannot claim jobs"
-  fi
+  # This case CANNOT be undone, and the code says so:
+  #
+  #   apps/node/src/runtime.rs:1154-1160
+  #     Err(error) => {
+  #         let expired = last_success.elapsed() >= lease;
+  #         warn!(...);
+  #         if expired {
+  #             quarantine(&shared, "node lease expired while Kernel was unreachable").await;
+  #             break;                    <-- the heartbeat loop EXITS
+  #         }
+  #
+  # `lease_seconds` defaults to 30 (config.rs:60) and this case freezes the Kernel
+  # for 70. So the Node quarantines itself and stops heartbeating permanently: it
+  # is a deliberate safety property - a Node that cannot tell whether it was taken
+  # over must not keep acting - and nothing in the platform brings it back.
+  #
+  # Measured on run 43613134315: no node returned to READY within 90 s, and case 6
+  # (which needs to complete a job) failed with
+  # `claim failed (403 Forbidden): node is not READY`.
+  #
+  # So this case runs LAST among the ones that need a live platform, and it says
+  # that in its own output. An earlier version waited 90 s for a recovery that
+  # cannot happen, which turned a product property into a test timeout.
+  note "6: nodes are now quarantined by design; this case must run last (see the header)"
   if [ "$JOB_STATE" = "SUCCEEDED" ] && [ "$LEASE_STATE" = "ACTIVE" ]; then
-    bad "5: the job succeeded with an ACTIVE lease after a 70 s outage - the heartbeat claim is not being tested"
+    bad "6: the job succeeded with an ACTIVE lease after a 70 s outage - the heartbeat claim is not being tested"
   else
-    ok "5: an outage longer than the TTL is not reported as a healthy run (job=$JOB_STATE lease=$LEASE_STATE)"
-  fi
-fi
-
-# ===========================================================================
-# 6. A duplicate Effect.
-#
-# The acceptance asserts exactly 3 receipts. This case inserts a fourth for the
-# same job and requires the assertion to notice, so "exactly 3" is a real check
-# rather than a number that happens to match.
-# ===========================================================================
-echo "== 6: a duplicated effect receipt =="
-JOB6="$(start_long_job 800)" || bad "6: could not start the job"
-STATUS6="$(wait_status "$JOB6" 120)" || true
-stop_worker
-if [ "$STATUS6" != "SUCCEEDED" ]; then
-  # QUEUED and RUNNING mean different things and only one of them is about this
-  # test. QUEUED is "no worker claimed it" - a setup or credential problem, and
-  # a reason to look here. RUNNING is "a worker claimed it and did not finish in
-  # time" - which is about the workload and the budget, not about duplicates.
-  report_job_not_running "$JOB6" "$STATUS6"
-  if [ "$STATUS6" = "QUEUED" ]; then
-    note "6: the job was never claimed (QUEUED) - this is a setup problem, not a product finding"
-  else
-    note "6: the job reached $STATUS6 but not SUCCEEDED within the budget"
-  fi
-  bad "6: could not establish a baseline job to duplicate an effect on"
-else
-  BASE="$(q "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB6';")"
-  [ "$BASE" = "3" ] || bad "6: baseline receipt count is $BASE, expected 3"
-  # Copy one receipt under a new key, if the table allows it.
-  q "INSERT INTO plugin_opsweave_data_catalog.catalog_effect_receipts
-       SELECT * FROM plugin_opsweave_data_catalog.catalog_effect_receipts
-       WHERE job_id='$JOB6' LIMIT 1;" >/dev/null 2>&1
-  AFTER="$(q "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB6';")"
-  if [ "$AFTER" = "$BASE" ]; then
-    note "6: the table's primary key refused the duplicate; that is the product preventing it, not the test"
-    ok "6: a duplicate receipt cannot be inserted at all (unique constraint holds)"
-  else
-    [ "$AFTER" != "3" ] \
-      && ok "6: the exactly-3 assertion would fail on a duplicated receipt (now $AFTER)" \
-      || bad "6: the duplicate was accepted but the count is still 3"
+    ok "6: an outage longer than the TTL is not reported as a healthy run (job=$JOB_STATE lease=$LEASE_STATE)"
   fi
 fi
 
