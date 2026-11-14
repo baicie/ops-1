@@ -1267,6 +1267,11 @@ a legitimate state.
 
 ### Verified in this revision
 
+> These are the numbers for the **second** revision (the one that added the
+> `deploy_or_already_active` helper). The third and final revision raised the
+> counts — see "Final revision, on Linux and on `main`" below. The two sets are
+> not in conflict; they are different commits.
+
 | Where | Result |
 |---|---|
 | macOS, full lifecycle | **50/50 PASS**, `preserved 8 pre-existing container(s)`, cleanup PASS |
@@ -1275,6 +1280,32 @@ a legitimate state.
 | macOS, negatives | **11/11 PASS**, every refusal pinned to its real code |
 | GitHub-hosted Linux, `plugin-lifecycle` | **SUCCESS** — lifecycle **50/50**, negatives **11/11**, `preserved 2 pre-existing container(s)`, functional PASS + cleanup PASS. Run [43407821518](https://github.com/baicie/ops-1/actions/runs/43407821518) |
 | GitHub-hosted Linux, `legacy-regression` | **SUCCESS** at `86ac5f6` after the shared `deploy_or_already_active` helper |
+
+### Final revision, on Linux and on `main`
+
+The numbers below are the **final** ones, and they come from two places: the
+last run on the PR before merge, and — more importantly — the run on the merged
+commit itself, which is the one that describes what `main` actually contains.
+
+| Where | Commit | Result |
+|---|---|---|
+| macOS, full lifecycle | final revision | **51/51 PASS** (the physical-container assertion is the 51st), `preserved 8 pre-existing container(s)` |
+| macOS, negatives | final revision | **13/13 PASS** (two assertions added for registry ownership and id-targeted cleanup) |
+| PR #96 checks | `d1f4da0` | **21/21 required checks green**, including `full TypeScript lifecycle` in 13 m 54 s |
+| **`main` after merge** | **`89113ad`** | **all five workflows `success`**: `ci` [43558682442](https://github.com/baicie/ops-1/actions/runs/43558682442), `platform-linux-acceptance` [43558682451](https://github.com/baicie/ops-1/actions/runs/43558682451), `plugin-lifecycle` [43558682523](https://github.com/baicie/ops-1/actions/runs/43558682523), `reliability` [43558682438](https://github.com/baicie/ops-1/actions/runs/43558682438), `staging-preview` [43558682468](https://github.com/baicie/ops-1/actions/runs/43558682468) |
+
+The `plugin-lifecycle` artifact for `89113ad` was downloaded and read, not just
+checked for a green tick:
+
+```
+PASS=51 FAIL=0
+   preserved 2 pre-existing container(s) still present and running
+PASS  the physical containers of the uninstalled instances are gone from the daemon
+
+PASS=13 FAIL=0
+   injections: PASS (every injected failure was detected)
+   cleanup:    PASS
+```
 
 ### Still open after the revision
 
@@ -1359,31 +1390,97 @@ Full lifecycle **51/51** (the physical-container assertion is new), negatives
 ### Position
 
 C1.3 → **PASS on its own scope**: the TypeScript lifecycle completes in one
-isolated run (50/50), six injected failures are each detected, container
-ownership is measured on the daemon, and the suite is wired to a PR-checked
-workflow.
+isolated run (**51/51**; 50/50 was the count before the physical-container
+assertion was added), six injected failures are each detected (13/13 assertions
+in the negative suite), container ownership is measured on the daemon, and the
+suite is wired to a workflow that runs on every PR and on `main`.
 
 C1 overall stays **PARTIAL**: D4 (assets after uninstall) is untouched by this
 phase, and the brief says not to introduce a retention policy here.
 
 ---
 
-## 5. What is still NOT done
+## 5. What was NOT done as of C1.1 — and where each item stands now
 
-| Item | Status |
-|---|---|
-| Full lifecycle end-to-end in one isolated run (Phase 3) | **NOT_RUN as a single recorded run** — the pieces ran across the state-machine and isolation suites, but no single transcript covers build → push → … → uninstall |
-| `|| true` removal from `e2e_platform.sh` | **NOT DONE** — 8 remain; 6 of them sit on deploy/activate lines, so a failed deploy still surfaces as a downstream gateway failure rather than at its cause |
-| Dedicated plugin-lifecycle CI workflow | **NOT DONE** — no workflow runs these suites yet |
-| Java / Go in the isolated harness | **NOT_RUN** — the Java restart failure reproduced locally, passed in CI, unexplained |
-| F2 retention policy | design only |
-| F3 planned disable | design only |
-| Long-lived async rollback operation | not built; the CLI finishes the work inline, which is enough for one operator and is documented as such |
+> **Historical section, corrected in place on 2026-11-14.**
+> It was written for C1.1 (`ff7b782`, 2026-11-12) and was **not** updated when
+> C1.3 landed, so for a while it contradicted §4i of this same document. Each
+> row now carries its **historical** status struck through, then its **current**
+> status, then the evidence. Rows that are still open say so. Nothing was
+> deleted: a stale claim that quietly disappears is as misleading as one that was
+> never corrected.
+
+| Item | Historical (C1.1, `ff7b782`) | Current status | Evidence |
+|---|---|---|---|
+| Full lifecycle end-to-end in one isolated run (Phase 3) | ~~**NOT_RUN** — no single transcript covered build → push → … → uninstall~~ | **DONE** | §4i. One isolated run: build → stage → deploy → activate → rollback → disable → enable → uninstall. Local **51/51**; the run on `main` `89113ad` is the recorded transcript (`lifecycle.log`, `PASS=51 FAIL=0`) |
+| `\|\| true` removal from `e2e_platform.sh` | ~~**NOT DONE** — 8 remain; 6 on deploy/activate lines~~ | **DONE for the class that decided the verdict; 6 remain elsewhere, classified below** | see §5.1 |
+| Dedicated plugin-lifecycle CI workflow | ~~**NOT DONE** — no workflow runs these suites yet~~ | **DONE** | `.github/workflows/plugin-lifecycle.yml`; first ran on PR #96, green on `main` `89113ad`. Not a required check, by the repository's own stability rule (§4i "CI") |
+| Java / Go in the isolated harness | ~~**NOT_RUN** — the Java restart failure reproduced locally, passed in CI, unexplained~~ | **PARTIAL — unchanged** | Both are staged, deployed, activated and serve Runtime v1 in the isolated run. Their **full** lifecycles (upgrade/rollback/disable/uninstall) are C3. The Java restart failure is still unexplained |
+| F2 retention policy | design only | **unchanged** | — |
+| F3 planned disable | design only | **unchanged** | — |
+| Long-lived async rollback operation | not built | **unchanged** | The CLI finishes the work inline, which is enough for one operator and is documented as such |
 
 **The concurrency contention is real and unfixed**: two rollbacks to the same
 version can starve each other on a loaded host — both sat at `PREPARING 0/2`
 while the node log showed instances cycling `READY → readiness timeout → READY`.
 The status codes are now correct; the scheduling problem is separate.
+
+### 5.1 Every remaining `|| true` in `e2e_platform.sh`, classified
+
+`grep -c '|| true' tests/acceptance/e2e_platform.sh` returns **11**, not 0.
+The claim this document makes is **not** that they were all removed. Each one was
+read and placed in exactly one category:
+
+| Category | Count | Lines | What it does | Why it is or is not acceptable |
+|---|---|---|---|---|
+| **Comment** (not code) | 5 | 7, 9, 10, 348, 413 | Quote the old script or describe the old defect | Nothing is discarded — they are prose |
+| **Has a downstream assertion** | 3 | 201, 242, 339 | `gateway_code` → `000`, then `000` is reported **INCONCLUSIVE**, never as a stopped route; `instances_of` → asserted as `V1_READY = 2`; `V1_NODES` → asserted as two distinct node ids | The discarded value cannot pass the assertion; an empty extraction becomes a named failure |
+| **Has an explicit "unmeasured" branch** | 1 | 706 | `CID_LIST` empty ⇒ prints `NOTE … physical container state was NOT measured` and records `physicalContainerCheck=not-measured` | The absence is reported, not glossed. It does **not** claim the containers were checked |
+| **Evidence-only, can mask a real failure** | 1 | 360 | An SSE `curl -m 4` that always ends by timeout; the two `grep`s that follow are the real assertions | Acceptable: the `curl` never carries the verdict, and the greps fail loudly on an empty file |
+| **Evidence-only, silently empty** | **1** | **290** | `digestV1` extraction | **Not acceptable as it stands — see §5.2** |
+
+### 5.2 `digestV1` is empty in the real CI evidence, and always was
+
+This is not a hypothetical. In the `plugin-lifecycle` artifact for `main`
+`89113ad`, `lifecycle.json` contains:
+
+```json
+"digestV1": ""
+```
+
+while `v1Instances` in the same file contains the correct digest twice
+(`…hello-ts@sha256:ddbfe9cf…`). The cause is ordering, not parsing:
+
+| Line | What happens |
+|---|---|
+| `:283` | `DETAIL_JSON="$(detail)"` — **before** any deployment exists |
+| `:290` | `digestV1` extracted from that snapshot, `2>/dev/null \|\| true` |
+| `:325` | `deploy_or_already_active "v1 deploys to two replicas…"` — the first deployment |
+
+At `:283` there are no `deployments[].instances[]`, so the extractor prints `""`,
+and `|| true` keeps the empty string. **The field is present in the evidence and
+looks collected, but it has never held a value.**
+
+This has three consequences the previous wording of this document got wrong:
+
+1. It is **not** merely "recorded and never asserted". Its extraction is
+   **guaranteed to fail** by where it sits.
+2. The `|| true` on it is therefore in the "can mask a real failure" class, not
+   the benign one.
+3. `digestV1` must not be cited as evidence that a digest-pinned reference was
+   verified. The digest **is** available (`v1Instances`), but not from this field.
+
+**Not fixed here.** This PR corrects the status document only; changing the
+acceptance script is a behavioural change and belongs with the layout rework, not
+in a docs PR. Recorded as an open item in §5.3.
+
+### 5.3 Still open after this correction
+
+| # | Item | Why it is not done here |
+|---|---|---|
+| 1 | `digestV1` moves after the v1 deploy, and gets an assertion (`non-empty` + `sha256:` prefix) instead of `\|\| true` | Requires editing `e2e_platform.sh`; this PR touches one Markdown file |
+| 2 | The other evidence-only extractions could be tightened the same way | Same reason; they currently fail loudly enough via their assertions |
+| 3 | Java/Go full lifecycles, D4, C2 negatives | C3 / C4 / C2 scope |
 
 ---
 
@@ -1397,17 +1494,30 @@ It is **not** the full lifecycle acceptance (Phase 3), and the workflow wiring
 (Phase 6 in the brief) is deliberately left for the next step so that this stays
 reviewable.
 
+> **Correction (2026-11-14):** both of the items named in that paragraph were
+> completed by C1.3 — the single isolated lifecycle run (§4i) and
+> `.github/workflows/plugin-lifecycle.yml`. The sentence is kept as the C1.1
+> position it was, not as the current one.
+
 C1 → **PARTIAL** (D4 assets-after-uninstall open; the TypeScript lifecycle now
 has a gate (§4i) but the three-language MATRIX, capability/grant negatives and
 browser coverage are still owed to C2/C3/C4).
 C1.1 → **PASS on its own scope**: isolation and rollback consistency.
-C1.2 → **PASS on its own scope**: an installation cannot delete, stop or
-overwrite a container another installation owns, verified against a real daemon
-with a planted colliding container. The pre-upgrade migration is manual and is
-stated above, not automated. C1.2.4 closes the last path by which a *reinitialized
-clone* could end up holding the original's ownership token: a migration
-interrupted before its first delete. Its durability argument is a design
+C1.2 → **PASS on its own scope, as scoped here**: the **Node Runtime** will not
+delete, stop or overwrite a container another installation owns, verified against
+a real daemon with a planted colliding container. The pre-upgrade migration is
+manual and is stated above, not automated. C1.2.4 closes the last path by which a
+*reinitialized clone* could end up holding the original's ownership token: a
+migration interrupted before its first delete. Its durability argument is a design
 property (§4h, ADR-023 §2.5), not a power-loss measurement.
+
+> **That PASS does not extend to the systemd `ExecStopPost` cleanup script.**
+> `deployments/linux/opsweave-node-cleanup.sh` selects containers by
+> `opsweave.node-id` alone and calls `docker rm -f` on each match — it does not
+> read `opsweave.installation-id`, and it does not go through `DockerAdapter`.
+> The ownership rule above is enforced *inside the Runtime*; this path sits
+> outside it. Tracked separately; it is **not** evidence against C1.2's scope,
+> and it must not be read as evidence for it either.
 
 The three phases together do not close the container-ownership question for
 *containers created before C1.2*: those are unlabelled and will be reported
