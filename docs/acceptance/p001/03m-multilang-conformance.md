@@ -86,10 +86,21 @@ readiness 200、未知路径 404。
 
 ## 5. 发现的两个产品缺口
 
-### 5.1 `RUNTIME_PROTOCOL` 定义了但从未被校验
+### 5.1 `RUNTIME_PROTOCOL` 的校验（**此前的判断是错的，已撤回**）
 
-`crates/contracts/src/lib.rs:17` 定义 `RUNTIME_PROTOCOL = "http-json-v1"`。
-全仓库搜索该常量，**除定义处外没有任何 Rust 使用**：
+**撤回。** 此前本节断言「该常量从未被用于校验」，依据是
+`grep -rn RUNTIME_PROTOCOL` 只找到定义处。那个搜索找的是**常量的名字**，
+而产品比较的是**字面量**：
+
+```
+apps/node/src/runtime.rs:1848   verify_runtime_info(shared, &base, workload).await?;
+apps/node/src/runtime.rs:1909   || info.runtime_protocol != "http-json-v1"
+```
+
+Node 在把实例标记为 Ready **之前**就拒绝了协议不是 `http-json-v1` 的实例。
+产品行为正确；错的是本节对它的解读。
+
+以下为当时的（错误）记录，保留以便追溯：
 
 ```
 $ grep -rn RUNTIME_PROTOCOL . --exclude-dir=target --exclude-dir=.git
@@ -100,7 +111,8 @@ Node 的就绪探测（`apps/node/src/runtime.rs:2011-2022` 的 `probe()`）只�
 `response.status().is_success()`，**不读取响应体，也不检查 runtime identity**。因此一个自报 `runtimeProtocol: "http-json-v0"` 的
 插件不会被拒绝。
 
-矩阵把这行记为 `KNOWN GAP` 并附上原因，而不是断言为通过。
+矩阵当时把这行记为 `KNOWN GAP`。**该条目已删除**，改为真断言：READY 实例
+必须报告契约协议，因为 Node 已经检查过。`KNOWN_GAPS` 现为空。
 
 ### 5.2 Java 对非法 JSON 返回 500，TS 与 Go 返回 400（**已修复**）
 
