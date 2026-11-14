@@ -235,6 +235,22 @@ for lang in ts go java; do
     # `docker ps -a` plus the container logs for this installation turn a row
     # that said "failed" into one that says what failed.
     {
+      # The NODE logs first: they say what the Node did with the container
+      # (pull, create, health-probe, remove) and they survive after the container
+      # is gone. Measured on run 43613861249: the container listing and the
+      # container logs below were BOTH EMPTY, because by the time `opsctl --wait`
+      # returned the failed containers had already been reaped. The Node's own log
+      # is the only record that still exists at that point.
+      echo "--- node logs (last 40 lines each) ---"
+      for n in node-a node-b; do
+        log="/tmp/p001c-${RUN_ID}/logs/$n.log"
+        if [ -f "$log" ]; then
+          echo "--- $n ---"
+          tail -40 "$log" 2>&1 || true
+        else
+          echo "--- $n: $log absent ---"
+        fi
+      done
       echo "--- containers of this installation ---"
       for inst in $INSTALL_IDS; do
         [ -n "$inst" ] || continue
