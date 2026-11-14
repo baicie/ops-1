@@ -121,16 +121,77 @@ FAKE
 chmod +x "$FAKE_BIN/opsweave-pipeline-worker"
 # The SUT resolves the worker as ./target/debug/opsweave-pipeline-worker; swap it
 # for the duration of one run and put the real one back whatever happens.
+#
+# "Whatever happens" is the whole point, and the previous version did not have
+# it. It restored the binary on the ONE path it could foresee:
+#
+#     mv "$REAL_BIN" "$REAL_BIN.real"
+#     CODE="$(run_sut)"
+#     mv "$REAL_BIN.real" "$REAL_BIN"      # <- reached only if run_sut returns
+#
+# If the run was interrupted - a signal, a harness timeout, CI cancelling the
+# job - control never reached the second `mv`, and the REAL worker binary stayed
+# parked at `*.real` while a script that does `exit 1` sat at the worker's path.
+#
+# The damage is not local to this case. `data_foundation_ci.sh` runs the
+# heartbeat negatives IMMEDIATELY AFTER this file, and they start
+# `./target/debug/opsweave-pipeline-worker` for each case. Measured on run
+# 43598745967: cases 1, 2, 3, 5 and 6 of the negatives all reported
+#
+#     the job did not reach RUNNING (got QUEUED)
+#           worker pid … already gone
+#
+# because every worker they launched was this stub. The negatives were reporting
+# the previous test's debris as a product condition.
+#
+# Measured directly: with the restore skipped, `./bin` afterwards is the stub
+# (exit 1) and `bin.real` holds the real binary - the swap survives an abort.
+#
+# So the restore is now unconditional (EXIT/TERM/INT) and its failure is a hard
+# error rather than a silent one: a worker binary that is not the real one must
+# never be left behind for the next script to execute.
 REAL_BIN="$ROOT/target/debug/opsweave-pipeline-worker"
+SWAPPED=0
+restore_worker_binary() {
+  [ "$SWAPPED" = "1" ] || return 0
+  SWAPPED=0
+  if [ -f "$REAL_BIN.real" ]; then
+    if mv -f "$REAL_BIN.real" "$REAL_BIN" 2>/dev/null; then
+      note "  restored the real worker binary to $REAL_BIN"
+    else
+      # Loud, and in the evidence file: the next script in the harness will run
+      # whatever is at that path, so a failure here is not cosmetic.
+      echo "FAIL  6: COULD NOT restore the real worker binary;" >>"$EVIDENCE"
+      echo "      $REAL_BIN.real is still the real one and $REAL_BIN may be the stub." >>"$EVIDENCE"
+      echo "      Everything after this point runs against the wrong worker." >>"$EVIDENCE"
+      FAIL=$((FAIL+1))
+      bad "6: the real worker binary could not be restored to $REAL_BIN (left at $REAL_BIN.real)"
+    fi
+  fi
+}
 if [ -x "$REAL_BIN" ]; then
   mv "$REAL_BIN" "$REAL_BIN.real"
   cp "$FAKE_BIN/opsweave-pipeline-worker" "$REAL_BIN"
+  SWAPPED=1
+  # Armed AFTER the swap so the restore always has something to undo, and armed
+  # for the whole duration of the run rather than for one statement.
+  trap restore_worker_binary EXIT
+  trap 'restore_worker_binary; exit 130' INT
+  trap 'restore_worker_binary; exit 143' TERM
   CODE="$(run_sut)"
-  mv "$REAL_BIN.real" "$REAL_BIN"
+  restore_worker_binary
+  trap - EXIT INT TERM
   if full_pass; then
     bad "6: a worker that fails for an unexplained reason still produced a full PASS"
   else
     ok "6: an unexplained worker failure is detected (exit $CODE, no PASS line)"
+  fi
+  # Prove the restore actually happened rather than trusting it: the next script
+  # in the harness executes this path.
+  if [ -x "$REAL_BIN" ] && ! [ -f "$REAL_BIN.real" ]; then
+    ok "6: the real worker binary is back in place with no .real left behind"
+  else
+    bad "6: after the case, $REAL_BIN is not the restored binary (or .real remains)"
   fi
 else
   notrun "6: $REAL_BIN is absent, so the worker could not be swapped"

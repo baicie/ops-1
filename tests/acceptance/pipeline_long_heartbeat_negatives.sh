@@ -81,6 +81,53 @@ bad() { FAIL=$((FAIL + 1)); echo "FAIL  $*"; echo "FAIL  $*" >>"$EVIDENCE"; }
 note(){ echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
 q()   { psql "$DB" -qAt -c "$1"; }
 
+# --- the worker binary must be the real one --------------------------------
+#
+# `pipeline_long_heartbeat_counterfactuals.sh` swaps
+# `target/debug/opsweave-pipeline-worker` for a script that exits 1, runs the SUT,
+# and swaps it back. If that swap is ever left behind, every worker THIS file
+# starts dies immediately - and the cases report
+#
+#     the job did not reach RUNNING (got QUEUED)
+#
+# which is a claim about the product. On run 43598745967 five cases failed this
+# way against a stubbed binary, not against a defect.
+#
+# The counterfactuals now restore unconditionally and verify it, and this guard
+# makes the debris impossible to mistake for a finding if it ever returns: a
+# `*.real` sibling means a swap is outstanding, and a worker that exits before
+# its own first log line means the path holds a stub.
+REAL_BIN="$ROOT/target/debug/opsweave-pipeline-worker"
+if [ -f "$REAL_BIN.real" ]; then
+  echo "BLOCKED: $REAL_BIN.real exists, so the worker binary at" >&2
+  echo "         $REAL_BIN is a stand-in left by another script. Every case here" >&2
+  echo "         would start it and report QUEUED as a product finding." >&2
+  echo "         Restore it (mv $REAL_BIN.real $REAL_BIN) and re-run." >&2
+  exit 3
+fi
+# The discriminator is the binary's own SIZE, not a `--version` probe: this
+# worker takes no CLI arguments (its `main` reads `OPSWEAVE_WORKER_JOB_ID` from
+# the environment), so `--version` would start one and try to reach the Kernel -
+# a check with side effects is not a precondition check.
+#
+# The stub the counterfactuals install is a few lines of shell; the real worker
+# links tokio, reqwest and the contracts crate. A floor of 1 MiB separates them
+# by orders of magnitude without executing anything, and a worker below it would
+# fail for a reason worth stopping on anyway.
+if [ -x "$REAL_BIN" ]; then
+  bin_size="$(wc -c <"$REAL_BIN" 2>/dev/null | tr -d ' ' || echo 0)"
+  if [ "${bin_size:-0}" -lt 1048576 ]; then
+    echo "BLOCKED: $REAL_BIN is only ${bin_size} bytes, so it is a stand-in (the" >&2
+    echo "         counterfactuals swap in a script that exits 1), not the real" >&2
+    echo "         worker. Every case would start it and report QUEUED as a" >&2
+    echo "         product finding. Rebuild: cargo build -p opsweave-pipeline-worker" >&2
+    exit 3
+  fi
+else
+  echo "BLOCKED: $REAL_BIN is missing; build it before running this suite" >&2
+  exit 3
+fi
+
 KERNEL_PID="$(cat /tmp/data-kernel.pid 2>/dev/null || true)"
 [ -n "$KERNEL_PID" ] || { echo "BLOCKED: /tmp/data-kernel.pid missing; needs the data-foundation harness" >&2; exit 1; }
 restore_kernel() { kill -CONT "$KERNEL_PID" 2>/dev/null || true; }
