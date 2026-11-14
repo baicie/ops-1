@@ -121,4 +121,28 @@ if ps -o stat= -p "$WORKER" 2>/dev/null | grep -q '^Z'; then
   exit 1
 fi
 echo "PASS Node SIGTERM left no live or zombie worker (pid=$WORKER reaped)"
+
+# Put Node A back. This suite ends by SIGTERMing the Node it was testing, and it
+# used to simply stop there - which made it terminal for node-a without saying
+# so. Everything scheduled after it that needed node-a failed with
+#
+#     403 Forbidden {"code":"FORBIDDEN","message":"node is not READY"}
+#
+# Measured on run 43638457457: the heartbeat negatives, which load a worker with
+# node-a's credential, reported `the job did not reach RUNNING (got QUEUED)` for
+# cases 2, 3, 5 and 6 because node-a's process had been gone since 20:57:59.
+#
+# Killing the Node is the ASSERTION here; leaving it dead is not. The restart is
+# part of the test, and it is asserted too: returning without saying whether
+# node-a came back is how the next step inherits a dead Node and reports it as a
+# product defect.
+NODE_A_PID="$(OPSWEAVE_WORKER_BATCH_DELAY_MS=5000 tests/runtime/start_node.sh node-a 9101)"
+echo "$NODE_A_PID" >/tmp/node-a.pid
+RECOVERED=0
+for _ in $(seq 1 120); do
+  if [ "$(instance_ready)" = "1" ]; then RECOVERED=1; break; fi
+  sleep 1
+done
+[ "$RECOVERED" = "1" ] || { echo "FAIL node-a did not come back READY for the steps that follow (pid=$NODE_A_PID)"; exit 1; }
+echo "node-a restarted pid=$NODE_A_PID (READY)"
 echo "Supervisor Instance STOP/Generation/SIGTERM: PASS"
