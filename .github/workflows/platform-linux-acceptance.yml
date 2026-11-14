@@ -188,6 +188,22 @@ jobs:
       # assertions about a clone are only meaningful against a daemon that
       # actually enforces the labels - the same reason `container_ownership` runs
       # in this job.
+      # P001 stage 2 (P0): the systemd `ExecStopPost` cleanup must delete only
+      # containers labelled for THIS installation. Before the fix it selected by
+      # `opsweave.node-id`, which two installations can share after a restore,
+      # and deleted another installation's containers - outside every guard the
+      # Runtime has.
+      #
+      # This suite has 34 assertions and **was not run by any workflow** until
+      # here: it was written with the fix, in `tests/ci/`, which no job invoked.
+      # A regression test nothing runs is a comment.
+      - name: ExecStopPost cleanup owns only this installation's containers
+        env:
+          OPSWEAVE_REQUIRE_TEST_DOCKER: "1"
+        run: |
+          set -eu
+          bash tests/ci/p001_execstoppost_ownership.sh
+
       - name: An interrupted reinitialize cannot keep the original's installation id
         env:
           OPSWEAVE_REQUIRE_TEST_DOCKER: "1"
