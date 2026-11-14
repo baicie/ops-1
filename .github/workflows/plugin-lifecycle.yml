@@ -1,0 +1,251 @@
+name: plugin-lifecycle
+
+# P001-C1.3: the TypeScript plugin's whole lifecycle, in one isolated run, on
+# every pull request that can change it.
+#
+# This workflow exists because the lifecycle acceptance had no gate. Until now
+# `tests/acceptance/e2e_platform.sh` ran only inside `data-foundation.yml`'s
+# `legacy-regression` job, whose `pull_request` trigger is path-filtered to a
+# list that does NOT include the script itself - so a change to the acceptance
+# script ran no acceptance. C0 recorded the same gap for `run_conformance.py`
+# ("never run in CI"). This job runs the lifecycle as its own thing, with the
+# evidence it produces kept as an artifact.
+#
+# It is NOT a required check and is deliberately not proposed as one yet: the
+# rule this repository already follows (and C0's plan says explicitly) is that a
+# check becomes required only after it has been stable on main for a while. The
+# first runs are the evidence for that decision, not the decision itself.
+#
+# Fails closed. A missing Docker daemon, a missing PostgreSQL, or a missing
+# registry is a red job, never a skip: `tests/ci/p001c13_lifecycle.sh` refuses to
+# start (BLOCKED) rather than degrading to a mock, and `OPSWEAVE_REQUIRE_TEST_DOCKER`
+# makes the Rust-side suites do the same.
+#
+# Why there is a `push` trigger and why it is unfiltered
+# -----------------------------------------------------
+# The first version had only `pull_request`, and the push of this very branch
+# produced run 43394795219: conclusion=failure, **jobCount=0**. That is not a
+# config error and not Docker/Postgres/apt - it is GitHub's representation of "a
+# push matched no workflow", and it looked exactly like a red acceptance run in
+# the checks list. A workflow that can report a failure without starting a job
+# teaches reviewers to ignore its red.
+#
+# `push` is deliberately NOT path-filtered. On `main` this is the record that the
+# lifecycle passed on the commit that was merged; filtering it would let a merge
+# that changed, say, a shared crate be recorded as having no acceptance at all.
+# It is not a PR gate on `main`, so the cost is one run per merge.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'apps/kernel/**'
+      - 'apps/node/**'
+      - 'apps/opsctl/**'
+      - 'crates/**'
+      - 'contracts/**'
+      - 'plugins/**'
+      # Every script the driver executes, plus every input those scripts read.
+      # A path filter that misses one of these is how a change to the acceptance
+      # code ships without the acceptance running - the exact gap this workflow
+      # exists to close, so the list is derived from what the scripts actually
+      # call rather than from what seemed relevant:
+      #   scripts/build-plugins.sh      builds and pushes the three images
+      #   scripts/assemble_plugin.py   writes each bundle's manifest
+      #   scripts/demo_up.sh           not used by this job, but shares the
+      #                                e2e_platform.sh contract
+      #   tests/ci/p001c_up.sh         the isolated platform driver
+      #   tests/ci/p001c_teardown.sh   the scoped teardown
+      - 'scripts/build-plugins.sh'
+      - 'scripts/assemble_plugin.py'
+      - 'scripts/demo_up.sh'
+      - 'scripts/demo_common.sh'
+      - 'plugins/**'
+      - 'tests/acceptance/e2e_platform.sh'
+      - 'tests/ci/p001c13_*.sh'
+      - 'tests/ci/p001c_up.sh'
+      - 'tests/ci/p001c_teardown.sh'
+      - 'tests/ci/p001c121_demo_safety.sh'
+      - '.github/workflows/plugin-lifecycle.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    name: full TypeScript lifecycle
+    runs-on: ubuntu-24.04
+    # Measured locally at ~7 min for the lifecycle plus ~2 min to build the
+    # bundles and images. 45 minutes leaves room for a slow runner without
+    # letting a hang hold the queue.
+    timeout-minutes: 45
+    env:
+      # The runner is dedicated to this job, so it is safe to run the container
+      # cleanup. On a developer's machine the same script refuses unless this is
+      # set - that check is what stops it removing a colleague's containers.
+      OPSWEAVE_CI_ALLOW_SHARED_DAEMON: "1"
+      # A dedicated port per workflow keeps this job from colliding with
+      # data-foundation's 5002 registry when both run on one host.
+      OPSWEAVE_TEST_REGISTRY_PORT: "5015"
+      # `NO_PROXY` alone. A YAML mapping treats keys case-insensitively for
+      # duplicate detection, so declaring both `no_proxy` and `NO_PROXY` is a
+      # parse error: "job.env.NO_PROXY is already defined". GitHub rejected the
+      # whole workflow on it - every push produced conclusion=failure with
+      # jobCount=0 - and the workflow was listed by its file path instead of its
+      # name, which is the tell that it never parsed. The lowercase form is set
+      # by the scripts themselves where they need it.
+      NO_PROXY: "127.0.0.1,localhost,::1"
+      # The lifecycle below is the TypeScript one; the Go and Java LIFECYCLES are
+      # P001-C3's deliverable and are not claimed here. Their TOOLCHAINS are still
+      # required, because scripts/build-plugins.sh builds all three bundles and
+      # the lifecycle stages all three (the Java plugin is what the disable
+      # assertion uses). The distinction matters: this job proves the TS
+      # lifecycle and that Go/Java serve Runtime v1, not their lifecycles.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+
+      # `scripts/build-plugins.sh` builds all three reference plugins, so this job
+      # needs the Go and Java toolchains even though the lifecycle it drives is the
+      # TypeScript one. Without them the Java plugin fails to compile with
+      # "release version 21 not supported" and the run BLOCKS at bundle build -
+      # correctly, but it never reaches the lifecycle. Measured on run 43405082632.
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+
+      - name: Install Maven
+        run: sudo apt-get update && sudo apt-get install -y maven
+
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile
+
+      - name: Install PostgreSQL client tools
+        # `pg_isready`, `createdb` and `dropdb` are what the harness uses; the
+        # service container only provides the server.
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      # A missing Docker daemon must fail the job, not skip it. This step is the
+      # gate: every step below assumes a daemon, and `p001c13_lifecycle.sh`
+      # BLOCKS rather than degrading - so a broken runner cannot report a green
+      # lifecycle that never ran.
+      - name: Require a working Docker daemon
+        run: |
+          set -eu
+          docker version
+          docker info >/dev/null
+          echo "docker daemon: $(docker version --format '{{.Server.Version}}')"
+
+      - name: Build the binaries the acceptance drives
+        run: |
+          set -eu
+          cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
+          pnpm --fail-if-no-match --filter @opsweave/platform-console build
+          pnpm --fail-if-no-match --filter @opsweave/ops-web build
+
+      # `scripts/build-plugins.sh` signs every bundle with `keys/publisher.key`,
+      # and the file does not exist in a fresh checkout - it is generated. Without
+      # it the bundle step dies with `io error: No such file or directory`, which
+      # says nothing about a missing key. `demo_up.sh` generates it lazily for the
+      # demo; a CI job has to do it explicitly, as data-foundation already does.
+      - name: Generate the publisher signing key
+        run: |
+          set -eu
+          ./target/debug/opsctl keygen --out-dir keys
+          test -f keys/publisher.key
+          test -f keys/publisher.pub
+
+      - name: Prepare PostgreSQL for the harness
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          set -eu
+          # The harness creates its own database per run id with `createdb`,
+          # which needs a server that accepts local connections.
+          pg_isready -h 127.0.0.1 -U postgres
+
+      - name: Full TypeScript plugin lifecycle
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          set -o pipefail
+          # One run, one isolated platform, one verdict. The script starts an
+          # isolated kernel/nodes/database/registry, runs the lifecycle end to
+          # end, checks container ownership, and tears down. Its exit code is the
+          # acceptance result and cleanup cannot overwrite it.
+          tests/ci/p001c13_lifecycle.sh 2>&1 | tee lifecycle.log
+
+      - name: The suite can fail - injected negatives
+        # Runs AFTER the happy path, and only if it passed: a negative suite on a
+        # platform the lifecycle already broke would report "the product refused"
+        # for a reason unrelated to the injection.
+        if: success()
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          set -o pipefail
+          tests/ci/p001c13_negatives.sh 2>&1 | tee lifecycle-negatives.log
+
+      - name: Upload the acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-lifecycle-evidence
+          # Both the structured record (lifecycle.json) and every step's raw
+          # command, exit code, stdout and stderr. A red run is diagnosable from
+          # this artifact alone.
+          path: |
+            artifacts/p001c13/
+            artifacts/p001c13-negatives/
+            lifecycle.log
+            lifecycle-negatives.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: State the result
+        if: always()
+        run: |
+          set -eu
+          {
+            echo "## Plugin lifecycle (P001-C1.3)"
+            echo
+            if [ -f artifacts/p001c13/lifecycle.json ]; then
+              echo '```json'
+              cat artifacts/p001c13/lifecycle.json
+              echo '```'
+            else
+              echo "No lifecycle.json was produced: the run did not reach the lifecycle."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
