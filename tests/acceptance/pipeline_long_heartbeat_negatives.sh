@@ -154,6 +154,25 @@ if [ "${OPSWEAVE_NEG_EXCLUSIVE_WORKER:-0}" != "1" ]; then
   exit 3
 fi
 
+# Start a worker bound to one job.
+#
+# The invocation used to be
+#
+#     env <assignments> "$@" ./target/debug/opsweave-pipeline-worker &
+#
+# and every caller passes exactly one argument (`start_long_job 40000`). `"$@"`
+# expands to the arguments AFTER `$1`, which is empty - so it should have been
+# harmless. It was not: `$@` was never shifted, so `"$@"` still contained
+# `40000`, and `env` received it as the COMMAND to run:
+#
+#     env: '40000': No such file or directory
+#
+# The worker never started, the job stayed QUEUED, and five cases reported
+# `the job did not reach RUNNING (got QUEUED)` as if the product had refused to
+# claim it. Measured on run 43604452855, in `/tmp/neg-<job>.log`.
+#
+# Nothing ever passed extra arguments, so the parameter is simply gone. A caller
+# that needs to wrap the worker can still do it through the environment.
 start_long_job() {
   local delay_ms="$1"
   JOB="$(curl -fsS -H "Authorization: Bearer $(token)" -X POST -H 'content-type: application/json' \
@@ -168,7 +187,7 @@ start_long_job() {
     OPSWEAVE_WORKER_JOB_ID="$JOB" \
     OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1" \
     OPSWEAVE_WORKER_BATCH_DELAY_MS="$delay_ms" \
-    "$@" ./target/debug/opsweave-pipeline-worker >"/tmp/neg-$JOB.log" 2>&1 &
+    ./target/debug/opsweave-pipeline-worker >"/tmp/neg-$JOB.log" 2>&1 &
   # Recorded in a file because this function is invoked from a command
   # substitution; a variable assignment here would be lost with the subshell.
   printf '%s\n' "$!" >"$WORKER_PID_FILE"
