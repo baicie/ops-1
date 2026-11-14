@@ -7,7 +7,16 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:18181"
+# The base URL comes from the environment when it is set.
+#
+# It was hardcoded to 18181, which is the DEFAULT port only. `p001c_up.sh`
+# derives a port per run (measured: 18501), and this file was the one place in
+# the chain that could not be pointed anywhere else - so the conformance
+# launcher ran it against nothing and got
+# `URLError: [Errno 111] Connection refused`. That failure is not about the
+# product, and it is not a reason to change the default.
+import os
+BASE = os.environ.get("OPSWEAVE_URL", "http://127.0.0.1:18181").rstrip("/")
 session = json.loads((pathlib.Path.home() / ".opsweave/session.json").read_text())
 TOKEN = session["token"]
 
