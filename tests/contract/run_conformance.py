@@ -88,7 +88,22 @@ def probe(plugin_id):
                 with urllib.request.urlopen(req, timeout=5) as response:
                     return response.status, json.loads(response.read() or b"{}")
             except urllib.error.HTTPError as error:
+                # A refusal is an ANSWER: the port is reachable and the plugin
+                # said no. The assertions below then fail with that status.
                 return error.code, {}
+            except (urllib.error.URLError, TimeoutError, OSError):
+                # NOT an answer. The instance's host port was not reachable from
+                # here, so nothing about the plugin was measured.
+                #
+                # Without this clause the exception escaped and the whole script
+                # died with a traceback - which read as "conformance is broken"
+                # when the truth was "this probe could not reach that container
+                # port". Measured on run 43576493693: the matrix had already
+                # passed 14/14 against the same platform.
+                #
+                # 0 is not a valid HTTP status, so every `== 200` assertion
+                # below fails loudly instead of passing silently.
+                return 0, {}
         info_status, info = local("/_opsweave/runtime/v1/info")
         check(info_status == 200, f"{plugin_id}: runtime info 200")
         check(info.get("pluginId") == plugin_id, f"{plugin_id}: runtime identity matches")

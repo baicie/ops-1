@@ -160,6 +160,28 @@ java       PARTIAL  (14 assertions, 0 failed, 1 not run)
 
 这也是**三语言同一断言**第一次真的做到：Java 的 500 在修复前只有这个矩阵能看见。
 
+## 6.6 门禁不覆盖的一项：Gateway 伪造头
+
+`tests/contract/run_conformance.py` 断言两件矩阵没有覆盖的事：
+
+1. Gateway **剥离**客户端伪造的 `X-OpsWeave-User-Role` 头；
+2. Gateway **投递** Kernel 签名的用户上下文。
+
+它在隔离平台上连续四次以
+`URLError: [Errno 111] Connection refused` 结束——它按 Kernel 记录的
+`hostPort` 直连插件实例，而那个端口在这个平台上从测试进程不可达。同一平台上
+矩阵用同样的实例跑出了 14/14。
+
+**因此它不阻塞 job，但也不等于通过。** 它的失败会打印在 run summary 与
+`run.txt` 里，并且是本文档记录的一个**未覆盖项**：
+
+| 项 | 状态 |
+|---|---|
+| Gateway 剥离伪造角色头 | **未验证**（矩阵不覆盖，原版探针在此平台上探不到实例端口） |
+| Gateway 投递签名上下文 | **同上** |
+
+不要把这行读成「已验证」或「已通过」。
+
 ## 7. 本地验证范围（诚实边界）
 
 | 检查 | 结果 |
