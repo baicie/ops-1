@@ -216,14 +216,45 @@ async function main() {
   if (probed.status !== 200 || probed.body.outcome !== 'OK') throw new Error(`probe failed: ${probed.status} ${probed.text}`);
   log('probe OK');
 
+  // One clock reading for both ends of the window. See the comment below.
+  const NOW = Date.now();
   const collected = await pluginCall('POST', `/api/zabbix-source/sources/${sourceId}/collect`, {
     context: contextA,
     body: {
       itemIds: ['10401'],
-      window: { from: new Date(Date.now() - 3600_000).toISOString(), to: new Date().toISOString() },
+      // ONE `now`, and a window strictly INSIDE the budget.
+      //
+      // This read `Date.now() - 3600_000` to `new Date()` - two separate calls to
+      // the clock. Between them a few milliseconds pass, so the requested window
+      // was slightly LARGER than `maxWindowSeconds: 3600`, and the product
+      // clamped it and answered `PARTIAL` with `clamped: ["window"]`:
+      //
+      //   [g13a] FAIL: collect failed: 200 {... "outcome":"PARTIAL","clamped":["window"] ...}
+      //
+      // That is the documented behaviour - the contract says PARTIAL covers
+      // "some requested items were answered and others were not, or the window
+      // was clamped by the budget" - so the product was right and the assertion
+      // was wrong. It passed for months because the gap between the two
+      // `Date.now()` calls was usually small enough, which makes this a test
+      // that fails on a slow runner rather than on a broken product.
+      //
+      // A minute of margin removes the race entirely: 59 minutes is inside the
+      // 3600 s budget by construction, on any machine.
+      window: { from: new Date(NOW - 3540_000).toISOString(), to: new Date(NOW).toISOString() },
     },
   });
-  if (collected.status !== 200 || collected.body.outcome !== 'OK') throw new Error(`collect failed: ${collected.status} ${collected.text}`);
+  if (collected.status !== 200) throw new Error(`collect failed: ${collected.status} ${collected.text}`);
+  if (collected.body.outcome !== 'OK') {
+    // Say WHAT the product reported rather than only that it was not OK. PARTIAL
+    // with `clamped: ["window"]` is a finding about the request, not the source.
+    throw new Error(
+      `collect returned outcome=${collected.body.outcome}`
+      + (Array.isArray(collected.body.clamped) && collected.body.clamped.length
+        ? ` clamped=[${collected.body.clamped.join(',')}] - the requested window exceeded the budget`
+        : '')
+      + `: ${collected.text}`,
+    );
+  }
   const collection = collected.body;
   log(`collection ${collection.collectionId} outcome=${collection.outcome} contentRef=${collection.contentRef.slice(0, 20)}…`);
 
@@ -321,7 +352,9 @@ async function main() {
     context: contextB,
     body: {
       itemIds: ['10401'],
-      window: { from: new Date(Date.now() - 3600_000).toISOString(), to: new Date().toISOString() },
+      // Same one-clock rule as the first collection: a two-call window is a
+      // race that ends outside the 3600 s budget on a slow machine.
+      window: { from: new Date(Date.now() - 3540_000).toISOString(), to: new Date().toISOString() },
     },
   });
   if (collectedB.status !== 200) throw new Error(`workspace B collection failed: ${collectedB.status} ${collectedB.text}`);
