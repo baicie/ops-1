@@ -971,10 +971,28 @@ fn read_binding(args: &Args) -> anyhow::Result<Option<InstallationBinding>> {
 }
 
 fn mint_installation_id(args: &Args, path: &Path) -> anyhow::Result<String> {
-    assert!(
-        !path.exists(),
-        "mint_installation_id must not be called when an identity exists"
-    );
+    // NO `assert!(!path.exists())` here.
+    //
+    // There was one, and it contradicted the branch twenty lines below that
+    // exists precisely to handle the case it forbade. The check is also useless:
+    // it is a TOCTOU window, not a guarantee - two threads both observe "absent",
+    // both enter, and only the atomic create decides the winner.
+    //
+    // Measured on `concurrent_mints_agree_on_one_identity` (8 threads, one state
+    // dir, run on the `runtime-golden-path` job of PR #107):
+    //
+    //     thread '<unnamed>' panicked at runtime.rs:974:
+    //     mint_installation_id must not be called when an identity exists
+    //
+    // The panic replaced the designed outcome. `write_private` opens with
+    // `create_new`, so exactly one writer wins and the losers get `AlreadyExists`
+    // - which the match below turns into "use the winner's id". That recovery is
+    // the correct behaviour, it is documented there, and the assert made it
+    // unreachable whenever the race was actually lost.
+    //
+    // The invariant that matters is kept: this function never OVERWRITES an
+    // existing identity. It is enforced by `create_new` in the kernel, not by a
+    // pre-flight `exists()` in userspace.
     let token = Uuid::new_v4().to_string();
     match write_private(path, token.as_bytes()) {
         Ok(()) => {}
@@ -2295,7 +2313,7 @@ processor	: 3
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_retry_loop_with, try_cleanup_with_timeout, Shared};
+    use super::{cleanup_retry_loop_with, mint_installation_id, try_cleanup_with_timeout, Shared};
     use crate::config::Args;
     use crate::docker::DockerAdapter;
     use clap::Parser;
@@ -2305,6 +2323,50 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::RwLock;
     use uuid::Uuid;
+
+    /// The loser of a concurrent mint must adopt the winner's id, not panic.
+    ///
+    /// This is the deterministic form of `concurrent_mints_agree_on_one_identity`
+    /// (in `tests/state_dir_clone.rs`): instead of racing 8 threads and hoping the
+    /// interleaving lands in the window, it calls `mint_installation_id` on a path
+    /// that ALREADY EXISTS - which is exactly the state the loser observes.
+    ///
+    /// Measured on CI (PR #107, `runtime-golden-path`):
+    ///
+    ///     thread '<unnamed>' panicked at runtime.rs:974:
+    ///     mint_installation_id must not be called when an identity exists
+    ///
+    /// An `assert!(!path.exists())` sat above the `AlreadyExists` recovery and
+    /// made that recovery unreachable whenever the race was actually lost. It
+    /// could not be reproduced locally in 20 runs or with a 2 ms sleep in the
+    /// window, because this machine's `create_new` is fast enough that the
+    /// threads do not overlap - so the counterfactual is written here instead,
+    /// where the losing state is not a matter of timing.
+    #[test]
+    fn a_lost_mint_race_adopts_the_winner_instead_of_panicking() {
+        let dir = std::env::temp_dir().join(format!("opsweave-mint-race-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let path = dir.join("installation-id");
+        let winner = Uuid::new_v4().to_string();
+        std::fs::write(&path, &winner).expect("the winner's identity");
+
+        let args = Args::parse_from([
+            "opsweave-node",
+            "--data-bind",
+            "127.0.0.1:0",
+            "--state-dir",
+            dir.to_str().unwrap(),
+        ]);
+        let adopted = mint_installation_id(&args, &path)
+            .expect("a lost race must adopt the winner, not fail");
+        assert_eq!(adopted, winner, "the loser must use the winner's id");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read back"),
+            winner,
+            "the winner's identity must not be overwritten"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn simple_docker(exit_code: i32) -> String {
         let dir = std::env::temp_dir().join(format!("opsweave-test-docker-{}", Uuid::new_v4()));
