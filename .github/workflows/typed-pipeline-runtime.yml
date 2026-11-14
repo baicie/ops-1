@@ -18,6 +18,12 @@ on:
       - 'tests/ui/data-foundation*.spec.ts'
       - 'tests/ui/studio.spec.ts'
       - 'tests/ui/visual-layout.spec.ts'
+      # P001-C4 added a fifth spec to the same harness. The checker caught the
+      # omission on the PR that added it: the spec was "covered" because the
+      # harness it lives in is on this workflow's command line, but editing the
+      # spec alone reran nothing. `tests/ci/**` above covers the harness; this
+      # line covers the spec.
+      - 'tests/ui/p001-c4-plugin-assets.spec.ts'
       - 'tests/ui/support/**'
       - 'tests/ui/playwright.config.ts'
       - '.github/workflows/typed-pipeline-runtime.yml'
