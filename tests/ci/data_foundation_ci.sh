@@ -278,6 +278,16 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   sleep 1
   OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts studio.spec.ts visual-layout.spec.ts
   kill "$UI_WORKER_PID" 2>/dev/null || true
+  # P001-C4 / D4. Runs LAST of the browser specs because it DISABLES and
+  # UNINSTALLS `dev.opsweave.hello` - any spec after it would be looking at a
+  # platform this one changed.
+  #
+  # Named explicitly rather than folded into the line above for a second reason:
+  # nine existing specs in this directory read a fixture file at module scope
+  # and crash the whole run when it is absent (see the D4 report), so a bare
+  # `playwright test` collects nothing at all. Naming the file is how the other
+  # browser steps in this repo already work.
+  OPSWEAVE_URL="$OPSWEAVE_URL" pnpm --filter @opsweave/ui-tests exec playwright test p001-c4-plugin-assets.spec.ts
 fi
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_orphan_worker.sh
