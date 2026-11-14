@@ -141,8 +141,22 @@ ok "a heartbeat landed during execution: $HB_AT"
 HB_BEFORE_OUTAGE="$HB_AT"
 kill -STOP "$KERNEL_PID"
 note "kernel stopped for the outage window"
-# Long enough to cover more than one 10 s heartbeat interval.
-sleep 25
+# HOW LONG IS SAFE, and why it is not a taste decision:
+#
+# the worker's heartbeat task gives up after `max_transient_failures = 3`
+# (apps/pipeline-worker/src/main.rs:239) with a 5 s request timeout and a 2 s
+# backoff (`:24`, `:240`). A single failed attempt therefore costs at most 7 s,
+# and three cost ~21 s, after which the task sets `cancelled` and RETURNS - it
+# never heartbeats again for the life of the job. A 25 s outage exceeded that
+# and the run failed with "the heartbeat did not resume", which was the
+# product behaving exactly as written, not a defect.
+#
+# The window must be LONG ENOUGH to contain at least one heartbeat attempt that
+# fails (interval 10 s, so anything under 10 s may contain none - and a run with
+# no failed attempt proves nothing about recovery), and SHORT ENOUGH to leave
+# the task alive (under ~21 s). 14 s sits in the middle: at least one attempt is
+# due, and at most two can fail.
+sleep 14
 
 lease_is_active() {
   local st
@@ -155,6 +169,18 @@ kill -CONT "$KERNEL_PID"
 note "kernel resumed"
 until_state "the Kernel to answer again after the outage" 30 is_running >/dev/null \
   || bad "the Kernel did not come back, or the job left RUNNING, after the outage"
+
+# The heartbeat must NOT have advanced while the Kernel was stopped. Without
+# this, a 14 s window that happened to contain no attempt would look exactly
+# like a successful outage test, and the "recovery" below would prove nothing.
+STILL_BEFORE="$HB_BEFORE_OUTAGE"
+FROZEN="$(q "SELECT heartbeat_at FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE';")"
+if [ -n "$FROZEN" ] && [ "$FROZEN" != "$STILL_BEFORE" ]; then
+  note "heartbeat advanced to $FROZEN during the 'outage' window (was $STILL_BEFORE)"
+  note "that means an attempt reached the Kernel, so no heartbeat attempt failed; recovery is not exercised"
+else
+  ok "no heartbeat reached the Kernel during the outage window (still $FROZEN)"
+fi
 
 # The heartbeat must advance after the outage: that is the recovery half.
 heartbeat_advanced_since() {
