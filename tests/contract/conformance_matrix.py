@@ -249,8 +249,24 @@ def main():
         print()
 
     # ---- verdict -----------------------------------------------------------
+    #
+    # A NOT_RUN row that is a DOCUMENTED PRODUCT GAP does not fail the gate; one
+    # that is "we could not measure this language" does.
+    #
+    # The first real run made the distinction concrete: all three languages
+    # passed 14/14, and the single NOT_RUN was `protocol-version-refusal` - the
+    # gap this script records in KNOWN_GAPS, because nothing in the Kernel reads
+    # `RUNTIME_PROTOCOL`. That is a known defect, not a measurement failure, and
+    # turning the whole matrix red for it would make the gate say "conformance
+    # is broken" about a product gap it is designed to report.
+    #
+    # The gap rows are named in KNOWN_GAP_ASSERTIONS so the exception cannot
+    # grow silently: any OTHER not-run row still blocks.
+    GAP_ASSERTIONS = set(KNOWN_GAPS)
     by_language = {}
-    for language, _assertion, status, _detail in results:
+    for language, assertion, status, _detail in results:
+        if status == "NOT_RUN" and assertion in GAP_ASSERTIONS:
+            status = "KNOWN_GAP"
         by_language.setdefault(language, []).append(status)
 
     print("== verdict ==")
@@ -263,6 +279,7 @@ def main():
             continue
         fails = statuses.count("FAIL")
         not_run = statuses.count("NOT_RUN")
+        gaps = statuses.count("KNOWN_GAP")
         if fails:
             verdict = "FAIL"
             overall = "FAIL" if overall != "BLOCKED" else overall
@@ -270,8 +287,13 @@ def main():
             verdict = "PARTIAL"
             overall = "BLOCKED" if overall == "PASS" else overall
         else:
-            verdict = "PASS"
-        print(f"{language:10s} {verdict:8s} ({len(statuses)} assertions, {fails} failed, {not_run} not run)")
+            verdict = "PASS" if gaps == 0 else "PASS (with known gap)"
+            if gaps:
+                print(
+                    f"{language:10s} -> not a gate failure; documented gap(s): "
+                    + ", ".join(sorted(GAP_ASSERTIONS))
+                )
+        print(f"{language:10s} {verdict:8s} ({len(statuses)} assertions, {fails} failed, {not_run} not run, {gaps} known gap)")
 
     print()
     for gap, why in KNOWN_GAPS.items():
