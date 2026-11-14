@@ -240,6 +240,11 @@ for _ in $(seq 1 40); do
   [ "$left" = "0" ] && break
   sleep 0.25
 done
+# The counterfactuals for the heartbeat acceptance itself, run while the
+# Node-managed supervisors are still alive: one case swaps the worker binary for
+# one that exits 1 and requires the acceptance to notice.
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
+  tests/acceptance/pipeline_long_heartbeat_counterfactuals.sh
 OPSWEAVE_NEG_EXCLUSIVE_WORKER=1 \
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
   tests/acceptance/pipeline_long_heartbeat_negatives.sh
