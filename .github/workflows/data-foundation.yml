@@ -56,6 +56,19 @@ jobs:
             artifacts/ui/data-foundation/*.png
             artifacts/ui/studio/*.png
           if-no-files-found: warn
+      # The heartbeat acceptance's evidence. It records every poll that decided
+      # the verdict, so a red job can be explained from the artifact instead of
+      # guessed at - and a green one can be read to confirm the heartbeat really
+      # landed during execution rather than being inferred from timing.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: long-heartbeat-evidence
+          path: |
+            /tmp/long-heartbeat-evidence.log
+            /tmp/long-heartbeat-negatives.log
+            /tmp/long-heartbeat.log
+          if-no-files-found: warn
   legacy-regression:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
