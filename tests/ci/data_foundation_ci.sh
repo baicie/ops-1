@@ -389,6 +389,12 @@ budget_check
 tests/ci/run_step.sh deadline_sink_http 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_http.sh
 budget_check
 tests/ci/run_step.sh capability_multi_provider 240 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/capability_multi_provider.sh
+
+# P001-C2 security negatives. Runs after the multi-provider case so the two are
+# not racing over the same grant, and it RESTORES an equivalent grant before it
+# exits, so the steps below see the fixture they expect.
+budget_check
+tests/ci/run_step.sh p001c2_security_negatives 300 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/p001c2_security_negatives.sh
 budget_check
 tests/ci/run_step.sh source_timeout_no_sink 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/source_timeout_no_sink.sh
 budget_check
