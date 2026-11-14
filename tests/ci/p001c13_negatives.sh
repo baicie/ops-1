@@ -153,6 +153,15 @@ UP_LOG="$EVIDENCE/platform-up.log"
 RUN_ID="$(tests/ci/p001c_up.sh 2>"$UP_LOG" | sed -n 's/^RUN_ID=//p' | tail -1)"
 if [ -z "$RUN_ID" ]; then
   tail -30 "$UP_LOG" >&2 || true
+  # Distinguish "the environment is not there" from "the platform is broken".
+  # `p001c_up.sh` exits 3 for a precondition it cannot satisfy - most often a
+  # Docker daemon that does not answer - and its own message says which. Passing
+  # that through matters because CI treats BLOCKED differently from FAIL: a
+  # daemon that is down is not a product finding, and reporting it as one sends
+  # the next person to read the Node's code.
+  if grep -qi 'BLOCKED' "$UP_LOG" 2>/dev/null; then
+    fatal "the isolated platform could not start: the environment is missing (see $UP_LOG); this is BLOCKED, not a product failure"
+  fi
   fatal "the isolated platform did not start"
 fi
 STATE="/tmp/p001c-${RUN_ID}"
