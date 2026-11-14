@@ -128,7 +128,26 @@ OWNED_IDS=""
 # The installation id is the same predicate the product uses to decide what it
 # may remove (ADR-023, and `p001c_up.sh` says so too). A container carrying this
 # run's installation id belongs to this run whatever node id it also carries.
-if ! ids="$(docker ps -aq --filter "label=opsweave.installation-id=${INSTALLATION_ID}" 2>&1)"; then
+# `--no-trunc` IS NOT COSMETIC HERE.
+#
+# `docker ps -aq` prints 12-character ids; `snapshot_containers` prints full
+# 64-character ones because it asks for `--no-trunc`. The post-check compares the
+# two lists with `grep -xF`, so with the default here NOTHING ever matched:
+# every container this run owned was also "foreign", and the two honestly-removed
+# ones were reported as a foreign sweep.
+#
+# Measured on run 43649219265:
+#
+#   removed 2 container(s) belonging to this run
+#   FAIL: containers this run did not own disappeared during teardown: 7eb3d3f5... ae6efadf...
+#
+# while `docker-after.json` - the lifecycle's own snapshot, taken before teardown -
+# listed both ids present and running with THIS run's installation id. They were
+# the two containers the line above says it removed.
+#
+# This check had never passed: it was added on this branch and this was its first
+# run against Docker.
+if ! ids="$(docker ps -aq --no-trunc --filter "label=opsweave.installation-id=${INSTALLATION_ID}" 2>&1)"; then
   echo "BLOCKED: could not query containers of installation $INSTALLATION_ID. Nothing was changed." >&2
   echo "         daemon said: ${ids:-<no output>}" >&2
   exit 2
@@ -136,6 +155,10 @@ fi
 OWNED_IDS="$ids"
 # De-duplicated and whitespace-normalised, so the count below is ids, not lines.
 OWNED_IDS="$(printf '%s\n' $OWNED_IDS | sort -u | tr '\n' ' ')"
+# The two lists are compared literally; say so once, in the log, so the next
+# person does not have to rediscover that one side is truncated and the other is
+# not. Cheap, and this is the exact mistake that made the check always fail.
+echo "   owned (full ids): $(printf '%s' "$OWNED_IDS" | tr ' ' '\n' | grep -c . ) container(s)"
 
 # --- process identity -------------------------------------------------------
 # See p001c_up.sh: a pidfile is not ownership. Same routine, duplicated here so
