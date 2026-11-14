@@ -68,6 +68,7 @@ annotation 报告的 "lost communication"。
 | 2 | 反事实换了 worker 二进制没换回 | 中断后 `target/debug/opsweave-pipeline-worker` 永久是 `exit 1` 的 stub | `trap EXIT/INT/TERM` 恢复 + case 自断言恢复成功 |
 | 3 | 诊断写到了 stdout | job id 变成 `"      worker for job <uuid>: …"`，所有查询报 `invalid input syntax for type uuid` | 改 `>&2`，并说明该函数的 stdout 就是返回值 |
 | 4 | `env` 收到 `40000` 当成命令 | `env: '40000': No such file or directory`，worker 从未启动 | 删掉从不该存在的 `"$@"` |
+| 5 | `q()` 没有 `ON_ERROR_STOP` | 列名写错（`error_code` vs `last_error_code`）时 UPDATE 静默失败，case 报成产品行为错误 | 加 `-v ON_ERROR_STOP=1`，三处 setup 语句加检查 |
 
 第 2 层的实测对照（同一 SIGTERM）：
 
@@ -84,7 +85,17 @@ before:  env: 40000: No such file or directory
 after:   WORKER STARTED FOO=40000
 ```
 
-**这四层里没有一层是产品缺陷。** 它们合起来让五次 negatives 失败看起来像
+第 5 层是在前四层清完之后才露出来的，而且它的表现最像产品缺陷：
+
+```
+ERROR:  column "error_code" of relation "pipeline_jobs" does not exist
+FAIL  1: expected FAILED after revocation, got RUNNING
+```
+
+psql 默认在 SQL 错误时**退出码仍是 0**，输出又被 `>/dev/null` 吞掉，于是
+"测试的 setup 根本没执行"和"产品没有把 job 标成 FAILED"在日志里一模一样。
+
+**这五层里没有一层是产品缺陷。** 它们合起来让 negatives 的失败看起来像
 "产品拒绝认领 job"。
 
 ---
@@ -129,13 +140,34 @@ PASS  6: the real worker binary is back in place with no .real left behind
 **我自己取消**——为了控制 runner 拥塞而取消整批 run，没有排除必需检查。
 这是本轮我自己造成的损失，记录在此。
 
+### 3.4 negatives 的第一次有效测量
+
+run 43607236890 是 negatives 第一次跑在活着的 worker 上。结果 `PASS=7 FAIL=2`
+（此前 `PASS=4 FAIL=5`，且失败全是基础设施）。
+
+| case | 结果 |
+|---|---|
+| 1 撤销 lease | FAIL —— **测试自己写错列名**，已修，待重跑 |
+| 2 decoy lease | PASS |
+| 3 lease 提前过期 | PASS |
+| 4 未知 pipeline | PASS |
+| 5 中断超过 TTL | PASS |
+| 6 重复 effect | FAIL —— 报 `status=QUEUED`，已加诊断区分"从未被认领"与"超预算"，**未修复** |
+| 7 信号安全 | PASS |
+| 8 数据库不可达 | PASS |
+
+**case 6 没有修好，只是变得可诊断。** 写成"已修复"就是本 PR 一直在防的那种替换。
+
+同一个原因也让 `data-foundation` job 失败——它跑同一套 negatives，`set -e`
+在 negatives 处中止，所以 **C4 浏览器验收在那个 job 里同样一次都没执行过**。
+
 ---
 
 ## 4. 尚未确证的（明确列出，不写成 PASS）
 
 | 项 | 状态 | 原因 |
 |---|---|---|
-| negatives 的 5 个故障注入是否真能检出 | **NOT_RUN** | 四层遮蔽刚清完，尚未有一次跑在活着的 worker 上 |
+| negatives 的 5 个故障注入是否真能检出 | **部分确证** | 见 §3.4 |
 | 其余 6 个 PR 的 CI 结论 | **NOT_RUN** | 修复有本地反事实，CI 被我取消 |
 | C4 浏览器验收的真实运行 | **NOT_RUN** | 专用 fixture 刚交付，尚未跑 |
 | Go/Java 生命周期矩阵 | **NOT_RUN** | 需要完整平台与三语言镜像 |
