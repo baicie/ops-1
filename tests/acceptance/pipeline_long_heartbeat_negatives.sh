@@ -125,6 +125,12 @@ start_long_job() {
   # Recorded in a file because this function is invoked from a command
   # substitution; a variable assignment here would be lost with the subshell.
   printf '%s\n' "$!" >"$WORKER_PID_FILE"
+  # Say where the worker's own output went. When five cases reported "the job did
+  # not reach RUNNING (got QUEUED)" on run 43598745967, the only evidence was
+  # `worker pid N already gone` - the reason was in /tmp/neg-<job>.log, which the
+  # workflow does not upload. The path is now printed so the next failure can be
+  # diagnosed from the job log alone.
+  note "worker for job $JOB: pid $! log /tmp/neg-$JOB.log"
   echo "$JOB"
 }
 
@@ -132,6 +138,26 @@ token() { python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/
 AUTH=(-H "Authorization: Bearer $(token)")
 source tests/acceptance/pipeline_worker_auth.sh
 load_worker node-b
+
+# Why a job is not RUNNING, from what the database and the log can show.
+#
+# The distinction that matters is between "no worker ever claimed this" (QUEUED -
+# a harness or credential defect) and "a worker claimed it and was rejected"
+# (FAILED or LOST - a product defect). Printing only the status made those look
+# identical in five cases at once.
+report_job_not_running() {
+  local job="$1" status="$2" log="/tmp/neg-$1.log"
+  note "  job $job status=$status"
+  local lease_row
+  lease_row="$(q "SELECT coalesce(current_lease_id::text,'(none)') || ' attempts=' || coalesce(attempts::text,'?') FROM kernel.pipeline_jobs WHERE job_id='$job';" 2>/dev/null || echo "(query failed)")"
+  note "  lease/attempts: $lease_row"
+  if [ -f "$log" ]; then
+    note "  worker log $log (last 5 lines):"
+    tail -5 "$log" | while IFS= read -r l; do note "    $l"; done
+  else
+    note "  worker log $log: absent - the worker never started or could not write"
+  fi
+}
 
 wait_status() { # job, budget
   # `budget` must be assigned on its own line: inside a single `local`
@@ -164,6 +190,11 @@ echo "== 1: a lease that is revoked under a running worker =="
 JOB1="$(start_long_job 40000)" || bad "1: could not start the job"
 STATUS1="$(wait_status "$JOB1" 30)" || true
 if [ "$STATUS1" != "RUNNING" ]; then
+  # Say WHY, from evidence, rather than only that it did not. QUEUED means no
+  # worker claimed the job; FAILED means one did and was rejected. Those are
+  # different defects, and on run 43598745967 five cases printed the status and
+  # nothing else while the worker's own log was not uploaded.
+  report_job_not_running "$JOB1" "$STATUS1"
   bad "1: the job did not reach RUNNING (got $STATUS1), so the revocation would prove nothing"
   stop_worker
 else

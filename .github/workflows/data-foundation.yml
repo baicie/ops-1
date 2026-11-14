@@ -67,7 +67,12 @@ jobs:
           path: |
             /tmp/long-heartbeat-evidence.log
             /tmp/long-heartbeat-negatives.log
+            /tmp/long-heartbeat-counterfactuals.log
             /tmp/long-heartbeat.log
+            # One per job the negatives start. On run 43598745794 five cases
+            # reported "the job did not reach RUNNING (got QUEUED)" and the
+            # worker's own explanation was in these files, which were not kept.
+            /tmp/neg-*.log
           if-no-files-found: warn
   legacy-regression:
     runs-on: ubuntu-24.04
