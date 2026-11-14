@@ -79,7 +79,21 @@ stop_worker() {
 ok()  { PASS=$((PASS + 1)); echo "PASS  $*"; echo "PASS  $*" >>"$EVIDENCE"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL  $*"; echo "FAIL  $*" >>"$EVIDENCE"; }
 note(){ echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
-q()   { psql "$DB" -qAt -c "$1"; }
+# `ON_ERROR_STOP=1`, matching the acceptance's own `q()`.
+#
+# Without it `psql -c` prints the error and exits 0, so a statement that failed
+# is indistinguishable from one that worked. Measured: an UPDATE naming a column
+# that does not exist (`error_code` instead of `last_error_code`), with its output
+# redirected to /dev/null, looked exactly like a successful one - and the case
+# then reported the PRODUCT's behaviour as wrong when its own setup had never
+# run:
+#
+#     ERROR: column "error_code" of relation "pipeline_jobs" does not exist
+#     FAIL  1: expected FAILED after revocation, got RUNNING
+#
+# With this flag a broken statement fails at the point it is written, with the
+# psql error visible.
+q()   { psql "$DB" -qAt -v ON_ERROR_STOP=1 -c "$1"; }
 
 # --- the worker binary must be the real one --------------------------------
 #
@@ -274,8 +288,23 @@ if [ "$STATUS1" != "RUNNING" ]; then
   stop_worker
 else
   LEASE1="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB1';")"
-  q "UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE lease_id='$LEASE1';" >/dev/null
-  q "UPDATE kernel.pipeline_jobs SET status='FAILED', error_code='LEASE_REVOKED' WHERE job_id='$JOB1';" >/dev/null
+  if ! q "UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE lease_id='$LEASE1';" >/dev/null; then
+    bad "1: could not revoke the lease (the UPDATE failed); the case proves nothing"
+  fi
+  # `last_error_code`, not `error_code` - see
+  # `apps/kernel/migrations/0003_typed_pipeline.sql:33`. The wrong name made this
+  # UPDATE fail, the `>/dev/null` hid the psql error, and the case then asserted
+  # on a job that had never been marked FAILED:
+  #
+  #     ERROR: column "error_code" of relation "pipeline_jobs" does not exist
+  #     FAIL  1: expected FAILED after revocation, got RUNNING
+  #
+  # A test reporting the product's behaviour while its own setup silently failed.
+  # The update is now checked, so a future schema change fails HERE with the
+  # psql error rather than turning the case into a product finding.
+  if ! q "UPDATE kernel.pipeline_jobs SET status='FAILED', last_error_code='LEASE_REVOKED' WHERE job_id='$JOB1';" >/dev/null; then
+    bad "1: could not mark the job FAILED (the UPDATE failed); the case proves nothing"
+  fi
   STATUS1_FINAL="$(wait_status "$JOB1" 60)" || true
   stop_worker
   [ "$STATUS1_FINAL" = "FAILED" ] \
@@ -334,11 +363,15 @@ if [ "$STATUS3" != "RUNNING" ]; then
   stop_worker
 else
   LEASE3="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB3';")"
-  q "UPDATE kernel.pipeline_job_leases SET expires_at = now() - interval '120 seconds' WHERE lease_id='$LEASE3';" >/dev/null
+  if ! q "UPDATE kernel.pipeline_job_leases SET expires_at = now() - interval '120 seconds' WHERE lease_id='$LEASE3';" >/dev/null; then
+    bad "3: could not expire the lease (the UPDATE failed); the case proves nothing"
+  fi
   # The Kernel's reaper marks it EXPIRED; the acceptance must not later call this
   # "kept alive" just because the job eventually succeeded or the row still exists.
   sleep 3
-  q "UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE lease_id='$LEASE3' AND expires_at < now();" >/dev/null
+  if ! q "UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE lease_id='$LEASE3' AND expires_at < now();" >/dev/null; then
+    bad "3: could not settle the lease to EXPIRED (the UPDATE failed); the case proves nothing"
+  fi
   stop_worker
   FINAL_STATUS="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE3';")"
   [ "$FINAL_STATUS" = "EXPIRED" ] \
@@ -413,7 +446,16 @@ JOB6="$(start_long_job 800)" || bad "6: could not start the job"
 STATUS6="$(wait_status "$JOB6" 120)" || true
 stop_worker
 if [ "$STATUS6" != "SUCCEEDED" ]; then
-  note "6: the job did not succeed (status=$STATUS6); the duplicate-effect check needs a completed job"
+  # QUEUED and RUNNING mean different things and only one of them is about this
+  # test. QUEUED is "no worker claimed it" - a setup or credential problem, and
+  # a reason to look here. RUNNING is "a worker claimed it and did not finish in
+  # time" - which is about the workload and the budget, not about duplicates.
+  report_job_not_running "$JOB6" "$STATUS6"
+  if [ "$STATUS6" = "QUEUED" ]; then
+    note "6: the job was never claimed (QUEUED) - this is a setup problem, not a product finding"
+  else
+    note "6: the job reached $STATUS6 but not SUCCEEDED within the budget"
+  fi
   bad "6: could not establish a baseline job to duplicate an effect on"
 else
   BASE="$(q "SELECT count(*) FROM plugin_opsweave_data_catalog.catalog_effect_receipts WHERE job_id='$JOB6';")"
