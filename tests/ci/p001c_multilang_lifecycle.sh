@@ -226,6 +226,32 @@ for lang in ts go java; do
   elif grep -q VERSION_ALREADY_ACTIVE "$EVIDENCE/$lang-deploy.log" 2>/dev/null; then
     row "$lang" "deploy 2 replicas" PASS "already deployed (not a failure)"
   else
+    # Capture WHY, while the containers that failed are still on the daemon.
+    #
+    # The deploy log says only `DEGRADED 0/2 ready (2 failed)`. Measured on run
+    # 43610395709: that was the whole record, and the job that could have said
+    # why - the Node's log - was not uploaded. Diagnosing it meant guessing.
+    #
+    # `docker ps -a` plus the container logs for this installation turn a row
+    # that said "failed" into one that says what failed.
+    {
+      echo "--- containers of this installation ---"
+      for inst in $INSTALL_IDS; do
+        [ -n "$inst" ] || continue
+        docker ps -a --filter "label=opsweave.installation-id=$inst" \
+          --format '{{.ID}} {{.Status}} {{.Image}} {{.Names}}' 2>&1 || true
+      done
+      echo "--- logs of the containers that are not running ---"
+      for inst in $INSTALL_IDS; do
+        [ -n "$inst" ] || continue
+        for cid in $(docker ps -aq --filter "label=opsweave.installation-id=$inst" 2>/dev/null || true); do
+          running="$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo unknown)"
+          [ "$running" = "true" ] && continue
+          echo "--- container $cid ($running) ---"
+          docker logs --tail 30 "$cid" 2>&1 || true
+        done
+      done
+    } >>"$EVIDENCE/$lang-deploy.log" 2>&1
     row "$lang" "deploy 2 replicas" FAIL "see $EVIDENCE/$lang-deploy.log"
     FAIL=$((FAIL+1)); continue
   fi
@@ -333,10 +359,22 @@ for dep in d.get('deployments') or []:
   fi
 
   # --- disable / enable / uninstall ---------------------------------------
+  # `Idempotency-Key` is REQUIRED on every mutating route
+  # (`receipts::idempotency_key`, 8..=128 chars) - a request without it is a 400
+  # before the handler runs.
+  #
+  # Measured on run 43610395709: `disable` returned HTTP 400 for exactly this
+  # reason, and the matrix reported it as a failure. The product was right; the
+  # request was malformed. Each call now carries a key that is unique per
+  # (method, path, time) so a genuine retry is still idempotent while two
+  # different operations never collide.
   api() { # method, path, [body] -> status code
     local m="$1" p="$2" b="${3:-}"
+    local key
+    key="p001c-ml-$m-$(printf '%s' "$p" | tr '/' '-')-$(date +%s%N)"
     local args=(-sS -o /dev/null -w '%{http_code}' -m 20 -X "$m"
-                -H "Authorization: Bearer $SESSION_TOKEN")
+                -H "Authorization: Bearer $SESSION_TOKEN"
+                -H "Idempotency-Key: $key")
     [ -n "$b" ] && args+=(-H 'content-type: application/json' --data-binary "$b")
     curl "${args[@]}" "$KERNEL_URL$p" 2>/dev/null || echo 000
   }
@@ -361,7 +399,11 @@ for dep in d.get('deployments') or []:
     *) row "$lang" "disable" FAIL "HTTP $DIS"; FAIL=$((FAIL+1)) ;;
   esac
 
-  UNI="$(api DELETE "/api/v1/plugins/$plugin")"
+  # `uninstall` is `POST /api/v1/plugins/{id}/uninstall`, not `DELETE` on the
+  # plugin itself. `/api/v1/plugins/{plugin_id}` registers GET only, so the
+  # matrix's DELETE returned 405 Method Not Allowed - the product refusing a
+  # method it does not serve, reported as a lifecycle failure.
+  UNI="$(api POST "/api/v1/plugins/$plugin/uninstall" '{}')"
   case "$UNI" in
     200|202|204)
       AFTER="$(api GET "/api/v1/gateway/$plugin/api/hello")"
@@ -388,8 +430,22 @@ for dep in d.get('deployments') or []:
   #   * `2>/dev/null` turned an unreachable daemon into an empty list, which
   #     `wc -l` counted as 0, which read as "clean". Same false positive as
   #     `p001c_teardown.sh` had.
-  #   * a single installation id was assumed. Two Nodes mint DIFFERENT ids by
-  #     design (ADR-023), so checking one would call half the platform clean.
+  #   * a single installation id was assumed. MEASURED: in this harness both
+  #     Nodes carry the SAME installation id (`p001c_up.sh` records node-a's and
+  #     enrols both with it), so this is not the defect it was thought to be.
+  #     The loop still covers every id it finds, because if the harness ever does
+  #     mint two, a check over one value silently calls half the platform clean.
+  #
+  # What this row claims, precisely: no container belonging to THIS installation
+  # remains after the language under test was uninstalled.
+  #
+  # That is weaker than it looks. The matrix installs ts, go and java into one
+  # platform, so a container still running for a plugin that has NOT yet been
+  # uninstalled is counted here and reported against the language under test.
+  # The row is correct for the LAST language and pessimistic for the others. It
+  # is left as-is because the alternative - filtering by plugin id - would stop
+  # detecting the thing this row exists for: a container whose plugin metadata is
+  # already gone but whose process is still there.
   #
   # All of them, by id, with the failure surfaced.
   LEFTOVER=0
