@@ -318,10 +318,81 @@ for (const workflow of workflows) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Signal-safety scan.
+//
+// A shell script that runs `kill -9 "${PID:-0}"` on an empty variable does not
+// "kill nothing": `${X:-0}` expands to the STRING `0`, and pid `0` means the
+// caller's own PROCESS GROUP. Measured: such a script never executes its next
+// statement - it dies with SIGKILL (exit 137) and every background child dies
+// with it.
+//
+// This is not hypothetical. Nine copies of that line in
+// `tests/acceptance/pipeline_long_heartbeat_negatives.sh` cost eight CI runs on
+// 2026-11-14. Each ran 55-60 minutes and ended with "The hosted runner lost
+// communication with the server", so the job looked like a 60-minute timeout.
+// On a GitHub runner the step shell's process group holds the runner's
+// communication process, which is what "lost communication" was reporting.
+//
+// The scan is about the SHAPE, not that one file: any `${VAR:-FALLBACK}` whose
+// expansion reaches `kill` or `wait` is flagged when the fallback is non-empty,
+// because a fallback the caller did not verify is a pid the caller did not
+// spawn. A bare literal `kill 0` is flagged too.
+const SIGNAL_TARGET = /\b(kill|wait)\s+(?:-\S+\s+)*"?\$\{(\w+):-([^}]*)\}/g;
+const LITERAL_GROUP = /\bkill\s+(?:-\S+\s+)*0\s*(?:$|[;&|])/;
+const SIGNAL_SAFETY = [];
+
+function scanSignalSafety(dir) {
+  let entries;
+  try { entries = readdirSync(join(ROOT, dir), { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    const rel = join(dir, entry.name);
+    if (entry.isDirectory()) { scanSignalSafety(rel); continue; }
+    if (!entry.name.endsWith('.sh')) continue;
+    const text = read(join(ROOT, rel));
+    if (!text) continue;
+    text.split('\n').forEach((line, i) => {
+      // Comments are stripped, because this repository explains the defect in
+      // prose and a gate that flags its own documentation gets switched off.
+      const code = line.replace(/#.*$/, '');
+      if (!code.trim()) return;
+      SIGNAL_TARGET.lastIndex = 0;
+      let m;
+      while ((m = SIGNAL_TARGET.exec(code)) !== null) {
+        const [, verb, name, fallback] = m;
+        // `${X:-}` expands to nothing; `kill` then errors, which is loud and
+        // harmless. Only a non-empty fallback can name a process that is not
+        // this script's child.
+        if (fallback === '') continue;
+        SIGNAL_SAFETY.push({
+          file: rel,
+          line: i + 1,
+          text: code.trim(),
+          reason:
+            fallback === '0'
+              ? `\${${name}:-0} expands to 0, and \`${verb} 0\` signals the caller's whole process group`
+              : /^-?\d+$/.test(fallback)
+                ? `\${${name}:-${fallback}} can expand to pid ${fallback}, which is not this script's child`
+                : `\${${name}:-${fallback}} is a pid the script never verified`,
+        });
+      }
+      if (LITERAL_GROUP.test(code)) {
+        SIGNAL_SAFETY.push({
+          file: rel, line: i + 1, text: code.trim(),
+          reason: '`kill 0` signals the caller\'s whole process group',
+        });
+      }
+    });
+  }
+}
+scanSignalSafety('tests/acceptance');
+scanSignalSafety('tests/ci');
+scanSignalSafety('scripts');
+
 const asJson = process.argv.includes('--json');
 const failing = coverage.filter((row) => row.status === 'NOT_REFERENCED' || row.status === 'STALE_EXCUSE');
 if (asJson) {
-  console.log(JSON.stringify({ coverage, inputGaps }, null, 2));
+  console.log(JSON.stringify({ coverage, inputGaps, signalSafety: SIGNAL_SAFETY }, null, 2));
 } else {
   const label = { COVERED: 'ok  ', EXPLICIT_SKIP: 'skip', NOT_REFERENCED: 'FAIL', STALE_EXCUSE: 'FAIL' };
   for (const row of coverage) {
@@ -338,8 +409,19 @@ if (asJson) {
   const coveredCount = coverage.filter((r) => r.status === 'COVERED').length;
   console.log('');
   console.log(`spec coverage: ${coveredCount} covered, ${coverage.length - coveredCount - failing.length} explicit-skip, ${failing.length} unreferenced`);
+  console.log('');
+  if (SIGNAL_SAFETY.length) {
+    console.log(`signal safety: ${SIGNAL_SAFETY.length} place(s) can signal a pid the script did not spawn:`);
+    for (const r of SIGNAL_SAFETY) {
+      console.log(`FAIL ${r.file}:${r.line}  ${r.reason}`);
+      console.log(`     ${r.text}`);
+    }
+  } else {
+    console.log('signal safety: no unverified pid reaches kill or wait');
+  }
 }
 // `process.exitCode`, not `process.exit()`: with --json the whole report goes to stdout, and an
 // immediate exit truncates a piped write (the run hung instead of printing, which a CI job would
 // read as a hung checker rather than a failing one).
-process.exitCode = failing.length === 0 && inputGaps.length === 0 ? 0 : 1;
+process.exitCode =
+  failing.length === 0 && inputGaps.length === 0 && SIGNAL_SAFETY.length === 0 ? 0 : 1;
