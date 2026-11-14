@@ -126,7 +126,18 @@ pg_isready >/dev/null 2>&1 || fatal "PostgreSQL is not running"
 # OpsWeave installation on the same host is indistinguishable from a leftover by
 # anything except the installation label. Refuse unless the caller says the
 # daemon is dedicated to CI.
-OURS_BEFORE="$(docker ps -aq --filter "label=opsweave.managed=true" 2>/dev/null | wc -l | tr -d ' ')"
+# A failed `docker ps` is NOT "no containers".
+#
+# `2>/dev/null` was here, and an unreachable daemon therefore produced an empty
+# list, `wc -l` said 0, and this check concluded the daemon was clean. The very
+# next step (`docker ps -a --no-trunc`, further down) refuses in that situation -
+# so the two disagreed, and the earlier, weaker one ran first.
+if ! OURS_BEFORE_RAW="$(docker ps -aq --filter "label=opsweave.managed=true" 2>"$EVIDENCE/docker-ps-ours.err")"; then
+  sed 's/^/      /' "$EVIDENCE/docker-ps-ours.err" >&2 2>/dev/null || true
+  fatal "docker ps failed before the run started, so this script cannot tell whether the
+         daemon already holds OpsWeave containers. An unreachable daemon is not an empty one."
+fi
+OURS_BEFORE="$(printf '%s' "$OURS_BEFORE_RAW" | grep -c . || true)"
 if [ "${OURS_BEFORE:-0}" != "0" ] && [ "${OPSWEAVE_CI_ALLOW_SHARED_DAEMON:-0}" != "1" ]; then
   fatal "the Docker daemon already has $OURS_BEFORE OpsWeave container(s).
          This run creates and removes containers; on a shared daemon it cannot tell

@@ -98,6 +98,94 @@ function listSpecs(dir, prefix = '') {
 const specFiles = listSpecs(UI).sort();
 
 /**
+ * Every shell test under tests/, treated the same way as a spec.
+ *
+ * The checker used to look only at `*.spec.ts`, so a shell acceptance script
+ * could be written, committed and never executed by anything. That is not a
+ * hypothetical: `tests/ci/p001_execstoppost_ownership.sh` carries 34 assertions
+ * for a P0 container-ownership fix and **no workflow ran it** until
+ * `platform-linux-acceptance.yml` was given the step.
+ *
+ * The same three verdicts apply. `KNOWN_UNRUN_SHELL` is the only way to silence
+ * one, and it wants a reason and a better home.
+ */
+const SHELL_TEST_DIRS = [join(ROOT, 'tests', 'acceptance'), join(ROOT, 'tests', 'ci')];
+function listShell(dir) {
+  let out = [];
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const entry of entries) {
+    const name = entry.name;
+    if (entry.isDirectory()) continue;
+    if (!name.endsWith('.sh')) continue;
+    // `_`-prefixed and `demo_` files are libraries sourced by other scripts, and
+    // `start_`/`build-` files are fixtures. They are not tests and cannot be
+    // "run" on their own.
+    if (/^(_|demo_|start_)/.test(name)) continue;
+    out.push(join(dir, name));
+  }
+  return out;
+}
+const shellTests = SHELL_TEST_DIRS.flatMap(listShell).sort();
+
+/**
+ * Whether a command line EXECUTES a shell test.
+ *
+ * `bash path/x.sh`, `sh path/x.sh`, `./path/x.sh`, or the bare path when it is
+ * the whole command. A `paths:` filter entry, a `name:`, or a comment naming the
+ * same file must not count - the same distinction `lineRuns` makes for specs,
+ * which the checker's own history says is easy to get wrong.
+ */
+function shellInvokes(line, spec) {
+  const base = spec.split('/').pop().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const trimmed = line.trim();
+  if (trimmed.startsWith('#')) return false;
+  // Must be preceded by an interpreter, a path separator, or start-of-token.
+  const re = new RegExp(`(^|[\\s'"])(bash|sh|\\./)?[^\\s'"]*/?${base}(?![\\w.-])`);
+  const m = re.exec(trimmed);
+  if (!m) return false;
+  // Reject a line that merely lists the path inside a YAML `paths:` filter.
+  if (/^\s*-\s*['"]?(tests|scripts)\//.test(trimmed)) return false;
+  return true;
+}
+
+const KNOWN_UNRUN_SHELL = new Map([
+  // Every entry was opened and read. A reason here says the script is kept
+  // deliberately and why it cannot run in this repository's CI today; it is not
+  // a way to silence a red check.
+  //
+  // Group A - needs a live platform the script starts and tears down itself, and
+  // a job that can give it one end to end. `plugin-lifecycle.yml` already runs
+  // the TypeScript lifecycle for ~20 minutes; adding eight more full-platform
+  // boots there would exceed the job timeout, so these stay manual until a
+  // separate job exists.
+  ['auth_limits.sh', 'needs a running platform (auth_limits starts its own); no job boots one for it'],
+  ['d5_workspace_scope.sh', 'needs a running platform with data plugins; manual'],
+  ['endpoint_policy.sh', 'needs a running platform; manual'],
+  ['incident_slice_api.sh', 'needs a running platform with the incident slice seeded; manual'],
+  ['kernel_restart.sh', 'needs a running platform it restarts itself; manual'],
+  ['permission_matrix.sh', 'needs three live sessions (admin/operator/viewer); manual'],
+  ['publisher_revocation.sh', 'needs a running platform with a signed publisher; manual'],
+  ['p001c123_reinit_recovery.sh', 'needs a running platform and a fresh enrolment token; manual'],
+  ['p001c124_migration_identity.sh', 'needs a running platform and a fresh enrolment token; manual'],
+
+  // Group B - needs Docker and a daemon no other workload shares.
+  ['node_lease.sh', 'destructive to the local demo state; needs its own daemon'],
+  ['node_quarantine.sh', 'destructive to the local demo state; needs its own daemon'],
+  ['node_revocation.sh', 'destructive to the local demo state; needs its own daemon'],
+  ['two_node_failover.sh', 'needs two Nodes and a daemon it can partition; manual'],
+  ['p001c121_demo_safety.sh', 'destructive to the local demo state by design; manual'],
+  ['p001c121_data_foundation_scope.sh', 'refuses to run when any OpsWeave container exists; needs a dedicated daemon'],
+  ['p001c_isolation_guard.sh', 'plants a foreign container and attacks the harness; needs a dedicated daemon'],
+
+  // Group C - needs a database or a live platform, but not a Docker daemon.
+  ['container_security.sh', 'inspects containers the platform created; needs a running platform'],
+  ['storage_migration_ledger.sh', 'needs a PostgreSQL database it migrates; manual'],
+  ['p001c122_clone_node_identity.sh', 'needs a running platform and a fresh enrolment token; manual'],
+  ['p001c_rollback_states.sh', 'asserts the rollback state machine against a live platform; manual'],
+]);
+
+/**
  * Only lines that INVOKE a runner count.
  *
  * This is the whole point of the checker, and the first version got it wrong in the same way it
@@ -318,10 +406,90 @@ for (const workflow of workflows) {
   }
 }
 
+// ---- collection-time safety -------------------------------------------------
+//
+// A spec that reads a file at MODULE SCOPE crashes Playwright's collection phase
+// when that file is absent, and the run reports `Total: 0 tests in 0 files`.
+// Measured on this tree: nine specs do exactly that, and
+// `pnpm --filter @opsweave/ui-tests exec playwright test` with no file argument
+// collects nothing at all while exiting 1.
+//
+// That is worse than a failing test. A job that runs `playwright test <file>`
+// is unaffected, but any job that relies on collecting the directory sees an
+// empty suite - and an empty suite is not a passing one.
+//
+// The check is deliberately narrow: `readFileSync`/`readFileSync`-like calls on
+// a line that is NOT inside a function body. Guarding with `existsSync` is
+// allowed; moving the read into `test.beforeAll` is preferred.
+const collectionRisks = [];
+for (const spec of specFiles) {
+  let body;
+  try { body = readFileSync(join(UI, spec), 'utf8'); } catch { continue; }
+  const lines = body.split('\n');
+  let depth = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const opens = (line.match(/\{/g) || []).length;
+    const closes = (line.match(/\}/g) || []).length;
+    // Only TOP-LEVEL statements can run at collection time. A read inside any
+    // function body (a test, a helper, beforeAll) is deferred and safe.
+    const topLevel = depth === 0;
+    if (topLevel
+        && !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('import ')
+        && /^(export\s+)?(const|let|var)\s/.test(trimmed)
+        && /readFileSync\s*\(/.test(trimmed)) {
+      // A read whose result is guarded by existsSync in this file is reported
+      // separately: it degrades a missing fixture instead of crashing.
+      const guarded = /existsSync/.test(body);
+      collectionRisks.push({ spec, line: i + 1, text: trimmed.slice(0, 90), guarded });
+    }
+    depth += opens - closes;
+    if (depth < 0) depth = 0;
+  }
+}
+
+// ---- shell tests -----------------------------------------------------------
+//
+// Same question for `.sh`: does any workflow invoke this file, directly or
+// through a harness that names it?
+const shellCoverage = shellTests.map((full) => {
+  const rel = full.replace(ROOT + '/', '');
+  const base = rel.split('/').pop();
+  const by = [];
+  for (const [workflow, { lines }] of commandsByWorkflow) {
+    // NOT gated on RUNNER: that regex matches playwright invocations only, and
+    // a shell test is invoked by `bash path/to/script.sh` or by being executed
+    // directly. The same trap the checker documents for spec files applies -
+    // a `paths:` entry or a comment naming the script must not count - so the
+    // line has to name it in an executable position.
+    if (lines.some((line) => shellInvokes(line, rel))) by.push(workflow);
+  }
+  // A script that only calls other scripts counts: the harness is the entry point.
+  for (const other of shellTests) {
+    if (other === full) continue;
+    let body = '';
+    try { body = readFileSync(other, 'utf8'); } catch { continue; }
+    if (body.split('\n').some((line) => lineRuns(line, rel))) {
+      const harnessRel = other.replace(ROOT + '/', '');
+      const harnessBy = [];
+      for (const [workflow, { lines }] of commandsByWorkflow) {
+        if (lines.some((line) => shellInvokes(line, harnessRel))) harnessBy.push(workflow);
+      }
+      if (harnessBy.length) by.push(...harnessBy.map((w) => `${w} via ${harnessRel.split('/').pop()}`));
+    }
+  }
+  const unique = [...new Set(by)];
+  if (unique.length > 0) return { spec: rel, status: 'COVERED', workflows: unique };
+  if (KNOWN_UNRUN_SHELL.has(base)) return { spec: rel, status: 'EXPLICIT_SKIP', workflows: [], note: KNOWN_UNRUN_SHELL.get(base) };
+  return { spec: rel, status: 'NOT_REFERENCED', workflows: [] };
+});
+const shellFailing = shellCoverage.filter((row) => row.status === 'NOT_REFERENCED');
+
 const asJson = process.argv.includes('--json');
 const failing = coverage.filter((row) => row.status === 'NOT_REFERENCED' || row.status === 'STALE_EXCUSE');
 if (asJson) {
-  console.log(JSON.stringify({ coverage, inputGaps }, null, 2));
+  console.log(JSON.stringify({ coverage, shellCoverage, inputGaps }, null, 2));
 } else {
   const label = { COVERED: 'ok  ', EXPLICIT_SKIP: 'skip', NOT_REFERENCED: 'FAIL', STALE_EXCUSE: 'FAIL' };
   for (const row of coverage) {
@@ -338,8 +506,28 @@ if (asJson) {
   const coveredCount = coverage.filter((r) => r.status === 'COVERED').length;
   console.log('');
   console.log(`spec coverage: ${coveredCount} covered, ${coverage.length - coveredCount - failing.length} explicit-skip, ${failing.length} unreferenced`);
+  console.log('');
+  const shellCovered = shellCoverage.filter((r) => r.status === 'COVERED').length;
+  const shellLabel = { COVERED: 'ok  ', EXPLICIT_SKIP: 'skip', NOT_REFERENCED: 'FAIL' };
+  for (const row of shellCoverage.filter((r) => r.status !== 'COVERED')) {
+    console.log(`${shellLabel[row.status]} ${row.spec.padEnd(48)} ${row.status}${row.note ? '  (' + row.note + ')' : ''}`);
+  }
+  console.log(
+    `shell coverage: ${shellCovered} covered, ${shellCoverage.length - shellCovered - shellFailing.length} explicit-skip, ${shellFailing.length} unreferenced`,
+  );
+  console.log('');
+  const unguarded = collectionRisks.filter((r) => !r.guarded);
+  if (unguarded.length) {
+    console.log(
+      `collection risk: ${unguarded.length} spec(s) read a file in a top-level statement with no \`existsSync\` guard,` +
+      ' so a bare `playwright test` collects nothing:',
+    );
+    for (const r of unguarded) console.log(`  ${r.spec}:${r.line}  ${r.text}`);
+  } else {
+    console.log('collection risk: none unguarded');
+  }
 }
 // `process.exitCode`, not `process.exit()`: with --json the whole report goes to stdout, and an
 // immediate exit truncates a piped write (the run hung instead of printing, which a CI job would
 // read as a hung checker rather than a failing one).
-process.exitCode = failing.length === 0 && inputGaps.length === 0 ? 0 : 1;
+process.exitCode = failing.length === 0 && shellFailing.length === 0 && inputGaps.length === 0 ? 0 : 1;
