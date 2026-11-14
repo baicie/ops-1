@@ -203,8 +203,75 @@ installation, moved or restored. It keeps the Kernel identity as well.
 ### 2.2b A node identity is not proof of a distinct process
 
 Even with separate node ids, two nodes can be misconfigured onto one state
-directory. That is a different failure and is not solved here: it is the
-"concurrent processes sharing one directory" case §2.2 leaves out of scope.
+directory. Between C1.2 and C1.4 that was out of scope. **As of C1.4 it is in
+scope for the normal lifecycle — see §2.6 — and remains out of scope for the
+cases §2.6 names.**
+
+### 2.6 One Node per state directory (C1.4)
+
+The Node takes an exclusive `flock(2)` on `<state_dir>/.node.lock` with
+`LOCK_EX | LOCK_NB`, immediately after `create_dir_all` and **before** the
+Docker daemon is probed, and holds it until the process exits.
+
+| Property | Value |
+|---|---|
+| Mechanism | `flock(2)`, advisory, `LOCK_EX \| LOCK_NB` |
+| Where | `<state_dir>/.node.lock`, mode `0600` |
+| Held | the whole process, via a bound `let _state_lock = …` |
+| Released | by the kernel on process death, including `SIGKILL`; **never** by `unlink` |
+| Platforms | Linux and macOS, by explicit whitelist — not `cfg(unix)` |
+| Everything else | `NODE_STATE_LOCK_UNSUPPORTED`, refuse to start |
+| Contention | `NODE_STATE_DIR_IN_USE`, refuse to start |
+| Any other failure | `NODE_STATE_LOCK_FAILED`, refuse to start |
+
+#### Why `flock` and not a PID file
+
+`flock` attaches to the open file description, which the kernel ties to the
+inode and releases when the process dies. A PID file has to be written
+atomically, can name a recycled PID, and survives a crash — three ways to be
+wrong that `flock` cannot be.
+
+#### Why the file is never unlinked
+
+Unlinking on exit would let a later process create a **new** inode and lock it,
+while a process still holding the old inode believes it is exclusive. There is
+no user-space cleanup to get wrong, because the kernel does it.
+
+#### What this does NOT cover
+
+These are residual and are **not** closed by C1.4. `docs/acceptance/p001/03k`
+records how each was measured.
+
+| Threat | Why not covered |
+|---|---|
+| the state directory is **deleted and re-created** during a run | the lock is on an inode; the new directory has a different one |
+| the directory is **replaced by a symlink** during a run | `create_dir_all` accepts a symlink silently; nothing validates it |
+| an **older Node** that predates this code | `flock` is advisory; it constrains only processes that ask |
+| **NFS / SMB** | semantics never verified here; explicitly outside the guarantee |
+| a process with permission to `rm -rf` its own state directory | it can, and does not need the lock's permission |
+
+The last row is why this is a mitigation and not a guarantee: in the staging
+deployment the Node **owns** its state directory (`README.md:39-41` chowns it
+to `10001:10001`, the uid the Node runs as).
+
+#### What was verified, and how
+
+| Claim | Evidence |
+|---|---|
+| a second process on one directory is refused | real `opsweave-node` processes, `tests/state_dir_lock.rs` |
+| the refusal happens **before** Docker is touched | the refused process reports no Docker error and reads no identity file |
+| a refused process changes nothing on disk | `installation-id` / `installation-binding.json` / `node-identity.json` sha256 and inode unchanged |
+| `SIGKILL` releases the lock | a third process gets past it and fails at Docker instead |
+| the lock follows the inode | unit test: `rm -rf` + `mkdir` at the same path is visible as a different inode |
+| the lock cannot be faked | four counterfactuals — no `flock`, immediate `LOCK_UN`, an unnamed temporary, unlink-on-drop — each make real-process tests fail |
+
+#### Compatibility
+
+A state directory from an earlier version has no `.node.lock`. The file is
+created on first start; nothing about identity, labels or migration changes.
+An **older binary** pointed at the same directory ignores the lock entirely —
+that is the advisory-lock boundary, and it means an upgrade must stop the old
+Node before starting the new one.
 
 ### 2.3 Pre-C1.2.1 state directories adopt in place
 
@@ -296,8 +363,9 @@ the durability claim does not apply.
 - **The clone that predates this ADR** stays undetectable. Residual, recorded.
 - **This does not make concurrent processes safe.** Two processes that both hold
   a valid binding for the same directory are the same installation by
-  definition; that case is out of scope here and covered by the rollout and
-  quarantine rules.
+  definition. C1.4 (§2.6) turns the **normal** case of that into a refusal at
+  startup; the cases §2.6 lists — replaced directory, replaced symlink, an older
+  binary, a network filesystem — stay open and are recorded, not implied.
 
 ## 4. Alternatives considered
 

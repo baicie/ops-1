@@ -8,3 +8,4 @@ pub mod config;
 pub mod docker;
 pub mod logs;
 pub mod runtime;
+pub mod state_lock;
