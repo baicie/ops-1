@@ -175,6 +175,52 @@ run 43607236890 是 negatives 第一次跑在活着的 worker 上。结果 `PASS
 
 ---
 
+## 4.1 一个必须叫 flake、但根因真实的例子
+
+`g13a-roundtrip`（**必需检查**）在 #105 上失败：
+
+```
+[g13a] FAIL: collect failed: 200 {... "outcome":"PARTIAL","clamped":["window"] ...}
+```
+
+**产品是对的。** 测试写的是：
+
+```js
+from: new Date(Date.now() - 3600_000)
+to:   new Date()                    // 第二次读时钟
+```
+
+两次 `Date.now()` 之间过了几毫秒，请求窗口就**略大于** `maxWindowSeconds: 3600`，
+产品按预算截断并返回 `PARTIAL`——契约原文：
+
+> PARTIAL: some requested items were answered and others were not,
+> **or the window was clamped by the budget**
+
+### 为什么必须叫它 flake
+
+同一份未修改的文件在别的分支上通过：
+
+| 分支 | `ci` | `g13a-roundtrip` |
+|---|---|---|
+| `test/p001-c4-browser-assets` | success | **success** |
+| `test/p001-identity-persistence-fail-closed` | success | success |
+| `fix/p001-heartbeat-acceptance-fail-closed` | failure | **failure** |
+
+失败与否取决于两次 `Date.now()` 之间过了多少微秒——这是机器的属性，
+不是被测代码的属性。
+
+### 但它不是"重跑就好"的 flake
+
+根因是确定的、可修的：**一次读时钟 + 59 分钟窗口**。修在 **PR #112**（独立 Draft）。
+
+**故意不放进 #105。** 修 main 上的 flake 是另一个任务；塞进 #105 会让这条分支
+成为另一个任务改动的落脚点——正是任务包禁止的隐式耦合。
+
+`g13a-roundtrip` 在 #105 上会一直红，直到 #112 合入。那是关于 main 的真实陈述，
+不是关于 #105 改动的陈述。
+
+---
+
 ## 5. 一条方法论结论
 
 这轮四次根因定位，没有一次来自"读代码想一想"，全部来自**把日志读到最后一行**：
