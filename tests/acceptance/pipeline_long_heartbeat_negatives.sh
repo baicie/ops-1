@@ -177,7 +177,16 @@ start_long_job() {
   # `worker pid N already gone` - the reason was in /tmp/neg-<job>.log, which the
   # workflow does not upload. The path is now printed so the next failure can be
   # diagnosed from the job log alone.
-  note "worker for job $JOB: pid $! log /tmp/neg-$JOB.log"
+  # stderr, NOT `note`. This function is invoked as `JOB="$(start_long_job …)"`,
+  # so everything it writes to stdout becomes the job id. A `note` here did
+  # exactly that: the id arrived as
+  #
+  #     "      worker for job <uuid>: pid … log /tmp/neg-<uuid>.log\n<uuid>"
+  #
+  # and every subsequent query failed with
+  # `invalid input syntax for type uuid`, turning four cases into UNKNOWN. The
+  # diagnostic broke the thing it was added to diagnose.
+  printf 'worker for job %s: pid %s log /tmp/neg-%s.log\n' "$JOB" "$!" "$JOB" >&2
   echo "$JOB"
 }
 
