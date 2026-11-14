@@ -72,7 +72,31 @@ async function statusOf(page: Page, url: string, credentials: RequestCredentials
   );
 }
 
+/**
+ * A missing fixture is BLOCKED, never a green skip.
+ *
+ * `test.skip()` produces a suite that reports success while asserting nothing -
+ * the exact substitution this phase exists to remove. A blocked reason is
+ * collected and, at the end of the test, rethrown as a failure whose message
+ * names what was missing. The core assertions cannot be skipped away.
+ */
+// Scoped to this file: the shared `playwright.config.ts` belongs to every spec,
+// and a D4 requirement must not change what the other suites capture.
+test.use({ screenshot: 'only-on-failure', trace: 'retain-on-failure' });
 test.describe.configure({ mode: 'serial' });
+
+const BLOCKED: string[] = [];
+function block(reason: string): void {
+  BLOCKED.push(reason);
+  test.info().annotations.push({ type: 'BLOCKED', description: reason });
+}
+function assertNotBlocked(): void {
+  if (BLOCKED.length > 0) {
+    throw new Error(
+      `D4 was BLOCKED and therefore measured nothing:\n  - ${BLOCKED.join('\n  - ')}`,
+    );
+  }
+}
 
 test('D4: asset and API reachability across disable and uninstall', async ({ page, context, baseURL }) => {
   const origin = new URL(baseURL!).origin;
@@ -113,11 +137,14 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
       break;
     }
   }
-  test.skip(
-    !PLUGIN,
-    `no installed plugin exposes a reachable frontend/index.html; D4 has nothing to measure ` +
-      `(candidates tried: ${candidates.join(', ')})`,
-  );
+  if (!PLUGIN) {
+    block(
+      `no installed plugin exposes a reachable frontend/index.html; D4 has nothing ` +
+        `to measure (candidates tried: ${candidates.join(', ')})`,
+    );
+    assertNotBlocked();
+    return;
+  }
 
   test.info().annotations.push({
     type: 'd4-target',
@@ -168,10 +195,11 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
     },
     [PLUGIN, token] as const,
   );
-  test.skip(
-    disableStatus === 404 || disableStatus === 0,
-    `this deployment has no usable disable route for ${PLUGIN} (HTTP ${disableStatus})`,
-  );
+  if (disableStatus === 404 || disableStatus === 0) {
+    block(`no usable disable route for ${PLUGIN} (HTTP ${disableStatus})`);
+    assertNotBlocked();
+    return;
+  }
 
   // (5) the API refuses while disabled — the property C1 already proved by
   // script; repeated here because this spec must not assume it.
@@ -202,10 +230,11 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
     },
     [PLUGIN, token] as const,
   );
-  test.skip(
-    uninstallStatus !== 200 && uninstallStatus !== 204,
-    `uninstall returned ${uninstallStatus}; D4's uninstall half is NOT measured`,
-  );
+  if (uninstallStatus !== 200 && uninstallStatus !== 204) {
+    block(`uninstall returned ${uninstallStatus}; D4's uninstall half is NOT measured`);
+    assertNotBlocked();
+    return;
+  }
 
   // (5) after uninstall the API must refuse and say why.
   const after = await page.evaluate(async (plugin) => {
@@ -246,4 +275,7 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
     [401, 403],
     `assets must stay closed to an unauthenticated browser after uninstall, got ${anonAfter}`,
   ).toContain(anonAfter);
+
+  // Nothing above was skipped: if any fixture was missing, this fails here.
+  assertNotBlocked();
 });
