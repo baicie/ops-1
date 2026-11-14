@@ -191,6 +191,28 @@ call() { # token-or-empty, method, path, [body]
   local args=(-sS -o "$SCRATCH/body" -w '%{http_code}' -m 15 -X "$method")
   [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
   [ -n "$body" ] && args+=(-H 'content-type: application/json' --data-binary "$body")
+  # The three mutating deployment routes require an Idempotency-Key.
+  #
+  # `apps/kernel/src/deployments.rs:202,390,663` all start with
+  # `receipts::idempotency_key(&headers)?`, and that returns
+  # `bad_request("Idempotency-Key header is required (8..=128 characters)")` -
+  # HTTP 400 - when the header is missing or out of range.
+  #
+  # Without this the activation probe below answered
+  #
+  #     BLOCKED  could not activate opsweave.data-catalog@0.0.1 (HTTP 400)
+  #
+  # on run 43649598664, and I read that 400 as a wrong `expectedRevision` because
+  # the request body also carries a CAS field. It was the missing header: the
+  # plugin id in that same line was already correct, and the CAS value never got
+  # read.
+  #
+  # Only these three routes get the header; everything else in this suite is a
+  # read or a refusal case that must stay exactly as a client would send it.
+  case "$method:$path" in
+    POST:*/activations|POST:*/deployments|POST:*/rollbacks)
+      args+=(-H "Idempotency-Key: c2-$(date +%s%N)-$RANDOM") ;;
+  esac
   local code
   code="$(curl "${args[@]}" "$URL$path" 2>/dev/null)" || code="000"
   printf '%s' "${code:-000}"
@@ -386,12 +408,23 @@ CREATE="$(call "$ADMIN_TOKEN" POST /api/v1/users \
   "{\"email\":\"$VIEWER_EMAIL\",\"displayName\":\"C2 Viewer\",\"password\":\"$VIEWER_PASS\",\"role\":\"viewer\"}")"
 if [ "$CREATE" = "201" ] || [ "$CREATE" = "200" ]; then
   VIEWER_CREATED=1
-  # The id comes from the response this request produced, not from a later
-  # lookup that could match a different row.
-  VIEWER_ID="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/v1/users" 2>/dev/null \
-    | python3 -c "import json,sys;print(next((u['id'] for u in json.load(sys.stdin) if u.get('email')=='$VIEWER_EMAIL'),''))" 2>/dev/null || true)"
+  # The id comes from the response THIS request produced.
+  #
+  # It used to be looked up in `GET /api/v1/users` by email, and that comparison
+  # could never match: `users.rs:88` stores `payload.email.trim().to_lowercase()`,
+  # while `$VIEWER_EMAIL` is `c2-viewer-$(date -u +%Y%m%dT%H%M%SZ)-$$@…` and
+  # therefore contains an upper-case `T` and `Z`. Measured on run 43649598664:
+  #
+  #     BLOCKED  2 ... the viewer was created but its id could not be read back
+  #     ... c2-viewer-20261114T230429Z-34670@opsweave.local id= (disabled below, by id)
+  #
+  # The account existed and every later case used it successfully; only the
+  # lookup was wrong. `create_user` returns `Json<UserView>` (`users.rs:49-53`),
+  # so the id is right here in the response - no second request, no comparison,
+  # and nothing that a future change to email casing can break.
+  VIEWER_ID="$(jf "d.get('id','')" <$SCRATCH/body 2>/dev/null || true)"
   if [ -z "$VIEWER_ID" ]; then
-    blocked "2 insufficient role: the viewer was created but its id could not be read back, so it cannot be cleaned up by id"
+    blocked "2 insufficient role: the viewer was created but the response carried no id, so it cannot be cleaned up by id"
   fi
   # The session token is NOT in the login response body: `/api/v1/auth/login`
   # sets it as an `HttpOnly` cookie (`auth.rs`, `opsweave_session=…`) and returns
@@ -632,7 +665,28 @@ notrun "10 incompatible upgrade" "contracts/ manifest has no field expressing an
 
 # A grant this suite owns, identified by a value only this run can produce.
 FIXTURE_TAG="c2-${RUN_TAG}"
-CREATE_GRANT_BODY="{\"name\":\"data.catalog.v1\",\"major\":1,\"consumerPluginId\":\"$PLUGIN\",\"providerPluginId\":\"$PLUGIN\",\"scope\":[\"dataset:read\"]}"
+# No `providerPluginId`, and the consumer is the integration plugin.
+#
+# Both fields were wrong, and each failed differently on run 43649598664:
+#
+#   consumerPluginId: "$PLUGIN"       - the catalog is the PROVIDER, not a
+#                                       consumer of its own capability.
+#   providerPluginId: "$PLUGIN"       - pins the grant to whatever provider is
+#                                       SELECTED. `capability_multi_provider.sh`
+#                                       runs before this suite, activates
+#                                       `opsweave.data-catalog-alt`, and leaves it
+#                                       selected; `capabilities.rs:138-158` then
+#                                       answers
+#                                         HTTP 409 PROVIDER_MISMATCH
+#                                         "requested provider opsweave.data-catalog
+#                                          is not the selected provider"
+#                                       and case 12 was BLOCKED.
+#
+# Omitting the provider is the documented way to say "whichever provider is
+# selected", and it is what `capability_multi_provider.sh:92` already does for the
+# grant it calls UNBOUND. Case 12 tests revocation semantics, not provider
+# pinning, so it should not care which provider is selected.
+CREATE_GRANT_BODY="{\"name\":\"data.catalog.v1\",\"major\":1,\"consumerPluginId\":\"opsweave.data-integration\",\"scope\":[\"dataset:read\"]}"
 CREATE_CODE="$(call "$ADMIN_TOKEN" POST /api/v1/capability-grants "$CREATE_GRANT_BODY")"
 OWN_GRANT_ID="$(jf "d.get('id') or d.get('grantId') or ''" <$SCRATCH/body 2>/dev/null || true)"
 if [ "$CREATE_CODE" != "200" ] && [ "$CREATE_CODE" != "201" ]; then
