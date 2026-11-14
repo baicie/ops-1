@@ -2295,7 +2295,116 @@ processor	: 3
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_retry_loop_with, try_cleanup_with_timeout, Shared};
+    use super::{cleanup_retry_loop_with, try_cleanup_with_timeout, write_atomic, Shared};
+
+    // ---- write_atomic under real filesystem faults -------------------------
+    //
+    // These live here rather than in `tests/` because `write_atomic` is private
+    // and, more importantly, because driving it through
+    // `load_or_create_installation_id` does NOT reach it: that path only reads
+    // and mints, and `write_atomic` is called by `save_identity` after
+    // enrolment. A test through the public entry point would pass while the
+    // write path was broken - measured: reverting the `rename` error handling
+    // left all five integration cases green.
+
+    fn fault_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "opsweave-write-atomic-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+        }
+        dir
+    }
+
+    fn temps_in(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .filter(|n| n.contains(".tmp."))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn running_as_root() -> bool {
+        // SAFETY: `geteuid` takes no arguments and cannot fail.
+        unsafe { libc::geteuid() == 0 }
+    }
+
+    #[test]
+    fn a_read_only_directory_makes_the_write_fail_and_leaves_no_temp_file() {
+        let dir = fault_dir("readonly");
+        let target = dir.join("identity.json");
+        if running_as_root() {
+            eprintln!("skip: mode 0555 does not stop uid 0");
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).expect("chmod");
+        }
+        let result = write_atomic(&target, b"{}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755));
+        }
+        assert!(
+            result.is_err(),
+            "a write into a read-only directory must fail"
+        );
+        assert!(!target.exists(), "nothing may be published");
+        assert!(
+            temps_in(&dir).is_empty(),
+            "a failed write must clean up its temp file: {:?}",
+            temps_in(&dir)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_target_that_is_a_directory_makes_the_publish_fail() {
+        // `rename(tmp, path)` fails with EISDIR. The failure must surface AND the
+        // temp file must not be left behind - the cleanup path only runs for the
+        // write phase, so this is the case that proves the rename error is
+        // propagated rather than swallowed.
+        let dir = fault_dir("target-is-dir");
+        let target = dir.join("identity.json");
+        std::fs::create_dir_all(&target).expect("directory at the target path");
+        std::fs::write(target.join("keep"), b"x").expect("content");
+
+        let result = write_atomic(&target, b"{}");
+        assert!(result.is_err(), "publishing over a directory must fail");
+        assert!(target.is_dir(), "the directory must not be replaced");
+        assert!(target.join("keep").is_file(), "its contents must survive");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_successful_write_publishes_the_exact_bytes_and_leaves_no_temp_file() {
+        // The control. Without it, a `write_atomic` that always failed would
+        // satisfy the two cases above.
+        let dir = fault_dir("control");
+        let target = dir.join("identity.json");
+        write_atomic(&target, b"{\"a\":1}").expect("the control write must succeed");
+        assert_eq!(std::fs::read(&target).expect("read"), b"{\"a\":1}");
+        assert!(
+            temps_in(&dir).is_empty(),
+            "no temp file after a successful write"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use crate::config::Args;
     use crate::docker::DockerAdapter;
     use clap::Parser;
