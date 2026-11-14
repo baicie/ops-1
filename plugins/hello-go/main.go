@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -104,7 +105,22 @@ func main() {
 				return
 			}
 		}
-		writeJSON(w, 200, id, map[string]any{"echoed": parsed, "pluginId": pluginID, "version": version, "instanceId": instanceID, "requestId": id})
+		// The same two observations the TypeScript reference plugin makes, so the
+		// conformance matrix can assert one property across all three languages.
+		// An unsigned caller-role header must never arrive (null = stripped); a
+		// Kernel-signed context must. The plugin only checks the prefix - it does
+		// not hold this plugin's context key and must not claim to verify it.
+		var deliveredRole any
+		if role := r.Header.Get("X-OpsWeave-User-Role"); role != "" {
+			deliveredRole = role
+		}
+		ctx := r.Header.Get("X-OpsWeave-User-Context")
+		writeJSON(w, 200, id, map[string]any{
+			"echoed": parsed, "pluginId": pluginID, "version": version,
+			"instanceId": instanceID, "requestId": id,
+			"deliveredUnsignedRole":  deliveredRole,
+			"deliveredSignedContext": strings.HasPrefix(ctx, "owu1."),
+		})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 404, requestID(r), "NOT_FOUND", "No such route", false)

@@ -75,6 +75,16 @@ public class HelloController {
         body.put("version", RuntimeState.VERSION);
         body.put("instanceId", RuntimeState.INSTANCE_ID);
         body.put("requestId", requestId(request));
+        // The same two observations the TypeScript and Go reference plugins make,
+        // so the conformance matrix asserts one property across all three
+        // languages. An unsigned caller-role header must never arrive (null =
+        // stripped by the Gateway); a Kernel-signed context must. Presence only:
+        // this plugin does not hold its context key and must not claim to have
+        // verified the token.
+        String role = request.getHeader("X-OpsWeave-User-Role");
+        body.put("deliveredUnsignedRole", role == null || role.isEmpty() ? null : role);
+        String ctx = request.getHeader("X-OpsWeave-User-Context");
+        body.put("deliveredSignedContext", ctx != null && ctx.startsWith("owu1."));
         return ResponseEntity.ok(body);
     }
 

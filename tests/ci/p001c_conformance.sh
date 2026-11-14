@@ -248,15 +248,26 @@ esac
 #   Making the job red for that says "conformance is broken" about a probe
 #   limitation. Making it green with no record hides a real assertion. So it is
 #   recorded loudly, in the run summary, and tracked as an open item.
-if [ "$BASELINE_STATUS" -ne 0 ]; then
+if [ "$BASELINE_STATUS" -ne 0 ] && [ "$MATRIX_STATUS" -eq 0 ]; then
   {
     echo
     echo "--- baseline prober: FAILED (exit $BASELINE_STATUS) ---"
-    echo "    This does not gate the job. It asserts the Gateway's forged-header"
-    echo "    handling, which the matrix does not cover, so its failure is a real"
-    echo "    open item - see docs/acceptance/p001/03m-multilang-conformance.md."
     echo "    Its last 20 lines:"
     tail -20 "$EVIDENCE/conformance.log" 2>/dev/null | sed 's/^/      /' || echo "      (no output captured)"
   } | tee -a "$EVIDENCE/run.txt"
+  # IT GATES NOW.
+  #
+  # It used to be recorded and ignored, on the grounds that its unique
+  # assertions (the Gateway's forged-header handling) were not worth a red job
+  # for a probe limitation. That was the wrong trade: an ungated assertion is
+  # not an assertion.
+  #
+  # Instead the two assertions it uniquely made were reproduced in the matrix
+  # (`gateway_identity_checks`, through the Gateway rather than a direct
+  # instance port), and both other plugins now expose the fields those rows
+  # read. With equivalence established, this prober's failure means something
+  # again - so it fails the job.
+  echo "RUNTIME CONFORMANCE: FAIL (the baseline prober failed; see $EVIDENCE/conformance.log)"
+  exit 1
 fi
 exit "$MATRIX_STATUS"
