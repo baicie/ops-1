@@ -697,15 +697,42 @@ else
   note "12: created this run's own grant $OWN_GRANT_ID (tag $FIXTURE_TAG)"
 
   # --- 12a. SEQUENTIAL: after the revocation is acknowledged, a NEW request --
-  # is refused. This is the claim the old case actually tested, and it now says
-  # so.
+  #
+  # NOT a gateway assertion, because the gateway does not consult grants.
+  #
+  # `apps/kernel/src/gateway.rs:38-46` authorises a user request on
+  # `auth.role` alone - Admin, Operator or Viewer - and `grep -c
+  # capability_grants apps/kernel/src/gateway.rs` returns 0. Grants are consumed
+  # on the WORKLOAD token path: `capabilities.rs:413-432` looks up
+  # `consumer_plugin_id = claims.plugin_id` and answers `403 CAPABILITY_FORBIDDEN`
+  # when that row is gone.
+  #
+  # So revoking a plugin's grant cannot make an admin's `GET
+  # /api/v1/gateway/...` fail, and this case asserted that it would:
+  #
+  #   FAIL  12a a request after the revoke was acknowledged:
+  #         the product ACCEPTED the request (HTTP 200); a refusal was required
+  #
+  # measured on runs 43652053167 and 43652053177. The product was right; the
+  # assertion described a mechanism this product does not have.
+  #
+  # It had never run before - the two earlier runs BLOCKED at activation - so
+  # nothing contradicted it until now.
+  #
+  # The revocation itself IS still verified here, as an API property: the grant
+  # this suite created is deleted and the Kernel reports success. What is not
+  # verified - and is not verifiable from this suite - is the effect on a
+  # workload token, because this suite has no workload token and does not run
+  # inside the plugin container. `capability_multi_provider.sh:100-116` covers
+  # exactly that, with the real token, and is the right place for it.
   REVOKE="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$OWN_GRANT_ID")"
   case "$REVOKE" in
     200|204)
-      expect_refusal "12a a request after the revoke was acknowledged" 403 CAPABILITY_FORBIDDEN \
-        "$ADMIN_TOKEN" GET "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" ;;
+      note "12a: the grant this suite created was revoked (HTTP $REVOKE)"
+      notrun "12a a request after the revoke" \
+        "gateway authorises on the user's role alone (gateway.rs:38-46, no capability_grants lookup); grant revocation is observable only on the workload-token path, which capability_multi_provider.sh:100-116 covers with a real token" ;;
     000) blocked "12a: the revoke did not complete (HTTP 000)" ;;
-    *)   blocked "12a: the revoke returned $REVOKE, so the follow-up proves nothing" ;;
+    *)   blocked "12a: the revoke returned $REVOKE, so even the API half was not established" ;;
   esac
 
   # --- 12b. CONCURRENT: a request already in flight when the revoke commits. -
@@ -757,8 +784,8 @@ else
       inconclusive "12b: the request never signalled that it had started before the revoke was issued, so no overlap was demonstrated"
     else
       case "$RACE_CODE" in
-        200) note "12b: OBSERVED_ATTEMPT - the request was in flight and succeeded; it was authorised before the revoke committed (documented outcome)" ;;
-        403) note "12b: OBSERVED_ATTEMPT - the request was in flight and was refused; the revoke committed first (documented outcome)" ;;
+        200) note "12b: OBSERVED_ATTEMPT - the in-flight request succeeded. Expected: the gateway authorises on role, so a grant revoke cannot refuse it (see 12a). What this records is that the revoke landed while a request was in flight and neither side errored." ;;
+        403) bad "12b: the in-flight request was refused with 403, which the gateway should not do on a grant revoke (gateway.rs:38-46 consults no grants); if this fires, the authorisation path changed and 12a's NOT_RUN needs revisiting" ;;
         000) blocked "12b: the in-flight request did not complete (HTTP 000)" ;;
         *)   bad "12b: the in-flight request returned $RACE_CODE, which is neither documented outcome" ;;
       esac
