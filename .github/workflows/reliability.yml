@@ -27,6 +27,21 @@ jobs:
       - name: Install catalog backend dependencies
         working-directory: plugins/data-catalog/backend
         run: npm ci --omit=dev --no-audit --no-fund
+      # `tests/acceptance/b2_response_bounds.sh` asserts two things about the
+      # shipped code: that no call site buffers a response before bounding it,
+      # and that the shared reader's own suite passes (including the real-socket
+      # chunked-forever case). It needs no platform - only a workspace and a
+      # toolchain - and no workflow ran it until here.
+      #
+      # It used to be in `check-spec-coverage`'s KNOWN_UNRUN list with the note
+      # "candidate for ci.yml". Wiring it is the better answer than keeping the
+      # note.
+      - name: Response bodies are bounded while read, not after buffering
+        run: |
+          set -eu
+          cargo build --locked -p opsweave-kernel >/dev/null
+          bash tests/acceptance/b2_response_bounds.sh
+
       - name: Run isolated quality fault harness
         env:
           PGHOST: localhost
