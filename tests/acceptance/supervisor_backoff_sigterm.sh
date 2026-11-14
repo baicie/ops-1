@@ -44,8 +44,32 @@ LOG_MARK="$(wc -l <"$LOG" 2>/dev/null || echo 0)"
 NODE_B_PID="$(OPSWEAVE_PIPELINE_WORKER_BIN="$FAKE" tests/runtime/start_node.sh node-b 9102)"
 echo "$NODE_B_PID" >/tmp/node-b.pid
 touch "$MARKER"
-# The fake child exits 9 repeatedly. Wait for THIS Node to report one, bounded,
-# rather than sleeping a guessed 2 s and then counting whatever is in the file.
+# Prove the Node was told to run the fake worker, before waiting for evidence
+# that it did.
+#
+# The env passed above used to be silently discarded: start_node.sh hard-coded
+# OPSWEAVE_PIPELINE_WORKER_BIN after the caller's assignment, so `env` replaced
+# it. This test then waited 30 s for an exit that could not come, from a REAL
+# worker that just sat there polling. The whole-file `grep -c` below was what
+# made it pass anyway.
+#
+# The check reads the Node's own process environment rather than trusting the
+# assignment: a future caller cannot lose this argument without saying so.
+if [ -r "/proc/$NODE_B_PID/environ" ]; then
+  SEEN_BIN="$(tr '\0' '\n' <"/proc/$NODE_B_PID/environ" | sed -n 's/^OPSWEAVE_PIPELINE_WORKER_BIN=//p')"
+  if [ "$SEEN_BIN" != "$FAKE" ]; then
+    bad "node-b was started with worker bin '$SEEN_BIN', not the fake '$FAKE' (the env assignment was lost)"
+  fi
+else
+  # No /proc (macOS). Fall back to the supervisor's own log line, which records
+  # the binary it spawned.
+  sleep 2
+  if ! tail -n +"$((LOG_MARK + 1))" "$LOG" 2>/dev/null | grep -q "starting node-managed pipeline worker"; then
+    bad "node-b never started any worker, so backoff cannot be tested"
+  fi
+fi
+# The fake child exits 9 immediately, so the supervisor must observe it. Wait for
+# THIS Node to report one, bounded, rather than sleeping a guessed 2 s.
 EXITS=0
 for _ in $(seq 1 120); do
   EXITS="$(tail -n +"$((LOG_MARK + 1))" "$LOG" 2>/dev/null | grep -c 'node-managed pipeline worker exited' || true)"
@@ -54,8 +78,9 @@ for _ in $(seq 1 120); do
 done
 if [ "${EXITS:-0}" -lt 1 ]; then
   echo "FAIL  no fake worker exit observed after this Node started (log mark $LOG_MARK)"
-  echo "      the Node may not have accepted its credential at all; its own log:"
-  tail -20 "$LOG" >&2 || true
+  echo "      expected '$FAKE' to exit 9 and the supervisor to log it within 30 s."
+  echo "      lines this Node wrote since the mark:"
+  tail -n +"$((LOG_MARK + 1))" "$LOG" 2>/dev/null | tail -20 >&2 || true
   exit 1
 fi
 START="$(date +%s%N)"
