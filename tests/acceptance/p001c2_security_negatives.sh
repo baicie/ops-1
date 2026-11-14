@@ -32,6 +32,9 @@
 # correct refusal. That substitution is the thing this script exists to avoid.
 set -uo pipefail
 URL="${OPSWEAVE_URL:-http://127.0.0.1:18181}"
+# Absolute, so this script does not depend on the caller's cwd for the one
+# binary it invokes directly.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EVIDENCE="${OPSWEAVE_C2_EVIDENCE:-/tmp/p001c2-negatives.log}"
 : >"$EVIDENCE"
 
@@ -124,8 +127,23 @@ echo "WS_A=$WS_A WS_B=$WS_B plugin=$PLUGIN" | tee -a "$EVIDENCE"
 # The activation is therefore made explicit here. A failure to establish it is
 # BLOCKED with the reason, never a silent pass.
 # Route and body read from `apps/kernel/src/routes.rs:178-181` and
-# `deployments::activate`, not guessed: `POST .../activations` with a version.
-ACTIVATE_STATUS="$(call "$ADMIN_TOKEN" POST "/api/v1/plugins/$PLUGIN/activations" '{"version":"0.0.1"}')"
+# `deployments::ActivateRequest` (`deployments.rs:146-151`), not guessed:
+# `POST .../activations` with BOTH `version` and `expectedRevision`.
+#
+# The first version sent only `{"version":"0.0.1"}` and got HTTP 422 -
+# `expectedRevision` is a required field because activation is a CAS. Sending
+# `-1` would have been worse than omitting it: it would look like a deliberate
+# never-matches guard instead of a wrong body.
+# The CAS value is `activeRevision.generation` on the plugin detail
+# (`plugins.rs:52-68`, `ActivationRevisionView`). Absent means "never activated",
+# where the apply path expects 0.
+REVISION="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/v1/plugins/$PLUGIN" \
+  | python3 -c 'import json,sys
+d = json.load(sys.stdin)
+rev = d.get("activeRevision") or {}
+print(rev.get("generation", 0))' 2>/dev/null || echo 0)"
+ACTIVATE_STATUS="$(call "$ADMIN_TOKEN" POST "/api/v1/plugins/$PLUGIN/activations" \
+  "{\"version\":\"0.0.1\",\"expectedRevision\":$REVISION}")"
 case "$ACTIVATE_STATUS" in
   200|201|204) note "activated $PLUGIN@0.0.1 for this suite" ;;
   409)         note "$PLUGIN@0.0.1 was already active" ;;
@@ -159,8 +177,26 @@ VIEWER_PASS="C2Viewer!2026"
 CREATE="$(call "$ADMIN_TOKEN" POST /api/v1/users \
   "{\"email\":\"$VIEWER_EMAIL\",\"displayName\":\"C2 Viewer\",\"password\":\"$VIEWER_PASS\",\"role\":\"viewer\"}")"
 if [ "$CREATE" = "201" ] || [ "$CREATE" = "200" ]; then
-  VIEWER_TOKEN="$(call "" POST /api/v1/auth/login \
-    "{\"email\":\"$VIEWER_EMAIL\",\"password\":\"$VIEWER_PASS\"}" >/dev/null; jf "d.get('token','')" </tmp/c2-body)"
+  # The session token is NOT in the login response body: `/api/v1/auth/login`
+  # sets it as an `HttpOnly` cookie (`auth.rs`, `opsweave_session=…`) and returns
+  # only `csrf_token`. Reading `d['token']` therefore always produced nothing,
+  # and the case reported "the viewer account was created but signing in
+  # produced no token" - a wrong reading of a correct response.
+  #
+  # `opsctl login` is the client that knows this, so the fixture uses it against
+  # a throwaway HOME and takes the token from the session file it writes.
+  # `opsctl` writes `$HOME/.opsweave/session.json`, and this script's admin
+  # session lives exactly there. Run the fixture under its own HOME so the two
+  # cannot collide - the admin token is read once at the top and would otherwise
+  # be replaced mid-run.
+  VIEWER_HOME="$(mktemp -d)"
+  VIEWER_TOKEN=""
+  if HOME="$VIEWER_HOME" "$ROOT/target/debug/opsctl" --url "$URL" login \
+       --email "$VIEWER_EMAIL" --password "$VIEWER_PASS" >/dev/null 2>&1; then
+    VIEWER_TOKEN="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' \
+      "$VIEWER_HOME/.opsweave/session.json" 2>/dev/null || true)"
+  fi
+  rm -rf "$VIEWER_HOME"
   if [ -z "$VIEWER_TOKEN" ]; then
     blocked "2 insufficient role: the viewer account was created but signing in produced no token"
   else
