@@ -77,19 +77,44 @@ Total: 0 tests in 0 files      <- exit 1
 **一个 spec 都收集不到。** 任何依赖「收集整个目录」的 job 会看到一个空套件，
 而空套件不是通过的套件。
 
-检查器现在检测**顶层语句**里的无守卫 `readFileSync`（import 行与函数体内的读取
-不算）：
+### 3.1 「9 个」与「5 个」的差异（已查明并更正）
+
+本文件初版写「9 个 spec」，而检查器只报 5 个。**两个数字量的是不同的集合**，
+不是检查器漏检，也不是文档写错了一个：
+
+| 口径 | 数量 |
+|---|---|
+| 模块作用域出现过 `readFileSync`（含 `import` 行与仓内文件读取） | 9 个文件 |
+| 初版检查器能看见的形态（`const x = readFileSync(...)`） | 5 个 |
+| **真的能让收集阶段崩掉**（读 `/tmp` 或 env 指定路径，且无 `existsSync`） | **5 个** |
+| 读的是**仓库内**文件（i18n catalog、已提交 fixture） | 5 处 |
+
+初版检查器漏了三种真实形态，现已修：
+
+```js
+JSON.parse(readFileSync(CATALOG_DIR + locale + '.json', 'utf8'))   // 尾随调用
+fs.readFileSync(                                                    // 跨行调用
+  path.resolve(...),
+```
+
+修正后共 **10 处、分布 9 个文件**，检查器把它们拆成两类输出：
 
 ```
 collection risk: 5 spec(s) … so a bare `playwright test` collects nothing:
-  g12d-probe.spec.ts:16      const SEED = JSON.parse(fs.readFileSync('/tmp/g12d/seed.json', …
+  g12d-probe.spec.ts:16      fs.readFileSync('/tmp/g12d/seed.json', …)
   g12r2-compare.spec.ts:17   …
   g12r2-matrix.spec.ts:26    …
   g12r2-races.spec.ts:20     …
   g12r2-states.spec.ts:26    …
+
+collection note: 5 spec(s) read a repository file at module scope.
+  …（i18n catalog / 已提交 fixture：随 checkout 存在，不会让收集崩掉）
 ```
 
-这 5 个都已在 EXPLICIT_SKIP 里（手工运行），所以**报告但不重复阻断**。
+**只有第一类能破坏收集。** 第二类列出来是为了完整，而不是为了阻断——一份
+三分之二是噪音的告警列表，没人会读。
+
+第一类那 5 个都在 EXPLICIT_SKIP 里（手工运行），所以**报告但不重复阻断**。
 修它们（把读取移进 `beforeAll`）是独立任务，不在本阶段。
 
 ## 4. 反事实（7.4）
@@ -114,6 +139,6 @@ collection risk: 5 spec(s) … so a bare `playwright test` collects nothing:
 - **不删任何 `|| true`**。`tests/` 下有 198 处，逐条分类需要知道每一处的意图；
   机械删除会破坏真正的容错（清理、超时探测、可选字段）。本阶段只修**已证明
   会改变判决**的那一处。
-- **不改那 9 个 spec 的模块作用域读取**。那是 5 个具体文件的改动，属独立任务。
+- **不改那 5 个会破坏收集的 spec 的模块作用域读取**。那是 5 个具体文件的改动，属独立任务。
 - **不把 20 个 EXPLICIT_SKIP 全部接线**。多数需要专用 daemon 或完整平台，
   为它们新建 job 是 CI 架构变更。
