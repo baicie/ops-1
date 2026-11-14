@@ -75,11 +75,21 @@ python3 scripts/assemble_plugin.py --template plugins/data-catalog-alt/manifest.
 #
 # Built from data-catalog: same image, same frontend bytes, its own id, and NO
 # capabilities, so it cannot answer for a capability the data plugins provide.
-python3 scripts/assemble_plugin.py --template plugins/data-catalog/manifest.template.json --out /tmp/data-bundles/d4-fixture --version "$TS_VERSION" --id dev.opsweave.hello-d4fixture --image-ref "$CAT_DIGEST" --frontend-dist /tmp/data-catalog-web >/dev/null
+python3 scripts/assemble_plugin.py --template plugins/data-catalog/manifest.template.json --out /tmp/data-bundles/d4-fixture --version "$TS_VERSION" --image-ref "$CAT_DIGEST" --frontend-dist /tmp/data-catalog-web >/dev/null
+# Id and capabilities are rewritten HERE rather than through an `--id` flag on the
+# assembler.
+#
+# PR #102 adds that flag for its own protocol-negative fixture, in the same file.
+# Two PRs adding the same argument to the same parser is a merge conflict for no
+# benefit - and the flag is incidental here, since the manifest is already being
+# edited on the next line. Keeping the change local removes the overlap entirely.
 python3 - /tmp/data-bundles/d4-fixture/manifest.json <<'PYFIX'
 import json, sys
 path = sys.argv[1]
 manifest = json.load(open(path))
+# Its own id: deploying it must not replace an instance the conformance matrix or
+# the data tests are measuring.
+manifest["id"] = "dev.opsweave.hello-d4fixture"
 # Nothing provided: this plugin exists to be uninstalled, and a second provider
 # of a catalog capability would make the data tests ambiguous.
 manifest["provides"] = []

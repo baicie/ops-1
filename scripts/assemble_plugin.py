@@ -26,24 +26,11 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--image-ref", required=True)
     parser.add_argument("--frontend-dist", type=Path)
-    # Overrides the template's `id`, so a fixture can be assembled from an
-    # existing template under an id of its own. Defaults to the template's value,
-    # so every existing call is unaffected.
-    #
-    # Two fixtures need this, for different reasons:
-    #
-    #   * the conformance negative fixture (PR #102) - the same Go binary
-    #     reporting a protocol the Node must reject; it needs its own id or it
-    #     would collide with the real plugin it is derived from.
-    #   * the D4 browser fixture (this branch) - the browser spec has to DISABLE
-    #     and UNINSTALL a plugin. It used to pick whatever the platform had and
-    #     destroy that, which in the data-foundation harness meant uninstalling a
-    #     data plugin that three later scripts (`data_ssrf.sh`,
-    #     `capability_multi_provider.sh`, `data_token_revocation.sh`) depend on.
-    #
-    # The two PRs added the flag independently, as the task rules require - no
-    # task may depend on another's unmerged branch. The definitions were
-    # identical, so this merge keeps one of them and both call sites work.
+    # Overrides the template's `id`. Added for the conformance negative fixture,
+    # which is the same Go binary reporting a protocol the Node must reject: it
+    # needs its own id, or it would collide with the real plugin it is derived
+    # from. Defaults to the template's value, so every existing call is
+    # unaffected.
     parser.add_argument("--id", dest="plugin_id")
     args = parser.parse_args()
 
