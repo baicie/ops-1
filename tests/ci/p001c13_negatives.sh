@@ -159,7 +159,15 @@ STATE="/tmp/p001c-${RUN_ID}"
 KERNEL_PORT="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['kernelPort'])" "$STATE/run.json")"
 SRC_EP="http://127.0.0.1:${KERNEL_PORT}"
 OPSCTL="$ROOT/target/debug/opsctl"
-PLUGIN="dev.opsweave.hello"
+# The plugin under test. Parameterised so the same injections can be aimed at
+# another language's plugin, which is what makes the negative matrix comparable
+# across languages instead of a TypeScript-only suite.
+#
+# The injections that build their own images (a crash-loop and a never-ready
+# container) are language-agnostic by construction: they serve the Runtime v1
+# contract and are staged under whatever plugin id is being tested.
+PLUGIN="${OPSWEAVE_NEG_PLUGIN:-dev.opsweave.hello}"
+PLUGIN_STEM="${OPSWEAVE_NEG_PLUGIN_STEM:-hello-ops}"
 export OPSWEAVE_URL="$SRC_EP" OPSWEAVE_ADMIN_EMAIL=admin@opsweave.local OPSWEAVE_ADMIN_PASSWORD='OpsWeave!2026'
 HOME="$STATE/home" "$OPSCTL" login --email "$OPSWEAVE_ADMIN_EMAIL" --password "$OPSWEAVE_ADMIN_PASSWORD" >/dev/null \
   || fatal "could not sign in"
@@ -222,7 +230,7 @@ say "injection 1: an invalid bundle signature"
 # The bundle is edited AND re-zipped without re-signing, so the detached
 # signature no longer matches the manifest digest. This is the tampering an
 # attacker with registry write access would attempt.
-python3 - "dist/plugins/hello-ops-0.0.1.plugin.zip" "$EVIDENCE/tampered.plugin.zip" <<'PY'
+python3 - "dist/plugins/${PLUGIN_STEM}-0.0.1.plugin.zip" "$EVIDENCE/tampered.plugin.zip" <<'PY'
 import zipfile, json, sys
 src, dst = sys.argv[1], sys.argv[2]
 with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as zout:
@@ -239,7 +247,7 @@ expect_refusal "an invalid bundle signature is rejected" "SIGNATURE_OR_BUNDLE_IN
 
 # A control for the same path: the genuine bundle is accepted. Without it the
 # refusal above could be a broken install command rather than a signature check.
-if HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" install dist/plugins/hello-ops-0.0.1.plugin.zip >/dev/null 2>&1; then
+if HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" install dist/plugins/${PLUGIN_STEM}-0.0.1.plugin.zip >/dev/null 2>&1; then
   ok "control: the genuine bundle is accepted, so the refusal above is about the signature"
 else
   bad "control failed: the genuine bundle was rejected, so injection 1 proved nothing"
@@ -457,7 +465,7 @@ say "injection 4: the gateway does not switch versions"
 # or a 503, satisfied it. Both are fixed: the request's status and the body's
 # parse are separate, explicit assertions, and the served version is compared
 # with the control plane rather than with a substring.
-if ! HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" install dist/plugins/hello-ops-0.0.1.plugin.zip >"$EVIDENCE/v1-install.log" 2>&1; then
+if ! HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" install dist/plugins/${PLUGIN_STEM}-0.0.1.plugin.zip >"$EVIDENCE/v1-install.log" 2>&1; then
   bad "injection 4 is INCONCLUSIVE: the v1 bundle could not be staged"
 elif ! HOME="$STATE/home" "$OPSCTL" --url "$SRC_EP" deploy "$PLUGIN" 0.0.1 --replicas 2 --selector role=node --wait >"$EVIDENCE/v1-deploy.log" 2>&1; then
   bad "injection 4 is INCONCLUSIVE: the v1 deployment did not become READY"
