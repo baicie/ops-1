@@ -115,6 +115,34 @@ CATALOG_PATH="/api/v1/gateway/$PLUGIN/api/data-catalog/datasets"
 echo "== P001-C2 security negatives against $URL =="
 echo "WS_A=$WS_A WS_B=$WS_B plugin=$PLUGIN" | tee -a "$EVIDENCE"
 
+# This suite must not depend on what a PREVIOUS suite left active. Measured: it
+# ran after `capability_multi_provider.sh`, which activates the alternate
+# catalog provider and never switches back, and every case that reaches
+# `/api/gateway/$PLUGIN/...` then answered `503 CAPABILITY_UNAVAILABLE` - the
+# classifier correctly called those BLOCKED, but the suite measured nothing.
+#
+# The activation is therefore made explicit here. A failure to establish it is
+# BLOCKED with the reason, never a silent pass.
+# Route and body read from `apps/kernel/src/routes.rs:178-181` and
+# `deployments::activate`, not guessed: `POST .../activations` with a version.
+ACTIVATE_STATUS="$(call "$ADMIN_TOKEN" POST "/api/v1/plugins/$PLUGIN/activations" '{"version":"0.0.1"}')"
+case "$ACTIVATE_STATUS" in
+  200|201|204) note "activated $PLUGIN@0.0.1 for this suite" ;;
+  409)         note "$PLUGIN@0.0.1 was already active" ;;
+  *)           blocked "could not activate $PLUGIN@0.0.1 (HTTP $ACTIVATE_STATUS); every gateway case below would measure an unavailable provider"
+               ;;
+esac
+
+# Confirm the provider really answers before asserting refusals against it. A
+# 503 here means the fixture is wrong, not that the product refused anything.
+PROBE="$(call "$ADMIN_TOKEN" GET "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets")"
+case "$PROBE" in
+  200) note "the catalog provider answers before the negative cases begin" ;;
+  503) blocked "the catalog provider is unavailable (503) before any case ran; the negatives below would all be BLOCKED, not measured" ;;
+  403) blocked "the catalog provider refused the admin (403); the fixture is wrong, so the negatives prove nothing" ;;
+  *)   note "pre-flight probe returned $PROBE; cases that need the provider will report BLOCKED individually" ;;
+esac
+
 # ---------------------------------------------------------------------------
 # 1. No credential at all.
 # ---------------------------------------------------------------------------
