@@ -48,8 +48,27 @@ EVIDENCE="${OPSWEAVE_LONG_HEARTBEAT_EVIDENCE:-/tmp/long-heartbeat-evidence.log}"
 json() { python3 -c "import json,sys;d=json.load(sys.stdin);print($1)"; }
 ok() { echo "PASS  $*"; echo "PASS  $*" >>"$EVIDENCE"; }
 bad() { echo "FAIL  $*"; echo "FAIL  $*" >>"$EVIDENCE"; exit 1; }
+# A missing platform is not a product failure. Exit 3 says "the environment was
+# not there"; exit 1 says "the product did not do what was asserted"; exit 2 says
+# "measured nothing conclusive". Collapsing them lets an unreachable harness be
+# reported as a defect, and a defect be reported as a harness problem.
+blocked() { echo "BLOCKED  $*"; echo "BLOCKED  $*" >>"$EVIDENCE"; exit 3; }
 note() { echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
-q() { psql "$DB" -qAt -c "$1"; }
+# A query that cannot run must STOP the script, never return "".
+#
+# An empty string is indistinguishable from "no rows" at every call site - a
+# lease that looks missing, a status that looks terminal, a heartbeat that looks
+# unchanged. `-v ON_ERROR_STOP=1` plus an explicit check makes an unreachable
+# database its own failure instead of a quiet verdict change.
+q() {
+  local out
+  if ! out="$(psql "$DB" -qAt -v ON_ERROR_STOP=1 -c "$1" 2>/tmp/long-heartbeat-psql.err)"; then
+    echo "FAIL  the database query could not run: $(head -1 /tmp/long-heartbeat-psql.err 2>/dev/null)" >&2
+    echo "FAIL  the database query could not run: $1" >>"$EVIDENCE"
+    exit 2
+  fi
+  printf '%s' "$out"
+}
 
 # Bounded polling. `until_state <description> <budget-seconds> <command...>`
 # re-runs the command every 250 ms until it prints a non-empty value, and fails
@@ -79,13 +98,13 @@ source tests/acceptance/pipeline_worker_auth.sh
 # Preconditions are stated, not discovered halfway through. Without them the
 # script would fail on a curl error several lines later, which reads like a
 # product failure rather than a missing harness.
-[ -f /tmp/data-kernel.pid ] || bad "BLOCKED: /tmp/data-kernel.pid is missing; this test needs the data-foundation platform (tests/ci/data_foundation_ci.sh)"
-[ -f "$ROOT/data-ci/node-b/node-identity.json" ] || bad "BLOCKED: $ROOT/data-ci/node-b/node-identity.json is missing; this test needs the enrolled node from the harness"
+[ -f /tmp/data-kernel.pid ] || blocked "/tmp/data-kernel.pid is missing; this test needs the data-foundation platform (tests/ci/data_foundation_ci.sh)"
+[ -f "$ROOT/data-ci/node-b/node-identity.json" ] || blocked "$ROOT/data-ci/node-b/node-identity.json is missing; this test needs the enrolled node from the harness"
 KERNEL_PID="$(cat /tmp/data-kernel.pid)"
-kill -0 "$KERNEL_PID" 2>/dev/null || bad "BLOCKED: the Kernel pid $KERNEL_PID in /tmp/data-kernel.pid is not running"
+kill -0 "$KERNEL_PID" 2>/dev/null || blocked "the Kernel pid $KERNEL_PID in /tmp/data-kernel.pid is not running"
 curl -fsS -o /dev/null -m 5 "$URL/livez" 2>/dev/null \
   || curl -fsS -o /dev/null -m 5 "${AUTH[@]}" "$URL/api/v1/nodes" 2>/dev/null \
-  || bad "BLOCKED: the Kernel at $URL does not answer; this test cannot distinguish a product failure from a missing platform"
+  || blocked "the Kernel at $URL does not answer; this test cannot distinguish a product failure from a missing platform"
 
 JOB="$(curl -fsS "${AUTH[@]}" -X POST -H 'content-type: application/json' -H "Idempotency-Key: long-heartbeat-$(date +%s%N)" --data-binary '{"pipelineId":"two-node-bulk","pipelineRevision":1,"input":{},"maxAttempts":2,"timeoutSeconds":300}' "$URL/api/v1/jobs" | json "d['jobId']")"
 load_worker node-b
@@ -139,62 +158,85 @@ ok "a heartbeat landed during execution: $HB_AT"
 #    the Kernel was stopped, and DID advance after it returned.
 # ---------------------------------------------------------------------------
 HB_BEFORE_OUTAGE="$HB_AT"
-kill -STOP "$KERNEL_PID"
-note "kernel stopped for the outage window"
-# HOW LONG IS SAFE, and why it is not a taste decision:
+
+# ---------------------------------------------------------------------------
+# THE OUTAGE, and why it is a database lock rather than `kill -STOP`.
 #
-# the worker's heartbeat task gives up after `max_transient_failures = 3`
-# (apps/pipeline-worker/src/main.rs:239) with a 5 s request timeout and a 2 s
-# backoff (`:24`, `:240`). A single failed attempt therefore costs at most 7 s,
-# and three cost ~21 s, after which the task sets `cancelled` and RETURNS - it
-# never heartbeats again for the life of the job. A 25 s outage exceeded that
-# and the run failed with "the heartbeat did not resume", which was the
-# product behaving exactly as written, not a defect.
+# `kill -STOP` on the Kernel was not an outage. Measured on 2026-11-14 the
+# heartbeat timestamp advanced DURING the window, so the observation could not
+# distinguish "no attempt failed" from "the attempt was queued and succeeded
+# once the process resumed". A test that cannot tell those apart tests nothing.
 #
-# The window must be LONG ENOUGH to contain at least one heartbeat attempt that
-# fails (interval 10 s, so anything under 10 s may contain none - and a run with
-# no failed attempt proves nothing about recovery), and SHORT ENOUGH to leave
-# the task alive (under ~21 s). 14 s sits in the middle: at least one attempt is
-# due, and at most two can fail.
-sleep 14
+# The heartbeat path is one transaction (`apps/kernel/src/jobs.rs::heartbeat`):
+#
+#     BEGIN
+#     authorize_lease(...)
+#     UPDATE kernel.pipeline_job_leases SET heartbeat_at=now(),expires_at=$2
+#            WHERE lease_id=$1
+#     COMMIT
+#
+# Holding a conflicting row lock makes that UPDATE block, and the worker's 5 s
+# request timeout then fails the attempt for real. Two facts make this better
+# than stopping the process:
+#
+#   * the failure is OBSERVABLE - `pg_locks` shows the waiter, so the script can
+#     prove an attempt reached the Kernel and was blocked;
+#   * it is REVERSIBLE - releasing the lock restores service without restarting
+#     anything, so recovery is measured on the same lease.
+# ---------------------------------------------------------------------------
+hold_lease_lock() {
+  # A session that takes the row lock and holds it for $1 seconds, in the
+  # background. `pg_sleep` keeps the transaction open; the lock is released when
+  # the session ends.
+  psql "$DB" -qAt -v ON_ERROR_STOP=1 -c \
+    "BEGIN; SELECT 1 FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE' FOR UPDATE; SELECT pg_sleep($1); COMMIT;" \
+    >/tmp/long-heartbeat-lock.log 2>&1 &
+  LOCK_PID=$!
+}
 
 lease_is_active() {
   local st
   st="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE';")"
   [ "$st" = "ACTIVE" ] && echo ACTIVE
 }
-# The lease must survive the outage in the Kernel's own records. While the
-# Kernel is stopped the query cannot run, so this is checked after CONT.
-kill -CONT "$KERNEL_PID"
-note "kernel resumed"
-until_state "the Kernel to answer again after the outage" 30 is_running >/dev/null \
-  || bad "the Kernel did not come back, or the job left RUNNING, after the outage"
 
-# The heartbeat must NOT have advanced while the Kernel was stopped. Without
-# this, a 14 s window that happened to contain no attempt would look exactly
-# like a successful outage test, and the "recovery" below would prove nothing.
-STILL_BEFORE="$HB_BEFORE_OUTAGE"
-FROZEN="$(q "SELECT heartbeat_at FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE';")"
-# `kill -STOP` is not a reliable outage on this platform. Measured on
-# 2026-11-14: the timestamp advanced during the window, so either the Kernel
-# kept serving from a socket backlog and processed the request after `CONT`, or
-# the write came from somewhere this script does not model. Either way the
-# observation cannot distinguish "no attempt failed" from "the attempt was
-# queued and succeeded later".
-#
-# It is therefore reported as INCONCLUSIVE and it does NOT pass. It is also not
-# a product failure: nothing here says the heartbeat is broken. What the case
-# does establish is the thing the brief asks for - a heartbeat after the window
-# and an ACTIVE lease - and that is asserted below.
-if [ -n "$FROZEN" ] && [ "$FROZEN" != "$STILL_BEFORE" ]; then
-  echo "INCONCLUSIVE  the heartbeat advanced to $FROZEN during the window (was $STILL_BEFORE)"
-  echo "INCONCLUSIVE  the heartbeat advanced to $FROZEN during the window (was $STILL_BEFORE)" >>"$EVIDENCE"
-  note "kill -STOP did not produce an observable outage; whether an attempt failed is unknown"
-  INCONCLUSIVE=1
+# Wait until a heartbeat request is actually BLOCKED on the lock. This is the
+# evidence that the outage existed: `pg_locks` with granted=false on the lease
+# row means some backend is waiting for exactly the UPDATE above.
+blocked_waiters() {
+  q "SELECT count(*) FROM pg_locks l
+       JOIN pg_stat_activity a ON a.pid = l.pid
+      WHERE NOT l.granted AND a.query LIKE '%pipeline_job_leases%'"
+}
+
+note "taking a row lock on the lease to force real heartbeat failures"
+hold_lease_lock 12
+# Bounded poll for a real blocked waiter instead of assuming the lock landed.
+WAITER_SEEN=0
+for _ in $(seq 1 40); do
+  if [ "$(blocked_waiters 2>/dev/null || echo 0)" -ge 1 ]; then WAITER_SEEN=1; break; fi
+  sleep 0.5
+done
+if [ "$WAITER_SEEN" = "1" ]; then
+  ok "a heartbeat request was observably BLOCKED on the lease row (pg_locks granted=false)"
 else
-  ok "no heartbeat reached the Kernel during the outage window (still $FROZEN)"
-  INCONCLUSIVE=0
+  blocked "no heartbeat request was ever observed waiting on the lease lock; the outage was not real"
 fi
+
+# The heartbeat must NOT advance while the lock is held. This is now a real
+# observation: a blocked UPDATE cannot write, so an advanced timestamp would
+# mean the lock was not held the way this script believes.
+FROZEN="$(q "SELECT heartbeat_at FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE';")"
+if [ -n "$FROZEN" ] && [ "$FROZEN" != "$HB_BEFORE_OUTAGE" ]; then
+  bad "the heartbeat advanced to $FROZEN during the lock window (was $HB_BEFORE_OUTAGE): the lock did not block the UPDATE, so this run does not test recovery"
+fi
+
+wait "$LOCK_PID" 2>/dev/null || true
+note "row lock released"
+# Recovery is the same lease receiving a heartbeat again. No restart, no
+# re-claim: the lock is the only thing that changed.
+until_state "the Kernel to answer again" 30 is_running >/dev/null \
+  || bad "the job left RUNNING after the lock was released"
 
 # The heartbeat must advance after the outage: that is the recovery half.
 heartbeat_advanced_since() {
@@ -255,8 +297,21 @@ note "heartbeats recorded after acquisition: $HEARTBEATS_DURING"
 WORKER_EXIT=0
 wait "$WORKER_PID" || WORKER_EXIT=$?
 if [ "$WORKER_EXIT" -ne 0 ]; then
-  note "this script's worker exited $WORKER_EXIT (see /tmp/long-heartbeat.log); the job's own outcome is asserted below, and a Node-managed worker may legitimately hold it"
-  tail -5 /tmp/long-heartbeat.log 2>/dev/null | sed 's/^/      /' || true
+  # A non-zero exit is only acceptable for ONE documented reason: the Node's
+  # supervisor also polls this queue, so after this worker finished the job it
+  # can be handed another and lose the claim race:
+  #
+  #   claim failed (409 Conflict): JOB_ALREADY_CLAIMED
+  #
+  # Any other non-zero exit is a failure of the worker under test, and reporting
+  # it as "the job's outcome is asserted below" would let a crashed worker pass
+  # on a job some OTHER worker completed.
+  if grep -q 'JOB_ALREADY_CLAIMED' /tmp/long-heartbeat.log 2>/dev/null; then
+    note "this worker exited $WORKER_EXIT with JOB_ALREADY_CLAIMED - the Node supervisor holds the job, which is the one allowed race"
+  else
+    tail -10 /tmp/long-heartbeat.log 2>/dev/null | sed 's/^/      /' || true
+    bad "the worker this script started exited $WORKER_EXIT for a reason other than the documented supervisor race"
+  fi
 fi
 
 # The verdict names what was and was not established.
@@ -275,7 +330,13 @@ if [ "${INCONCLUSIVE:-0}" = "1" ]; then
   ok "long-running job kept its Lease via the independent heartbeat (job=$JOB lease=$LEASE records=$RECORDS effects=$EFFECTS)"
   echo "Long Heartbeat Golden Path: INCONCLUSIVE (the outage half was not observable; the heartbeat-during-execution half passed)"
   echo "evidence: $EVIDENCE"
-  exit 0
+  # NON-ZERO. "Not proven" must not be a green CI run.
+  #
+  # The previous version exited 0 here, so a run that never produced a real
+  # heartbeat failure still gated as a pass - the exact substitution this
+  # acceptance exists to prevent. Exit 2 is this repository's code for
+  # "measured nothing conclusive" (conformance_matrix.py uses the same value).
+  exit 2
 fi
 ok "long-running job kept its Lease via the independent heartbeat across an outage (job=$JOB lease=$LEASE records=$RECORDS effects=$EFFECTS)"
 echo "Long Heartbeat Golden Path: PASS"

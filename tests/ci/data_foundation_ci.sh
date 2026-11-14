@@ -240,9 +240,11 @@ for _ in $(seq 1 40); do
   [ "$left" = "0" ] && break
   sleep 0.25
 done
-OPSWEAVE_NEG_EXCLUSIVE_WORKER=1 \
+# The counterfactuals for the heartbeat acceptance itself, run while the
+# Node-managed supervisors are still alive: one case swaps the worker binary for
+# one that exits 1 and requires the acceptance to notice.
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
-  tests/acceptance/pipeline_long_heartbeat_negatives.sh
+  tests/acceptance/pipeline_long_heartbeat_counterfactuals.sh
 # Concurrency testing must not compete with Node-managed workers left by prior scenarios.
 for node in node-a node-b; do
   node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"
@@ -299,3 +301,27 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_instance_generation_sigterm.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_backoff_sigterm.sh
+
+# Runs LAST: it quarantines every Node by design (see its header).
+# TERMINAL FOR THE PLATFORM. Case 6 freezes the Kernel for longer than the node
+# lease (70 s vs 30 s), so every Node quarantines itself and stops heartbeating
+# permanently - `apps/node/src/runtime.rs:1154` breaks out of the heartbeat loop,
+# which is the correct safety behaviour and is not reversible.
+#
+# Measured on run 43613... (PR #105): the negatives reached `PASS=9 FAIL=0`, and
+# then `claim_concurrency.py` failed with `StopIteration` because it looks for a
+# READY instance and there is none. Ten steps follow this one and several need a
+# live node.
+#
+# So the suite runs where its side effects cannot reach anything else: last in the
+# harness, after every test that needs the platform. Moving the ten following
+# steps above it would also work and is more fragile - the next person to append a
+# step would have to remember.
+#
+# `OPSWEAVE_NEG_TERMINAL=1` is how a caller says "the platform is expendable from
+# here on". Without it the suite refuses when steps still follow, so this cannot
+# silently regress to running in the middle again.
+OPSWEAVE_NEG_EXCLUSIVE_WORKER=1 \
+OPSWEAVE_NEG_TERMINAL=1 \
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
+  tests/acceptance/pipeline_long_heartbeat_negatives.sh

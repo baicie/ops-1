@@ -82,4 +82,10 @@ jobs:
             /tmp/node-a.log
             /tmp/node-b.log
             /tmp/*worker*.log
+            # The heartbeat acceptance writes one worker log per job here. It was
+            # not uploaded, so run 43598745967 left behind five
+            # "the job did not reach RUNNING (got QUEUED)" lines and no way to
+            # read why the worker exited. The harness also prints each path now.
+            /tmp/neg-*.log
+            /tmp/long-heartbeat*.log
           if-no-files-found: warn
