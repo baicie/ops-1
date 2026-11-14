@@ -9,11 +9,26 @@ User=opsweave-node
 Group=opsweave-node
 EnvironmentFile=/etc/opsweave/node.env
 ExecStart=/opt/opsweave/bin/opsweave-node
+# Runs after the process is gone, including after SIGKILL. It re-derives ownership
+# from <state_dir>/installation-id and refuses to delete anything it cannot prove
+# belongs to this installation. Its exit code is meaningful: 2 means the daemon
+# could not be queried, which must not be read as "nothing left to clean up".
 ExecStopPost=/opt/opsweave/bin/opsweave-node-cleanup
 Restart=on-failure
 RestartSec=3
 # Rootless Docker socket for this dedicated account; never the system socket.
+#
+# BOTH names are set on purpose:
+#   OPSWEAVE_DOCKER_HOST  what the Node's own adapter reads (config.rs)
+#   DOCKER_HOST           what the `docker` CLI reads, and therefore what
+#                         ExecStopPost's cleanup script uses
+# Setting only the first made the cleanup script talk to the DEFAULT socket -
+# under this unit that is not the rootless daemon at all.
 Environment=OPSWEAVE_DOCKER_HOST=unix:///run/user/%U/docker.sock
+Environment=DOCKER_HOST=unix:///run/user/%U/docker.sock
+# The cleanup script reads the identity from the state directory. Declared here
+# rather than relying on a default, so the unit and the script cannot disagree.
+Environment=OPSWEAVE_NODE_STATE_DIR=/var/lib/opsweave-node
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
