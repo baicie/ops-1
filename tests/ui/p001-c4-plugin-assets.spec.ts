@@ -40,7 +40,20 @@ const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 // plugins, not the hello reference plugin. A 404 there made the spec fail
 // before it measured anything - and the same 404 would have read as "assets
 // are gone" if it had come one step later.
-const PREFERRED_PLUGIN = process.env.OPSWEAVE_ASSET_PLUGIN || '';
+// The fixture this spec is allowed to destroy.
+//
+// It used to pick ANY installed plugin with a reachable `frontend/index.html`
+// and then disable and uninstall it. In `data_foundation_ci.sh` that meant a
+// data plugin - the only ones with frontends there - and three scripts that run
+// AFTER this spec (`data_ssrf.sh`, `capability_multi_provider.sh`,
+// `data_token_revocation.sh`) need exactly those. A measurement that changes the
+// platform underneath later tests is not a measurement those tests can trust.
+//
+// So the spec installs its own copy: the hello-ops image and frontend under the
+// id below, providing only `sample.hello.v1`. Nothing else uses it, so
+// uninstalling it costs nothing.
+const FIXTURE_PLUGIN = process.env.OPSWEAVE_D4_FIXTURE_PLUGIN || 'dev.opsweave.hello-d4fixture';
+const FIXTURE_STEM = process.env.OPSWEAVE_D4_FIXTURE_STEM || 'hello-ops-d4fixture';
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -73,6 +86,47 @@ async function statusOf(page: Page, url: string, credentials: RequestCredentials
 }
 
 /**
+ * Install this spec's own fixture bundle.
+ *
+ * `opsctl` rather than the UI: the product's install path is a signed-bundle CLI
+ * and driving it through a browser would test the installer, not the asset
+ * serving this spec exists to measure. The bundle is produced by
+ * `scripts/build-plugins.sh` alongside the plugins the harness deploys.
+ *
+ * Returns one of:
+ *   'ok'                 installed now
+ *   'already-installed'  a previous run left it, which is not a failure
+ *   '<text>'             anything else, which the caller reports as BLOCKED
+ *
+ * Deliberately NOT `test.skip()`: a fixture that cannot be installed means this
+ * test measured nothing, and that must be visible.
+ */
+async function installFixture(): Promise<string> {
+  const { execFileSync } = await import('node:child_process');
+  const path = await import('node:path');
+  const repoRoot = path.resolve(__dirname, '..', '..');
+  const bundle = path.join(repoRoot, 'dist', 'plugins', `${FIXTURE_STEM}.plugin.zip`);
+  const opsctl = path.join(repoRoot, 'target', 'debug', 'opsctl');
+  try {
+    execFileSync(
+      opsctl,
+      ['--url', process.env.OPSWEAVE_URL || 'http://127.0.0.1:18181', 'install', bundle],
+      { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 120_000 },
+    );
+    return 'ok';
+  } catch (error) {
+    const message = String((error as { stderr?: string; message?: string }).stderr
+      || (error as Error).message);
+    // An install that fails because the plugin is already there is the normal
+    // second-run state, not an error.
+    if (/already installed|already exists|ALREADY_INSTALLED/i.test(message)) {
+      return 'already-installed';
+    }
+    return message.split('\n').slice(0, 3).join(' | ');
+  }
+}
+
+/**
  * A missing fixture is BLOCKED, never a green skip.
  *
  * `test.skip()` produces a suite that reports success while asserting nothing -
@@ -102,22 +156,29 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
   const origin = new URL(baseURL!).origin;
   await login(page);
 
-  // Find a deployed plugin that HAS a frontend. The list comes from the Kernel;
-  // nothing here guesses a name or a path.
-  const candidates = await page.evaluate(async (preferred) => {
-    const r = await fetch('/api/v1/plugins', { credentials: 'same-origin' });
-    if (!r.ok) return [];
-    const all = (await r.json()) as Array<{ id: string }>;
-    const ids = all.map((p) => p.id);
-    return preferred && ids.includes(preferred) ? [preferred, ...ids.filter((i) => i !== preferred)] : ids;
-  }, PREFERRED_PLUGIN);
-  expect(candidates.length, 'the platform must have at least one plugin installed').toBeGreaterThan(0);
+  // Install THIS spec's fixture. It is the only plugin this test may disable or
+  // uninstall, and it exists for no other purpose.
+  //
+  // The bundle is built by `scripts/build-plugins.sh` and installed with
+  // `opsctl`; the UI has no install endpoint this spec could use, and driving
+  // one would test the installer rather than the assets. The install is
+  // idempotent: an earlier run's fixture may still be present, or may have been
+  // uninstalled by the last step of this same test.
+  const installResult = await installFixture();
+  if (installResult !== 'ok' && installResult !== 'already-installed') {
+    block(`could not install the D4 fixture ${FIXTURE_PLUGIN}: ${installResult}`);
+    assertNotBlocked();
+    return;
+  }
 
+  // Resolve the version and publisher the Kernel recorded, and confirm the
+  // frontend bytes are actually served before measuring anything about them.
   let PLUGIN = '';
   let VERSION = '';
   let publisher = '';
   let indexUrl = '';
-  for (const id of candidates) {
+  {
+    const id = FIXTURE_PLUGIN;
     const found = await page.evaluate(async (plugin) => {
       const r = await fetch(`/api/v1/plugins/${plugin}`, { credentials: 'same-origin' });
       if (!r.ok) return null;
@@ -126,15 +187,19 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
       const pub = body.publisher || body.manifest?.publisher || '';
       return version && pub ? { version, publisher: pub } : null;
     }, id);
-    if (!found) continue;
-    const probe = origin + `/assets/${found.publisher}/${id}/${found.version}/frontend/index.html`;
-    const status = await statusOf(page, probe);
-    if (status === 200) {
-      PLUGIN = id;
-      VERSION = found.version;
-      publisher = found.publisher;
-      indexUrl = probe;
-      break;
+    if (found) {
+      const probe = origin + `/assets/${found.publisher}/${id}/${found.version}/frontend/index.html`;
+      const status = await statusOf(page, probe);
+      if (status === 200) {
+        PLUGIN = id;
+        VERSION = found.version;
+        publisher = found.publisher;
+        indexUrl = probe;
+      } else {
+        block(`the D4 fixture is installed but its index.html returned ${status}, not 200`);
+        assertNotBlocked();
+        return;
+      }
     }
   }
   if (!PLUGIN) {

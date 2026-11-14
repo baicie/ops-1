@@ -333,8 +333,18 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts studio.spec.ts visual-layout.spec.ts
   kill "$UI_WORKER_PID" 2>/dev/null || true
   # P001-C4 / D4. Runs LAST of the browser specs because it DISABLES and
-  # UNINSTALLS `dev.opsweave.hello` - any spec after it would be looking at a
-  # platform this one changed.
+  # UNINSTALLS a plugin - any spec after it would be looking at a platform this
+  # one changed.
+  #
+  # The comment used to name `dev.opsweave.hello`, which this harness never
+  # installs. What the spec actually did was DISCOVER a plugin with a reachable
+  # `frontend/index.html` and destroy that - and here the only candidates are the
+  # data plugins, which `data_ssrf.sh`, `capability_multi_provider.sh` and
+  # `data_token_revocation.sh` all need later in this same script.
+  #
+  # It now installs its own fixture (`dev.opsweave.hello-d4fixture`, built by
+  # `scripts/build-plugins.sh`) and uninstalls only that. Nothing else uses it, so
+  # the destructive half is confined.
   #
   # Named explicitly rather than folded into the line above for a second reason:
   # nine existing specs in this directory read a fixture file at module scope
