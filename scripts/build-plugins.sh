@@ -70,6 +70,30 @@ docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSIO
 # right version baked in - not the 0.0.1 image under a different tag.
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.2 --build-arg CAPABILITY_DIGEST="$GO_CAP" --build-arg BUILD_DIGEST="$GO_BUILD" -t "$REGISTRY/opsweave/hello-go:0.0.2" plugins/hello-go >/dev/null
 
+# The negative fixture for the conformance matrix: the SAME binary and image
+# base, reporting a runtime protocol the Node must refuse. Built as its own
+# image and bundle because it needs its own plugin id - deploying it under the
+# real plugin's id would replace the instance the matrix just measured.
+#
+# The protocol is a runtime value the plugin self-reports, which is exactly what
+# `verify_runtime_info` checks (`apps/node/src/runtime.rs:1909`). Making it a
+# build argument is what lets the refusal be exercised against a real container
+# rather than asserted about code.
+echo "== Go negative fixture (reports http-json-v2)"
+# Its own build digest, derived from the same binary plus the protocol name, so
+# the fixture is distinguishable from the real plugin in `runtime/v1/info`
+# rather than claiming an identical provenance it does not have.
+GO_BUILD_2PROTO="$(python3 - "$GO_BUILD" <<'PYHASH'
+import hashlib, sys
+# Same prefix convention as `sha256_file`, computed from the real binary's digest
+# plus the protocol name - so the fixture reports a digest of its own rather than
+# reusing the real plugin's, and `shasum` (a Perl utility that is not guaranteed
+# on the runner image) is not needed.
+print("sha256:" + hashlib.sha256(("http-json-v2\n" + sys.argv[1]).encode()).hexdigest())
+PYHASH
+)"
+docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$GO_CAP" --build-arg BUILD_DIGEST="$GO_BUILD_2PROTO" --build-arg PLUGIN_ID=dev.opsweave.hello-go-v2protocol --build-arg RUNTIME_PROTOCOL=http-json-v2 -t "$REGISTRY/opsweave/hello-go-v2protocol:0.0.1" plugins/hello-go >/dev/null
+
 echo "== Java OCI image"
 # The pinned JRE comes from one of two deterministic sources, in this order:
 #
@@ -191,13 +215,17 @@ echo "== push digests"
 docker push "$REGISTRY/opsweave/hello-ts:$TS_VERSION" >/dev/null
 docker push "$REGISTRY/opsweave/hello-ts:$TS_V2_VERSION" >/dev/null
 docker push "$REGISTRY/opsweave/hello-go:0.0.1" >/dev/null
+# main's 0.0.2 upgrade image and this branch's negative fixture: different tags,
+# different digests, both pushed.
 docker push "$REGISTRY/opsweave/hello-go:0.0.2" >/dev/null
+docker push "$REGISTRY/opsweave/hello-go-v2protocol:0.0.1" >/dev/null
 docker push "$REGISTRY/opsweave/hello-java:0.0.1" >/dev/null
 docker push "$REGISTRY/opsweave/hello-java:0.0.2" >/dev/null
 TS_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-ts:$TS_VERSION")"
 TS2_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-ts:$TS_V2_VERSION")"
 GO_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-go:0.0.1")"
 GO2_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-go:0.0.2")"
+GO_V2PROTO_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-go-v2protocol:0.0.1")"
 JAVA_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-java:0.0.1")"
 JAVA2_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-java:0.0.2")"
 
@@ -210,14 +238,37 @@ python3 scripts/assemble_plugin.py --template plugins/hello-go/manifest.template
 python3 scripts/assemble_plugin.py --template plugins/hello-go/manifest.template.json --out /tmp/opsweave-bundles/hello-go-0.0.2 --version 0.0.2 --image-ref "$GO2_DIGEST" >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/hello-java/manifest.template.json --out /tmp/opsweave-bundles/hello-java-0.0.1 --version 0.0.1 --image-ref "$JAVA_DIGEST" >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/hello-java/manifest.template.json --out /tmp/opsweave-bundles/hello-java-0.0.2 --version 0.0.2 --image-ref "$JAVA2_DIGEST" >/dev/null
-for name in hello-ops-0.0.1 hello-ops-0.0.2 hello-go-0.0.1 hello-go-0.0.2 hello-java-0.0.1 hello-java-0.0.2; do
+# The conformance negative fixture. Its own id, so deploying it cannot replace
+# the instance the matrix measures, and its own version string so a surfaced
+# `runtime/v1/info` from it is identifiable at a glance.
+python3 scripts/assemble_plugin.py --template plugins/hello-go/manifest.template.json --out /tmp/opsweave-bundles/hello-go-v2protocol --version 0.0.1 --id dev.opsweave.hello-go-v2protocol --image-ref "$GO_V2PROTO_DIGEST" >/dev/null
+# The fixture must not claim the real plugin's capabilities. It is installed to
+# be REFUSED, and a bundle advertising `sample.hello.go.v1` would be a second
+# provider of a capability the matrix is measuring - the kind of cross-talk that
+# turns one failing assertion into two confusing ones.
+python3 - /tmp/opsweave-bundles/hello-go-v2protocol/manifest.json <<'PYFIX'
+import json, sys
+path = sys.argv[1]
+manifest = json.load(open(path))
+manifest["provides"] = []
+with open(path, "w") as handle:
+    json.dump(manifest, handle, indent=2)
+    handle.write("\n")
+PYFIX
+# Every bundle this script writes. The fixture is listed too: it is a real signed
+# bundle a consumer can install, and leaving it out of a loop over the same
+# directory is the asymmetry that makes a later reader wonder which are real.
+for name in hello-ops-0.0.1 hello-ops-0.0.2 hello-go-0.0.1 hello-go-0.0.2 hello-java-0.0.1 hello-java-0.0.2 hello-go-v2protocol; do
   ./target/debug/opsctl bundle --dir "/tmp/opsweave-bundles/$name" --out "dist/plugins/$name.plugin.zip" --key keys/publisher.key >/dev/null
 done
 python3 - "$TS_DIGEST" "$TS2_DIGEST" "$GO_DIGEST" "$JAVA_DIGEST" <<'PY'
 import json, pathlib, sys
 plugin_dir = pathlib.Path('dist/plugins')
 entries = []
-for name in ['hello-ops-0.0.1','hello-ops-0.0.2','hello-go-0.0.1','hello-go-0.0.2','hello-java-0.0.1','hello-java-0.0.2']:
+# The fixture is listed too. It is a real signed bundle that a consumer can
+# install, and leaving it out of the index while it sits in the same directory is
+# the kind of asymmetry that makes a later reader wonder which bundles are real.
+for name in ['hello-ops-0.0.1','hello-ops-0.0.2','hello-go-0.0.1','hello-go-0.0.2','hello-java-0.0.1','hello-java-0.0.2','hello-go-v2protocol']:
     entries.append({"bundle": f"{name}.plugin.zip", "path": str(plugin_dir / f"{name}.plugin.zip")})
 (pathlib.Path('dist/plugins/index.json')).write_text(json.dumps({
     "generatedAt": "deterministic build output",

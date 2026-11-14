@@ -248,6 +248,52 @@ esac
 #   Making the job red for that says "conformance is broken" about a probe
 #   limitation. Making it green with no record hides a real assertion. So it is
 #   recorded loudly, in the run summary, and tracked as an open item.
+# --- the Node must REFUSE a plugin that reports the wrong protocol ------------
+#
+# The matrix asserts that a READY instance reports `http-json-v1`. That is a
+# different claim from "the Node refuses one that does not": an instance could
+# report the right value because nothing else was ever tried.
+#
+# This step builds the missing half - a real fixture that reports
+# `http-json-v2` - and requires the Node to refuse it.
+#
+# The fixture is the Go plugin with `OPSWEAVE_RUNTIME_PROTOCOL=http-json-v2`.
+# That knob exists only for this test; the default is the contract value and no
+# release image sets it.
+PROTOCOL_CHECK=0
+say "a plugin that reports http-json-v2 must be refused by the Node"
+if [ ! -f dist/plugins/hello-go-v2protocol.plugin.zip ]; then
+  echo "NOT_RUN  protocol-negative: dist/plugins/hello-go-v2protocol.plugin.zip is missing" \
+    | tee -a "$EVIDENCE/run.txt"
+  PROTOCOL_CHECK=3
+else
+  HOME="$RUN_DIR/home" ./target/debug/opsctl --url "$KERNEL_URL" install \
+    dist/plugins/hello-go-v2protocol.plugin.zip >>"$EVIDENCE/protocol-negative.log" 2>&1 \
+    || echo "protocol-negative: install failed (it may already be installed)" >>"$EVIDENCE/protocol-negative.log"
+  # Deploy it and then look for a READY instance. There must never be one.
+  HOME="$RUN_DIR/home" ./target/debug/opsctl --url "$KERNEL_URL" deploy \
+    dev.opsweave.hello-go-v2protocol 0.0.1 --replicas 1 --selector role=node \
+    >>"$EVIDENCE/protocol-negative.log" 2>&1 || true
+  sleep 3
+  READY_V2="$(HOME="$RUN_DIR/home" curl -fsS -H "Authorization: Bearer $TOKEN" \
+    "$KERNEL_URL/api/v1/plugins/dev.opsweave.hello-go-v2protocol" 2>/dev/null \
+    | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d={}
+print(sum(1 for dep in d.get("deployments", []) for i in dep.get("instances", []) if i.get("state") == "READY"))' 2>/dev/null || echo "")"
+  if [ -z "$READY_V2" ]; then
+    echo "NOT_RUN  protocol-negative: could not read the fixture's state; the refusal is unproven" \
+      | tee -a "$EVIDENCE/run.txt"
+    PROTOCOL_CHECK=3
+  elif [ "$READY_V2" != "0" ]; then
+    echo "FAIL  a plugin reporting http-json-v2 reached READY ($READY_V2 instance(s)); the Node's protocol gate did not run" \
+      | tee -a "$EVIDENCE/run.txt"
+    PROTOCOL_CHECK=1
+  else
+    echo "PASS  a plugin reporting http-json-v2 never reached READY" | tee -a "$EVIDENCE/run.txt"
+  fi
+fi
+
 if [ "$BASELINE_STATUS" -ne 0 ] && [ "$MATRIX_STATUS" -eq 0 ]; then
   {
     echo
@@ -269,5 +315,20 @@ if [ "$BASELINE_STATUS" -ne 0 ] && [ "$MATRIX_STATUS" -eq 0 ]; then
   # again - so it fails the job.
   echo "RUNTIME CONFORMANCE: FAIL (the baseline prober failed; see $EVIDENCE/conformance.log)"
   exit 1
+fi
+# The protocol negative gates too. It is a distinct claim from the matrix's
+# "a READY instance reports the contract protocol", and a failure of either is a
+# real one - so the exit code is the most severe of the two.
+#
+# 3 (NOT_RUN) does not fail the job, because a missing fixture bundle is a
+# build-ordering problem rather than a product statement - but it is printed,
+# and `MATRIX_STATUS` still decides the exit when it is a failure.
+if [ "$PROTOCOL_CHECK" = "1" ]; then
+  echo "RUNTIME CONFORMANCE: FAIL (a plugin with the wrong runtime protocol reached READY)"
+  exit 1
+fi
+if [ "$PROTOCOL_CHECK" = "3" ] && [ "$MATRIX_STATUS" -eq 0 ]; then
+  echo "RUNTIME CONFORMANCE: PASS_WITH_COVERAGE_GAPS (the protocol negative did not run)"
+  exit 3
 fi
 exit "$MATRIX_STATUS"

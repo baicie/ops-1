@@ -20,6 +20,7 @@ var (
 	version          = env("OPSWEAVE_PLUGIN_VERSION", "0.0.1")
 	capabilityDigest = env("OPSWEAVE_CAPABILITY_DIGEST", "sha256:0000000000000000000000000000000000000000000000000000000000000000")
 	buildDigest      = env("OPSWEAVE_BUILD_DIGEST", "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	runtimeProtocol  = env("OPSWEAVE_RUNTIME_PROTOCOL", "http-json-v1")
 	instanceID       = env("OPSWEAVE_INSTANCE_ID", "dev-instance")
 	port             = env("PORT", "8080")
 	ready            atomic.Bool
@@ -57,7 +58,11 @@ func main() {
 	mux.HandleFunc("/_opsweave/runtime/v1/info", func(w http.ResponseWriter, r *http.Request) {
 		id := requestID(r)
 		writeJSON(w, 200, id, map[string]any{
-			"pluginId": pluginID, "version": version, "runtimeProtocol": "http-json-v1",
+			// Overridable ONLY so the conformance matrix can build a fixture that
+			// reports a protocol the Node must reject. It defaults to the contract
+			// value, and no production image sets it - the same courtesy the build
+			// digest and version already get.
+			"pluginId": pluginID, "version": version, "runtimeProtocol": runtimeProtocol,
 			"capabilityDigest": capabilityDigest, "buildDigest": buildDigest,
 		})
 	})

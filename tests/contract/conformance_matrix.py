@@ -31,6 +31,7 @@ Exit codes: 0 = PASS, 1 = FAIL (a language disagreed with the contract),
 2 = BLOCKED (a language could not be measured).
 """
 import hashlib
+import re
 import json
 import os
 import pathlib
@@ -67,6 +68,29 @@ except FileNotFoundError:
 TOKEN = session["token"]
 
 results = []          # (language, assertion, status)
+def classify(language, assertion, status_code, ok, detail=""):
+    """Record the result of an HTTP check, keeping "network failed" separate.
+
+    A status of 0 means the request never produced an HTTP response: connection
+    refused, DNS, timeout, TLS. That is the ENVIRONMENT, not the product, and
+    the previous code folded it into FAIL everywhere - `status == 0` made
+    `400 <= 0 < 500` false and the row read as a contract violation.
+
+    The distinction is not cosmetic. A run against a Node that is still starting
+    produces status 0 on every row, so the matrix reported a language FAIL for
+    every assertion and the overall verdict was FAIL - blaming the plugin for the
+    harness. Two people debugging that would look at the plugin.
+
+    BLOCKED rows make the language NOT_RUN, which the verdict turns into BLOCKED
+    for the whole matrix: "could not be measured" and "disagreed" are different
+    answers and the exit codes are different too.
+    """
+    if status_code == 0:
+        record(language, assertion, "NOT_RUN", f"no HTTP response: {detail or 'request failed'}")
+        return
+    record(language, assertion, "PASS" if ok else "FAIL", detail)
+
+
 def record(language, assertion, status, detail=""):
     results.append((language, assertion, status, detail))
     line = f"{status:9s} {language:10s} {assertion}"
@@ -140,7 +164,7 @@ def conformance_checks(language, plugin_id):
     base = f"http://127.0.0.1:{inst['hostPort']}"
 
     status, info, raw = http(base + "/_opsweave/runtime/v1/info")
-    record(language, "runtime info 200", "PASS" if status == 200 else "FAIL", f"status={status}")
+    classify(language, "runtime info 200", status, status == 200, f"status={status}")
     if not isinstance(info, dict):
         record(language, "runtime info is JSON", "FAIL", f"body={raw[:80]!r}")
         return None
@@ -152,7 +176,19 @@ def conformance_checks(language, plugin_id):
          f"{info.get('version')} vs {active}"),
         ("protocol is http-json-v1", info.get("runtimeProtocol") == "http-json-v1",
          info.get("runtimeProtocol")),
-        ("build digest is a sha256", str(info.get("buildDigest", "")).startswith("sha256:"),
+        # The contract pins the SHAPE exactly:
+        # `contracts/openapi/plugin-runtime-v1.yaml` -> `buildDigest:
+        # {pattern: '^sha256:[a-f0-9]{64}$'}`. `startswith("sha256:")` accepted
+        # `sha256:`, `sha256:xyz` and `sha256:deadbeef` - three strings the
+        # schema rejects - so the row was checking almost nothing.
+        #
+        # What this deliberately does NOT do is compare the digest to the image
+        # the Node deployed. The plugin reports a value baked in at build time;
+        # the Kernel does not expose the image digest on any endpoint this probe
+        # can read, and inferring one from the other would be a guess dressed as
+        # a check. That relation is `KNOWN_GAP`-shaped and is not asserted here.
+        ("build digest matches the contract pattern ^sha256:[a-f0-9]{64}$",
+         re.fullmatch(r"sha256:[a-f0-9]{64}", str(info.get("buildDigest", ""))) is not None,
          str(info.get("buildDigest"))[:24]),
     ]
     provides = (detail.get("manifest") or {}).get("provides") or []
@@ -166,10 +202,10 @@ def conformance_checks(language, plugin_id):
 
     live, _, _ = http(base + "/_opsweave/health/live")
     ready, _, _ = http(base + "/_opsweave/health/ready")
-    record(language, "liveness 200", "PASS" if live == 200 else "FAIL", f"status={live}")
-    record(language, "readiness 200", "PASS" if ready == 200 else "FAIL", f"status={ready}")
+    classify(language, "liveness 200", live, live == 200, f"status={live}")
+    classify(language, "readiness 200", ready, ready == 200, f"status={ready}")
     unknown, _, _ = http(base + "/api/does-not-exist")
-    record(language, "unknown path 404", "PASS" if unknown == 404 else "FAIL", f"status={unknown}")
+    classify(language, "unknown path 404", unknown, unknown == 404, f"status={unknown}")
     return base
 
 
@@ -183,36 +219,45 @@ def negative_checks(language, base, plugin_id):
     #    turned into a 500. The contract names it: `INVALID_JSON` at 400.
     #    (`/api/hello/echo` is the one route all three languages implement with
     #    the same shape - verified by reading each handler, not assumed.)
+    # One request, two assertions, and a precise expectation.
+    #
+    # This used to send the SAME malformed body twice and accept anything in the
+    # 4xx range with any `code` or `errorCode` field. The comment above it said
+    # "the contract names it: `INVALID_JSON` at 400" - and nothing checked
+    # either half of that sentence. A plugin answering `422 {"code":"BAD_INPUT"}`
+    # passed, and so did `400 {"code":"SOMETHING_ELSE"}`.
+    #
+    # The contract is exact, so the assertion is too: HTTP 400 and the stable
+    # code `INVALID_JSON`. Sending the request once also removes the possibility
+    # of the two rows disagreeing because they measured different responses.
+    malformed_status, malformed_body = 0, None
     req = urllib.request.Request(base + "/api/hello/echo", data=b"{not json", method="POST")
     req.add_header("Content-Type", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
-            malformed = r.status
+            malformed_status = r.status
+            raw = r.read()
     except urllib.error.HTTPError as e:
-        malformed = e.code
-    except OSError:
-        malformed = 0
-    record(language, "malformed JSON is refused with 4xx",
-           "PASS" if 400 <= malformed < 500 else "FAIL", f"status={malformed}")
-
-    # 2. A missing stable error code in a refusal is a contract violation.
-    req = urllib.request.Request(base + "/api/hello/echo", data=b"{not json", method="POST")
-    req.add_header("Content-Type", "application/json")
-    code_present = False
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            body = json.loads(r.read() or b"{}")
-    except urllib.error.HTTPError as e:
+        malformed_status = e.code
+        raw = e.read()
+    except OSError as exc:
+        malformed_status, raw = 0, b""
+        malformed_body = str(exc)
+    if raw:
         try:
-            body = json.loads(e.read() or b"{}")
+            malformed_body = json.loads(raw or b"{}")
         except json.JSONDecodeError:
-            body = {}
-    except OSError:
-        body = {}
-    if isinstance(body, dict):
-        code_present = bool(body.get("code") or body.get("errorCode"))
-    record(language, "a refusal carries a stable error code",
-           "PASS" if code_present else "FAIL", f"body keys={sorted(body)[:4] if isinstance(body, dict) else body}")
+            malformed_body = {"<unparsable>": raw[:80].decode("utf-8", "replace")}
+
+    classify(
+        language,
+        "malformed JSON is refused with 400 INVALID_JSON",
+        malformed_status,
+        malformed_status == 400 and isinstance(malformed_body, dict)
+        and (malformed_body.get("code") == "INVALID_JSON"
+             or malformed_body.get("errorCode") == "INVALID_JSON"),
+        f"status={malformed_status} body={malformed_body if not isinstance(malformed_body, dict) else {k: malformed_body.get(k) for k in ('code', 'errorCode') if k in malformed_body}}",
+    )
 
     # 3. Runtime protocol agreement.
     #
@@ -243,13 +288,13 @@ def negative_checks(language, base, plugin_id):
 
     # 4. Unauthenticated request through the Gateway must not reach the plugin.
     status, _, _ = http(f"{BASE}/api/v1/gateway/{plugin_id}/api/hello", authenticated=False)
-    record(language, "gateway refuses a request with no credential",
-           "PASS" if status in (401, 403) else "FAIL", f"status={status}")
+    classify(language, "gateway refuses a request with no credential",
+             status, status in (401, 403), f"status={status}")
 
     # 5. Wrong runtime path prefix must 404 rather than be treated as success.
     status, _, _ = http(base + "/_opsweave/runtime/v2/info")
-    record(language, "an unsupported protocol path 404s",
-           "PASS" if status == 404 else "FAIL", f"status={status}")
+    classify(language, "an unsupported protocol path 404s",
+             status, status == 404, f"status={status}")
 
 
 def gateway_identity_checks(language, plugin_id):
