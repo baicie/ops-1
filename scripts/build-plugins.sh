@@ -59,6 +59,16 @@ echo "== Go OCI image"
 ( cd plugins/hello-go && GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o hello-go-linux . )
 GO_BUILD="$(sha256_file plugins/hello-go/hello-go-linux)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$GO_CAP" --build-arg BUILD_DIGEST="$GO_BUILD" -t "$REGISTRY/opsweave/hello-go:0.0.1" plugins/hello-go >/dev/null
+# A second version, so the Go plugin can be put through upgrade and rollback the
+# way the TypeScript reference plugin already is. Without it those steps can only
+# be reported NOT_RUN, and "Go has a full lifecycle" would be an inference from
+# another language rather than a measurement.
+#
+# `PLUGIN_VERSION` is what the runtime reports at `/_opsweave/runtime/v1/info`,
+# and the Node refuses an instance whose reported version differs from the
+# signed manifest (`verify_runtime_info`). So this must be a real image with the
+# right version baked in - not the 0.0.1 image under a different tag.
+docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.2 --build-arg CAPABILITY_DIGEST="$GO_CAP" --build-arg BUILD_DIGEST="$GO_BUILD" -t "$REGISTRY/opsweave/hello-go:0.0.2" plugins/hello-go >/dev/null
 
 echo "== Java OCI image"
 # The pinned JRE comes from one of two deterministic sources, in this order:
@@ -148,6 +158,9 @@ else
 fi
 JAVA_BUILD="$(sha256_file plugins/hello-java/target/hello-java-0.0.1.jar)"
 docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.1 --build-arg CAPABILITY_DIGEST="$JAVA_CAP" --build-arg BUILD_DIGEST="$JAVA_BUILD" -t "$REGISTRY/opsweave/hello-java:0.0.1" plugins/hello-java >/dev/null
+# Same reason as the Go 0.0.2 image above: a real second version, so upgrade and
+# rollback are measured rather than assumed.
+docker build --build-arg BASE_IMAGE="$NODE_BASE_IMAGE" --build-arg PLUGIN_VERSION=0.0.2 --build-arg CAPABILITY_DIGEST="$JAVA_CAP" --build-arg BUILD_DIGEST="$JAVA_BUILD" -t "$REGISTRY/opsweave/hello-java:0.0.2" plugins/hello-java >/dev/null
 # A JRE that cannot boot the jar still builds and pushes cleanly; the failure only
 # appears minutes later inside a Pod as a replica stuck in DEGRADED (B1.8 run
 # 42472581569: java.beans.PropertyEditorSupport missing from a hand-listed jlink
@@ -178,11 +191,15 @@ echo "== push digests"
 docker push "$REGISTRY/opsweave/hello-ts:$TS_VERSION" >/dev/null
 docker push "$REGISTRY/opsweave/hello-ts:$TS_V2_VERSION" >/dev/null
 docker push "$REGISTRY/opsweave/hello-go:0.0.1" >/dev/null
+docker push "$REGISTRY/opsweave/hello-go:0.0.2" >/dev/null
 docker push "$REGISTRY/opsweave/hello-java:0.0.1" >/dev/null
+docker push "$REGISTRY/opsweave/hello-java:0.0.2" >/dev/null
 TS_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-ts:$TS_VERSION")"
 TS2_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-ts:$TS_V2_VERSION")"
 GO_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-go:0.0.1")"
+GO2_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-go:0.0.2")"
 JAVA_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-java:0.0.1")"
+JAVA2_DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$REGISTRY/opsweave/hello-java:0.0.2")"
 
 echo "== signed bundles"
 rm -rf /tmp/opsweave-bundles dist/plugins
@@ -190,15 +207,17 @@ mkdir -p /tmp/opsweave-bundles dist/plugins
 python3 scripts/assemble_plugin.py --template plugins/hello-ops/manifest.template.json --out /tmp/opsweave-bundles/hello-ops-0.0.1 --version "$TS_VERSION" --image-ref "$TS_DIGEST" --frontend-dist /tmp/hello-web-v1 >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/hello-ops/manifest.template.json --out /tmp/opsweave-bundles/hello-ops-0.0.2 --version "$TS_V2_VERSION" --image-ref "$TS2_DIGEST" --frontend-dist /tmp/hello-web-v2 >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/hello-go/manifest.template.json --out /tmp/opsweave-bundles/hello-go-0.0.1 --version 0.0.1 --image-ref "$GO_DIGEST" >/dev/null
+python3 scripts/assemble_plugin.py --template plugins/hello-go/manifest.template.json --out /tmp/opsweave-bundles/hello-go-0.0.2 --version 0.0.2 --image-ref "$GO2_DIGEST" >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/hello-java/manifest.template.json --out /tmp/opsweave-bundles/hello-java-0.0.1 --version 0.0.1 --image-ref "$JAVA_DIGEST" >/dev/null
-for name in hello-ops-0.0.1 hello-ops-0.0.2 hello-go-0.0.1 hello-java-0.0.1; do
+python3 scripts/assemble_plugin.py --template plugins/hello-java/manifest.template.json --out /tmp/opsweave-bundles/hello-java-0.0.2 --version 0.0.2 --image-ref "$JAVA2_DIGEST" >/dev/null
+for name in hello-ops-0.0.1 hello-ops-0.0.2 hello-go-0.0.1 hello-go-0.0.2 hello-java-0.0.1 hello-java-0.0.2; do
   ./target/debug/opsctl bundle --dir "/tmp/opsweave-bundles/$name" --out "dist/plugins/$name.plugin.zip" --key keys/publisher.key >/dev/null
 done
 python3 - "$TS_DIGEST" "$TS2_DIGEST" "$GO_DIGEST" "$JAVA_DIGEST" <<'PY'
 import json, pathlib, sys
 plugin_dir = pathlib.Path('dist/plugins')
 entries = []
-for name in ['hello-ops-0.0.1','hello-ops-0.0.2','hello-go-0.0.1','hello-java-0.0.1']:
+for name in ['hello-ops-0.0.1','hello-ops-0.0.2','hello-go-0.0.1','hello-go-0.0.2','hello-java-0.0.1','hello-java-0.0.2']:
     entries.append({"bundle": f"{name}.plugin.zip", "path": str(plugin_dir / f"{name}.plugin.zip")})
 (pathlib.Path('dist/plugins/index.json')).write_text(json.dumps({
     "generatedAt": "deterministic build output",
