@@ -432,6 +432,20 @@ for dep in d.get('deployments') or []:
   # plugin itself. `/api/v1/plugins/{plugin_id}` registers GET only, so the
   # matrix's DELETE returned 405 Method Not Allowed - the product refusing a
   # method it does not serve, reported as a lifecycle failure.
+  #
+  # Snapshot THIS plugin's containers before the uninstall, so the containment
+  # row below can ask the only question it is entitled to ask: did the containers
+  # that existed for this plugin go away?
+  #
+  # `opsweave.plugin-id` is stamped by the Node on every container it creates
+  # (`apps/node/src/docker.rs:655`), so the snapshot is exact. Taken by immutable
+  # id, and the daemon's own failure is recorded rather than collapsed to "none".
+  BEFORE_CIDS=""
+  BEFORE_ERR=""
+  if ! BEFORE_CIDS="$(docker ps -aq --filter "label=opsweave.plugin-id=$plugin" 2>&1)"; then
+    BEFORE_ERR="docker ps failed for plugin $plugin: ${BEFORE_CIDS:-<no output>}"
+    BEFORE_CIDS=""
+  fi
   UNI="$(api POST "/api/v1/plugins/$plugin/uninstall" '{}')"
   case "$UNI" in
     200|202|204)
@@ -447,55 +461,52 @@ for dep in d.get('deployments') or []:
     *) row "$lang" "uninstall" FAIL "HTTP $UNI"; FAIL=$((FAIL+1)) ;;
   esac
 
-  # The physical containers this plugin owned must be gone, and containers
-  # belonging to anything else must not be. Compared by IMMUTABLE ID against a
-  # snapshot - a label filter would agree with itself.
+  # Did the containers this plugin had BEFORE the uninstall go away?
   #
-  # Three defects in the line this replaces:
+  # The previous version counted every container carrying this installation id
+  # and required the count to be zero. That is not a statement about the plugin
+  # under test: the harness installs ts, go and java into one platform, so when
+  # the `ts` row ran, the containers of `hello-go` and `hello-java` - installed
+  # by the lifecycle fixture, still desired - were counted against `ts`.
   #
-  #   * it used `$INSTALL_ID` (singular). Only `INSTALL_IDS` exists, and
-  #     `set -u` is on, so this aborted the whole matrix at the first language's
-  #     uninstall check - after every expensive step had already run.
-  #   * `2>/dev/null` turned an unreachable daemon into an empty list, which
-  #     `wc -l` counted as 0, which read as "clean". Same false positive as
-  #     `p001c_teardown.sh` had.
-  #   * a single installation id was assumed. MEASURED: in this harness both
-  #     Nodes carry the SAME installation id (`p001c_up.sh` records node-a's and
-  #     enrols both with it), so this is not the defect it was thought to be.
-  #     The loop still covers every id it finds, because if the harness ever does
-  #     mint two, a check over one value silently calls half the platform clean.
+  # Measured on run 43653529643:
   #
-  # What this row claims, precisely: no container belonging to THIS installation
-  # remains after the language under test was uninstalled.
+  #   ts    no container of this installation remains  FAIL  6 container(s) left
+  #   go    no container of this installation remains  FAIL  6 container(s) left
+  #   java  no container of this installation remains  FAIL  6 container(s) left
   #
-  # That is weaker than it looks. The matrix installs ts, go and java into one
-  # platform, so a container still running for a plugin that has NOT yet been
-  # uninstalled is counted here and reported against the language under test.
-  # The row is correct for the LAST language and pessimistic for the others. It
-  # is left as-is because the alternative - filtering by plugin id - would stop
-  # detecting the thing this row exists for: a container whose plugin metadata is
-  # already gone but whose process is still there.
+  # `PASS=30 FAIL=3`. The three failures are one fact - six containers belonging
+  # to other plugins - reported once per language.
   #
-  # All of them, by id, with the failure surfaced.
+  # The old comment defended the absolute count on the grounds that filtering by
+  # plugin id "would stop detecting a container whose plugin metadata is already
+  # gone but whose process is still there". That reasoning does not hold: a
+  # container whose metadata is gone was never in the snapshot, so no filter can
+  # lose it - and it is not this plugin's container to report on.
+  #
+  # The snapshot makes the claim exact: the ids that existed for this plugin are
+  # gone. Ids are compared, not counted, so a container that never belonged to
+  # this plugin cannot make the row fail, and one that did cannot hide.
   LEFTOVER=0
-  LEFTOVER_ERR=""
-  for inst in $INSTALL_IDS; do
-    [ -n "$inst" ] || continue
-    if ! ids="$(docker ps -aq --filter "label=opsweave.installation-id=$inst" 2>&1)"; then
-      LEFTOVER_ERR="docker ps failed for installation $inst: ${ids:-<no output>}"
-      break
-    fi
-    n="$(printf '%s\n' "$ids" | grep -c . || true)"
-    LEFTOVER=$((LEFTOVER + n))
-  done
+  LEFTOVER_IDS=""
+  LEFTOVER_ERR="$BEFORE_ERR"
+  if [ -z "$LEFTOVER_ERR" ]; then
+    for cid in $BEFORE_CIDS; do
+      [ -n "$cid" ] || continue
+      if docker inspect "$cid" >/dev/null 2>&1; then
+        LEFTOVER=$((LEFTOVER + 1))
+        LEFTOVER_IDS="$LEFTOVER_IDS $cid"
+      fi
+    done
+  fi
   if [ -n "$LEFTOVER_ERR" ]; then
-    row "$lang" "no container of this installation remains" BLOCKED "$LEFTOVER_ERR"
+    row "$lang" "no container of this plugin remains" BLOCKED "$LEFTOVER_ERR"
     BLOCKED=$((BLOCKED+1))
   elif [ "$LEFTOVER" -eq 0 ]; then
-    row "$lang" "no container of this installation remains" PASS ""
+    row "$lang" "no container of this plugin remains" PASS "none of $(printf '%s\n' $BEFORE_CIDS | grep -c . ) pre-uninstall container(s) remain"
     PASS=$((PASS+1))
   else
-    row "$lang" "no container of this installation remains" FAIL "$LEFTOVER container(s) left"
+    row "$lang" "no container of this plugin remains" FAIL "$LEFTOVER container(s) left:$LEFTOVER_IDS"
     FAIL=$((FAIL+1))
   fi
 done
