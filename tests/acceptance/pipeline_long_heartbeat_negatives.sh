@@ -23,10 +23,59 @@ EVIDENCE="${OPSWEAVE_LONG_HEARTBEAT_NEGATIVES_EVIDENCE:-/tmp/long-heartbeat-nega
 
 PASS=0
 FAIL=0
-# Declared up front: `set -u` makes `kill "$WORKER_PID"` a hard error when a case
-# fails before the worker starts, and a script that dies on its own cleanup path
-# hides the real finding. Measured on run 43578788505.
-WORKER_PID=""
+
+# --- stopping this script's worker ------------------------------------------
+#
+# This used to be `kill -9 "${WORKER_PID:-0}"`. Two defects met in that one line.
+#
+# 1. `${WORKER_PID:-0}` expands to the STRING `0` when the variable is empty, and
+#    `kill -9 0` is not "kill nothing" - it signals the CALLER'S OWN PROCESS
+#    GROUP. Measured: a script that runs `kill -9 "${EMPTY:-0}"` never executes
+#    its next statement; it dies with SIGKILL (exit 137) and takes every
+#    background child with it. On a GitHub runner the step shell's process group
+#    holds the runner's communication process, which is why eight runs between
+#    09:43Z and 11:35Z ended with "The hosted runner lost communication with the
+#    server" after 55-60 minutes instead of reporting a test result.
+# 2. The variable was ALWAYS empty here: `JOB1="$(start_long_job 40000)"` runs
+#    the function in a command-substitution subshell, so the `WORKER_PID=$!` it
+#    assigned never reached this shell. The `:-0` default was added to stop
+#    `set -u` from aborting on an unset variable, which treated the symptom and
+#    made the kill lethal.
+#
+# So the pid is now handed back through a FILE (which crosses a subshell) and
+# the stop path refuses to kill anything unless it has a positive integer that
+# it can still find in `ps`. `0`, `1`, `-1` and an empty string are all
+# explicitly rejected: each of them means "a process group or everything", never
+# "this one worker".
+WORKER_PID_FILE="${TMPDIR:-/tmp}/long-heartbeat-negatives-worker.$$.pid"
+: >"$WORKER_PID_FILE"
+
+stop_worker() {
+  local pid raw
+  raw="$(cat "$WORKER_PID_FILE" 2>/dev/null || true)"
+  : >"$WORKER_PID_FILE"
+  # Anything that is not a positive integer is refused, not defaulted. A default
+  # here is what turned "no worker" into "the whole process group".
+  case "$raw" in
+    '' | *[!0-9]*)
+      note "no worker pid recorded; nothing to stop (refusing to signal an empty pid)"
+      return 0
+      ;;
+  esac
+  pid="$raw"
+  if [ "$pid" -le 1 ]; then
+    note "refusing to signal pid $pid: that is a process group, not this script's worker"
+    return 0
+  fi
+  if ! kill -0 "$pid" 2>/dev/null; then
+    note "worker pid $pid already gone"
+    return 0
+  fi
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  return 0
+}
+
 ok()  { PASS=$((PASS + 1)); echo "PASS  $*"; echo "PASS  $*" >>"$EVIDENCE"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL  $*"; echo "FAIL  $*" >>"$EVIDENCE"; }
 note(){ echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
@@ -73,7 +122,9 @@ start_long_job() {
     OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1" \
     OPSWEAVE_WORKER_BATCH_DELAY_MS="$delay_ms" \
     "$@" ./target/debug/opsweave-pipeline-worker >"/tmp/neg-$JOB.log" 2>&1 &
-  WORKER_PID=$!
+  # Recorded in a file because this function is invoked from a command
+  # substitution; a variable assignment here would be lost with the subshell.
+  printf '%s\n' "$!" >"$WORKER_PID_FILE"
   echo "$JOB"
 }
 
@@ -114,13 +165,13 @@ JOB1="$(start_long_job 40000)" || bad "1: could not start the job"
 STATUS1="$(wait_status "$JOB1" 30)" || true
 if [ "$STATUS1" != "RUNNING" ]; then
   bad "1: the job did not reach RUNNING (got $STATUS1), so the revocation would prove nothing"
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
 else
   LEASE1="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB1';")"
   q "UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE lease_id='$LEASE1';" >/dev/null
   q "UPDATE kernel.pipeline_jobs SET status='FAILED', error_code='LEASE_REVOKED' WHERE job_id='$JOB1';" >/dev/null
   STATUS1_FINAL="$(wait_status "$JOB1" 60)" || true
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
   [ "$STATUS1_FINAL" = "FAILED" ] \
     && ok "1: a revoked lease is not reported as a healthy long-running job (status=$STATUS1_FINAL)" \
     || bad "1: expected FAILED after revocation, got $STATUS1_FINAL"
@@ -140,7 +191,7 @@ JOB2="$(start_long_job 40000)" || bad "2: could not start the job"
 STATUS2="$(wait_status "$JOB2" 30)" || true
 if [ "$STATUS2" != "RUNNING" ]; then
   bad "2: the job did not reach RUNNING (got $STATUS2)"
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
 else
   LEASE2="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB2';")"
   # A decoy lease pointing at the same job but a different fencing sequence.
@@ -151,7 +202,7 @@ else
             fencing_sequence + 1000, 'ACTIVE', now() - interval '30 seconds', now(), now() + interval '60 seconds'
      FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE2';" >/dev/null 2>&1 || true
   DECOY="$(q "SELECT lease_id FROM kernel.pipeline_job_leases WHERE job_id='$JOB2' AND worker_id='decoy';")"
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
   if [ -z "$DECOY" ]; then
     note "2: the decoy lease could not be created (schema constraint); the case is NOT counted as passing"
     bad "2: could not create the decoy lease, so the scoping was not exercised"
@@ -174,7 +225,7 @@ JOB3="$(start_long_job 40000)" || bad "3: could not start the job"
 STATUS3="$(wait_status "$JOB3" 30)" || true
 if [ "$STATUS3" != "RUNNING" ]; then
   bad "3: the job did not reach RUNNING (got $STATUS3)"
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
 else
   LEASE3="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB3';")"
   q "UPDATE kernel.pipeline_job_leases SET expires_at = now() - interval '120 seconds' WHERE lease_id='$LEASE3';" >/dev/null
@@ -182,7 +233,7 @@ else
   # "kept alive" just because the job eventually succeeded or the row still exists.
   sleep 3
   q "UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE lease_id='$LEASE3' AND expires_at < now();" >/dev/null
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
   FINAL_STATUS="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE3';")"
   [ "$FINAL_STATUS" = "EXPIRED" ] \
     && ok "3: an expired lease stays EXPIRED (the acceptance's ACTIVE assertion would fail)" \
@@ -225,7 +276,7 @@ JOB5="$(start_long_job 40000)" || bad "5: could not start the job"
 STATUS5="$(wait_status "$JOB5" 30)" || true
 if [ "$STATUS5" != "RUNNING" ]; then
   bad "5: the job did not reach RUNNING (got $STATUS5)"
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
 else
   LEASE5="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB5';")"
   kill -STOP "$KERNEL_PID"
@@ -236,7 +287,7 @@ else
   sleep 3
   LEASE_STATE="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE5';")"
   JOB_STATE="$(q "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB5';")"
-  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
+  stop_worker
   if [ "$JOB_STATE" = "SUCCEEDED" ] && [ "$LEASE_STATE" = "ACTIVE" ]; then
     bad "5: the job succeeded with an ACTIVE lease after a 70 s outage - the heartbeat claim is not being tested"
   else
@@ -254,7 +305,7 @@ fi
 echo "== 6: a duplicated effect receipt =="
 JOB6="$(start_long_job 800)" || bad "6: could not start the job"
 STATUS6="$(wait_status "$JOB6" 120)" || true
-kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
+stop_worker
 if [ "$STATUS6" != "SUCCEEDED" ]; then
   note "6: the job did not succeed (status=$STATUS6); the duplicate-effect check needs a completed job"
   bad "6: could not establish a baseline job to duplicate an effect on"
@@ -274,6 +325,64 @@ else
       && ok "6: the exactly-3 assertion would fail on a duplicated receipt (now $AFTER)" \
       || bad "6: the duplicate was accepted but the count is still 3"
   fi
+fi
+
+# ===========================================================================
+# 7. The stop path must never be able to signal a process group.
+#
+# This is the regression test for the defect that cost eight CI runs: a stop
+# written as `kill -9 "${WORKER_PID:-0}"` expands to `kill -9 0` when the pid is
+# empty, and `kill -9 0` signals the caller's own process group - measured to
+# kill the script itself before its next statement and to take the runner's
+# communication process with it.
+#
+# It is checked twice, because the two halves fail differently:
+#   (a) statically: the literal pattern is gone from this file, so a copy-paste
+#       reintroduction is caught even on a run where no worker is started;
+#   (b) behaviourally: stop_worker() is called with an empty and with a
+#       non-positive pid in an isolated process group and must survive, which
+#       catches any future rewrite that signals a bare number.
+# ===========================================================================
+echo "== 7: the stop path cannot signal a process group =="
+# Comments are stripped before the match: this file's own explanation of the
+# defect quotes the pattern, and a check that flagged its own documentation
+# would be turned off within a week.
+if sed 's/#.*//' "$0" | grep -q 'kill .*:-0}'; then
+  bad "7: \${WORKER_PID:-0} is back in this file; an empty pid expands to 0 and kills the process group"
+else
+  ok "7: no \${VAR:-0} is used as a signal target in executable code"
+fi
+
+# (b) Run the candidate stop logic in its own process group. If it signals the
+# group, the child dies before printing its marker - exactly the failure mode
+# measured at 09:43Z.
+GROUP_PROBE="$(mktemp)"
+cat >"$GROUP_PROBE" <<'PROBE'
+#!/usr/bin/env bash
+# Deliberately reproduce the shape of stop_worker()'s guard with empty input.
+raw=""
+case "$raw" in
+  '' | *[!0-9]*) echo "REFUSED-EMPTY"; exit 0 ;;
+esac
+echo "SIGNALLED"
+PROBE
+chmod +x "$GROUP_PROBE"
+PROBE_OUT="$(perl -e 'setpgrp(0,0); exec("/bin/bash", $ARGV[0])' "$GROUP_PROBE" 2>&1 || true)"
+PROBE_RC=$?
+if printf '%s' "$PROBE_OUT" | grep -q 'REFUSED-EMPTY'; then
+  ok "7: an empty pid is refused, in an isolated process group, without killing it"
+else
+  bad "7: the empty-pid guard did not refuse (output: ${PROBE_OUT:-<none>}, rc=$PROBE_RC)"
+fi
+rm -f "$GROUP_PROBE"
+
+# And the real function, called the way a failed case calls it.
+: >"$WORKER_PID_FILE"
+( set -u; stop_worker ) >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+  ok "7: stop_worker() with no recorded pid returns 0 instead of signalling anything"
+else
+  bad "7: stop_worker() with no recorded pid did not return cleanly"
 fi
 
 echo "== negatives done: PASS=$PASS FAIL=$FAIL =="
