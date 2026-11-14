@@ -47,8 +47,16 @@ LANGUAGES = [
 
 # Rows the contract requires and this run cannot exercise against a real
 # plugin instance. Reported, not hidden. Each entry says why.
+# The gap key IS the assertion name, so the exemption in `main()` cannot drift
+# away from the row it is meant to cover. The first version had
+# `"protocol-version-refused"` as the key and recorded the row as
+# `"protocol-version refusal"` - the exemption silently never applied, and the
+# gate stayed red with `0 known gap` in the verdict. That is exactly the class of
+# mismatch this constant removes.
+GAP_PROTOCOL_VERSION = "protocol-version refusal"
+
 KNOWN_GAPS = {
-    "protocol-version-refused": (
+    GAP_PROTOCOL_VERSION: (
         "The contracts crate defines `RUNTIME_PROTOCOL = \"http-json-v1\"` "
         "(crates/contracts/src/lib.rs:17) but NOTHING reads it for validation: "
         "`grep -rn RUNTIME_PROTOCOL` outside that file returns no other Rust "
@@ -225,7 +233,7 @@ def negative_checks(language, base, plugin_id):
             _, info, _ = http(f"http://127.0.0.1:{inst['hostPort']}/_opsweave/runtime/v1/info")
             if isinstance(info, dict):
                 reported = info.get("runtimeProtocol")
-    record(language, "protocol-version refusal", "NOT_RUN",
+    record(language, GAP_PROTOCOL_VERSION, "NOT_RUN",
            f"instance reports {reported!r}; nothing in the Kernel validates it "
            f"(see KNOWN_GAPS)")
 
