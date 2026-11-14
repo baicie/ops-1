@@ -9,6 +9,7 @@ use clap::Parser;
 use opsweave_node::config::Args;
 use opsweave_node::docker::DockerAdapter;
 use opsweave_node::runtime::{self, Shared};
+use opsweave_node::state_lock;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::RwLock;
@@ -22,6 +23,20 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
     let args = Args::parse();
     std::fs::create_dir_all(&args.state_dir).context("create node state directory")?;
+    // One Node per state directory, from here to process exit. This is the
+    // single point where it may be taken: after the directory exists (the lock
+    // file lives inside it) and before the Docker daemon is touched. When the
+    // lock cannot be taken, nothing below runs - no Docker probe, no Kernel
+    // request, no identity file read or write, no background task, no container.
+    //
+    // `_state_lock` is bound to a NAME. `let _ = ...` would drop it at the end
+    // of this statement and the mutual exclusion would never exist; the type is
+    // `#[must_use]` so the compiler warns, and
+    // `tests/state_dir_lock.rs` proves the difference with real processes.
+    let _state_lock = state_lock::lock_state_dir(&args.state_dir).map_err(|error| {
+        anyhow::anyhow!("{error}")
+            .context("the Node refuses to start because it cannot prove it is the only one using this state directory")
+    })?;
     let http = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(3))
         .timeout(std::time::Duration::from_secs(20))
