@@ -298,9 +298,55 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_http.sh
 OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/capability_multi_provider.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/source_timeout_no_sink.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_instance_generation_sigterm.sh
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_backoff_sigterm.sh
+
+# Node revocation is TERMINAL for the Node it revokes, and it used to run nine
+# steps too early.
+#
+# `data_token_revocation.sh` revokes the Node that hosts the data-integration
+# instance (`DELETE /api/v1/nodes/{id}`). The Kernel writes `revoked_at`, flips
+# the Node and its instances to UNREACHABLE, and nothing brings them back:
+# `kernel.nodes.name` is UNIQUE, so re-enrolling under the same name is not a
+# way out either.
+#
+# That step sat at what used to be the end of the list. PR #105 moved the
+# heartbeat negatives to the very last line and left revocation in front of
+# them, so `load_worker node-b` - which the negatives call - ran against a Node
+# whose credential had already been revoked. Measured on run 43631374366, every
+# poll for 90 s:
+#
+#     FAIL no READY plugin instance on node-b after 90 s
+#          states seen: opsweave.data-integration:UNREACHABLE ...
+#
+# and node-b's own log says why, at 19:39:40, one step earlier:
+#
+#     node credential rejected; quarantining workloads status=403
+#     body={"code":"FORBIDDEN","message":"node identity has been revoked"}
+#     node entering quarantine; stopping all managed workloads
+#
+# Every restart after that loaded `generation=5`, was rejected again, and
+# quarantined again - the Node could not come back, by design.
+#
+# The two supervisor steps had moved above revocation in the same edit, so they
+# still passed; `supervisor_backoff_sigterm.sh` was passing for the wrong reason
+# in the window where it did not - it counts `node-managed pipeline worker
+# exited` lines in a log that already had four from `supervisor_lifecycle.sh`,
+# so a Node that never started a worker would still satisfy it.
+#
+# ORDER: revocation runs after every step that needs node-b, and BEFORE the
+# negatives - not because the negatives need node-b (they are bound to node-a),
+# but because revocation itself needs a READY instance to revoke, and case 6 of
+# the negatives quarantines every Node. So the sequence is:
+#
+#     ... everything that needs a live platform ...
+#     revocation            (kills node-b; needs node-b READY to do it)
+#     heartbeat negatives   (bound to node-a; case 6 kills both nodes)
+#
+# Nothing that needs node-b may follow this line. If something does, its failure
+# reads as `no READY plugin instance on node-b`, which looks like a deployment
+# defect and is not one - that is exactly how run 43631374366 failed.
+OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
 
 # Runs LAST: it quarantines every Node by design (see its header).
 # TERMINAL FOR THE PLATFORM. Case 6 freezes the Kernel for longer than the node

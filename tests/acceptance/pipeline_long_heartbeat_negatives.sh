@@ -195,7 +195,7 @@ start_long_job() {
     "$URL/api/v1/jobs" | python3 -c 'import json,sys;print(json.load(sys.stdin)["jobId"])')"
   [ -n "$JOB" ] || return 1
   env OPSWEAVE_WORKER_KERNEL_URL="$URL" \
-    OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-b/node-identity.json" \
+    OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-a/node-identity.json" \
     OPSWEAVE_WORKER_INSTANCE_ID="$W_INSTANCE_ID" \
     OPSWEAVE_WORKER_NODE_GENERATION="$W_NODE_GEN" \
     OPSWEAVE_WORKER_JOB_ID="$JOB" \
@@ -226,7 +226,25 @@ start_long_job() {
 token() { python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])'; }
 AUTH=(-H "Authorization: Bearer $(token)")
 source tests/acceptance/pipeline_worker_auth.sh
-load_worker node-b
+# node-a, not node-b.
+#
+# The worker here only needs ONE Node's valid credential - it never touches the
+# instance's data port, and the pipeline's sink resolves through the catalog
+# capability that node-a hosts (`OPSWEAVE_DATA_CATALOG_SELECTOR=zone=node-a`).
+#
+# This suite is terminal for the platform (case 6 quarantines every Node), so it
+# runs last, and `data_token_revocation.sh` needs a READY instance to revoke - so
+# that one has to run BEFORE this suite, not after.
+#
+# It revokes node-b. Measured on run 43631374366: every poll for 90 s returned
+# `opsweave.data-integration:UNREACHABLE` because the step order had put
+# revocation in front of this suite, and `load_worker node-b` was asking a Node
+# with `revoked_at` set for a READY instance that could never come back.
+#
+# Binding to node-a makes the two terminal steps independent of each other:
+# revocation kills node-b, this suite is bound to node-a, and case 6 - which
+# takes both down - is the only thing that has to stay last within the suite.
+load_worker node-a
 
 # Why a job is not RUNNING, from what the database and the log can show.
 #

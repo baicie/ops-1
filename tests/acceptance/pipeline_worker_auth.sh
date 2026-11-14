@@ -11,22 +11,30 @@ load_worker() {
   W_NODE_GEN="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/nodes" | python3 -c 'import json,sys; data=json.load(sys.stdin); nid=sys.argv[1]; print(next(n["generation"] for n in data if n["id"]==nid))' "$W_NODE_ID")"
   # Wait for a READY instance instead of demanding one on the first look.
   #
-  # This used to query once and `exit 1` if nothing was READY. Measured on PR
-  # #108 (run 43628236890), at the step that loads a worker for the browser
-  # smoke:
+  # This used to query once and `exit 1` if nothing was READY. A Node that is
+  # restarted re-adopts its containers and re-marks its instances READY
+  # asynchronously, so a single sample says "not yet" about a Node that is
+  # coming back - a race reported as a product finding, the same shape as every
+  # other finding this suite has produced.
   #
-  #     FAIL no READY plugin instance on node-b
+  # THE 90 s FAILURE THAT FIRST EXPOSED THIS WAS NOT THAT RACE. Measured on run
+  # 43631374366, the poll ran all 90 times and reported:
   #
-  # The node had just been through the supervisor tests, which SIGSTOP, SIGINT
-  # and SIGTERM it; a Node that restarts re-adopts its containers and re-marks
-  # its instances READY asynchronously. The old code sampled that transition
-  # once and called it a failure - a race reported as a product finding, the
-  # same shape as every other finding this suite has produced.
+  #     FAIL no READY plugin instance on node-b after 90 s
+  #          states seen: opsweave.data-integration:UNREACHABLE ...
   #
-  # Bounded, so a genuinely missing instance still fails: 90 s, then it says
-  # which plugins were looked at and what state they were in.
+  # Never "STARTING", never "none" - always UNREACHABLE, for the whole 90 s. A
+  # transition would have moved; a revoked Node cannot. The cause was step order
+  # in `data_foundation_ci.sh`: `data_token_revocation.sh` revokes node-b and is
+  # irreversible, and the negatives were scheduled after it. That is fixed next
+  # to the revocation step, not here.
+  #
+  # So this wait is for the restart transition, and it is bounded: 90 s, then it
+  # says which plugins were looked at and what state each was in. When the states
+  # never change, the message points at revocation rather than at a slow Node.
   W_INSTANCE_ID=""
   W_INSTANCE_SEEN=""
+  W_INSTANCE_STATES=""
   for _ in $(seq 1 90); do
     for plugin in opsweave.data-catalog opsweave.data-integration; do
       W_INSTANCE_ID="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/plugins/$plugin" 2>/dev/null \
@@ -50,8 +58,18 @@ print(",".join(states) if states else "none")' "$W_NODE_ID" 2>/dev/null || echo 
   if [ -z "$W_INSTANCE_ID" ]; then
     echo "FAIL no READY plugin instance on $node_name after 90 s"
     echo "     states seen:$W_INSTANCE_SEEN"
-    echo "     (a Node that restarted re-adopts its containers asynchronously;"
-    echo "      this waits for that, and still fails if it never happens)"
+    case "$W_INSTANCE_SEEN" in
+      *UNREACHABLE*)
+        # A transition moves; a revoked Node does not. Say which this is, because
+        # "no READY instance" reads like a deployment defect and sent me looking
+        # at adoption on run 43631374366 when node-b had `revoked_at` set.
+        echo "     UNREACHABLE and never changing: this Node's credential was revoked"
+        echo "     (revoked_at set), not a slow restart. Step order is the usual cause;"
+        echo "     check whether a revocation step ran before this one." ;;
+      *)
+        echo "     (a Node that restarted re-adopts its containers asynchronously;"
+        echo "      this waits for that, and still fails if it never happens)" ;;
+    esac
     exit 1
   fi
   W_BOOT_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
