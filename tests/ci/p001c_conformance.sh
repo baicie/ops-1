@@ -40,19 +40,33 @@ blocked() { echo "BLOCKED: $*" >&2; exit 3; }
 cleanup() {
   local code=$?
   trap - EXIT TERM INT
+  # ORDER: the platform first, its registry second.
+  #
+  # `p001c_teardown.sh` stops the nodes, which may still be reconciling
+  # containers that pull from this registry. Removing the registry first would
+  # turn a clean shutdown into a pull failure and then report the cleanup as
+  # broken. The registry was created before the platform and is removed after it.
+  local cleanup_failed=0
   if [ -n "$RUN_ID" ]; then
     if [ "$KEEP" = "1" ]; then
       echo "   --keep: the platform is still up as $RUN_ID"
       echo "     tests/ci/p001c_teardown.sh $RUN_ID --purge"
+    elif tests/ci/p001c_teardown.sh "$RUN_ID" --purge >"$EVIDENCE/teardown.log" 2>&1; then
+      echo "cleanup: platform PASS"
     else
-      if tests/ci/p001c_teardown.sh "$RUN_ID" --purge >"$EVIDENCE/teardown.log" 2>&1; then
-        echo "cleanup: PASS"
-      else
-        echo "cleanup: FAIL (see $EVIDENCE/teardown.log)"
-        [ "$code" -eq 0 ] && code=1
-      fi
+      echo "cleanup: platform FAIL (see $EVIDENCE/teardown.log)"
+      cleanup_failed=1
     fi
   fi
+  if [ "${CREATED_REGISTRY:-0}" = "1" ]; then
+    if docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1; then
+      echo "cleanup: registry PASS"
+    else
+      echo "cleanup: registry FAIL ($REGISTRY_NAME could not be removed)"
+      cleanup_failed=1
+    fi
+  fi
+  [ "$cleanup_failed" -eq 0 ] || [ "$code" -ne 0 ] || code=1
   exit "$code"
 }
 trap cleanup EXIT TERM INT
@@ -65,11 +79,43 @@ command -v psql >/dev/null 2>&1 || blocked "no psql; the platform harness needs 
 pg_isready -h "${PGHOST:-127.0.0.1}" -p "${PGPORT:-5432}" >/dev/null 2>&1 \
   || blocked "PostgreSQL is not reachable at ${PGHOST:-127.0.0.1}:${PGPORT:-5432}"
 
+# `localhost` resolves to ::1 on this runner, and a registry published on
+# 127.0.0.1 does not answer there. Measured on the first real run:
+#   Get "http://localhost:5001/v2/": dial tcp [::1]:5001: connect: connection refused
+# `no_proxy` is what the C1.3 lifecycle driver already does for the same reason.
+export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
+
+REGISTRY_PORT="${OPSWEAVE_TEST_REGISTRY_PORT:-5014}"
+REGISTRY_NAME="opsweave-conformance-registry-$REGISTRY_PORT"
+CREATED_REGISTRY=0
+
+# This registry is this run's, and ownership is established before anything is
+# removed - the same rule the lifecycle driver applies, for the same reason.
+if docker container inspect "$REGISTRY_NAME" >/dev/null 2>&1; then
+  OWNER="$(docker inspect -f '{{index .Config.Labels "opsweave.conformance.registry"}}' "$REGISTRY_NAME" 2>/dev/null || echo '')"
+  if [ "$OWNER" != "yes" ]; then
+    echo "BLOCKED: a container named $REGISTRY_NAME exists and was not created by this script; refusing to remove it" >&2
+    exit 3
+  fi
+else
+  docker run -d --name "$REGISTRY_NAME" --label "opsweave.conformance.registry=yes" \
+    -p "127.0.0.1:${REGISTRY_PORT}:5000" registry:2 >/dev/null \
+    || { echo "BLOCKED: could not start a local registry on 127.0.0.1:${REGISTRY_PORT}" >&2; exit 3; }
+  CREATED_REGISTRY=1
+fi
+for _ in $(seq 1 30); do
+  curl -fsS -m 2 "http://127.0.0.1:${REGISTRY_PORT}/v2/" >/dev/null 2>&1 && break
+  sleep 1
+done
+
 say "build the binaries and bundles the platform needs"
 cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl \
   >"$EVIDENCE/build.log" 2>&1 || { echo "BLOCKED: the workspace did not build; see $EVIDENCE/build.log" >&2; exit 3; }
 [ -f keys/publisher.key ] || ./target/debug/opsctl keygen --out-dir keys >>"$EVIDENCE/build.log" 2>&1
-scripts/build-plugins.sh >>"$EVIDENCE/build.log" 2>&1 \
+# `BUILD=1` is what makes the script actually build images; without it the
+# bundles step is skipped and every later install fails with "package not found".
+OPSWEAVE_REGISTRY="localhost:${REGISTRY_PORT}" BUILD=1 \
+  scripts/build-plugins.sh >>"$EVIDENCE/build.log" 2>&1 \
   || { echo "BLOCKED: the plugin bundles did not build; see $EVIDENCE/build.log" >&2; exit 3; }
 
 say "start an isolated platform"
