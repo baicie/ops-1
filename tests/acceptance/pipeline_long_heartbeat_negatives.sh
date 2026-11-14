@@ -23,6 +23,10 @@ EVIDENCE="${OPSWEAVE_LONG_HEARTBEAT_NEGATIVES_EVIDENCE:-/tmp/long-heartbeat-nega
 
 PASS=0
 FAIL=0
+# Declared up front: `set -u` makes `kill "$WORKER_PID"` a hard error when a case
+# fails before the worker starts, and a script that dies on its own cleanup path
+# hides the real finding. Measured on run 43578788505.
+WORKER_PID=""
 ok()  { PASS=$((PASS + 1)); echo "PASS  $*"; echo "PASS  $*" >>"$EVIDENCE"; }
 bad() { FAIL=$((FAIL + 1)); echo "FAIL  $*"; echo "FAIL  $*" >>"$EVIDENCE"; }
 note(){ echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
@@ -35,6 +39,25 @@ trap restore_kernel EXIT TERM INT
 
 # A job and a running worker, with a batch delay long enough that the job is
 # still executing while each injection takes effect.
+#
+# The harness starts its Nodes with `OPSWEAVE_NODE_WORKER_ENABLED=1`, so a
+# Node-managed supervisor ALSO claims jobs from this queue. That makes "my
+# worker got the job" a race this script cannot win by construction: on run
+# 43578788505 the job finished with SUCCEEDED before the worker this script
+# started could claim it, and the case reported
+# "the job did not reach RUNNING (got SUCCEEDED)".
+#
+# The negative cases below therefore require a queue no supervisor is polling.
+# `OPSWEAVE_C2_EXCLUSIVE_WORKER=1` is the caller asserting that. Without it the
+# suite says so and stops, rather than reporting a race as a product finding.
+if [ "${OPSWEAVE_NEG_EXCLUSIVE_WORKER:-0}" != "1" ]; then
+  echo "BLOCKED: the Node-managed supervisor also claims jobs on this queue, so a" >&2
+  echo "         case that needs THIS worker to hold the lease cannot be timed" >&2
+  echo "         deterministically. Re-run with OPSWEAVE_NEG_EXCLUSIVE_WORKER=1 and" >&2
+  echo "         the nodes' worker-enabled markers removed." >&2
+  exit 3
+fi
+
 start_long_job() {
   local delay_ms="$1"
   JOB="$(curl -fsS -H "Authorization: Bearer $(token)" -X POST -H 'content-type: application/json' \
@@ -91,13 +114,13 @@ JOB1="$(start_long_job 40000)" || bad "1: could not start the job"
 STATUS1="$(wait_status "$JOB1" 30)" || true
 if [ "$STATUS1" != "RUNNING" ]; then
   bad "1: the job did not reach RUNNING (got $STATUS1), so the revocation would prove nothing"
-  kill -9 "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
 else
   LEASE1="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB1';")"
   q "UPDATE kernel.pipeline_job_leases SET status='REVOKED' WHERE lease_id='$LEASE1';" >/dev/null
   q "UPDATE kernel.pipeline_jobs SET status='FAILED', error_code='LEASE_REVOKED' WHERE job_id='$JOB1';" >/dev/null
   STATUS1_FINAL="$(wait_status "$JOB1" 60)" || true
-  kill -9 "$WORKER_PID" 2>/dev/null; wait "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
   [ "$STATUS1_FINAL" = "FAILED" ] \
     && ok "1: a revoked lease is not reported as a healthy long-running job (status=$STATUS1_FINAL)" \
     || bad "1: expected FAILED after revocation, got $STATUS1_FINAL"
@@ -117,7 +140,7 @@ JOB2="$(start_long_job 40000)" || bad "2: could not start the job"
 STATUS2="$(wait_status "$JOB2" 30)" || true
 if [ "$STATUS2" != "RUNNING" ]; then
   bad "2: the job did not reach RUNNING (got $STATUS2)"
-  kill -9 "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
 else
   LEASE2="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB2';")"
   # A decoy lease pointing at the same job but a different fencing sequence.
@@ -128,7 +151,7 @@ else
             fencing_sequence + 1000, 'ACTIVE', now() - interval '30 seconds', now(), now() + interval '60 seconds'
      FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE2';" >/dev/null 2>&1 || true
   DECOY="$(q "SELECT lease_id FROM kernel.pipeline_job_leases WHERE job_id='$JOB2' AND worker_id='decoy';")"
-  kill -9 "$WORKER_PID" 2>/dev/null; wait "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
   if [ -z "$DECOY" ]; then
     note "2: the decoy lease could not be created (schema constraint); the case is NOT counted as passing"
     bad "2: could not create the decoy lease, so the scoping was not exercised"
@@ -151,7 +174,7 @@ JOB3="$(start_long_job 40000)" || bad "3: could not start the job"
 STATUS3="$(wait_status "$JOB3" 30)" || true
 if [ "$STATUS3" != "RUNNING" ]; then
   bad "3: the job did not reach RUNNING (got $STATUS3)"
-  kill -9 "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
 else
   LEASE3="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB3';")"
   q "UPDATE kernel.pipeline_job_leases SET expires_at = now() - interval '120 seconds' WHERE lease_id='$LEASE3';" >/dev/null
@@ -159,7 +182,7 @@ else
   # "kept alive" just because the job eventually succeeded or the row still exists.
   sleep 3
   q "UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE lease_id='$LEASE3' AND expires_at < now();" >/dev/null
-  kill -9 "$WORKER_PID" 2>/dev/null; wait "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
   FINAL_STATUS="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE3';")"
   [ "$FINAL_STATUS" = "EXPIRED" ] \
     && ok "3: an expired lease stays EXPIRED (the acceptance's ACTIVE assertion would fail)" \
@@ -202,7 +225,7 @@ JOB5="$(start_long_job 40000)" || bad "5: could not start the job"
 STATUS5="$(wait_status "$JOB5" 30)" || true
 if [ "$STATUS5" != "RUNNING" ]; then
   bad "5: the job did not reach RUNNING (got $STATUS5)"
-  kill -9 "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true
 else
   LEASE5="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB5';")"
   kill -STOP "$KERNEL_PID"
@@ -213,7 +236,7 @@ else
   sleep 3
   LEASE_STATE="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE5';")"
   JOB_STATE="$(q "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB5';")"
-  kill -9 "$WORKER_PID" 2>/dev/null; wait "$WORKER_PID" 2>/dev/null
+  kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
   if [ "$JOB_STATE" = "SUCCEEDED" ] && [ "$LEASE_STATE" = "ACTIVE" ]; then
     bad "5: the job succeeded with an ACTIVE lease after a 70 s outage - the heartbeat claim is not being tested"
   else
@@ -231,7 +254,7 @@ fi
 echo "== 6: a duplicated effect receipt =="
 JOB6="$(start_long_job 800)" || bad "6: could not start the job"
 STATUS6="$(wait_status "$JOB6" 120)" || true
-kill -9 "$WORKER_PID" 2>/dev/null; wait "$WORKER_PID" 2>/dev/null
+kill -9 "${WORKER_PID:-0}" 2>/dev/null || true; wait "${WORKER_PID:-0}" 2>/dev/null || true
 if [ "$STATUS6" != "SUCCEEDED" ]; then
   note "6: the job did not succeed (status=$STATUS6); the duplicate-effect check needs a completed job"
   bad "6: could not establish a baseline job to duplicate an effect on"

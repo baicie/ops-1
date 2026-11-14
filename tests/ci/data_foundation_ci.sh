@@ -210,12 +210,40 @@ OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/kernel_restart_takeover.sh
 KERNEL_PID="$(cat /tmp/data-kernel.pid)"
 OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_long_heartbeat.sh
-# The counterfactual half: six faults, each of which must be detected by the
-# assertion written for it. A long-heartbeat acceptance nobody has tried to
-# break is worth as little as the `sleep 75` version it replaced.
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_long_heartbeat_negatives.sh
-# Concurrency testing must not compete with Node-managed workers left by prior scenarios.
+# The counterfactual half runs AFTER the Node-managed supervisors are stopped.
+#
+# Its cases need THIS script's worker to be the one holding the lease, and the
+# supervisors also poll the same queue: on run 43578788505 a supervisor claimed
+# the job first and finished it before the case could revoke the lease, which
+# the case correctly reported as "the job did not reach RUNNING (got SUCCEEDED)"
+# - a race, not a product finding.
+#
+# So the markers come off first, exactly as the concurrency tests below already
+# do, and the suite is told the queue is exclusive to it.
 rm -f "$ROOT/data-ci/node-a/worker-enabled" "$ROOT/data-ci/node-b/worker-enabled"
+for node in node-a node-b; do
+  node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"
+  if [ -n "$node_pid" ]; then
+    for worker_pid in $(pgrep -P "$node_pid" -f opsweave-pipeline-worker || true); do kill -9 "$worker_pid" 2>/dev/null || true; done
+  fi
+done
+# Wait for the workers to actually be gone rather than sleeping a guessed 3 s:
+# the same "bounded polling instead of a fixed delay" rule the heartbeat
+# acceptance was rewritten for.
+for _ in $(seq 1 40); do
+  left=0
+  for node in node-a node-b; do
+    node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"
+    [ -n "$node_pid" ] || continue
+    pgrep -P "$node_pid" -f opsweave-pipeline-worker >/dev/null 2>&1 && left=1
+  done
+  [ "$left" = "0" ] && break
+  sleep 0.25
+done
+OPSWEAVE_NEG_EXCLUSIVE_WORKER=1 \
+OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
+  tests/acceptance/pipeline_long_heartbeat_negatives.sh
+# Concurrency testing must not compete with Node-managed workers left by prior scenarios.
 for node in node-a node-b; do
   node_pid="$(cat "/tmp/$node.pid" 2>/dev/null || true)"
   if [ -n "$node_pid" ]; then
