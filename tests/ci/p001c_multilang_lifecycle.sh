@@ -31,7 +31,7 @@ mkdir -p "$EVIDENCE"
 MATRIX="$EVIDENCE/matrix.tsv"
 : >"$MATRIX"
 
-PASS=0; FAIL=0; NOT_RUN=0
+PASS=0; FAIL=0; NOT_RUN=0; BLOCKED=0
 row() { # language, step, verdict, detail
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$MATRIX"
   printf '%-10s %-34s %-9s %s\n' "$1" "$2" "$3" "$4"
@@ -80,9 +80,33 @@ export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
 REGISTRY_PORT="${OPSWEAVE_TEST_REGISTRY_PORT:-5015}"
 REGISTRY_NAME="opsweave-ml-registry-$REGISTRY_PORT"
 CREATED_REGISTRY=0
+# The platform this script starts must be torn down by it.
+#
+# It was not: `p001c_up.sh` starts a Kernel, two Nodes, a PostgreSQL database and
+# a state directory, and nothing stopped any of them. On a CI runner that is
+# invisible (the runner is discarded), which is exactly why it survived - the
+# same script on a developer machine leaves a Kernel holding :18181 and a
+# database holding connections, and the NEXT run fails on the port with no clue
+# that the previous run left it.
+#
+# `p001c_teardown.sh` is the scoped counterpart, and it is called with `--purge`
+# so the database and state directory go too. Its own contract is "BLOCKED and
+# change nothing if I cannot prove ownership", which is the behaviour wanted
+# here: a teardown that cannot identify its target must not guess.
+PLATFORM_RUN_ID=""
 cleanup() {
   local code=$?
   trap - EXIT TERM INT
+  if [ -n "$PLATFORM_RUN_ID" ]; then
+    if tests/ci/p001c_teardown.sh "$PLATFORM_RUN_ID" --purge >>"${EVIDENCE:-/dev/null}/teardown.log" 2>&1; then
+      echo "cleanup: platform $PLATFORM_RUN_ID torn down"
+    else
+      # Reported, and it makes an otherwise-green run non-zero. A cleanup that
+      # fails silently is how the next run inherits the port.
+      echo "cleanup: FAIL (platform $PLATFORM_RUN_ID; see ${EVIDENCE:-?}/teardown.log)"
+      [ "$code" -eq 0 ] && code=1
+    fi
+  fi
   if [ "$CREATED_REGISTRY" = "1" ]; then
     docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1 \
       && echo "cleanup: registry removed" \
@@ -114,6 +138,9 @@ fi
 say "start one isolated platform"
 RUN_ID="$(tests/ci/p001c_up.sh 2>"$EVIDENCE/platform-up.log" | sed -n 's/^RUN_ID=//p' | tail -1)"
 [ -n "$RUN_ID" ] || { echo "BLOCKED: no platform; see $EVIDENCE/platform-up.log" >&2; exit 3; }
+# Recorded as soon as it exists, so the trap tears down a partially-started
+# platform too - that is when leftovers are most likely.
+PLATFORM_RUN_ID="$RUN_ID"
 KERNEL_URL="$(sed -n 's/^== platform up: //p' "$EVIDENCE/platform-up.log" | tail -1)"
 RUN_DIR="$(sed -n 's/^RUN_DIR=//p' "$EVIDENCE/platform-up.log" | tail -1)"
 {
@@ -324,8 +351,34 @@ for dep in d.get('deployments') or []:
   # The physical containers this plugin owned must be gone, and containers
   # belonging to anything else must not be. Compared by IMMUTABLE ID against a
   # snapshot - a label filter would agree with itself.
-  LEFTOVER="$(docker ps -aq     --filter "label=opsweave.installation-id=$INSTALL_ID" 2>/dev/null | wc -l | tr -d ' ')"
-  if [ "${LEFTOVER:-1}" = "0" ]; then
+  #
+  # Three defects in the line this replaces:
+  #
+  #   * it used `$INSTALL_ID` (singular). Only `INSTALL_IDS` exists, and
+  #     `set -u` is on, so this aborted the whole matrix at the first language's
+  #     uninstall check - after every expensive step had already run.
+  #   * `2>/dev/null` turned an unreachable daemon into an empty list, which
+  #     `wc -l` counted as 0, which read as "clean". Same false positive as
+  #     `p001c_teardown.sh` had.
+  #   * a single installation id was assumed. Two Nodes mint DIFFERENT ids by
+  #     design (ADR-023), so checking one would call half the platform clean.
+  #
+  # All of them, by id, with the failure surfaced.
+  LEFTOVER=0
+  LEFTOVER_ERR=""
+  for inst in $INSTALL_IDS; do
+    [ -n "$inst" ] || continue
+    if ! ids="$(docker ps -aq --filter "label=opsweave.installation-id=$inst" 2>&1)"; then
+      LEFTOVER_ERR="docker ps failed for installation $inst: ${ids:-<no output>}"
+      break
+    fi
+    n="$(printf '%s\n' "$ids" | grep -c . || true)"
+    LEFTOVER=$((LEFTOVER + n))
+  done
+  if [ -n "$LEFTOVER_ERR" ]; then
+    row "$lang" "no container of this installation remains" BLOCKED "$LEFTOVER_ERR"
+    BLOCKED=$((BLOCKED+1))
+  elif [ "$LEFTOVER" -eq 0 ]; then
     row "$lang" "no container of this installation remains" PASS ""
     PASS=$((PASS+1))
   else
@@ -338,9 +391,35 @@ done
 say "matrix"
 column -t -s $'\t' "$MATRIX" 2>/dev/null || cat "$MATRIX"
 echo
-echo "PASS=$PASS FAIL=$FAIL NOT_RUN=$NOT_RUN"
+echo "PASS=$PASS FAIL=$FAIL BLOCKED=$BLOCKED NOT_RUN=$NOT_RUN"
 echo "evidence: $EVIDENCE"
 
-[ "$FAIL" -eq 0 ] || exit 1
-[ "$NOT_RUN" -eq 0 ] || exit 2
+# Five outcomes, and the exit code is the verdict.
+#
+# `BLOCKED` was counted nowhere before this: a row that could not be measured
+# (a daemon that failed to answer, a fixture that was not there) incremented a
+# counter nothing read, and the script exited 0. `NOT_RUN` shared the same fate
+# when it was the only non-pass - `[ "$NOT_RUN" -eq 0 ] || exit 2` happens to
+# catch it, but the summary line did not mention BLOCKED at all, so a run with
+# blocked rows printed "PASS=n FAIL=0 NOT_RUN=0" and looked complete.
+#
+#   0  STRICT_PASS              every language, every step, asserted
+#   1  FAIL                     a language disagreed with the contract
+#   2  BLOCKED                  a step could not be measured
+#   3  PASS_WITH_COVERAGE_GAPS  nothing failed, but some steps did not run
+#
+# FAIL and BLOCKED both outrank the softer verdicts.
+if [ "$FAIL" -ne 0 ]; then
+  echo "verdict: FAIL"
+  exit 1
+fi
+if [ "$BLOCKED" -ne 0 ]; then
+  echo "verdict: BLOCKED ($BLOCKED step(s) could not be measured)"
+  exit 2
+fi
+if [ "$NOT_RUN" -ne 0 ]; then
+  echo "verdict: PASS_WITH_COVERAGE_GAPS ($NOT_RUN step(s) did not run)"
+  exit 3
+fi
+echo "verdict: STRICT_PASS"
 exit 0

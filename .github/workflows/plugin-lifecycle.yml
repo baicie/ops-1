@@ -67,6 +67,11 @@ on:
       - 'tests/ci/p001c13_*.sh'
       - 'tests/ci/p001c_up.sh'
       - 'tests/ci/p001c_teardown.sh'
+      # The multilang matrix and everything it drives. Without these lines a
+      # change to the matrix would run no matrix - which is the exact gap this
+      # job was created to close for the TypeScript lifecycle.
+      - 'tests/ci/p001c_multilang_lifecycle.sh'
+      - 'tests/ci/p001c13_negatives.sh'
       - 'tests/ci/p001c121_demo_safety.sh'
       - '.github/workflows/plugin-lifecycle.yml'
 
@@ -218,6 +223,24 @@ jobs:
           set -o pipefail
           tests/ci/p001c13_negatives.sh 2>&1 | tee lifecycle-negatives.log
 
+      - name: Go and Java get the same lifecycle (P001-C3)
+        # Runs LAST, and only after the TypeScript lifecycle passed: the matrix
+        # builds its own platform and its own 0.0.1/0.0.2 image pairs, so an
+        # earlier failure means the resources it needs are not trustworthy.
+        #
+        # This is the gate P001-C3 was missing. The matrix existed and nothing
+        # executed it, which `tests/ci/check-spec-coverage.mjs` would report as
+        # NOT_REFERENCED - a test nothing runs is a comment.
+        if: success()
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          OPSWEAVE_TEST_REGISTRY_PORT: "5016"
+        run: |
+          set -o pipefail
+          tests/ci/p001c_multilang_lifecycle.sh 2>&1 | tee lifecycle-multilang.log
+
       - name: Upload the acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -231,6 +254,8 @@ jobs:
             artifacts/p001c13-negatives/
             lifecycle.log
             lifecycle-negatives.log
+            lifecycle-multilang.log
+            artifacts/p001c-multilang-lifecycle/
           if-no-files-found: warn
           retention-days: 14
 
