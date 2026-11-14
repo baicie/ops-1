@@ -82,6 +82,12 @@ pub enum LockError {
     InUse { path: PathBuf },
     /// The platform has no implementation here. Refused rather than degraded.
     Unsupported { platform: &'static str },
+    /// The lock path exists but is not a regular file.
+    ///
+    /// Separate from `Failed` because the operator action differs: a FIFO or a
+    /// device node at `.node.lock` means something replaced it, not that the
+    /// filesystem refused a lock.
+    NotRegular { path: PathBuf, kind: &'static str },
     /// `open` or `flock` failed for any other reason. Carries the errno so the
     /// message can name it instead of saying "an error occurred".
     Failed {
@@ -97,7 +103,9 @@ impl LockError {
         match self {
             LockError::InUse { .. } => "NODE_STATE_DIR_IN_USE",
             LockError::Unsupported { .. } => "NODE_STATE_LOCK_UNSUPPORTED",
-            LockError::Failed { .. } => "NODE_STATE_LOCK_FAILED",
+            // Same outward code: to a caller it is still "the lock could not be
+            // taken", and the message distinguishes the cause.
+            LockError::NotRegular { .. } | LockError::Failed { .. } => "NODE_STATE_LOCK_FAILED",
         }
     }
 }
@@ -121,6 +129,15 @@ impl std::fmt::Display for LockError {
                  running without the guarantee: two Nodes on one state directory corrupt \
                  each other's identity",
                 self.code()
+            ),
+            LockError::NotRegular { path, kind } => write!(
+                f,
+                "{}: {} exists but is {}; the Node only ever creates a regular \
+                 file there, so the state directory has been modified. Refusing \
+                 to lock it",
+                self.code(),
+                path.display(),
+                kind
             ),
             LockError::Failed {
                 path,
@@ -189,11 +206,28 @@ mod platform {
         // world-readable. `create(true)` without `truncate`: the file is a
         // handle, not content - truncating it would be harmless for `flock`
         // but would also rewrite a file another process may have open.
+        // `O_NOFOLLOW`: never follow a symlink at the lock path.
+        //
+        // Plain `open()` follows one, and the lock then lands on whatever the
+        // link points at. Measured: with `.node.lock` -> `elsewhere`, `open()`
+        // succeeds and `flock` returns 0 on the TARGET's inode. Two Nodes given
+        // two different targets would each "hold the lock" while sharing one
+        // state directory - the directive the lock exists to enforce, defeated
+        // by one symlink.
+        //
+        // `O_NOFOLLOW` makes that an `ELOOP` failure instead, which the caller
+        // gets as `NODE_STATE_LOCK_FAILED` naming the errno. A lock file that is
+        // a symlink is not something the Node ever creates, so refusing it costs
+        // nothing legitimate.
+        //
+        // `O_CLOEXEC` closes the descriptor across exec, so a child process
+        // cannot inherit the lock and keep it after this process exits.
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .mode(0o600)
             .open(path)
             .map_err(|error| LockError::Failed {
@@ -201,6 +235,42 @@ mod platform {
                 operation: "open the lock file",
                 errno: error.raw_os_error().unwrap_or(0),
             })?;
+
+        // The path must now be a REGULAR file.
+        //
+        // `O_NOFOLLOW` rules out symlinks, but a FIFO or a device node at this
+        // path would still open. Opening a FIFO for write blocks until a reader
+        // appears, so startup would HANG rather than refuse - and `flock` on a
+        // FIFO does not mean what the lock needs it to mean.
+        //
+        // The Node only ever creates a regular file here, so anything else is a
+        // tampered or misconfigured state directory. `ENOTSUP` is reported with
+        // the file's actual kind in the message below.
+        {
+            use std::os::unix::fs::FileTypeExt;
+            let kind = file
+                .metadata()
+                .map_err(|error| LockError::Failed {
+                    path: path.to_path_buf(),
+                    operation: "stat the opened lock file",
+                    errno: error.raw_os_error().unwrap_or(0),
+                })?
+                .file_type();
+            if !kind.is_file() {
+                return Err(LockError::NotRegular {
+                    path: path.to_path_buf(),
+                    kind: if kind.is_fifo() {
+                        "a FIFO"
+                    } else if kind.is_socket() {
+                        "a socket"
+                    } else if kind.is_char_device() || kind.is_block_device() {
+                        "a device node"
+                    } else {
+                        "not a regular file"
+                    },
+                });
+            }
+        }
 
         let fd = file.as_raw_fd();
         let mut attempt = 0;
@@ -355,6 +425,62 @@ mod tests {
         // product path by accident.
         let regained = lock_state_dir(&dir).expect("after dropping the first, the lock is free");
         drop(regained);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_symlinked_lock_file_is_refused_not_followed() {
+        // Measured before the fix: `open()` followed the link and `flock`
+        // succeeded on the TARGET's inode. Two Nodes pointed at two different
+        // targets would each hold "the lock" over one state directory.
+        let dir = tmpdir("symlink");
+        let elsewhere = dir.join("elsewhere");
+        std::fs::write(&elsewhere, b"").expect("target file");
+        std::os::unix::fs::symlink(&elsewhere, dir.join(LOCK_FILE)).expect("symlink");
+
+        match lock_state_dir(&dir) {
+            Err(LockError::Failed { errno, .. }) => {
+                assert_eq!(errno, libc::ELOOP, "expected ELOOP, got errno {errno}");
+            }
+            Ok(_) => panic!("a symlinked lock file must be refused, not followed"),
+            Err(other) => panic!("expected Failed(ELOOP), got {other:?}"),
+        }
+        // And the target was never opened for locking.
+        assert_eq!(
+            std::fs::metadata(&elsewhere)
+                .expect("target still exists")
+                .len(),
+            0
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_non_regular_lock_file_is_refused() {
+        // A FIFO at `.node.lock` opens for write only when a reader is present,
+        // so without this check startup would HANG instead of refusing. A
+        // device node would open and `flock` on it would mean something else
+        // entirely.
+        //
+        // A FIFO is creatable without privileges; that is why it is the case
+        // here rather than mknod.
+        let dir = tmpdir("fifo");
+        let fifo = dir.join(LOCK_FILE);
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo failed");
+
+        match lock_state_dir(&dir) {
+            Err(LockError::NotRegular { kind, .. }) => {
+                assert_eq!(kind, "a FIFO");
+            }
+            Ok(_) => panic!("a FIFO at the lock path must be refused"),
+            Err(other) => panic!("expected NotRegular, got {other:?}"),
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
