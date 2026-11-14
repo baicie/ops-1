@@ -73,7 +73,22 @@ def main():
         results = list(pool.map(lambda pair: request("POST", "/internal/v1/pipeline-jobs/claim-next", pair[1], pair[0]), identities))
     single_statuses = [status for status, _ in results]
     if single_statuses.count(200) != 1 or any(s not in (200, 204) for s in single_statuses):
-        failures.append(f"claim-next single statuses={single_statuses}")
+        # Say WHAT was double-claimed, not only how many said yes.
+        #
+        # Measured on PR #105 (run 43617558035):
+        #     FAIL claim-next single statuses=[..., 200, ..., 200, ...]
+        # Two workers returned 200 for ONE queued Job. The count is the symptom;
+        # the leases are the evidence, and without them the finding cannot be
+        # reproduced or handed to anyone.
+        leases = psql(
+            "SELECT coalesce(string_agg(worker_id || '@' || fencing_sequence, ' | ' ORDER BY fencing_sequence), '') "
+            f"FROM kernel.pipeline_job_leases WHERE job_id='{next_job}'"
+        )
+        fence = psql(f"SELECT current_fence FROM kernel.pipeline_jobs WHERE job_id='{next_job}';")
+        failures.append(
+            f"claim-next single statuses={single_statuses} "
+            f"leases=[{leases}] current_fence={fence}"
+        )
     if psql(f"SELECT status FROM kernel.pipeline_jobs WHERE job_id='{next_job}';") != "CLAIMED":
         failures.append("claim-next single job was not claimed")
     # Claim-Next with several queued Jobs must distribute them exactly once.
