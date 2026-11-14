@@ -90,15 +90,34 @@ Restore verifies a **new** database by default. Never point the Kernel at a part
 
 ## Node stop / crash containment
 
-`opsweave-node.service` installs `ExecStopPost=/opt/opsweave/bin/opsweave-node-cleanup`. This is a last-resort cleanup for a Node process killed before the Runtime can quarantine itself; it removes containers labeled with that Node identity. The Runtime also quarantines on a `400/401/403/409` heartbeat or when its control lease expires, and removes managed containers before exiting. Test the lease and quarantine paths with `tests/acceptance/node_lease.sh` and `tests/acceptance/node_quarantine.sh`; both are destructive to the local demo state.
+`opsweave-node.service` installs `ExecStopPost=/opt/opsweave/bin/opsweave-node-cleanup`. This is a last-resort cleanup for a Node process killed before the Runtime can quarantine itself. **It removes only containers whose `opsweave.installation-id` label equals the id in `<state_dir>/installation-id`** — the same ownership rule the Runtime uses. It deliberately does *not* select by `opsweave.node-id`: a restored database or a copied state directory reproduces the same node id in two installations (ADR-023), so a node-id filter reaches containers belonging to someone else. Before this was fixed, it did select by node id and would delete a second installation's containers; `tests/ci/p001_execstoppost_ownership.sh` is the regression suite and runs against a real daemon.
+
+Its exit code is part of the contract and is recorded by systemd:
+
+| Code | Meaning |
+|---|---|
+| 0 | nothing to do, or everything this installation owns was removed |
+| 1 | no Docker endpoint configured |
+| 2 | **the daemon could not be queried** — not "no containers left" |
+| 3 | the installation identity is missing, empty, unreadable or not a UUID — refused |
+| 4 | a candidate's labels could not be proven to match; it was left alone |
+| 5 | a container proven to be ours could not be removed |
+
+`2` and `0` must never be confused: an unreachable daemon reported as a clean sweep is how leftover containers stay invisible after a crash.
+
+The unit sets **both** `OPSWEAVE_DOCKER_HOST` (read by the Node adapter) and `DOCKER_HOST` (read by the `docker` CLI, and therefore by the cleanup script). Setting only the first made the script talk to the default socket, which under the rootless unit is a different daemon or none at all.
+
+The Runtime also quarantines on a `400/401/403/409` heartbeat or when its control lease expires, and removes managed containers before exiting. Test the lease and quarantine paths with `tests/acceptance/node_lease.sh` and `tests/acceptance/node_quarantine.sh`; both are destructive to the local demo state.
 
 Do not expose `OPSWEAVE_NODE_DATA_BIND` beyond loopback until an authenticated TLS/mTLS terminator or tunnel is in front of it. Kernel↔Node mTLS and certificate rotation are still a production release blocker (`NOT_RUN`).
 
 **Known gap (open, unassigned).** The unit and the paragraph above both name
 `/opt/opsweave/bin/opsweave-node-cleanup`, but the repository ships only
 `deployments/linux/opsweave-node-cleanup.sh` and no build or install rule produces the
-extension-less binary at that path. On a host provisioned from this repository,
-`ExecStopPost` therefore fails and the last-resort containment path described above does
-not run. Fix by either installing the `.sh` under that name with the executable bit, or
-changing `ExecStopPost` to invoke the script; the quarantine paths the Runtime performs
-itself are unaffected by this gap.
+extension-less binary at that path. The same gap applies to
+`ExecStart=/opt/opsweave/bin/opsweave-node` and to `opsweave-kernel.service`: the
+repository contains no install rule for `/opt/opsweave/bin/` at all. On a host
+provisioned from this repository, `ExecStopPost` therefore fails and the last-resort
+containment path described above does not run. Fix by either installing the `.sh`
+under that name with the executable bit, or changing `ExecStopPost` to invoke the
+script; the quarantine paths the Runtime performs itself are unaffected by this gap.
