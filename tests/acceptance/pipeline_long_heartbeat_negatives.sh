@@ -427,6 +427,34 @@ else
   LEASE_STATE="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE5';")"
   JOB_STATE="$(q "SELECT status FROM kernel.pipeline_jobs WHERE job_id='$JOB5';")"
   stop_worker
+  # This case stops the Kernel for longer than the NODE heartbeat TTL as well as
+  # the lease TTL, so the Nodes go stale and are not READY when it ends.
+  #
+  # Everything that runs AFTER this case needs a READY node to claim a job. On run
+  # 43611053760 case 6 failed with exactly that, and the worker's own log said so:
+  #
+  #     Error: claim failed (403 Forbidden): {"code":"FORBIDDEN",
+  #       "message":"node is not READY"}
+  #
+  # That is this case's side effect, not a product finding - so the case now
+  # WAITS for the platform to recover before returning, and fails if it does not.
+  # Leaving a broken platform for the next case is how one case's PASS hides the
+  # next case's setup failure.
+  READY_BACK=""
+  for _ in $(seq 1 90); do
+    READY_BACK="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/nodes" 2>/dev/null \
+      | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: print(""); raise SystemExit
+print(sum(1 for n in d if n.get("status")=="READY" and not n.get("stale")))' 2>/dev/null || true)"
+    [ "${READY_BACK:-0}" -ge 1 ] && break
+    sleep 1
+  done
+  if [ "${READY_BACK:-0}" -ge 1 ]; then
+    note "5: $READY_BACK node(s) READY again after the outage"
+  else
+    bad "5: no node returned to READY within 90 s after the outage; later cases cannot claim jobs"
+  fi
   if [ "$JOB_STATE" = "SUCCEEDED" ] && [ "$LEASE_STATE" = "ACTIVE" ]; then
     bad "5: the job succeeded with an ACTIVE lease after a 70 s outage - the heartbeat claim is not being tested"
   else
