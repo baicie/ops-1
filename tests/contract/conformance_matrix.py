@@ -23,9 +23,9 @@ a matrix with a hole is not a comparison.
 ## Fault injection
 
 Each case mutates a real, running plugin instance's *view* through the Gateway
-or its own port, then asserts the documented behaviour. Two of them are
-recorded as **known gaps** rather than passes - see `KNOWN_GAPS` below - because
-the contract says they should be refused and the product currently does not.
+or its own port, then asserts the documented behaviour. `KNOWN_GAPS` exists for
+contract requirements no run can exercise; it is **empty**, and a row may only
+enter it with a reproduction and a reason. See the comment above it.
 
 Exit codes: 0 = PASS, 1 = FAIL (a language disagreed with the contract),
 2 = BLOCKED (a language could not be measured).
@@ -45,29 +45,19 @@ LANGUAGES = [
     ("java", "dev.opsweave.hello-java"),
 ]
 
-# Rows the contract requires and this run cannot exercise against a real
-# plugin instance. Reported, not hidden. Each entry says why.
-# The gap key IS the assertion name, so the exemption in `main()` cannot drift
-# away from the row it is meant to cover. The first version had
-# `"protocol-version-refused"` as the key and recorded the row as
-# `"protocol-version refusal"` - the exemption silently never applied, and the
-# gate stayed red with `0 known gap` in the verdict. That is exactly the class of
-# mismatch this constant removes.
-GAP_PROTOCOL_VERSION = "protocol-version refusal"
-
-KNOWN_GAPS = {
-    GAP_PROTOCOL_VERSION: (
-        "The contracts crate defines `RUNTIME_PROTOCOL = \"http-json-v1\"` "
-        "(crates/contracts/src/lib.rs:17) but NOTHING reads it for validation: "
-        "`grep -rn RUNTIME_PROTOCOL` outside that file returns no other Rust "
-        "usage, and the Node's readiness `probe()` (runtime.rs:2011-2022) only "
-        "checks `response.status().is_success()` - it never reads the body or the "
-        "runtime identity. "
-        "A plugin that reports `runtimeProtocol: \"http-json-v0\"` is therefore "
-        "not refused. This script MEASURES that and reports it; it does not "
-        "assert it as correct."
-    ),
-}
+# Rows the contract requires and this run cannot exercise.
+#
+# EMPTY, and that is a correction. The previous version listed
+# `protocol-version refusal` here, claiming "nothing reads RUNTIME_PROTOCOL for
+# validation". That was wrong, and it was wrong because the search was
+# incomplete: `grep -rn RUNTIME_PROTOCOL` finds only the constant's definition,
+# but the enforcement compares the literal string in `verify_runtime_info`
+# (`apps/node/src/runtime.rs:1888-1918`), which the earlier grep could not find.
+#
+# The Node refuses an instance whose `/runtime/v1/info` reports any protocol
+# other than `http-json-v1` BEFORE it reaches Ready (`:1848`). The product
+# behaves correctly; the gap was in this file's reading of it.
+KNOWN_GAPS = {}
 
 try:
     session = json.loads((pathlib.Path.home() / ".opsweave/session.json").read_text())
@@ -224,7 +214,17 @@ def negative_checks(language, base, plugin_id):
     record(language, "a refusal carries a stable error code",
            "PASS" if code_present else "FAIL", f"body keys={sorted(body)[:4] if isinstance(body, dict) else body}")
 
-    # 3. Runtime protocol mismatch. MEASURED, NOT ASSERTED - see KNOWN_GAPS.
+    # 3. Runtime protocol agreement.
+    #
+    # The Node refuses an instance whose `/runtime/v1/info` reports any protocol
+    # other than `http-json-v1`, BEFORE marking it Ready
+    # (`apps/node/src/runtime.rs:1848` calls `verify_runtime_info`, which
+    # compares at `:1909`).
+    #
+    # So the observable property from here is: a READY instance is one the Node
+    # has already checked, therefore its reported protocol MUST be the contract
+    # value. An instance that reported anything else and is still READY would
+    # mean the check does not run or does not gate.
     detail = detail_of(plugin_id)
     reported = None
     if detail:
@@ -233,9 +233,13 @@ def negative_checks(language, base, plugin_id):
             _, info, _ = http(f"http://127.0.0.1:{inst['hostPort']}/_opsweave/runtime/v1/info")
             if isinstance(info, dict):
                 reported = info.get("runtimeProtocol")
-    record(language, GAP_PROTOCOL_VERSION, "NOT_RUN",
-           f"instance reports {reported!r}; nothing in the Kernel validates it "
-           f"(see KNOWN_GAPS)")
+    if reported is None:
+        record(language, "a READY instance reports the contract protocol", "NOT_RUN",
+               "no reachable READY instance to read the protocol from")
+    else:
+        record(language, "a READY instance reports the contract protocol",
+               "PASS" if reported == "http-json-v1" else "FAIL",
+               f"reports {reported!r}")
 
     # 4. Unauthenticated request through the Gateway must not reach the plugin.
     status, _, _ = http(f"{BASE}/api/v1/gateway/{plugin_id}/api/hello", authenticated=False)
@@ -248,28 +252,63 @@ def negative_checks(language, base, plugin_id):
            "PASS" if status == 404 else "FAIL", f"status={status}")
 
 
+def gateway_identity_checks(language, plugin_id):
+    """The Gateway's caller-identity handling, per language.
+
+    These two rows existed only in `run_conformance.py`, and that prober cannot
+    always reach a plugin instance on the isolated platform this gate builds -
+    so its unique assertions were effectively ungated. They are reproduced here
+    through the **Gateway**, which is the path that matters anyway: the claim is
+    about what the Gateway delivers to a plugin, not about what the plugin
+    answers when called directly.
+
+    The plugin echoes back what it actually received:
+      `deliveredUnsignedRole`  - the value of the unsigned caller-role header,
+                                 or null when the Gateway stripped it
+      `deliveredSignedContext` - true when an `owu1.`-prefixed Kernel-signed
+                                 context arrived
+    """
+    forged = {"X-OpsWeave-User-Role": "forged-superadmin", "X-OpsWeave-User-Id": "forged"}
+    status, body, _ = http(
+        f"{BASE}/api/v1/gateway/{plugin_id}/api/hello/echo",
+        "POST",
+        {"probe": True},
+        forged,
+    )
+    if status != 200 or not isinstance(body, dict):
+        record(language, "gateway identity probe", "NOT_RUN",
+               f"the echo endpoint answered {status}; this language's plugin may not expose it")
+        return
+    record(language, "gateway strips the unsigned caller role header",
+           "PASS" if body.get("deliveredUnsignedRole") is None else "FAIL",
+           f"deliveredUnsignedRole={body.get('deliveredUnsignedRole')!r}")
+    record(language, "gateway delivers a Kernel-signed caller context",
+           "PASS" if body.get("deliveredSignedContext") is True else "FAIL",
+           f"deliveredSignedContext={body.get('deliveredSignedContext')!r}")
+
+
 def main():
     print(f"Runtime conformance matrix against {BASE}\n")
     for language, plugin_id in LANGUAGES:
         print(f"== {language} ({plugin_id}) ==")
         base = conformance_checks(language, plugin_id)
         negative_checks(language, base, plugin_id)
+        gateway_identity_checks(language, plugin_id)
         print()
 
     # ---- verdict -----------------------------------------------------------
     #
-    # A NOT_RUN row that is a DOCUMENTED PRODUCT GAP does not fail the gate; one
-    # that is "we could not measure this language" does.
+    # A NOT_RUN row that is in KNOWN_GAPS does not fail the gate; one that is
+    # "we could not measure this language" does.
     #
-    # The first real run made the distinction concrete: all three languages
-    # passed 14/14, and the single NOT_RUN was `protocol-version-refusal` - the
-    # gap this script records in KNOWN_GAPS, because nothing in the Kernel reads
-    # `RUNTIME_PROTOCOL`. That is a known defect, not a measurement failure, and
-    # turning the whole matrix red for it would make the gate say "conformance
-    # is broken" about a product gap it is designed to report.
+    # KNOWN_GAPS is empty today. The one entry it ever held was withdrawn as a
+    # false finding: the product does refuse a wrong protocol
+    # (`verify_runtime_info`, runtime.rs:1888-1918), and this file had only
+    # searched for the constant's name rather than the comparison.
     #
-    # The gap rows are named in KNOWN_GAP_ASSERTIONS so the exception cannot
-    # grow silently: any OTHER not-run row still blocks.
+    # The mechanism stays so a genuine gap has somewhere to go that is not a
+    # silent pass - and so adding one is a visible edit, not a quietly widened
+    # allowlist.
     GAP_ASSERTIONS = set(KNOWN_GAPS)
     by_language = {}
     for language, assertion, status, _detail in results:
@@ -278,7 +317,22 @@ def main():
         by_language.setdefault(language, []).append(status)
 
     print("== verdict ==")
-    overall = "PASS"
+    #
+    # Five outcomes, and the report must never blur the middle one:
+    #
+    #   STRICT_PASS            every language, every assertion, no exceptions
+    #   PASS_WITH_KNOWN_GAPS   all measured rows passed, but a documented gap
+    #                          means the matrix is not complete
+    #   FAIL                   a language disagreed with the contract
+    #   BLOCKED                a language could not be measured
+    #   NOT_RUN                a language produced no rows at all
+    #
+    # PASS_WITH_KNOWN_GAPS exits 0 like STRICT_PASS, because a documented gap is
+    # not a regression - but it prints a different name, so a reader (and a
+    # report) cannot call it full compliance. Writing "PASS" for it would be the
+    # substitution this gate exists to prevent, applied to the gate itself.
+    overall = "STRICT_PASS"
+    any_gap = False
     for language, _ in LANGUAGES:
         statuses = by_language.get(language, [])
         if not statuses:
@@ -290,25 +344,35 @@ def main():
         gaps = statuses.count("KNOWN_GAP")
         if fails:
             verdict = "FAIL"
-            overall = "FAIL" if overall != "BLOCKED" else overall
+            if overall != "BLOCKED":
+                overall = "FAIL"
         elif not_run:
-            verdict = "PARTIAL"
-            overall = "BLOCKED" if overall == "PASS" else overall
+            verdict = "NOT_RUN"
+            if overall == "STRICT_PASS":
+                overall = "BLOCKED"
         else:
-            verdict = "PASS" if gaps == 0 else "PASS (with known gap)"
+            verdict = "PASS" if gaps == 0 else "PASS_WITH_KNOWN_GAPS"
             if gaps:
+                any_gap = True
                 print(
-                    f"{language:10s} -> not a gate failure; documented gap(s): "
+                    f"{language:10s} -> documented gap(s), not a gate failure: "
                     + ", ".join(sorted(GAP_ASSERTIONS))
                 )
-        print(f"{language:10s} {verdict:8s} ({len(statuses)} assertions, {fails} failed, {not_run} not run, {gaps} known gap)")
+        print(f"{language:10s} {verdict:20s} ({len(statuses)} assertions, {fails} failed, {not_run} not run, {gaps} known gap)")
+
+    if overall == "STRICT_PASS" and any_gap:
+        overall = "PASS_WITH_KNOWN_GAPS"
 
     print()
     for gap, why in KNOWN_GAPS.items():
         print(f"KNOWN GAP  {gap}: {why}")
 
     print(f"\noverall: {overall}")
-    if overall == "PASS":
+    if overall == "STRICT_PASS":
+        return 0
+    if overall == "PASS_WITH_KNOWN_GAPS":
+        # Same exit code as a strict pass: a documented, reproduced gap is not
+        # a regression. The NAME is what stops it being reported as compliance.
         return 0
     if overall == "FAIL":
         return 1
