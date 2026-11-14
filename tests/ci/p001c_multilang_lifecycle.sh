@@ -136,19 +136,47 @@ if ! OPSWEAVE_REGISTRY="localhost:${REGISTRY_PORT}" BUILD=1 scripts/build-plugin
 fi
 
 say "start one isolated platform"
-RUN_ID="$(tests/ci/p001c_up.sh 2>"$EVIDENCE/platform-up.log" | sed -n 's/^RUN_ID=//p' | tail -1)"
+# `p001c_up.sh` prints `RUN_ID=`, `RUN_DIR=` and `== platform up: <url>` on
+# STDOUT; only diagnostics go to stderr. The previous version captured stdout
+# through a pipe that kept `RUN_ID` and discarded the rest, then read the other
+# two back out of the STDERR file - where they never were:
+#
+#     RUN_ID=20261114151359-35436-58c717c8
+#     KERNEL_URL=
+#     RUN_DIR=
+#     BLOCKED: sign-in failed
+#
+# Empty `KERNEL_URL` is what turned into "sign-in failed", which reads like a
+# credential problem. Capture the whole stdout, keep it, and parse from there.
+UP_OUT="$(tests/ci/p001c_up.sh 2>"$EVIDENCE/platform-up.log")" || true
+printf '%s\n' "$UP_OUT" >>"$EVIDENCE/platform-up.log"
+RUN_ID="$(printf '%s\n' "$UP_OUT" | sed -n 's/^RUN_ID=//p' | tail -1)"
 [ -n "$RUN_ID" ] || { echo "BLOCKED: no platform; see $EVIDENCE/platform-up.log" >&2; exit 3; }
 # Recorded as soon as it exists, so the trap tears down a partially-started
 # platform too - that is when leftovers are most likely.
 PLATFORM_RUN_ID="$RUN_ID"
-KERNEL_URL="$(sed -n 's/^== platform up: //p' "$EVIDENCE/platform-up.log" | tail -1)"
-RUN_DIR="$(sed -n 's/^RUN_DIR=//p' "$EVIDENCE/platform-up.log" | tail -1)"
+KERNEL_URL="$(printf '%s\n' "$UP_OUT" | sed -n 's/^== platform up: //p' | tail -1)"
+RUN_DIR="$(printf '%s\n' "$UP_OUT" | sed -n 's/^RUN_DIR=//p' | tail -1)"
+[ -n "$KERNEL_URL" ] || { echo "BLOCKED: the platform started but reported no URL" >&2; exit 3; }
 {
   echo "RUN_ID=$RUN_ID"; echo "KERNEL_URL=$KERNEL_URL"; echo "RUN_DIR=$RUN_DIR"
 } >"$EVIDENCE/run.txt"
 # Both Nodes' installation ids, read from the harness's own state directories.
-# They are DIFFERENT by design (ADR-023), so a check that used only the first
-# would look at half the platform and call the other half clean.
+#
+# MEASURED, and it corrects this comment: in `p001c_up.sh` both Nodes carry the
+# SAME installation id. `run.json` records only node-a's, and that one value is
+# what both nodes were enrolled with - seen in CI as
+#
+#     installations: 72e6c746-2d34-40a5-8b88-017223b15ebe 72e6c746-...
+#
+# ADR-023 is about Node identity being bound to a state directory; it does not
+# say a test harness must mint a distinct installation per Node, and this one
+# does not. The earlier version of this comment claimed otherwise and would have
+# sent the next reader looking for a difference that is not there.
+#
+# The loop still covers every id it finds. That is not defensive padding: if the
+# harness ever does mint two, a check over one value would silently call half the
+# platform clean, and the cost of iterating is one line.
 INSTALL_IDS=""
 for inst in node-a node-b; do
   id_file="/tmp/p001c-${RUN_ID}/$inst/installation-id"
