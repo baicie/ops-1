@@ -7,9 +7,26 @@ MARKER="$ROOT/data-ci/node-b/worker-enabled"
 ok() { echo "PASS  $*"; }
 bad() { echo "FAIL  $*"; exit 1; }
 workers() { pgrep -P "$NODE_B_PID" -f opsweave-pipeline-worker 2>/dev/null || true; }
+# Wait for a supervised worker, bounded.
+#
+# The bound has to exceed the supervisor's own maximum backoff, or the third
+# crash-loop round can never pass.
+#
+# `apps/node/src/worker_supervisor.rs` backs off `2 * 2^failures`, capped at 30 s,
+# and `failures` only resets after a worker has survived 60 s. In this test each
+# worker is killed within seconds, so the delay grows 4 s -> 8 s -> 16 s -> 30 s.
+# Measured on run 43640918133: round 1 took 16.2 s, round 2 took 30.4 s, and
+# round 3 hit this function's old 30 s ceiling and reported
+# `supervisor did not restart in crash-loop round 3` - a deterministic boundary
+# error, not a slow machine. The ceiling equalled the cap.
+#
+# 90 s leaves room for the 30 s cap plus the supervisor's 500 ms poll and the
+# pgrep race, without hiding a supervisor that genuinely stopped restarting: a
+# broken supervisor never comes back at any bound.
+WAIT_WORKER_TRIES=180   # 180 * 0.5 s = 90 s
 wait_worker() {
   local pid=""
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 "$WAIT_WORKER_TRIES"); do
     pid="$(workers | head -1)"
     [ -n "$pid" ] && { echo "$pid"; return 0; }
     sleep 0.5
