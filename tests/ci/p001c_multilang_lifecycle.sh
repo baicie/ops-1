@@ -130,7 +130,20 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-if ! OPSWEAVE_REGISTRY="localhost:${REGISTRY_PORT}" BUILD=1 scripts/build-plugins.sh \
+# `127.0.0.1`, NOT `localhost`.
+#
+# The registry is published on `127.0.0.1:${REGISTRY_PORT}` (the `-p` above), and
+# the image ref baked into each bundle keeps whatever host this variable names.
+# Measured on run 43616570950, from the Node's own log:
+#
+#   docker pull failed (exit 1): Error response from daemon:
+#     Get "http://localhost:5015/v2/": dial tcp [::1]:5015: connect: connection refused
+#
+# `localhost` resolves to `::1` on that host, the registry is IPv4-only, and the
+# deploy fails. Go passed only because its image was already in the local daemon
+# from an earlier step, so no pull was needed - which is exactly how a
+# host-dependent bug looks like a language-specific one.
+if ! OPSWEAVE_REGISTRY="127.0.0.1:${REGISTRY_PORT}" BUILD=1 scripts/build-plugins.sh \
       >"$EVIDENCE/plugins-build.log" 2>&1; then
   echo "BLOCKED: plugin bundles did not build; see $EVIDENCE/plugins-build.log" >&2; exit 3
 fi
