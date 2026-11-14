@@ -9,6 +9,26 @@
 #   tests/ci/p001c_teardown.sh <run-id> --purge  # also delete state dir and db
 #
 # Anything it cannot verify as its own is reported BLOCKED and left alone.
+#
+# ---------------------------------------------------------------------------
+# Why the Docker precondition is checked before anything else
+# ---------------------------------------------------------------------------
+# This script used to ask the daemon like this:
+#
+#     ids="$(docker ps -aq --filter ... 2>/dev/null || true)"
+#     [ -n "$ids" ] || continue
+#
+# With the daemon unreachable, `docker ps` fails, `2>/dev/null` hides why, `|| true`
+# makes the failure a success, and `$(...)` captures the empty stdout. The next
+# line then reads that empty string as "this run owns no containers". The script
+# reported `removed 0 container(s)`, dropped the database and deleted the state
+# directory - so the containers were left running with nothing on disk left to
+# say whose they were. That is worse than not cleaning up at all: ownership
+# evidence is exactly what a later manual recovery needs.
+#
+# The rule now: the daemon is a PRECONDITION, checked once, before processes are
+# stopped. A query that fails is BLOCKED (exit 2) and NOTHING is removed,
+# dropped or deleted.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -22,7 +42,7 @@ if [ -z "$RUN_ID" ]; then
   exit 2
 fi
 
-STATE="/tmp/p001c-${RUN_ID}"
+STATE="${OPSWEAVE_TEARDOWN_STATE_DIR:-/tmp/p001c-${RUN_ID}}"
 if [ ! -f "$STATE/run.json" ]; then
   echo "BLOCKED: no run record at $STATE/run.json; refusing to guess what $RUN_ID owns" >&2
   exit 1
@@ -45,6 +65,53 @@ if [ -z "$INSTALLATION_ID" ]; then
   echo "BLOCKED: $STATE/run.json records no installationId; it cannot prove which containers it owns" >&2
   exit 1
 fi
+
+# --- Docker is a precondition, not a best-effort query ----------------------
+#
+# Checked ONCE, up front, with the reason preserved. `docker info` is the
+# cheapest call that proves the daemon answers; if it fails, the run stops with
+# every container still running and every file still on disk, so a human (or a
+# later automated attempt) can recover ownership from run.json.
+if ! docker_err="$(docker info --format '{{.ServerVersion}}' 2>&1 >/dev/null)"; then
+  echo "BLOCKED: the Docker daemon is not reachable, so this script cannot prove" >&2
+  echo "         which containers run $RUN_ID owns. Nothing was stopped, removed," >&2
+  echo "         dropped or deleted: $STATE and database $DB are intact so ownership" >&2
+  echo "         can still be recovered." >&2
+  echo "         daemon said: ${docker_err:-<no output>}" >&2
+  exit 2
+fi
+
+# --- container inventory, taken BEFORE anything is touched ------------------
+#
+# Every id this run owns, plus a full list of every container on the daemon so
+# the post-check can prove nothing else moved. Snapshotting first is what makes
+# "I removed exactly mine" a checkable claim rather than an assertion.
+snapshot_containers() {
+  # Prints one `id<TAB>installation-id<TAB>node-id` line per container.
+  docker ps -a --no-trunc \
+    --format '{{.ID}}\t{{.Label "opsweave.installation-id"}}\t{{.Label "opsweave.node-id"}}'
+}
+
+if ! BEFORE_ALL="$(snapshot_containers)"; then
+  echo "BLOCKED: could not list containers. Nothing was changed." >&2
+  exit 2
+fi
+
+OWNED_IDS=""
+for nid in $NODE_IDS; do
+  # Node id alone is not ownership - see p001c_up.sh. The installation id is the
+  # same predicate the product itself uses, so this removes exactly what the
+  # node would remove, no more.
+  if ! ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
+      --filter "label=opsweave.installation-id=${INSTALLATION_ID}" 2>&1)"; then
+    echo "BLOCKED: could not query containers of node $nid. Nothing was changed." >&2
+    echo "         daemon said: ${ids:-<no output>}" >&2
+    exit 2
+  fi
+  OWNED_IDS="$OWNED_IDS $ids"
+done
+# De-duplicated and whitespace-normalised, so the count below is ids, not lines.
+OWNED_IDS="$(printf '%s\n' $OWNED_IDS | sort -u | tr '\n' ' ')"
 
 # --- process identity -------------------------------------------------------
 # See p001c_up.sh: a pidfile is not ownership. Same routine, duplicated here so
@@ -107,22 +174,56 @@ for pid in $stopped_pids; do
 done
 echo "   processes stopped"
 
+# --- removal, by immutable id ----------------------------------------------
 removed=0
-for nid in $NODE_IDS; do
-  # Node id alone is not ownership - see p001c_up.sh. The installation id is the
-  # same predicate the product itself uses, so this removes exactly what the
-  # node would remove, no more.
-  ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
-    --filter "label=opsweave.installation-id=${INSTALLATION_ID}" 2>/dev/null || true)"
-  [ -n "$ids" ] || continue
-  # shellcheck disable=SC2086
-  echo "$ids" | xargs -r docker rm -f >/dev/null 2>&1 || {
-    echo "BLOCKED: could not remove containers of node $nid; not widening the sweep" >&2
+for id in $OWNED_IDS; do
+  if ! out="$(docker rm -f "$id" 2>&1 >/dev/null)"; then
+    echo "BLOCKED: could not remove container $id; not widening the sweep" >&2
+    echo "         daemon said: ${out:-<no output>}" >&2
+    echo "         $STATE and database $DB were left intact." >&2
     exit 1
-  }
-  removed=$((removed + $(echo "$ids" | wc -l | tr -d ' ')))
+  fi
+  removed=$((removed + 1))
 done
 echo "   removed $removed container(s) belonging to this run"
+
+# --- post-check: the removal really happened, and nothing else moved --------
+#
+# Three separate claims, each checked against a fresh daemon query:
+#   1. every id we set out to remove is gone;
+#   2. every OTHER container that existed before still exists;
+#   3. the daemon still answers (a removal that coincided with the daemon going
+#      away must not read as success).
+if ! AFTER_ALL="$(snapshot_containers)"; then
+  echo "BLOCKED: containers were removed but the daemon stopped answering, so their" >&2
+  echo "         absence could not be verified. Check by hand: $OWNED_IDS" >&2
+  exit 2
+fi
+
+after_ids="$(printf '%s\n' "$AFTER_ALL" | cut -f1)"
+survivors=""
+for id in $OWNED_IDS; do
+  if printf '%s\n' "$after_ids" | grep -qxF "$id"; then survivors="$survivors $id"; fi
+done
+if [ -n "$survivors" ]; then
+  echo "BLOCKED: these containers still exist after removal was attempted:$survivors" >&2
+  exit 1
+fi
+
+before_ids="$(printf '%s\n' "$BEFORE_ALL" | cut -f1 | sort -u)"
+foreign_before="$(printf '%s\n' "$before_ids" | grep -vxF -f <(printf '%s\n' $OWNED_IDS) || true)"
+missing_foreign=""
+for id in $foreign_before; do
+  [ -n "$id" ] || continue
+  if ! printf '%s\n' "$after_ids" | grep -qxF "$id"; then missing_foreign="$missing_foreign $id"; fi
+done
+if [ -n "$missing_foreign" ]; then
+  echo "FAIL: containers this run did not own disappeared during teardown:$missing_foreign" >&2
+  echo "      That is the sweep this script exists to avoid. Investigate before" >&2
+  echo "      trusting any other cleanup result." >&2
+  exit 1
+fi
+echo "   verified: $removed owned container(s) gone, all other containers untouched"
 
 if [ "$PURGE" = "1" ]; then
   # `--force` is required, and its absence made every purge BLOCKED: killing the
@@ -131,8 +232,14 @@ if [ "$PURGE" = "1" ]; then
   # "is being accessed by other users". `demo_up.sh` already uses --force for the
   # same reason. This only terminates sessions on THIS run's database, whose name
   # is derived from the run id.
-  dropdb --if-exists --force "$DB" 2>/dev/null || {
-    echo "BLOCKED: could not drop $DB" >&2; exit 1; }
+  #
+  # It runs only after the post-check above passed: deleting the database before
+  # proving the containers are gone would destroy the ability to find them.
+  if ! db_err="$(dropdb --if-exists --force "$DB" 2>&1 >/dev/null)"; then
+    echo "BLOCKED: could not drop $DB; state directory $STATE kept for inspection" >&2
+    echo "         psql said: ${db_err:-<no output>}" >&2
+    exit 1
+  fi
   rm -rf "$STATE"
   echo "   purged $DB and $STATE"
 else
