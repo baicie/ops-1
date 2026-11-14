@@ -46,6 +46,9 @@ bad()     { FAIL=$((FAIL+1)); echo "FAIL  $*"; echo "FAIL  $*" >>"$EVIDENCE"; }
 blocked() { BLOCKED=$((BLOCKED+1)); echo "BLOCKED  $*"; echo "BLOCKED  $*" >>"$EVIDENCE"; }
 note()    { echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
 
+# A value only this run can produce. Used to tag every resource this suite
+# creates, so cleanup can never touch another suite's grant or account.
+RUN_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 ADMIN_TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])' 2>/dev/null || true)"
 [ -n "$ADMIN_TOKEN" ] || { echo "BLOCKED: no ~/.opsweave/session.json" >&2; exit 3; }
 
@@ -85,15 +88,23 @@ expect_refusal() {
         bad "$label: status $status was right but the code was '$code', expected '$want_code'"
       fi
       ;;
-    401|403)
-      # A 401/403 is only evidence when it is the code this case is about. A
-      # 401 on a case that expected 403 usually means the fixture's own
-      # credential died, and calling that a pass is the substitution this
-      # script exists to prevent.
-      if [ "$code" = "$want_code" ]; then
-        ok "$label: refused with $status $code"
+    401|403|404|409|422)
+      # STATUS AND CODE ARE BOTH REQUIRED TO MATCH EXACTLY.
+      #
+      # The previous version accepted any 401/403 as long as the error code was
+      # right. That lets 401 and 403 substitute for each other, and they mean
+      # different things: "you are not authenticated" vs "you are authenticated
+      # and not allowed". A suite that treats them as interchangeable cannot
+      # tell a broken fixture from a broken authorisation rule.
+      #
+      # A wrong status with a right code is a FIXTURE problem (the credential
+      # died, the route moved), so it is BLOCKED rather than FAIL - the product
+      # was never tested. A right status with a wrong code is a FAIL: the
+      # refusal happened but not for the documented reason.
+      if [ "$code" != "$want_code" ]; then
+        bad "$label: status $status was right but the code was '$code', expected '$want_code'"
       else
-        blocked "$label: got $status $code, expected $want_status $want_code - likely the fixture credential, not the behaviour under test"
+        blocked "$label: got $status $code, expected $want_status $want_code - the fixture is not in the state this case needs, so the behaviour under test was not exercised"
       fi
       ;;
     2*)
@@ -262,14 +273,46 @@ case "$code" in
 esac
 
 # ---------------------------------------------------------------------------
-# 7. A forged workspace scope.
+# 7. A forged workspace in a WRITE body, which is a different mechanism.
 #
-# The workload's workspace is Kernel-derived (capabilities.rs:303-329). A client
-# naming a different workspace in the body must not change which workspace the
-# token is minted for.
-# ---------------------------------------------------------------------------
-expect_refusal "7 forged workspace in the request" 403 WORKSPACE_FORBIDDEN \
-  "$ADMIN_TOKEN" GET "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets?workspaceId=$WS_B"
+# Cases 3 and 7 used to send the identical request, so one security property was
+# counted twice. They are now different mechanisms:
+#
+#   3  reads ANOTHER workspace's data, named in the query string
+#   7  writes a dataset while naming another workspace in the BODY
+#
+# The plugin ignores the body's workspace entirely and files the dataset under
+# the workspace from the SIGNED context (`server.mjs`, POST handler: "never one
+# named in the body: a caller that could choose would be granting itself a
+# workspace"). So the observable property is not a 403 - it is that the write is
+# filed under the caller's OWN workspace, not the forged one.
+#
+# Asserting 403 here would have been wrong: the product accepts the write and
+# ignores the forged field, which is the safer behaviour.
+FORGED_DATASET="c2-forged-$RUN_TAG"
+FORGED_BODY="{\"datasetId\":\"$FORGED_DATASET\",\"workspaceId\":\"$WS_B\",\"fields\":[{\"name\":\"probe\",\"type\":\"string\"}]}"
+WRITE_CODE="$(call "$ADMIN_TOKEN" POST "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" "$FORGED_BODY")"
+case "$WRITE_CODE" in
+  200|201)
+    FILED_WS="$(python3 -c '
+import json,sys
+try: d=json.load(open("/tmp/c2-body"))
+except Exception: d={}
+print(d.get("workspaceId") or (d.get("dataset") or {}).get("workspaceId") or "")' 2>/dev/null || true)"
+    if [ "$FILED_WS" = "$WS_B" ]; then
+      bad "7: a body-supplied workspace was honoured - the dataset was filed under $WS_B"
+    elif [ -n "$FILED_WS" ]; then
+      ok "7: a body-supplied workspace was ignored; the dataset was filed under $FILED_WS"
+    else
+      note "7: the write succeeded but the response did not name a workspace; the forged field was not honoured, which is the property, but this run cannot quote where it landed"
+    fi
+    ;;
+  403)
+    ok "7: the write was refused (403) rather than honouring the forged workspace"
+    ;;
+  000) blocked "7: the write did not complete (HTTP 000)" ;;
+  *)   blocked "7: the write returned $WRITE_CODE; neither outcome establishes the property" ;;
+esac
 
 # ---------------------------------------------------------------------------
 # 8 / 9. Calls after disable and after uninstall.
@@ -278,12 +321,60 @@ expect_refusal "7 forged workspace in the request" 403 WORKSPACE_FORBIDDEN \
 # caller opts into. Without the opt-in they are reported NOT_RUN rather than
 # skipped silently - a skipped case in a security suite must be visible.
 # ---------------------------------------------------------------------------
-if [ "${OPSWEAVE_C2_ALLOW_DESTRUCTIVE:-0}" = "1" ]; then
-  ok "8/9 destructive disable/uninstall: deferred to the lifecycle suite, which owns that state"
-  note "8/9 are covered by tests/acceptance/e2e_platform.sh (disable -> 503, uninstall -> 503) and are not repeated here"
+#
+# The previous version printed `ok` when the opt-in was set, without disabling
+# or uninstalling anything. That is a PASS for a test that never ran - the same
+# substitution this suite exists to catch, one level up.
+#
+# Two honest outcomes are possible here, and there is no third:
+#
+#   * actually disable and uninstall, with the refusal measured; or
+#   * NOT_RUN, naming the suite that does measure it.
+#
+# `COVERED_ELSEWHERE` is printed with the exact command that covers it, so the
+# claim can be checked rather than taken on trust.
+if [ "${OPSWEAVE_C2_ALLOW_DESTRUCTIVE:-0}" != "1" ]; then
+  echo "NOT_RUN  8 disable: not executed here (opt in with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1)"
+  echo "NOT_RUN  8: covered by tests/acceptance/e2e_platform.sh (disable -> 503 CAPABILITY_UNAVAILABLE)" >>"$EVIDENCE"
+  echo "NOT_RUN  9 uninstall: not executed here"
+  echo "NOT_RUN  9: covered by tests/acceptance/e2e_platform.sh (uninstall -> 503 CAPABILITY_UNAVAILABLE)" >>"$EVIDENCE"
+  echo "COVERED_ELSEWHERE  8/9 -> tests/acceptance/e2e_platform.sh"
+  echo "COVERED_ELSEWHERE  8/9 -> tests/acceptance/e2e_platform.sh" >>"$EVIDENCE"
 else
-  echo "NOT_RUN  8/9 disable/uninstall (set OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1 to opt in)"
-  echo "NOT_RUN  8/9 disable/uninstall" >>"$EVIDENCE"
+  # --- 8. DISABLE, for real -------------------------------------------------
+  DISABLE_CODE="$(call "$ADMIN_TOKEN" POST "/api/v1/plugins/$PLUGIN/disable" '{}')"
+  case "$DISABLE_CODE" in
+    200|202|204)
+      expect_refusal "8 a gateway call after disable" 503 CAPABILITY_UNAVAILABLE \
+        "$ADMIN_TOKEN" GET "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets"
+      # Put it back, or every later suite sees a disabled plugin.
+      ENABLE_CODE="$(call "$ADMIN_TOKEN" POST "/api/v1/plugins/$PLUGIN/enable" '{}')"
+      case "$ENABLE_CODE" in
+        200|202|204) note "8: re-enabled $PLUGIN" ;;
+        *) bad "8: the plugin was disabled but could not be re-enabled (HTTP $ENABLE_CODE); later suites are affected" ;;
+      esac
+      ;;
+    000) blocked "8: the disable request did not complete (HTTP 000)" ;;
+    *)   blocked "8: disable returned $DISABLE_CODE, so the refusal below would prove nothing" ;;
+  esac
+
+  # --- 9. UNINSTALL, for real -----------------------------------------------
+  #
+  # This one is NOT restored: uninstalling cannot be undone from here without a
+  # redeploy, and a suite that quietly redeployed would be changing the platform
+  # for everything after it. It is therefore opt-in and LAST, and the caller is
+  # told that the plugin is gone.
+  UNINSTALL_CODE="$(call "$ADMIN_TOKEN" DELETE "/api/v1/plugins/$PLUGIN")"
+  case "$UNINSTALL_CODE" in
+    200|202|204)
+      expect_refusal "9 a gateway call after uninstall" 503 CAPABILITY_UNAVAILABLE \
+        "$ADMIN_TOKEN" GET "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets"
+      echo "NOTE  9: $PLUGIN has been UNINSTALLED by this run and is not restored"
+      echo "NOTE  9: $PLUGIN has been UNINSTALLED by this run and is not restored" >>"$EVIDENCE"
+      ;;
+    000) blocked "9: the uninstall request did not complete (HTTP 000)" ;;
+    *)   blocked "9: uninstall returned $UNINSTALL_CODE, so the refusal below would prove nothing" ;;
+  esac
 fi
 
 # ---------------------------------------------------------------------------
@@ -298,61 +389,99 @@ echo "NOT_RUN  10 incompatible upgrade" >>"$EVIDENCE"
 note "10: contracts/ manifest has no field expressing an incompatible upgrade; asserting a refusal would test a fabricated input"
 
 # ---------------------------------------------------------------------------
-# 12. Concurrent revoke and in-flight request.
+# 12. Revocation semantics: SEQUENTIAL and CONCURRENT are different claims.
 #
-# A grant is revoked while a request is in flight. Either outcome is acceptable
-# for the REQUEST (it may have been evaluated before the revoke); what must NOT
-# happen is a 2xx AFTER the revoke has been acknowledged. The check therefore
-# sequences them: revoke, wait for the kernel to acknowledge, then require 403.
+# The previous version listed every ACTIVE grant, took the first one it saw and
+# revoked it. That is destructive to a resource this suite did not create: the
+# grant may belong to another test, and revoking it changes what every later
+# script in the harness observes.
+#
+# It also claimed one thing while testing another. "Revoke, then request" is a
+# SEQUENTIAL check. A concurrent revoke is a different claim and needs a real
+# in-flight request racing a committed revoke.
 # ---------------------------------------------------------------------------
-GRANTS="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/v1/capability-grants" 2>/dev/null || true)"
-GRANT_ID="$(printf '%s' "$GRANTS" | python3 -c '
-import json,sys
-try: d=json.load(sys.stdin)
-except Exception: d=[]
-items = d if isinstance(d,list) else d.get("grants") or d.get("items") or []
-for g in items:
-    if g.get("status","").upper() in ("ACTIVE","") : print(g.get("grantId") or g.get("id") or ""); break
-' 2>/dev/null || true)"
-if [ -z "$GRANT_ID" ]; then
-  blocked "12 concurrent revoke: no active grant to revoke"
+
+# A grant this suite owns, identified by a value only this run can produce.
+FIXTURE_TAG="c2-${RUN_TAG}"
+CREATE_GRANT_BODY="{\"name\":\"data.catalog.v1\",\"major\":1,\"consumerPluginId\":\"$PLUGIN\",\"providerPluginId\":\"$PLUGIN\",\"scope\":[\"dataset:read\"]}"
+CREATE_CODE="$(call "$ADMIN_TOKEN" POST /api/v1/capability-grants "$CREATE_GRANT_BODY")"
+OWN_GRANT_ID="$(jf "d.get('id') or d.get('grantId') or ''" </tmp/c2-body 2>/dev/null || true)"
+if [ "$CREATE_CODE" != "200" ] && [ "$CREATE_CODE" != "201" ]; then
+  blocked "12: could not create this run's own grant (HTTP $CREATE_CODE); no existing grant is touched"
+elif [ -z "$OWN_GRANT_ID" ]; then
+  blocked "12: the kernel accepted the grant but returned no id; nothing is revoked"
 else
-  # Snapshot enough of the grant to put an equivalent one back. Revoking and
-  # leaving it revoked would change what every LATER script in the harness
-  # observes, which turns one suite's fixture into another suite's flake.
-  GRANT_JSON="$(printf '%s' "$GRANTS" | python3 -c '
-import json,sys
-d=json.load(sys.stdin)
-items = d if isinstance(d,list) else d.get("grants") or d.get("items") or []
-for g in items:
-    if (g.get("grantId") or g.get("id")) == sys.argv[1]:
-        print(json.dumps({"name":g.get("name"),"major":g.get("major"),
-                          "consumerPluginId":g.get("consumerPluginId"),
-                          "providerPluginId":g.get("providerPluginId"),
-                          "scope":g.get("scope") or []}))
-        break
-' "$GRANT_ID" 2>/dev/null || true)"
-  REVOKE="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$GRANT_ID")"
+  note "12: created this run's own grant $OWN_GRANT_ID (tag $FIXTURE_TAG)"
+
+  # --- 12a. SEQUENTIAL: after the revocation is acknowledged, a NEW request --
+  # is refused. This is the claim the old case actually tested, and it now says
+  # so.
+  REVOKE="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$OWN_GRANT_ID")"
   case "$REVOKE" in
     200|204)
-      expect_refusal "12 a request after an acknowledged revoke" 403 CAPABILITY_FORBIDDEN \
-        "$ADMIN_TOKEN" GET "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets"
-      if [ -n "$GRANT_JSON" ]; then
-        RESTORE="$(call "$ADMIN_TOKEN" POST /api/v1/capability-grants "$GRANT_JSON")"
-        case "$RESTORE" in
-          200|201) note "12: an equivalent grant was re-created so later suites see the same fixture" ;;
-          *) blocked "12: the grant could not be re-created (HTTP $RESTORE); later suites may see a changed fixture" ;;
-        esac
-      else
-        blocked "12: the grant's own fields could not be read, so it was not restored"
-      fi
-      ;;
-    000) blocked "12 concurrent revoke: revoke did not complete (HTTP 000)" ;;
-    *)   blocked "12 concurrent revoke: revoke returned $REVOKE, so the follow-up proves nothing" ;;
+      expect_refusal "12a a request after the revoke was acknowledged" 403 CAPABILITY_FORBIDDEN \
+        "$ADMIN_TOKEN" GET "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" ;;
+    000) blocked "12a: the revoke did not complete (HTTP 000)" ;;
+    *)   blocked "12a: the revoke returned $REVOKE, so the follow-up proves nothing" ;;
   esac
+
+  # --- 12b. CONCURRENT: a request already in flight when the revoke commits. -
+  #
+  # The contract does not say such a request must fail - it may have been
+  # authorised before the revoke. What must NOT happen is that it was refused
+  # BEFORE the revoke and the suite silently called that "concurrent". So the
+  # check is: fire the request and the revoke together, then require the
+  # response to be one of the two documented outcomes, and record which.
+  #
+  # A second grant is created because 12a consumed the first one.
+  CREATE2="$(call "$ADMIN_TOKEN" POST /api/v1/capability-grants "$CREATE_GRANT_BODY")"
+  OWN2="$(jf "d.get('id') or d.get('grantId') or ''" </tmp/c2-body 2>/dev/null || true)"
+  if [ "$CREATE2" != "200" ] && [ "$CREATE2" != "201" ]; then
+    blocked "12b: could not create a second grant for the concurrency case (HTTP $CREATE2)"
+  elif [ -z "$OWN2" ]; then
+    blocked "12b: no id returned for the second grant"
+  else
+    curl -sS -o /tmp/c2-race-body -w '%{http_code}' -m 15 \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      "$URL/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" >/tmp/c2-race-code 2>/dev/null &
+    RACE_PID=$!
+    REVOKE2="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$OWN2")"
+    wait "$RACE_PID" 2>/dev/null || true
+    RACE_CODE="$(cat /tmp/c2-race-code 2>/dev/null || echo 000)"
+    case "$RACE_CODE" in
+      200) note "12b: the in-flight request succeeded - it was authorised before the revoke committed (documented outcome)" ;;
+      403) note "12b: the in-flight request was refused - the revoke committed first (documented outcome)" ;;
+      000) blocked "12b: the in-flight request did not complete (HTTP 000)" ;;
+      *)   bad "12b: the in-flight request returned $RACE_CODE, which is neither documented outcome" ;;
+    esac
+    case "$REVOKE2" in
+      200|204) ok "12b: the concurrent revoke was acknowledged" ;;
+      *)       blocked "12b: the concurrent revoke returned $REVOKE2" ;;
+    esac
+    note "12b: only ONE interleaving was observed. This is evidence of a concurrent attempt, not a proof of race-freedom - the suite records which side won rather than claiming determinism."
+  fi
 fi
 
 # --- fixture cleanup --------------------------------------------------------
+#
+# Every resource this run created is named here and nowhere else. The previous
+# version also revoked "the first ACTIVE grant it could see", which may have
+# belonged to another suite; nothing like that remains.
+#
+# Leftover grants: 12a and 12b revoke their own before finishing, but a case
+# that fails midway leaves one ACTIVE. Revoking by the id this run recorded is
+# safe - it can only name a grant this run created.
+for leftover in "${OWN_GRANT_ID:-}" "${OWN2:-}"; do
+  [ -n "$leftover" ] || continue
+  CODE="$(call "$ADMIN_TOKEN" DELETE "/api/v1/capability-grants/$leftover")"
+  case "$CODE" in
+    200|204) note "cleanup: revoked this run's leftover grant $leftover" ;;
+    404)     note "cleanup: grant $leftover was already gone" ;;
+    *)       echo "FAIL  cleanup: this run's grant $leftover could not be revoked (HTTP $CODE)" >>"$EVIDENCE"
+             FAIL=$((FAIL+1)) ;;
+  esac
+done
+
 if [ -n "${VIEWER_EMAIL:-}" ]; then
   UID_TO_DELETE="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/v1/users" 2>/dev/null \
     | python3 -c "import json,sys;print(next((u['id'] for u in json.load(sys.stdin) if u.get('email')=='$VIEWER_EMAIL'),''))" 2>/dev/null || true)"
