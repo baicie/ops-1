@@ -257,8 +257,19 @@ PY
     # Both filters. The node id alone is not ownership: it survives a database
     # restore or a copied state directory, so an unrelated install can share it.
     # The run label is set only by this run's nodes.
-    ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
-      --filter "label=opsweave.test-run=${RUN_ID}" 2>/dev/null || true)"
+    #
+    # The query's failure is NOT collapsed into "no leftovers". `2>/dev/null ||
+    # true` used to turn an unreachable daemon into an empty list, which then read
+    # as "nothing to remove" - so the run started new nodes on top of the old
+    # ones' containers and failed later with a port or name collision that looked
+    # like a product defect. A daemon that cannot answer is a BLOCKED start.
+    if ! ids="$(docker ps -aq --filter "label=opsweave.node-id=${nid}" \
+        --filter "label=opsweave.test-run=${RUN_ID}" 2>&1)"; then
+      echo "BLOCKED: could not query leftovers of node $nid; the Docker daemon did not" >&2
+      echo "         answer. Refusing to start on top of containers this run cannot see." >&2
+      echo "         daemon said: ${ids:-<no output>}" >&2
+      exit 3
+    fi
     if [ -n "$ids" ]; then
       echo "== remove leftover containers of previous node $nid"
       # shellcheck disable=SC2086

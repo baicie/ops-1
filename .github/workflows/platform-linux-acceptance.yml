@@ -195,6 +195,18 @@ jobs:
           set -eu
           cargo test --locked -p opsweave-node --test migration_identity --test migration_durability -- --test-threads=1 --nocapture
 
+      # P001: teardown must not report success for cleanup it did not perform.
+      #
+      # Most cases drive `p001c_teardown.sh` through a stateful `docker` stub, so
+      # they run without a daemon at all - which is the point, because the defect
+      # they cover IS the daemon being unreachable. The last case needs a real
+      # daemon and reports NOT_RUN here if there is none; this job has one, so it
+      # also confirms the stub did not invent the contract.
+      - name: Teardown never reports cleanup it did not perform
+        run: |
+          set -eu
+          tests/ci/p001c_teardown_negatives.sh
+
       - name: Node reaches the docker socket as an unprivileged user
         id: socket
         run: |
