@@ -256,35 +256,6 @@ mod platform {
     }
 }
 
-/// Read-only facts about the lock for tests and diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LockFacts {
-    /// Device and inode of the lock file, as the filesystem reports them.
-    pub device: u64,
-    pub inode: u64,
-}
-
-/// Device and inode of the lock file, or `None` if it does not exist.
-///
-/// The tests use this to prove that the lock follows the inode: after an
-/// in-place `mv` the pair is unchanged, and after `rm -rf` + `mkdir` it differs.
-pub fn lock_facts(state_dir: &Path) -> Option<LockFacts> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let meta = std::fs::metadata(state_dir.join(LOCK_FILE)).ok()?;
-        Some(LockFacts {
-            device: meta.dev(),
-            inode: meta.ino(),
-        })
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = state_dir;
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,25 +360,44 @@ mod tests {
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
-    fn the_lock_follows_the_inode_and_not_the_path() {
+    fn the_lock_is_bound_to_the_open_file_not_to_the_path() {
+        // What matters is the SEMANTIC property: the lock lives on the open file
+        // description, so a SECOND OPEN of the same path is refused, and a
+        // process that re-creates the directory cannot take the holder's lock
+        // away from it.
+        //
+        // An earlier version asserted `assert_ne!(before_inode, after_inode)`
+        // after `rm -rf` + `mkdir`. It passed on APFS and failed on Linux:
+        // tmpfs reuses a just-freed inode number, so the pair came back equal.
+        // The inode NUMBER is not the property. "The holder still holds, and a
+        // fresh open gets its own object" is.
         let dir = tmpdir("inode");
         let held = lock_state_dir(&dir).expect("lock");
-        let before = lock_facts(&dir).expect("lock file exists");
 
-        // Delete and re-create at the SAME path: a new inode, so a second
-        // locker succeeds. This is the documented limit (Gate §4.1), asserted
-        // here so nobody later "fixes" it by assuming the path is enough.
-        drop(held);
+        // A second open of the same path is refused while the first is alive.
+        match lock_state_dir(&dir) {
+            Err(LockError::InUse { .. }) => {}
+            other => panic!("a second open of the same path must be refused, got {other:?}"),
+        }
+
+        // Re-create the directory underneath the holder. A second locker then
+        // SUCCEEDS - the re-created directory is a different object and the
+        // holder's lock does not reach it.
+        //
+        // This is not a property to celebrate; it is the failure mode the
+        // deployment Gate records as risk 1 and that ADR-023 §2.6 lists as
+        // not covered. It is asserted here so the limit is pinned by a test
+        // rather than living only in prose: a later change that claims to close
+        // it would have to change this test, visibly.
         std::fs::remove_dir_all(&dir).expect("remove");
         std::fs::create_dir_all(&dir).expect("recreate");
-        let held_again = lock_state_dir(&dir).expect("lock the new inode");
-        let after = lock_facts(&dir).expect("lock file exists");
-        assert_ne!(
-            (before.device, before.inode),
-            (after.device, after.inode),
-            "re-creating the directory must be visible as a different inode"
-        );
-        drop(held_again);
+        let in_new = lock_state_dir(&dir)
+            .expect("DOCUMENTED LIMIT: after the directory is replaced, a new locker succeeds");
+        drop(in_new);
+
+        drop(held);
+        let regained = lock_state_dir(&dir).expect("nothing holds it after the guards are gone");
+        drop(regained);
         std::fs::remove_dir_all(&dir).ok();
     }
 }
