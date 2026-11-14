@@ -25,6 +25,37 @@ export OPSWEAVE_DATA_INTEGRATION_SELECTOR="zone=node-b"
 # the dedicated-runner case, where the containers really are leftovers of an
 # earlier run of this same script.
 STATE_CI="$ROOT/data-ci"
+
+# --- per-step timing and the overall budget ---------------------------------
+#
+# This script runs 40 acceptance scripts in one CI step. Before this, the step
+# list could only report `data_foundation_ci.sh: in_progress`, so the eight runs
+# that ended with "The hosted runner lost communication with the server" said
+# nothing about WHERE the run stopped. The green baseline spends 16 minutes in
+# this step and the failing runs spent 54, so the useful signal is per-step
+# duration, not a verdict.
+#
+# Every step now goes through `tests/ci/run_step.sh`, which prints
+#
+#   STEP result=PASS|FAIL|TIMEOUT name=… start=… end=… secs=… pid=… rc=… timeout=…
+#
+# and bounds the step's own process tree. On top of that, WALL_BUDGET below is
+# the whole-script ceiling: when it is exceeded the run stops with a TIMEOUT
+# verdict instead of continuing to the runner's 60-minute limit, so the failure
+# arrives with the step log intact.
+WALL_BUDGET="${OPSWEAVE_CI_WALL_BUDGET:-1500}"   # 25 min; green runs use ~16
+STARTED_AT=$SECONDS
+budget_check() {
+  local now=$(( SECONDS - STARTED_AT ))
+  if [ "$now" -ge "$WALL_BUDGET" ]; then
+    echo "TIMEOUT: the harness has run ${now}s, past its ${WALL_BUDGET}s budget." >&2
+    echo "         The last STEP line above names the step that was running." >&2
+    echo "         This is a harness budget, not a product failure: raise" >&2
+    echo "         OPSWEAVE_CI_WALL_BUDGET only with a measurement to justify it." >&2
+    exit 124
+  fi
+}
+
 cleanup() {
   local code=$?
   for pid in "${PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
@@ -188,28 +219,45 @@ done
 [ "${READY:-0}" = "2" ] || { echo "nodes not ready"; exit 1; }
 
 echo "== install/activate both data plugins"
-scripts/demo_data_up.sh
+budget_check
+tests/ci/run_step.sh demo_data_up 600 -- scripts/demo_data_up.sh
 
 echo "== supervisor lifecycle (real OS processes)"
-tests/acceptance/supervisor_lifecycle.sh
+budget_check
+tests/ci/run_step.sh supervisor_lifecycle 240 -- tests/acceptance/supervisor_lifecycle.sh
 
 echo "== real OCI Golden Path"
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_foundation.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_authz.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_reliability.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/storage_migration_concurrency.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/storage_migration_parser.sh
-tests/acceptance/data_token_security.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/dynamic_catalog_pipeline.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_jobs.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/catalog_fenced_sink.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_advanced.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_node_managed.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_two_node_takeover.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/kernel_restart_takeover.sh
+budget_check
+tests/ci/run_step.sh data_foundation 240 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_foundation.sh
+budget_check
+tests/ci/run_step.sh data_authz 180 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_authz.sh
+budget_check
+tests/ci/run_step.sh data_reliability 240 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_reliability.sh
+budget_check
+tests/ci/run_step.sh storage_migration_concurrency 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/storage_migration_concurrency.sh
+budget_check
+tests/ci/run_step.sh storage_migration_parser 120 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/storage_migration_parser.sh
+budget_check
+tests/ci/run_step.sh data_token_security 120 -- tests/acceptance/data_token_security.sh
+budget_check
+tests/ci/run_step.sh dynamic_catalog_pipeline 240 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/dynamic_catalog_pipeline.sh
+budget_check
+tests/ci/run_step.sh pipeline_jobs 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_jobs.sh
+budget_check
+tests/ci/run_step.sh catalog_fenced_sink 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/catalog_fenced_sink.sh
+budget_check
+tests/ci/run_step.sh pipeline_worker 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker.sh
+budget_check
+tests/ci/run_step.sh pipeline_worker_advanced 240 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_advanced.sh
+budget_check
+tests/ci/run_step.sh pipeline_worker_node_managed 240 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_worker_node_managed.sh
+budget_check
+tests/ci/run_step.sh pipeline_two_node_takeover 240 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_two_node_takeover.sh
+budget_check
+tests/ci/run_step.sh kernel_restart_takeover 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/kernel_restart_takeover.sh
 KERNEL_PID="$(cat /tmp/data-kernel.pid)"
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_long_heartbeat.sh
+budget_check
+tests/ci/run_step.sh pipeline_long_heartbeat 240 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_long_heartbeat.sh
 # The counterfactual half runs AFTER the Node-managed supervisors are stopped.
 #
 # Its cases need THIS script's worker to be the one holding the lease, and the
@@ -253,8 +301,10 @@ for node in node-a node-b; do
   fi
 done
 sleep 3
-python3 tests/runtime/claim_concurrency.py
-python3 tests/runtime/catalog_lock_race.py
+budget_check
+tests/ci/run_step.sh claim_concurrency 180 -- python3 tests/runtime/claim_concurrency.py
+budget_check
+tests/ci/run_step.sh catalog_lock_race 180 -- python3 tests/runtime/catalog_lock_race.py
 if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   echo "== browser extension smoke and business flows"
   # A Node restart can adopt the Integration container before its workload
@@ -273,6 +323,8 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   URL="$OPSWEAVE_URL"
   TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
   AUTH=(-H "Authorization: Bearer $TOKEN")
+  # `source`, not a step: it defines load_worker for the block below. Wrapping it
+  # in run_step.sh would have run it in a subshell and defined nothing.
   source tests/acceptance/pipeline_worker_auth.sh
   load_worker node-b
   env     OPSWEAVE_WORKER_KERNEL_URL="$OPSWEAVE_URL"     OPSWEAVE_WORKER_NODE_IDENTITY="$ROOT/data-ci/node-b/node-identity.json"     OPSWEAVE_WORKER_INSTANCE_ID="$W_INSTANCE_ID"     OPSWEAVE_WORKER_NODE_GENERATION="$W_NODE_GEN"     OPSWEAVE_WORKER_SOURCE_ALLOWLIST="172.17.0.1,127.0.0.1"     OPSWEAVE_WORKER_BATCH_DELAY_MS=800     ./target/debug/opsweave-pipeline-worker >/tmp/ui-worker.log 2>&1 &
@@ -281,93 +333,60 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts studio.spec.ts visual-layout.spec.ts
   kill "$UI_WORKER_PID" 2>/dev/null || true
 fi
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_orphan_worker.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
-tests/acceptance/pipeline_read_api.sh
-tests/acceptance/pipeline_validation_api.sh
-tests/acceptance/pipeline_draft_api.sh
-tests/acceptance/pipeline_publish_api.sh
-python3 tests/acceptance/publish_concurrency.py "$OPSWEAVE_URL" "$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
-tests/acceptance/job_list_api.sh
-tests/acceptance/job_authorization.sh
-tests/acceptance/preview_api.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=0 OPSWEAVE_TEST_KERNEL_PID="$KERNEL_PID" tests/acceptance/data_token_refresh.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_heartbeat_ttl_takeover.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_race.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_http.sh
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/capability_multi_provider.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/source_timeout_no_sink.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_instance_generation_sigterm.sh
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_backoff_sigterm.sh
+budget_check
+tests/ci/run_step.sh pipeline_node_runtime_sigkill 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh
+budget_check
+tests/ci/run_step.sh pipeline_orphan_worker 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_orphan_worker.sh
+budget_check
+tests/ci/run_step.sh data_ssrf 120 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_ssrf.sh
+budget_check
+tests/ci/run_step.sh pipeline_read_api 120 -- tests/acceptance/pipeline_read_api.sh
+budget_check
+tests/ci/run_step.sh pipeline_validation_api 120 -- tests/acceptance/pipeline_validation_api.sh
+budget_check
+tests/ci/run_step.sh pipeline_draft_api 120 -- tests/acceptance/pipeline_draft_api.sh
+budget_check
+tests/ci/run_step.sh pipeline_publish_api 120 -- tests/acceptance/pipeline_publish_api.sh
+budget_check
+tests/ci/run_step.sh publish_concurrency 180 -- python3 tests/acceptance/publish_concurrency.py "$OPSWEAVE_URL" "$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])')"
+budget_check
+tests/ci/run_step.sh job_list_api 120 -- tests/acceptance/job_list_api.sh
+budget_check
+tests/ci/run_step.sh job_authorization 120 -- tests/acceptance/job_authorization.sh
+budget_check
+tests/ci/run_step.sh preview_api 120 -- tests/acceptance/preview_api.sh
+budget_check
+tests/ci/run_step.sh data_token_refresh 180 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json OPSWEAVE_TEST_NODE_REVOCATION=0 OPSWEAVE_TEST_KERNEL_PID="$KERNEL_PID" tests/acceptance/data_token_refresh.sh
+budget_check
+tests/ci/run_step.sh pipeline_heartbeat_ttl_takeover 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_heartbeat_ttl_takeover.sh
+budget_check
+tests/ci/run_step.sh deadline_sink_race 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_race.sh
+budget_check
+tests/ci/run_step.sh deadline_sink_http 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/deadline_sink_http.sh
+budget_check
+tests/ci/run_step.sh capability_multi_provider 240 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/capability_multi_provider.sh
+budget_check
+tests/ci/run_step.sh source_timeout_no_sink 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/source_timeout_no_sink.sh
+budget_check
+tests/ci/run_step.sh supervisor_instance_generation_sigterm 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_instance_generation_sigterm.sh
+budget_check
+tests/ci/run_step.sh supervisor_backoff_sigterm 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/supervisor_backoff_sigterm.sh
+# Node revocation is TERMINAL for the Node it revokes, so it runs after every
+# step that needs a live Node and before the negatives - which are bound to
+# node-a. Case 6 of the negatives quarantines every Node, and revocation needs
+# a READY instance to revoke, so this order is the only one that works.
+# PR #115 has the full account.
+budget_check
+tests/ci/run_step.sh data_token_revocation 180 -- OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
 
-# Node revocation is TERMINAL for the Node it revokes, and it used to run nine
-# steps too early.
-#
-# `data_token_revocation.sh` revokes the Node that hosts the data-integration
-# instance (`DELETE /api/v1/nodes/{id}`). The Kernel writes `revoked_at`, flips
-# the Node and its instances to UNREACHABLE, and nothing brings them back:
-# `kernel.nodes.name` is UNIQUE, so re-enrolling under the same name is not a
-# way out either.
-#
-# That step sat at what used to be the end of the list. PR #105 moved the
-# heartbeat negatives to the very last line and left revocation in front of
-# them, so `load_worker node-b` - which the negatives call - ran against a Node
-# whose credential had already been revoked. Measured on run 43631374366, every
-# poll for 90 s:
-#
-#     FAIL no READY plugin instance on node-b after 90 s
-#          states seen: opsweave.data-integration:UNREACHABLE ...
-#
-# and node-b's own log says why, at 19:39:40, one step earlier:
-#
-#     node credential rejected; quarantining workloads status=403
-#     body={"code":"FORBIDDEN","message":"node identity has been revoked"}
-#     node entering quarantine; stopping all managed workloads
-#
-# Every restart after that loaded `generation=5`, was rejected again, and
-# quarantined again - the Node could not come back, by design.
-#
-# The two supervisor steps had moved above revocation in the same edit, so they
-# still passed; `supervisor_backoff_sigterm.sh` was passing for the wrong reason
-# in the window where it did not - it counts `node-managed pipeline worker
-# exited` lines in a log that already had four from `supervisor_lifecycle.sh`,
-# so a Node that never started a worker would still satisfy it.
-#
-# ORDER: revocation runs after every step that needs node-b, and BEFORE the
-# negatives - not because the negatives need node-b (they are bound to node-a),
-# but because revocation itself needs a READY instance to revoke, and case 6 of
-# the negatives quarantines every Node. So the sequence is:
-#
-#     ... everything that needs a live platform ...
-#     revocation            (kills node-b; needs node-b READY to do it)
-#     heartbeat negatives   (bound to node-a; case 6 kills both nodes)
-#
-# Nothing that needs node-b may follow this line. If something does, its failure
-# reads as `no READY plugin instance on node-b`, which looks like a deployment
-# defect and is not one - that is exactly how run 43631374366 failed.
-OPSWEAVE_DATA_FIXTURE=http://172.17.0.1:18090/data-hosts.json tests/acceptance/data_token_revocation.sh
-
-# Runs LAST: it quarantines every Node by design (see its header).
-# TERMINAL FOR THE PLATFORM. Case 6 freezes the Kernel for longer than the node
-# lease (70 s vs 30 s), so every Node quarantines itself and stops heartbeating
-# permanently - `apps/node/src/runtime.rs:1154` breaks out of the heartbeat loop,
-# which is the correct safety behaviour and is not reversible.
-#
-# Measured on run 43613... (PR #105): the negatives reached `PASS=9 FAIL=0`, and
-# then `claim_concurrency.py` failed with `StopIteration` because it looks for a
-# READY instance and there is none. Ten steps follow this one and several need a
-# live node.
-#
-# So the suite runs where its side effects cannot reach anything else: last in the
-# harness, after every test that needs the platform. Moving the ten following
-# steps above it would also work and is more fragile - the next person to append a
-# step would have to remember.
-#
-# `OPSWEAVE_NEG_TERMINAL=1` is how a caller says "the platform is expendable from
-# here on". Without it the suite refuses when steps still follow, so this cannot
-# silently regress to running in the middle again.
-OPSWEAVE_NEG_EXCLUSIVE_WORKER=1 \
-OPSWEAVE_NEG_TERMINAL=1 \
-OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
+# Runs LAST: it quarantines every Node by design (see its header). Wrapped in
+# run_step so a hang is bounded like every other step.
+budget_check
+# `run_step.sh` takes leading `VAR=value` tokens and puts them through `env`, so
+# the variables go here once rather than twice. The previous resolution had them
+# on both sides of `--`, which works and reads as a mistake.
+tests/ci/run_step.sh pipeline_long_heartbeat_negatives 420 -- \
+  OPSWEAVE_NEG_EXCLUSIVE_WORKER=1 \
+  OPSWEAVE_NEG_TERMINAL=1 \
+  OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' \
   tests/acceptance/pipeline_long_heartbeat_negatives.sh
