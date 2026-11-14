@@ -1,0 +1,136 @@
+name: runtime-conformance
+
+# P001-C3: the Runtime HTTP/JSON v1 black-box conformance, for TypeScript, Go and
+# Java, as a gate.
+#
+# Why this workflow exists: `tests/contract/run_conformance.py` has asserted all
+# three languages since it was written and **no workflow has ever run it**.
+# C0 recorded exactly that (`docs/acceptance/p001/03-plugin-baseline.md:126`,
+# `:138`), and `IMPLEMENTATION_STATUS.md:42` labels its result "PASS (local)" -
+# accurate, and not a gate. A conformance suite that only runs on one machine is
+# documentation, not evidence.
+#
+# The matrix it produces is the deliverable: every language is judged by the
+# same assertions, and a language that cannot be measured is reported
+# `NOT_RUN` / `BLOCKED` rather than folded into a pass. A matrix with a hole is
+# not a comparison.
+#
+# Fails closed. A missing Docker daemon, PostgreSQL or toolchain is a red step
+# before anything runs; the launcher `tests/ci/p001c_conformance.sh` BLOCKS
+# rather than degrading to a mock.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'plugins/**'
+      - 'tests/contract/**'
+      - 'tests/ci/p001c_conformance.sh'
+      - 'contracts/**'
+      - 'apps/kernel/src/gateway.rs'
+      - 'apps/kernel/src/capabilities.rs'
+      - 'apps/node/src/runtime.rs'
+      - '.github/workflows/runtime-conformance.yml'
+
+concurrency:
+  # One per ref: a conformance run owns a Docker daemon, a PostgreSQL database
+  # and a registry, and two of them on one runner would fight over the ports.
+  group: runtime-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: opsweave
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d opsweave"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+
+      # All three reference plugins are built, so all three toolchains are
+      # required. Without them the Java bundle fails with "release version 21
+      # not supported" and the run BLOCKS at bundle build - the failure mode
+      # measured on run 43405082632 in plugin-lifecycle.
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+
+      - name: Install Maven
+        run: sudo apt-get update && sudo apt-get install -y maven
+
+      - name: Install workspace
+        run: pnpm install --frozen-lockfile
+
+      - name: Install PostgreSQL client tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      # A broken runner must fail, never skip. The launcher refuses to start
+      # without a daemon, and this step makes that refusal a red job rather than
+      # a green one that measured nothing.
+      - name: Require a working Docker daemon
+        run: |
+          set -eu
+          docker version
+          docker info >/dev/null
+          echo "docker daemon: $(docker version --format '{{.Server.Version}}')"
+
+      - name: Runtime conformance for TypeScript, Go and Java
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          OPSWEAVE_REQUIRE_TEST_DOCKER: "1"
+        run: |
+          set -o pipefail
+          tests/ci/p001c_conformance.sh 2>&1 | tee conformance.log
+
+      - name: Upload the conformance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-conformance-evidence
+          path: |
+            conformance.log
+            artifacts/p001c-conformance/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: State the result
+        if: always()
+        run: |
+          set -eu
+          {
+            echo "## Runtime conformance (P001-C3)"
+            echo
+            if [ -f conformance.log ]; then
+              echo '```'
+              tail -40 conformance.log
+              echo '```'
+            else
+              echo "No conformance.log was produced: the run did not reach the matrix."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
