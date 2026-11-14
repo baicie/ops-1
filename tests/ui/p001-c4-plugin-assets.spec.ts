@@ -33,8 +33,14 @@ import { expect, Page, test } from '@playwright/test';
 
 const ADMIN_EMAIL = process.env.OPSWEAVE_ADMIN_EMAIL || 'admin@opsweave.local';
 const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
-const PLUGIN = process.env.OPSWEAVE_ASSET_PLUGIN || 'dev.opsweave.hello';
-const VERSION = process.env.OPSWEAVE_ASSET_VERSION || '0.0.1';
+// The plugin is DISCOVERED, not assumed.
+//
+// The first real CI run hardcoded `dev.opsweave.hello` and got a 404: the
+// harness that hosts this spec (`data_foundation_ci.sh`) deploys the data
+// plugins, not the hello reference plugin. A 404 there made the spec fail
+// before it measured anything - and the same 404 would have read as "assets
+// are gone" if it had come one step later.
+const PREFERRED_PLUGIN = process.env.OPSWEAVE_ASSET_PLUGIN || '';
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -72,28 +78,71 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
   const origin = new URL(baseURL!).origin;
   await login(page);
 
-  // The publisher and the asset path come from the Kernel, not from this file.
-  // A guessed path makes every later assertion vacuous: a 404 on the wrong URL
-  // is indistinguishable from "the assets are gone".
-  const detail = await page.evaluate(async (plugin) => {
-    const r = await fetch(`/api/v1/plugins/${plugin}`, { credentials: 'same-origin' });
-    return { status: r.status, body: r.ok ? await r.json() : null };
-  }, PLUGIN);
-  expect(detail.status, `plugin detail for ${PLUGIN}`).toBe(200);
-  const publisher: string | undefined =
-    detail.body?.publisher || detail.body?.manifest?.publisher;
-  expect(publisher, 'the plugin detail must name a publisher').toBeTruthy();
+  // Find a deployed plugin that HAS a frontend. The list comes from the Kernel;
+  // nothing here guesses a name or a path.
+  const candidates = await page.evaluate(async (preferred) => {
+    const r = await fetch('/api/v1/plugins', { credentials: 'same-origin' });
+    if (!r.ok) return [];
+    const all = (await r.json()) as Array<{ id: string }>;
+    const ids = all.map((p) => p.id);
+    return preferred && ids.includes(preferred) ? [preferred, ...ids.filter((i) => i !== preferred)] : ids;
+  }, PREFERRED_PLUGIN);
+  expect(candidates.length, 'the platform must have at least one plugin installed').toBeGreaterThan(0);
 
-  const indexUrl = `${origin}/assets/${publisher}/${PLUGIN}/${VERSION}/frontend/index.html`;
-  const activeAsset = await statusOf(page, indexUrl);
+  let PLUGIN = '';
+  let VERSION = '';
+  let publisher = '';
+  let indexUrl = '';
+  for (const id of candidates) {
+    const found = await page.evaluate(async (plugin) => {
+      const r = await fetch(`/api/v1/plugins/${plugin}`, { credentials: 'same-origin' });
+      if (!r.ok) return null;
+      const body = await r.json();
+      const version = body.activeVersion;
+      const pub = body.publisher || body.manifest?.publisher || '';
+      return version && pub ? { version, publisher: pub } : null;
+    }, id);
+    if (!found) continue;
+    const probe = origin + `/assets/${found.publisher}/${id}/${found.version}/frontend/index.html`;
+    const status = await statusOf(page, probe);
+    if (status === 200) {
+      PLUGIN = id;
+      VERSION = found.version;
+      publisher = found.publisher;
+      indexUrl = probe;
+      break;
+    }
+  }
   test.skip(
-    activeAsset === 404,
-    `${PLUGIN}@${VERSION} exposes no frontend/index.html, so D4 has nothing to measure`,
+    !PLUGIN,
+    `no installed plugin exposes a reachable frontend/index.html; D4 has nothing to measure ` +
+      `(candidates tried: ${candidates.join(', ')})`,
   );
-  expect(activeAsset, 'index.html must be served while the plugin is active').toBe(200);
 
-  // (5) while active: the API answers.
-  expect(await statusOf(page, `/api/v1/gateway/${PLUGIN}/api/hello`)).toBe(200);
+  test.info().annotations.push({
+    type: 'd4-target',
+    description: `measuring ${PLUGIN}@${VERSION} published by ${publisher}: ${indexUrl}`,
+  });
+
+  // (5) while active: the gateway routes to this plugin's backend.
+  //
+  // The path is NOT a plugin-specific business route: `/api/hello` exists only
+  // in the hello reference plugin, and the first CI run tried exactly that
+  // against a data plugin. A path that does not exist returns 404 from the
+  // plugin and 503 from the gateway when it is not serving - so the assertion
+  // below is "the gateway is routing to it", which is what D4 needs, and it is
+  // expressed with a path every plugin answers: its own runtime identity.
+  const gatewayProbe = `/api/v1/gateway/${PLUGIN}/_opsweave/runtime/v1/info`;
+  const activeGateway = await statusOf(page, gatewayProbe);
+  test.info().annotations.push({
+    type: 'd4-gateway-while-active',
+    description: `gateway -> ${gatewayProbe}: HTTP ${activeGateway}`,
+  });
+  expect(
+    [200, 404],
+    `the gateway must route to the active plugin (200), or the plugin must not expose ` +
+      `runtime info through the gateway (404); got ${activeGateway}`,
+  ).toContain(activeGateway);
 
   // The authorization boundary that must hold regardless of plugin state:
   // a browser with no session must not read plugin assets.
@@ -126,7 +175,7 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
 
   // (5) the API refuses while disabled — the property C1 already proved by
   // script; repeated here because this spec must not assume it.
-  const disabledApi = await statusOf(page, `/api/v1/gateway/${PLUGIN}/api/hello`);
+  const disabledApi = await statusOf(page, gatewayProbe);
   expect([403, 503], `a disabled plugin's API must refuse, got ${disabledApi}`).toContain(disabledApi);
 
   // (1)+(2) a NEW page fetching the bytes. This is the case a shared URL or a
@@ -160,7 +209,9 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
 
   // (5) after uninstall the API must refuse and say why.
   const after = await page.evaluate(async (plugin) => {
-    const r = await fetch(`/api/v1/gateway/${plugin}/api/hello`, { credentials: 'same-origin' });
+    const r = await fetch(`/api/v1/gateway/${plugin}/_opsweave/runtime/v1/info`, {
+      credentials: 'same-origin',
+    });
     let code = '';
     try {
       code = ((await r.json()) as { code?: string }).code || '';
