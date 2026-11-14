@@ -1,6 +1,7 @@
 package dev.opsweave.hello;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -75,6 +76,27 @@ public class HelloController {
         body.put("instanceId", RuntimeState.INSTANCE_ID);
         body.put("requestId", requestId(request));
         return ResponseEntity.ok(body);
+    }
+
+    // The Runtime v1 contract names this refusal: malformed JSON is a 400 with
+    // a stable code (`contracts/openapi/plugin-runtime-v1.yaml`, `Error`), and
+    // TypeScript (`server.mjs:84`) and Go (`main.go:103`) both answer
+    // `400 INVALID_JSON`.
+    //
+    // Without this handler Spring's `HttpMessageNotReadableException` fell
+    // through to the `Exception` handler below and became
+    // `500 INTERNAL` - a contract divergence that existed only in Java and was
+    // invisible until the conformance matrix ran the same assertion against all
+    // three languages.
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, Object>> unreadableBody(
+            HttpMessageNotReadableException exception, HttpServletRequest request) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", "INVALID_JSON");
+        body.put("message", "Body must be valid JSON");
+        body.put("requestId", requestId(request));
+        body.put("retryable", false);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     @ExceptionHandler(Exception.class)
