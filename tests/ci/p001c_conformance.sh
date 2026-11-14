@@ -123,14 +123,22 @@ RUN_ID="$(tests/ci/p001c_up.sh 2>&1 | tee "$EVIDENCE/platform-up.log" | sed -n '
 [ -n "$RUN_ID" ] || blocked "p001c_up.sh did not print a RUN_ID; see $EVIDENCE/platform-up.log"
 echo "RUN_ID=$RUN_ID" >"$EVIDENCE/run.txt"
 
-# `p001c_up.sh` exports the URLs it chose; re-derive them from its own log so
-# this script and the platform cannot disagree.
-KERNEL_URL="$(grep -oE 'KERNEL_URL=http[^ ]+' "$EVIDENCE/platform-up.log" | tail -1 | cut -d= -f2-)"
-[ -n "$KERNEL_URL" ] || KERNEL_URL="http://127.0.0.1:18181"
-echo "KERNEL_URL=$KERNEL_URL" >>"$EVIDENCE/run.txt"
+# The harness chooses the port and the HOME. Both must be read from ITS output:
+# it starts the Kernel on a derived port (measured: 18621, not 18181) and writes
+# the session under `<run dir>/home`, not `~/.opsweave`. Hardcoding either
+# produced `Connection refused` on the first real run and would have done so on
+# every run - the first version of this script assumed both.
+KERNEL_URL="$(sed -n 's/^== platform up: //p' "$EVIDENCE/platform-up.log" | tail -1)"
+RUN_DIR="$(sed -n 's/^RUN_DIR=//p' "$EVIDENCE/platform-up.log" | tail -1)"
+[ -n "$KERNEL_URL" ] || blocked "p001c_up.sh did not report a platform URL; see $EVIDENCE/platform-up.log"
+[ -n "$RUN_DIR" ] || blocked "p001c_up.sh did not report a RUN_DIR; see $EVIDENCE/platform-up.log"
+{
+  echo "KERNEL_URL=$KERNEL_URL"
+  echo "RUN_DIR=$RUN_DIR"
+} >>"$EVIDENCE/run.txt"
 
 say "sign in"
-./target/debug/opsctl --url "$KERNEL_URL" login \
+HOME="$RUN_DIR/home" ./target/debug/opsctl --url "$KERNEL_URL" login \
   --email "${OPSWEAVE_ADMIN_EMAIL:-admin@opsweave.local}" \
   --password "${OPSWEAVE_ADMIN_PASSWORD:-OpsWeave!2026}" >"$EVIDENCE/login.log" 2>&1 \
   || blocked "sign-in failed; see $EVIDENCE/login.log"
@@ -143,7 +151,7 @@ say "sign in"
 deploy_and_activate() {
   local plugin="$1"
   local out
-  if out="$(./target/debug/opsctl --url "$KERNEL_URL" deploy "$plugin" 0.0.1 \
+  if out="$(HOME="$RUN_DIR/home" ./target/debug/opsctl --url "$KERNEL_URL" deploy "$plugin" 0.0.1 \
               --replicas 1 --selector role=node --wait 2>&1)"; then
     echo "$out" >>"$EVIDENCE/deploy.log"
   elif printf '%s' "$out" | grep -q 'VERSION_ALREADY_ACTIVE'; then
@@ -152,7 +160,7 @@ deploy_and_activate() {
     echo "$plugin: deploy failed: $out" >>"$EVIDENCE/deploy.log"
     return 1
   fi
-  if out="$(./target/debug/opsctl --url "$KERNEL_URL" activate "$plugin" 0.0.1 2>&1)"; then
+  if out="$(HOME="$RUN_DIR/home" ./target/debug/opsctl --url "$KERNEL_URL" activate "$plugin" 0.0.1 2>&1)"; then
     echo "$out" >>"$EVIDENCE/deploy.log"
   elif printf '%s' "$out" | grep -qi 'already active'; then
     echo "$plugin: 0.0.1 already active" >>"$EVIDENCE/deploy.log"
@@ -180,7 +188,7 @@ while read -r plugin stem; do
   say "install $plugin"
   [ -f "dist/plugins/$stem.plugin.zip" ] \
     || { echo "$plugin: bundle dist/plugins/$stem.plugin.zip is missing; the matrix will report it NOT_RUN" | tee -a "$EVIDENCE/deploy.log"; continue; }
-  ./target/debug/opsctl --url "$KERNEL_URL" install \
+  HOME="$RUN_DIR/home" ./target/debug/opsctl --url "$KERNEL_URL" install \
     "dist/plugins/$stem.plugin.zip" >>"$EVIDENCE/deploy.log" 2>&1 \
     || echo "$plugin: install failed (it may already be installed)" >>"$EVIDENCE/deploy.log"
   if deploy_and_activate "$plugin"; then
@@ -193,14 +201,14 @@ done < <(conformance_plugins)
 # --- the matrix ---------------------------------------------------------------
 say "run the conformance matrix"
 set +e
-OPSWEAVE_URL="$KERNEL_URL" python3 tests/contract/conformance_matrix.py 2>&1 | tee "$EVIDENCE/matrix.log"
+HOME="$RUN_DIR/home" OPSWEAVE_URL="$KERNEL_URL" python3 tests/contract/conformance_matrix.py 2>&1 | tee "$EVIDENCE/matrix.log"
 MATRIX_STATUS=${PIPESTATUS[0]}
 set -e
 
 # The original happy-path prober keeps its own record; its result is reported
 # beside the matrix, not merged into it.
 say "run the original happy-path prober"
-OPSWEAVE_URL="$KERNEL_URL" python3 tests/contract/run_conformance.py >"$EVIDENCE/conformance.log" 2>&1
+HOME="$RUN_DIR/home" OPSWEAVE_URL="$KERNEL_URL" python3 tests/contract/run_conformance.py >"$EVIDENCE/conformance.log" 2>&1
 BASELINE_STATUS=$?
 echo "baseline prober exit=$BASELINE_STATUS" >>"$EVIDENCE/run.txt"
 
