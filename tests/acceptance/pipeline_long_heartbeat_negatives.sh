@@ -446,7 +446,16 @@ fi
 # ===========================================================================
 # 6. The Kernel does not come back.
 #
-# LAST AMONG THE CASES THAT NEED A LIVE PLATFORM, and deliberately so. Freezing
+# LAST, FULL STOP - and the caller has to say so.
+#
+# `OPSWEAVE_NEG_TERMINAL=1` is the caller asserting that nothing after this suite
+# needs a live platform. Without it the suite REFUSES to run case 6, rather than
+# quarantining the nodes out from under whatever comes next. Measured on PR #105:
+# `claim_concurrency.py` failed with `StopIteration` looking for a READY instance,
+# because case 6 had quarantined every node two steps earlier. Ten steps followed
+# it in `data_foundation_ci.sh`.
+#
+# A test whose side effect breaks the next test is not a test of the product. Freezing
 # the Kernel for longer than the node lease (30 s, `config.rs:60`) makes each Node
 # quarantine itself and STOP heartbeating - `runtime.rs:1154` breaks out of the
 # heartbeat loop, which is the correct safety behaviour (a Node that cannot tell
@@ -461,6 +470,12 @@ fi
 # stopped longer than the lease TTL, then restores it: the job must NOT come out
 # SUCCEEDED on a lease that was never renewed.
 # ===========================================================================
+if [ "${OPSWEAVE_NEG_TERMINAL:-0}" != "1" ]; then
+  # Refusing is the point: this case is irreversible, and silently running it in
+  # the middle of a harness is how the failure lands on the next test.
+  note "6: SKIPPED - case 6 quarantines every Node and cannot be undone"
+  notrun "6 an outage past the lease TTL" "set OPSWEAVE_NEG_TERMINAL=1 only when no later step needs a live node"
+else
 echo "== 6: an outage that outlives the lease TTL =="
 JOB6="$(start_long_job 40000)" || bad "6: could not start the job"
 STATUS6="$(wait_status "$JOB6" 30)" || true
@@ -520,6 +535,7 @@ else
   else
     ok "6: an outage longer than the TTL is not reported as a healthy run (job=$JOB_STATE lease=$LEASE_STATE)"
   fi
+fi
 fi
 
 # ===========================================================================
