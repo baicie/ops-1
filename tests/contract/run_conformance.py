@@ -7,7 +7,16 @@ import sys
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:18181"
+# The base URL comes from the environment when it is set.
+#
+# It was hardcoded to 18181, which is the DEFAULT port only. `p001c_up.sh`
+# derives a port per run (measured: 18501), and this file was the one place in
+# the chain that could not be pointed anywhere else - so the conformance
+# launcher ran it against nothing and got
+# `URLError: [Errno 111] Connection refused`. That failure is not about the
+# product, and it is not a reason to change the default.
+import os
+BASE = os.environ.get("OPSWEAVE_URL", "http://127.0.0.1:18181").rstrip("/")
 session = json.loads((pathlib.Path.home() / ".opsweave/session.json").read_text())
 TOKEN = session["token"]
 
@@ -79,7 +88,22 @@ def probe(plugin_id):
                 with urllib.request.urlopen(req, timeout=5) as response:
                     return response.status, json.loads(response.read() or b"{}")
             except urllib.error.HTTPError as error:
+                # A refusal is an ANSWER: the port is reachable and the plugin
+                # said no. The assertions below then fail with that status.
                 return error.code, {}
+            except (urllib.error.URLError, TimeoutError, OSError):
+                # NOT an answer. The instance's host port was not reachable from
+                # here, so nothing about the plugin was measured.
+                #
+                # Without this clause the exception escaped and the whole script
+                # died with a traceback - which read as "conformance is broken"
+                # when the truth was "this probe could not reach that container
+                # port". Measured on run 43576493693: the matrix had already
+                # passed 14/14 against the same platform.
+                #
+                # 0 is not a valid HTTP status, so every `== 200` assertion
+                # below fails loudly instead of passing silently.
+                return 0, {}
         info_status, info = local("/_opsweave/runtime/v1/info")
         check(info_status == 200, f"{plugin_id}: runtime info 200")
         check(info.get("pluginId") == plugin_id, f"{plugin_id}: runtime identity matches")
