@@ -251,7 +251,39 @@ expect_refusal() {
 
 WS_A="00000000-0000-4000-8000-000000000001"
 WS_B="00000000-0000-4000-8000-0000000000b2"
-PLUGIN="dev.opsweave.data-catalog"
+# The plugin this suite exercises, resolved from what is actually installed.
+#
+# This was hard-coded to `dev.opsweave.data-catalog`, an id that exists nowhere
+# in this repository: `plugins/data-catalog/manifest.template.json` declares
+# `opsweave.data-catalog` and `scripts/demo_data_up.sh` deploys that id. The
+# hard-coded name made the activation probe below a 404 route,
+#
+#     curl: (22) The requested URL returned error: 404
+#     BLOCKED  could not activate dev.opsweave.data-catalog@0.0.1 (HTTP 400)
+#
+# and the 400 is the second-order effect: the 404 made `$REVISION` fall back to 0,
+# so the activation CAS carried a revision that no plugin has. Every gateway case
+# below then reported `503 ... environment/availability failure` - which was
+# honest, but the cause was this line and it took a run to see it.
+#
+# Reading the id from the deployment list rather than naming it: the suite then
+# measures whatever `demo_data_up.sh` actually installed, and a future rename
+# cannot silently turn this into a 404 again.
+PLUGIN="$(curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" "$URL/api/v1/plugins" \
+  | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+items = data if isinstance(data, list) else data.get("items", data.get("plugins", []))
+# The catalog whose id ends in data-catalog and is not the alternate provider.
+ids = sorted(p.get("id") or p.get("pluginId") or "" for p in items)
+for candidate in ids:
+    if candidate.endswith("data-catalog"):
+        print(candidate); raise SystemExit
+raise SystemExit("no data-catalog plugin is installed")
+' 2>/dev/null)" || PLUGIN=""
+if [ -z "$PLUGIN" ]; then
+  blocked "no data-catalog plugin is installed, so there is nothing to guard"
+fi
 
 # --- arm the fixture cleanup -----------------------------------------------
 #
