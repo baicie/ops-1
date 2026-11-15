@@ -162,29 +162,50 @@ export const DELEGATED_CHECKS = {
  *
  * STATES, and why "absent" is not "red":
  *
- *   found-green      a check with that name succeeded on this commit.
- *   found-red        it exists and did not succeed. A merge blocker.
- *   found-skipped    it exists and was skipped. A merge blocker for a required
- *                    suite: "skipped" is the failure this gate exists to catch.
- *   absent           no check with that name on this commit. The workflow did
- *                    not run for it. That is the hole described above, and it is
- *                    reported as a FAIL - unless the caller says the workflow is
- *                    legitimately not applicable, which nothing can establish
- *                    automatically, so it is never assumed.
+ *   verified     a check with that name succeeded on this commit.
+ *   failed       it exists and did not succeed. A merge blocker.
+ *   skipped      it exists and was skipped. A merge blocker for a required
+ *                suite: "skipped" is the failure this gate exists to catch.
+ *   pending      it exists and is still running (`queued`, `in_progress`,
+ *                `waiting`, `requested`). NOT a failure, and NOT verified.
+ *   absent       no check with that name on this commit. The workflow did not
+ *                run for it. That is the hole described above, and it is
+ *                reported as a FAIL.
  *
- * `absent` failing is the strict, fail-closed reading. It is deliberately not
- * softened: an analyzer that maps a file to a suite no filter matches is a
- * defect in one of the two tables, and the correct response is to fix the table,
- * not to let the run through.
+ * PENDING HAD TO BE SPLIT OUT, and the first version of this function got it
+ * wrong. `ci-gate` lives in `ci.yml` and cannot wait on another workflow's run
+ * (no cross-workflow `needs`), so it reads its siblings at whatever moment it
+ * starts. Measured on this branch's first run with the check-run lookup: the gate
+ * executed while `acceptance`, `full TypeScript lifecycle` and `golden-path` were
+ * still `in_progress`, folded all three into `failed`, and went red against three
+ * checks that then passed. It was the first red on a branch whose other 23 checks
+ * were green, which is precisely the "the gate is broken" noise this file exists
+ * to avoid.
+ *
+ * The property that matters is ABSENT: a workflow that never STARTED for a change
+ * the analyzer required, so no result can ever exist. A workflow that started is a
+ * different fact - it will produce a result, and the branch ruleset already
+ * enforces the two that gate merges (`linux-runtime`, `quality-faults`). So
+ * `pending` is reported, never counted as a pass, and does not fail this job.
+ *
+ * It is still not a pass: the gate prints `delegated-pending` for each, so a
+ * reader of the summary can see the decision was made before those results
+ * existed. `absent` remains a FAIL.
  *
  * @param {Record<string,string|null>} checks check name -> conclusion, from the
- *        API. A name that is not present at all is `null`.
+ *        API. A name that is not present at all is `null`; a name that is present
+ *        but unfinished carries its status (`in_progress`, `queued`, ...).
  * @param {string[]} suites delegated suites the impact analyzer required
- * @returns {{verified: string[], failed: string[], absent: string[], unverifiable: string[]}}
+ * @returns {{verified: string[], failed: string[], skipped: string[], pending:
+ *            string[], absent: string[], unverifiable: string[]}}
  */
+const UNFINISHED = new Set(['queued', 'in_progress', 'waiting', 'requested', 'pending']);
+
 export function delegatedVerdict(checks, suites) {
   const verified = [];
   const failed = [];
+  const skipped = [];
+  const pending = [];
   const absent = [];
   const unverifiable = [];
   for (const suite of suites) {
@@ -192,12 +213,20 @@ export function delegatedVerdict(checks, suites) {
     if (!names) { unverifiable.push(suite); continue; }
     const states = names.map((n) => [n, checks[n] ?? null]);
     const missing = states.filter(([, c]) => c === null).map(([n]) => n);
-    const bad = states.filter(([, c]) => c !== null && c !== 'success').map(([n, c]) => `${n}: ${c}`);
-    if (bad.length) { failed.push(`${suite} (${bad.join(', ')})`); continue; }
+    const unfinished = states.filter(([, c]) => c !== null && UNFINISHED.has(c)).map(([n, c]) => `${n}: ${c}`);
+    // A check that is skipped is red for this purpose even when a sibling is
+    // still running: the answer for that facet is already known and it is "no".
+    const skippedNow = states.filter(([, c]) => c === 'skipped').map(([n]) => n);
+    const red = states.filter(([, c]) => c !== null && c !== 'success'
+      && !UNFINISHED.has(c) && c !== 'skipped').map(([n, c]) => `${n}: ${c}`);
+
+    if (skippedNow.length) { skipped.push(`${suite} (${skippedNow.join(', ')} was skipped)`); continue; }
+    if (red.length) { failed.push(`${suite} (${red.join(', ')})`); continue; }
+    if (unfinished.length) { pending.push(`${suite} (${unfinished.join(', ')}); the result did not exist when this gate ran`); continue; }
     if (missing.length) { absent.push(`${suite} (no check named ${missing.join(', ')} on this commit; ${DELEGATED[suite]} did not run for it)`); continue; }
     verified.push(suite);
   }
-  return { verified, failed, absent, unverifiable };
+  return { verified, failed, skipped, pending, absent, unverifiable };
 }
 
 /**
@@ -553,7 +582,7 @@ const DELEGATED_SELFTEST = [
     name: 'delegated: every check present and green verifies',
     suites: ['linux-runtime', 'quality-faults'],
     checks: { 'linux-runtime': 'success', 'quality-faults': 'success' },
-    want: { verified: 2, failed: 0, absent: 0, unverifiable: 0 },
+    want: { verified: 2, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
     // The hole the API exists to close: the analyzer requires the suite, the
@@ -561,40 +590,41 @@ const DELEGATED_SELFTEST = [
     name: 'delegated: a suite with no check on this commit is ABSENT, not green',
     suites: ['data-foundation'],
     checks: {},
-    want: { verified: 0, failed: 0, absent: 1, unverifiable: 0 },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 1, unverifiable: 0 },
   },
   {
     name: 'delegated: a red check is a failure',
     suites: ['runtime-conformance'],
     checks: { conformance: 'failure' },
-    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
     // `skipped` must never read as success here either. It is the same failure
-    // mode as a skipped required job inside ci.yml.
-    name: 'delegated: a skipped check is a failure, not a pass',
+    // mode as a skipped required job inside ci.yml. It has its own bucket now, so
+    // a reader can tell "was skipped" from "ran and failed".
+    name: 'delegated: a skipped check is a failure, in its own bucket',
     suites: ['linux-runtime'],
     checks: { 'linux-runtime': 'skipped' },
-    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+    want: { verified: 0, failed: 0, skipped: 1, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
     name: 'delegated: a cancelled check is a failure',
     suites: ['g12-acceptance'],
     checks: { acceptance: 'cancelled' },
-    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
     // data-foundation is asserted by TWO jobs; one green is not the suite green.
     name: 'delegated: a suite with two producing jobs needs both',
     suites: ['data-foundation'],
     checks: { 'golden-path': 'success', 'legacy-regression': 'failure' },
-    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
     name: 'delegated: a suite with two producing jobs and only one present is absent',
     suites: ['data-foundation'],
     checks: { 'golden-path': 'success' },
-    want: { verified: 0, failed: 0, absent: 1, unverifiable: 0 },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 1, unverifiable: 0 },
   },
   {
     // browser-e2e is a step inside golden-path, not a job of its own. It maps to
@@ -603,23 +633,42 @@ const DELEGATED_SELFTEST = [
     name: 'delegated: browser-e2e is read from golden-path',
     suites: ['browser-e2e'],
     checks: { 'golden-path': 'success' },
-    want: { verified: 1, failed: 0, absent: 0, unverifiable: 0 },
+    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
     // The API reports a run that has started but not finished as its STATUS, not
-    // its conclusion. Measured live: `{"artifact-budget":"queued"}` came back for
-    // an in-flight run. `queued` and `in_progress` are not successes and must not
-    // be read as one - a missing conclusion is the absence of an answer.
-    name: 'delegated: a check still in progress is a failure, not a pass',
+    // its conclusion. Measured live in the gate's own log:
+    // {"acceptance":"in_progress","golden-path":"in_progress"}. `in_progress` and
+    // `queued` are not successes and must not be read as one - but they are not
+    // failures either. `ci-gate` cannot wait on another workflow's run, so it
+    // necessarily sees its siblings mid-flight; folding that into `failed` made it
+    // the first red on a branch whose other 23 checks were green.
+    name: 'delegated: a check still in progress is PENDING, not a failure',
     suites: ['data-foundation'],
     checks: { 'golden-path': 'in_progress', 'legacy-regression': 'queued' },
-    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 1, absent: 0, unverifiable: 0 },
+  },
+  {
+    // The dangerous mixture: one facet already answered "no" while the other is
+    // still running. The known answer wins - waiting cannot turn skipped into
+    // success.
+    name: 'delegated: a skipped facet is a failure even while a sibling runs',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'in_progress', 'legacy-regression': 'skipped' },
+    want: { verified: 0, failed: 0, skipped: 1, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // Same for a hard failure next to an unfinished one.
+    name: 'delegated: a red facet is a failure even while a sibling runs',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'in_progress', 'legacy-regression': 'failure' },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
     name: 'delegated: a suite with no check mapping is reported unverifiable',
     suites: ['a-suite-nobody-mapped'],
     checks: { anything: 'success' },
-    want: { verified: 0, failed: 0, absent: 0, unverifiable: 1 },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 1 },
   },
 ];
 
@@ -651,10 +700,12 @@ function selftest() {
     const got = delegatedVerdict(c.checks, c.suites);
     const ok = got.verified.length === c.want.verified
       && got.failed.length === c.want.failed
+      && got.skipped.length === c.want.skipped
+      && got.pending.length === c.want.pending
       && got.absent.length === c.want.absent
       && got.unverifiable.length === c.want.unverifiable;
     if (!ok) bad += 1;
-    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${JSON.stringify(c.want)}, got verified=${got.verified.length} failed=${got.failed.length} absent=${got.absent.length} unverifiable=${got.unverifiable.length}\n`);
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${JSON.stringify(c.want)}, got verified=${got.verified.length} failed=${got.failed.length} skipped=${got.skipped.length} pending=${got.pending.length} absent=${got.absent.length} unverifiable=${got.unverifiable.length}\n`);
   }
   const total = SELFTEST.length + DELEGATED_SELFTEST.length;
   process.stdout.write(bad === 0 ? `gate selftest: ${total}/${total} pass\n` : `gate selftest: ${bad} FAILED\n`);
@@ -696,7 +747,9 @@ function main(argv) {
       .map((line) => line.split(' ')[0])
       .filter((s) => s in DELEGATED_CHECKS);
     del = delegatedVerdict(checks, requiredDelegated);
-    if (del.failed.length || del.absent.length) verdict = 'FAIL';
+    // `pending` is NOT a failure: the workflow started, so a result will exist.
+    // `skipped` and `absent` are, and `absent` is the one this lookup exists for.
+    if (del.failed.length || del.skipped.length || del.absent.length) verdict = 'FAIL';
   }
 
   const out = { ...result, verdict };
@@ -706,6 +759,8 @@ function main(argv) {
   if (del) {
     for (const v of del.verified) process.stdout.write(`  delegated-verified: ${v}\n`);
     for (const f of del.failed) process.stdout.write(`  delegated-failed: ${f}\n`);
+    for (const s of del.skipped) process.stdout.write(`  delegated-skipped: ${s}\n`);
+    for (const p of del.pending) process.stdout.write(`  delegated-pending: ${p}\n`);
     for (const a of del.absent) process.stdout.write(`  delegated-absent: ${a}\n`);
     for (const u of del.unverifiable) process.stdout.write(`  delegated-unverifiable: ${u}\n`);
   }
