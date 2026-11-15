@@ -73,13 +73,15 @@ if [ -z "$CURRENT_TOKEN" ]; then
   #
   # The container's own log distinguishes them. `bad` first so the FAIL counter
   # stays right, then the detail, then exit.
-  bad "the workload token file never gained data.catalog.v1 within 60 s (keys seen: ${TOKEN_SEEN:-<nothing>})"
+  # Print the diagnosis BEFORE `bad`, because `bad` is `echo` + `exit 1`
+  # (`:10`). Written the other way round first, and it produced nothing at all on
+  # run 43680822312 - the exit ran before the echoes.
   echo "      container: $CONTAINER_ID"
   docker ps --filter "id=$CONTAINER_ID" --format '      image={{.Image}} status={{.Status}}' 2>&1 || true
   echo "      raw file bytes: $(docker exec "$CONTAINER_ID" sh -c 'wc -c </run/opsweave/capability-tokens.json' 2>&1 || echo '<unreadable>')"
   echo "      --- last 20 lines of the container log ---"
   docker logs --tail 20 "$CONTAINER_ID" 2>&1 | sed 's/^/      /' || true
-  exit 1
+  bad "the workload token file never gained data.catalog.v1 within 60 s (keys seen: ${TOKEN_SEEN:-<nothing>})"
 fi
 FRESH_RESPONSE="$(curl -fsS -X POST -H "Authorization: Bearer $CURRENT_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
 FRESH_TOKEN="$(printf '%s' "$FRESH_RESPONSE" | json "d['token']")"
