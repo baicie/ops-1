@@ -39,6 +39,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo fmt --all -- --check
       # Only a genuinely unset URL makes the fixture skip, and OPSWEAVE_REQUIRE_TEST_DATABASE=1
@@ -238,6 +252,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel
       - uses: actions/setup-node@v4
@@ -262,6 +290,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
       - run: ./target/debug/opsctl keygen --out-dir keys
@@ -326,6 +368,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -390,6 +446,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel
       - name: start the kernel (its worker loop is the system under test)
@@ -439,6 +509,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel
       - name: start the kernel (its worker loop is the system under test)
@@ -530,6 +614,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       # The console bundle is a *configuration input* to this job, not its
       # subject: the probe asserts the console shell is still served from a
       # platform-only binary. Building it here keeps the job self-contained
