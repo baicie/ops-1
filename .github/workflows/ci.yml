@@ -588,8 +588,32 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
+      - uses: dtolnay/rust-toolchain@stable
+      # See .github/workflows/ci.yml's other jobs: `shared-key` replaces the
+      # job-based key so this job reads the workspace cache instead of writing one
+      # nobody reads.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: pip install jsonschema pyyaml
+      # Build one real signed bundle BEFORE validating. Without this the validator
+      # takes its `else` branch and prints "(no dist/plugins yet; bundle checks
+      # skipped)", which is what it has done for the life of this job: the digest
+      # comparisons it contains had never executed in CI. That message reads like
+      # a benign note, which is why the gap survived an audit round.
+      #
+      # No Docker, no registry, no OCI push: `assemble_plugin.py` is pure Python,
+      # the web assets ship in the tree, and `opsctl bundle` signs with a key
+      # generated here. The real packer (`scripts/build-plugins.sh`) still runs in
+      # `plugin-lifecycle.yml`; this proves the validator's own checks run and can
+      # fail, not that the packer is correct.
+      - name: Build a bundle, so the bundle checks actually run
+        run: scripts/contract-bundle-fixture.sh
       - run: python3 tests/contract/validate_contracts.py
+      # The validator's failure paths, against the bundle just built. A check that
+      # has never been observed to fail is not known to be a check.
+      - name: The bundle checks can fail
+        run: python3 tests/contract/test_bundle_validation.py
 
   # P001-A: the platform-only boundary is a claim until something boots it.
   #

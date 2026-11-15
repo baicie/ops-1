@@ -69,9 +69,26 @@ def main() -> int:
 
     # Generated bundles: schema-check the embedded manifest, asset index and
     # recompute the three hashes without trusting the packer.
+    #
+    # WHAT THIS LAYER DOES AND DOES NOT PROVE. It proves the packer's digest
+    # FIELDS agree with the bytes it wrote. It does not prove authenticity: the
+    # Ed25519 signature over (artifactDigest, manifestDigest) is verified by
+    # `crates/bundle::verify_bundle`, in the required `rust` job, and a manifest
+    # field that is not itself digest-covered (version, publisher, `provides`) can
+    # be changed here without this section noticing - measured: changing
+    # `version` produces `ok bundle`. That is not a hole in this check, it is the
+    # boundary between integrity-of-what-was-written and proof-of-who-wrote-it.
+    # Both are required; this file is only the first.
     bundle_dir = ROOT / "dist" / "plugins"
     if bundle_dir.exists():
+        examined = 0
         for bundle_path in sorted(bundle_dir.glob("*.plugin.zip")):
+            examined += 1
+            # Count this bundle's own failures so the "ok" line cannot print for a
+            # bundle that failed. The first version printed `ok bundle X` and the
+            # mismatch on the next line, which reads as a pass in a grepped log -
+            # measured on a bundle whose asset index had been altered.
+            before = len(FAILURES)
             try:
                 with zipfile.ZipFile(bundle_path) as archive:
                     manifest = json.loads(archive.read("manifest.json"))
@@ -88,33 +105,40 @@ def main() -> int:
                         remote_digest = "sha256:" + hashlib.sha256(archive.read(manifest["frontend"]["remoteEntry"])).hexdigest()
                         if remote_digest != manifest["frontend"]["remoteEntryDigest"]:
                             FAILURES.append(f"{bundle_path.name}: remoteEntryDigest mismatch")
-                print(f"  ok bundle {bundle_path.name}")
+                if len(FAILURES) == before:
+                    print(f"  ok bundle {bundle_path.name}")
+                else:
+                    print(f"  FAILED bundle {bundle_path.name} ({len(FAILURES) - before} problem(s))")
             except Exception as exc:  # noqa: BLE001
                 FAILURES.append(f"{bundle_path.name}: {exc}")
+        # Zero bundles is not success. `dist/plugins` exists (someone made the
+        # directory) but holds nothing to examine, which is the same silent skip
+        # this branch is here to prevent.
+        if examined == 0:
+            FAILURES.append(
+                "dist/plugins exists but holds no *.plugin.zip, so no bundle was examined"
+            )
     else:
-        # Say what is NOT covered, and where it IS covered.
+        # Not an error, but not silence either.
         #
-        # This branch always runs in CI: `dist/` is gitignored (`.gitignore:3`)
-        # and the required `contracts` job checks out, installs jsonschema, and
-        # runs this file - it never builds a bundle. So the digest comparisons
-        # above have never executed in CI, and a message that reads like a benign
-        # note is the reason nobody noticed.
+        # CI now builds a bundle first (`scripts/contract-bundle-fixture.sh`, run
+        # by the `contracts` job) exactly so this section executes there. Reaching
+        # this branch in CI therefore means that step did not run, and the log says
+        # so rather than reading as a pass.
         #
-        # The behaviour they were written for IS covered, by `crates/bundle`:
-        # `builds_and_verifies_bundle`, `rejects_tampered_payload`,
-        # `rejects_a_swapped_asset_index`, and
-        # `manifest_image_reference_is_covered_by_signature` build real zips,
-        # sign them, and verify them - inside `cargo test --locked --workspace`,
-        # which is the required `rust` check. `verify_bundle` itself applies three
-        # independent checks in order (PayloadIndexMismatch, PayloadDigest,
-        # asset-index digest); see the comment on `rejects_a_swapped_asset_index`.
-        #
-        # Not deleted: it is the only check that would run against bundles
-        # produced by the real packer in a working tree. It is reported as
-        # not-run so the gap is visible in the log instead of reading as success.
+        # Locally, `dist/` is gitignored, so a fresh checkout lands here. The
+        # behaviour these checks were written for is ALSO covered by
+        # `crates/bundle` - `builds_and_verifies_bundle`, `rejects_tampered_payload`,
+        # `rejects_a_swapped_asset_index`,
+        # `manifest_image_reference_is_covered_by_signature` - which build, sign and
+        # verify real zips inside `cargo test --locked --workspace` (the required
+        # `rust` check). This section is the only one that examines a bundle via
+        # the PYTHON validator, so a divergence between the two implementations
+        # would only show here.
         print("  NOT RUN: no dist/plugins in this checkout, so no bundle was examined.")
-        print("           The packer's digests are covered by crates/bundle tests in the")
-        print("           required `rust` job. This section runs only when bundles exist.")
+        print("           In CI this means the bundle fixture step did not run; locally it")
+        print("           just means dist/ is absent. Signature verification lives in")
+        print("           crates/bundle and runs in the required `rust` job.")
 
 
     # --- 0.0.2 Data Foundation contracts ---------------------------------
