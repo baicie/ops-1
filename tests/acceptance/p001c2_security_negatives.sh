@@ -474,34 +474,58 @@ expect_refusal "3 cross-workspace dataset read" 403 WORKSPACE_FORBIDDEN \
 
 # ---------------------------------------------------------------------------
 # 4. A capability the caller has no grant for.
+#
+# NOT a user-endpoint assertion, because this endpoint does not consult grants.
+#
+# `capabilities::resolve` (`apps/kernel/src/capabilities.rs:237-260`) takes an
+# `AuthUser`, ignores it (`_auth`), calls `resolve_provider`, and answers
+# `AVAILABLE`. There is no grant lookup anywhere in it. `CAPABILITY_FORBIDDEN`
+# is produced only on the WORKLOAD path (`capabilities.rs:800-820`, keyed on
+# `claims.plugin_id`).
+#
+# So a capability nobody registered cannot answer 403 CAPABILITY_FORBIDDEN here -
+# `resolve_provider` finds no row and the request is 503 CAPABILITY_UNAVAILABLE.
+# Measured on runs 43654427307 and 43654427317:
+#
+#   BLOCKED  4 unheld capability: HTTP 503 from the product is an
+#            environment/availability failure, not the documented refusal
+#
+# The suite classified the 503 honestly, but the case cannot be about this
+# endpoint. 6 inherits the same defect: it repeats this request with forged
+# identity headers and requires the same refusal.
 # ---------------------------------------------------------------------------
-# `CAPABILITY_FORBIDDEN` is emitted by the Kernel's resolve endpoint
-# (`apps/kernel/src/capabilities.rs:818-820`, "no active grant"), not by a
-# plugin path. The earlier version of this case pointed at a plugin route that
-# does not exist and would have been satisfied by a 404 body.
-expect_refusal "4 unheld capability" 403 CAPABILITY_FORBIDDEN \
-  "$ADMIN_TOKEN" GET /api/v1/capabilities/not.held.v1/1/resolve
+notrun "4 unheld capability" \
+  "the user resolve endpoint ignores grants (capabilities.rs:237-260 takes _auth and returns AVAILABLE); CAPABILITY_FORBIDDEN exists only on the workload-token path, which capability_multi_provider.sh:100-116 exercises with a real token"
 
 # ---------------------------------------------------------------------------
 # 6. A forged caller identity.
 #
 # The identity headers are Kernel-owned. A client that sets them must not be
 # believed; the gateway strips them (asserted positively by the conformance
-# matrix) and the request is evaluated as the real bearer's identity. Here the
-# assertion is that forging them does not GRANT anything: the same request that
-# fails as the admin (case 4) must still fail.
-# ---------------------------------------------------------------------------
+# matrix) and the request is evaluated as the real bearer's identity.
+#
+# The assertion is that forging them does not GRANT anything. It used to be made
+# against `/api/v1/capabilities/not.held.v1/1/resolve`, the same request as case
+# 4 - so when case 4 turned out to describe a mechanism this endpoint does not
+# have (it ignores grants, and answers 503 for a capability nobody registered),
+# case 6 inherited the same impossibility: a 503 is not evidence that the forged
+# headers were ignored, it is evidence that nothing was there to answer.
+#
+# It is now made against a route that is actually served and actually refuses:
+# the cross-workspace dataset read from case 3, which answered
+# `403 WORKSPACE_FORBIDDEN`. That is the shape this case needs - a real refusal
+# that must not become a success because a header was added.
 FORGED=(-H "X-OpsWeave-User-Id: 00000000-0000-4000-8000-00000000dead" -H "X-OpsWeave-User-Role: superadmin")
 code="$(curl -sS -o $SCRATCH/body -w '%{http_code}' -m 15 "${FORGED[@]}" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
-  "$URL/api/v1/capabilities/not.held.v1/1/resolve" 2>/dev/null)" || code="000"
-# Same four-way classification as expect_refusal. An earlier version called any
-# 5xx a FAIL, which reports an unavailable product as a security defect - the
-# mirror image of the substitution this suite exists to prevent.
+  "$URL/api/v1/gateway/$PLUGIN/api/data-catalog/datasets?workspaceId=$WS_B" 2>/dev/null)" || code="000"
+# Classification unchanged in spirit: a 2xx means the forged headers were
+# believed (FAIL), a matching 403 means they were not (PASS), and anything that
+# is neither means the case did not measure the property.
 case "$code" in
-  403) [ "$(body_code)" = "CAPABILITY_FORBIDDEN" ] \
+  403) [ "$(body_code)" = "WORKSPACE_FORBIDDEN" ] \
          && ok "6 forged identity headers do not grant anything" \
-         || blocked "6 forged identity gave 403 but code '$(body_code)', expected CAPABILITY_FORBIDDEN" ;;
+         || blocked "6 forged identity gave 403 but code '$(body_code)', expected WORKSPACE_FORBIDDEN" ;;
   000) blocked "6 forged identity: the request did not complete (HTTP 000)" ;;
   2*)  bad "6 forged identity headers WERE believed (HTTP $code)" ;;
   401) blocked "6 forged identity: got 401, so the fixture credential is the problem, not the forged headers" ;;
@@ -526,8 +550,37 @@ esac
 #
 # Asserting 403 here would have been wrong: the product accepts the write and
 # ignores the forged field, which is the safer behaviour.
-FORGED_DATASET="c2-forged-$RUN_TAG"
-FORGED_BODY="{\"datasetId\":\"$FORGED_DATASET\",\"workspaceId\":\"$WS_B\",\"fields\":[{\"name\":\"probe\",\"type\":\"string\"}]}"
+FORGED_DATASET="$(python3 -c 'import uuid;print(uuid.uuid4())')"
+# A body the product accepts, apart from the forged workspace.
+#
+# The old body was
+#   {"datasetId":"c2-forged-$RUN_TAG","workspaceId":"...","fields":[{"name":"probe","type":"string"}]}
+# which has two independent problems:
+#
+#   datasetId  is not a UUID, and `server.mjs:718` rejects that with 400 before
+#              anything else happens.
+#   fields     omit `nullable` and `ordinal`, which `validateFields`
+#              (`server.mjs:105-117`) requires. It throws a bare `Error`, the
+#              handler's catch-all turns it into 500 `internal catalog error`.
+#
+# Measured on run 43654427307: `BLOCKED 7: the write returned 500; neither
+# outcome establishes the property`. The case never reached its subject - it was
+# sending a malformed request.
+#
+# PRODUCT FINDING, recorded but not fixed here: a client that omits `nullable` or
+# `ordinal` gets 500 INTERNAL rather than 400 INVALID_REQUEST. `validateFields`
+# throws `new Error(...)` like the field-name and type checks above it, so all of
+# them surface as internal errors. Worth a separate fix; it is not this suite's
+# subject, and changing the plugin's status codes from a test branch would make
+# this test measure something else.
+FORGED_BODY="$(python3 -c '
+import json, sys
+print(json.dumps({
+  "datasetId": sys.argv[1],
+  "name": sys.argv[2],
+  "workspaceId": sys.argv[3],
+  "fields": [{"name": "probe", "type": "string", "nullable": True, "ordinal": 0}],
+}))' "$FORGED_DATASET" "c2-forged-$RUN_TAG" "$WS_B")"
 WRITE_CODE="$(call "$ADMIN_TOKEN" POST "/api/v1/gateway/$PLUGIN/api/data-catalog/datasets" "$FORGED_BODY")"
 case "$WRITE_CODE" in
   200|201)
