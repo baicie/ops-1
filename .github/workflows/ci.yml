@@ -1072,8 +1072,13 @@ jobs:
             cat /tmp/gate.txt
             echo '```'
             echo
-            echo "Not covered by this job: \`linux-runtime\` and \`quality-faults\` are"
-            echo "produced by other workflows and enforced directly by the branch ruleset."
+            echo "This job reads the result of all fifteen \`ci.yml\` jobs, and fails if any"
+            echo "of them is not \`success\` — not only the ones the impact analyzer asked"
+            echo "for. What it cannot see: \`linux-runtime\`, \`quality-faults\` and the"
+            echo "acceptance suites in other workflows. Those are named as \`delegated\` in"
+            echo "the output above, and the first two are enforced directly by the branch"
+            echo "ruleset. A \`delegated (partly)\` line means this job checked one facet and"
+            echo "another workflow checks the rest — read it as partial, not as covered."
           } >> "$GITHUB_STEP_SUMMARY"
       - name: The gate's own selftest
         run: |

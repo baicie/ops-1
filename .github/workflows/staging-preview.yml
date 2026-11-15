@@ -218,6 +218,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # The ancestry check below asks `git merge-base --is-ancestor`, which
+          # needs the target's history. A depth-1 clone of a branch tip answers
+          # `rc=0` for the tip and `fatal: Not a valid commit name` for anything
+          # older - so a dispatch naming last week's commit would be told it "is
+          # not an ancestor of origin/main", which is the wrong diagnosis for a
+          # commit that is on main. Measured on a depth-1 clone: the tip resolved,
+          # an older main commit did not.
+          fetch-depth: 0
 
       - name: Resolve the target commit
         id: target
@@ -236,18 +244,23 @@ jobs:
       # syntactic gate and the wrong semantic one: a dispatch can name a commit
       # that is on no branch, was never built by CI, or is on a fork.
       #
-      # The three questions that matter, asked of the commit that is about to be
-      # deployed:
+      # The two questions asked here are about PROVENANCE - where the commit came
+      # from. Whether an image exists for it is a different question with a
+      # different answer depending on the path:
       #
-      #   1. Is it reachable from the repository's default branch? A commit that
-      #      only exists in someone's fork, or that was force-pushed out, must not
-      #      become what staging serves.
-      #   2. Did it get here through a pull request? `main` is linear and every
-      #      merge is a squash (`rules/08-docs-and-workflow.md`), so a commit on
-      #      main with no merge commit behind it did not go through review.
-      #   3. Is an image for it already published? This job never relabels a
-      #      different tree with a requested SHA; it deploys the published image
-      #      for that SHA. If no image exists, the deploy would pull nothing.
+      #   build=true   this job is about to publish that image, so requiring it
+      #                to exist first is a deadlock.
+      #   build=false  "Verify the published image for a re-deploy" below asks
+      #                `docker manifest inspect "$IMAGE_REPO:$TARGET_SHA"`, which
+      #                is the real answer, against the real registry, in the only
+      #                branch where the question applies.
+      #
+      # An earlier version of this step asked it here as well, against the ghcr
+      # *REST* API and a `sha-` prefix. Both were wrong: the published tags are
+      # bare 40-hex (136 of 136 at the time of writing, 0 with a prefix), and the
+      # step runs before the build. The result was a check that passed only by
+      # being skipped on a push and blocked every `workflow_dispatch` - including
+      # the ones this file documents.
       #
       # What this does NOT do is re-run the required checks against that commit.
       # They ran on the PR that produced it, and the answer to "did they pass" is
@@ -258,10 +271,19 @@ jobs:
       - name: The requested commit is one this repository published
         env:
           TARGET_SHA: ${{ steps.target.outputs.sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # 1. Reachable from the default branch. `git merge-base --is-ancestor`
+          # 1. The commit is in this clone at all. Distinguishing this from "not
+          #    on main" matters: `merge-base --is-ancestor` exits 128 for an
+          #    object it has never seen, and the same 128 for a genuine non-
+          #    ancestor. Reporting the second when the first happened sends the
+          #    reader looking for a force-push that never occurred.
+          if ! git cat-file -e "${TARGET_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::$TARGET_SHA is not present in this checkout. It is not a commit of this repository."
+            exit 1
+          fi
+
+          # 2. Reachable from the default branch. `git merge-base --is-ancestor`
           #    is the question "is this on main", not "does a ref name it" - a tag
           #    or a dangling branch would satisfy the weaker one.
           if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
@@ -270,7 +292,7 @@ jobs:
           fi
           echo "$TARGET_SHA is on origin/main"
 
-          # 2. It arrived through a pull request. Squash merging means main is
+          # 3. It arrived through a pull request. Squash merging means main is
           #    linear, so every commit on it is either a merge of a reviewed PR or
           #    a direct push. The repository ruleset forbids the second, and this
           #    checks that the rule actually held for THIS commit.
@@ -280,17 +302,6 @@ jobs:
             *) echo "::error::$TARGET_SHA did not come from a merged pull request (subject: $subject). Only commits that went through review reach staging."; exit 1 ;;
           esac
           echo "commit came from a pull request: $subject"
-
-          # 3. An image for it exists. `devices: read` on packages is enough for
-          #    the public ghcr.io manifest check. A missing image is a BLOCKED
-          #    deploy, not a rebuild of a different tree.
-          repo_lc="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-          if ! gh api "/users/${repo_lc%%/*}/packages/container/${repo_lc##*/}/versions" \
-               --jq ".[] | .metadata.container.tags[]?" 2>/dev/null | grep -qx "sha-${TARGET_SHA}"; then
-            echo "::error::no published image tagged sha-${TARGET_SHA}. Staging deploys a published image for the commit it names; it does not build a new one here. Run the build workflow for that commit first, or dispatch without sha to deploy this ref."
-            exit 1
-          fi
-          echo "published image found: sha-${TARGET_SHA}"
 
       - name: Decide whether this run must build
         id: decide
