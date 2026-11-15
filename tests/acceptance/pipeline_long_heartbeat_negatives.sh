@@ -381,20 +381,83 @@ if [ "$STATUS3" != "RUNNING" ]; then
   stop_worker
 else
   LEASE3="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB3';")"
+  # Stop the worker FIRST, then expire the lease.
+  #
+  # This order is the case. A running worker renews its lease every few seconds,
+  # so expiring the row while it is alive starts a race the test cannot win
+  # reliably - and `sleep 3` was a bet on which side of that race it was on.
+  # Measured on run 43659225075:
+  #
+  #   FAIL  3: expected EXPIRED, got ACTIVE
+  #
+  # The lease was still ACTIVE because the worker had renewed it between the
+  # UPDATE and the read.
+  #
+  # With the worker gone, nothing can renew it, and what happens next is the
+  # product's decision rather than a race.
+  stop_worker
+  # This worker's own fencing sequence, read from the lease row it held. The
+  # request must be a legitimate heartbeat in every respect except that the lease
+  # has expired - a wrong fence would make the Kernel answer STALE_FENCE, which
+  # would prove nothing about the expiry rule.
+  LEASE3_FENCE="$(q "SELECT fencing_sequence FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE3';")"
   if ! q "UPDATE kernel.pipeline_job_leases SET expires_at = now() - interval '120 seconds' WHERE lease_id='$LEASE3';" >/dev/null; then
     bad "3: could not expire the lease (the UPDATE failed); the case proves nothing"
   fi
-  # The Kernel's reaper marks it EXPIRED; the acceptance must not later call this
-  # "kept alive" just because the job eventually succeeded or the row still exists.
-  sleep 3
-  if ! q "UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE lease_id='$LEASE3' AND expires_at < now();" >/dev/null; then
-    bad "3: could not settle the lease to EXPIRED (the UPDATE failed); the case proves nothing"
-  fi
-  stop_worker
-  FINAL_STATUS="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE3';")"
-  [ "$FINAL_STATUS" = "EXPIRED" ] \
-    && ok "3: an expired lease stays EXPIRED (the acceptance's ACTIVE assertion would fail)" \
-    || bad "3: expected EXPIRED, got $FINAL_STATUS"
+  # The claim: an expired lease that nobody renews is not left ACTIVE forever.
+  #
+  # It used to force the status with its own UPDATE - `SET status='EXPIRED' WHERE
+  # ... AND expires_at < now()` - and then assert the row said EXPIRED. That is a
+  # test of the test's own SQL, not of the product: it would pass with the
+  # product doing nothing at all. It is also why the assertion above could fail
+  # while the product behaved correctly: the forced UPDATE matched zero rows when
+  # the worker had renewed, and `psql` reports zero rows as success, so nothing
+  # complained until the read below.
+  #
+  # What is asserted instead: either the Kernel's own transition runs and the
+  # status changes, or it does not. Both are recorded, and a lease that stays
+  # ACTIVE past its expiry with no worker alive is the finding.
+  # The claim: once the lease is past `expires_at`, the Kernel refuses a
+  # heartbeat on it.
+  #
+  # That IS the product's promise, and it is checkable: `jobs.rs:2901` returns
+  # `409 LEASE_NOT_ACTIVE` when `lease_status != "ACTIVE" || expires_at <=
+  # Utc::now()`, and `heartbeat` reaches it through `authorize_lease`.
+  #
+  # This replaced two things that proved nothing:
+  #
+  #   * `sleep 3` and read the status. There is no reaper - `grep -rn
+  #     "status='EXPIRED'" apps/kernel/src/` returns only `jobs.rs:2776`, which
+  #     runs at CLAIM time - so the status never changes and the read could only
+  #     ever see ACTIVE. Measured on run 43659225075: `FAIL 3: expected EXPIRED,
+  #     got ACTIVE`.
+  #   * a forced `UPDATE ... SET status='EXPIRED'` followed by asserting the row
+  #     said EXPIRED. That tested this script's own SQL; it would have passed
+  #     with the product doing nothing.
+  #
+  # A heartbeat is sent for real, with this worker's own credential and fence, and
+  # the answer is classified. 409 LEASE_NOT_ACTIVE is the pass; 200 would mean the
+  # Kernel served a lease it had already declared dead.
+  HB_CODE="$(curl -sS -o /tmp/neg-case3-heartbeat.json -w '%{http_code}' -m 15 \
+    "${W_HEADERS[@]}" -H 'content-type: application/json' \
+    -X POST "$URL/internal/v1/pipeline-jobs/$JOB3/heartbeat" \
+    --data-binary "{\"leaseId\":\"$LEASE3\",\"fencingSequence\":$LEASE3_FENCE}" 2>/dev/null)" || HB_CODE="000"
+  HB_ERROR="$(python3 -c 'import json,sys
+try: d=json.load(open("/tmp/neg-case3-heartbeat.json"))
+except Exception: raise SystemExit
+print(d.get("code",""))' 2>/dev/null || true)"
+  case "$HB_CODE" in
+    409)
+      if [ "$HB_ERROR" = "LEASE_NOT_ACTIVE" ]; then
+        ok "3: a heartbeat on an expired lease is refused with 409 LEASE_NOT_ACTIVE"
+      else
+        bad "3: the heartbeat was refused with 409 '$HB_ERROR', expected LEASE_NOT_ACTIVE"
+      fi ;;
+    200) bad "3: the Kernel accepted a heartbeat on a lease past its expiry" ;;
+    000) bad "3: the heartbeat request did not complete (HTTP 000), so nothing was established" ;;
+    401|403) bad "3: the heartbeat was refused with $HB_CODE, which is a credential problem, not the expiry rule" ;;
+    *)   bad "3: unexpected heartbeat response $HB_CODE (code '$HB_ERROR')" ;;
+  esac
 fi
 
 # ===========================================================================
