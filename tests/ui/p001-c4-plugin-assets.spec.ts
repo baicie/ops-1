@@ -54,6 +54,10 @@ const ADMIN_PASSWORD = process.env.OPSWEAVE_ADMIN_PASSWORD || 'OpsWeave!2026';
 // uninstalling it costs nothing.
 const FIXTURE_PLUGIN = process.env.OPSWEAVE_D4_FIXTURE_PLUGIN || 'dev.opsweave.hello-d4fixture';
 const FIXTURE_STEM = process.env.OPSWEAVE_D4_FIXTURE_STEM || 'hello-ops-d4fixture';
+// The version `scripts/build-data-plugins.sh` builds the fixture at: it uses
+// `TS_VERSION="${OPSWEAVE_DATA_VERSION:-0.0.1}"` (line 7) for every bundle it
+// assembles, the D4 fixture included.
+const FIXTURE_VERSION = process.env.OPSWEAVE_DATA_VERSION || '0.0.1';
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -122,17 +126,59 @@ async function installFixture(): Promise<string> {
       ['--url', process.env.OPSWEAVE_URL || 'http://127.0.0.1:18181', 'install', bundle],
       { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 120_000 },
     );
-    return 'ok';
   } catch (error) {
     const message = String((error as { stderr?: string; message?: string }).stderr
       || (error as Error).message);
     // An install that fails because the plugin is already there is the normal
     // second-run state, not an error.
-    if (/already installed|already exists|ALREADY_INSTALLED/i.test(message)) {
-      return 'already-installed';
+    if (!/already installed|already exists|ALREADY_INSTALLED/i.test(message)) {
+      return message.split('\n').slice(0, 3).join(' | ');
     }
-    return message.split('\n').slice(0, 3).join(' | ');
   }
+  // INSTALL IS NOT ACTIVATION.
+  //
+  // `activeVersion` in the plugin detail is the ACTIVATION record
+  // (`plugins.rs:174`, from `revision_map`), not the installation. A plugin that
+  // has been installed and never activated reports `activeVersion: null`, and the
+  // discovery below treats that as "nothing to measure".
+  //
+  // Measured on run 43670481610: the bundle existed (6.6K, built at 03:04), the
+  // install returned ok, and D4 still reported "no installed plugin exposes a
+  // reachable frontend/index.html". Nothing was wrong with the fixture; it had
+  // never been made active, so it had no version, so no asset path could be
+  // computed.
+  //
+  // Activated here, the way every other script activates a plugin:
+  //
+  //     opsctl --url "$URL" activate <plugin> <version>
+  //
+  // (`scripts/demo_up.sh:152`, `scripts/demo_data_up.sh:23`). `opsctl` carries the
+  // session itself, so no token has to be threaded through the test - and there
+  // is no `OPSWEAVE_ADMIN_TOKEN` in this harness to thread.
+  //
+  // `--expected-revision` is NOT passed. It defaults to none
+  // (`main.rs:84-85`, `Option<i64>`), and computing it would mean reading
+  // `GET /api/v1/plugins/{id}` first - a second failure mode for no benefit. The
+  // spec does not care about the CAS; it cares that the version is active.
+  try {
+    const url = process.env.OPSWEAVE_URL || 'http://127.0.0.1:18181';
+    execFileSync(
+      opsctl,
+      ['--url', url, 'activate', FIXTURE_PLUGIN, FIXTURE_VERSION],
+      { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 120_000 },
+    );
+  } catch (error) {
+    const message = String((error as { stderr?: string; message?: string }).stderr
+      || (error as Error).message);
+    // Already active is the second-run state; anything else is a real failure to
+    // make the fixture usable, and saying so beats letting discovery report "no
+    // installed plugin exposes a reachable frontend/index.html" - which is what
+    // run 43670481610 said for a plugin that was installed and never activated.
+    if (!/already active|already activated|409|ALREADY_ACTIVE|CONFLICT/i.test(message)) {
+      return `activation failed: ${message.split('\n').slice(0, 3).join(' | ')}`;
+    }
+  }
+  return 'ok';
 }
 
 /**
@@ -190,12 +236,28 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
     const id = FIXTURE_PLUGIN;
     const found = await page.evaluate(async (plugin) => {
       const r = await fetch(`/api/v1/plugins/${plugin}`, { credentials: 'same-origin' });
-      if (!r.ok) return null;
+      if (!r.ok) return { missing: `GET /api/v1/plugins/${plugin} returned ${r.status}` };
       const body = await r.json();
       const version = body.activeVersion;
       const pub = body.publisher || body.manifest?.publisher || '';
-      return version && pub ? { version, publisher: pub } : null;
+      if (!version) return { missing: `the plugin exists but has no activeVersion (keys: ${Object.keys(body).join(', ')})` };
+      if (!pub) return { missing: `the plugin is at ${version} but reports no publisher` };
+      return { version, publisher: pub };
     }, id);
+    if (found && 'missing' in found) {
+      // Say WHICH of the three things was missing.
+      //
+      // The message below used to be one sentence - "no installed plugin exposes
+      // a reachable frontend/index.html" - for three different findings: the
+      // plugin is not installed, it is installed but not activated, or it is
+      // active with no publisher recorded. Measured on run 43670481610, the
+      // report was that single sentence for a fixture whose install had
+      // returned `ok`, which cannot be distinguished from an install that did
+      // nothing.
+      block(`the D4 fixture is not usable: ${found.missing}`);
+      assertNotBlocked();
+      return;
+    }
     if (found) {
       const probe = origin + `/assets/${found.publisher}/${id}/${found.version}/frontend/index.html`;
       const status = await statusOf(page, probe);
