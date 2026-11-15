@@ -26,9 +26,17 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--image-ref", required=True)
     parser.add_argument("--frontend-dist", type=Path)
+    # Overrides the template's `id`. Added for the conformance negative fixture,
+    # which is the same Go binary reporting a protocol the Node must reject: it
+    # needs its own id, or it would collide with the real plugin it is derived
+    # from. Defaults to the template's value, so every existing call is
+    # unaffected.
+    parser.add_argument("--id", dest="plugin_id")
     args = parser.parse_args()
 
     manifest = json.loads(args.template.read_text())
+    if args.plugin_id:
+        manifest["id"] = args.plugin_id
     manifest["version"] = args.version
     manifest["backend"]["imageRef"] = args.image_ref
     if args.frontend_dist:

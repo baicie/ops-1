@@ -16,6 +16,12 @@ data-restored/
 
 plugins/hello-java/jre/
 plugins/hello-go/hello-go-linux
+# A local `go build` in that directory writes the host-native binary here. The
+# linux one above is the name the Dockerfile copies, so it was covered; this one
+# was not, and a `git add -A` put a 10 MB build artifact into a commit.
+plugins/hello-go/hello-go
+plugins/hello-java/target/
+plugins/hello-go/*.test
 data-test/
 
 artifacts/reliability/

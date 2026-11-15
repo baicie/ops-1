@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -19,6 +20,7 @@ var (
 	version          = env("OPSWEAVE_PLUGIN_VERSION", "0.0.1")
 	capabilityDigest = env("OPSWEAVE_CAPABILITY_DIGEST", "sha256:0000000000000000000000000000000000000000000000000000000000000000")
 	buildDigest      = env("OPSWEAVE_BUILD_DIGEST", "sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	runtimeProtocol  = env("OPSWEAVE_RUNTIME_PROTOCOL", "http-json-v1")
 	instanceID       = env("OPSWEAVE_INSTANCE_ID", "dev-instance")
 	port             = env("PORT", "8080")
 	ready            atomic.Bool
@@ -56,7 +58,11 @@ func main() {
 	mux.HandleFunc("/_opsweave/runtime/v1/info", func(w http.ResponseWriter, r *http.Request) {
 		id := requestID(r)
 		writeJSON(w, 200, id, map[string]any{
-			"pluginId": pluginID, "version": version, "runtimeProtocol": "http-json-v1",
+			// Overridable ONLY so the conformance matrix can build a fixture that
+			// reports a protocol the Node must reject. It defaults to the contract
+			// value, and no production image sets it - the same courtesy the build
+			// digest and version already get.
+			"pluginId": pluginID, "version": version, "runtimeProtocol": runtimeProtocol,
 			"capabilityDigest": capabilityDigest, "buildDigest": buildDigest,
 		})
 	})
@@ -104,7 +110,22 @@ func main() {
 				return
 			}
 		}
-		writeJSON(w, 200, id, map[string]any{"echoed": parsed, "pluginId": pluginID, "version": version, "instanceId": instanceID, "requestId": id})
+		// The same two observations the TypeScript reference plugin makes, so the
+		// conformance matrix can assert one property across all three languages.
+		// An unsigned caller-role header must never arrive (null = stripped); a
+		// Kernel-signed context must. The plugin only checks the prefix - it does
+		// not hold this plugin's context key and must not claim to verify it.
+		var deliveredRole any
+		if role := r.Header.Get("X-OpsWeave-User-Role"); role != "" {
+			deliveredRole = role
+		}
+		ctx := r.Header.Get("X-OpsWeave-User-Context")
+		writeJSON(w, 200, id, map[string]any{
+			"echoed": parsed, "pluginId": pluginID, "version": version,
+			"instanceId": instanceID, "requestId": id,
+			"deliveredUnsignedRole":  deliveredRole,
+			"deliveredSignedContext": strings.HasPrefix(ctx, "owu1."),
+		})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		errorJSON(w, 404, requestID(r), "NOT_FOUND", "No such route", false)
