@@ -168,8 +168,23 @@ async function installFixture(): Promise<string> {
   // `--wait` so a failed deploy is reported here rather than as an empty
   // `activeVersion` three calls later.
   const url = process.env.OPSWEAVE_URL || 'http://127.0.0.1:18181';
+  // LONGER THAN `--wait`'S OWN BOUND, OR THIS KILLS THE COMMAND IT IS WAITING FOR.
+  //
+  // `opsctl deploy --wait` polls for 300 s (`main.rs`, `wait_for_ready(&api,
+  // &plugin, &version, 300)`). This timeout used to be 180 s, so on a deploy that
+  // took longer than three minutes the child was killed while it was still
+  // working, and the report was
+  //
+  //     deploy failed: spawnSync .../opsctl ETIMEDOUT
+  //
+  // measured on run 43673487188 - which says nothing about whether the deploy
+  // would have succeeded, because nothing was allowed to finish.
+  //
+  // 360 s: the inner bound plus a minute to start up and print its own error if
+  // it has one. If the deploy really is stuck, opsctl says so in its own words
+  // first, which is a better message than a spawn timeout.
   const run = (args: string[]): string => execFileSync(opsctl, ['--url', url, ...args], {
-    cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 180_000,
+    cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 360_000,
   }) as string;
   try {
     run(['deploy', FIXTURE_PLUGIN, FIXTURE_VERSION, '--replicas', '1', '--selector', 'role=node', '--wait']);
