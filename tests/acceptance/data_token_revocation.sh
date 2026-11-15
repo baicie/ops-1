@@ -60,7 +60,26 @@ print(",".join(sorted(d)) or "<empty object>")' 2>/dev/null || echo "<unreadable
   sleep 1
 done
 if [ -z "$CURRENT_TOKEN" ]; then
+  # Say what the container IS, not only that the key was missing.
+  #
+  # Run 43675797785 waited the full 60 s and reported `keys seen: <empty object>`
+  # for a Node the harness had just confirmed READY. Three things make this file
+  # empty and they need different fixes:
+  #
+  #   * the integration INSTANCE is not READY (its Node is; the instance may not be)
+  #   * the instance is READY but the token refresh is being refused by the Kernel
+  #   * this is the wrong container (`awk /data-integration/` matches the IMAGE
+  #     name, and after #107 an image reference can be a digest with no name in it)
+  #
+  # The container's own log distinguishes them. `bad` first so the FAIL counter
+  # stays right, then the detail, then exit.
   bad "the workload token file never gained data.catalog.v1 within 60 s (keys seen: ${TOKEN_SEEN:-<nothing>})"
+  echo "      container: $CONTAINER_ID"
+  docker ps --filter "id=$CONTAINER_ID" --format '      image={{.Image}} status={{.Status}}' 2>&1 || true
+  echo "      raw file bytes: $(docker exec "$CONTAINER_ID" sh -c 'wc -c </run/opsweave/capability-tokens.json' 2>&1 || echo '<unreadable>')"
+  echo "      --- last 20 lines of the container log ---"
+  docker logs --tail 20 "$CONTAINER_ID" 2>&1 | sed 's/^/      /' || true
+  exit 1
 fi
 FRESH_RESPONSE="$(curl -fsS -X POST -H "Authorization: Bearer $CURRENT_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
 FRESH_TOKEN="$(printf '%s' "$FRESH_RESPONSE" | json "d['token']")"
