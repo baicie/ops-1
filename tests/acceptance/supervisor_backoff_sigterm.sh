@@ -92,9 +92,22 @@ CHILDREN="$(pgrep -P "$NODE_B_PID" -f opsweave 2>/dev/null | wc -l | tr -d ' ' |
 [ "${CHILDREN:-0}" = "0" ] || bad "children remain after shutdown: $CHILDREN"
 [ "$DURATION_MS" -lt 10000 ] || bad "shutdown duration=$DURATION_MS ms exceeds bound"
 echo "PASS SIGTERM during supervisor restart backoff: duration=${DURATION_MS}ms children=0 exits=$EXITS"
-# Restore a normal Node B for the remaining gates. Waited for, not slept through,
-# and asserted: the steps that follow this one need node-b READY, and returning
-# without saying whether it came back is how the next step inherits a dead Node.
+# Restore a normal Node B for the steps that follow, and wait for it to be USABLE
+# rather than merely alive.
+#
+# `kill -0` only proves a process exists. A Node that has just started still has
+# to enrol, adopt its container and re-mark the instance READY before its
+# workload token file has anything in it. Measured on run 43666780709: this line
+# returned 0.3 s before `data_token_revocation` ran, that step read
+# `/run/opsweave/capability-tokens.json` and found `{}`, and waited 60 s for a key
+# that was never coming -
+#
+#   FAIL  the workload token file never gained data.catalog.v1 within 60 s
+#         (keys seen: <empty object>)
+#
+# Waiting for READY here is the same rule the harness states for the browser
+# block: "Wait for the actual Catalog token, not a sleep." A process check is the
+# sleep, one level up.
 tests/runtime/start_node.sh node-b 9102 >/dev/null
 RESTORED=0
 for _ in $(seq 1 120); do
@@ -102,5 +115,21 @@ for _ in $(seq 1 120); do
   sleep 0.5
 done
 [ "$RESTORED" = "1" ] || bad "node-b was not restarted for the steps that follow"
-echo "node-b restarted pid=$(cat /tmp/node-b.pid)"
+# Now the part that matters. Readiness is the Kernel's statement about the Node,
+# so it is read from the Kernel, not inferred from the process table.
+TOKEN="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.opsweave/session.json")))["token"])' 2>/dev/null || true)"
+NODE_B_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["nodeId"])' "$ROOT/data-ci/node-b/node-identity.json" 2>/dev/null || true)"
+USABLE=0
+for _ in $(seq 1 120); do
+  STATE="$(curl -fsS -H "Authorization: Bearer $TOKEN" "${URL:-http://127.0.0.1:18181}/api/v1/nodes" 2>/dev/null \
+    | python3 -c 'import json,sys
+nid=sys.argv[1]
+try: data=json.load(sys.stdin)
+except Exception: raise SystemExit
+print(next((n.get("status","?") for n in data if n["id"]==nid), "?"))' "$NODE_B_ID" 2>/dev/null || echo "?")"
+  if [ "$STATE" = "READY" ]; then USABLE=1; break; fi
+  sleep 1
+done
+[ "$USABLE" = "1" ] || bad "node-b restarted but did not reach READY within 120 s (last state: ${STATE:-?})"
+echo "node-b restarted pid=$(cat /tmp/node-b.pid) and READY"
 echo "Supervisor Backoff SIGTERM: PASS"
