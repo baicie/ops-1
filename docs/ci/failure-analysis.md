@@ -105,3 +105,54 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 `data-foundation.yml` 与 `typed-pipeline-runtime.yml` 在重叠路径上**恰好会并发**。
 
 未观察到由此产生的失败，但这属于「靠运气」而非隔离。消除重复执行同时会消除这个风险。
+
+
+## 6. 独立审计确认的其余缺陷（本轮未修）
+
+以下由对抗性验证确认（每条都有 `file:line` 与复现步骤），但**不在本轮修复范围**。
+列在这里而不是删掉，是因为它们决定了这个 CI 体系离「可信」还有多远。
+
+### P1 — 门禁可绕过
+
+| # | 位置 | 问题 |
+|---|---|---|
+| 1 | `tests/contract/validate_contracts.py:73,95` | 唯一的 bundle 摘要校验被 `if bundle_dir.exists()` 守卫，而 `dist/plugins` 是 gitignore 的、只由 `scripts/build-plugins.sh` 生成。必需的 `contracts` job 从不构建 bundle，所以**永远走 else 分支**，打印 `(no dist/plugins yet; bundle checks skipped)` 后退出 0。打包器写错 digest 不会被这个门禁发现。 |
+| 2 | `tests/ci/check-spec-coverage.mjs:93,121` | 检查器的文件清单只有 `tests/ui/*.spec.ts` 与 `tests/{acceptance,ci}/*.sh`，**不枚举 `*.test.mjs`**。本仓库的 `tests/ci/*.test.mjs`（9 个）因此不受覆盖检查管辖。 |
+| 3 | `.github/workflows/staging-preview.yml:36` | push 触发里列了一个开发分支 `feat/0.0.5-staging-preview`。该分支当前不存在于 origin，但触发是**休眠而非移除**——任何人推这个分支名就得到一次完整部署。 |
+| 4 | `.github/workflows/staging-preview.yml:214` | `workflow_dispatch` 的 `sha` 输入是自由文本，没有验证该提交可达 main、通过任何必需检查、或其镜像来自 CI 验证过的树。 |
+
+### P1 — 覆盖缺口
+
+| # | 位置 | 问题 |
+|---|---|---|
+| 5 | `staging-preview.yml:268` | 完整产品镜像（`--target runtime`）**只在这里构建**，而这个 workflow 没有 `pull_request` 触发。每个 PR 触发的镜像构建都是别的 target。 |
+| 6 | `staging-preview.yml:1011` | `full` 层级只能通过 `workflow_dispatch` 到达。 |
+
+### P1 — 重复
+
+| # | 位置 | 问题 |
+|---|---|---|
+| 7 | `ci.yml:766` vs `platform-linux-acceptance.yml:73` | 逐字节相同的镜像构建，只是 tag 不同（`opsweave-platform:ci` vs `:linux-bond`）。两者都是必需检查，都在每个 PR 上运行。 |
+| 8 | `ci.yml:34` 等 14 处 | 14 个 job 各自安装 Rust 工具链，**没有一个缓存**。`actions/cache`、`Swatinem/rust-cache`、`sccache` 在全部 workflow 里零匹配。 |
+| 9 | `tests/ci/p001c13_negatives.sh:145` | 同一个 plugin-lifecycle job 里 `scripts/build-plugins.sh` 被调用**三次**（三个不同 registry 端口），每次构建并推送 7 个 OCI 镜像。 |
+| 10 | `data-foundation.yml:108` | 单个 job 内同一批二进制与 web bundle 被构建两次（一次显式，一次由 `demo_up.sh:67-68`）。 |
+
+### 已验证但判定为「不是缺陷」
+
+| 位置 | 结论 |
+|---|---|
+| `tests/ci/impact.mjs:92` | 反例提出的 P0 被否定：fail-closed 分支确实生效。 |
+| `ci.yml:493` | 同上。 |
+| `data-foundation.yml:15`、`g12-acceptance.yml:26` | 路径覆盖缺口被否定。 |
+| `staging-preview.yml:2223` | 发布安全问题被否定。 |
+
+## 7. 本轮修了什么
+
+| 发现 | 状态 |
+|---|---|
+| `data_foundation_ci.sh` 跑两遍 | **已修**（删除 `typed-pipeline-runtime.yml`） |
+| 重复那份缺 `--locked` | **已修**（随文件删除） |
+| `spec-coverage` 看不见浏览器块消失 | **已修**（env 守卫识别，变异测试验证） |
+| `ci-gate` 读 `needs` 的形状错误 | **已修**（首次真实运行抓到） |
+
+其余 10 项记录在此，未修。
