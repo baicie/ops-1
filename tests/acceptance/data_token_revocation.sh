@@ -22,8 +22,46 @@ done
 echo "revocation worker pid=$WORKER_PID ppid=$(cat /tmp/node-b.pid)"
 CONTAINER_ID="$(docker ps --filter label=opsweave.managed=true --format '{{.ID}} {{.Image}}' | awk '/data-integration/ {print $1; exit}')"
 [ -n "$CONTAINER_ID" ] || bad "data-integration container not found"
-CURRENT_TOKEN="$(docker exec "$CONTAINER_ID" cat /run/opsweave/capability-tokens.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["data.catalog.v1"])')"
-[ -n "$CURRENT_TOKEN" ] || bad "current workload token file is empty"
+# Wait for the workload token file, do not read it once and assume.
+#
+# The Node writes `/run/opsweave/capability-tokens.json` inside the container
+# after the instance is READY, and refreshes it on its own schedule. Reading it
+# immediately after the container exists is a race: measured on run 43660344831,
+#
+#     revocation worker pid=29983 ppid=29511
+#     Traceback (most recent call last):
+#       File "<string>", line 1, in <module>
+#     KeyError: 'data.catalog.v1'
+#     STEP result=FAIL name=data_token_revocation ... secs=2
+#
+# Two seconds from start to failure - the file was there but the key was not yet.
+#
+# `data_foundation_ci.sh` already waits for exactly this before its browser block
+# ("A Node restart can adopt the Integration container before its workload token
+# file is refreshed. Wait for the actual Catalog token, not a sleep."). This
+# script is one of the steps that runs BEFORE that block, so it cannot rely on
+# it; the same wait belongs here.
+#
+# Bounded and specific: it waits for THIS key, and a file that never gains it is
+# reported with what the file actually contained.
+CURRENT_TOKEN=""
+TOKEN_SEEN=""
+for _ in $(seq 1 60); do
+  RAW="$(docker exec "$CONTAINER_ID" cat /run/opsweave/capability-tokens.json 2>/dev/null || true)"
+  CURRENT_TOKEN="$(printf '%s' "$RAW" | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: raise SystemExit
+print(d.get("data.catalog.v1",""))' 2>/dev/null || true)"
+  [ -n "$CURRENT_TOKEN" ] && break
+  TOKEN_SEEN="$(printf '%s' "$RAW" | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: print("<not JSON>"); raise SystemExit
+print(",".join(sorted(d)) or "<empty object>")' 2>/dev/null || echo "<unreadable>")"
+  sleep 1
+done
+if [ -z "$CURRENT_TOKEN" ]; then
+  bad "the workload token file never gained data.catalog.v1 within 60 s (keys seen: ${TOKEN_SEEN:-<nothing>})"
+fi
 FRESH_RESPONSE="$(curl -fsS -X POST -H "Authorization: Bearer $CURRENT_TOKEN" "$URL/internal/v1/workload-tokens/refresh")"
 FRESH_TOKEN="$(printf '%s' "$FRESH_RESPONSE" | json "d['token']")"
 DETAIL="$(curl -fsS "${AUTH[@]}" "$URL/api/v1/plugins/opsweave.data-integration")"
