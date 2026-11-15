@@ -75,6 +75,18 @@ signal_tree() {
   else
     # Children first: signalling the parent alone can orphan a daemon that then
     # reparents to init and outlives this wrapper.
+    #
+    # DO NOT fall back to `kill "$sig" -"$child"` on this path. `setsid` is what
+    # makes `$child` a process-group leader; without it the child shares the
+    # CALLER's process group, so `-PGID` names this shell and everything beside
+    # it. That is the `kill -9 0` self-kill this repo already fixed once, and I
+    # reintroduced it here for one commit: running the wrapper by hand on macOS
+    # killed the shell that started it (exit 144) and left the daemon alive.
+    #
+    # The descendant walk is all this path can honestly do. When the leader has
+    # already exited, its children are unreachable from here - which is why the
+    # SIGKILL escalation below no longer depends on the leader being alive, and
+    # why CI (Linux, setsid present) takes the group path.
     local pid
     for pid in $(descendants "$child"); do kill "$sig" "$pid" 2>/dev/null || true; done
     kill "$sig" "$child" 2>/dev/null || true
@@ -92,9 +104,28 @@ while kill -0 "$child" 2>/dev/null; do
       kill -0 "$child" 2>/dev/null || break
       sleep 0.25
     done
-    if kill -0 "$child" 2>/dev/null; then
-      signal_tree -KILL
-    fi
+    # SIGKILL the whole tree UNCONDITIONALLY.
+    #
+    # This used to be `if kill -0 "$child" 2>/dev/null; then signal_tree -KILL`.
+    # That gate asks whether the LEADER is alive, but the leader is not what the
+    # grace period is for: a step can spawn a daemon that ignores SIGTERM while
+    # its leader exits promptly on it. When that happens `kill -0 "$child"` is
+    # false, the escalation never runs, and the daemon is reparented to init with
+    # the dead leader's process group - alive past the wrapper, holding ports and
+    # Docker handles. That is the exact outcome the header promises cannot
+    # happen.
+    #
+    # Reproduced before fixing: a leader with `trap 'exit 0' TERM` plus
+    # `( trap '' TERM; exec sleep 300 ) &`, run under this wrapper with a 2 s
+    # budget. The wrapper printed `STEP result=TIMEOUT ... rc=124` and returned
+    # while `ps` still showed the sleep, PPID 1, PGID of the dead leader. Same on
+    # macOS (no-setsid path) and on Linux with util-linux setsid (the CI runner's
+    # platform).
+    #
+    # Signalling a process group whose leader has already exited is harmless - the
+    # group still exists while any member lives, and `kill ... -PGID` returns
+    # ESRCH when none does.
+    signal_tree -KILL
     break
   fi
   sleep 0.5
