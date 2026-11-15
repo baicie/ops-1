@@ -332,6 +332,30 @@ if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]; then
   sleep 1
   OPSWEAVE_URL="$OPSWEAVE_URL" OPSWEAVE_UI_FIXTURE=http://172.17.0.1:18090/data-hosts.json pnpm --filter @opsweave/ui-tests exec playwright test data-foundation.spec.ts data-foundation-flows.spec.ts studio.spec.ts visual-layout.spec.ts
   kill "$UI_WORKER_PID" 2>/dev/null || true
+  # P001-C4 / D4 IS NOT RUN HERE, AND THAT IS THE PR'S OWN STANCE.
+  #
+  # The spec is delivered; the run is NOT_RUN. It was briefly wired in below and
+  # that was wrong on two counts:
+  #
+  #   * it contradicted the deliverable. A spec whose PR says "run NOT_RUN" being
+  #     executed by the harness every run means the harness, not the report, is
+  #     deciding what is claimed.
+  #   * it does not pass yet. Five CI rounds went into it (__dirname,
+  #     `candidates`, install-without-activate, install-without-deploy, and then
+  #     `opsctl deploy --wait` sitting on its own 300 s bound), and the last one
+  #     has no identified cause: nothing about the fixture appears in the Kernel's
+  #     log at all. Chasing that from inside a branch about browser assets is how
+  #     a delivery PR turns into an investigation.
+  #
+  # What IS in this branch: the spec, its fixture in
+  # `scripts/build-data-plugins.sh`, and the four defects the CI rounds found in
+  # it. Those are real and they are fixed. The deploy timeout is a separate
+  # question and gets its own work.
+  #
+  # To run it by hand:
+  #
+  #   OPSWEAVE_URL=http://127.0.0.1:18181 \
+  #     pnpm --filter @opsweave/ui-tests exec playwright test p001-c4-plugin-assets.spec.ts
 fi
 budget_check
 tests/ci/run_step.sh pipeline_node_runtime_sigkill 180 -- OPSWEAVE_TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/opsweave' tests/acceptance/pipeline_node_runtime_sigkill.sh

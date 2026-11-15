@@ -60,7 +60,47 @@ mkdir -p /tmp/data-bundles dist/plugins
 python3 scripts/assemble_plugin.py --template plugins/data-catalog/manifest.template.json --out /tmp/data-bundles/data-catalog --version "$TS_VERSION" --image-ref "$CAT_DIGEST" --frontend-dist /tmp/data-catalog-web >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/data-integration/manifest.template.json --out /tmp/data-bundles/data-integration --version "$TS_VERSION" --image-ref "$INT_DIGEST" --frontend-dist /tmp/data-integration-web >/dev/null
 python3 scripts/assemble_plugin.py --template plugins/data-catalog-alt/manifest.template.json --out /tmp/data-bundles/data-catalog-alt --version "$TS_VERSION" --image-ref "$CAT_DIGEST" --frontend-dist /tmp/data-catalog-web >/dev/null
-for name in data-catalog data-catalog-alt data-integration; do
+# D4's dedicated fixture lives here, not in `build-plugins.sh`.
+#
+# The C4 browser spec disables and uninstalls a plugin to measure what happens to
+# its assets. It must not do that to anything the rest of THIS harness needs, and
+# it did: it discovered whatever plugin had a reachable `frontend/index.html`,
+# and here those are the data plugins that `data_ssrf.sh`,
+# `capability_multi_provider.sh` and `data_token_revocation.sh` all use later.
+#
+# It has to be built by this script rather than `build-plugins.sh` because this
+# is the only one `data_foundation_ci.sh` runs - a fixture built elsewhere would
+# simply not exist, and C4 would go from "runs but destroys state" to "never
+# runs", which is not an improvement.
+#
+# Built from data-catalog: same image, same frontend bytes, its own id, and NO
+# capabilities, so it cannot answer for a capability the data plugins provide.
+python3 scripts/assemble_plugin.py --template plugins/data-catalog/manifest.template.json --out /tmp/data-bundles/d4-fixture --version "$TS_VERSION" --image-ref "$CAT_DIGEST" --frontend-dist /tmp/data-catalog-web >/dev/null
+# Id and capabilities are rewritten HERE rather than through an `--id` flag on the
+# assembler.
+#
+# PR #102 adds that flag for its own protocol-negative fixture, in the same file.
+# Two PRs adding the same argument to the same parser is a merge conflict for no
+# benefit - and the flag is incidental here, since the manifest is already being
+# edited on the next line. Keeping the change local removes the overlap entirely.
+python3 - /tmp/data-bundles/d4-fixture/manifest.json <<'PYFIX'
+import json, sys
+path = sys.argv[1]
+manifest = json.load(open(path))
+# Its own id: deploying it must not replace an instance the conformance matrix or
+# the data tests are measuring.
+manifest["id"] = "dev.opsweave.hello-d4fixture"
+# Nothing provided: this plugin exists to be uninstalled, and a second provider
+# of a catalog capability would make the data tests ambiguous.
+manifest["provides"] = []
+with open(path, "w") as handle:
+    json.dump(manifest, handle, indent=2)
+    handle.write("\n")
+PYFIX
+for name in data-catalog data-catalog-alt data-integration d4-fixture; do
   ./target/debug/opsctl bundle --dir "/tmp/data-bundles/$name" --out "dist/plugins/$name-$TS_VERSION.plugin.zip" --key keys/publisher.key >/dev/null
 done
-ls -lh dist/plugins/data-*.plugin.zip
+# The spec looks for a stem, and builds the filename from it. Rename to the
+# convention it uses rather than special-casing the build script's naming.
+mv "dist/plugins/d4-fixture-$TS_VERSION.plugin.zip" dist/plugins/hello-ops-d4fixture.plugin.zip
+ls -lh dist/plugins/data-*.plugin.zip dist/plugins/hello-ops-d4fixture.plugin.zip
