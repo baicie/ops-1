@@ -1008,6 +1008,172 @@ jobs:
             || { echo "::error::the platform image depends on business code it does not ship"; exit 1; }
           echo "the platform target built with the business application deliberately broken"
 
+  # The FULL product image, on every pull request.
+  #
+  # WHY THIS IS A SEPARATE JOB FROM `platform-image-build`
+  #
+  # `deployments/staging/Dockerfile` has two final stages. `platform` ships the
+  # kernel with no business features; `runtime` ships the FULL kernel plus
+  # `opsweave-pipeline-worker` and the ops-web bundle. The second one is what
+  # staging actually deploys, and until this job existed it was built in exactly
+  # one place: `staging-preview.yml`, which has no `pull_request` trigger. So a
+  # change that broke the full kernel - a new dependency the release profile
+  # cannot link, a feature the platform-only build compiles out, a missing
+  # pipeline-worker binary - could merge with every required check green and
+  # fail on the first deploy.
+  #
+  # That is a coverage gap, not an optimisation: the two targets compile
+  # different feature sets, and `cargo test --locked --workspace` builds neither
+  # of them in release mode.
+  #
+  # WHAT IT ASSERTS, and why each assertion exists
+  #
+  #   present   the four binaries and BOTH web bundles. `platform-image-build`
+  #             asserts ops-web and the pipeline worker are ABSENT from its
+  #             image; this one asserts they are present in this one. Two jobs,
+  #             opposite assertions, one Dockerfile - which is what makes the
+  #             stage split a tested boundary rather than a comment.
+  #   boots     /livez, /readyz, /admin/overview (the platform console),
+  #             /app (the ops web app) and /api/v1/version, with the served
+  #             revision matching the commit. A 200 from each is not enough:
+  #             the console assertion reads the HTML for the app's own mount, so
+  #             an empty index.html fails.
+  #   distinct  the kernel here must NOT be the platform-only build. The
+  #             platform job greps its kernel for `BUSINESS_ROUTE_NOT_BUILT` and
+  #             requires it; this job requires that string to be ABSENT and the
+  #             ingest route to work instead. Without this pair, both images
+  #             could ship the same kernel and both jobs would pass.
+  runtime-image-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the full runtime image
+        run: |
+          set -eu
+          docker build -f deployments/staging/Dockerfile --target runtime \
+            --build-arg OPSWEAVE_VERSION_OVERRIDE="" \
+            -t opsweave-runtime:ci .
+      - name: Assert the image contains the whole product
+        run: |
+          set -eu
+          IMG=opsweave-runtime:ci
+          fail() { echo "::error::$1"; exit 1; }
+
+          for bin in opsweave-kernel opsweave-node opsctl opsweave-pipeline-worker; do
+            docker run --rm --entrypoint /bin/sh "$IMG" -c "test -x /usr/local/bin/$bin" \
+              || fail "the runtime image is missing /usr/local/bin/$bin"
+          done
+          # BOTH bundles: the platform console and the ops web app. They are
+          # separate Vite builds with separate mounts (/admin vs /app).
+          docker run --rm --entrypoint /bin/sh "$IMG" -c 'test -f /app/web/index.html' \
+            || fail "the platform console bundle is missing from the runtime image"
+          docker run --rm --entrypoint /bin/sh "$IMG" -c 'test -f /app/ops-web/index.html' \
+            || fail "the ops web bundle is missing from the runtime image"
+          envs="$(docker image inspect "$IMG" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          case "$envs" in
+            *OPSWEAVE_OPS_WEB_DIST=/app/ops-web*) ;;
+            *) fail "OPSWEAVE_OPS_WEB_DIST does not point at /app/ops-web: $envs" ;;
+          esac
+
+          # The kernel must be the FULL build, which is the exact inverse of the
+          # assertion in platform-image-build. `--no-default-features` is what
+          # compiles the business routes out, and it stamps
+          # BUSINESS_ROUTE_NOT_BUILT into the refusal path.
+          cid="$(docker create "$IMG")"
+          docker cp "$cid:/usr/local/bin/opsweave-kernel" /tmp/full-kernel
+          docker rm "$cid" >/dev/null
+          if strings /tmp/full-kernel | grep -q "BUSINESS_ROUTE_NOT_BUILT"; then
+            fail "the kernel in the runtime image is a platform-only build"
+          fi
+      - name: The image boots and serves both applications
+        run: |
+          set -eu
+          IMG=opsweave-runtime:ci
+          docker network create p001full || true
+          docker run -d --name p001full-pg --network p001full \
+            -e POSTGRES_DB=opsweave -e POSTGRES_USER=opsweave -e POSTGRES_PASSWORD=ci-pass \
+            postgres:17
+          for _ in $(seq 1 60); do
+            docker exec p001full-pg pg_isready -U opsweave -d opsweave >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker run -d --name p001full-kernel --network p001full -p 19082:19081 \
+            -e DATABASE_URL="postgres://opsweave:ci-pass@p001full-pg:5432/opsweave?sslmode=disable" \
+            -e OPSWEAVE_BIND=0.0.0.0:19081 \
+            -e OPSWEAVE_DATA_DIR=/app/data \
+            -e OPSWEAVE_WEB_DIST=/app/web \
+            -e OPSWEAVE_OPS_WEB_DIST=/app/ops-web \
+            -e OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=ci@example.invalid \
+            -e OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=ci-only-not-a-secret \
+            "$IMG"
+          for _ in $(seq 1 90); do
+            curl -fsS http://127.0.0.1:19082/livez >/dev/null 2>&1 && break
+            sleep 1
+          done
+          code() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
+          body() { curl -sS "$@"; }
+          [ "$(code http://127.0.0.1:19082/livez)" = "200" ] || { docker logs p001full-kernel; exit 1; }
+          [ "$(code http://127.0.0.1:19082/readyz)" = "200" ] || { docker logs p001full-kernel; exit 1; }
+
+          # Both front-ends. Not "HTTP 200 means it works": each assertion reads
+          # the response for something only a real build of THAT app contains.
+          [ "$(code http://127.0.0.1:19082/admin/overview)" = "200" ] \
+            || { echo "::error::the platform console is not served"; docker logs p001full-kernel; exit 1; }
+          [ "$(code http://127.0.0.1:19082/app)" = "200" ] \
+            || { echo "::error::the ops web app is not served on /app"; docker logs p001full-kernel; exit 1; }
+          console_html="$(body http://127.0.0.1:19082/admin/overview)"
+          case "$console_html" in
+            *'<div id="root"'*|*'<div id=root'*) ;;
+            *) echo "::error::/admin/overview is not a built console shell: $(printf '%s' "$console_html" | head -c 300)"; exit 1 ;;
+          esac
+          app_html="$(body http://127.0.0.1:19082/app)"
+          case "$app_html" in
+            *'<div id="root"'*|*'<div id=root'*) ;;
+            *) echo "::error::/app is not a built ops-web shell: $(printf '%s' "$app_html" | head -c 300)"; exit 1 ;;
+          esac
+          # And they must not be the same document served twice.
+          if [ "$console_html" = "$app_html" ]; then
+            echo "::error::/admin/overview and /app served identical bytes; the two bundles are not distinct"
+            exit 1
+          fi
+
+          # The business route the platform image refuses must work here.
+          ingest_code="$(curl -sS -o /tmp/ingest.json -w '%{http_code}' -X POST \
+            -H 'content-type: application/json' \
+            -d '{"events":[]}' \
+            http://127.0.0.1:19082/api/v1/telemetry/events || true)"
+          if [ "$ingest_code" = "404" ] && grep -q BUSINESS_ROUTE_NOT_BUILT /tmp/ingest.json 2>/dev/null; then
+            echo "::error::the runtime image refuses the ingest route as not-built; it is a platform-only kernel"
+            exit 1
+          fi
+          echo "ingest route answered $ingest_code (not the platform-only refusal)"
+
+          # /api/v1/version answers with exactly five fields and does not leak
+          # the database URL, the data directory, or any env var.
+          #
+          # It deliberately does NOT assert commitSha == GITHUB_SHA, and that is
+          # worth writing down because it was the first version of this step.
+          # `OPSWEAVE_BUILD_SHA` is an ENVIRONMENT variable the deploy script
+          # exports (scripts/deploy-staging.sh:418, deployments/staging/compose.yaml:110),
+          # not a build-time fact baked into the image. In a bare `docker run` it
+          # is unset and the endpoint truthfully reports `"commitSha":null` -
+          # measured on this image. Asserting the sha here would have forced the
+          # Dockerfile to bake in a claim the build cannot verify, which is the
+          # opposite of what the assertion was for. The served-commit check lives
+          # where the value exists: scripts/deploy-staging.sh:1059.
+          served="$(body http://127.0.0.1:19082/api/v1/version)"
+          for field in version commitSha buildTime environment startedAt; do
+            case "$served" in
+              *"\"$field\":"*) ;;
+              *) echo "::error::/api/v1/version is missing $field: $served"; exit 1 ;;
+            esac
+          done
+          case "$served" in
+            *sslmode*|*postgres://*|*OPSWEAVE_DATA_DIR*) echo "::error::/api/v1/version leaks configuration: $served"; exit 1 ;;
+          esac
+          docker logs p001full-kernel | tail -5
+
   # The merge gate.
   #
   # WHY THIS JOB EXISTS, AND WHY IT IS NOT A SCRIPT IN ANOTHER WORKFLOW
@@ -1062,6 +1228,7 @@ jobs:
       - spec-coverage
       - platform-only
       - platform-image-build
+      - runtime-image-build
       - zabbix-plugin
       - b2-plugin-identity
       - g13a-roundtrip

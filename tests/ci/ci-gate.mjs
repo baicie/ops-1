@@ -92,6 +92,7 @@ export const JOB_TO_SUITE = {
   'spec-coverage': 'spec-coverage',
   'platform-only': 'platform-only',
   'platform-image-build': 'platform-image-build',
+  'runtime-image-build': 'platform-image-build',
   'zabbix-plugin': 'plugin-lifecycle',
   'b2-plugin-identity': 'data-foundation',
   'g13a-roundtrip': 'data-foundation',
