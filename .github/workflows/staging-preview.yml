@@ -45,6 +45,29 @@ on:
       # with an explicit sha, which now verifies where that sha came from (see
       # the "Verify the requested sha" step).
       - main
+  # A nightly full-tier certification.
+  #
+  # WHY THIS EXISTS, and it is not "run the tests more".
+  #
+  # The three seeded-data suites are labelled `[known-flaky]` and their run steps
+  # are `continue-on-error`. An audit of the last twenty staging runs found every
+  # one of them `skipped`: the `full` tier is reachable only through
+  # `workflow_dispatch`, and nobody dispatches it nightly. So the label has never
+  # been earned or disproven by a single data point, and "flaky" is a guess
+  # written into a job name.
+  #
+  # This run produces the data. It is a certification of `main`'s HEAD, in its own
+  # concurrency bucket, and it gates nothing: a red seeded suite still lands in
+  # health.json and the artifact, and the seeded jobs still exit 0. The point is to
+  # be able to answer "how often does this actually fail" with a number, after
+  # which the decision to promote or delete a suite is evidence-based rather than
+  # a guess either way.
+  #
+  # It does deploy: it certifies what the host serves for main's HEAD, which is
+  # what a nightly is for. If that is unwanted, delete this trigger - the suites
+  # then return to never running, which is the state this replaced.
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       sha:
@@ -86,7 +109,13 @@ permissions:
 # deploy fight over one lock, and what cancelled run 40818496709 (baseline 11fe91c) the moment
 # 40818576895 (candidate e6142ff) was triggered, losing the comparison the two runs existed to make.
 concurrency:
-  group: "staging-preview-${{ (inputs.verify_only == true) && format('verify-{0}', inputs.sha || github.sha) || 'deploy' }}"
+  # Three buckets, not one. A verify run certifies what is live, a deploy run
+  # changes what is live, and the nightly does both while producing the
+  # seeded-data evidence. Folding the nightly into `deploy` would let a push to
+  # main cancel it mid-certification - and a cancelled nightly is a data point
+  # that silently does not exist, which is exactly the state this schedule was
+  # added to end.
+  group: "staging-preview-${{ (inputs.verify_only == true) && format('verify-{0}', inputs.sha || github.sha) || (github.event_name == 'schedule' && 'nightly') || 'deploy' }}"
   cancel-in-progress: true
 
 env:
@@ -182,6 +211,16 @@ jobs:
             echo "tier=full" >> "$GITHUB_OUTPUT"
             echo "reason=verify_only=true certifies the build that is already deployed, so the whole suite runs" >> "$GITHUB_OUTPUT"
             echo "::notice::acceptance tier full - verify_only=true certifies the deployed build, so the full suite runs (surfaces and seeded-data included)"
+            exit 0
+          fi
+          # The nightly. A scheduled run has no operator to pass full_suite, and its
+          # entire purpose is to produce the seeded-data failure-rate data that the
+          # `[known-flaky]` label has never had. A nightly that ran the core tier
+          # would be a copy of the push run and would produce no new information.
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            echo "tier=full" >> "$GITHUB_OUTPUT"
+            echo "reason=the nightly certification: the full tier is what produces the seeded-data evidence" >> "$GITHUB_OUTPUT"
+            echo "::notice::acceptance tier full - nightly certification of main's HEAD"
             exit 0
           fi
           if [ "$FULL_SUITE" = "true" ]; then

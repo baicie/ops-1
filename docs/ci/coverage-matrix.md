@@ -128,3 +128,28 @@ summary 与一个非必需的 check），积累数据后再决定是修测试还
 | NOT_IMPLEMENTED | 代码不存在 |
 
 本轮没有任何一项达到 `TESTED_STAGING` 或 `TESTED_REAL_INFRA` 的证据门槛。
+
+## 更正：三个 `[known-flaky]` 套件的真实状态是 NEVER_RUN
+
+本文件先前写「失败被 `continue-on-error` 吞掉」。实测二十次最近的 staging 运行后，这个
+描述是错的，而且错的方向很重要：
+
+```
+$ gh api .../actions/runs/<id>/jobs | jq 'select(名字含 seeded) | conclusion'
+seeded-data studio [known-flaky]        skipped
+seeded-data visual layout [known-flaky] skipped
+seeded-data visual [known-flaky]        skipped
+```
+
+**全部是 `skipped`，不是 `failure`。** 原因是 `full` 层级只能通过 `workflow_dispatch`
+到达，而没有任何人定时 dispatch 它。因此：
+
+- `continue-on-error` 从未掩盖过一次失败，因为从未有一次运行；
+- `[known-flaky]` 这个标签既没有被证实，也没有被证伪——它是个猜测，写在了 job 名里；
+- 这三个套件不是「不稳定」，是「不存在」。
+
+判定改为 **NEVER_RUN**。修复不是把 `continue-on-error` 关掉（那会在没有数据的情况下
+让 staging 常态红），而是先产生数据：`staging-preview.yml` 新增每日
+`cron: '17 3 * * *'`，走 `full` 层级、独立的 concurrency 桶，产出的仍然是
+`health.json` 与 artifact，仍然不阻塞任何东西。积累到足够样本后，再决定是提升为阻塞、
+修测试、还是删除。
