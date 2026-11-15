@@ -104,7 +104,16 @@ async function statusOf(page: Page, url: string, credentials: RequestCredentials
 async function installFixture(): Promise<string> {
   const { execFileSync } = await import('node:child_process');
   const path = await import('node:path');
-  const repoRoot = path.resolve(__dirname, '..', '..');
+  const { fileURLToPath } = await import('node:url');
+  // `__dirname` does not exist here: these specs run as ESM, and the reference
+  // threw `Error: __dirname is not defined` at the first call - measured on run
+  // 43666924580, where the whole D4 test failed on that line rather than on
+  // anything it was meant to measure.
+  //
+  // Every other spec in this directory derives a path from `import.meta.url`
+  // (`g11-viewer-write-entries.spec.ts:68`, `observability-surface.spec.ts:26`);
+  // this one now does the same.
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const bundle = path.join(repoRoot, 'dist', 'plugins', `${FIXTURE_STEM}.plugin.zip`);
   const opsctl = path.join(repoRoot, 'target', 'debug', 'opsctl');
   try {
