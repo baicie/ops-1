@@ -117,7 +117,6 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 | # | 位置 | 问题 |
 |---|---|---|
 | 1 | `tests/contract/validate_contracts.py:73,95` | 唯一的 bundle 摘要校验被 `if bundle_dir.exists()` 守卫，而 `dist/plugins` 是 gitignore 的、只由 `scripts/build-plugins.sh` 生成。必需的 `contracts` job 从不构建 bundle，所以**永远走 else 分支**，打印 `(no dist/plugins yet; bundle checks skipped)` 后退出 0。打包器写错 digest 不会被这个门禁发现。 |
-| 2 | `tests/ci/check-spec-coverage.mjs:93,121` | 检查器的文件清单只有 `tests/ui/*.spec.ts` 与 `tests/{acceptance,ci}/*.sh`，**不枚举 `*.test.mjs`**。本仓库的 `tests/ci/*.test.mjs`（9 个）因此不受覆盖检查管辖。 |
 | 3 | `.github/workflows/staging-preview.yml:36` | push 触发里列了一个开发分支 `feat/0.0.5-staging-preview`。该分支当前不存在于 origin，但触发是**休眠而非移除**——任何人推这个分支名就得到一次完整部署。 |
 | 4 | `.github/workflows/staging-preview.yml:214` | `workflow_dispatch` 的 `sha` 输入是自由文本，没有验证该提交可达 main、通过任何必需检查、或其镜像来自 CI 验证过的树。 |
 
@@ -133,8 +132,8 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 | # | 位置 | 问题 |
 |---|---|---|
 | 7 | `ci.yml:766` vs `platform-linux-acceptance.yml:73` | 逐字节相同的镜像构建，只是 tag 不同（`opsweave-platform:ci` vs `:linux-bond`）。两者都是必需检查，都在每个 PR 上运行。 |
-| 8 | `ci.yml:34` 等 14 处 | 14 个 job 各自安装 Rust 工具链，**没有一个缓存**。`actions/cache`、`Swatinem/rust-cache`、`sccache` 在全部 workflow 里零匹配。 |
-| 9 | `tests/ci/p001c13_negatives.sh:145` | 同一个 plugin-lifecycle job 里 `scripts/build-plugins.sh` 被调用**三次**（三个不同 registry 端口），每次构建并推送 7 个 OCI 镜像。 |
+| 8 | `ci.yml` 7 处、`data-foundation.yml` 2 处、其余 4 个 workflow 各 1 处 | 13 个 job 安装 Rust 工具链，**没有一个缓存编译产物**。`actions/cache`、`Swatinem/rust-cache`、`sccache` 零匹配。**pnpm store 是有缓存的**（`cache: pnpm` 出现在 5 处）——审计初稿说「零缓存」不准确，这里已更正。 |
+| 9 | `tests/ci/p001c13_negatives.sh:145` 与 `tests/ci/p001c13_lifecycle.sh:204` | 同一个 `plugin-lifecycle` job 里（`.github/workflows/plugin-lifecycle.yml:224` 调 negatives，negatives 与 lifecycle 各自调用一次）`scripts/build-plugins.sh` 至少被调用**两次**，每次构建并推送 7 个 OCI 镜像。审计初稿说「三次」，把 `p001c_multilang_lifecycle.sh:146` 也算进来了——那属于另一个 workflow，同一 job 内是两次。 |
 | 10 | `data-foundation.yml:108` | 单个 job 内同一批二进制与 web bundle 被构建两次（一次显式，一次由 `demo_up.sh:67-68`）。 |
 
 ### 已验证但判定为「不是缺陷」
@@ -145,6 +144,14 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 | `ci.yml:493` | 同上。 |
 | `data-foundation.yml:15`、`g12-acceptance.yml:26` | 路径覆盖缺口被否定。 |
 | `staging-preview.yml:2223` | 发布安全问题被否定。 |
+
+## 6b. 本轮已修的三项（原在上一节）
+
+| # | 位置 | 修复 |
+|---|---|---|
+| 2 | `tests/ci/check-spec-coverage.mjs:121` | `*.test.mjs` 纳入清单；立刻发现 `b2_workspace_isolation.test.mjs` 从不运行，已接入 `b2-plugin-identity` |
+| — | `check-spec-coverage.mjs` env 守卫 | 见下节；`spec-coverage` 现在能发现唯一带 `RUN_BROWSER_SMOKE` 的调用被删除 |
+| — | `.github/workflows/typed-pipeline-runtime.yml` | 整个删除（42 步 harness 的第二次执行） |
 
 ## 7. 本轮修了什么
 
