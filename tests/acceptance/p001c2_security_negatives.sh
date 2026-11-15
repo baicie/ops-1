@@ -776,7 +776,33 @@ FIXTURE_TAG="c2-${RUN_TAG}"
 # selected", and it is what `capability_multi_provider.sh:92` already does for the
 # grant it calls UNBOUND. Case 12 tests revocation semantics, not provider
 # pinning, so it should not care which provider is selected.
-CREATE_GRANT_BODY="{\"name\":\"data.catalog.v1\",\"major\":1,\"consumerPluginId\":\"opsweave.data-integration\",\"scope\":[\"dataset:read\"]}"
+# The consumer is a plugin id THIS SUITE OWNS, not `opsweave.data-integration`.
+#
+# `capabilities.rs:585-596` mints a workload token per entry in a plugin's
+# `requires`, and only when a grant exists for `consumer_plugin_id = <that
+# plugin>`. `data-integration` requires `data.catalog.v1:1`, and three later steps
+# in the same harness need its token file to be populated.
+#
+# This suite revoked a grant under `consumerPluginId: opsweave.data-integration` -
+# the same row `capability_multi_provider.sh:126` restores just before it - so
+# after case 12 ran there was no grant for that consumer, the Kernel minted
+# nothing, and `apps/node/src/runtime.rs:1657` wrote `{}`:
+#
+#     fallback: env.get("OPSWEAVE_CAPABILITY_TOKENS").unwrap_or("{}")
+#
+# Measured on runs 43680822312 and 43675797785:
+#
+#     FAIL  the workload token file never gained data.catalog.v1 within 60 s
+#           (keys seen: <empty object>)
+#
+# reported by `data_token_revocation.sh`, two steps after this one. The file was
+# empty because nothing was in it to write - not because the write failed, and
+# not because the Node was slow.
+#
+# `consumerPluginId` is validated only for being non-empty (`capabilities.rs:148`),
+# so a fixture id is legal. `FIXTURE_TAG` already existed for exactly this and was
+# only being printed in a note.
+CREATE_GRANT_BODY="{\"name\":\"data.catalog.v1\",\"major\":1,\"consumerPluginId\":\"$FIXTURE_TAG\",\"scope\":[\"dataset:read\"]}"
 CREATE_CODE="$(call "$ADMIN_TOKEN" POST /api/v1/capability-grants "$CREATE_GRANT_BODY")"
 OWN_GRANT_ID="$(jf "d.get('id') or d.get('grantId') or ''" <$SCRATCH/body 2>/dev/null || true)"
 if [ "$CREATE_CODE" != "200" ] && [ "$CREATE_CODE" != "201" ]; then
