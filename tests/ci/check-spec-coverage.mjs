@@ -396,6 +396,15 @@ function invocations(text) {
 // With relative paths the question "does this line run that harness" is exact:
 // the line must name the path, or name the basename AND be unambiguous.
 const harnessFiles = new Map(); // repo-relative path -> invocation lines
+/**
+ * repo-relative path -> the harness's FULL command lines, in order.
+ *
+ * `harnessFiles` keeps only the lines that invoke a runner, which is enough to
+ * answer "is this spec named here" and useless for "is the line that names it
+ * inside an env-guarded block". The guard lives on a different line, so the
+ * ordered list has to be kept too.
+ */
+const harnessBody = new Map();
 const harnessByBase = new Map(); // basename -> [relative paths]
 for (const dir of ['tests/ci', 'tests/acceptance']) {
   let names = [];
@@ -404,6 +413,7 @@ for (const dir of ['tests/ci', 'tests/acceptance']) {
     if (!name.endsWith('.sh')) continue;
     const rel = `${dir}/${name}`;
     harnessFiles.set(rel, invocations(read(join(ROOT, dir, name))));
+    harnessBody.set(rel, commandLines(read(join(ROOT, dir, name))));
     if (!harnessByBase.has(name)) harnessByBase.set(name, []);
     harnessByBase.get(name).push(rel);
   }
@@ -480,10 +490,75 @@ function workflowCommands(name) {
       }
     }
   }
+  // ENV VARS THE WORKFLOW SETS WHEN IT CALLS THE HARNESS.
+  //
+  // `data_foundation_ci.sh` guards its four Playwright specs with
+  // `if [ "${RUN_BROWSER_SMOKE:-0}" = "1" ]` at :308. A workflow that calls the
+  // script without that variable executes 41 of 42 steps and skips the browser
+  // block - but reading the script's TEXT cannot tell, so this checker credited
+  // those specs to it anyway.
+  //
+  // Measured on a clean export of main: deleting the only invocation that sets
+  // RUN_BROWSER_SMOKE left `spec-coverage` green, printing
+  // `COVERED <- typed-pipeline-runtime.yml` for two specs that workflow never ran.
+  // The check whose entire purpose is "a spec no workflow executes guarantees
+  // nothing" could not see the removal of the only workflow that executed them.
+  //
+  // So the env assignments are collected here and applied below: a line inside an
+  // env-guarded block only counts for a workflow that sets that variable.
+  // ONLY the workflow's own lines. A variable the harness assigns to itself is
+  // not the workflow providing it, and including those made the guard look
+  // satisfied when it was not.
+  const envSet = new Set();
+  for (const line of own) {
+    for (const m of line.matchAll(/(?:^|[\s;&|(])([A-Z][A-Z0-9_]{2,})=/g)) envSet.add(m[1]);
+    for (const m of line.matchAll(/\bexport\s+([A-Z][A-Z0-9_]{2,})=/g)) envSet.add(m[1]);
+  }
+
   return {
     files: [...reached],
     lines: own.concat([...reached].flatMap((h) => harnessFiles.get(h))),
+    // The ordered body of every reachable harness, so the caller can ask "is this
+    // invocation inside a guard?" - a question the invocation list alone cannot
+    // answer, because the guard is on a different line.
+    body: [...reached].flatMap((h) => harnessBody.get(h) ?? []),
+    envSet,
   };
+}
+
+/**
+ * The env variable whose truthiness a harness line depends on, if any.
+ *
+ * Only the `[ "${VAR:-0}" = "1" ]` / `[ "${VAR:-0}" != "1" ]` shape is recognised,
+ * because that is the shape the harnesses in this repository actually use. A
+ * general shell parser is out of scope; a shape this checker does not recognise is
+ * treated as unguarded, which keeps the check as strict as it was before rather
+ * than inventing exclusions.
+ */
+function guardVariable(line) {
+  // Two checks rather than one regex, because the one-regex version was wrong
+  // twice and silently: `[!=]=` is a character class followed by a literal `=`,
+  // which can never match a single `=` - and after fixing that, an alternation
+  // with the `==` branch first swallowed the `=` case. Both mistakes produced a
+  // pattern that matched nothing, so the guard was invisible and the checker went
+  // on crediting browser specs to a workflow that never ran them.
+  //
+  // A line is a guard when it interpolates `${VAR:-0}` AND compares against 1.
+  // ONLY variables that read as "enable this".
+  //
+  // The shape alone is not enough. `g13a1_gateway_e2e.sh:580` guards the same
+  // `[ "${X:-0}" = "1" ]` shape with `G13A1_SKIP_UI` - where 1 means the spec does
+  // NOT run. Treating every guarded block the same way made that spec read as
+  // uncovered on this very branch, which is a false failure and would have made
+  // the checker unusable.
+  //
+  // A variable whose name says skip/disable/no-/without inverts the meaning, and
+  // this checker does not model inversion: it returns null for those, so they are
+  // treated as unguarded - exactly as strict as before this change.
+  const name = line.match(/\$\{([A-Z][A-Z0-9_]{2,}):-0\}/);
+  if (!name) return null;
+  if (/(?:^|_)(?:SKIP|DISABLE|DISABLED|NO|WITHOUT|OFF)(?:_|$)/.test(name[1])) return null;
+  return /(?:!=|==|=)\s*"?1"?\s*\]/.test(line) ? name[1] : null;
 }
 
 const workflows = readdirSync(WORKFLOWS).filter((name) => name.endsWith('.yml') || name.endsWith('.yaml')).sort();
@@ -605,9 +680,40 @@ function harnessLineRuns(line, spec) {
 }
 
 const coveredBy = new Map(specFiles.map((spec) => [spec, []]));
-for (const [workflow, { lines }] of commandsByWorkflow) {
+/** spec -> [{workflow, guard}] for the specs that only ran behind an env guard. */
+const guardEvidence = new Map();
+for (const [workflow, { lines, body, envSet }] of commandsByWorkflow) {
   for (const spec of specFiles) {
-    if (lines.some((line) => RUNNER.test(line) && lineRuns(line, spec))) coveredBy.get(spec).push(workflow);
+    if (!lines.some((line) => RUNNER.test(line) && lineRuns(line, spec))) continue;
+    // Which guard, if any, sits in front of the line that runs this spec?
+    //
+    // The spec's own invocation is what matters, not anything else in the file: a
+    // guard elsewhere in the script does not gate this line.
+    const invocation = lines.find((line) => RUNNER.test(line) && lineRuns(line, spec));
+    // Which guard, if any, encloses the line that runs this spec?
+    //
+    // Position in the harness body decides it: a guard opens a block, and every
+    // invocation after it (until a dedent we do not model) is inside. That is an
+    // over-approximation - a nested or early-closed guard would be misread - but
+    // it only ever ADDS a guard, which makes the check stricter, never looser.
+    const iIdx = body.findIndex((l) => l.includes(invocation ?? '\u0000'));
+    const guardFor = [];
+    for (let i = 0; i < body.length; i += 1) {
+      const g = guardVariable(body[i]);
+      if (g && iIdx >= 0 && i < iIdx) guardFor.push(g);
+    }
+    // A guarded block only counts when the workflow sets the variable. A spec
+    // that appears both inside and outside a guard is unguarded - the unguarded
+    // line is enough to run it.
+    const guarded = guardFor.filter((g) => !envSet.has(g));
+    const isUnguarded = guarded.length === 0;
+    if (isUnguarded) {
+      coveredBy.get(spec).push(workflow);
+    } else {
+      const key = spec;
+      if (!guardEvidence.has(key)) guardEvidence.set(key, []);
+      guardEvidence.get(key).push({ workflow, guard: guarded[0] });
+    }
   }
 }
 
