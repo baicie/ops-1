@@ -85,6 +85,25 @@ absent()  {
   ABSENT_REASONS="$ABSENT_REASONS
   - $1: $reason"
 }
+# `COVERED`: measured elsewhere, with the exact command named.
+#
+# Same verdict effect as ABSENT and for the same reason - it is not a hole in
+# THIS run - but a different fact, so it gets its own line. A NOT_RUN says "this
+# should have been measured and was not"; COVERED says "it was, by that script,
+# and you can run it".
+#
+# Not a way to drop work quietly: the destination is named, so the claim is
+# checkable, and a case that has no destination belongs in NOT_RUN.
+COVERED=0
+COVERED_REASONS=""
+covered()  {
+  COVERED=$((COVERED+1))
+  local reason="${2:-no reason given}"
+  echo "COVERED  $1  ($reason)"
+  echo "COVERED  $1  ($reason)" >>"$EVIDENCE"
+  COVERED_REASONS="$COVERED_REASONS
+  - $1: $reason"
+}
 note()    { echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
 
 # --- fixture cleanup --------------------------------------------------------
@@ -673,10 +692,8 @@ if [ "${OPSWEAVE_C2_ALLOW_DESTRUCTIVE:-0}" != "1" ]; then
   # Counted, not merely printed. A NOT_RUN that only reaches stdout is a NOT_RUN
   # the verdict cannot see, which is how "eight of twelve did not run" used to
   # exit 0.
-  notrun "8 disable" "opt in with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1; e2e_platform.sh covers disable -> 503 CAPABILITY_UNAVAILABLE"
-  notrun "9 uninstall" "opt in with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1; e2e_platform.sh covers uninstall -> 503 CAPABILITY_UNAVAILABLE"
-  echo "COVERED_ELSEWHERE  8/9 -> tests/acceptance/e2e_platform.sh"
-  echo "COVERED_ELSEWHERE  8/9 -> tests/acceptance/e2e_platform.sh" >>"$EVIDENCE"
+  covered "8 disable" "tests/acceptance/e2e_platform.sh covers disable -> 503 CAPABILITY_UNAVAILABLE; opt in here with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1"
+  covered "9 uninstall" "tests/acceptance/e2e_platform.sh covers uninstall -> 503 CAPABILITY_UNAVAILABLE; opt in here with OPSWEAVE_C2_ALLOW_DESTRUCTIVE=1"
 else
   # --- 8. DISABLE, for real -------------------------------------------------
   DISABLE_CODE="$(call "$ADMIN_TOKEN" POST "/api/v1/plugins/$PLUGIN/disable" '{}')"
@@ -902,6 +919,11 @@ if [ "$ABSENT" -gt 0 ]; then
   echo "there is nothing to assert. These are NOT passes and NOT coverage gaps -"
   echo "each line names the code that shows the mechanism is missing:$ABSENT_REASONS"
 fi
+if [ "$COVERED" -gt 0 ]; then
+  echo
+  echo "COVERED elsewhere ($COVERED case(s)): measured by another suite, named below"
+  echo "so the claim can be checked. These are NOT passes here:$COVERED_REASONS"
+fi
 if [ "$NOT_RUN" -gt 0 ]; then
   echo
   echo "NOT_RUN this run ($NOT_RUN case(s)); these are NOT passes:$NOT_RUN_REASONS"
@@ -928,23 +950,23 @@ if [ "$PASS" -eq 0 ]; then
   echo "verdict: INCONCLUSIVE (no case asserted anything)"
   exit 4
 fi
-# ABSENT does not change the verdict.
+# NEITHER ABSENT NOR COVERED changes the verdict.
 #
-# It used to share the NOT_RUN counter, which made this suite exit 3 on every
-# run - `verdict: PASS_WITH_COVERAGE_GAPS (5 case(s) did not run)` - and exit 3
-# is a failure to `run_step.sh`, so the harness stopped there on a run where
-# nothing had gone wrong. Measured on run 43656373611: `PASS=6 FAIL=0 BLOCKED=0`,
-# rc=3.
+# Both used to share the NOT_RUN counter, which made this suite exit 3 on every
+# run - `verdict: PASS_WITH_COVERAGE_GAPS (5 case(s) did not run)` - and exit 3 is
+# a failure to `run_step.sh`, so the harness stopped on a run where nothing had
+# gone wrong. Measured on run 43656373611: `PASS=6 FAIL=0 BLOCKED=0`, rc=3.
 #
-# The five were not gaps. Three were "this product has no such mechanism" (4, 10,
-# 12a) and two were "opt-in destructive coverage that e2e_platform.sh owns" (8,
-# 9). Neither is a hole in this run, and neither will change however many times
-# it is re-run - which is exactly what NOT_RUN is supposed to signal.
+# None of the five was a hole in that run:
+#   4, 10, 12a  the product has no such mechanism (ABSENT, with the code cited)
+#   8, 9        destructive coverage owned by e2e_platform.sh (COVERED, named)
+# Neither is something a re-run would measure differently.
 #
-# A NOT_RUN still fails the run, because that one IS a hole: something should
-# have been measured here and was not.
-if [ "$ABSENT" -gt 0 ]; then
-  echo "verdict: STRICT_PASS ($ABSENT case(s) ABSENT by design - see above)"
+# NOT_RUN still fails the run, because that one IS a hole: something should have
+# been measured here and was not. Keeping that distinction is the entire reason
+# the five-way verdict replaced `exit $FAIL`.
+if [ "$ABSENT" -gt 0 ] || [ "$COVERED" -gt 0 ]; then
+  echo "verdict: STRICT_PASS ($ABSENT absent, $COVERED covered elsewhere - both listed above)"
   exit 0
 fi
 echo "verdict: STRICT_PASS"
