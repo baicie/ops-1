@@ -1,0 +1,591 @@
+#!/usr/bin/env bash
+# P001-C3 — Go and Java through the SAME lifecycle the TypeScript reference
+# plugin already passes, with language-agnostic parameters and shared assertions.
+#
+# ## What this is, and what it is deliberately not
+#
+# `tests/ci/p001c13_lifecycle.sh` drives `e2e_platform.sh` for
+# `dev.opsweave.hello` (TypeScript). This script reuses that machinery with the
+# plugin parameterised, so Go and Java are measured by the same assertions rather
+# than by a second, looser suite written for them.
+#
+# The lifecycle needs TWO versions (upgrade, rollback, "v2 deployed but not
+# activated"). Today only the TypeScript plugin has a 0.0.2 bundle
+# (`scripts/build-plugins.sh` builds `hello-ops-0.0.1`/`0.0.2` and
+# `hello-go-0.0.1`/`hello-java-0.0.1`). So each language is reported per STEP,
+# and the version-dependent steps are `NOT_RUN` with that reason - not skipped,
+# and never inferred from another language.
+#
+# ## Exit codes
+#
+#   0  every step that could run passed, and none was silently dropped
+#   1  a step failed
+#   2  a step could not be measured (the matrix says which)
+#   3  the environment was not there
+set -uo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$ROOT" || exit 3
+
+EVIDENCE="${OPSWEAVE_ML_EVIDENCE:-artifacts/p001c-multilang-lifecycle}"
+mkdir -p "$EVIDENCE"
+MATRIX="$EVIDENCE/matrix.tsv"
+: >"$MATRIX"
+
+PASS=0; FAIL=0; NOT_RUN=0; BLOCKED=0
+row() { # language, step, verdict, detail
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"$MATRIX"
+  printf '%-10s %-34s %-9s %s\n' "$1" "$2" "$3" "$4"
+}
+
+# --- preconditions -----------------------------------------------------------
+command -v docker >/dev/null 2>&1 || { echo "BLOCKED: no docker" >&2; exit 3; }
+docker version --format '{{.Server.Version}}' >/dev/null 2>&1 \
+  || { echo "BLOCKED: no Docker daemon" >&2; exit 3; }
+pg_isready -h "${PGHOST:-127.0.0.1}" -p "${PGPORT:-5432}" >/dev/null 2>&1 \
+  || { echo "BLOCKED: no PostgreSQL" >&2; exit 3; }
+[ -f keys/publisher.key ] || ./target/debug/opsctl keygen --out-dir keys >/dev/null 2>&1 || true
+[ -f keys/publisher.key ] || { echo "BLOCKED: no publisher key" >&2; exit 3; }
+
+# --- the bundles that exist --------------------------------------------------
+#
+# Read from what the build actually produced, not from what it should produce.
+# A language whose bundle is absent is reported, not skipped.
+available_bundle() { # language, version -> stem or empty
+  local lang="$1" ver="$2" stem
+  case "$lang" in
+    go)   stem="hello-go-$ver" ;;
+    java) stem="hello-java-$ver" ;;
+    ts)   stem="hello-ops-$ver" ;;
+  esac
+  [ -f "dist/plugins/$stem.plugin.zip" ] && echo "$stem"
+}
+
+# --- one platform, three languages ------------------------------------------
+#
+# Starting one platform per language would triple the runtime and change nothing:
+# the lifecycle assertions are the same and the platform is isolated per run.
+# One platform, three plugins, is what makes the comparison meaningful.
+say() { echo; echo "==> $*"; }
+
+say "build the binaries and bundles"
+if ! cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl \
+      >"$EVIDENCE/build.log" 2>&1; then
+  echo "BLOCKED: the workspace did not build; see $EVIDENCE/build.log" >&2; exit 3
+fi
+
+# A registry of this run's own, owned by label - the same rule the C1.3 driver
+# applies, for the same reason: removing a container this script did not create
+# is destructive.
+export no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost
+REGISTRY_PORT="${OPSWEAVE_TEST_REGISTRY_PORT:-5015}"
+REGISTRY_NAME="opsweave-ml-registry-$REGISTRY_PORT"
+CREATED_REGISTRY=0
+# The platform this script starts must be torn down by it.
+#
+# It was not: `p001c_up.sh` starts a Kernel, two Nodes, a PostgreSQL database and
+# a state directory, and nothing stopped any of them. On a CI runner that is
+# invisible (the runner is discarded), which is exactly why it survived - the
+# same script on a developer machine leaves a Kernel holding :18181 and a
+# database holding connections, and the NEXT run fails on the port with no clue
+# that the previous run left it.
+#
+# `p001c_teardown.sh` is the scoped counterpart, and it is called with `--purge`
+# so the database and state directory go too. Its own contract is "BLOCKED and
+# change nothing if I cannot prove ownership", which is the behaviour wanted
+# here: a teardown that cannot identify its target must not guess.
+PLATFORM_RUN_ID=""
+cleanup() {
+  local code=$?
+  trap - EXIT TERM INT
+  if [ -n "$PLATFORM_RUN_ID" ]; then
+    if tests/ci/p001c_teardown.sh "$PLATFORM_RUN_ID" --purge >>"${EVIDENCE:-/dev/null}/teardown.log" 2>&1; then
+      echo "cleanup: platform $PLATFORM_RUN_ID torn down"
+    else
+      # Reported, and it makes an otherwise-green run non-zero. A cleanup that
+      # fails silently is how the next run inherits the port.
+      echo "cleanup: FAIL (platform $PLATFORM_RUN_ID; see ${EVIDENCE:-?}/teardown.log)"
+      [ "$code" -eq 0 ] && code=1
+    fi
+  fi
+  if [ "$CREATED_REGISTRY" = "1" ]; then
+    docker rm -f "$REGISTRY_NAME" >/dev/null 2>&1 \
+      && echo "cleanup: registry removed" \
+      || { echo "cleanup: FAIL (registry $REGISTRY_NAME)"; [ "$code" -eq 0 ] && code=1; }
+  fi
+  exit "$code"
+}
+trap cleanup EXIT TERM INT
+
+if docker container inspect "$REGISTRY_NAME" >/dev/null 2>&1; then
+  OWNER="$(docker inspect -f '{{index .Config.Labels "opsweave.ml.registry"}}' "$REGISTRY_NAME" 2>/dev/null || echo '')"
+  [ "$OWNER" = "yes" ] || { echo "BLOCKED: $REGISTRY_NAME exists and is not this script's" >&2; exit 3; }
+else
+  docker run -d --name "$REGISTRY_NAME" --label "opsweave.ml.registry=yes" \
+    -p "127.0.0.1:${REGISTRY_PORT}:5000" registry:2 >/dev/null || {
+      echo "BLOCKED: cannot start a registry on 127.0.0.1:$REGISTRY_PORT" >&2; exit 3; }
+  CREATED_REGISTRY=1
+fi
+for _ in $(seq 1 30); do
+  curl -fsS -m 2 "http://127.0.0.1:${REGISTRY_PORT}/v2/" >/dev/null 2>&1 && break
+  sleep 1
+done
+
+# `127.0.0.1`, NOT `localhost`.
+#
+# The registry is published on `127.0.0.1:${REGISTRY_PORT}` (the `-p` above), and
+# the image ref baked into each bundle keeps whatever host this variable names.
+# Measured on run 43616570950, from the Node's own log:
+#
+#   docker pull failed (exit 1): Error response from daemon:
+#     Get "http://localhost:5015/v2/": dial tcp [::1]:5015: connect: connection refused
+#
+# `localhost` resolves to `::1` on that host, the registry is IPv4-only, and the
+# deploy fails. Go passed only because its image was already in the local daemon
+# from an earlier step, so no pull was needed - which is exactly how a
+# host-dependent bug looks like a language-specific one.
+if ! OPSWEAVE_REGISTRY="127.0.0.1:${REGISTRY_PORT}" BUILD=1 scripts/build-plugins.sh \
+      >"$EVIDENCE/plugins-build.log" 2>&1; then
+  echo "BLOCKED: plugin bundles did not build; see $EVIDENCE/plugins-build.log" >&2; exit 3
+fi
+
+say "start one isolated platform"
+# `p001c_up.sh` prints `RUN_ID=`, `RUN_DIR=` and `== platform up: <url>` on
+# STDOUT; only diagnostics go to stderr. The previous version captured stdout
+# through a pipe that kept `RUN_ID` and discarded the rest, then read the other
+# two back out of the STDERR file - where they never were:
+#
+#     RUN_ID=20261114151359-35436-58c717c8
+#     KERNEL_URL=
+#     RUN_DIR=
+#     BLOCKED: sign-in failed
+#
+# Empty `KERNEL_URL` is what turned into "sign-in failed", which reads like a
+# credential problem. Capture the whole stdout, keep it, and parse from there.
+UP_OUT="$(tests/ci/p001c_up.sh 2>"$EVIDENCE/platform-up.log")" || true
+printf '%s\n' "$UP_OUT" >>"$EVIDENCE/platform-up.log"
+RUN_ID="$(printf '%s\n' "$UP_OUT" | sed -n 's/^RUN_ID=//p' | tail -1)"
+[ -n "$RUN_ID" ] || { echo "BLOCKED: no platform; see $EVIDENCE/platform-up.log" >&2; exit 3; }
+# Recorded as soon as it exists, so the trap tears down a partially-started
+# platform too - that is when leftovers are most likely.
+PLATFORM_RUN_ID="$RUN_ID"
+KERNEL_URL="$(printf '%s\n' "$UP_OUT" | sed -n 's/^== platform up: //p' | tail -1)"
+RUN_DIR="$(printf '%s\n' "$UP_OUT" | sed -n 's/^RUN_DIR=//p' | tail -1)"
+[ -n "$KERNEL_URL" ] || { echo "BLOCKED: the platform started but reported no URL" >&2; exit 3; }
+{
+  echo "RUN_ID=$RUN_ID"; echo "KERNEL_URL=$KERNEL_URL"; echo "RUN_DIR=$RUN_DIR"
+} >"$EVIDENCE/run.txt"
+# Both Nodes' installation ids, read from the harness's own state directories.
+#
+# MEASURED, and it corrects this comment: in `p001c_up.sh` both Nodes carry the
+# SAME installation id. `run.json` records only node-a's, and that one value is
+# what both nodes were enrolled with - seen in CI as
+#
+#     installations: 72e6c746-2d34-40a5-8b88-017223b15ebe 72e6c746-...
+#
+# ADR-023 is about Node identity being bound to a state directory; it does not
+# say a test harness must mint a distinct installation per Node, and this one
+# does not. The earlier version of this comment claimed otherwise and would have
+# sent the next reader looking for a difference that is not there.
+#
+# The loop still covers every id it finds. That is not defensive padding: if the
+# harness ever does mint two, a check over one value would silently call half the
+# platform clean, and the cost of iterating is one line.
+INSTALL_IDS=""
+for inst in node-a node-b; do
+  id_file="/tmp/p001c-${RUN_ID}/$inst/installation-id"
+  [ -f "$id_file" ] && INSTALL_IDS="$INSTALL_IDS $(tr -d '[:space:]' <"$id_file")"
+done
+say "platform: $KERNEL_URL (run $RUN_ID, installations:${INSTALL_IDS:- none})"
+
+OPSCTL="$ROOT/target/debug/opsctl"
+HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" login \
+  --email "${OPSWEAVE_ADMIN_EMAIL:-admin@opsweave.local}" \
+  --password "${OPSWEAVE_ADMIN_PASSWORD:-OpsWeave!2026}" >/dev/null 2>&1 \
+  || { echo "BLOCKED: sign-in failed" >&2; exit 3; }
+
+# --- the matrix --------------------------------------------------------------
+#
+# For each language: the steps that can be measured TODAY, each with its own
+# verdict. `build` and `bundle` are already known from the build log; everything
+# after `activate` is genuinely measured here.
+for lang in ts go java; do
+  case "$lang" in
+    ts) plugin=dev.opsweave.hello ;;
+    go) plugin=dev.opsweave.hello-go ;;
+    java) plugin=dev.opsweave.hello-java ;;
+  esac
+  stem="$(available_bundle "$lang" 0.0.1)"
+
+  if [ -n "$stem" ]; then
+    row "$lang" "build + OCI image + signed bundle" PASS "$stem.plugin.zip present"
+  else
+    row "$lang" "build + OCI image + signed bundle" NOT_RUN "no bundle in dist/plugins for $plugin"
+    continue
+  fi
+
+  # install
+  if HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" install "dist/plugins/$stem.plugin.zip" \
+       >"$EVIDENCE/$lang-install.log" 2>&1; then
+    row "$lang" "install (signature verified)" PASS ""
+  else
+    row "$lang" "install (signature verified)" FAIL "see $EVIDENCE/$lang-install.log"
+    FAIL=$((FAIL+1)); continue
+  fi
+
+  # deploy 2 replicas
+  if HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" deploy "$plugin" 0.0.1 \
+       --replicas 2 --selector role=node --wait >"$EVIDENCE/$lang-deploy.log" 2>&1; then
+    row "$lang" "deploy 2 replicas" PASS ""
+  elif grep -q VERSION_ALREADY_ACTIVE "$EVIDENCE/$lang-deploy.log" 2>/dev/null; then
+    row "$lang" "deploy 2 replicas" PASS "already deployed (not a failure)"
+  else
+    # Capture WHY, while the containers that failed are still on the daemon.
+    #
+    # The deploy log says only `DEGRADED 0/2 ready (2 failed)`. Measured on run
+    # 43610395709: that was the whole record, and the job that could have said
+    # why - the Node's log - was not uploaded. Diagnosing it meant guessing.
+    #
+    # `docker ps -a` plus the container logs for this installation turn a row
+    # that said "failed" into one that says what failed.
+    {
+      # The NODE logs first: they say what the Node did with the container
+      # (pull, create, health-probe, remove) and they survive after the container
+      # is gone. Measured on run 43613861249: the container listing and the
+      # container logs below were BOTH EMPTY, because by the time `opsctl --wait`
+      # returned the failed containers had already been reaped. The Node's own log
+      # is the only record that still exists at that point.
+      echo "--- node logs (last 40 lines each) ---"
+      for n in node-a node-b; do
+        log="/tmp/p001c-${RUN_ID}/logs/$n.log"
+        if [ -f "$log" ]; then
+          echo "--- $n ---"
+          tail -40 "$log" 2>&1 || true
+        else
+          echo "--- $n: $log absent ---"
+        fi
+      done
+      echo "--- containers of this installation ---"
+      for inst in $INSTALL_IDS; do
+        [ -n "$inst" ] || continue
+        docker ps -a --filter "label=opsweave.installation-id=$inst" \
+          --format '{{.ID}} {{.Status}} {{.Image}} {{.Names}}' 2>&1 || true
+      done
+      echo "--- logs of the containers that are not running ---"
+      for inst in $INSTALL_IDS; do
+        [ -n "$inst" ] || continue
+        for cid in $(docker ps -aq --filter "label=opsweave.installation-id=$inst" 2>/dev/null || true); do
+          running="$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo unknown)"
+          [ "$running" = "true" ] && continue
+          echo "--- container $cid ($running) ---"
+          docker logs --tail 30 "$cid" 2>&1 || true
+        done
+      done
+    } >>"$EVIDENCE/$lang-deploy.log" 2>&1
+    row "$lang" "deploy 2 replicas" FAIL "see $EVIDENCE/$lang-deploy.log"
+    FAIL=$((FAIL+1)); continue
+  fi
+
+  # both READY on two different nodes - read back from the Kernel
+  HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" activate "$plugin" 0.0.1 \
+    >"$EVIDENCE/$lang-activate.log" 2>&1 \
+    || grep -qi 'already active' "$EVIDENCE/$lang-activate.log" 2>/dev/null
+  # Read the plugin detail from the Kernel's JSON API, not from `opsctl plugins`
+  # - that command prints text lines (`"{} {} active=… state=…"`, main.rs:392),
+  # so a JSON parser on its output returns nothing and every language would look
+  # as though it had no READY replica.
+  SESSION_TOKEN="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["token"])' \
+    "$RUN_DIR/home/.opsweave/session.json" 2>/dev/null || true)"
+  NODES="$(curl -fsS -m 15 -H "Authorization: Bearer $SESSION_TOKEN" \
+    "$KERNEL_URL/api/v1/plugins/$plugin" 2>/dev/null | python3 -c "
+import json,sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+active = d.get('activeVersion')
+for dep in d.get('deployments') or []:
+    if active and dep.get('version') != active:
+        continue
+    ids = {i['nodeId'] for i in dep.get('instances') or [] if i.get('state') == 'READY'}
+    print(' '.join(sorted(n for n in ids if n)))
+" 2>/dev/null || true)"
+  COUNT="$(printf '%s' "$NODES" | wc -w | tr -d ' ')"
+  if [ "${COUNT:-0}" -ge 1 ]; then
+    row "$lang" "activate + READY replicas" PASS "$COUNT distinct node(s)"
+    PASS=$((PASS+1))
+  else
+    row "$lang" "activate + READY replicas" FAIL "no READY instance reported"
+    FAIL=$((FAIL+1)); continue
+  fi
+
+  # gateway request through the real route
+  CODE="$(curl -sS -o "$EVIDENCE/$lang-gateway.json" -w '%{http_code}' -m 15 \
+    -H "Authorization: Bearer $SESSION_TOKEN" \
+    "$KERNEL_URL/api/v1/gateway/$plugin/api/hello" 2>/dev/null || echo 000)"
+  if [ "$CODE" = "200" ]; then
+    row "$lang" "gateway serves the plugin" PASS "HTTP 200"
+    PASS=$((PASS+1))
+  else
+    row "$lang" "gateway serves the plugin" FAIL "HTTP $CODE"
+    FAIL=$((FAIL+1))
+  fi
+
+  # --- upgrade / rollback, with a real 0.0.2 ------------------------------
+  STEM2="$(available_bundle "$lang" 0.0.2)"
+  if [ -z "$STEM2" ]; then
+    for step in "upgrade to 0.0.2" "v2 deployed but not activated" "rollback to 0.0.1"; do
+      row "$lang" "$step" NOT_RUN "no 0.0.2 bundle in dist/plugins for this language"
+      NOT_RUN=$((NOT_RUN+1))
+    done
+    continue
+  fi
+
+  if HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" install "dist/plugins/$STEM2.plugin.zip"        >"$EVIDENCE/$lang-install2.log" 2>&1; then
+    row "$lang" "install 0.0.2 (signature verified)" PASS ""
+    PASS=$((PASS+1))
+  else
+    row "$lang" "install 0.0.2 (signature verified)" FAIL "see $EVIDENCE/$lang-install2.log"
+    FAIL=$((FAIL+1)); continue
+  fi
+
+  if HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" deploy "$plugin" 0.0.2        --replicas 1 --selector role=node --wait >"$EVIDENCE/$lang-deploy2.log" 2>&1; then
+    row "$lang" "upgrade: deploy 0.0.2" PASS ""
+    PASS=$((PASS+1))
+  else
+    row "$lang" "upgrade: deploy 0.0.2" FAIL "see $EVIDENCE/$lang-deploy2.log"
+    FAIL=$((FAIL+1)); continue
+  fi
+
+  # The route must still be 0.0.1: v2 is deployed and READY but NOT activated.
+  STILL="$(curl -sS -m 10 -H "Authorization: Bearer $SESSION_TOKEN"     "$KERNEL_URL/api/v1/gateway/$plugin/api/hello" 2>/dev/null | grep -c '\"0\.0\.1\"' || true)"
+  if [ "${STILL:-0}" -ge 1 ]; then
+    row "$lang" "v2 deployed but not activated keeps v1" PASS ""
+    PASS=$((PASS+1))
+  else
+    row "$lang" "v2 deployed but not activated keeps v1" FAIL "the route is not serving 0.0.1"
+    FAIL=$((FAIL+1))
+  fi
+
+  # activate 0.0.2, then roll back
+  HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" activate "$plugin" 0.0.2     >"$EVIDENCE/$lang-activate2.log" 2>&1 || true
+  SWITCHED="$(curl -sS -m 10 -H "Authorization: Bearer $SESSION_TOKEN"     "$KERNEL_URL/api/v1/gateway/$plugin/api/hello" 2>/dev/null | grep -c '\"0\.0\.2\"' || true)"
+  if [ "${SWITCHED:-0}" -ge 1 ]; then
+    row "$lang" "activate 0.0.2 switches the route" PASS ""
+    PASS=$((PASS+1))
+  else
+    row "$lang" "activate 0.0.2 switches the route" FAIL "route does not serve 0.0.2"
+    FAIL=$((FAIL+1))
+  fi
+
+  HOME="$RUN_DIR/home" "$OPSCTL" --url "$KERNEL_URL" rollback "$plugin" 0.0.1     >"$EVIDENCE/$lang-rollback.log" 2>&1 || true
+  ROLLED="$(curl -sS -m 10 -H "Authorization: Bearer $SESSION_TOKEN"     "$KERNEL_URL/api/v1/gateway/$plugin/api/hello" 2>/dev/null | grep -c '\"0\.0\.1\"' || true)"
+  if [ "${ROLLED:-0}" -ge 1 ]; then
+    row "$lang" "rollback to 0.0.1" PASS ""
+    PASS=$((PASS+1))
+  else
+    row "$lang" "rollback to 0.0.1" FAIL "route does not serve 0.0.1 after rollback"
+    FAIL=$((FAIL+1))
+  fi
+
+  # --- disable / enable / uninstall ---------------------------------------
+  # `Idempotency-Key` is REQUIRED on every mutating route
+  # (`receipts::idempotency_key`, 8..=128 chars) - a request without it is a 400
+  # before the handler runs.
+  #
+  # Measured on run 43610395709: `disable` returned HTTP 400 for exactly this
+  # reason, and the matrix reported it as a failure. The product was right; the
+  # request was malformed. Each call now carries a key that is unique per
+  # (method, path, time) so a genuine retry is still idempotent while two
+  # different operations never collide.
+  api() { # method, path, [body] -> status code
+    local m="$1" p="$2" b="${3:-}"
+    local key
+    key="p001c-ml-$m-$(printf '%s' "$p" | tr '/' '-')-$(date +%s%N)"
+    local args=(-sS -o /dev/null -w '%{http_code}' -m 20 -X "$m"
+                -H "Authorization: Bearer $SESSION_TOKEN"
+                -H "Idempotency-Key: $key")
+    [ -n "$b" ] && args+=(-H 'content-type: application/json' --data-binary "$b")
+    curl "${args[@]}" "$KERNEL_URL$p" 2>/dev/null || echo 000
+  }
+
+  DIS="$(api POST "/api/v1/plugins/$plugin/disable" '{}')"
+  case "$DIS" in
+    200|202|204)
+      REFUSED="$(api GET "/api/v1/gateway/$plugin/api/hello")"
+      if [ "$REFUSED" = "503" ]; then
+        row "$lang" "disable -> gateway refuses (503)" PASS ""
+        PASS=$((PASS+1))
+      else
+        row "$lang" "disable -> gateway refuses (503)" FAIL "got HTTP $REFUSED"
+        FAIL=$((FAIL+1))
+      fi
+      ENA="$(api POST "/api/v1/plugins/$plugin/enable" '{}')"
+      case "$ENA" in
+        200|202|204) row "$lang" "enable" PASS ""; PASS=$((PASS+1)) ;;
+        *) row "$lang" "enable" FAIL "HTTP $ENA"; FAIL=$((FAIL+1)) ;;
+      esac ;;
+    000) row "$lang" "disable" NOT_RUN "HTTP 000"; NOT_RUN=$((NOT_RUN+1)) ;;
+    *) row "$lang" "disable" FAIL "HTTP $DIS"; FAIL=$((FAIL+1)) ;;
+  esac
+
+  # `uninstall` is `POST /api/v1/plugins/{id}/uninstall`, not `DELETE` on the
+  # plugin itself. `/api/v1/plugins/{plugin_id}` registers GET only, so the
+  # matrix's DELETE returned 405 Method Not Allowed - the product refusing a
+  # method it does not serve, reported as a lifecycle failure.
+  #
+  # Snapshot THIS plugin's containers before the uninstall, two ways, because the
+  # two answer different questions.
+  #
+  #   BEFORE_CIDS      every container Docker attributes to this plugin via
+  #                    `opsweave.plugin-id` (`apps/node/src/docker.rs:655`). This
+  #                    is the broad view: it includes containers the Kernel may
+  #                    already have forgotten about.
+  #   BEFORE_KERNEL    the containerIds the Kernel itself reports for this
+  #                    plugin's instances, read from the plugin detail. This is
+  #                    the view `e2e_platform.sh:547-550` uses, and it is the one
+  #                    the product's own contract is about: "the containers of the
+  #                    instances you uninstalled are gone".
+  #
+  # Collapsing them was the mistake of the previous two versions of this row: one
+  # counted the whole installation (other plugins' containers included), the
+  # other counted every labelled container (historical ones included). Reporting
+  # them separately says which claim broke.
+  BEFORE_CIDS=""
+  BEFORE_KERNEL=""
+  BEFORE_ERR=""
+  if ! BEFORE_CIDS="$(docker ps -aq --filter "label=opsweave.plugin-id=$plugin" 2>&1)"; then
+    BEFORE_ERR="docker ps failed for plugin $plugin: ${BEFORE_CIDS:-<no output>}"
+    BEFORE_CIDS=""
+  fi
+  if [ -z "$BEFORE_ERR" ]; then
+    BEFORE_KERNEL="$(curl -sS -m 20 -H "Authorization: Bearer $SESSION_TOKEN" \
+      "$KERNEL_URL/api/v1/plugins/$plugin" 2>/dev/null | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: raise SystemExit
+for dep in d.get("deployments") or []:
+    for i in dep.get("instances") or []:
+        if i.get("containerId"):
+            print(i["containerId"])
+' 2>/dev/null || true)"
+  fi
+  UNI="$(api POST "/api/v1/plugins/$plugin/uninstall" '{}')"
+  case "$UNI" in
+    200|202|204)
+      AFTER="$(api GET "/api/v1/gateway/$plugin/api/hello")"
+      if [ "$AFTER" = "503" ]; then
+        row "$lang" "uninstall -> gateway refuses (503)" PASS ""
+        PASS=$((PASS+1))
+      else
+        row "$lang" "uninstall -> gateway refuses (503)" FAIL "got HTTP $AFTER"
+        FAIL=$((FAIL+1))
+      fi ;;
+    000) row "$lang" "uninstall" NOT_RUN "HTTP 000"; NOT_RUN=$((NOT_RUN+1)) ;;
+    *) row "$lang" "uninstall" FAIL "HTTP $UNI"; FAIL=$((FAIL+1)) ;;
+  esac
+
+  # TWO claims, reported separately, because they are not the same claim.
+  #
+  #   a) the containers the KERNEL named for this plugin's instances are gone.
+  #      This is the product's contract, the one `e2e_platform.sh:547-550` checks,
+  #      and the one a leak of a serving replica would break.
+  #   b) every container Docker labels with this plugin id is gone. Stricter:
+  #      it also catches containers the Kernel no longer tracks, e.g. an orphan
+  #      left by the 0.0.1 -> 0.0.2 upgrade.
+  #
+  # Folding them together is what made the last two versions wrong in opposite
+  # directions - one counted other plugins' containers, the other counted every
+  # labelled container and could not say which claim had broken.
+  #
+  # WAIT FOR IT. `uninstall` is an instruction, not a removal:
+  # `deployments.rs:878` sets `desired_action='STOP'` and returns. The Node acts
+  # on it on its next reconcile pass (`apps/node/src/runtime.rs:1158`, a 1 s
+  # loop). Looking at the daemon the moment `uninstall` returned was reading a
+  # state the platform had not been given time to reach.
+  remaining_of() { # $1 = newline-separated ids
+    local left="" cid
+    for cid in $1; do
+      [ -n "$cid" ] || continue
+      docker inspect "$cid" >/dev/null 2>&1 && left="$left $cid"
+    done
+    printf '%s' "$left"
+  }
+  KERNEL_LEFT=""
+  LABEL_LEFT=""
+  if [ -z "$BEFORE_ERR" ]; then
+    for _ in $(seq 1 120); do   # 60 s, bounded: a real leak still fails
+      KERNEL_LEFT="$(remaining_of "$BEFORE_KERNEL")"
+      LABEL_LEFT="$(remaining_of "$BEFORE_CIDS")"
+      [ -z "$KERNEL_LEFT" ] && [ -z "$LABEL_LEFT" ] && break
+      sleep 0.5
+    done
+  fi
+  if [ -n "$BEFORE_ERR" ]; then
+    row "$lang" "no container of this plugin remains" BLOCKED "$BEFORE_ERR"
+    BLOCKED=$((BLOCKED+1))
+  else
+    if [ -z "$KERNEL_LEFT" ]; then
+      row "$lang" "the Kernel's containers for this plugin are gone" PASS "$(printf '%s\n' $BEFORE_KERNEL | grep -c . ) container(s), all removed"
+      PASS=$((PASS+1))
+    else
+      # The product's own claim. A replica the Kernel named is still running.
+      DETAIL=""
+      for cid in $KERNEL_LEFT; do
+        DETAIL="$DETAIL $(docker inspect -f '{{.Name}}|{{.Config.Image}}|{{.State.Status}}' "$cid" 2>/dev/null || echo "$cid|?|?")"
+      done
+      row "$lang" "the Kernel's containers for this plugin are gone" FAIL "still present after 60 s:$DETAIL"
+      FAIL=$((FAIL+1))
+    fi
+    if [ -z "$LABEL_LEFT" ]; then
+      row "$lang" "no labelled container of this plugin remains" PASS ""
+      PASS=$((PASS+1))
+    else
+      # Not the product's contract, but a real leftover: a container carrying
+      # this plugin's id that nothing removed. Reported so it can be judged,
+      # with the image tag that says which version left it.
+      DETAIL=""
+      for cid in $LABEL_LEFT; do
+        DETAIL="$DETAIL $(docker inspect -f '{{.Name}}|{{.Config.Image}}|{{.State.Status}}' "$cid" 2>/dev/null || echo "$cid|?|?")"
+      done
+      row "$lang" "no labelled container of this plugin remains" FAIL "still present after 60 s:$DETAIL"
+      FAIL=$((FAIL+1))
+    fi
+  fi
+done
+
+# --- verdict -----------------------------------------------------------------
+say "matrix"
+column -t -s $'\t' "$MATRIX" 2>/dev/null || cat "$MATRIX"
+echo
+echo "PASS=$PASS FAIL=$FAIL BLOCKED=$BLOCKED NOT_RUN=$NOT_RUN"
+echo "evidence: $EVIDENCE"
+
+# Five outcomes, and the exit code is the verdict.
+#
+# `BLOCKED` was counted nowhere before this: a row that could not be measured
+# (a daemon that failed to answer, a fixture that was not there) incremented a
+# counter nothing read, and the script exited 0. `NOT_RUN` shared the same fate
+# when it was the only non-pass - `[ "$NOT_RUN" -eq 0 ] || exit 2` happens to
+# catch it, but the summary line did not mention BLOCKED at all, so a run with
+# blocked rows printed "PASS=n FAIL=0 NOT_RUN=0" and looked complete.
+#
+#   0  STRICT_PASS              every language, every step, asserted
+#   1  FAIL                     a language disagreed with the contract
+#   2  BLOCKED                  a step could not be measured
+#   3  PASS_WITH_COVERAGE_GAPS  nothing failed, but some steps did not run
+#
+# FAIL and BLOCKED both outrank the softer verdicts.
+if [ "$FAIL" -ne 0 ]; then
+  echo "verdict: FAIL"
+  exit 1
+fi
+if [ "$BLOCKED" -ne 0 ]; then
+  echo "verdict: BLOCKED ($BLOCKED step(s) could not be measured)"
+  exit 2
+fi
+if [ "$NOT_RUN" -ne 0 ]; then
+  echo "verdict: PASS_WITH_COVERAGE_GAPS ($NOT_RUN step(s) did not run)"
+  exit 3
+fi
+echo "verdict: STRICT_PASS"
+exit 0
