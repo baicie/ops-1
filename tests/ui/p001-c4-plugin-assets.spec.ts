@@ -148,32 +148,65 @@ async function installFixture(): Promise<string> {
   // never been made active, so it had no version, so no asset path could be
   // computed.
   //
+  // INSTALL -> DEPLOY -> ACTIVATE, three steps, not one.
+  //
+  // Run 43672194292, with the diagnostic added in the previous commit doing its
+  // job:
+  //
+  //     activation failed: API 404 Not Found returned NOT_FOUND:
+  //     deployment not found; deploy the version first
+  //
+  // The Kernel was right and the message said so. `activate` operates on a
+  // DEPLOYMENT (`deployments.rs`, activate_inner looks up
+  // `plugin_deployments WHERE plugin_id AND version`), and installing a bundle
+  // creates none. `scripts/demo_up.sh:150-156` is the reference: deploy, then
+  // activate.
+  //
+  // One replica is enough: D4 measures ONE instance's assets. The selector is
+  // `role=node`, which both Nodes carry (`data_foundation_ci.sh:195`).
+  //
+  // `--wait` so a failed deploy is reported here rather than as an empty
+  // `activeVersion` three calls later.
+  const url = process.env.OPSWEAVE_URL || 'http://127.0.0.1:18181';
+  const run = (args: string[]): string => execFileSync(opsctl, ['--url', url, ...args], {
+    cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 180_000,
+  }) as string;
+  try {
+    run(['deploy', FIXTURE_PLUGIN, FIXTURE_VERSION, '--replicas', '1', '--selector', 'role=node', '--wait']);
+  } catch (error) {
+    const message = String((error as { stderr?: string; message?: string }).stderr
+      || (error as Error).message);
+    // What a second run actually does, read from `deployments.rs:285-300`:
+    //
+    //   status READY | PREPARING | PENDING  -> 202 ACCEPTED, not an error
+    //   status ACTIVE                       -> 409 VERSION_ALREADY_ACTIVE
+    //   status DISABLED/DEGRADED/FAILED     -> re-deployed, 202
+    //
+    // So the only repeat case that throws is ACTIVE, which means the fixture is
+    // already deployed and serving - exactly the state this function wants.
+    if (!/VERSION_ALREADY_ACTIVE|already the active version|409|CONFLICT/i.test(message)) {
+      return `deploy failed: ${message.split('\n').slice(0, 3).join(' | ')}`;
+    }
+  }
   // Activated here, the way every other script activates a plugin:
   //
   //     opsctl --url "$URL" activate <plugin> <version>
   //
   // (`scripts/demo_up.sh:152`, `scripts/demo_data_up.sh:23`). `opsctl` carries the
-  // session itself, so no token has to be threaded through the test - and there
-  // is no `OPSWEAVE_ADMIN_TOKEN` in this harness to thread.
+  // session itself - `data_foundation_ci.sh:169` logs in once and every later
+  // `opsctl` call uses it - so no token has to be threaded through the test.
   //
-  // `--expected-revision` is NOT passed. It defaults to none
-  // (`main.rs:84-85`, `Option<i64>`), and computing it would mean reading
-  // `GET /api/v1/plugins/{id}` first - a second failure mode for no benefit. The
-  // spec does not care about the CAS; it cares that the version is active.
+  // `--expected-revision` is NOT passed: it is `Option<i64>` and defaults to none
+  // (`main.rs:84-85`), and computing it would mean reading the plugin detail
+  // first, adding a second failure mode for a CAS this test does not care about.
   try {
-    const url = process.env.OPSWEAVE_URL || 'http://127.0.0.1:18181';
-    execFileSync(
-      opsctl,
-      ['--url', url, 'activate', FIXTURE_PLUGIN, FIXTURE_VERSION],
-      { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe', timeout: 120_000 },
-    );
+    run(['activate', FIXTURE_PLUGIN, FIXTURE_VERSION]);
   } catch (error) {
     const message = String((error as { stderr?: string; message?: string }).stderr
       || (error as Error).message);
     // Already active is the second-run state; anything else is a real failure to
     // make the fixture usable, and saying so beats letting discovery report "no
-    // installed plugin exposes a reachable frontend/index.html" - which is what
-    // run 43670481610 said for a plugin that was installed and never activated.
+    // installed plugin exposes a reachable frontend/index.html".
     if (!/already active|already activated|409|ALREADY_ACTIVE|CONFLICT/i.test(message)) {
       return `activation failed: ${message.split('\n').slice(0, 3).join(' | ')}`;
     }
