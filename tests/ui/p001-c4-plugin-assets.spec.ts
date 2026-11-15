@@ -212,9 +212,14 @@ test('D4: asset and API reachability across disable and uninstall', async ({ pag
     }
   }
   if (!PLUGIN) {
+    // `candidates` was referenced here and defined nowhere - this file had never
+    // been executed, so `Error: candidates is not defined` is what the first CI
+    // run after the __dirname fix reported (run 43669073512, 1.0 s in). The loop
+    // above tries exactly ONE plugin, `FIXTURE_PLUGIN`, so there is no list to
+    // join; naming the one it tried is both accurate and the thing a reader needs.
     block(
       `no installed plugin exposes a reachable frontend/index.html; D4 has nothing ` +
-        `to measure (candidates tried: ${candidates.join(', ')})`,
+        `to measure (tried: ${FIXTURE_PLUGIN})`,
     );
     assertNotBlocked();
     return;
