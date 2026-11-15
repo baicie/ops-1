@@ -433,18 +433,41 @@ for dep in d.get('deployments') or []:
   # matrix's DELETE returned 405 Method Not Allowed - the product refusing a
   # method it does not serve, reported as a lifecycle failure.
   #
-  # Snapshot THIS plugin's containers before the uninstall, so the containment
-  # row below can ask the only question it is entitled to ask: did the containers
-  # that existed for this plugin go away?
+  # Snapshot THIS plugin's containers before the uninstall, two ways, because the
+  # two answer different questions.
   #
-  # `opsweave.plugin-id` is stamped by the Node on every container it creates
-  # (`apps/node/src/docker.rs:655`), so the snapshot is exact. Taken by immutable
-  # id, and the daemon's own failure is recorded rather than collapsed to "none".
+  #   BEFORE_CIDS      every container Docker attributes to this plugin via
+  #                    `opsweave.plugin-id` (`apps/node/src/docker.rs:655`). This
+  #                    is the broad view: it includes containers the Kernel may
+  #                    already have forgotten about.
+  #   BEFORE_KERNEL    the containerIds the Kernel itself reports for this
+  #                    plugin's instances, read from the plugin detail. This is
+  #                    the view `e2e_platform.sh:547-550` uses, and it is the one
+  #                    the product's own contract is about: "the containers of the
+  #                    instances you uninstalled are gone".
+  #
+  # Collapsing them was the mistake of the previous two versions of this row: one
+  # counted the whole installation (other plugins' containers included), the
+  # other counted every labelled container (historical ones included). Reporting
+  # them separately says which claim broke.
   BEFORE_CIDS=""
+  BEFORE_KERNEL=""
   BEFORE_ERR=""
   if ! BEFORE_CIDS="$(docker ps -aq --filter "label=opsweave.plugin-id=$plugin" 2>&1)"; then
     BEFORE_ERR="docker ps failed for plugin $plugin: ${BEFORE_CIDS:-<no output>}"
     BEFORE_CIDS=""
+  fi
+  if [ -z "$BEFORE_ERR" ]; then
+    BEFORE_KERNEL="$(curl -sS -m 20 -H "Authorization: Bearer $SESSION_TOKEN" \
+      "$KERNEL_URL/api/v1/plugins/$plugin" 2>/dev/null | python3 -c '
+import json, sys
+try: d = json.load(sys.stdin)
+except Exception: raise SystemExit
+for dep in d.get("deployments") or []:
+    for i in dep.get("instances") or []:
+        if i.get("containerId"):
+            print(i["containerId"])
+' 2>/dev/null || true)"
   fi
   UNI="$(api POST "/api/v1/plugins/$plugin/uninstall" '{}')"
   case "$UNI" in
@@ -461,53 +484,72 @@ for dep in d.get('deployments') or []:
     *) row "$lang" "uninstall" FAIL "HTTP $UNI"; FAIL=$((FAIL+1)) ;;
   esac
 
-  # Did the containers this plugin had BEFORE the uninstall go away?
+  # TWO claims, reported separately, because they are not the same claim.
   #
-  # The previous version counted every container carrying this installation id
-  # and required the count to be zero. That is not a statement about the plugin
-  # under test: the harness installs ts, go and java into one platform, so when
-  # the `ts` row ran, the containers of `hello-go` and `hello-java` - installed
-  # by the lifecycle fixture, still desired - were counted against `ts`.
+  #   a) the containers the KERNEL named for this plugin's instances are gone.
+  #      This is the product's contract, the one `e2e_platform.sh:547-550` checks,
+  #      and the one a leak of a serving replica would break.
+  #   b) every container Docker labels with this plugin id is gone. Stricter:
+  #      it also catches containers the Kernel no longer tracks, e.g. an orphan
+  #      left by the 0.0.1 -> 0.0.2 upgrade.
   #
-  # Measured on run 43653529643:
+  # Folding them together is what made the last two versions wrong in opposite
+  # directions - one counted other plugins' containers, the other counted every
+  # labelled container and could not say which claim had broken.
   #
-  #   ts    no container of this installation remains  FAIL  6 container(s) left
-  #   go    no container of this installation remains  FAIL  6 container(s) left
-  #   java  no container of this installation remains  FAIL  6 container(s) left
-  #
-  # `PASS=30 FAIL=3`. The three failures are one fact - six containers belonging
-  # to other plugins - reported once per language.
-  #
-  # The old comment defended the absolute count on the grounds that filtering by
-  # plugin id "would stop detecting a container whose plugin metadata is already
-  # gone but whose process is still there". That reasoning does not hold: a
-  # container whose metadata is gone was never in the snapshot, so no filter can
-  # lose it - and it is not this plugin's container to report on.
-  #
-  # The snapshot makes the claim exact: the ids that existed for this plugin are
-  # gone. Ids are compared, not counted, so a container that never belonged to
-  # this plugin cannot make the row fail, and one that did cannot hide.
-  LEFTOVER=0
-  LEFTOVER_IDS=""
-  LEFTOVER_ERR="$BEFORE_ERR"
-  if [ -z "$LEFTOVER_ERR" ]; then
-    for cid in $BEFORE_CIDS; do
+  # WAIT FOR IT. `uninstall` is an instruction, not a removal:
+  # `deployments.rs:878` sets `desired_action='STOP'` and returns. The Node acts
+  # on it on its next reconcile pass (`apps/node/src/runtime.rs:1158`, a 1 s
+  # loop). Looking at the daemon the moment `uninstall` returned was reading a
+  # state the platform had not been given time to reach.
+  remaining_of() { # $1 = newline-separated ids
+    local left="" cid
+    for cid in $1; do
       [ -n "$cid" ] || continue
-      if docker inspect "$cid" >/dev/null 2>&1; then
-        LEFTOVER=$((LEFTOVER + 1))
-        LEFTOVER_IDS="$LEFTOVER_IDS $cid"
-      fi
+      docker inspect "$cid" >/dev/null 2>&1 && left="$left $cid"
+    done
+    printf '%s' "$left"
+  }
+  KERNEL_LEFT=""
+  LABEL_LEFT=""
+  if [ -z "$BEFORE_ERR" ]; then
+    for _ in $(seq 1 120); do   # 60 s, bounded: a real leak still fails
+      KERNEL_LEFT="$(remaining_of "$BEFORE_KERNEL")"
+      LABEL_LEFT="$(remaining_of "$BEFORE_CIDS")"
+      [ -z "$KERNEL_LEFT" ] && [ -z "$LABEL_LEFT" ] && break
+      sleep 0.5
     done
   fi
-  if [ -n "$LEFTOVER_ERR" ]; then
-    row "$lang" "no container of this plugin remains" BLOCKED "$LEFTOVER_ERR"
+  if [ -n "$BEFORE_ERR" ]; then
+    row "$lang" "no container of this plugin remains" BLOCKED "$BEFORE_ERR"
     BLOCKED=$((BLOCKED+1))
-  elif [ "$LEFTOVER" -eq 0 ]; then
-    row "$lang" "no container of this plugin remains" PASS "none of $(printf '%s\n' $BEFORE_CIDS | grep -c . ) pre-uninstall container(s) remain"
-    PASS=$((PASS+1))
   else
-    row "$lang" "no container of this plugin remains" FAIL "$LEFTOVER container(s) left:$LEFTOVER_IDS"
-    FAIL=$((FAIL+1))
+    if [ -z "$KERNEL_LEFT" ]; then
+      row "$lang" "the Kernel's containers for this plugin are gone" PASS "$(printf '%s\n' $BEFORE_KERNEL | grep -c . ) container(s), all removed"
+      PASS=$((PASS+1))
+    else
+      # The product's own claim. A replica the Kernel named is still running.
+      DETAIL=""
+      for cid in $KERNEL_LEFT; do
+        DETAIL="$DETAIL $(docker inspect -f '{{.Name}}|{{.Config.Image}}|{{.State.Status}}' "$cid" 2>/dev/null || echo "$cid|?|?")"
+      done
+      row "$lang" "the Kernel's containers for this plugin are gone" FAIL "still present after 60 s:$DETAIL"
+      FAIL=$((FAIL+1))
+    fi
+    if [ -z "$LABEL_LEFT" ]; then
+      row "$lang" "no labelled container of this plugin remains" PASS ""
+      PASS=$((PASS+1))
+    else
+      # Not the product's contract, but a real leftover: a container carrying
+      # this plugin's id that nothing removed. Reported so it can be judged,
+      # with the image tag that says which version left it.
+      DETAIL=""
+      for cid in $LABEL_LEFT; do
+        DETAIL="$DETAIL $(docker inspect -f '{{.Name}}|{{.Config.Image}}|{{.State.Status}}' "$cid" 2>/dev/null || echo "$cid|?|?")"
+      done
+      row "$lang" "no labelled container of this plugin remains" FAIL "still present after 60 s:$DETAIL"
+      FAIL=$((FAIL+1))
+    fi
   fi
 done
 
