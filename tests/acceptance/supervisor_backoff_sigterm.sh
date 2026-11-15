@@ -131,5 +131,30 @@ print(next((n.get("status","?") for n in data if n["id"]==nid), "?"))' "$NODE_B_
   sleep 1
 done
 [ "$USABLE" = "1" ] || bad "node-b restarted but did not reach READY within 120 s (last state: ${STATE:-?})"
-echo "node-b restarted pid=$(cat /tmp/node-b.pid) and READY"
+# The NODE being READY is not the INSTANCE being READY, and the steps that follow
+# need the second.
+#
+# `data_token_revocation.sh` reads `/run/opsweave/capability-tokens.json` from the
+# data-integration container, and the Node only writes it once that INSTANCE is
+# READY. Measured on run 43675797785: this line printed "node-b restarted and
+# READY", the next step then waited its own 60 s and reported
+#
+#     the workload token file never gained data.catalog.v1 (keys seen: <empty object>)
+#
+# The Node had come back; its workload had not. `demo_data_up.sh` places the
+# integration instance on `zone=node-b` (`data_foundation_ci.sh:10`), which is the
+# Node this suite restarted, so an instance still STARTING at this point is
+# expected rather than surprising.
+INSTANCE_READY=0
+for _ in $(seq 1 120); do
+  READY_INSTANCES="$(curl -fsS -H "Authorization: Bearer $TOKEN" "${URL:-http://127.0.0.1:18181}/api/v1/plugins/opsweave.data-integration" 2>/dev/null \
+    | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: raise SystemExit
+print(sum(1 for dep in (d.get("deployments") or []) for i in (dep.get("instances") or []) if i.get("state")=="READY"))' 2>/dev/null || echo 0)"
+  [ "${READY_INSTANCES:-0}" -ge 1 ] && { INSTANCE_READY=1; break; }
+  sleep 1
+done
+[ "$INSTANCE_READY" = "1" ] || bad "node-b is READY but its data-integration instance is not (within 120 s)"
+echo "node-b restarted pid=$(cat /tmp/node-b.pid), READY, data-integration instance READY"
 echo "Supervisor Backoff SIGTERM: PASS"
