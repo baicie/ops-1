@@ -128,11 +128,32 @@ A 的代价是 Ruleset 仍需保留 `linux-runtime` 与 `quality-faults` 两项�
 | Nightly workflow | 未建立 | 需要先确定哪些 L3 套件在 nightly 有意义 |
 | Release Gate | 未建立 | 依赖 staging 链重构，本轮未动 |
 | `staging-preview.yml` 重构 | **未动** | 涉及真实主机与密钥，brief 要求人工批准 |
-| Ruleset 修改 | **未做** | brief 明令禁止 |
-| actionlint / shellcheck 接入 CI | 未做 | 需要先决定是否把 2 条既有警告清零 |
-| Rust / pnpm / Docker 缓存 | 未做 | 需要实测收益，本轮无 Runner 可测 |
+| Ruleset 修改 | **未做** | brief 明令禁止。方案见阶段 C |
+| actionlint / shellcheck 接入 CI | 未做 | 本机 actionlint 干净；shellcheck 有 2 条既有 SC2125 警告，清零是独立改动 |
+| Rust 编译缓存 | **已做** | `Swatinem/rust-cache@v2` + `shared-key`，14 处安装点共用（接入后 `contracts` 新增一处） |
+| pnpm / Docker / Playwright 缓存 | 未做 | pnpm store 已有 `cache: pnpm`；Docker 只影响 staging 与 image-build，本轮未测 |
 | SBOM / Provenance | 未做 | 需要 release 链先存在 |
-| `contracts` 同名冲突 | **未修** | 修它需要重命名一个 check，而 Ruleset 里就有 `contracts`；改名会破坏门禁 |
+| `contracts` 同名冲突 | **已修** | 见下节；改名的是 `typed-pipeline-contracts`，Ruleset 要的 `contracts` 一个字没动 |
+| 三个 `[known-flaky]` 套件从未运行 | **已定位，已加数据源** | 见 `coverage-matrix.md`；每日全量 certification 产生失败率 |
+| `contracts` job 的 bundle 校验从未执行 | **已修** | CI 现在先构建真实签名 bundle 再验证，附 8 个反例 |
+
+## `contracts` 同名冲突：实际怎么修的
+
+先前这里写的是「改名会让 Ruleset 里的 `contracts` 永久 Pending」。**那个判断是错的。**
+
+两个 workflow 各自报告一个叫 `contracts` 的 check：
+
+| Workflow | 脚本 | 改名后 |
+|---|---|---|
+| `ci.yml` | `validate_contracts.py` | 保持 `contracts`（Ruleset 要的就是它） |
+| `typed-pipeline-contracts.yml` | `validate_typed_pipeline.py` | `typed-pipeline-contracts` |
+
+Ruleset 要求的名字是 `contracts`，而它由 `ci.yml` 提供——那个 job 从未改名。改的是**另一个**
+workflow 的 job 名，Ruleset 根本没有引用过它。所以不存在 Pending。
+
+实测：改名前同一 PR 上 `contracts` 出现三次（两个 workflow × 两个事件），改名后
+`contracts` 一次、`typed-pipeline-contracts` 一次。新 check 可见但不阻塞合并；把它提升为
+必需是人来决定的事（阶段 C）。
 
 ## `contracts` 同名冲突的迁移建议
 

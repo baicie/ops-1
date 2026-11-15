@@ -2,7 +2,7 @@
 
 ## 1. `data_foundation_ci.sh` 被两个 workflow 各跑一遍
 
-这是本仓库最贵的一处重复，实测合计约 **2550 秒**（1051 + 1502）。
+这是本仓库最贵的一处重复，实测合计约 **2553 秒**（1051 + 1502）。
 
 | 调用点 | 环境变量 |
 |---|---|
@@ -132,7 +132,7 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 | # | 位置 | 问题 |
 |---|---|---|
 | 7 | `ci.yml:766` vs `platform-linux-acceptance.yml:73` | 逐字节相同的镜像构建，只是 tag 不同（`opsweave-platform:ci` vs `:linux-bond`）。两者都是必需检查，都在每个 PR 上运行。 |
-| 8 | `ci.yml` 7 处、`data-foundation.yml` 2 处、其余 4 个 workflow 各 1 处 | 13 个 job 安装 Rust 工具链，**没有一个缓存编译产物**。`actions/cache`、`Swatinem/rust-cache`、`sccache` 零匹配。**pnpm store 是有缓存的**（`cache: pnpm` 出现在 5 处）——审计初稿说「零缓存」不准确，这里已更正。 |
+| 8 | `ci.yml` 8 处、`data-foundation.yml` 2 处、其余 4 个 workflow 各 1 处 | 本报告撰写时为 14 个 job 安装 Rust 工具链（原审计记 13 个；`contracts` job 本轮新增了一处），**没有一个缓存编译产物**。`actions/cache`、`Swatinem/rust-cache`、`sccache` 零匹配。**pnpm store 是有缓存的**（`cache: pnpm` 出现在 5 处）——审计初稿说「零缓存」不准确，这里已更正。 |
 | 9 | `tests/ci/p001c13_negatives.sh:145` 与 `tests/ci/p001c13_lifecycle.sh:204` | 同一个 `plugin-lifecycle` job 里（`.github/workflows/plugin-lifecycle.yml:224` 调 negatives，negatives 与 lifecycle 各自调用一次）`scripts/build-plugins.sh` 至少被调用**两次**，每次构建并推送 7 个 OCI 镜像。审计初稿说「三次」，把 `p001c_multilang_lifecycle.sh:146` 也算进来了——那属于另一个 workflow，同一 job 内是两次。 |
 | 10 | `data-foundation.yml:108` | 单个 job 内同一批二进制与 web bundle 被构建两次（一次显式，一次由 `demo_up.sh:67-68`）。 |
 
@@ -162,4 +162,32 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 | `spec-coverage` 看不见浏览器块消失 | **已修**（env 守卫识别，变异测试验证） |
 | `ci-gate` 读 `needs` 的形状错误 | **已修**（首次真实运行抓到） |
 
-其余 10 项记录在此，未修。
+## 8. 第二轮：对这份清单本身做对抗性复核
+
+第一轮之后，PR #120 上又做了一轮。**下列缺陷全部是本分支自己引入的**——这一点值得单独
+写下来，因为它说明「审查自己刚写的东西」和「审查别人的东西」需要用同样的力度。
+
+| 位置 | 缺陷 | 怎么发现的 |
+|---|---|---|
+| `ci-gate` 的 `JOB_TO_SUITE` | 只映射了 15 个 job 里的 7 个（Ruleset 要求的那 7 个）。另外 8 个每个 PR 都跑，结果被读进来又丢掉——红的 `g13b17-principal` 不影响 gate 判决 | 把 `needs` 的实际 job 集和映射表做差集 |
+| `ci-gate` 的 `delegated` | 七个 suite 一律标 `delegated` 后放行。分析器要求了、workflow 因 path filter 没启动的 suite，**没有任何红 check 可看** | 把 `impact.mjs` 的规则和每个 workflow 的 `paths:` 逐条比对，22 处分歧 |
+| `staging-preview.yml` 的 sha 检查 | 要求 tag `sha-<SHA>` 且查 ghcr REST API，且写在 build job 里、构建**之前**。实测 136 个已发布 tag 全是裸 40-hex，0 个带前缀 → **任何 `workflow_dispatch` 都会死在这一步** | 匿名列出 ghcr 的 tag |
+| 同上 | `merge-base --is-ancestor` 在 depth-1 克隆上对不在克隆里的 commit 返回 128，被 `if !` 报成「不在 origin/main 上」——诊断错误 | 在 depth-1 克隆上实测：分支尖端 rc=0，较旧的 main commit `fatal: Not a valid commit name` |
+| `ci-gate.mjs` 注释 | 引用 `tests/ci/check-workflow-hygiene.mjs`——该文件从未存在 | `ls` |
+| 同上 | 写「七个 workflow」，实际九个 | 同上 |
+| `ci-gate` 的 pending | 把 `in_progress` 一律算成 `failed`，在三个兄弟 check 还在跑时变红——gate 第一红在它自己的读时序上 | 真实运行 43716720306 的日志 |
+| `contracts` 的 bundle fixture | 读 `plugins/hello-ops/web/dist`——gitignore 的构建产物。本地过、CI 挂 | CI 报 `missing required file: frontend/remoteEntry.js` |
+| `validate_contracts.py` | `ok bundle` 无条件打印，包括刚往 FAILURES 里追加了摘要不匹配的那一个 | 手工篡改 bundle 后 grep 日志 |
+
+最后一条是我自己读错日志造成的：第一次看时以为篡改**没有被发现**，实际是
+`CONTRACT VALIDATION FAILED` 打在 `ok bundle` 之后，grep 截断让我看到的顺序反了。据此
+改的「`ok` 行会误报」是真缺陷，但我当时给的理由是错的。
+
+### 仍然未修（明确记录）
+
+| # | 位置 | 为什么没修 |
+|---|---|---|
+| 5 | `staging-preview.yml` 的 `--target runtime` 完整镜像只在无 `pull_request` 触发的 workflow 里构建 | 需要 staging 链重构，且要真实主机验证；brief 禁止本轮触碰 |
+| 6 | `full` 层级只能 `workflow_dispatch` 到达 | 已加每日 certification 产生数据，但不提升为 PR 阻塞——没有基线就阻塞是错误顺序 |
+| 7 | `ci.yml` 与 `platform-linux-acceptance.yml` 各构建一次相同镜像 | 实测：artifact 传递（60–90 MB `docker save`）与重建同量级（345s vs 469s），不划算 |
+| 9 | 同一 job 内 `build-plugins.sh` 被调用两次 | 两次针对不同 registry，是刻意的隔离；Docker layer cache 已让第二次变便宜 |

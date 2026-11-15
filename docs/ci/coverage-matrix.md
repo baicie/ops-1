@@ -102,9 +102,23 @@
 
 这与任务书「`continue-on-error` 不能让产品回归被掩盖为完整发布验收通过」的要求冲突。
 
-本轮**未修改**：改它需要先知道这三个套件的真实失败率，否则会把 staging 部署变成
-常态红。正确顺序是：先让它们以「失败但不阻塞」的方式**报告**（例如把结果写进 job
-summary 与一个非必需的 check），积累数据后再决定是修测试还是恢复为阻塞。
+**已处理，但不是靠关闭 `continue-on-error`。**
+
+先做了一次实测：最近二十次 staging 运行里，这三个 job **每一次都是 `skipped`**，不是
+`failure`。`full` 层级只能通过 `workflow_dispatch` 到达，而没有人定时 dispatch。所以
+`continue-on-error` 从未掩盖过失败（没有失败可掩盖），`[known-flaky]` 也从未被数据支持或
+否定——它是写在 job 名里的猜测。
+
+关闭 `continue-on-error` 会把 staging 在三套没有任何基线的测试上变成常态红，这是错误
+顺序。改为给 `staging-preview.yml` 加 `cron: '17 3 * * *'` 的每日 certification：
+
+- 走 `full` 层级，才跑得到这三个套件；
+- 独立 concurrency 桶，push 到 main 不会取消进行中的 nightly（被取消的 nightly 是一个
+  静默不存在的数据点）；
+- 仍然是 `continue-on-error` + `health.json` + artifact，不阻塞任何东西。
+
+积累足够样本后，再决定提升为阻塞、修测试、还是删除。在那之前它们的判定是 **NEVER_RUN**，
+不是 FLAKY。
 
 ## 未验证
 
