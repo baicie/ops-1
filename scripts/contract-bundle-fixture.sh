@@ -11,10 +11,18 @@
 # like a benign note, which is why the gap survived.
 #
 # The real packer (`scripts/build-plugins.sh`) needs Docker, a registry and three
-# toolchains. This needs none of them: `assemble_plugin.py` is pure Python,
-# `plugins/hello-ops/web/dist` ships in the tree, and `opsctl bundle` signs and
-# verifies with a key generated here. So the required check can examine a real
-# bundle on every pull request.
+# toolchains. This needs none of them: `assemble_plugin.py` is pure Python, the
+# frontend comes from `tests/contract/fixtures/hello-frontend` (a tracked
+# directory, not a build output), and `opsctl bundle` signs and verifies with a key
+# generated here. So the required check can examine a real bundle on every pull
+# request.
+#
+# IT USED `plugins/hello-ops/web/dist` AND THAT WAS WRONG. `dist/` is gitignored
+# (.gitignore:3), so the directory exists on a developer machine that has built
+# the web bundle and does not exist in a fresh CI checkout - the script passed
+# locally and failed in CI with `missing required file: frontend/remoteEntry.js`.
+# Depending on an untracked build output inside a required check is the same
+# defect class this repository keeps finding; the fixture is tracked instead.
 #
 # WHAT IT IS NOT: it is not the real packer, and passing it does not prove the
 # real packer is correct. It proves the validator's own checks run and can fail.
@@ -45,7 +53,7 @@ python3 scripts/assemble_plugin.py \
   --out "$OUT_DIR/../contract-fixture-staging/hello" \
   --version 0.0.1 \
   --image-ref "$IMAGE_REF" \
-  --frontend-dist plugins/hello-ops/web/dist >/dev/null
+  --frontend-dist tests/contract/fixtures/hello-frontend >/dev/null
 
 ./target/debug/opsctl bundle \
   --dir "$OUT_DIR/../contract-fixture-staging/hello" \
