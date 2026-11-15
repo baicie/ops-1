@@ -157,7 +157,7 @@ unverifiable 没有 check 名映射                 -> 报告
 
 | 项 | 状态 | 依据 |
 |---|---|---|
-| Runtime Image（完整 `--target runtime`） | **NOT_RUN** | 只在 `staging-preview.yml` 构建，该 workflow 无 `pull_request` 触发；本轮禁止触碰 staging |
+| Runtime Image（完整 `--target runtime`） | **已加进 CI，本地验证通过，CI 结果见下** | 新增 `runtime-image-build` job：构建完整镜像并启动，断言 4 个二进制、2 个前端 bundle、`/livez`、`/readyz`、`/admin/overview`、`/app`、ingest 路由，并断言内核是完整构建（`platform-image-build` 断言的是反面）。本地实测：268 MB、两个前端返回**不同**文档、ingest 返回 422 而非 403/404 的 platform-only 拒绝、platform 镜像在此 job 下会失败两处 |
 | C4 浏览器验收（`p001-c4-plugin-assets.spec.ts`） | **NOT_RUN** | `check-spec-coverage.mjs` 明确报告它为 EXPLICIT_SKIP，并附原因：`opsctl deploy --wait` 在 300s 边界上挂住，原因未定位 |
 | TS / Go / Java Conformance | 在 CI 执行 | `runtime-conformance.yml` 的 `conformance` check 绿；**未**验证跨语言断言矩阵是否覆盖任务书列的全部维度 |
 | Plugin Lifecycle | 在 CI 执行 | `plugin-lifecycle.yml` 的 `full TypeScript lifecycle` 绿 |

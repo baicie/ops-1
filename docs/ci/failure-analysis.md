@@ -124,7 +124,7 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 
 | # | 位置 | 问题 |
 |---|---|---|
-| 5 | `staging-preview.yml:268` | 完整产品镜像（`--target runtime`）**只在这里构建**，而这个 workflow 没有 `pull_request` 触发。每个 PR 触发的镜像构建都是别的 target。 |
+| 5 | `staging-preview.yml:268` | 完整产品镜像（`--target runtime`）**只在这里构建**，而这个 workflow 没有 `pull_request` 触发。每个 PR 触发的镜像构建都是别的 target。**已修**：`ci.yml` 新增 `runtime-image-build`，PR 上构建并启动完整镜像。 |
 | 6 | `staging-preview.yml:1011` | `full` 层级只能通过 `workflow_dispatch` 到达。 |
 
 ### P1 — 重复
