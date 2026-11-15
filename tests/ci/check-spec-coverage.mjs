@@ -118,6 +118,13 @@ function listShell(dir) {
   for (const entry of entries) {
     const name = entry.name;
     if (entry.isDirectory()) continue;
+    // `*.test.mjs` are tests too, and they were outside this inventory entirely.
+    //
+    // `tests/ci/` uses that suffix for its `node --test` suites (nine of them,
+    // including the counters this branch adds), and a `*.test.mjs` that no
+    // workflow runs is exactly the thing this checker exists to catch. It only
+    // ever looked at `*.spec.ts` and `*.sh`.
+    if (name.endsWith('.test.mjs')) { out.push(join(dir, name)); continue; }
     if (!name.endsWith('.sh')) continue;
     // `_`-prefixed and `demo_` files are libraries sourced by other scripts, and
     // `start_`/`build-` files are fixtures. They are not tests and cannot be

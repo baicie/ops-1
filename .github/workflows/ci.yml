@@ -205,7 +205,14 @@ jobs:
       - run: npm ci --prefix plugins/data-catalog/backend
       - run: npm ci --prefix plugins/data-integration/backend
       - name: identity attack and regression suite
-        run: node --test tests/ci/b2_plugin_identity_attack.test.mjs
+        run: |
+          node --test tests/ci/b2_plugin_identity_attack.test.mjs
+          # Workspace isolation was written and never run. `check-spec-coverage.mjs`
+          # could not see it because it only enumerated `*.spec.ts` and `*.sh`; once
+          # `*.test.mjs` was added to that inventory this suite reported
+          # NOT_REFERENCED. Same domain as the attack suite above - a plugin reading
+          # across a workspace boundary - so it runs here rather than in a new job.
+          node --test tests/ci/b2_workspace_isolation.test.mjs
   # The decomposed suites cannot prove a round trip: two implementations of the
   # same digest can both be wrong. This job starts a real Kernel, a real plugin
   # process and a real PostgreSQL, and checks that the bytes the plugin signed
