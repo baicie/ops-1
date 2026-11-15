@@ -3,6 +3,13 @@ on:
   pull_request:
   push:
     branches: [main]
+
+# Least privilege at the workflow level. No job here publishes packages, pushes
+# an image, or writes to a pull request, so read is all any of them needs.
+# `staging-preview.yml` is the only workflow with `packages: write`, and it has no
+# `pull_request` trigger at all.
+permissions:
+  contents: read
 jobs:
   rust:
     runs-on: ubuntu-24.04
@@ -863,3 +870,110 @@ jobs:
             -t opsweave-platform:ci-sabotage . \
             || { echo "::error::the platform image depends on business code it does not ship"; exit 1; }
           echo "the platform target built with the business application deliberately broken"
+
+  # The merge gate.
+  #
+  # WHY THIS JOB EXISTS, AND WHY IT IS NOT A SCRIPT IN ANOTHER WORKFLOW
+  #
+  # Seven of the nine required checks are produced by this workflow. The other
+  # two - `linux-runtime` and `quality-faults` - are produced by two more
+  # workflows that trigger on every PR with no path filter.
+  #
+  # A gate that aggregated all nine would have to wait for other workflow runs.
+  # `needs:` cannot do that, and a `workflow_run`-based aggregator cannot detect
+  # "another workflow was skipped by its path filter" - the event simply never
+  # fires, so "all dependencies finished" is not a state it can observe. Writing
+  # that gate anyway is the specific failure the CI overhaul brief forbids.
+  #
+  # So this gate is honest about its scope: it decides on the jobs it can see,
+  # which are exactly the seven required checks this workflow owns plus every
+  # non-required job here. `linux-runtime` and `quality-faults` remain directly
+  # enforced by the branch ruleset, as they are today. Nothing is claimed that is
+  # not checked.
+  #
+  # WHAT MAKES IT A GATE RATHER THAN A SUMMARY
+  #
+  # `if: always()` so it runs even when a dependency failed - a gate that does not
+  # run when things break is a gate that passes when things break.
+  #
+  # It receives `needs` verbatim and decides, rather than letting GitHub's default
+  # "a failed need fails the job" be the whole story. The difference matters:
+  # a SKIPPED required job does not fail its dependent by default, and `skipped`
+  # is what a path filter or a bad `if:` produces.
+  #
+  # The decision logic is tests/ci/ci-gate.mjs, with `--selftest` covering the
+  # three ways this kind of gate lies (skipped counted as pass, required job not
+  # wired, cancelled counted as pass).
+  ci-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: always()
+    needs:
+      - rust
+      - web
+      - web-unit
+      - contracts
+      - spec-coverage
+      - platform-only
+      - platform-image-build
+      - zabbix-plugin
+      - b2-plugin-identity
+      - g13a-roundtrip
+      - g13a1-gateway
+      - g13b14-claim
+      - g13b16-effect
+      - g13b17-principal
+      - artifact-budget
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `git diff` against the merge base needs history, not a shallow tip.
+          fetch-depth: 0
+      - name: Decide
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The files this PR changed, from the merge base - not from
+          # `origin/main`, which may have moved and would attribute other people's
+          # changes to this PR.
+          if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+            CHANGED="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || true)"
+          else
+            CHANGED=""
+          fi
+          if [ -z "$CHANGED" ]; then
+            # No diff available (a push event, or a fetch that did not complete).
+            # Fail closed: ask the analyzer about a path it cannot map, which is
+            # its strict branch.
+            echo "no change set available; requiring every suite"
+            CHANGED="__unavailable__"
+          fi
+          echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
+          IMPACT="$(printf '%s\n' "$CHANGED" | node tests/ci/impact.mjs --stdin --json)"
+          printf '%s\n' "$IMPACT" | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const on = Object.entries(d.suites).filter(([, v]) => v).map(([k]) => k);
+            console.log("suites required by this change: " + (on.join(" ") || "(none)"));
+          '
+          node tests/ci/ci-gate.mjs --needs-json "$NEEDS" --impact-json "$IMPACT" | tee /tmp/gate.txt
+          # The summary is what a human reads in the Actions UI.
+          {
+            echo "## ci-gate"
+            echo '```'
+            cat /tmp/gate.txt
+            echo '```'
+            echo
+            echo "Not covered by this job: \`linux-runtime\` and \`quality-faults\` are"
+            echo "produced by other workflows and enforced directly by the branch ruleset."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: The gate's own selftest
+        run: |
+          set -eu
+          # A gate whose logic was never counterfactually tested is the thing this
+          # repository has been bitten by repeatedly. Run it before trusting it.
+          node tests/ci/ci-gate.mjs --selftest
+          node --test tests/ci/impact.test.mjs

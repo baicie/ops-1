@@ -62,11 +62,21 @@ export const HARD_REQUIRED = [
 ];
 
 /**
- * Job id -> suite name. The workflow passes `needs` verbatim; this maps the
- * GitHub job ids onto the analyzer's vocabulary.
+ * Job id -> suite name, for the suites THIS workflow produces.
  *
- * A job listed here that is ABSENT from `needs` is an error, not a skip: it means
- * the gate was wired to fewer jobs than it claims to check.
+ * Deliberately partial. `ci.yml` produces seven of the nine required checks; the
+ * other two (`linux-runtime`, `quality-faults`) come from other workflows, and
+ * several impact suites (`data-foundation`, `plugin-lifecycle`,
+ * `runtime-conformance`, `browser-e2e`, `g12-acceptance`) live in workflows this
+ * job cannot see.
+ *
+ * A gate that listed them here would report "not wired" forever, and a gate that
+ * quietly accepted their absence would be the fake aggregate the overhaul brief
+ * forbids. So the split is explicit: `gate()` decides on OWNED, and every suite
+ * that an external workflow produces is reported as DELEGATED with the workflow
+ * that must have produced it. The ruleset enforces `linux-runtime` and
+ * `quality-faults` directly; the rest are advisory today, which docs/ci/ records
+ * as a finding rather than pretending this job covers them.
  */
 export const JOB_TO_SUITE = {
   rust: 'rust',
@@ -76,13 +86,17 @@ export const JOB_TO_SUITE = {
   'spec-coverage': 'spec-coverage',
   'platform-only': 'platform-only',
   'platform-image-build': 'platform-image-build',
-  'quality-faults': 'quality-faults',
-  'linux-runtime': 'linux-runtime',
-  'plugin-lifecycle': 'plugin-lifecycle',
-  'runtime-conformance': 'runtime-conformance',
-  'data-foundation': 'data-foundation',
-  'browser-e2e': 'browser-e2e',
-  'g12-acceptance': 'g12-acceptance',
+};
+
+/** Suite -> the workflow outside ci.yml that produces it. */
+export const DELEGATED = {
+  'linux-runtime': 'platform-linux-acceptance.yml',
+  'quality-faults': 'reliability.yml',
+  'data-foundation': 'data-foundation.yml',
+  'plugin-lifecycle': 'plugin-lifecycle.yml',
+  'runtime-conformance': 'runtime-conformance.yml',
+  'browser-e2e': 'data-foundation.yml',
+  'g12-acceptance': 'g12-acceptance.yml',
 };
 
 /**
@@ -102,7 +116,15 @@ export function gate(needs, impact) {
   const notWired = [];
   const notes = [];
 
+  const delegated = [];
   for (const suite of required) {
+    const ownSuites = new Set(Object.values(JOB_TO_SUITE));
+    if (DELEGATED[suite] && !ownSuites.has(suite)) {
+      // Produced by another workflow. This gate cannot see it and must not claim
+      // to have checked it.
+      delegated.push(`${suite} -> ${DELEGATED[suite]}`);
+      continue;
+    }
     const jobId = Object.keys(JOB_TO_SUITE).find((k) => JOB_TO_SUITE[k] === suite);
     if (!jobId || !(jobId in needs)) {
       // The gate is wired to fewer jobs than it requires. That is a defect in the
@@ -142,6 +164,7 @@ export function gate(needs, impact) {
     failed,
     skippedRequired,
     notWired,
+    delegated,
     notes,
   };
 }
@@ -181,15 +204,17 @@ const SELFTEST = [
     want: 'FAIL',
   },
   {
+    // The suite must be one this workflow OWNS. A delegated suite being skipped
+    // is not this gate's failure to report - it cannot see that workflow run.
     name: 'impact-required suite skipped',
     because: 'skipped',
-    needs: { rust: 'success', web: 'success', 'web-unit': 'success', contracts: 'success', 'spec-coverage': 'success', 'platform-only': 'success', 'platform-image-build': 'success', 'quality-faults': 'success', 'linux-runtime': 'success', 'plugin-lifecycle': 'skipped' },
-    impact: { suites: { ...Object.fromEntries(SUITES.map((s) => [s, false])), 'plugin-lifecycle': true }, unmatched: [] },
+    needs: { rust: 'success', web: 'success', 'web-unit': 'success', contracts: 'success', 'spec-coverage': 'success', 'platform-only': 'skipped', 'platform-image-build': 'success' },
+    impact: { suites: { ...Object.fromEntries(SUITES.map((s) => [s, false])), 'platform-only': true }, unmatched: [] },
     want: 'FAIL',
   },
   {
     name: 'non-required suite skipped',
-    needs: { rust: 'success', web: 'success', 'web-unit': 'success', contracts: 'success', 'spec-coverage': 'success', 'platform-only': 'success', 'platform-image-build': 'success', 'quality-faults': 'success', 'linux-runtime': 'success', 'plugin-lifecycle': 'skipped' },
+    needs: { rust: 'success', web: 'success', 'web-unit': 'success', contracts: 'success', 'spec-coverage': 'success', 'platform-only': 'success', 'platform-image-build': 'success' },
     impact: { suites: Object.fromEntries(SUITES.map((s) => [s, false])), unmatched: [] },
     want: 'PASS',
   },
@@ -206,6 +231,17 @@ const SELFTEST = [
     impact: { suites: Object.fromEntries(SUITES.map((s) => [s, true])), unmatched: ['x/y.bin'] },
     want: 'PASS',
   },
+  // A delegated suite the impact analyzer required is REPORTED, not treated as
+  // either a pass or a wiring defect. Silently dropping it would be the fake
+  // aggregate the overhaul brief forbids; failing on it would block every
+  // high-risk PR forever.
+  {
+    name: 'delegated suite is reported, not a failure',
+    needs: { rust: 'success', web: 'success', 'web-unit': 'success', contracts: 'success', 'spec-coverage': 'success', 'platform-only': 'success', 'platform-image-build': 'success' },
+    impact: { suites: { ...Object.fromEntries(SUITES.map((s) => [s, false])), 'linux-runtime': true }, unmatched: [] },
+    want: 'PASS',
+    because: 'delegated',
+  },
 ];
 
 function selftest() {
@@ -220,9 +256,10 @@ function selftest() {
     if (c.because === 'skipped') okReason = got.skippedRequired.length > 0 && got.failed.length === 0;
     else if (c.because === 'failed') okReason = got.failed.length > 0 && got.skippedRequired.length === 0;
     else if (c.because === 'notWired') okReason = got.notWired.length > 0 && got.failed.length === 0;
+    else if (c.because === 'delegated') okReason = got.delegated.length > 0 && got.failed.length === 0;
     const ok = okVerdict && okReason;
     if (!ok) bad += 1;
-    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${c.want}${c.because ? ` because ${c.because}` : ''}, got ${got.verdict} (failed=${got.failed.length} skipped=${got.skippedRequired.length} notWired=${got.notWired.length})\n`);
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${c.want}${c.because ? ` because ${c.because}` : ''}, got ${got.verdict} (failed=${got.failed.length} skipped=${got.skippedRequired.length} notWired=${got.notWired.length} delegated=${got.delegated.length})\n`);
   }
   process.stdout.write(bad === 0 ? `gate selftest: ${SELFTEST.length}/${SELFTEST.length} pass\n`
     : `gate selftest: ${bad} FAILED\n`);
@@ -254,8 +291,10 @@ function main(argv) {
     for (const f of result.failed) process.stdout.write(`  failed: ${f}\n`);
     for (const s of result.skippedRequired) process.stdout.write(`  skipped: ${s}\n`);
     for (const n of result.notWired) process.stdout.write(`  not wired: ${n}\n`);
+    for (const d of result.delegated) process.stdout.write(`  out of scope: ${d}\n`);
     return 1;
   }
+  for (const d of result.delegated) process.stdout.write(`  delegated: ${d}\n`);
   for (const n of result.notes) process.stdout.write(`  note: ${n}\n`);
   return 0;
 }
