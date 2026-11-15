@@ -92,7 +92,29 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 FAILURES.append(f"{bundle_path.name}: {exc}")
     else:
-        print("  (no dist/plugins yet; bundle checks skipped)")
+        # Say what is NOT covered, and where it IS covered.
+        #
+        # This branch always runs in CI: `dist/` is gitignored (`.gitignore:3`)
+        # and the required `contracts` job checks out, installs jsonschema, and
+        # runs this file - it never builds a bundle. So the digest comparisons
+        # above have never executed in CI, and a message that reads like a benign
+        # note is the reason nobody noticed.
+        #
+        # The behaviour they were written for IS covered, by `crates/bundle`:
+        # `builds_and_verifies_bundle`, `rejects_tampered_payload`,
+        # `rejects_a_swapped_asset_index`, and
+        # `manifest_image_reference_is_covered_by_signature` build real zips,
+        # sign them, and verify them - inside `cargo test --locked --workspace`,
+        # which is the required `rust` check. `verify_bundle` itself applies three
+        # independent checks in order (PayloadIndexMismatch, PayloadDigest,
+        # asset-index digest); see the comment on `rejects_a_swapped_asset_index`.
+        #
+        # Not deleted: it is the only check that would run against bundles
+        # produced by the real packer in a working tree. It is reported as
+        # not-run so the gap is visible in the log instead of reading as success.
+        print("  NOT RUN: no dist/plugins in this checkout, so no bundle was examined.")
+        print("           The packer's digests are covered by crates/bundle tests in the")
+        print("           required `rust` job. This section runs only when bundles exist.")
 
 
     # --- 0.0.2 Data Foundation contracts ---------------------------------

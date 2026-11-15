@@ -32,8 +32,19 @@ name: staging-preview
 on:
   push:
     branches:
+      # `main` only.
+      #
+      # A development branch was listed here. It does not exist on origin
+      # (`git ls-remote --heads origin feat/0.0.5-staging-preview` returns
+      # nothing), but the trigger was dormant, not removed: whoever pushed a
+      # branch with that name would get a full deployment, image build and SSH
+      # to the staging host, from a branch no check has any opinion about.
+      #
+      # Removing it costs nothing today and closes that door permanently. A
+      # feature branch that needs a preview gets one through `workflow_dispatch`
+      # with an explicit sha, which now verifies where that sha came from (see
+      # the "Verify the requested sha" step).
       - main
-      - feat/0.0.5-staging-preview
   workflow_dispatch:
     inputs:
       sha:
@@ -220,6 +231,66 @@ jobs:
           fi
           echo "sha=$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
           echo "target commit: $REQUESTED_SHA"
+
+      # The format check above accepts any 40-hex string. That is the right
+      # syntactic gate and the wrong semantic one: a dispatch can name a commit
+      # that is on no branch, was never built by CI, or is on a fork.
+      #
+      # The three questions that matter, asked of the commit that is about to be
+      # deployed:
+      #
+      #   1. Is it reachable from the repository's default branch? A commit that
+      #      only exists in someone's fork, or that was force-pushed out, must not
+      #      become what staging serves.
+      #   2. Did it get here through a pull request? `main` is linear and every
+      #      merge is a squash (`rules/08-docs-and-workflow.md`), so a commit on
+      #      main with no merge commit behind it did not go through review.
+      #   3. Is an image for it already published? This job never relabels a
+      #      different tree with a requested SHA; it deploys the published image
+      #      for that SHA. If no image exists, the deploy would pull nothing.
+      #
+      # What this does NOT do is re-run the required checks against that commit.
+      # They ran on the PR that produced it, and the answer to "did they pass" is
+      # in the commit's check runs, not here. Asking GitHub for those results and
+      # failing on a missing or red one is the next step and is deliberately not
+      # folded into this change: it changes what a dispatch means, and the mapping
+      # from suite names to required checks is what docs/ci/ is still deciding.
+      - name: The requested commit is one this repository published
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # 1. Reachable from the default branch. `git merge-base --is-ancestor`
+          #    is the question "is this on main", not "does a ref name it" - a tag
+          #    or a dangling branch would satisfy the weaker one.
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+            echo "::error::$TARGET_SHA is not an ancestor of origin/main. Staging deploys commits this repository merged, not commits that merely exist: a fork commit, a force-pushed-out commit, or a branch tip must go through a PR first."
+            exit 1
+          fi
+          echo "$TARGET_SHA is on origin/main"
+
+          # 2. It arrived through a pull request. Squash merging means main is
+          #    linear, so every commit on it is either a merge of a reviewed PR or
+          #    a direct push. The repository ruleset forbids the second, and this
+          #    checks that the rule actually held for THIS commit.
+          subject="$(git log -1 --format=%s "$TARGET_SHA")"
+          case "$subject" in
+            *"(#"*")") ;;
+            *) echo "::error::$TARGET_SHA did not come from a merged pull request (subject: $subject). Only commits that went through review reach staging."; exit 1 ;;
+          esac
+          echo "commit came from a pull request: $subject"
+
+          # 3. An image for it exists. `devices: read` on packages is enough for
+          #    the public ghcr.io manifest check. A missing image is a BLOCKED
+          #    deploy, not a rebuild of a different tree.
+          repo_lc="$(printf '%s' "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          if ! gh api "/users/${repo_lc%%/*}/packages/container/${repo_lc##*/}/versions" \
+               --jq ".[] | .metadata.container.tags[]?" 2>/dev/null | grep -qx "sha-${TARGET_SHA}"; then
+            echo "::error::no published image tagged sha-${TARGET_SHA}. Staging deploys a published image for the commit it names; it does not build a new one here. Run the build workflow for that commit first, or dispatch without sha to deploy this ref."
+            exit 1
+          fi
+          echo "published image found: sha-${TARGET_SHA}"
 
       - name: Decide whether this run must build
         id: decide
