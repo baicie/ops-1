@@ -728,6 +728,51 @@ mod tests {
         ));
     }
 
+    /// Swapping `frontend/asset-index.json` must be refused, and it is - by the
+    /// FIRST of the three independent checks in `verify_bundle`.
+    ///
+    /// Writing this test found the layering, which nothing documented:
+    ///
+    ///   1. `PayloadIndexMismatch` (`:210`) - `compute_payload(&files)` against
+    ///      `payload-index.json`. Any byte changed anywhere in the zip fails here.
+    ///   2. `PayloadDigest` (`:217`) - the canonical payload hash against
+    ///      `manifest.artifactDigest`.
+    ///   3. the asset-index digest (`:244`) - the index bytes against
+    ///      `manifest.frontend.assetIndexDigest`.
+    ///
+    /// My first version asserted check 3 fired and failed, because check 1 had
+    /// already refused the bundle. The test was wrong, not the code.
+    ///
+    /// So this asserts the outcome - a swapped index never verifies - and names
+    /// which layer did it, so a later reordering that moves the refusal to a
+    /// weaker check is visible.
+    #[test]
+    fn rejects_a_swapped_asset_index() {
+        let dir = tempdir().unwrap();
+        write_fixture(dir.path(), true);
+        let key = generate_signing_key();
+        let bundle = build_bundle_from_dir(dir.path(), &key, &BundleLimits::default()).unwrap();
+        let mut files = read_zip(&bundle, &BundleLimits::default()).unwrap();
+
+        let swapped = br#"{"version":"1","assets":[{"path":"frontend/remoteEntry.js","size":1,"sha256":"sha256:"}]}"#.to_vec();
+        files.insert("frontend/asset-index.json".into(), swapped);
+
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for (path, content) in files {
+            writer
+                .start_file(path, SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(&content).unwrap();
+        }
+        let swapped_bundle = writer.finish().unwrap().into_inner();
+        match verify_bundle(&swapped_bundle, &key.verifying_key(), &BundleLimits::default()) {
+            Err(BundleError::PayloadIndexMismatch) => {}
+            other => panic!(
+                "a swapped asset index must fail at the payload index before anything else, got {other:?}"
+            ),
+        }
+    }
+
     #[test]
     fn rejects_path_traversal() {
         let mut out = Vec::new();

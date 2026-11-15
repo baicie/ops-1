@@ -32,8 +32,42 @@ name: staging-preview
 on:
   push:
     branches:
+      # `main` only.
+      #
+      # A development branch was listed here. It does not exist on origin
+      # (`git ls-remote --heads origin feat/0.0.5-staging-preview` returns
+      # nothing), but the trigger was dormant, not removed: whoever pushed a
+      # branch with that name would get a full deployment, image build and SSH
+      # to the staging host, from a branch no check has any opinion about.
+      #
+      # Removing it costs nothing today and closes that door permanently. A
+      # feature branch that needs a preview gets one through `workflow_dispatch`
+      # with an explicit sha, which now verifies where that sha came from (see
+      # the "Verify the requested sha" step).
       - main
-      - feat/0.0.5-staging-preview
+  # A nightly full-tier certification.
+  #
+  # WHY THIS EXISTS, and it is not "run the tests more".
+  #
+  # The three seeded-data suites are labelled `[known-flaky]` and their run steps
+  # are `continue-on-error`. An audit of the last twenty staging runs found every
+  # one of them `skipped`: the `full` tier is reachable only through
+  # `workflow_dispatch`, and nobody dispatches it nightly. So the label has never
+  # been earned or disproven by a single data point, and "flaky" is a guess
+  # written into a job name.
+  #
+  # This run produces the data. It is a certification of `main`'s HEAD, in its own
+  # concurrency bucket, and it gates nothing: a red seeded suite still lands in
+  # health.json and the artifact, and the seeded jobs still exit 0. The point is to
+  # be able to answer "how often does this actually fail" with a number, after
+  # which the decision to promote or delete a suite is evidence-based rather than
+  # a guess either way.
+  #
+  # It does deploy: it certifies what the host serves for main's HEAD, which is
+  # what a nightly is for. If that is unwanted, delete this trigger - the suites
+  # then return to never running, which is the state this replaced.
+  schedule:
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       sha:
@@ -75,7 +109,13 @@ permissions:
 # deploy fight over one lock, and what cancelled run 40818496709 (baseline 11fe91c) the moment
 # 40818576895 (candidate e6142ff) was triggered, losing the comparison the two runs existed to make.
 concurrency:
-  group: "staging-preview-${{ (inputs.verify_only == true) && format('verify-{0}', inputs.sha || github.sha) || 'deploy' }}"
+  # Three buckets, not one. A verify run certifies what is live, a deploy run
+  # changes what is live, and the nightly does both while producing the
+  # seeded-data evidence. Folding the nightly into `deploy` would let a push to
+  # main cancel it mid-certification - and a cancelled nightly is a data point
+  # that silently does not exist, which is exactly the state this schedule was
+  # added to end.
+  group: "staging-preview-${{ (inputs.verify_only == true) && format('verify-{0}', inputs.sha || github.sha) || (github.event_name == 'schedule' && 'nightly') || 'deploy' }}"
   cancel-in-progress: true
 
 env:
@@ -173,6 +213,16 @@ jobs:
             echo "::notice::acceptance tier full - verify_only=true certifies the deployed build, so the full suite runs (surfaces and seeded-data included)"
             exit 0
           fi
+          # The nightly. A scheduled run has no operator to pass full_suite, and its
+          # entire purpose is to produce the seeded-data failure-rate data that the
+          # `[known-flaky]` label has never had. A nightly that ran the core tier
+          # would be a copy of the push run and would produce no new information.
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            echo "tier=full" >> "$GITHUB_OUTPUT"
+            echo "reason=the nightly certification: the full tier is what produces the seeded-data evidence" >> "$GITHUB_OUTPUT"
+            echo "::notice::acceptance tier full - nightly certification of main's HEAD"
+            exit 0
+          fi
           if [ "$FULL_SUITE" = "true" ]; then
             full_reason="workflow_dispatch asked for the full suite (full_suite=true)"
           else
@@ -207,6 +257,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # The ancestry check below asks `git merge-base --is-ancestor`, which
+          # needs the target's history. A depth-1 clone of a branch tip answers
+          # `rc=0` for the tip and `fatal: Not a valid commit name` for anything
+          # older - so a dispatch naming last week's commit would be told it "is
+          # not an ancestor of origin/main", which is the wrong diagnosis for a
+          # commit that is on main. Measured on a depth-1 clone: the tip resolved,
+          # an older main commit did not.
+          fetch-depth: 0
 
       - name: Resolve the target commit
         id: target
@@ -220,6 +278,69 @@ jobs:
           fi
           echo "sha=$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
           echo "target commit: $REQUESTED_SHA"
+
+      # The format check above accepts any 40-hex string. That is the right
+      # syntactic gate and the wrong semantic one: a dispatch can name a commit
+      # that is on no branch, was never built by CI, or is on a fork.
+      #
+      # The two questions asked here are about PROVENANCE - where the commit came
+      # from. Whether an image exists for it is a different question with a
+      # different answer depending on the path:
+      #
+      #   build=true   this job is about to publish that image, so requiring it
+      #                to exist first is a deadlock.
+      #   build=false  "Verify the published image for a re-deploy" below asks
+      #                `docker manifest inspect "$IMAGE_REPO:$TARGET_SHA"`, which
+      #                is the real answer, against the real registry, in the only
+      #                branch where the question applies.
+      #
+      # An earlier version of this step asked it here as well, against the ghcr
+      # *REST* API and a `sha-` prefix. Both were wrong: the published tags are
+      # bare 40-hex (136 of 136 at the time of writing, 0 with a prefix), and the
+      # step runs before the build. The result was a check that passed only by
+      # being skipped on a push and blocked every `workflow_dispatch` - including
+      # the ones this file documents.
+      #
+      # What this does NOT do is re-run the required checks against that commit.
+      # They ran on the PR that produced it, and the answer to "did they pass" is
+      # in the commit's check runs, not here. Asking GitHub for those results and
+      # failing on a missing or red one is the next step and is deliberately not
+      # folded into this change: it changes what a dispatch means, and the mapping
+      # from suite names to required checks is what docs/ci/ is still deciding.
+      - name: The requested commit is one this repository published
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # 1. The commit is in this clone at all. Distinguishing this from "not
+          #    on main" matters: `merge-base --is-ancestor` exits 128 for an
+          #    object it has never seen, and the same 128 for a genuine non-
+          #    ancestor. Reporting the second when the first happened sends the
+          #    reader looking for a force-push that never occurred.
+          if ! git cat-file -e "${TARGET_SHA}^{commit}" 2>/dev/null; then
+            echo "::error::$TARGET_SHA is not present in this checkout. It is not a commit of this repository."
+            exit 1
+          fi
+
+          # 2. Reachable from the default branch. `git merge-base --is-ancestor`
+          #    is the question "is this on main", not "does a ref name it" - a tag
+          #    or a dangling branch would satisfy the weaker one.
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+            echo "::error::$TARGET_SHA is not an ancestor of origin/main. Staging deploys commits this repository merged, not commits that merely exist: a fork commit, a force-pushed-out commit, or a branch tip must go through a PR first."
+            exit 1
+          fi
+          echo "$TARGET_SHA is on origin/main"
+
+          # 3. It arrived through a pull request. Squash merging means main is
+          #    linear, so every commit on it is either a merge of a reviewed PR or
+          #    a direct push. The repository ruleset forbids the second, and this
+          #    checks that the rule actually held for THIS commit.
+          subject="$(git log -1 --format=%s "$TARGET_SHA")"
+          case "$subject" in
+            *"(#"*")") ;;
+            *) echo "::error::$TARGET_SHA did not come from a merged pull request (subject: $subject). Only commits that went through review reach staging."; exit 1 ;;
+          esac
+          echo "commit came from a pull request: $subject"
 
       - name: Decide whether this run must build
         id: decide

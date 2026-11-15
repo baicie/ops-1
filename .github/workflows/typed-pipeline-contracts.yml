@@ -11,7 +11,20 @@ on:
       - 'contracts/**'
       - 'tests/contract/**'
 jobs:
-  contracts:
+  # Named for THIS workflow, not `contracts`.
+  #
+  # `ci.yml` also produces a check called `contracts`, running a different script
+  # (`validate_contracts.py` vs `validate_typed_pipeline.py`). Two checks with one
+  # name means the merge gate cannot tell which one it is looking at - and on run
+  # 43711367103 this PR had three `contracts` entries: two from this workflow (push
+  # and pull_request) and one from `ci.yml`.
+  #
+  # The ruleset's required check is `contracts`, which `ci.yml` supplies. So this
+  # job is renamed and becomes an additional, non-blocking check: no protection is
+  # lost, and the ambiguity is gone. Promoting it to required is a separate
+  # decision for a human - see docs/ci/architecture-proposal.md.
+  typed-pipeline-contracts:
+    name: typed-pipeline-contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

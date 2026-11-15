@@ -64,8 +64,32 @@ if [ "$RESET" = "1" ]; then
   rm -rf "$ROOT/data"
 fi
 
-cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
-pnpm --fail-if-no-match --filter @opsweave/platform-console build && pnpm --fail-if-no-match --filter @opsweave/ops-web build >/dev/null
+# `BUILD=0` used to skip only the plugin bundles, not these two lines. A caller
+# that had just built the binaries and the web bundles itself - as
+# `.github/workflows/data-foundation.yml:118` does, immediately before calling
+# this script - paid for both a second time.
+#
+# `SKIP_BUILD=1` is that caller saying "the products are already here". It is
+# deliberately separate from `BUILD`, which controls the plugin bundles: the two
+# are different artefacts with different cost, and conflating them is what made
+# the first nine lines of this file's contract misleading.
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+  for artifact in target/debug/opsweave-kernel target/debug/opsweave-node \
+                  target/debug/opsweave-opsctl apps/platform-console/dist/index.html \
+                  apps/ops-web/dist/index.html; do
+    if [ ! -e "$artifact" ]; then
+      echo "SKIP_BUILD=1 but $artifact is missing; building it instead of failing on a stale tree." >&2
+      SKIP_BUILD=0
+      break
+    fi
+  done
+fi
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+  echo "== binaries and web bundles are already built (SKIP_BUILD=1)"
+else
+  cargo build -q -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
+  pnpm --fail-if-no-match --filter @opsweave/platform-console build && pnpm --fail-if-no-match --filter @opsweave/ops-web build >/dev/null
+fi
 
 if [ "$BUILD" = "1" ]; then
   BUILD=1 scripts/build-plugins.sh

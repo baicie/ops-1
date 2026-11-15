@@ -3,6 +3,13 @@ on:
   pull_request:
   push:
     branches: [main]
+
+# Least privilege at the workflow level. No job here publishes packages, pushes
+# an image, or writes to a pull request, so read is all any of them needs.
+# `staging-preview.yml` is the only workflow with `packages: write`, and it has no
+# `pull_request` trigger at all.
+permissions:
+  contents: read
 jobs:
   rust:
     runs-on: ubuntu-24.04
@@ -32,6 +39,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo fmt --all -- --check
       # Only a genuinely unset URL makes the fixture skip, and OPSWEAVE_REQUIRE_TEST_DATABASE=1
@@ -198,7 +219,14 @@ jobs:
       - run: npm ci --prefix plugins/data-catalog/backend
       - run: npm ci --prefix plugins/data-integration/backend
       - name: identity attack and regression suite
-        run: node --test tests/ci/b2_plugin_identity_attack.test.mjs
+        run: |
+          node --test tests/ci/b2_plugin_identity_attack.test.mjs
+          # Workspace isolation was written and never run. `check-spec-coverage.mjs`
+          # could not see it because it only enumerated `*.spec.ts` and `*.sh`; once
+          # `*.test.mjs` was added to that inventory this suite reported
+          # NOT_REFERENCED. Same domain as the attack suite above - a plugin reading
+          # across a workspace boundary - so it runs here rather than in a new job.
+          node --test tests/ci/b2_workspace_isolation.test.mjs
   # The decomposed suites cannot prove a round trip: two implementations of the
   # same digest can both be wrong. This job starts a real Kernel, a real plugin
   # process and a real PostgreSQL, and checks that the bytes the plugin signed
@@ -224,6 +252,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel
       - uses: actions/setup-node@v4
@@ -248,6 +290,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel -p opsweave-node -p opsweave-opsctl
       - run: ./target/debug/opsctl keygen --out-dir keys
@@ -312,6 +368,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -376,6 +446,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel
       - name: start the kernel (its worker loop is the system under test)
@@ -425,6 +509,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: cargo build --locked -p opsweave-kernel
       - name: start the kernel (its worker loop is the system under test)
@@ -476,14 +574,46 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: node tests/ci/check-spec-coverage.mjs
+      # "Which suites does this change require" is answered twice - by
+      # tests/ci/impact.mjs (read after the run) and by each workflow's
+      # `pull_request.paths` (read before it). When the analyzer requires a suite
+      # whose workflow the filter never starts, no check is ever produced, so
+      # nothing can be red and `ci-gate` reports the suite delegated. This fails
+      # that case where it is introduced rather than after a wasted round trip.
+      - name: The impact analyzer and the workflow path filters agree
+        run: node tests/ci/check-impact-consistency.mjs
   contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
+      - uses: dtolnay/rust-toolchain@stable
+      # See .github/workflows/ci.yml's other jobs: `shared-key` replaces the
+      # job-based key so this job reads the workspace cache instead of writing one
+      # nobody reads.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       - run: pip install jsonschema pyyaml
+      # Build one real signed bundle BEFORE validating. Without this the validator
+      # takes its `else` branch and prints "(no dist/plugins yet; bundle checks
+      # skipped)", which is what it has done for the life of this job: the digest
+      # comparisons it contains had never executed in CI. That message reads like
+      # a benign note, which is why the gap survived an audit round.
+      #
+      # No Docker, no registry, no OCI push: `assemble_plugin.py` is pure Python,
+      # the web assets ship in the tree, and `opsctl bundle` signs with a key
+      # generated here. The real packer (`scripts/build-plugins.sh`) still runs in
+      # `plugin-lifecycle.yml`; this proves the validator's own checks run and can
+      # fail, not that the packer is correct.
+      - name: Build a bundle, so the bundle checks actually run
+        run: scripts/contract-bundle-fixture.sh
       - run: python3 tests/contract/validate_contracts.py
+      # The validator's failure paths, against the bundle just built. A check that
+      # has never been observed to fail is not known to be a check.
+      - name: The bundle checks can fail
+        run: python3 tests/contract/test_bundle_validation.py
 
   # P001-A: the platform-only boundary is a claim until something boots it.
   #
@@ -516,6 +646,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # One cache, shared by every job in this workflow.
+      #
+      # Thirteen jobs across the estate install a Rust toolchain and none cached
+      # a compiled artifact, so each started with an empty `target/`. `shared-key`
+      # is what makes them share: without it `Swatinem/rust-cache@v2` derives the
+      # key from the job id (`add-job-id-key` defaults to true), and seven jobs
+      # would write seven caches that never hit each other.
+      #
+      # The key also covers `Cargo.lock`, the workspace manifests, the toolchain
+      # file and `.cargo/config.toml` via `add-rust-environment-hash-key`, so a
+      # lockfile change invalidates it rather than silently reusing stale objects.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
       # The console bundle is a *configuration input* to this job, not its
       # subject: the probe asserts the console shell is still served from a
       # platform-only binary. Building it here keeps the job self-contained
@@ -863,3 +1007,343 @@ jobs:
             -t opsweave-platform:ci-sabotage . \
             || { echo "::error::the platform image depends on business code it does not ship"; exit 1; }
           echo "the platform target built with the business application deliberately broken"
+
+  # The FULL product image, on every pull request.
+  #
+  # WHY THIS IS A SEPARATE JOB FROM `platform-image-build`
+  #
+  # `deployments/staging/Dockerfile` has two final stages. `platform` ships the
+  # kernel with no business features; `runtime` ships the FULL kernel plus
+  # `opsweave-pipeline-worker` and the ops-web bundle. The second one is what
+  # staging actually deploys, and until this job existed it was built in exactly
+  # one place: `staging-preview.yml`, which has no `pull_request` trigger. So a
+  # change that broke the full kernel - a new dependency the release profile
+  # cannot link, a feature the platform-only build compiles out, a missing
+  # pipeline-worker binary - could merge with every required check green and
+  # fail on the first deploy.
+  #
+  # That is a coverage gap, not an optimisation: the two targets compile
+  # different feature sets, and `cargo test --locked --workspace` builds neither
+  # of them in release mode.
+  #
+  # WHAT IT ASSERTS, and why each assertion exists
+  #
+  #   present   the four binaries and BOTH web bundles. `platform-image-build`
+  #             asserts ops-web and the pipeline worker are ABSENT from its
+  #             image; this one asserts they are present in this one. Two jobs,
+  #             opposite assertions, one Dockerfile - which is what makes the
+  #             stage split a tested boundary rather than a comment.
+  #   boots     /livez, /readyz, /admin/overview (the platform console),
+  #             /app (the ops web app) and /api/v1/version, with the served
+  #             revision matching the commit. A 200 from each is not enough:
+  #             the console assertion reads the HTML for the app's own mount, so
+  #             an empty index.html fails.
+  #   distinct  the kernel here must NOT be the platform-only build. The
+  #             platform job greps its kernel for `BUSINESS_ROUTE_NOT_BUILT` and
+  #             requires it; this job requires that string to be ABSENT and the
+  #             ingest route to work instead. Without this pair, both images
+  #             could ship the same kernel and both jobs would pass.
+  runtime-image-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the full runtime image
+        run: |
+          set -eu
+          docker build -f deployments/staging/Dockerfile --target runtime \
+            --build-arg OPSWEAVE_VERSION_OVERRIDE="" \
+            -t opsweave-runtime:ci .
+      - name: Assert the image contains the whole product
+        run: |
+          set -eu
+          IMG=opsweave-runtime:ci
+          fail() { echo "::error::$1"; exit 1; }
+
+          for bin in opsweave-kernel opsweave-node opsctl opsweave-pipeline-worker; do
+            docker run --rm --entrypoint /bin/sh "$IMG" -c "test -x /usr/local/bin/$bin" \
+              || fail "the runtime image is missing /usr/local/bin/$bin"
+          done
+          # BOTH bundles: the platform console and the ops web app. They are
+          # separate Vite builds with separate mounts (/admin vs /app).
+          docker run --rm --entrypoint /bin/sh "$IMG" -c 'test -f /app/web/index.html' \
+            || fail "the platform console bundle is missing from the runtime image"
+          docker run --rm --entrypoint /bin/sh "$IMG" -c 'test -f /app/ops-web/index.html' \
+            || fail "the ops web bundle is missing from the runtime image"
+          envs="$(docker image inspect "$IMG" --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          case "$envs" in
+            *OPSWEAVE_OPS_WEB_DIST=/app/ops-web*) ;;
+            *) fail "OPSWEAVE_OPS_WEB_DIST does not point at /app/ops-web: $envs" ;;
+          esac
+
+          # The kernel must be the FULL build, which is the exact inverse of the
+          # assertion in platform-image-build. `--no-default-features` is what
+          # compiles the business routes out, and it stamps
+          # BUSINESS_ROUTE_NOT_BUILT into the refusal path.
+          cid="$(docker create "$IMG")"
+          docker cp "$cid:/usr/local/bin/opsweave-kernel" /tmp/full-kernel
+          docker rm "$cid" >/dev/null
+          if strings /tmp/full-kernel | grep -q "BUSINESS_ROUTE_NOT_BUILT"; then
+            fail "the kernel in the runtime image is a platform-only build"
+          fi
+      - name: The image boots and serves both applications
+        run: |
+          set -eu
+          IMG=opsweave-runtime:ci
+          docker network create p001full || true
+          docker run -d --name p001full-pg --network p001full \
+            -e POSTGRES_DB=opsweave -e POSTGRES_USER=opsweave -e POSTGRES_PASSWORD=ci-pass \
+            postgres:17
+          for _ in $(seq 1 60); do
+            docker exec p001full-pg pg_isready -U opsweave -d opsweave >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker run -d --name p001full-kernel --network p001full -p 19082:19081 \
+            -e DATABASE_URL="postgres://opsweave:ci-pass@p001full-pg:5432/opsweave?sslmode=disable" \
+            -e OPSWEAVE_BIND=0.0.0.0:19081 \
+            -e OPSWEAVE_DATA_DIR=/app/data \
+            -e OPSWEAVE_WEB_DIST=/app/web \
+            -e OPSWEAVE_OPS_WEB_DIST=/app/ops-web \
+            -e OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=ci@example.invalid \
+            -e OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=ci-only-not-a-secret \
+            "$IMG"
+          for _ in $(seq 1 90); do
+            curl -fsS http://127.0.0.1:19082/livez >/dev/null 2>&1 && break
+            sleep 1
+          done
+          code() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
+          body() { curl -sS "$@"; }
+          [ "$(code http://127.0.0.1:19082/livez)" = "200" ] || { docker logs p001full-kernel; exit 1; }
+          [ "$(code http://127.0.0.1:19082/readyz)" = "200" ] || { docker logs p001full-kernel; exit 1; }
+
+          # Both front-ends. Not "HTTP 200 means it works": each assertion reads
+          # the response for something only a real build of THAT app contains.
+          [ "$(code http://127.0.0.1:19082/admin/overview)" = "200" ] \
+            || { echo "::error::the platform console is not served"; docker logs p001full-kernel; exit 1; }
+          [ "$(code http://127.0.0.1:19082/app)" = "200" ] \
+            || { echo "::error::the ops web app is not served on /app"; docker logs p001full-kernel; exit 1; }
+          console_html="$(body http://127.0.0.1:19082/admin/overview)"
+          case "$console_html" in
+            *'<div id="root"'*|*'<div id=root'*) ;;
+            *) echo "::error::/admin/overview is not a built console shell: $(printf '%s' "$console_html" | head -c 300)"; exit 1 ;;
+          esac
+          app_html="$(body http://127.0.0.1:19082/app)"
+          case "$app_html" in
+            *'<div id="root"'*|*'<div id=root'*) ;;
+            *) echo "::error::/app is not a built ops-web shell: $(printf '%s' "$app_html" | head -c 300)"; exit 1 ;;
+          esac
+          # And they must not be the same document served twice.
+          if [ "$console_html" = "$app_html" ]; then
+            echo "::error::/admin/overview and /app served identical bytes; the two bundles are not distinct"
+            exit 1
+          fi
+
+          # The business route the platform image refuses must work here.
+          ingest_code="$(curl -sS -o /tmp/ingest.json -w '%{http_code}' -X POST \
+            -H 'content-type: application/json' \
+            -d '{"events":[]}' \
+            http://127.0.0.1:19082/api/v1/telemetry/events || true)"
+          if [ "$ingest_code" = "404" ] && grep -q BUSINESS_ROUTE_NOT_BUILT /tmp/ingest.json 2>/dev/null; then
+            echo "::error::the runtime image refuses the ingest route as not-built; it is a platform-only kernel"
+            exit 1
+          fi
+          echo "ingest route answered $ingest_code (not the platform-only refusal)"
+
+          # /api/v1/version answers with exactly five fields and does not leak
+          # the database URL, the data directory, or any env var.
+          #
+          # It deliberately does NOT assert commitSha == GITHUB_SHA, and that is
+          # worth writing down because it was the first version of this step.
+          # `OPSWEAVE_BUILD_SHA` is an ENVIRONMENT variable the deploy script
+          # exports (scripts/deploy-staging.sh:418, deployments/staging/compose.yaml:110),
+          # not a build-time fact baked into the image. In a bare `docker run` it
+          # is unset and the endpoint truthfully reports `"commitSha":null` -
+          # measured on this image. Asserting the sha here would have forced the
+          # Dockerfile to bake in a claim the build cannot verify, which is the
+          # opposite of what the assertion was for. The served-commit check lives
+          # where the value exists: scripts/deploy-staging.sh:1059.
+          served="$(body http://127.0.0.1:19082/api/v1/version)"
+          for field in version commitSha buildTime environment startedAt; do
+            case "$served" in
+              *"\"$field\":"*) ;;
+              *) echo "::error::/api/v1/version is missing $field: $served"; exit 1 ;;
+            esac
+          done
+          case "$served" in
+            *sslmode*|*postgres://*|*OPSWEAVE_DATA_DIR*) echo "::error::/api/v1/version leaks configuration: $served"; exit 1 ;;
+          esac
+          docker logs p001full-kernel | tail -5
+
+  # The merge gate.
+  #
+  # WHY THIS JOB EXISTS, AND WHY IT IS NOT A SCRIPT IN ANOTHER WORKFLOW
+  #
+  # Seven of the nine required checks are produced by this workflow. The other
+  # two - `linux-runtime` and `quality-faults` - are produced by two more
+  # workflows that trigger on every PR with no path filter.
+  #
+  # A gate that aggregated all nine would have to wait for other workflow runs.
+  # `needs:` cannot do that, and a `workflow_run`-based aggregator cannot detect
+  # "another workflow was skipped by its path filter" - the event simply never
+  # fires, so "all dependencies finished" is not a state it can observe. Writing
+  # that gate anyway is the specific failure the CI overhaul brief forbids.
+  #
+  # So this gate is honest about its scope: it decides on the jobs it can see,
+  # which are exactly the seven required checks this workflow owns plus every
+  # non-required job here. `linux-runtime` and `quality-faults` remain directly
+  # enforced by the branch ruleset, as they are today. Nothing is claimed that is
+  # not checked.
+  #
+  # WHAT MAKES IT A GATE RATHER THAN A SUMMARY
+  #
+  # `if: always()` so it runs even when a dependency failed - a gate that does not
+  # run when things break is a gate that passes when things break.
+  #
+  # It receives `needs` verbatim and decides, rather than letting GitHub's default
+  # "a failed need fails the job" be the whole story. The difference matters:
+  # a SKIPPED required job does not fail its dependent by default, and `skipped`
+  # is what a path filter or a bad `if:` produces.
+  #
+  # The decision logic is tests/ci/ci-gate.mjs, with `--selftest` covering the
+  # three ways this kind of gate lies (skipped counted as pass, required job not
+  # wired, cancelled counted as pass).
+  ci-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: always()
+    # `checks: read` is what lets this job stop taking the other workflows on
+    # faith. It queries the check runs on THIS commit by name, so a suite the
+    # impact analyzer requires whose workflow never started (a path filter that
+    # does not match, a `paths:` typo, a disabled workflow) produces "absent"
+    # instead of a silent pass. Read-only; the workflow-level default is
+    # `contents: read` and this adds one scope.
+    permissions:
+      contents: read
+      checks: read
+    needs:
+      - rust
+      - web
+      - web-unit
+      - contracts
+      - spec-coverage
+      - platform-only
+      - platform-image-build
+      - runtime-image-build
+      - zabbix-plugin
+      - b2-plugin-identity
+      - g13a-roundtrip
+      - g13a1-gateway
+      - g13b14-claim
+      - g13b16-effect
+      - g13b17-principal
+      - artifact-budget
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `git diff` against the merge base needs history, not a shallow tip.
+          fetch-depth: 0
+      - name: Decide
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The files this PR changed, from the merge base - not from
+          # `origin/main`, which may have moved and would attribute other people's
+          # changes to this PR.
+          if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+            CHANGED="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || true)"
+          else
+            CHANGED=""
+          fi
+          if [ -z "$CHANGED" ]; then
+            # No diff available (a push event, or a fetch that did not complete).
+            # Fail closed: ask the analyzer about a path it cannot map, which is
+            # its strict branch.
+            echo "no change set available; requiring every suite"
+            CHANGED="__unavailable__"
+          fi
+          echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
+          IMPACT="$(printf '%s\n' "$CHANGED" | node tests/ci/impact.mjs --stdin --json)"
+          printf '%s\n' "$IMPACT" | node -e '
+            const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const on = Object.entries(d.suites).filter(([, v]) => v).map(([k]) => k);
+            console.log("suites required by this change: " + (on.join(" ") || "(none)"));
+          '
+
+          # Every check run on this commit, by name, as a flat map.
+          #
+          # `ci-gate` can only see `ci.yml`. The suites produced elsewhere
+          # (data-foundation, plugin-lifecycle, runtime-conformance,
+          # g12-acceptance, linux-runtime, quality-faults) are asserted by
+          # workflows whose runs this job cannot wait on. Reading THEIR results
+          # from the check-run API for this exact SHA is what turns "delegated"
+          # from a promise into a fact - and what makes an ABSENT check a failure
+          # rather than a silent pass.
+          #
+          # The API returns one entry per attempt; take the most recent conclusion
+          # for each name. A name that never appears stays absent, which is the
+          # state this is here to detect.
+          #
+          # A push to main has no `pull_request.head.sha`; the check runs are then
+          # queried for github.sha, which is the same commit for that event.
+          CHECKS_SHA="${HEAD_SHA:-$GITHUB_SHA}"
+          CHECKS="$(gh api --paginate \
+            "/repos/$REPO/commits/$CHECKS_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | {name, conclusion, status, started: .started_at}] | sort_by(.started // "") | group_by(.name) | map(last) | map({key: .name, value: (if .conclusion == null then .status else .conclusion end)}) | from_entries' \
+            2>/dev/null || echo '{}')"
+          echo "check runs on $CHECKS_SHA:"; printf '%s\n' "$CHECKS" | head -c 2000; echo
+
+          node tests/ci/ci-gate.mjs --needs-json "$NEEDS" --impact-json "$IMPACT" --checks-json "$CHECKS" > /tmp/gate.txt 2>&1
+          GATE_RC=$?
+          cat /tmp/gate.txt
+          # Deliberately not `| tee`: under `set -e` a `ci-gate` exit of 1 ends the
+          # step before the summary is written, and a red gate is exactly when the
+          # summary matters most. Capture, write the summary, then fail.
+          # The summary is what a human reads in the Actions UI.
+          {
+            echo "## ci-gate"
+            echo '```'
+            cat /tmp/gate.txt
+            echo '```'
+            echo
+            echo "This job reads the result of all fifteen \`ci.yml\` jobs, and fails if any"
+            echo "of them is not \`success\` — not only the ones the impact analyzer asked"
+            echo "for."
+            echo
+            echo "Suites produced by other workflows are read from the check-run API for"
+            echo "this exact commit:"
+            echo
+            echo "- \`delegated-verified\` - the check exists and passed."
+            echo "- \`delegated-failed\` / \`delegated-skipped\` - a merge blocker."
+            echo "- \`delegated-absent\` - the workflow did not run for this change even"
+            echo "  though the impact analyzer required it. A merge blocker: there is no"
+            echo "  red check to notice it, because the two decision tables (analyzer"
+            echo "  rules and workflow path filters) are maintained separately."
+            echo "- \`delegated-pending\` - the workflow started but had not finished"
+            echo "  when this job ran. It cannot wait on another workflow's run, so this"
+            echo "  is reported rather than judged; it is not a pass and not a failure."
+            echo "  A \`pending\` line means the decision above was made before that"
+            echo "  result existed."
+            echo
+            echo "\`delegated (partly)\` means this job checked one facet and another"
+            echo "workflow checks the rest — read it as partial, not as covered."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$GATE_RC" -ne 0 ]; then
+            echo "::error::ci-gate failed (exit $GATE_RC). The summary above says why."
+            exit "$GATE_RC"
+          fi
+      - name: The gate's own selftest
+        run: |
+          set -eu
+          # A gate whose logic was never counterfactually tested is the thing this
+          # repository has been bitten by repeatedly. Run it before trusting it.
+          node tests/ci/ci-gate.mjs --selftest
+          node --test tests/ci/impact.test.mjs
+          # The analyzer's output is what the gate judges, so its own tests run
+          # here too - including the cases that pin the analyzer to the suites a
+          # workflow can actually start.
