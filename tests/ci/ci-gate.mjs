@@ -105,7 +105,31 @@ export const DELEGATED = {
  * @returns {{verdict: 'PASS'|'FAIL', required: string[], failed: string[],
  *            skippedRequired: string[], notWired: string[], notes: string[]}}
  */
-export function gate(needs, impact) {
+/**
+ * Normalise `needs` to job id -> result string.
+ *
+ * `toJSON(needs)` in an Actions workflow does NOT produce `{"rust": "success"}`.
+ * It produces `{"rust": {"result": "success", "outputs": {}}}`, and my first
+ * version of this function compared that object to the string `'success'`,
+ * so every job read as failed:
+ *
+ *     failed: rust (job rust: [object Object])
+ *
+ * measured on this branch's first real run (43695561054) - all nineteen checks
+ * green, the gate red. Accepting both shapes keeps the unit tests readable while
+ * handling what GitHub actually sends.
+ */
+export function normaliseNeeds(raw) {
+  const out = {};
+  for (const [jobId, value] of Object.entries(raw ?? {})) {
+    if (value && typeof value === 'object' && 'result' in value) out[jobId] = String(value.result);
+    else out[jobId] = String(value);
+  }
+  return out;
+}
+
+export function gate(rawNeeds, impact) {
+  const needs = normaliseNeeds(rawNeeds);
   const required = new Set(HARD_REQUIRED);
   for (const suite of SUITES) {
     if (impact.suites[suite]) required.add(suite);
@@ -230,6 +254,34 @@ const SELFTEST = [
     needs: { rust: 'success', web: 'success', 'web-unit': 'success', contracts: 'success', 'spec-coverage': 'success', 'platform-only': 'success', 'platform-image-build': 'success', 'quality-faults': 'success', 'linux-runtime': 'success', 'plugin-lifecycle': 'success', 'runtime-conformance': 'success', 'data-foundation': 'success', 'browser-e2e': 'success', 'g12-acceptance': 'success' },
     impact: { suites: Object.fromEntries(SUITES.map((s) => [s, true])), unmatched: ['x/y.bin'] },
     want: 'PASS',
+  },
+  // THE SHAPE GITHUB ACTUALLY SENDS.
+  //
+  // Every other case here passes `{"rust": "success"}`, which is not what
+  // `toJSON(needs)` produces. That is why the selftest passed while the gate
+  // reported `rust (job rust: [object Object])` on its first real run: the tests
+  // and the workflow were feeding it different data and only the workflow was
+  // right. This case is the workflow's shape.
+  {
+    name: 'real toJSON(needs) shape: objects with result and outputs',
+    needs: Object.fromEntries(SUITES.map((x) => [x, { result: 'success', outputs: {} }])
+      .concat([['rust', { result: 'success', outputs: {} }]])),
+    impact: { suites: Object.fromEntries(SUITES.map((x) => [x, true])), unmatched: [] },
+    want: 'PASS',
+  },
+  {
+    name: 'real shape: a failure inside the object is still a failure',
+    because: 'failed',
+    needs: { rust: { result: 'failure', outputs: {} }, web: { result: 'success', outputs: {} }, 'web-unit': { result: 'success', outputs: {} }, contracts: { result: 'success', outputs: {} }, 'spec-coverage': { result: 'success', outputs: {} }, 'platform-only': { result: 'success', outputs: {} }, 'platform-image-build': { result: 'success', outputs: {} } },
+    impact: { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] },
+    want: 'FAIL',
+  },
+  {
+    name: 'real shape: a skipped object is still skipped, not a pass',
+    because: 'skipped',
+    needs: { rust: { result: 'skipped', outputs: {} }, web: { result: 'success', outputs: {} }, 'web-unit': { result: 'success', outputs: {} }, contracts: { result: 'success', outputs: {} }, 'spec-coverage': { result: 'success', outputs: {} }, 'platform-only': { result: 'success', outputs: {} }, 'platform-image-build': { result: 'success', outputs: {} } },
+    impact: { suites: Object.fromEntries(SUITES.map((x) => [x, false])), unmatched: [] },
+    want: 'FAIL',
   },
   // A delegated suite the impact analyzer required is REPORTED, not treated as
   // either a pass or a wiring defect. Silently dropping it would be the fake
