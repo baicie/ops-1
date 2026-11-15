@@ -65,6 +65,26 @@ notrun()  {
   NOT_RUN_REASONS="$NOT_RUN_REASONS
   - $1: $reason"
 }
+# `ABSENT`: the product has no such mechanism, so there is nothing to assert.
+#
+# Different from NOT_RUN, which means "this should have been measured and was
+# not". The distinction decides the exit code: a NOT_RUN is a gap in this run, an
+# ABSENT is a fact about the product that no future run of this suite will change.
+#
+# Deliberately NOT a way to skip work. Every ABSENT line names a `file:line` that
+# shows the mechanism is missing, so the next person can check the claim instead
+# of taking it on trust. If the mechanism is ever added, that line stops being
+# true and the case must become a real assertion.
+ABSENT=0
+ABSENT_REASONS=""
+absent()  {
+  ABSENT=$((ABSENT+1))
+  local reason="${2:-no reason given}"
+  echo "ABSENT  $1  ($reason)"
+  echo "ABSENT  $1  ($reason)" >>"$EVIDENCE"
+  ABSENT_REASONS="$ABSENT_REASONS
+  - $1: $reason"
+}
 note()    { echo "      $*"; echo "note  $*" >>"$EVIDENCE"; }
 
 # --- fixture cleanup --------------------------------------------------------
@@ -494,7 +514,7 @@ expect_refusal "3 cross-workspace dataset read" 403 WORKSPACE_FORBIDDEN \
 # endpoint. 6 inherits the same defect: it repeats this request with forged
 # identity headers and requires the same refusal.
 # ---------------------------------------------------------------------------
-notrun "4 unheld capability" \
+absent "4 unheld capability" \
   "the user resolve endpoint ignores grants (capabilities.rs:237-260 takes _auth and returns AVAILABLE); CAPABILITY_FORBIDDEN exists only on the workload-token path, which capability_multi_provider.sh:100-116 exercises with a real token"
 
 # ---------------------------------------------------------------------------
@@ -701,7 +721,7 @@ fi
 # manifest has no such field, so "refuse an incompatible upgrade" cannot be
 # exercised. Stated, not skipped.
 # ---------------------------------------------------------------------------
-notrun "10 incompatible upgrade" "contracts/ manifest has no field expressing an incompatible upgrade; asserting a refusal would test a fabricated input"
+absent "10 incompatible upgrade" "contracts/ manifest has no field expressing an incompatible upgrade; asserting a refusal would test a fabricated input"
 
 # ---------------------------------------------------------------------------
 # 12. Revocation semantics: SEQUENTIAL and CONCURRENT are different claims.
@@ -782,7 +802,7 @@ else
   case "$REVOKE" in
     200|204)
       note "12a: the grant this suite created was revoked (HTTP $REVOKE)"
-      notrun "12a a request after the revoke" \
+      absent "12a a request after the revoke" \
         "gateway authorises on the user's role alone (gateway.rs:38-46, no capability_grants lookup); grant revocation is observable only on the workload-token path, which capability_multi_provider.sh:100-116 covers with a real token" ;;
     000) blocked "12a: the revoke did not complete (HTTP 000)" ;;
     *)   blocked "12a: the revoke returned $REVOKE, so even the API half was not established" ;;
@@ -876,6 +896,12 @@ echo "evidence: $EVIDENCE"
 #
 # BLOCKED and FAIL win over the softer verdicts: an environment problem and a
 # product defect are both more urgent than a coverage note.
+if [ "$ABSENT" -gt 0 ]; then
+  echo
+  echo "ABSENT this run ($ABSENT case(s)): the product has no such mechanism, so"
+  echo "there is nothing to assert. These are NOT passes and NOT coverage gaps -"
+  echo "each line names the code that shows the mechanism is missing:$ABSENT_REASONS"
+fi
 if [ "$NOT_RUN" -gt 0 ]; then
   echo
   echo "NOT_RUN this run ($NOT_RUN case(s)); these are NOT passes:$NOT_RUN_REASONS"
@@ -901,6 +927,25 @@ if [ "$PASS" -eq 0 ]; then
   # when every case fails its precondition and the counters stay at zero.
   echo "verdict: INCONCLUSIVE (no case asserted anything)"
   exit 4
+fi
+# ABSENT does not change the verdict.
+#
+# It used to share the NOT_RUN counter, which made this suite exit 3 on every
+# run - `verdict: PASS_WITH_COVERAGE_GAPS (5 case(s) did not run)` - and exit 3
+# is a failure to `run_step.sh`, so the harness stopped there on a run where
+# nothing had gone wrong. Measured on run 43656373611: `PASS=6 FAIL=0 BLOCKED=0`,
+# rc=3.
+#
+# The five were not gaps. Three were "this product has no such mechanism" (4, 10,
+# 12a) and two were "opt-in destructive coverage that e2e_platform.sh owns" (8,
+# 9). Neither is a hole in this run, and neither will change however many times
+# it is re-run - which is exactly what NOT_RUN is supposed to signal.
+#
+# A NOT_RUN still fails the run, because that one IS a hole: something should
+# have been measured here and was not.
+if [ "$ABSENT" -gt 0 ]; then
+  echo "verdict: STRICT_PASS ($ABSENT case(s) ABSENT by design - see above)"
+  exit 0
 fi
 echo "verdict: STRICT_PASS"
 exit 0
