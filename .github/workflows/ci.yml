@@ -574,6 +574,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: node tests/ci/check-spec-coverage.mjs
+      # "Which suites does this change require" is answered twice - by
+      # tests/ci/impact.mjs (read after the run) and by each workflow's
+      # `pull_request.paths` (read before it). When the analyzer requires a suite
+      # whose workflow the filter never starts, no check is ever produced, so
+      # nothing can be red and `ci-gate` reports the suite delegated. This fails
+      # that case where it is introduced rather than after a wasted round trip.
+      - name: The impact analyzer and the workflow path filters agree
+        run: node tests/ci/check-impact-consistency.mjs
   contracts:
     runs-on: ubuntu-latest
     steps:
@@ -1013,6 +1021,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     if: always()
+    # `checks: read` is what lets this job stop taking the other workflows on
+    # faith. It queries the check runs on THIS commit by name, so a suite the
+    # impact analyzer requires whose workflow never started (a path filter that
+    # does not match, a `paths:` typo, a disabled workflow) produces "absent"
+    # instead of a silent pass. Read-only; the workflow-level default is
+    # `contents: read` and this adds one scope.
+    permissions:
+      contents: read
+      checks: read
     needs:
       - rust
       - web
@@ -1039,6 +1056,8 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           # The files this PR changed, from the merge base - not from
@@ -1064,7 +1083,36 @@ jobs:
             const on = Object.entries(d.suites).filter(([, v]) => v).map(([k]) => k);
             console.log("suites required by this change: " + (on.join(" ") || "(none)"));
           '
-          node tests/ci/ci-gate.mjs --needs-json "$NEEDS" --impact-json "$IMPACT" | tee /tmp/gate.txt
+
+          # Every check run on this commit, by name, as a flat map.
+          #
+          # `ci-gate` can only see `ci.yml`. The suites produced elsewhere
+          # (data-foundation, plugin-lifecycle, runtime-conformance,
+          # g12-acceptance, linux-runtime, quality-faults) are asserted by
+          # workflows whose runs this job cannot wait on. Reading THEIR results
+          # from the check-run API for this exact SHA is what turns "delegated"
+          # from a promise into a fact - and what makes an ABSENT check a failure
+          # rather than a silent pass.
+          #
+          # The API returns one entry per attempt; take the most recent conclusion
+          # for each name. A name that never appears stays absent, which is the
+          # state this is here to detect.
+          #
+          # A push to main has no `pull_request.head.sha`; the check runs are then
+          # queried for github.sha, which is the same commit for that event.
+          CHECKS_SHA="${HEAD_SHA:-$GITHUB_SHA}"
+          CHECKS="$(gh api --paginate \
+            "/repos/$REPO/commits/$CHECKS_SHA/check-runs?per_page=100" \
+            --jq '[.check_runs[] | {name, conclusion, status, started: .started_at}] | sort_by(.started // "") | group_by(.name) | map(last) | map({key: .name, value: (if .conclusion == null then .status else .conclusion end)}) | from_entries' \
+            2>/dev/null || echo '{}')"
+          echo "check runs on $CHECKS_SHA:"; printf '%s\n' "$CHECKS" | head -c 2000; echo
+
+          node tests/ci/ci-gate.mjs --needs-json "$NEEDS" --impact-json "$IMPACT" --checks-json "$CHECKS" > /tmp/gate.txt 2>&1
+          GATE_RC=$?
+          cat /tmp/gate.txt
+          # Deliberately not `| tee`: under `set -e` a `ci-gate` exit of 1 ends the
+          # step before the summary is written, and a red gate is exactly when the
+          # summary matters most. Capture, write the summary, then fail.
           # The summary is what a human reads in the Actions UI.
           {
             echo "## ci-gate"
@@ -1074,12 +1122,21 @@ jobs:
             echo
             echo "This job reads the result of all fifteen \`ci.yml\` jobs, and fails if any"
             echo "of them is not \`success\` — not only the ones the impact analyzer asked"
-            echo "for. What it cannot see: \`linux-runtime\`, \`quality-faults\` and the"
-            echo "acceptance suites in other workflows. Those are named as \`delegated\` in"
-            echo "the output above, and the first two are enforced directly by the branch"
-            echo "ruleset. A \`delegated (partly)\` line means this job checked one facet and"
+            echo "for."
+            echo
+            echo "Suites produced by other workflows are read from the check-run API for"
+            echo "this exact commit. \`delegated-verified\` means the check exists and"
+            echo "passed; \`delegated-absent\` means the workflow did not run for this"
+            echo "change even though the impact analyzer required it — that is a failure"
+            echo "here, because there is no red check to notice it and the two decision"
+            echo "tables (analyzer rules and workflow path filters) are maintained"
+            echo "separately. \`delegated (partly)\` means this job checked one facet and"
             echo "another workflow checks the rest — read it as partial, not as covered."
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$GATE_RC" -ne 0 ]; then
+            echo "::error::ci-gate failed (exit $GATE_RC). The summary above says why."
+            exit "$GATE_RC"
+          fi
       - name: The gate's own selftest
         run: |
           set -eu
@@ -1087,3 +1144,6 @@ jobs:
           # repository has been bitten by repeatedly. Run it before trusting it.
           node tests/ci/ci-gate.mjs --selftest
           node --test tests/ci/impact.test.mjs
+          # The analyzer's output is what the gate judges, so its own tests run
+          # here too - including the cases that pin the analyzer to the suites a
+          # workflow can actually start.

@@ -76,7 +76,13 @@ const RULES = [
   { glob: 'apps/node/**', suites: ['rust', 'linux-runtime', 'data-foundation', 'plugin-lifecycle'] },
   { glob: 'apps/pipeline-worker/**', suites: ['rust', 'data-foundation'] },
   { glob: 'apps/opsctl/**', suites: ['rust', 'plugin-lifecycle'] },
-  { glob: 'crates/**', suites: ['rust', 'contracts'] },
+  // `crates/**` used to require `contracts` as well. Only `crates/bundle` has any
+  // relationship to the contract validators (it is what signs and verifies the
+  // bundles `validate_contracts.py` was written to inspect), and
+  // `typed-pipeline-contracts.yml` does not watch `crates/` at all - so the
+  // requirement produced a suite that could not run for that change.
+  { glob: 'crates/**', suites: ['rust'] },
+  { glob: 'crates/bundle/**', suites: ['contracts'] },
 
   // --- Contracts -------------------------------------------------------------
   { glob: 'contracts/**', suites: ['contracts', 'runtime-conformance', 'data-foundation'] },
@@ -94,14 +100,36 @@ const RULES = [
   // A change to the harness can break any suite that uses it, and the harness
   // itself is not covered by any assertion that reads it. Run the things it
   // drives.
-  { glob: 'tests/ci/**', suites: ['spec-coverage', 'data-foundation', 'linux-runtime', 'plugin-lifecycle'] },
+  //
+  // The plugin-lifecycle claim here used to be `tests/ci/**` wholesale, which
+  // said "any change under tests/ci requires the lifecycle suite". Measured
+  // against what that workflow actually runs, it is false: `plugin-lifecycle.yml`
+  // invokes exactly three scripts — p001c13_lifecycle.sh, p001c13_negatives.sh,
+  // p001c_multilang_lifecycle.sh — and none of them calls the 42-step harness.
+  // The rule was an over-broad guess, and the cost of the guess was that
+  // `ci-gate` demanded a lifecycle result for a change to, say,
+  // `tests/ci/check-tracked-png-budget.mjs`; the lifecycle filter does not match
+  // that path, so the suite never ran and the gate had nothing to read. Now the
+  // claim is the specific one.
+  { glob: 'tests/ci/**', suites: ['spec-coverage', 'data-foundation', 'linux-runtime'] },
+  { glob: 'tests/ci/p001c13_*.sh', suites: ['plugin-lifecycle'] },
+  { glob: 'tests/ci/p001c_multilang_lifecycle.sh', suites: ['plugin-lifecycle', 'runtime-conformance'] },
   { glob: 'tests/acceptance/**', suites: ['data-foundation', 'browser-e2e'] },
   { glob: 'tests/runtime/**', suites: ['data-foundation', 'linux-runtime'] },
   { glob: 'tests/contract/**', suites: ['contracts', 'runtime-conformance'] },
   { glob: 'tests/reliability/**', suites: ['quality-faults'] },
 
   // --- Scripts and deployments ----------------------------------------------
-  { glob: 'scripts/**', suites: ['plugin-lifecycle', 'data-foundation'] },
+  // `scripts/**` used to claim plugin-lifecycle for the same reason and with the
+  // same defect: `plugin-lifecycle.yml`'s filter names four scripts explicitly
+  // (build-plugins.sh, assemble_plugin.py, demo_up.sh, demo_common.sh). A change
+  // to an unrelated script in that directory does not start the workflow, so the
+  // analyzer must not say it does.
+  { glob: 'scripts/**', suites: ['data-foundation'] },
+  { glob: 'scripts/build-plugins.sh', suites: ['plugin-lifecycle'] },
+  { glob: 'scripts/assemble_plugin.py', suites: ['plugin-lifecycle'] },
+  { glob: 'scripts/demo_up.sh', suites: ['plugin-lifecycle'] },
+  { glob: 'scripts/demo_common.sh', suites: ['plugin-lifecycle'] },
   { glob: 'deployments/**', suites: ['platform-image-build', 'linux-runtime'] },
 
   // --- Dependencies ----------------------------------------------------------

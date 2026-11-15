@@ -114,6 +114,93 @@ export const DELEGATED = {
 };
 
 /**
+ * Suite -> the CHECK NAME a delegated workflow reports.
+ *
+ * `DELEGATED` names the workflow, which is not something GitHub's check-run API
+ * can be asked about. The check-run API is keyed by check name, and the name is
+ * the job's `name:` (or its id when it has none) - so it is often not the suite
+ * name. `plugin-lifecycle.yml`'s job is named `full TypeScript lifecycle`;
+ * `data-foundation.yml` reports `golden-path`.
+ *
+ * Two of these are ambiguous and are recorded as such rather than guessed:
+ *
+ *   data-foundation -> golden-path, legacy-regression. BOTH jobs run in that
+ *   workflow and both must be green. browser-e2e maps to the same two, because
+ *   the browser block is a step inside golden-path, not a job of its own.
+ *
+ * A suite with no entry here is one whose result the gate cannot attribute even
+ * with the API, and it stays reported as delegated-unverified.
+ */
+export const DELEGATED_CHECKS = {
+  'linux-runtime': ['linux-runtime'],
+  'quality-faults': ['quality-faults'],
+  'data-foundation': ['golden-path', 'legacy-regression'],
+  'browser-e2e': ['golden-path'],
+  'plugin-lifecycle': ['full TypeScript lifecycle'],
+  'runtime-conformance': ['conformance'],
+  'g12-acceptance': ['acceptance'],
+};
+
+/**
+ * Decide what to do about the suites produced by other workflows, given the
+ * check runs that exist on this commit.
+ *
+ * WHY THIS EXISTS
+ *
+ * `gate()` says "delegated" for seven suites and passes. That is honest, and it
+ * is also the entire exploit surface of this design: a suite the impact analyzer
+ * requires, whose workflow never started (a path filter that does not match a
+ * file the analyzer mapped, a `paths:` typo, a workflow disabled in the UI),
+ * produces no result for `ci-gate` to see — so it is reported as delegated and
+ * the gate goes green. The analyzer and the filters are two hand-maintained
+ * tables, and this audit measured 22 disagreements between them. Under the old
+ * behaviour every one of those was a silent hole.
+ *
+ * The check-run API closes it, because it is keyed by (commit, check name) and
+ * does not care which file the check came from. Anything a delegated workflow
+ * produces appears there.
+ *
+ * STATES, and why "absent" is not "red":
+ *
+ *   found-green      a check with that name succeeded on this commit.
+ *   found-red        it exists and did not succeed. A merge blocker.
+ *   found-skipped    it exists and was skipped. A merge blocker for a required
+ *                    suite: "skipped" is the failure this gate exists to catch.
+ *   absent           no check with that name on this commit. The workflow did
+ *                    not run for it. That is the hole described above, and it is
+ *                    reported as a FAIL - unless the caller says the workflow is
+ *                    legitimately not applicable, which nothing can establish
+ *                    automatically, so it is never assumed.
+ *
+ * `absent` failing is the strict, fail-closed reading. It is deliberately not
+ * softened: an analyzer that maps a file to a suite no filter matches is a
+ * defect in one of the two tables, and the correct response is to fix the table,
+ * not to let the run through.
+ *
+ * @param {Record<string,string|null>} checks check name -> conclusion, from the
+ *        API. A name that is not present at all is `null`.
+ * @param {string[]} suites delegated suites the impact analyzer required
+ * @returns {{verified: string[], failed: string[], absent: string[], unverifiable: string[]}}
+ */
+export function delegatedVerdict(checks, suites) {
+  const verified = [];
+  const failed = [];
+  const absent = [];
+  const unverifiable = [];
+  for (const suite of suites) {
+    const names = DELEGATED_CHECKS[suite];
+    if (!names) { unverifiable.push(suite); continue; }
+    const states = names.map((n) => [n, checks[n] ?? null]);
+    const missing = states.filter(([, c]) => c === null).map(([n]) => n);
+    const bad = states.filter(([, c]) => c !== null && c !== 'success').map(([n, c]) => `${n}: ${c}`);
+    if (bad.length) { failed.push(`${suite} (${bad.join(', ')})`); continue; }
+    if (missing.length) { absent.push(`${suite} (no check named ${missing.join(', ')} on this commit; ${DELEGATED[suite]} did not run for it)`); continue; }
+    verified.push(suite);
+  }
+  return { verified, failed, absent, unverifiable };
+}
+
+/**
  * @param {Record<string,string>} needs job id -> result ('success'|'failure'|'cancelled'|'skipped')
  * @param {{suites: Record<string, boolean>, unmatched: string[]}} impact
  * @returns {{verdict: 'PASS'|'FAIL', required: string[], failed: string[],
@@ -454,6 +541,88 @@ const SELFTEST = [
   },
 ];
 
+/**
+ * Counterfactuals for `delegatedVerdict`.
+ *
+ * These are the cases that decide whether "delegated" is a statement of fact or
+ * an escape hatch. Each `suites` list is what the analyzer required; each `checks`
+ * object is what the API returned for this commit.
+ */
+const DELEGATED_SELFTEST = [
+  {
+    name: 'delegated: every check present and green verifies',
+    suites: ['linux-runtime', 'quality-faults'],
+    checks: { 'linux-runtime': 'success', 'quality-faults': 'success' },
+    want: { verified: 2, failed: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // The hole the API exists to close: the analyzer requires the suite, the
+    // workflow never ran, and there is no check to be red.
+    name: 'delegated: a suite with no check on this commit is ABSENT, not green',
+    suites: ['data-foundation'],
+    checks: {},
+    want: { verified: 0, failed: 0, absent: 1, unverifiable: 0 },
+  },
+  {
+    name: 'delegated: a red check is a failure',
+    suites: ['runtime-conformance'],
+    checks: { conformance: 'failure' },
+    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+  },
+  {
+    // `skipped` must never read as success here either. It is the same failure
+    // mode as a skipped required job inside ci.yml.
+    name: 'delegated: a skipped check is a failure, not a pass',
+    suites: ['linux-runtime'],
+    checks: { 'linux-runtime': 'skipped' },
+    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+  },
+  {
+    name: 'delegated: a cancelled check is a failure',
+    suites: ['g12-acceptance'],
+    checks: { acceptance: 'cancelled' },
+    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+  },
+  {
+    // data-foundation is asserted by TWO jobs; one green is not the suite green.
+    name: 'delegated: a suite with two producing jobs needs both',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'success', 'legacy-regression': 'failure' },
+    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+  },
+  {
+    name: 'delegated: a suite with two producing jobs and only one present is absent',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'success' },
+    want: { verified: 0, failed: 0, absent: 1, unverifiable: 0 },
+  },
+  {
+    // browser-e2e is a step inside golden-path, not a job of its own. It maps to
+    // the same check, and this case records that so a later reader does not
+    // "fix" the map by inventing a check name that will never exist.
+    name: 'delegated: browser-e2e is read from golden-path',
+    suites: ['browser-e2e'],
+    checks: { 'golden-path': 'success' },
+    want: { verified: 1, failed: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // The API reports a run that has started but not finished as its STATUS, not
+    // its conclusion. Measured live: `{"artifact-budget":"queued"}` came back for
+    // an in-flight run. `queued` and `in_progress` are not successes and must not
+    // be read as one - a missing conclusion is the absence of an answer.
+    name: 'delegated: a check still in progress is a failure, not a pass',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'in_progress', 'legacy-regression': 'queued' },
+    want: { verified: 0, failed: 1, absent: 0, unverifiable: 0 },
+  },
+  {
+    name: 'delegated: a suite with no check mapping is reported unverifiable',
+    suites: ['a-suite-nobody-mapped'],
+    checks: { anything: 'success' },
+    want: { verified: 0, failed: 0, absent: 0, unverifiable: 1 },
+  },
+];
+
 function selftest() {
   let bad = 0;
   for (const c of SELFTEST) {
@@ -478,8 +647,17 @@ function selftest() {
     if (!ok) bad += 1;
     process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${c.want}${c.because ? ` because ${c.because}` : ''}, got ${got.verdict} (failed=${got.failed.length} skipped=${got.skippedRequired.length} notWired=${got.notWired.length} delegated=${got.delegated.length})\n`);
   }
-  process.stdout.write(bad === 0 ? `gate selftest: ${SELFTEST.length}/${SELFTEST.length} pass\n`
-    : `gate selftest: ${bad} FAILED\n`);
+  for (const c of DELEGATED_SELFTEST) {
+    const got = delegatedVerdict(c.checks, c.suites);
+    const ok = got.verified.length === c.want.verified
+      && got.failed.length === c.want.failed
+      && got.absent.length === c.want.absent
+      && got.unverifiable.length === c.want.unverifiable;
+    if (!ok) bad += 1;
+    process.stdout.write(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: want ${JSON.stringify(c.want)}, got verified=${got.verified.length} failed=${got.failed.length} absent=${got.absent.length} unverifiable=${got.unverifiable.length}\n`);
+  }
+  const total = SELFTEST.length + DELEGATED_SELFTEST.length;
+  process.stdout.write(bad === 0 ? `gate selftest: ${total}/${total} pass\n` : `gate selftest: ${bad} FAILED\n`);
   return bad === 0 ? 0 : 1;
 }
 
@@ -488,10 +666,12 @@ function main(argv) {
 
   let needsJson = null;
   let impactJson = null;
+  let checksJson = null;
   let files = [];
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--needs-json') { needsJson = argv[++i]; }
     else if (argv[i] === '--impact-json') { impactJson = argv[++i]; }
+    else if (argv[i] === '--checks-json') { checksJson = argv[++i]; }
     else if (argv[i] === '--files') { while (i + 1 < argv.length && !argv[i + 1].startsWith('--')) files.push(argv[++i]); }
     else { process.stderr.write(`ci-gate: unknown argument ${argv[i]}\n`); return 2; }
   }
@@ -502,9 +682,34 @@ function main(argv) {
   const impact = impactJson ? JSON.parse(impactJson) : analyse(files);
 
   const result = gate(needs, impact);
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  process.stdout.write(`\nverdict: ${result.verdict}\n`);
-  if (result.verdict === 'FAIL') {
+  let verdict = result.verdict;
+
+  // The delegated suites: `gate()` can only say "another workflow owns this".
+  // With the check-run results for THIS commit it can say whether they passed.
+  // Without them it still reports each one, but as unverified - it never claims
+  // a suite it did not read.
+  let del = null;
+  if (checksJson !== null) {
+    let checks;
+    try { checks = JSON.parse(checksJson); } catch { process.stderr.write('ci-gate: --checks-json is not JSON\n'); return 2; }
+    const requiredDelegated = result.delegated
+      .map((line) => line.split(' ')[0])
+      .filter((s) => s in DELEGATED_CHECKS);
+    del = delegatedVerdict(checks, requiredDelegated);
+    if (del.failed.length || del.absent.length) verdict = 'FAIL';
+  }
+
+  const out = { ...result, verdict };
+  if (del) out.delegatedResults = del;
+  process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+  process.stdout.write(`\nverdict: ${verdict}\n`);
+  if (del) {
+    for (const v of del.verified) process.stdout.write(`  delegated-verified: ${v}\n`);
+    for (const f of del.failed) process.stdout.write(`  delegated-failed: ${f}\n`);
+    for (const a of del.absent) process.stdout.write(`  delegated-absent: ${a}\n`);
+    for (const u of del.unverifiable) process.stdout.write(`  delegated-unverifiable: ${u}\n`);
+  }
+  if (verdict === 'FAIL') {
     for (const f of result.failed) process.stdout.write(`  failed: ${f}\n`);
     for (const s of result.skippedRequired) process.stdout.write(`  skipped: ${s}\n`);
     for (const n of result.notWired) process.stdout.write(`  not wired: ${n}\n`);

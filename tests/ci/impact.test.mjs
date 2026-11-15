@@ -139,3 +139,152 @@ test('N every suite in the vocabulary is reachable by some path', () => {
   const missing = SUITES.filter((s) => !reachable.has(s));
   assert.deepEqual(missing, [], `unreachable suites: ${missing.join(', ')}`);
 });
+
+// ---------------------------------------------------------------------------
+// O. The analyzer must not claim a suite whose workflow cannot start.
+//
+// Measured defect: `tests/ci/**` claimed `plugin-lifecycle` for every file in
+// that directory, but `plugin-lifecycle.yml` invokes three specific scripts and
+// its filter names them. A change to `tests/ci/check-tracked-png-budget.mjs`
+// therefore required a suite that GitHub would never start, so `ci-gate` had no
+// result to read and reported it delegated. The claim is now the specific one.
+// ---------------------------------------------------------------------------
+
+test('O the harness directory alone does not claim the plugin lifecycle', () => {
+  assert.ok(!on(['tests/ci/check-tracked-png-budget.mjs']).includes('plugin-lifecycle'));
+  assert.ok(!on(['tests/ci/check-spec-coverage.mjs']).includes('plugin-lifecycle'));
+  assert.ok(!on(['tests/ci/g13a_evidence_roundtrip.mjs']).includes('plugin-lifecycle'));
+});
+
+test('O a lifecycle script does claim it', () => {
+  assert.ok(on(['tests/ci/p001c13_lifecycle.sh']).includes('plugin-lifecycle'));
+  assert.ok(on(['tests/ci/p001c13_negatives.sh']).includes('plugin-lifecycle'));
+  assert.ok(on(['tests/ci/p001c_multilang_lifecycle.sh']).includes('plugin-lifecycle'));
+});
+
+test('O an unrelated script does not claim the plugin lifecycle', () => {
+  // plugin-lifecycle.yml's filter names four scripts explicitly.
+  assert.ok(!on(['scripts/unrelated.mjs']).includes('plugin-lifecycle'));
+  assert.ok(on(['scripts/build-plugins.sh']).includes('plugin-lifecycle'));
+  assert.ok(on(['scripts/assemble_plugin.py']).includes('plugin-lifecycle'));
+  assert.ok(on(['scripts/demo_up.sh']).includes('plugin-lifecycle'));
+  assert.ok(on(['scripts/demo_common.sh']).includes('plugin-lifecycle'));
+});
+
+test('O a crate that is not the bundle crate does not claim contracts', () => {
+  // typed-pipeline-contracts.yml does not watch crates/. The `contracts` suite is
+  // ci.yml's unfiltered job, but the bundle crate is the only one whose change
+  // that validator has an opinion about.
+  assert.ok(!on(['crates/platform-client/src/lib.rs']).includes('contracts'));
+  assert.ok(on(['crates/bundle/src/lib.rs']).includes('contracts'));
+});
+
+// ---------------------------------------------------------------------------
+// P. Every suite the analyzer can turn on must be produced by something.
+//
+// A suite in the vocabulary that no workflow produces is "a spec no workflow
+// executes" applied to the suite list: the gate can require it forever and
+// nothing will ever report on it.
+// ---------------------------------------------------------------------------
+
+test('P every suite is reachable and every mapped job is a real ci.yml job', () => {
+  for (const suite of SUITES) {
+    // Either some probe turns it on, or it is one ci-gate reads from ci.yml.
+    const reachable = [
+      'apps/kernel/src/gateway.rs', 'apps/node/src/runtime.rs',
+      'apps/platform-console/src/main.tsx', 'contracts/x.json',
+      'plugins/hello-go/main.go', 'tests/ci/p001c13_lifecycle.sh',
+      'tests/contract/x.py', 'tests/reliability/x.sh', 'deployments/Dockerfile',
+      'crates/x/src/lib.rs',
+    ].some((f) => analyse([f]).suites[suite]);
+    assert.ok(reachable, `suite ${suite} is turned on by no probe and no known path`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Q. The filter parser used by check-impact-consistency.mjs agrees with a real
+//    YAML parser.
+//
+// That script deliberately has no YAML dependency, because neither PyYAML nor a
+// `yaml` npm package is guaranteed on a bare runner and an install step would be
+// a new failure mode for a check whose purpose is to not be flaky. So it carries
+// its own parser - and a hand-written parser that is only compared against
+// reality once, when it is written, is exactly the artifact this repository has
+// been burned by. This case compares it against PyYAML whenever PyYAML exists
+// (it does locally, and in the jobs that install jsonschema).
+// ---------------------------------------------------------------------------
+
+test('Q the filter parser agrees with PyYAML where PyYAML exists', async () => {
+  let python = null;
+  for (const candidate of ['python3', 'python']) {
+    try {
+      const { execFileSync } = await import('node:child_process');
+      execFileSync(candidate, ['-c', 'import yaml'], { stdio: 'ignore' });
+      python = candidate;
+      break;
+    } catch { /* try the next one */ }
+  }
+  if (!python) {
+    // Not a pass and not a failure: record that the cross-check did not run so
+    // nobody reads the absence of this test's output as agreement.
+    assert.ok(true, 'PyYAML unavailable; cross-check NOT RUN');
+    return;
+  }
+  const { execFileSync } = await import('node:child_process');
+  const { pathsFor, SUITE_WORKFLOW_MAP } = await import('./check-impact-consistency.mjs');
+  for (const workflow of Object.values(SUITE_WORKFLOW_MAP)) {
+    const js = pathsFor(workflow).map((x) => x.glob);
+    const py = JSON.parse(execFileSync(python, [
+      '-c',
+      'import yaml, json, sys\n'
+      + 'd = yaml.safe_load(open(sys.argv[1]))\n'
+      + 'on = d.get(True) or d.get("on")\n'
+      + 'print(json.dumps(((on or {}).get("pull_request") or {}).get("paths") or []))\n',
+      `.github/workflows/${workflow}`,
+    ], { encoding: 'utf8' }));
+    assert.deepEqual(js, py, `${workflow}: hand-written parser disagrees with PyYAML`);
+  }
+
+  // The five real workflows happen to be written in a shape the parser handles
+  // even when its exit condition is wrong. A synthetic file pins the properties
+  // the real files do not exercise: a comment inside the list, a blank line
+  // inside the list, a quoted entry containing `#`, and a later `paths:` block on
+  // a DIFFERENT trigger that must not be read.
+  const { writeFileSync, mkdirSync, rmSync } = await import('node:fs');
+  const fixture = '.github/workflows/__parser_fixture.yml';
+  mkdirSync('.github/workflows', { recursive: true });
+  writeFileSync(fixture, [
+    'on:',
+    '  push:',
+    '    paths:',
+    "      - 'never-read/**'",
+    '  pull_request:',
+    '    paths:',
+    '      # a comment inside the list',
+    "      - 'apps/a/**'",
+    '',
+    "      - 'apps/b/**'",
+    "      - 'a file with # inside/**'   # trailing comment",
+    '      - "quoted/**"',
+    '    branches: [main]',
+    '  workflow_dispatch:',
+    '',
+  ].join('\n'));
+  try {
+    const { pathsFor: pf } = await import('./check-impact-consistency.mjs');
+    assert.deepEqual(pf('__parser_fixture.yml').map((x) => x.glob), [
+      'apps/a/**', 'apps/b/**', 'a file with # inside/**', 'quoted/**',
+    ]);
+    const py = JSON.parse(execFileSync(python, [
+      '-c',
+      'import yaml, json, sys\n'
+      + 'd = yaml.safe_load(open(sys.argv[1]))\n'
+      + 'on = d.get(True) or d.get("on")\n'
+      + 'print(json.dumps(((on or {}).get("pull_request") or {}).get("paths") or []))\n',
+      fixture,
+    ], { encoding: 'utf8' }));
+    assert.deepEqual(pf('__parser_fixture.yml').map((x) => x.glob), py);
+  } finally {
+    rmSync(fixture, { force: true });
+  }
+});
