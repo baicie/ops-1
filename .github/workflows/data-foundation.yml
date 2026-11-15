@@ -5,14 +5,21 @@ on:
     paths:
       - 'apps/kernel/**'
       - 'apps/node/**'
+      # The 42-step harness drives the pipeline worker directly (claim-next,
+      # leases, fencing, sink effects). A change to the worker or to the runtime
+      # helpers it is exercised through belongs here, not only in
+      # typed-pipeline-runtime.
+      - 'apps/pipeline-worker/**'
       - 'contracts/**'
-      - 'plugins/data-catalog/**'
-      - 'plugins/data-integration/**'
-      - 'plugins/data-catalog-alt/**'
+      # Every plugin, not just the data ones: the harness installs and activates
+      # plugins, and `plugins/**` used to reach it only through
+      # typed-pipeline-runtime's second invocation of the same script.
+      - 'plugins/**'
       - 'tests/ui/**'
       - 'scripts/**'
       - 'tests/ci/**'
-      - 'tests/acceptance/data_foundation.sh'
+      - 'tests/acceptance/**'
+      - 'tests/runtime/**'
       - '.github/workflows/data-foundation.yml' 
 
 permissions:
