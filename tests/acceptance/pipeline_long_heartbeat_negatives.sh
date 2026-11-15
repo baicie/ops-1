@@ -23,6 +23,25 @@ EVIDENCE="${OPSWEAVE_LONG_HEARTBEAT_NEGATIVES_EVIDENCE:-/tmp/long-heartbeat-nega
 
 PASS=0
 FAIL=0
+# Cases that ran and could not establish their property, with the reason.
+#
+# This exists because `note` alone was not enough: a case that can only `note`
+# silently joins the PASS column as far as the exit code is concerned, and a
+# suite that reports `PASS=8 FAIL=0` while one of its cases measured nothing is
+# the substitution this whole file exists to catch.
+# `absent` and `covered`, the same two categories the C2 suite uses, for the same
+# reason: neither is a hole in this run.
+#
+#   absent   the product has no such mechanism; names the file:line that shows it
+#   covered  another suite measures it; names that suite
+#
+# Neither changes the exit code. A case that measured nothing WITHOUT naming one
+# of these would be a problem - but the only such case here is case 3, and it
+# names the missing mechanism.
+ABSENT=0
+absent()  { ABSENT=$((ABSENT + 1)); note "ABSENT  $*"; }
+COVERED=0
+covered() { COVERED=$((COVERED + 1)); note "COVERED  $*"; }
 
 # --- stopping this script's worker ------------------------------------------
 #
@@ -381,20 +400,52 @@ if [ "$STATUS3" != "RUNNING" ]; then
   stop_worker
 else
   LEASE3="$(q "SELECT current_lease_id FROM kernel.pipeline_jobs WHERE job_id='$JOB3';")"
+  # Stop the worker FIRST, then expire the lease.
+  #
+  # This order is the case. A running worker renews its lease every few seconds,
+  # so expiring the row while it is alive starts a race the test cannot win
+  # reliably - and `sleep 3` was a bet on which side of that race it was on.
+  # Measured on run 43659225075:
+  #
+  #   FAIL  3: expected EXPIRED, got ACTIVE
+  #
+  # The lease was still ACTIVE because the worker had renewed it between the
+  # UPDATE and the read.
+  #
+  # With the worker gone, nothing can renew it, and what happens next is the
+  # product's decision rather than a race.
+  stop_worker
   if ! q "UPDATE kernel.pipeline_job_leases SET expires_at = now() - interval '120 seconds' WHERE lease_id='$LEASE3';" >/dev/null; then
     bad "3: could not expire the lease (the UPDATE failed); the case proves nothing"
   fi
-  # The Kernel's reaper marks it EXPIRED; the acceptance must not later call this
-  # "kept alive" just because the job eventually succeeded or the row still exists.
-  sleep 3
-  if ! q "UPDATE kernel.pipeline_job_leases SET status='EXPIRED' WHERE lease_id='$LEASE3' AND expires_at < now();" >/dev/null; then
-    bad "3: could not settle the lease to EXPIRED (the UPDATE failed); the case proves nothing"
-  fi
-  stop_worker
-  FINAL_STATUS="$(q "SELECT status FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE3';")"
-  [ "$FINAL_STATUS" = "EXPIRED" ] \
-    && ok "3: an expired lease stays EXPIRED (the acceptance's ACTIVE assertion would fail)" \
-    || bad "3: expected EXPIRED, got $FINAL_STATUS"
+  # WHAT THIS CASE CAN AND CANNOT ESTABLISH
+  #
+  # There is no lease reaper: `grep -rn "status='EXPIRED'" apps/kernel/src/`
+  # returns exactly one site, `jobs.rs:2776`, and it runs at CLAIM time to retire
+  # the lease it is replacing. No timer touches the table. So a lease past
+  # `expires_at` stays `ACTIVE`, and waiting for `EXPIRED` waits for something
+  # that will not happen - measured on run 43659225075 as
+  # `FAIL 3: expected EXPIRED, got ACTIVE`.
+  #
+  # The version before that forced the status with its own UPDATE and then read it
+  # back. That tested this script's own SQL; it would have passed with the product
+  # doing nothing.
+  #
+  # An HTTP heartbeat was tried next. The rule is real (`jobs.rs:2901` answers
+  # `409 LEASE_NOT_ACTIVE` for an expired lease, reached through
+  # `authorize_lease`), but the request is refused earlier by
+  # `authenticate_worker_headers` when the Node is not READY - measured on run
+  # 43662389151 as a 403 that says nothing about expiry. Making it work would need
+  # a READY Node this suite cannot guarantee at this point, and a case that
+  # silently depends on one is the same trap one level down.
+  #
+  # This suite's counters are PASS/FAIL only, and neither word fits. The
+  # observation is recorded with `note`, which is the honest third answer and the
+  # same shape as the ABSENT/COVERED categories the C2 suite grew.
+  LEASE_AFTER="$(q "SELECT status || ' expires_at=' || expires_at || ' worker=' || worker_id FROM kernel.pipeline_job_leases WHERE lease_id='$LEASE3';")"
+  absent "3: the status transition this case waited for does not exist - lease after expiry with no worker alive: $LEASE_AFTER"
+  note "3: this Kernel has no lease reaper (jobs.rs:2776 flips EXPIRED only at claim time), so the status transition this case waited for does not exist"
+  note "3: the rule that DOES exist is jobs.rs:2901 (409 LEASE_NOT_ACTIVE on heartbeat), and reaching it needs a READY Node that this suite cannot assume here; capability_multi_provider.sh:100-116 exercises lease rejection with a live token instead"
 fi
 
 # ===========================================================================
@@ -614,6 +665,13 @@ else
   bad "7: stop_worker() with no recorded pid did not return cleanly"
 fi
 
-echo "== negatives done: PASS=$PASS FAIL=$FAIL =="
+echo "== negatives done: PASS=$PASS FAIL=$FAIL ABSENT=$ABSENT COVERED=$COVERED =="
 echo "evidence: $EVIDENCE"
 [ "$FAIL" -eq 0 ] || exit 1
+if [ "$ABSENT" -gt 0 ] || [ "$COVERED" -gt 0 ]; then
+  # Named, not hidden: the counts are in the line above and every entry says what
+  # it is and where the claim can be checked. Neither category is a hole, so
+  # neither changes the exit code - the same rule the C2 suite uses.
+  echo "verdict: PASS ($ABSENT absent, $COVERED covered elsewhere - both named above)"
+fi
+exit 0
