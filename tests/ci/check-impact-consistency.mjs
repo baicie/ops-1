@@ -330,5 +330,51 @@ for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// GATED JOBS: every job whose `if:` reads the scope job must still be reachable.
+//
+// `ci.yml` now skips seven jobs unless `impact.mjs` asks for their suite. That is
+// the biggest cost saving in this file's history and the biggest new way to lose
+// coverage: if the analyzer stops mapping a path to a gated suite, the job
+// silently stops running for it, and nothing is red - there is no check to be red.
+//
+// The check: for the paths that job exists to cover, the analyzer must still
+// require its suite. `GATED_COVERAGE` names the job, the suite, and one path per
+// thing the job is there for. A gated job with no entry here is an error, so
+// adding one forces someone to say what it covers.
+// ---------------------------------------------------------------------------
+const GATED_COVERAGE = [
+  // job id                          suite                   paths that must keep it on
+  ['rust', 'rust', ['apps/kernel/src/gateway.rs', 'crates/bundle/src/lib.rs']],
+  ['web', 'web', ['apps/platform-console/src/main.tsx', 'apps/ops-web/src/main.tsx']],
+  ['web-unit', 'web-unit', ['packages/ui/src/button.tsx']],
+  [
+    'platform-image-build', 'platform-image-build',
+    // Everything the Dockerfile compiles: apps/, crates/, contracts/, both web apps.
+    ['apps/kernel/src/gateway.rs', 'apps/node/src/agent.rs', 'crates/bundle/src/lib.rs',
+      'contracts/x.json', 'apps/ops-web/src/main.tsx'],
+  ],
+  [
+    'runtime-image-build', 'platform-image-build',
+    // The full image additionally ships the pipeline worker and both bundles.
+    ['apps/pipeline-worker/src/main.rs', 'apps/ops-web/src/main.tsx',
+      'apps/platform-console/src/main.tsx'],
+  ],
+  [
+    'g13a1-gateway', 'g12-acceptance',
+    ['apps/kernel/src/gateway.rs', 'apps/kernel/src/capabilities.rs'],
+  ],
+];
+
+for (const [job, suite, paths] of GATED_COVERAGE) {
+  for (const file of paths) {
+    if (!analyse([file]).suites[suite]) {
+      errors += 1;
+      process.stdout.write(`ERROR gated job ${job}: ${file} no longer requires ${suite}, so the job would be skipped for it\n`);
+      process.stdout.write(`        the job is now conditional on that suite; a change to ${file} would not build it\n`);
+    }
+  }
+}
+
 process.stdout.write(`\nimpact/filter consistency: ${errors} error(s), ${warnings} warning(s)\n`);
 if (errors > 0 || (strict && warnings > 0)) process.exit(1);

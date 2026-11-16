@@ -67,29 +67,40 @@ export const SUITES = [
  */
 const RULES = [
   // --- Rust source -----------------------------------------------------------
-  { glob: 'apps/kernel/**', suites: ['rust', 'platform-only', 'data-foundation', 'linux-runtime'] },
+  // The image builds belong on anything the Dockerfile compiles. Its
+  // `rustbuild` stage copies `apps/`, `crates/` and `contracts/`, and its
+  // `webbuild` stage builds both Vite apps (- deployments/staging/Dockerfile:59-62,
+  // :126-127). Without these, gating the image jobs on the analyzer would stop
+  // building an image for a kernel change - the gap only invisible today because
+  // both jobs currently run unconditionally.
+  { glob: 'apps/kernel/**', suites: ['rust', 'platform-only', 'data-foundation', 'linux-runtime', 'platform-image-build'] },
   // The gateway and capability code is the authorisation surface. A change here
   // must be measured against the security negatives and the gateway acceptance,
   // not only against `cargo test`.
   { glob: 'apps/kernel/src/gateway.rs', suites: ['g12-acceptance'] },
-  { glob: 'apps/kernel/src/capabilities.rs', suites: ['runtime-conformance', 'plugin-lifecycle'] },
-  { glob: 'apps/node/**', suites: ['rust', 'linux-runtime', 'data-foundation', 'plugin-lifecycle'] },
-  { glob: 'apps/pipeline-worker/**', suites: ['rust', 'data-foundation'] },
-  { glob: 'apps/opsctl/**', suites: ['rust', 'plugin-lifecycle'] },
+  // `g12-acceptance` is here because `g13a1-gateway` - one of its jobs - is the
+  // end-to-end test of capability grants: it mints a workload token against a
+  // live Gateway and drives it to a plugin container. Without this entry that job
+  // would be skipped for the one file it exists to cover, since this branch made
+  // it conditional on the suite.
+  { glob: 'apps/kernel/src/capabilities.rs', suites: ['runtime-conformance', 'plugin-lifecycle', 'g12-acceptance'] },
+  { glob: 'apps/node/**', suites: ['rust', 'linux-runtime', 'data-foundation', 'plugin-lifecycle', 'platform-image-build'] },
+  { glob: 'apps/pipeline-worker/**', suites: ['rust', 'data-foundation', 'platform-image-build'] },
+  { glob: 'apps/opsctl/**', suites: ['rust', 'plugin-lifecycle', 'platform-image-build'] },
   // `crates/**` used to require `contracts` as well. Only `crates/bundle` has any
   // relationship to the contract validators (it is what signs and verifies the
   // bundles `validate_contracts.py` was written to inspect), and
   // `typed-pipeline-contracts.yml` does not watch `crates/` at all - so the
   // requirement produced a suite that could not run for that change.
-  { glob: 'crates/**', suites: ['rust'] },
+  { glob: 'crates/**', suites: ['rust', 'platform-image-build'] },
   { glob: 'crates/bundle/**', suites: ['contracts'] },
 
   // --- Contracts -------------------------------------------------------------
-  { glob: 'contracts/**', suites: ['contracts', 'runtime-conformance', 'data-foundation'] },
+  { glob: 'contracts/**', suites: ['contracts', 'runtime-conformance', 'data-foundation', 'platform-image-build'] },
 
   // --- Web -------------------------------------------------------------------
-  { glob: 'apps/platform-console/**', suites: ['web', 'web-unit', 'browser-e2e'] },
-  { glob: 'apps/ops-web/**', suites: ['web', 'web-unit', 'browser-e2e'] },
+  { glob: 'apps/platform-console/**', suites: ['web', 'web-unit', 'browser-e2e', 'platform-image-build'] },
+  { glob: 'apps/ops-web/**', suites: ['web', 'web-unit', 'browser-e2e', 'platform-image-build'] },
   { glob: 'packages/**', suites: ['web', 'web-unit', 'browser-e2e'] },
   // `data-foundation` belongs here: the 42-step harness runs four Playwright
   // specs from this directory (data_foundation_ci.sh:333 - data-foundation,
