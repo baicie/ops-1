@@ -1247,23 +1247,40 @@ jobs:
           NEEDS: ${{ toJSON(needs) }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # The files this PR changed, from the merge base - not from
-          # `origin/main`, which may have moved and would attribute other people's
-          # changes to this PR.
+          # The files this commit changed.
+          #
+          # Pull request: from the merge base, not from `origin/main`, which may
+          # have moved and would attribute other people's changes to this PR.
+          #
+          # Push: from the commit itself. A merge to `main` is a squash, so the
+          # commit's own diff IS the change set - exactly what GitHub's path
+          # filters see when they decide which workflows to start.
+          #
+          # WHY THE PUSH CASE MATTERS, and why it used to fail closed:
+          # before this, a push had no `BASE_SHA`/`HEAD_SHA`, `CHANGED` came back
+          # empty, and the script substituted `__unavailable__` - an unmapped path,
+          # so the analyzer turned every suite on. On the #120 merge commit
+          # (61b73f0) that demanded `data-foundation`, which has no `push` trigger
+          # and so could never produce a check, and the gate went red on `main`.
+          # "Require everything because I cannot see the diff" is not fail-closed,
+          # it is fail-noisy: the true change set was right there in the commit.
           if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
             git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
             CHANGED="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || true)"
           else
-            CHANGED=""
+            CHANGED="$(git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" 2>/dev/null || true)"
+            if [ -n "$CHANGED" ]; then
+              echo "no pull-request base; using the commit's own diff for ${GITHUB_SHA}"
+            fi
           fi
           if [ -z "$CHANGED" ]; then
-            # No diff available (a push event, or a fetch that did not complete).
-            # Fail closed: ask the analyzer about a path it cannot map, which is
-            # its strict branch.
+            # A root commit, or a diff that could not be produced at all. This is
+            # the only genuinely unknown case, and it keeps failing closed.
             echo "no change set available; requiring every suite"
             CHANGED="__unavailable__"
           fi
@@ -1298,8 +1315,14 @@ jobs:
             2>/dev/null || echo '{}')"
           echo "check runs on $CHECKS_SHA:"; printf '%s\n' "$CHECKS" | head -c 2000; echo
 
-          node tests/ci/ci-gate.mjs --needs-json "$NEEDS" --impact-json "$IMPACT" --checks-json "$CHECKS" > /tmp/gate.txt 2>&1
-          GATE_RC=$?
+          # `|| true` because this script runs under `set -e`: without it a gate
+          # that exits 1 ends the step on the spot, the summary below is never
+          # written, and the Actions page shows a bare "exit code 1" with no
+          # explanation - which is exactly what happened on the #120 merge commit
+          # (61b73f0). The comment on the block below says "capture, write the
+          # summary, then fail"; this line is what makes that true.
+          GATE_RC=0
+          node tests/ci/ci-gate.mjs --needs-json "$NEEDS" --impact-json "$IMPACT" --checks-json "$CHECKS" > /tmp/gate.txt 2>&1 || GATE_RC=$?
           cat /tmp/gate.txt
           # Deliberately not `| tee`: under `set -e` a `ci-gate` exit of 1 ends the
           # step before the summary is written, and a red gate is exactly when the

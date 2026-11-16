@@ -1,6 +1,23 @@
 name: data-foundation
 on:
   workflow_dispatch:
+  # `push` as well as `pull_request`, with no path filter.
+  #
+  # Every other suite workflow in this repository triggers on both. This one did
+  # not, and the gap only became visible once `ci-gate` started reading the
+  # check-run API: on the merge commit for #120 (61b73f0) the gate demanded
+  # `data-foundation` and there was no check to find, because a push does not
+  # fire a `pull_request` trigger. The gate was right to fail - it had been told
+  # the suite was required and could not verify it - but the missing half was
+  # here.
+  #
+  # No `paths:` on the push side, deliberately. The point of running on main is
+  # to know whether main is green, and a path filter on a merge commit would
+  # silently decide "this change cannot break it" using the same table the gate
+  # distrusts. It is the post-merge answer, and there is exactly one of them per
+  # merge.
+  push:
+    branches: [main]
   pull_request:
     paths:
       - 'apps/kernel/**'

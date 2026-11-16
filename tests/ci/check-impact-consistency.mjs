@@ -41,6 +41,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { analyse, SUITES } from './impact.mjs';
 
 /**
@@ -145,6 +146,23 @@ function globToRegExp(glob) {
  * The result is cross-checked against PyYAML when it IS available, so a silent
  * parser disagreement is a test failure rather than a wrong verdict.
  */
+/**
+ * The top-level trigger names of a workflow, read the same way `pathsFor` reads
+ * its filters: with a real parse, no YAML dependency.
+ */
+export function triggersFor(workflow) {
+  return JSON.parse(execFileSync('python3', [
+    '-c',
+    'import yaml, json, sys\n'
+    + 'd = yaml.safe_load(open(sys.argv[1]))\n'
+    + 'on = d.get(True) or d.get("on")\n'
+    + 'if isinstance(on, str): print(json.dumps([on]))\n'
+    + 'elif isinstance(on, list): print(json.dumps(on))\n'
+    + 'else: print(json.dumps(list((on or {}).keys())))\n',
+    `.github/workflows/${workflow}`,
+  ], { encoding: 'utf8' }));
+}
+
 export function pathsFor(workflow) {
   const path = `.github/workflows/${workflow}`;
   const lines = readFileSync(path, 'utf8').split('\n');
@@ -236,6 +254,35 @@ for (const suite of uncovered) {
   if (!CI_OWNED.includes(suite)) {
     process.stdout.write(`ERROR suite ${suite}: no workflow produces it and it is not listed as ci.yml-owned\n`);
     errors += 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TRIGGER COMPLETENESS: a workflow that produces a suite must run on BOTH events.
+//
+// The filter check above asks "does this workflow start for these paths". It does
+// not ask "does this workflow start at all on a push", and that was the defect
+// the #120 merge exposed: `data-foundation.yml` had `pull_request` only, so on a
+// push to main it never ran, `ci-gate` demanded the suite, and there was no check
+// to find. The gate was right; the workflow was missing half its triggers.
+//
+// A suite that is only verified on pull requests means `main` is unverified for
+// that suite. Every workflow here should run on push as well - and be path-
+// filtered on the pull-request side only, so the post-merge run is unconditional.
+// ---------------------------------------------------------------------------
+for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
+  let triggers;
+  try {
+    triggers = triggersFor(workflow);
+  } catch (err) {
+    errors += 1;
+    process.stdout.write(`ERROR ${workflow}: could not read its triggers: ${err.message}\n`);
+    continue;
+  }
+  if (!triggers.includes('push')) {
+    errors += 1;
+    process.stdout.write(`ERROR ${workflow}: produces suite ${suite} but has no push trigger, so main is unverified for it\n`);
+    process.stdout.write(`        ci-gate runs on push and will demand ${suite} with no check to find\n`);
   }
 }
 
