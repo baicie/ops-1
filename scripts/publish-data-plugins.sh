@@ -113,7 +113,34 @@ if [ ! -f "$PUBLISHER_KEY" ]; then
   sudo chmod 0644 "$PUBLISHER_PUB"
   say "publisher key created at $PUBLISHER_KEY"
 fi
-[ -f "$PUBLISHER_PUB" ] || die "no $PUBLISHER_PUB; cannot register the publisher" 
+# The public half must exist even if this host was provisioned before the
+# script kept it: the key on staging was created by an earlier version that
+# copied only the private file, so the deploy failed with
+#   no /srv/opsweave-staging/publisher.pub; cannot register the publisher
+# Derive it from the private key instead of demanding that history never
+# happened. Ed25519 seeds are PKCS#8-wrapped here, which node can do.
+if [ ! -f "$PUBLISHER_PUB" ]; then
+  say "deriving $PUBLISHER_PUB from the private key"
+  seed_hex="$(sudo tr -d '\n' < "$PUBLISHER_KEY")"
+  # python3 + cryptography is on the host; node is not.
+  derived="$(printf '%s' "$seed_hex" | python3 -c '
+import sys
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
+raw = bytes.fromhex(sys.stdin.read().strip())
+key = Ed25519PrivateKey.from_private_bytes(raw)
+pub = key.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw,
+)
+sys.stdout.write(pub.hex())
+' 2>/dev/null || true)"
+  [ -n "$derived" ] || die "could not derive the public key from $PUBLISHER_KEY"
+  printf '%s\n' "$derived" | sudo tee "$PUBLISHER_PUB" >/dev/null
+  sudo chown root:root "$PUBLISHER_PUB"
+  sudo chmod 0644 "$PUBLISHER_PUB"
+  say "derived public key $derived"
+fi
 
 # Register the public half. Idempotent (the endpoint upserts); see the note at
 # the top of this file. The public key is stored beside the private one, so this
