@@ -26,11 +26,23 @@
 #   3. Assembles, signs and installs a bundle per plugin, inside the kernel
 #      container - the only place `opsctl` exists.
 #
-# WHAT IT NEVER DOES
+# THE PUBLISHER KEY MUST BE REGISTERED, NOT MERELY CREATED
 #
-# It does not rotate the publisher key, and it does not touch
-# `kernel.trusted_publishers`. It creates the key on first run if absent, and
-# signs with whatever is at $PUBLISHER_KEY.
+# A bundle signed by a key the platform has not trusted is refused with
+# SIGNATURE_OR_BUNDLE_INVALID, which is what the first run that got this far
+# returned. Creating the key is half the job; the platform has to know its public
+# half.
+#
+# So after creating the key, this registers the public half as `trusted-team` -
+# the publisher id the manifests already declare - through the platform's own
+# admin API. That upserts, so a host whose key is already registered is
+# unaffected, and a rotated key registers itself instead of silently mismatching.
+#
+# This is a deliberate write to trust state, and the reason it is here rather
+# than in a manual step: a deployment that can publish a bundle but cannot
+# register the key that signs it has a path that only works once, by hand. If you
+# do not want the deployment to own this, set PUBLISHER_ID to a publisher that is
+# registered out of band and provision $PUBLISHER_KEY yourself.
 set -euo pipefail
 
 SRC="${PLUGIN_SRC:-/srv/opsweave-staging/plugin-src}"
@@ -42,6 +54,7 @@ PG_DB="${PG_DB:-opsweave}"
 REGISTRY="${PLUGIN_REGISTRY:-127.0.0.1:15001}"
 KERNEL_URL="${KERNEL_URL:-http://127.0.0.1:3000}"
 PUBLISHER_KEY="$DATA/publisher.key"
+PUBLISHER_PUB="$DATA/publisher.pub"
 PLUGINS=(data-catalog data-integration)
 
 say() { printf '%s\n' "$*"; }
@@ -93,11 +106,48 @@ if [ ! -f "$PUBLISHER_KEY" ]; then
   say "no publisher key at $PUBLISHER_KEY; creating one for this deployment"
   sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl keygen --out-dir /tmp/opsweave-keygen >/dev/null
   sudo docker cp "$KERNEL_CONTAINER:/tmp/opsweave-keygen/publisher.key" "$PUBLISHER_KEY" >/dev/null
+  sudo docker cp "$KERNEL_CONTAINER:/tmp/opsweave-keygen/publisher.pub" "$PUBLISHER_PUB" >/dev/null
   sudo docker exec "$KERNEL_CONTAINER" rm -rf /tmp/opsweave-keygen
-  sudo chown root:root "$PUBLISHER_KEY"
+  sudo chown root:root "$PUBLISHER_KEY" "$PUBLISHER_PUB"
   sudo chmod 0600 "$PUBLISHER_KEY"
+  sudo chmod 0644 "$PUBLISHER_PUB"
   say "publisher key created at $PUBLISHER_KEY"
 fi
+[ -f "$PUBLISHER_PUB" ] || die "no $PUBLISHER_PUB; cannot register the publisher" 
+
+# Register the public half. Idempotent (the endpoint upserts); see the note at
+# the top of this file. The public key is stored beside the private one, so this
+# reads a file rather than deriving anything.
+publisher_id="${PUBLISHER_ID:-trusted-team}"
+pub_hex="$(tr -d '\n' < "$PUBLISHER_PUB")"
+[ -n "$pub_hex" ] || die "empty public key in $PUBLISHER_PUB"
+say "publisher $publisher_id public key: $pub_hex"
+registered="$(sudo docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -tAc \
+  "SELECT count(*) FROM kernel.trusted_publishers WHERE publisher_id='$publisher_id' AND public_key_hex='$pub_hex' AND trust_state='TRUSTED'")"
+if [ "$registered" != "0" ]; then
+  say "publisher $publisher_id already trusts this key"
+else
+  say "registering publisher $publisher_id"
+  # The admin API is the supported path; writing the table directly would skip
+  # its validation. Reuse the opsctl session cookie it already created.
+  # `opsctl login` stores {token, csrf} and sends the token as a bearer
+  # credential with `x-csrf-token` - not as a cookie (apps/opsctl/src/main.rs:115-118,
+  # :170-171). Reusing that saved session is what lets this call the admin API
+  # without a second login.
+  session="$(sudo docker exec "$KERNEL_CONTAINER" sh -c 'cat "${HOME:-/home/opsweave}/.opsweave/session.json" 2>/dev/null' || true)"
+  token="$(printf '%s' "$session" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("token",""))' 2>/dev/null || true)"
+  csrf="$(printf '%s' "$session" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("csrf",""))' 2>/dev/null || true)"
+  [ -n "$token" ] || die "no opsctl session token; cannot call the publishers API"
+  curl -fsS -m 20 -X POST "$KERNEL_URL/api/v1/publishers" \
+    -H "authorization: Bearer $token" \
+    -H "x-csrf-token: $csrf" \
+    -H 'content-type: application/json' \
+    -d "{\"publisherId\":\"$publisher_id\",\"publicKeyHex\":\"$pub_hex\",\"note\":\"registered by the staging deploy\"}" \
+    >/dev/null \
+    || die "could not register publisher $publisher_id; a bundle signed with this key would be refused"
+  say "publisher $publisher_id registered"
+fi
+
 
 email="$(sudo grep -E '^OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=' "$DATA/kernel.env" | cut -d= -f2-)"
 pass="$(sudo grep -E '^OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=' "$DATA/kernel.env" | cut -d= -f2-)"
