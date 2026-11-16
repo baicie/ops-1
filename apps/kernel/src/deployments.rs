@@ -59,6 +59,16 @@ pub struct InstanceRow {
     pub node_data_token: Option<String>,
 }
 
+/// An instance the scheduler cannot recover and that holds no resource.
+///
+/// A failed state with no container is a dead row: `desired_action` is still
+/// START because nothing stopped it, but there is nothing on the node to manage.
+/// Counting it as occupied is what made a single failed pull block every later
+/// deployment on that node.
+fn is_ghost_instance(row: &InstanceRow) -> bool {
+    matches!(row.state.as_str(), "UNHEALTHY" | "UNREACHABLE") && row.container_id.is_none()
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, FromRow)]
 pub struct ActivationRow {
@@ -1328,9 +1338,30 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         .into_iter()
         .map(|(node_id, count)| (node_id, count.max(0) as usize))
         .collect();
+    // What occupies a slot on a node.
+    //
+    // This counted every row with `desired_action == "START"`, including
+    // instances that are UNHEALTHY and hold no container at all. Those can never
+    // recover on their own - the scheduler is not going to start them - so they
+    // held a slot forever and every later deployment of any plugin failed with
+    // INSTANCE_CAPACITY_EXCEEDED against a node that had free capacity.
+    //
+    // Measured on staging 2026-11-16: three containers running, four instances
+    // counted, and the fourth was an UNHEALTHY row with `container_id IS NULL`
+    // left by a deployment whose image could not be pulled. The next deploy of
+    // that plugin - and, because the limit is per node, of any plugin - could not
+    // be scheduled until that row was stopped by hand.
+    //
+    // The rule now: a failed instance with no container is not using the node.
+    // One that HAS a container still counts even when unhealthy, because it is
+    // occupying real resources and the scheduler may still be managing it.
     let mut used_nodes: HashMap<Uuid, usize> = existing
         .iter()
-        .filter(|row| row.slot < deployment.desired_replicas && row.desired_action == "START")
+        .filter(|row| {
+            row.slot < deployment.desired_replicas
+                && row.desired_action == "START"
+                && !is_ghost_instance(row)
+        })
         .fold(HashMap::new(), |mut map, row| {
             *map.entry(row.node_id).or_insert(0) += 1;
             map
@@ -1911,8 +1942,8 @@ fn placement_failure_reason(node_name: &str, rejection: &PlacementRejection) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_node, node_has_capacity, placement_failure_reason, NodeUsage, PlacementContext,
-        PlacementRejection,
+        evaluate_node, is_ghost_instance, node_has_capacity, placement_failure_reason, InstanceRow,
+        NodeUsage, PlacementContext, PlacementRejection,
     };
     use crate::nodes::NodeRow;
     use chrono::Utc;
@@ -2308,6 +2339,65 @@ mod tests {
                 available_mib: 2656,
                 limit_mib: 2390,
             })
+        );
+    }
+    /// A failed instance with no container must not occupy a node slot.
+    ///
+    /// The predicate is tested directly because that is where the defect was: the
+    /// placement planner counted every `desired_action == "START"` row, so an
+    /// UNHEALTHY instance whose container was never created - a failed image pull
+    /// leaves exactly that - held a slot forever. Measured on staging
+    /// 2026-11-16: three containers running, four instances counted, and every
+    /// later deployment of any plugin on that node refused with
+    /// INSTANCE_CAPACITY_EXCEEDED.
+    ///
+    /// The three cases below are the decision, not the symptom:
+    ///   failed + no container   -> ghost, does not occupy
+    ///   failed + has container  -> still occupies (real resources, still managed)
+    ///   healthy                 -> occupies
+    #[test]
+    fn a_failed_instance_without_a_container_does_not_occupy_a_slot() {
+        let base = |state: &str, container: Option<&str>| InstanceRow {
+            id: Uuid::new_v4(),
+            deployment_id: Uuid::new_v4(),
+            node_id: Uuid::new_v4(),
+            slot: 0,
+            deployment_generation: 1,
+            desired_action: "START".into(),
+            state: state.into(),
+            observed_at: Some(Utc::now()),
+            container_id: container.map(str::to_string),
+            image_digest: None,
+            host_port: None,
+            restart_count: 0,
+            last_error: None,
+            runtime_adapter_version: None,
+            node_name: Some("staging-node".into()),
+            node_status: Some("READY".into()),
+            node_last_seen_at: Some(Utc::now()),
+            node_data_endpoint: None,
+            node_data_token: None,
+        };
+
+        assert!(
+            is_ghost_instance(&base("UNHEALTHY", None)),
+            "an UNHEALTHY instance with no container is a dead row and must not hold a slot"
+        );
+        assert!(
+            is_ghost_instance(&base("UNREACHABLE", None)),
+            "the same holds for UNREACHABLE"
+        );
+        assert!(
+            !is_ghost_instance(&base("UNHEALTHY", Some("abc123"))),
+            "an UNHEALTHY instance that HAS a container is still using the node"
+        );
+        assert!(
+            !is_ghost_instance(&base("READY", None)),
+            "a READY instance counts even before its container id is observed"
+        );
+        assert!(
+            !is_ghost_instance(&base("STARTING", None)),
+            "a starting instance is on its way up and must keep its slot"
         );
     }
 }
