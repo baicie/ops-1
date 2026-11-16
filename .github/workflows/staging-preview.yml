@@ -739,6 +739,7 @@ jobs:
               sudo docker cp "$KC:/tmp/opsweave-keygen/publisher.pub" /tmp/opsweave-publisher.pub >/dev/null
               sudo docker exec "$KC" rm -rf /tmp/opsweave-keygen
               sudo chmod 0600 "$key"
+              sudo chown root:root "$key"
               echo "publisher key created at $key"
             fi
 
@@ -767,7 +768,15 @@ jobs:
                 --image-ref "$img" \
                 --frontend-dist "$src/plugins/$name/web/dist" >/dev/null
               sudo docker cp "/tmp/opsweave-bundle-$name" "$KC:/tmp/bundle-$name" >/dev/null
+              # docker cp writes as root and the container runs as opsweave
+              # (uid 10001), so the private key landed unreadable and
+              # `opsctl bundle --key` failed with
+              # "io error: Permission denied (os error 13)".
+              # Hand the file to the container user, mode 0400, and remove it
+              # from the container afterwards.
               sudo docker cp "$key" "$KC:/tmp/publisher.key" >/dev/null
+              sudo docker exec -u 0 "$KC" chown opsweave:opsweave /tmp/publisher.key
+              sudo docker exec -u 0 "$KC" chmod 0400 /tmp/publisher.key
               sudo docker exec "$KC" /usr/local/bin/opsctl --url http://127.0.0.1:3000                 bundle --dir "/tmp/bundle-$name" --out "/tmp/$name.plugin.zip" --key /tmp/publisher.key >/dev/null
               sudo docker exec "$KC" /usr/local/bin/opsctl --url http://127.0.0.1:3000                 install "/tmp/$name.plugin.zip" 2>&1 | tail -1
               sudo docker exec "$KC" /usr/local/bin/opsctl --url http://127.0.0.1:3000                 deploy "$plugin" "$digest" --wait 2>&1 | tail -2
