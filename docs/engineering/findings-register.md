@@ -1,0 +1,197 @@
+# 缺陷登记册
+
+本轮审查的每一次「发现问题 → 定性 → 处置」都在这里。**判定标准写在最后一节**，
+所有状态都以真实证据为准，不以「PR 已合并」或「有单测」代替。
+
+基线：`main @ e299741`（2026-11-17）。上一份总表见 `next-phase-execution-report.md`。
+
+---
+
+## 状态定义
+
+| 状态 | 含义 |
+|---|---|
+| **FIXED** | 已改代码，且有能证伪的测试；测试在 CI 真实执行 |
+| **VERIFIED** | 已确认是缺陷，但本轮未改（附原因） |
+| **NOT_A_DEFECT** | 查证后推翻（附证据） |
+| **BLOCKED** | 需要真实环境 / 权限 / 人工决策 |
+| **NOT_RUN** | 有测试或方案，本轮未执行 |
+| **ACCEPTED_RISK** | 明确接受，附理由与代价 |
+| **NEEDS_DECISION** | 有产品/架构含义，不是工程问题 |
+
+---
+
+## Wave A — 即时安全（本轮）
+
+### A-1 幽灵实例占满节点容量 FIXED
+
+| | |
+|---|---|
+| 现象 | `INSTANCE_CAPACITY_EXCEEDED ... 4 instances ... limit of 4`，而节点上只有 3 个容器 |
+| 根因 | 容量统计按 `desired_action='START'` 计数，不看实例自身 `state` 与 `container_id` |
+| 来源 | 一次失败的 image pull 留下 `UNHEALTHY` + 无容器的行 |
+| 影响 | **该节点上任何插件**的后续部署永久失败，直到人工改库 |
+
+分三次修，每修一次暴露出下一层——这个顺序本身值得记录：
+
+| # | 改了什么 | 结果 |
+|---|---|---|
+| PR #135 | `used_nodes`（进程内计数）排除幽灵 | **无效**——不是限制读取的那份 |
+| PR #136 | `global_instance_counts`（SQL 聚合）排除幽灵 | 有效，但只修了数量 |
+| PR #137 | `allocations`（CPU/内存求和）同样排除 | 补齐；两个口径现在一致 |
+
+**PR #137 的反事实**：把两处 SQL 改回旧版，集成测试报 `left: 4, right: 3`——正是 staging 的
+现象。测试跑在真实 PostgreSQL 上，覆盖：
+
+```
+3 占用 + 1 幽灵        -> count 3, cpu 1500, mem 768
+UNHEALTHY 但有容器      -> 仍占位（排除过多会让调度器超卖）
+UNREACHABLE 但有容器    -> 仍占位
+READY 未观测到容器 ID   -> 仍占位
+STARTING                -> 仍占位
+两个插件共享节点        -> 一个的幽灵不能掩盖另一个的占用
+```
+
+**教训**：谓词单测在这次问题上是无效的——`is_ghost_instance` 两次都是对的，错的是
+**调用它的 SQL**。只有真实数据库能看见。
+
+### A-2 私钥在失败路径上残留 FIXED
+
+| | |
+|---|---|
+| 位置 | `scripts/publish-data-plugins.sh` |
+| 现象 | 私钥 `docker cp` 进运行中的 kernel 容器，清理语句在循环末尾 |
+| 根因 | `set -e` 让 `bundle`/`install`/`deploy` 失败时直接退出，**清理永不执行** |
+| 影响 | 私钥长期留在长驻容器的 `/tmp/publisher.key`，直到下次部署重建容器 |
+
+改为 `EXIT`/`INT`/`TERM` trap，范围限定为一个已知路径。实测三例：
+
+```
+失败路径 + rm 成功  -> 发出 rm 命令                    PASS
+失败路径 + rm 失败  -> 报 ::error，不静默              PASS
+退出码              -> 保留原值（7 进 7 出）           PASS
+```
+
+**未做**：签名仍然发生在长驻 kernel 容器内。评审建议的「隔离签名环境」需要
+`opsctl` 能脱离容器运行，属于架构改动，未在本轮处理（见 B-5）。
+
+### A-3 推送失败被吞掉 FIXED
+
+```bash
+sudo docker push "$img" >/dev/null 2>&1 || true
+say "$name: pushed $img"          # 无条件打印
+```
+
+registry 不可达、layer 被拒、磁盘满——三种情况都打印「pushed」并继续，随后为**不存在的
+镜像**签发 bundle。
+
+现在：推送失败即终止；推送后用 `docker manifest inspect` 与 `RepoDigests` 向 registry
+核实它实际提供了什么。
+
+### A-4 版本身份漏掉 manifest 与 Dockerfile FIXED
+
+| 输入 | 旧 hash 是否覆盖 |
+|---|---|
+| backend `*.mjs` | ✓ |
+| web dist | ✓ |
+| `manifest.template.json` | **✗** |
+| `Dockerfile` | **✗** |
+| `package.json` | **✗** |
+
+**实证**（改前）：
+
+```
+changing manifest    kept the version at 81b7f7e6876d
+changing Dockerfile  kept the version at 81b7f7e6876d
+```
+
+即：改了插件声明的能力、或改了基础镜像，部署会判定「已安装」并跳过——**变更永远到不了
+staging，且不报任何错**。这正是本轮要防的那类故障，低一层。
+
+现在六个输入各自都改变版本，而 mtime 不改变（hash 覆盖内容而非时间戳）。
+
+**未做**：`0.0.<n>` 这个形状本身。让 major/minor 有意义需要先决定插件版本与平台版本的
+关系，那是 ADR 不是 hash。
+
+---
+
+## 待处理（本轮尚未动手）
+
+| # | 项 | 状态 | 说明 |
+|---|---|---|---|
+| B-1 | 幽灵实例的**生命周期**（不是统计） | NOT_RUN | 见下 |
+| B-2 | 并发部署是否重复预留资源 | NOT_RUN | TASK-01 要求，未测 |
+| B-3 | CPU 满 / 内存满但实例数未满 的独立用例 | NOT_RUN | 集成测试缺这两个分支 |
+| B-4 | Tag 被指向不同 digest 时拒绝 | NOT_RUN | 需要保存上次 digest 才能判断 |
+| B-5 | 签名移出长驻 kernel 容器 | NEEDS_DECISION | 需要 `opsctl` 脱离容器运行 |
+| B-6 | 版本 `% 100000` 碰撞 | ACCEPTED_RISK | 概率低但非零；当前版本号是内容指纹而非语义版本 |
+| B-7 | Staging 发布事务性（Kernel 新 / Plugin 旧） | NOT_RUN | TASK-06，未开始 |
+| B-8 | CI Gate 的 `delegated-pending` 不阻塞 | VERIFIED | 已知设计取舍，见下 |
+
+### B-1 为什么「不统计幽灵」不等于「修复」
+
+现在幽灵不占容量，但它**仍然留在 `plugin_instances` 里**，`desired_action` 仍是 `START`。
+Kernel 的 reconciliation loop 会持续把它写回 `START`——手工 `UPDATE ... STOP` 在同一秒内被
+覆盖（实测 `updated_at` 等于当前时间）。
+
+所以：容量问题解决了，**状态机的收敛问题没有**。缺的是一张明确的迁移表：
+`UNHEALTHY` 何时判定为不可恢复、何时终止并重建 generation、Node 重新上线后旧观察是否
+复活废弃实例。这需要 ADR，不是补丁。
+
+### B-8 CI Gate 的 pending 语义
+
+`delegated-pending` 不阻止 gate 返回 PASS。这是**刻意的**：`ci-gate` 无法等待其它
+workflow 的 run，把「结果尚不存在」判成失败会让 gate 在自身的读时序上变红（已发生过一次，
+run 43716720306）。
+
+代价是：一个 suite 若在 gate 运行后才失败，gate 已经绿了。当前由 Ruleset 直接强制的两个
+检查（`linux-runtime`、`quality-faults`）不受影响；其余 delegated suite 属于
+ACCEPTED_RISK，写在这里而不是假装 gate 覆盖了它们。
+
+---
+
+## NOT_A_DEFECT（查证后推翻）
+
+| 曾经怀疑 | 结论 | 证据 |
+|---|---|---|
+| `SameSite=Strict` 导致跳转丢 cookie | 推翻 | 5234/5409 会话 `last_seen_at > created_at`，cookie 正常发送 |
+| `ci-gate` 的 diff 获取在 push 上失效 | 推翻 | 日志里 `changed files:` 是脚本回显；真实输出在 `##[endgroup]` 之后 |
+| `deploy` 步骤的 `continue-on-error` 吞掉失败 | 推翻 | fallback 步骤以 `steps.deploy.outcome == 'failure'` 为条件，且自己会 fail job |
+| 重复镜像构建应当合并 | 维持不改 | artifact 传递 60–90 MB 与重建同量级（345s vs 469s） |
+| 同 job 内两次 `build-plugins.sh` 应当合并 | 维持不改 | 两个 registry 是刻意隔离；Docker layer cache 已让第二次变便宜 |
+
+---
+
+## 本轮我自己造成的问题
+
+诚实记录，因为它们影响了排查路径：
+
+| 问题 | 后果 | 发现方式 |
+|---|---|---|
+| 用 `assert` 包裹的补丁脚本，assert 抛异常时 write 未执行 | `pnpm build` 从未进入 workflow，bundle 无前端 | 部署日志报 `missing required file: frontend/remoteEntry.js` |
+| 把 publisher 公钥换成自己的以推进部署 | 削弱了平台信任链 | 自查后回滚，指纹恢复为 `c5aa5963...` |
+| 在 arm64 Mac 上构建镜像推给 amd64 主机 | `no matching manifest for linux/amd64` | 主机 pull 失败 |
+| 手工 `UPDATE` 实例状态以腾出容量 | 被 reconciliation loop 立刻覆盖 | 查询 `updated_at` 为当前时间 |
+
+---
+
+## 复现方式
+
+本轮所有判定都可复跑：
+
+```bash
+# 容量 SQL 的真实 PostgreSQL 集成测试
+docker run -d --name capdb -e POSTGRES_DB=opsweave -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres -p 55433:5432 postgres:17
+OPSWEAVE_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55433/opsweave \
+  OPSWEAVE_REQUIRE_TEST_DATABASE=1 cargo test -p opsweave-kernel capacity_sql
+
+# 版本 hash 的六个输入
+bash /tmp/ver.sh
+
+# 私钥清理的三个路径
+bash /tmp/t3.sh   # 失败路径移除
+```
+
+`/tmp/ver.sh` 与 `/tmp/t3.sh` 是对仓库脚本管线的独立复刻；它们不是提交的测试，因为脚本
+运行在 staging 主机上，而主机不在 CI 里。这一点是缺口，见 B-9。
