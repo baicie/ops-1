@@ -225,3 +225,57 @@ delegated-pending: data-foundation (golden-path: in_progress, legacy-regression:
 ```
 
 `data-foundation` 第一次在 `main` 上启动。
+
+## 10. 第四轮：`main` 绿了之后，才看得见「绿得有多贵」
+
+前三轮都在修「红」。第四轮的起点是 `main` 全绿之后的一个问题：**它绿得有多贵？**
+
+实测一次只改一个 `.md` 的合入（`6824796`）：
+
+| workflow | 耗时 |
+|---|---|
+| `data-foundation` | 22.3 min |
+| `plugin-lifecycle` | 17.3 min |
+| `staging-preview` | 13.0 min |
+| `platform-linux-acceptance` | 9.9 min |
+| `ci` | 5.2 min |
+| `runtime-conformance` | 3.8 min |
+| `reliability` | 2.3 min |
+| **合计** | **73.8 machine-minutes** |
+
+分析器判定这次改动需要 **0 个 suite**。最近 25 个 main 提交里有 3 个属于这一类。
+
+### 我上一轮的论证是错的
+
+在 #121 里我写：「push 侧不能加路径过滤，那等于用 gate 不信任的表来判定『这个改动不会破坏它』，
+在主分支上跑的意义就是知道主分支绿不绿。」
+
+**反对的真实内容是「两张表不能不一致」。** 正确答案是让一张从另一张推导出来，不是把表删掉。
+现在重型 workflow 的 push 过滤器就是 `impact.mjs` 说需要它的那些路径；`ci.yml` 保持不过滤，
+因为它承载 `HARD_REQUIRED`——那才是抓「文档提交弄坏了构建」的东西。
+
+```
+docs-only push      7 workflow / 73.8 min  ->  2 workflow
+8c8cb39（改 8 个文件，含全部 workflow）  7 workflow，一个都没少
+```
+
+### 检查器本身有它要抓的那个 bug
+
+`pathsFor` 加了 `event` 参数，函数体却仍硬编码 `pull_request:`。整个 push 断言**静默空转**。
+变异测试才暴露它：从 push 过滤器删掉 `apps/kernel/**`，零报错。
+
+这是本轮第二次「检查器空转」——第一次是 `spec-coverage` 看不见浏览器块消失（第 7 节）。
+**一个只被写过、没被证伪过的检查，和没有检查是同一件事。**
+
+修它时又暴露分析器的洞：`data_foundation_ci.sh:333` 跑 4 个 `tests/ui/` spec，
+但 `tests/ui/**` 规则里没有 `data-foundation`。抓到它的是**这个分支之前就存在**的
+`check-spec-coverage.mjs`。
+
+### 附带：`g13a1-gateway` 的固定端口
+
+同一次运行里 `g13a1-gateway` 死在 `address already in use`（端口 55432），产品什么都没做。
+四个固定端口、固定容器名、从不检查。而且旧代码用 `>/dev/null` 丢掉了 docker 的真实错误，
+**端口冲突和 daemon 损坏在日志里长一个样**。
+
+现在端口是选出来的（首个 ≥55432 的空闲端口），且**刻意不用重试循环**——重试会让冲突静默
+消失，下一次落在没人看的步骤上。
