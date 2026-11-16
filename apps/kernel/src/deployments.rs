@@ -1321,6 +1321,16 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
         JOIN kernel.plugin_deployments d ON d.id=i.deployment_id
         WHERE i.desired_action='START'
           AND d.status IN ('PENDING','PREPARING','READY','ACTIVE','DEGRADED')
+          -- An instance that failed and holds no container is not using the
+          -- node. Without this a single failed image pull leaves a row that
+          -- occupies a per-node slot forever, and every later deployment of ANY
+          -- plugin on that node is refused with INSTANCE_CAPACITY_EXCEEDED.
+          --
+          -- This is the query the planner actually limits against;
+          -- `used_nodes` below is a second, narrower count. Fixing only that one
+          -- changed nothing, which is how this was found: the kernel served the
+          -- fix, the ghost row was still there, and the deploy still refused.
+          AND NOT (i.state IN ('UNHEALTHY','UNREACHABLE') AND i.container_id IS NULL)
         GROUP BY i.node_id
         "#,
     )
@@ -1348,9 +1358,13 @@ async fn reconcile_deployment(state: &AppState, deployment: DeploymentRow) -> an
     //
     // Measured on staging 2026-11-16: three containers running, four instances
     // counted, and the fourth was an UNHEALTHY row with `container_id IS NULL`
-    // left by a deployment whose image could not be pulled. The next deploy of
-    // that plugin - and, because the limit is per node, of any plugin - could not
-    // be scheduled until that row was stopped by hand.
+    // left by a deployment whose image could not be pulled.
+    //
+    // NOTE: this is NOT the count the planner limits against. The per-node limit
+    // is enforced on `global_instance_counts`, a SQL aggregate defined above. Fixing
+    // this one alone changed nothing on staging - the kernel served the fix and the
+    // deploy still refused - which is how the other query was found. Both now
+    // exclude the same shape; if you add a third count, exclude it there too.
     //
     // The rule now: a failed instance with no container is not using the node.
     // One that HAS a container still counts even when unhealthy, because it is
