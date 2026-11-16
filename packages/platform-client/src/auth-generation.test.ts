@@ -21,7 +21,7 @@ import { authGeneration, createAuthGeneration, type AuthGeneration } from '@opsw
 function provider(clock: AuthGeneration) {
   const state = { user: null as string | null };
 
-  /** auth.tsx:62-75 `refresh()` - ticket before the request, writes gated on it. */
+  /** auth.tsx `refresh()` - ticket before the request, writes gated on it. */
   async function refresh(response: Promise<{ user: string }>) {
     const ticket = clock.ticket();
     try {
@@ -29,8 +29,11 @@ function provider(clock: AuthGeneration) {
       if (!clock.accepts(ticket)) return 'discarded';
       state.user = body.user;
       return 'applied';
-    } catch {
+    } catch (error) {
       if (!clock.accepts(ticket)) return 'discarded';
+      // auth.tsx: only a 401 ends the session. Anything else leaves it alone.
+      const status = (error as { status?: unknown }).status;
+      if (status !== 401) return 'kept';
       state.user = null;
       return 'signed-out';
     }
@@ -200,5 +203,44 @@ describe('the opsweave:unauthorized signal api.ts dispatches', () => {
     expect(events).toHaveLength(1);
     expect((events[0] as CustomEvent).detail).toEqual({ generation: issuedAt });
     expect(authGeneration.acceptsEvent(events[0])).toBe(true);
+  });
+
+  /**
+   * A failed probe is not a revoked session.
+   *
+   * `refresh()` used to clear the session on ANY throw. Every hop between /admin
+   * and /app is a full page load (two bundles, two shells), so the probe runs
+   * again, and on the staging link - ~500-830 ms TTFB - one timeout or one 502
+   * from the proxy was indistinguishable from an expired cookie. Operators were
+   * signed out mid-task with 156 sessions still valid in the database.
+   */
+  describe('a probe that failed for a reason other than 401', () => {
+    it('keeps the session when the request never reached the kernel', async () => {
+      // fetch rejects on a network failure: no status at all.
+      const networkError = Object.assign(new TypeError('Failed to fetch'));
+      const clock = createAuthGeneration();
+      const app = provider(clock);
+      app.login('admin');
+
+      await expect(app.refresh(Promise.reject(networkError))).resolves.toBe('kept');
+    });
+
+    it('keeps the session on a 502 from the proxy', async () => {
+      const gateway = Object.assign(new Error('Bad Gateway'), { status: 502 });
+      const clock = createAuthGeneration();
+      const app = provider(clock);
+      app.login('admin');
+
+      await expect(app.refresh(Promise.reject(gateway))).resolves.toBe('kept');
+    });
+
+    it('still signs out on a real 401', async () => {
+      const expired = Object.assign(new Error('no session'), { status: 401 });
+      const clock = createAuthGeneration();
+      const app = provider(clock);
+      app.login('admin');
+
+      await expect(app.refresh(Promise.reject(expired))).resolves.toBe('signed-out');
+    });
   });
 });

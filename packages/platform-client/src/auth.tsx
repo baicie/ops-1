@@ -80,9 +80,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!authGeneration.accepts(ticket)) return;
       setCsrfToken(result.csrfToken);
       applySession(result);
-    } catch {
+    } catch (error) {
       if (!authGeneration.accepts(ticket)) return;
-      clearSession();
+      // A FAILED probe is not a REVOKED session. Only the kernel saying "there is
+      // no such session" ends a session; a timeout, a 502 from the proxy, an
+      // aborted request or a dropped connection says nothing about it.
+      //
+      // This used to clear the session on every throw, and on the staging link
+      // (~500-830 ms TTFB, per the note on `login` below) that signed operators
+      // out mid-task: each hop between /admin and /app is a full page load - two
+      // separate bundles, two shells - so `refresh` runs again, and one slow or
+      // failed probe was indistinguishable from an expired cookie.
+      //
+      // The distinction is the status. `ApiError` carries one; a network failure
+      // does not, because fetch rejects rather than answering. So 401 signs out
+      // and everything else leaves the session exactly as it was - the page shows
+      // its own error, which is the truthful outcome: we do not know.
+      const status = (error as { status?: unknown }).status;
+      if (status === 401) clearSession();
     } finally {
       setLoading(false);
     }
