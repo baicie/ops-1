@@ -91,7 +91,13 @@ const RULES = [
   { glob: 'apps/platform-console/**', suites: ['web', 'web-unit', 'browser-e2e'] },
   { glob: 'apps/ops-web/**', suites: ['web', 'web-unit', 'browser-e2e'] },
   { glob: 'packages/**', suites: ['web', 'web-unit', 'browser-e2e'] },
-  { glob: 'tests/ui/**', suites: ['spec-coverage', 'browser-e2e'] },
+  // `data-foundation` belongs here: the 42-step harness runs four Playwright
+  // specs from this directory (data_foundation_ci.sh:333 - data-foundation,
+  // data-foundation-flows, studio, visual-layout). Without it, the push filter
+  // generated from this table omitted `tests/ui/**` and
+  // `check-spec-coverage.mjs` caught the inconsistency: a spec the workflow runs
+  // on a pull request but not on a push.
+  { glob: 'tests/ui/**', suites: ['spec-coverage', 'browser-e2e', 'data-foundation'] },
 
   // --- Plugins ---------------------------------------------------------------
   { glob: 'plugins/**', suites: ['runtime-conformance', 'plugin-lifecycle', 'data-foundation'] },

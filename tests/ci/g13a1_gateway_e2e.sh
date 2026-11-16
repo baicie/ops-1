@@ -15,7 +15,42 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 URL="http://127.0.0.1:18185"
-DB_PORT=55432
+# Which port the database listens on.
+#
+# This was a constant, and a constant is a claim that nothing else on the machine
+# wants that port. On run 43792879692 the claim was false: `docker run -p
+# 55432:5432` failed with `failed to bind host port for 0.0.0.0:55432: address
+# already in use`, the job died before the product did anything, and the check
+# went red with no defect behind it. `platform-linux-acceptance.yml:122` names
+# the same port, so two jobs that ever share a daemon collide - and this script
+# cannot see whether that is what happened.
+#
+# So the port is chosen now, not assumed: the first free port at or above the old
+# constant. `OPSWEAVE_G13A1_DB_PORT` overrides it, which is what a caller that
+# wants a specific port uses.
+#
+# Deliberately NOT a retry loop around `docker run`. Retrying until something
+# binds would make the failure disappear without telling anyone that the port was
+# contested, and the next contest would land on a step nobody watches. Choosing a
+# free port and then asserting the server really answers on it is the same
+# guarantee without the silence.
+def_port_scan() {
+  python3 - "$1" <<'PY'
+import socket, sys
+want = int(sys.argv[1])
+for port in range(want, want + 200):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+    print(port)
+    raise SystemExit(0)
+raise SystemExit("no free port in range")
+PY
+}
+DB_PORT="${OPSWEAVE_G13A1_DB_PORT:-$(def_port_scan 55432)}"
 DB_NAME=opsweave_g13a1
 DB_URL="postgres://postgres:postgres@127.0.0.1:${DB_PORT}/${DB_NAME}"
 PLUGIN_HOST="${OPSWEAVE_G13A1_PLUGIN_HOST:-host.docker.internal}"
@@ -147,8 +182,20 @@ rm -rf /tmp/g13a1-data
 pg_ready() {
   docker exec "$PG_CONTAINER" psql -U postgres -d "$DB_NAME" -tAc 'SELECT 1' >/dev/null 2>&1
 }
-if ! docker run -d --name "$PG_CONTAINER" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB_NAME" -p "${DB_PORT}:5432" postgres:17 >/dev/null; then
-  echo "postgres:17 container would not start on ${DB_PORT}; docker said:"
+if ! docker run -d --name "$PG_CONTAINER" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB_NAME" -p "${DB_PORT}:5432" postgres:17 >/dev/null 2>&1; then
+  echo "postgres:17 container would not start on ${DB_PORT}. Diagnosis:"
+  # The generic probe tells you the image and daemon are fine but says nothing
+  # about WHY the real container failed. A port collision and a broken daemon both
+  # arrive here, and they need different fixes, so say which one it is.
+  if ss -ltn 2>/dev/null | grep -q ":$DB_PORT "; then
+    echo "  port ${DB_PORT} is held by something else on this host:"
+    ss -ltnp 2>/dev/null | grep ":$DB_PORT " || true
+    echo "  this is a HARNESS failure, not a product failure: two runs are sharing a host"
+  fi
+  echo "  -- docker's own error for the real container --"
+  docker run -d --name "${PG_CONTAINER}-probe" -e POSTGRES_PASSWORD=postgres -p "${DB_PORT}:5432" postgres:17 2>&1 | tail -5
+  docker rm -f "${PG_CONTAINER}-probe" >/dev/null 2>&1 || true
+  echo "  -- and a container with no port binding, to separate daemon from port --"
   docker run -d --name "${PG_CONTAINER}-probe" -e POSTGRES_PASSWORD=postgres postgres:17 2>&1 | tail -5
   docker rm -f "${PG_CONTAINER}-probe" >/dev/null 2>&1 || true
   exit 2

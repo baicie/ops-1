@@ -39,6 +39,34 @@ on:
   push:
     branches:
       - main
+    # Mirrors the paths `tests/ci/impact.mjs` says require `plugin-lifecycle`. The
+    # push side used to be unfiltered, on the argument that a path filter would
+    # decide "this change cannot break it" using a table the gate distrusts.
+    # Measurement refuted that: the docs-only commit 6824796 needed ZERO suites per
+    # the analyzer and still started all seven workflows - 74 machine-minutes,
+    # 17.3 of them this one.
+    #
+    # The argument's real content is "the two tables must not disagree", and the
+    # answer to that is to derive one from the other, not to delete one. These
+    # entries are generated from impact.mjs, and
+    # tests/ci/check-impact-consistency.mjs fails the required spec-coverage job
+    # when they drift.
+    #
+    # `ci.yml` stays unfiltered on push: it carries HARD_REQUIRED (rust, web,
+    # contracts, spec-coverage), which is what catches a docs commit that broke
+    # the build.
+    paths:
+      - 'apps/kernel/src/capabilities.rs'
+      - 'apps/node/**'
+      - 'apps/opsctl/**'
+      - 'plugins/**'
+      - 'scripts/assemble_plugin.py'
+      - 'scripts/build-plugins.sh'
+      - 'scripts/demo_common.sh'
+      - 'scripts/demo_up.sh'
+      - 'tests/ci/p001c13_*.sh'
+      - 'tests/ci/p001c_multilang_lifecycle.sh'
+      - '.github/workflows/plugin-lifecycle.yml'
   pull_request:
     paths:
       - 'apps/kernel/**'
