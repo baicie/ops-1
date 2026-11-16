@@ -56,6 +56,14 @@ const SUITE_WORKFLOW = {
   'g12-acceptance': 'g12-acceptance.yml',
   'plugin-lifecycle': 'plugin-lifecycle.yml',
   'runtime-conformance': 'runtime-conformance.yml',
+  // These two were missing, so nothing checked them - and that is exactly how
+  // `browser-e2e` came to be mapped to data-foundation's `golden-path` check
+  // while every path that requires it (packages/**, the two web apps) does not
+  // start data-foundation at all. PR #127 failed on it.
+  // `browser-e2e` has TWO producers for disjoint inputs; see ANY_OF_WORKFLOWS.
+  'browser-e2e': 'g12-acceptance.yml',
+  'linux-runtime': 'platform-linux-acceptance.yml',
+  'quality-faults': 'reliability.yml',
   // NOT `contracts`. That suite is produced by `ci.yml`'s `contracts` job, which
   // has no path filter and always runs. `typed-pipeline-contracts.yml` runs a
   // DIFFERENT validator (`validate_typed_pipeline.py`) and reports a different
@@ -105,6 +113,19 @@ const PROBES = [
   ['.github/workflows/reliability.yml', 'a workflow with no path filter'],
   ['.github/workflows/g12-acceptance.yml', 'a workflow editing itself'],
 ];
+
+/**
+ * Suites that more than one workflow can produce, as alternatives.
+ *
+ * The single-producer loop below asserts "the workflow that produces this suite
+ * must start for the paths that require it". That is false for `browser-e2e`:
+ * `packages/**` starts g12-acceptance and never data-foundation, and `tests/ui/**`
+ * does the reverse. For those, the rule is "at least ONE of its producers starts",
+ * which is the static twin of `REQUIRE_ANY_CHECK` in ci-gate.mjs.
+ */
+const ANY_OF_WORKFLOWS = {
+  'browser-e2e': ['g12-acceptance.yml', 'data-foundation.yml'],
+};
 
 function globToRegExp(glob) {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
@@ -212,30 +233,42 @@ let errors = 0;
 let warnings = 0;
 
 for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
-  let filters;
-  try {
-    filters = pathsFor(workflow);
-  } catch (err) {
-    process.stdout.write(`ERROR ${workflow}: could not read its paths filter: ${err.message}\n`);
+  // An any-of suite is satisfied when ANY of its producers starts, so its
+  // filters are the union of theirs.
+  const producers = ANY_OF_WORKFLOWS[suite] ?? [workflow];
+  const filters = [];
+  let unfilteredProducer = null;
+  let readFailure = null;
+  for (const producer of producers) {
+    let f;
+    try {
+      f = pathsFor(producer);
+    } catch (err) {
+      readFailure = `${producer}: could not read its paths filter: ${err.message}`;
+      break;
+    }
+    if (f.length === 0) { unfilteredProducer = producer; break; }
+    filters.push(...f);
+  }
+  if (readFailure) {
+    process.stdout.write(`ERROR ${readFailure}\n`);
     errors += 1;
     continue;
   }
-  if (filters.length === 0) {
-    process.stdout.write(`ERROR ${workflow}: suite ${suite} is attributed to it but it has no pull_request.paths, so this check cannot verify the pairing\n`);
-    errors += 1;
-    continue;
-  }
+  // An unfiltered producer starts for everything, which is a legitimate shape
+  // (platform-linux-acceptance and reliability have no pull_request.paths at all).
+  if (unfilteredProducer) continue;
 
   for (const [file, why] of PROBES) {
     const needed = analyse([file]).suites[suite];
     const starts = filters.some((f) => f.re.test(file));
     if (needed && !starts) {
       errors += 1;
-      process.stdout.write(`ERROR ${suite}: ${file} requires it (${why}) but ${workflow} does not start for that path\n`);
+      process.stdout.write(`ERROR ${suite}: ${file} requires it (${why}) but no workflow that produces it starts for that path\n`);
       process.stdout.write(`        no check will exist, so nothing can be red; ci-gate would report the suite delegated\n`);
     } else if (!needed && starts) {
       warnings += 1;
-      process.stdout.write(`warn  ${suite}: ${workflow} starts for ${file} (${why}) but the analyzer does not require ${suite}\n`);
+      process.stdout.write(`warn  ${suite}: ${producers.join('/')} starts for ${file} (${why}) but the analyzer does not require ${suite}\n`);
     }
   }
 }
@@ -301,19 +334,34 @@ const UNFILTERED_ON_PUSH = new Set(['ci.yml']);
 
 for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
   if (UNFILTERED_ON_PUSH.has(workflow)) continue;
-  let filters;
-  try {
-    filters = pathsFor(workflow, 'push');
-  } catch (err) {
+  // Same any-of rule as the pull-request side: a suite with alternative
+  // producers is satisfied when any one of them starts.
+  const producers = ANY_OF_WORKFLOWS[suite] ?? [workflow];
+  let filters = [];
+  let unfiltered = false;
+  let readError = null;
+  for (const producer of producers) {
+    let f;
+    try {
+      f = pathsFor(producer, 'push');
+    } catch (err) {
+      readError = `${producer}: could not read its push filter: ${err.message}`;
+      break;
+    }
+    if (f.length === 0) { unfiltered = true; break; }
+    filters.push(...f);
+  }
+  if (readError) {
     errors += 1;
-    process.stdout.write(`ERROR ${workflow}: could not read its push filter: ${err.message}\n`);
+    process.stdout.write(`ERROR ${readError}\n`);
     continue;
   }
+  if (unfiltered) continue;
   if (filters.length === 0) {
     // No push filter at all means it runs for everything, which is safe but
     // expensive. Report it rather than silently accepting the cost.
     warnings += 1;
-    process.stdout.write(`warn  ${suite}: ${workflow} has no push paths filter, so it runs on every commit to main\n`);
+    process.stdout.write(`warn  ${suite}: ${producers.join('/')} has no push paths filter, so it runs on every commit to main\n`);
     continue;
   }
   for (const [file, why] of PROBES) {
@@ -321,11 +369,11 @@ for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
     const starts = filters.some((f) => f.re.test(file));
     if (needed && !starts) {
       errors += 1;
-      process.stdout.write(`ERROR ${suite}: ${file} requires it (${why}) but ${workflow} does not start for it on push\n`);
+      process.stdout.write(`ERROR ${suite}: ${file} requires it (${why}) but no workflow that produces it starts for it on push\n`);
       process.stdout.write(`        main would be unverified for ${suite} after that merge\n`);
     } else if (!needed && starts) {
       warnings += 1;
-      process.stdout.write(`warn  ${suite}: ${workflow} starts on push for ${file} (${why}) but the analyzer does not require ${suite}\n`);
+      process.stdout.write(`warn  ${suite}: ${producers.join('/')} starts on push for ${file} (${why}) but the analyzer does not require ${suite}\n`);
     }
   }
 }

@@ -122,7 +122,31 @@ export const DELEGATED = {
   'data-foundation': 'data-foundation.yml',
   'plugin-lifecycle': 'plugin-lifecycle.yml',
   'runtime-conformance': 'runtime-conformance.yml',
-  'browser-e2e': 'data-foundation.yml',
+  // `browser-e2e` is produced by whichever workflow actually runs Playwright for
+  // the changed tree. For `packages/**` and both web apps that is
+  // `g12-acceptance.yml`, not `data-foundation.yml`: data-foundation's
+  // `pull_request.paths` does not match `packages/**` at all, so demanding its
+  // check name for a platform-client change failed the gate with
+  // `delegated-absent: browser-e2e (no check named golden-path)` on PR #127.
+  //
+  // The suite name is coarse - two workflows can both run a browser - and the
+  // honest fix is to name the one the analyzer's rules actually point at. If a
+  // path starts requiring browser-e2e from data-foundation, it needs its own
+  // suite name rather than widening this map.
+  // TWO producers, and that is the accurate statement rather than a shortcut.
+  //
+  // `browser-e2e` is the suite "a browser ran against this tree". Two workflows
+  // do that for different inputs: `g12-acceptance.yml` for packages/** and the
+  // two web apps, `data-foundation.yml` (RUN_BROWSER_SMOKE=1, four Playwright
+  // specs) for tests/ui/**, tests/acceptance/** and the lockfile. Neither one
+  // covers the other's paths.
+  //
+  // Naming a single producer was wrong in both directions: data-foundation made
+  // PR #127 fail with delegated-absent for a packages/** change, and
+  // g12-acceptance would do the same for a tests/ui change. The consensus rule
+  // below (ANY producer's check being green satisfies the suite) is what a shared
+  // suite name has to mean.
+  'browser-e2e': ['g12-acceptance.yml', 'data-foundation.yml'],
   'g12-acceptance': 'g12-acceptance.yml',
 };
 
@@ -148,11 +172,29 @@ export const DELEGATED_CHECKS = {
   'linux-runtime': ['linux-runtime'],
   'quality-faults': ['quality-faults'],
   'data-foundation': ['golden-path', 'legacy-regression'],
-  'browser-e2e': ['golden-path'],
+  // Any ONE of these satisfies browser-e2e (see REQUIRE_ALL_CHECKS).
+  'browser-e2e': ['acceptance', 'golden-path'],
   'plugin-lifecycle': ['full TypeScript lifecycle'],
   'runtime-conformance': ['conformance'],
   'g12-acceptance': ['acceptance'],
 };
+
+/**
+ * Suites whose listed checks are ALTERNATIVES rather than facets.
+ *
+ * `data-foundation` is a facet case: one suite, two jobs that both run, and both
+ * must be green - `golden-path` passing says nothing about `legacy-regression`.
+ *
+ * `browser-e2e` is not. It means "a browser ran against this tree", and two
+ * workflows do that for disjoint inputs. A packages/** change starts
+ * g12-acceptance and not data-foundation; a tests/ui change does the reverse.
+ * Requiring both would demand a check that could not exist - the same defect that
+ * failed PR #127 in the other direction.
+ *
+ * So the default is ALL (a facet is the more common shape and the stricter one),
+ * and a suite named here is satisfied by any one green check.
+ */
+export const REQUIRE_ANY_CHECK = new Set(['browser-e2e']);
 
 /**
  * Decide what to do about the suites produced by other workflows, given the
@@ -232,6 +274,18 @@ export function delegatedVerdict(checks, suites) {
     const skippedNow = states.filter(([, c]) => c === 'skipped').map(([n]) => n);
     const red = states.filter(([, c]) => c !== null && c !== 'success'
       && !UNFINISHED.has(c) && c !== 'skipped').map(([n, c]) => `${n}: ${c}`);
+    const green = states.filter(([, c]) => c === 'success').map(([n]) => n);
+
+    // Alternatives: one green check is the whole answer, and only a failure when
+    // EVERY alternative ran and none of them passed.
+    if (REQUIRE_ANY_CHECK.has(suite)) {
+      if (green.length) { verified.push(`${suite} (${green.join(', ')})`); continue; }
+      if (red.length) { failed.push(`${suite} (${red.join(', ')})`); continue; }
+      if (skippedNow.length) { skipped.push(`${suite} (${skippedNow.join(', ')} was skipped)`); continue; }
+      if (unfinished.length) { pending.push(`${suite} (${unfinished.join(', ')}); no alternative had finished when this gate ran`); continue; }
+      absent.push(`${suite} (none of ${names.join(', ')} exists on this commit; no workflow that produces it ran)`);
+      continue;
+    }
 
     if (skippedNow.length) { skipped.push(`${suite} (${skippedNow.join(', ')} was skipped)`); continue; }
     if (red.length) { failed.push(`${suite} (${red.join(', ')})`); continue; }
@@ -651,12 +705,14 @@ const DELEGATED_SELFTEST = [
     want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 1, unverifiable: 0 },
   },
   {
-    // browser-e2e is a step inside golden-path, not a job of its own. It maps to
-    // the same check, and this case records that so a later reader does not
-    // "fix" the map by inventing a check name that will never exist.
-    name: 'delegated: browser-e2e is read from golden-path',
+    // browser-e2e is produced by g12-acceptance for the paths the analyzer maps
+    // to it (packages/**, both web apps). This was `golden-path` - a check
+    // data-foundation.yml only produces for changes its own path filter matches,
+    // which `packages/**` does not. PR #127 failed with delegated-absent because
+    // of it.
+    name: 'delegated: browser-e2e is read from the acceptance check',
     suites: ['browser-e2e'],
-    checks: { 'golden-path': 'success' },
+    checks: { acceptance: 'success' },
     want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
   },
   {
@@ -687,6 +743,44 @@ const DELEGATED_SELFTEST = [
     suites: ['data-foundation'],
     checks: { 'golden-path': 'in_progress', 'legacy-regression': 'failure' },
     want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  // browser-e2e has TWO producers and they are alternatives, not facets.
+  {
+    // The packages/** case: g12-acceptance ran, data-foundation did not.
+    name: 'delegated: browser-e2e is satisfied by acceptance alone',
+    suites: ['browser-e2e'],
+    checks: { acceptance: 'success' },
+    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // The tests/ui/** case: data-foundation ran, g12-acceptance did not.
+    name: 'delegated: browser-e2e is satisfied by golden-path alone',
+    suites: ['browser-e2e'],
+    checks: { 'golden-path': 'success' },
+    want: { verified: 1, failed: 0, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // Neither producer ran at all: no browser touched this tree.
+    name: 'delegated: browser-e2e with neither producer is absent',
+    suites: ['browser-e2e'],
+    checks: { other: 'success' },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 1, unverifiable: 0 },
+  },
+  {
+    // One producer failed and the other never ran: still a failure. An
+    // alternative that ran and broke is an answer.
+    name: 'delegated: browser-e2e fails when a producer ran and failed',
+    suites: ['browser-e2e'],
+    checks: { acceptance: 'failure' },
+    want: { verified: 0, failed: 1, skipped: 0, pending: 0, absent: 0, unverifiable: 0 },
+  },
+  {
+    // data-foundation is a FACET suite: both jobs must be green. This is the
+    // case that separates the two shapes.
+    name: 'delegated: data-foundation needs both jobs, unlike browser-e2e',
+    suites: ['data-foundation'],
+    checks: { 'golden-path': 'success' },
+    want: { verified: 0, failed: 0, skipped: 0, pending: 0, absent: 1, unverifiable: 0 },
   },
   {
     name: 'delegated: a suite with no check mapping is reported unverifiable',

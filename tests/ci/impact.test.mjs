@@ -91,7 +91,18 @@ test('H the coverage checker changing runs the coverage checker', () => {
 test('I a lock file takes every language with it', () => {
   assert.ok(on(['Cargo.lock']).includes('rust'));
   assert.ok(on(['pnpm-lock.yaml']).includes('web'));
-  assert.ok(on(['pnpm-lock.yaml']).includes('browser-e2e'));
+  assert.ok(on(['pnpm-lock.yaml']).includes('web-unit'));
+});
+
+test('I pnpm-lock.yaml does NOT claim a browser suite no workflow would start', () => {
+  // It did, and the claim was inert: neither g12-acceptance nor data-foundation
+  // lists `pnpm-lock.yaml` in its `pull_request.paths`, so a dependency bump
+  // demanded `browser-e2e` and no check could ever be produced for it - ci-gate
+  // would have reported `delegated-absent` and failed the PR.
+  //
+  // A lockfile does deserve extra coverage; the way to get it is to add the path
+  // to a workflow's filter, not to name a suite that cannot run.
+  assert.ok(!on(['pnpm-lock.yaml']).includes('browser-e2e'));
 });
 
 test('J editing a workflow runs at least one gate', () => {
