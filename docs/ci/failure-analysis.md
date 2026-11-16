@@ -251,8 +251,12 @@ delegated-pending: data-foundation (golden-path: in_progress, legacy-regression:
 在主分支上跑的意义就是知道主分支绿不绿。」
 
 **反对的真实内容是「两张表不能不一致」。** 正确答案是让一张从另一张推导出来，不是把表删掉。
-现在重型 workflow 的 push 过滤器就是 `impact.mjs` 说需要它的那些路径；`ci.yml` 保持不过滤，
-因为它承载 `HARD_REQUIRED`——那才是抓「文档提交弄坏了构建」的东西。
+现在重型 workflow 的 push 过滤器就是 `impact.mjs` 说需要它的那些路径。
+
+（这一段原本还写着「`ci.yml` 保持不过滤，因为它承载 `HARD_REQUIRED`」。那句话在 #125 之后
+已经不成立——`ci.yml` 的重型 job 也门控了，`HARD_REQUIRED` 收到只剩 `contracts` 与
+`spec-coverage`。保留这行更正，是因为它是同一类错误的第三次出现：**一个看起来保守的选择，
+在下一轮变成了被推翻的假设。**）
 
 ```
 docs-only push      7 workflow / 73.8 min  ->  2 workflow
@@ -279,3 +283,40 @@ docs-only push      7 workflow / 73.8 min  ->  2 workflow
 
 现在端口是选出来的（首个 ≥55432 的空闲端口），且**刻意不用重试循环**——重试会让冲突静默
 消失，下一次落在没人看的步骤上。
+
+## 11. 第五轮：给 `ci.yml` 加重型 job 门控，在它自己身上找到三个缺陷
+
+`ci.yml` 有 17 个 job 且没有路径过滤，所以一次只改 `.md` 的 PR 也跑全套：实测 17.5
+machine-minutes（ci 6.5 + linux-runtime 9.0 + quality-faults 2.0），其中约 12 分钟是两次
+镜像构建与五个 g13/g13b 验收 job——`.md` 不可能影响它们。
+
+`paths:` 是 workflow 级的，而 `ci.yml` 同时装着「必须每次跑、只要几秒」的 job 和「不该跑、
+要几分钟」的 job。所以判断做成一次：新增 `scope` job 跑分析器、按组输出布尔值，重型 job 读
+`needs.scope.outputs.*`。
+
+**`ci-gate` 仍然要求分析器要的每一个 suite**，所以分析器只被用来**跳过**工作，从不被用来
+开脱：一个代码改动如果所有 job 都 skipped，gate 返回 FAIL 并逐个点名。
+
+`HARD_REQUIRED` 从 5 个收到 2 个。`rust` 最近 30 个提交里只有 8 次被真正需要，却跑了 30 次。
+留下的是 `contracts` 与 `spec-coverage`——**抓「CI 接线本身坏了」的那两个**，正是「什么都不
+需要跑」这个判断最不该能掩盖的东西。
+
+### 门控在它自己的规则里找出三个缺陷
+
+| # | 缺陷 | 谁抓到的 |
+|---|---|---|
+| 1 | 改 `ci.yml` 时跳过了 `ci.yml` 定义的 `rust` job——`.github/workflows/**` 被映射到只有 `spec-coverage` | 真实 CI 跑在 PR #125 上 |
+| 2 | 修法 `[...SUITES]`（改任何 workflow 要全部 suite）太宽，一致性检查器报 20 个错：它声称改 `g12-acceptance.yml` 需要 `runtime-conformance`，而那个 workflow 根本不会为它启动 | 静态一致性检查器 |
+| 3 | 按文件收敛后，改 `ci.yml` 仍要求四个**不可能启动**的 suite（`data-foundation`、`g12-acceptance`、`plugin-lifecycle`、`runtime-conformance`）——gate 报 `delegated-absent` | 真实 CI 跑在 PR #125 上 |
+
+三个都变成了必需的 `spec-coverage` job 里的静态断言：
+`WORKFLOW_EDIT_COVERAGE`（改 workflow 必须要求它产出的 suite）与
+「被要求的 suite 必须有 workflow 会启动」（gate 运行时 `delegated-absent` 的静态孪生）。
+
+**规律：一条「扩大覆盖」的规则看起来总是安全的，但它可能空转或有害。只有拿它去对照真实
+存在的 workflow 才能分辨。**
+
+### 一个被误读为「变慢」的现象
+
+`impact.test.mjs` 从 100ms 涨到几分钟。不是变慢——一致性检查器在 exit 1（20 个错误），
+而调用它的测试在等那个失败的子进程。**超时变长时，先查是不是有东西真的失败了。**
