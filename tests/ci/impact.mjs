@@ -155,7 +155,15 @@ const RULES = [
   { glob: 'Cargo.toml', suites: ['rust', 'platform-only', 'platform-image-build'] },
   { glob: 'Cargo.lock', suites: ['rust', 'platform-only', 'platform-image-build'] },
   { glob: 'package.json', suites: ['web', 'web-unit'] },
-  { glob: 'pnpm-lock.yaml', suites: ['web', 'web-unit', 'browser-e2e'] },
+  // `browser-e2e` was claimed here and is wrong: neither g12-acceptance nor
+  // data-foundation has `pnpm-lock.yaml` in its `pull_request.paths`, so a
+  // dependency bump demanded a browser suite no workflow would start. The
+  // consistency checker found it the moment browser-e2e gained producers it
+  // could actually check against.
+  //
+  // A lockfile IS a whole-estate change, so `web` and `web-unit` stay - both run
+  // from ci.yml, which has no filter.
+  { glob: 'pnpm-lock.yaml', suites: ['web', 'web-unit'] },
   { glob: 'pnpm-workspace.yaml', suites: ['web', 'web-unit'] },
 
   // --- The CI definitions themselves ----------------------------------------
