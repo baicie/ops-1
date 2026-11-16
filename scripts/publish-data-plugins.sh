@@ -142,9 +142,22 @@ sys.stdout.write(pub.hex())
   say "derived public key $derived"
 fi
 
+
+
+email="$(sudo grep -E '^OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=' "$DATA/kernel.env" | cut -d= -f2-)"
+pass="$(sudo grep -E '^OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=' "$DATA/kernel.env" | cut -d= -f2-)"
+[ -n "$email" ] && [ -n "$pass" ] || die "bootstrap admin credentials are absent from $DATA/kernel.env"
+
+sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
+  login --email "$email" --password "$pass" >/dev/null
+say "opsctl authenticated"
+
 # Register the public half. Idempotent (the endpoint upserts); see the note at
-# the top of this file. The public key is stored beside the private one, so this
-# reads a file rather than deriving anything.
+# the top of this file.
+#
+# This sits AFTER `opsctl login` on purpose. The first version put it before the
+# login and died with "no opsctl session token; cannot call the publishers API" -
+# the session file it reads is written by that login.
 publisher_id="${PUBLISHER_ID:-trusted-team}"
 pub_hex="$(tr -d '\n' < "$PUBLISHER_PUB")"
 [ -n "$pub_hex" ] || die "empty public key in $PUBLISHER_PUB"
@@ -156,8 +169,8 @@ if [ "$registered" != "0" ]; then
 else
   say "registering publisher $publisher_id"
   # The admin API is the supported path; writing the table directly would skip
-  # its validation. Reuse the opsctl session cookie it already created.
-  # `opsctl login` stores {token, csrf} and sends the token as a bearer
+  # its validation. `opsctl login` (above) stores {token, csrf} and sends the
+  # token as a bearer
   # credential with `x-csrf-token` - not as a cookie (apps/opsctl/src/main.rs:115-118,
   # :170-171). Reusing that saved session is what lets this call the admin API
   # without a second login.
@@ -174,15 +187,6 @@ else
     || die "could not register publisher $publisher_id; a bundle signed with this key would be refused"
   say "publisher $publisher_id registered"
 fi
-
-
-email="$(sudo grep -E '^OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=' "$DATA/kernel.env" | cut -d= -f2-)"
-pass="$(sudo grep -E '^OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=' "$DATA/kernel.env" | cut -d= -f2-)"
-[ -n "$email" ] && [ -n "$pass" ] || die "bootstrap admin credentials are absent from $DATA/kernel.env"
-
-sudo docker exec "$KERNEL_CONTAINER" /usr/local/bin/opsctl --url "$KERNEL_URL" \
-  login --email "$email" --password "$pass" >/dev/null
-say "opsctl authenticated"
 
 for name in "${PLUGINS[@]}"; do
   plugin="opsweave.$name"
