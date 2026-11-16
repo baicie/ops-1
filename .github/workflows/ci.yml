@@ -11,7 +11,89 @@ on:
 permissions:
   contents: read
 jobs:
+  # Which suites does this change actually require? Answered ONCE, here, and read
+  # by every job that is expensive enough to care.
+  #
+  # WHY A JOB AND NOT A `paths:` FILTER
+  #
+  # `paths:` is workflow-level, and ci.yml holds both the jobs that must run on
+  # every change (contracts, spec-coverage, artifact-budget - all seconds) and the
+  # ones that cost minutes (two image builds, four g13/g13b acceptance jobs). A
+  # workflow-level filter cannot separate them.
+  #
+  # The alternative was an `if:` on each heavy job that re-derives the answer. That
+  # puts the same decision in two places, and this repository has now been bitten
+  # twice by two tables that were supposed to agree. So the answer is computed
+  # once, as an output, and jobs read it.
+  #
+  # WHY THE ANALYZER IS TRUSTWORTHY HERE, and where it is not: it is used only to
+  # SKIP work. `ci-gate` still requires every suite the analyzer asked for, so a
+  # wrong answer in the permissive direction fails the gate rather than passing it.
+  # A wrong answer in the restrictive direction - skipping a suite that was needed
+  # - is what `check-impact-consistency.mjs` guards, in the required
+  # `spec-coverage` job.
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image-build: ${{ steps.decide.outputs.image-build }}
+      acceptance: ${{ steps.decide.outputs.acceptance }}
+      rust: ${{ steps.decide.outputs.rust }}
+      web: ${{ steps.decide.outputs.web }}
+      web-unit: ${{ steps.decide.outputs.web-unit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The merge base is needed for the pull-request diff.
+          fetch-depth: 0
+      - name: Decide the scope
+        id: decide
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+            CHANGED="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" 2>/dev/null || true)"
+          else
+            CHANGED="$(git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" 2>/dev/null || true)"
+          fi
+          if [ -z "$CHANGED" ]; then
+            # Unknown change set -> do everything. Same fail-closed rule as the gate.
+            CHANGED="__unavailable__"
+            echo "no change set available; running the heavy jobs"
+          fi
+          printf '%s\n' "$CHANGED" | sed 's/^/  /'
+          printf '%s\n' "$CHANGED" | node tests/ci/impact.mjs --stdin --json > /tmp/impact.json
+          # One flag per group of expensive jobs. Add a group here only together
+          # with the suite rule in impact.mjs that makes it required.
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const d = JSON.parse(readFileSync("/tmp/impact.json", "utf8"));
+            const out = {
+              // The two image builds (~4.5 min each). Required by anything the
+              // Dockerfile compiles: apps/, crates/, contracts/, both web apps.
+              "image-build": d.suites["platform-image-build"],
+              // The four g13/g13b acceptance jobs (~1.6-3.9 min each). They drive
+              // the Gateway against a live platform.
+              "acceptance": d.suites["g12-acceptance"] || d.suites["data-foundation"],
+              // The three compile/typecheck jobs. Seconds to a couple of minutes,
+              // but they ran on every documentation change until now.
+              "rust": d.suites["rust"],
+              "web": d.suites["web"],
+              "web-unit": d.suites["web-unit"],
+            };
+            for (const [k, v] of Object.entries(out)) {
+              console.log(k + "=" + (v ? "true" : "false"));
+            }
+          ' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
   rust:
+    if: ${{ needs.scope.outputs.rust == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-24.04
     # apps/kernel's DB-backed tests (src/jobs.rs, mod terminalization_tests) skip only when
     # OPSWEAVE_TEST_DATABASE_URL is genuinely unset; a set-but-unusable URL (bad syntax,
@@ -82,6 +164,8 @@ jobs:
           test "$present" = "t"
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
   web:
+    if: ${{ needs.scope.outputs.web == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +222,8 @@ jobs:
   # above only typechecks and builds, so a green pipeline never proved a unit test passed. It is
   # its own job so a red unit run is reported as such instead of hiding behind a build failure.
   web-unit:
+    if: ${{ needs.scope.outputs.web-unit == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -232,6 +318,8 @@ jobs:
   # process and a real PostgreSQL, and checks that the bytes the plugin signed
   # are the bytes the Kernel verified, stored and served.
   g13a-roundtrip:
+    if: ${{ needs.scope.outputs.acceptance == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -280,6 +368,8 @@ jobs:
   # collect dialog, not a fixture. Upstream Zabbix is a local fixture and the
   # run says so; REAL_ZABBIX remains NOT_RUN.
   g13a1-gateway:
+    if: ${{ needs.scope.outputs.acceptance == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-24.04
     env:
       OPSWEAVE_REGISTRY: 127.0.0.1:5001
@@ -345,6 +435,8 @@ jobs:
   # Without this job the acceptance script would be a file nothing runs - the defect
   # tests/ci/check-spec-coverage.mjs exists to refuse.
   g13b14-claim:
+    if: ${{ needs.scope.outputs.acceptance == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -425,6 +517,8 @@ jobs:
   # exact state a crash leaves behind; the real Kernel worker must recover it
   # from the receipt without calling any plugin.
   g13b16-effect:
+    if: ${{ needs.scope.outputs.acceptance == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -488,6 +582,8 @@ jobs:
   # revocation and a disabled source stop it with a stable terminal reason. The
   # real Kernel worker loop is the system under test; no Node/Zabbix is used.
   g13b17-principal:
+    if: ${{ needs.scope.outputs.acceptance == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -901,6 +997,8 @@ jobs:
   # neither. The sabotage step below is that regression's counterfactual, and it
   # is the reason this job exists rather than a `docker build` one-liner.
   platform-image-build:
+    if: ${{ needs.scope.outputs.image-build == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -1044,6 +1142,8 @@ jobs:
   #             ingest route to work instead. Without this pair, both images
   #             could ship the same kernel and both jobs would pass.
   runtime-image-build:
+    if: ${{ needs.scope.outputs.image-build == 'true' }}
+    needs: [scope]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -1221,6 +1321,7 @@ jobs:
       contents: read
       checks: read
     needs:
+      - scope
       - rust
       - web
       - web-unit

@@ -67,29 +67,40 @@ export const SUITES = [
  */
 const RULES = [
   // --- Rust source -----------------------------------------------------------
-  { glob: 'apps/kernel/**', suites: ['rust', 'platform-only', 'data-foundation', 'linux-runtime'] },
+  // The image builds belong on anything the Dockerfile compiles. Its
+  // `rustbuild` stage copies `apps/`, `crates/` and `contracts/`, and its
+  // `webbuild` stage builds both Vite apps (- deployments/staging/Dockerfile:59-62,
+  // :126-127). Without these, gating the image jobs on the analyzer would stop
+  // building an image for a kernel change - the gap only invisible today because
+  // both jobs currently run unconditionally.
+  { glob: 'apps/kernel/**', suites: ['rust', 'platform-only', 'data-foundation', 'linux-runtime', 'platform-image-build'] },
   // The gateway and capability code is the authorisation surface. A change here
   // must be measured against the security negatives and the gateway acceptance,
   // not only against `cargo test`.
   { glob: 'apps/kernel/src/gateway.rs', suites: ['g12-acceptance'] },
-  { glob: 'apps/kernel/src/capabilities.rs', suites: ['runtime-conformance', 'plugin-lifecycle'] },
-  { glob: 'apps/node/**', suites: ['rust', 'linux-runtime', 'data-foundation', 'plugin-lifecycle'] },
-  { glob: 'apps/pipeline-worker/**', suites: ['rust', 'data-foundation'] },
-  { glob: 'apps/opsctl/**', suites: ['rust', 'plugin-lifecycle'] },
+  // `g12-acceptance` is here because `g13a1-gateway` - one of its jobs - is the
+  // end-to-end test of capability grants: it mints a workload token against a
+  // live Gateway and drives it to a plugin container. Without this entry that job
+  // would be skipped for the one file it exists to cover, since this branch made
+  // it conditional on the suite.
+  { glob: 'apps/kernel/src/capabilities.rs', suites: ['runtime-conformance', 'plugin-lifecycle', 'g12-acceptance'] },
+  { glob: 'apps/node/**', suites: ['rust', 'linux-runtime', 'data-foundation', 'plugin-lifecycle', 'platform-image-build'] },
+  { glob: 'apps/pipeline-worker/**', suites: ['rust', 'data-foundation', 'platform-image-build'] },
+  { glob: 'apps/opsctl/**', suites: ['rust', 'plugin-lifecycle', 'platform-image-build'] },
   // `crates/**` used to require `contracts` as well. Only `crates/bundle` has any
   // relationship to the contract validators (it is what signs and verifies the
   // bundles `validate_contracts.py` was written to inspect), and
   // `typed-pipeline-contracts.yml` does not watch `crates/` at all - so the
   // requirement produced a suite that could not run for that change.
-  { glob: 'crates/**', suites: ['rust'] },
+  { glob: 'crates/**', suites: ['rust', 'platform-image-build'] },
   { glob: 'crates/bundle/**', suites: ['contracts'] },
 
   // --- Contracts -------------------------------------------------------------
-  { glob: 'contracts/**', suites: ['contracts', 'runtime-conformance', 'data-foundation'] },
+  { glob: 'contracts/**', suites: ['contracts', 'runtime-conformance', 'data-foundation', 'platform-image-build'] },
 
   // --- Web -------------------------------------------------------------------
-  { glob: 'apps/platform-console/**', suites: ['web', 'web-unit', 'browser-e2e'] },
-  { glob: 'apps/ops-web/**', suites: ['web', 'web-unit', 'browser-e2e'] },
+  { glob: 'apps/platform-console/**', suites: ['web', 'web-unit', 'browser-e2e', 'platform-image-build'] },
+  { glob: 'apps/ops-web/**', suites: ['web', 'web-unit', 'browser-e2e', 'platform-image-build'] },
   { glob: 'packages/**', suites: ['web', 'web-unit', 'browser-e2e'] },
   // `data-foundation` belongs here: the 42-step harness runs four Playwright
   // specs from this directory (data_foundation_ci.sh:333 - data-foundation,
@@ -149,6 +160,42 @@ const RULES = [
 
   // --- The CI definitions themselves ----------------------------------------
   // Editing a workflow must not be the one change that runs nothing.
+  // Editing a workflow must run every suite THAT WORKFLOW produces, plus the
+  // coverage check. Not every suite in the repository.
+  //
+  // The rule said only `spec-coverage`, which was invisible while every ci.yml job
+  // ran unconditionally. This branch made the heavy jobs conditional, and the hole
+  // became real: PR #125 edits ci.yml - the file that defines the `rust` job - and
+  // `rust` was skipped.
+  //
+  // The first fix was `[...SUITES]`, and `check-impact-consistency.mjs` rejected
+  // it immediately: a workflow's push filter is its own paths, so demanding all
+  // fourteen suites for every workflow edit says "editing g12-acceptance.yml
+  // requires runtime-conformance", which that workflow never starts for. Broad was
+  // as wrong as narrow, in the other direction.
+  //
+  // Per-file is the accurate statement: each entry names one workflow and the
+  // suites its jobs produce. A workflow not listed here produces no suite a gate
+  // reads, so `spec-coverage` is the whole answer for it.
+  // `ci.yml` defines ten suites, but only six are produced ENTIRELY here. The
+  // other four (data-foundation, g12-acceptance, plugin-lifecycle,
+  // runtime-conformance) have the rest of their coverage in workflows whose
+  // `pull_request.paths` do not match `ci.yml` - so demanding them would make the
+  // gate require a check no workflow will produce. Measured on PR #125: ci-gate
+  // reported `delegated-absent: g12-acceptance` and `delegated-absent:
+  // plugin-lifecycle` for exactly this reason.
+  //
+  // The six below are fully determined by ci.yml's own jobs (its `JOB_TO_SUITE`
+  // in tests/ci/ci-gate.mjs), so a change to ci.yml genuinely can break them.
+  { glob: '.github/workflows/ci.yml', suites: ['rust', 'web', 'web-unit', 'contracts', 'spec-coverage', 'platform-only', 'platform-image-build'] },
+  { glob: '.github/workflows/data-foundation.yml', suites: ['data-foundation', 'browser-e2e'] },
+  { glob: '.github/workflows/g12-acceptance.yml', suites: ['g12-acceptance'] },
+  { glob: '.github/workflows/platform-linux-acceptance.yml', suites: ['linux-runtime'] },
+  { glob: '.github/workflows/plugin-lifecycle.yml', suites: ['plugin-lifecycle'] },
+  { glob: '.github/workflows/reliability.yml', suites: ['quality-faults'] },
+  { glob: '.github/workflows/runtime-conformance.yml', suites: ['runtime-conformance'] },
+  { glob: '.github/workflows/typed-pipeline-contracts.yml', suites: ['contracts'] },
+  // Any OTHER workflow file: the coverage check is the thing that reads it.
   { glob: '.github/workflows/**', suites: ['spec-coverage'] },
   { glob: 'tests/ci/check-spec-coverage.mjs', suites: ['spec-coverage'] },
 ];

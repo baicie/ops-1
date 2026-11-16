@@ -58,9 +58,21 @@ import { analyse, SUITES } from './impact.mjs';
  * formatting, typecheck, the coverage wiring itself.
  */
 export const HARD_REQUIRED = [
-  'rust',
-  'web',
-  'web-unit',
+  // Only the two that are about the CI wiring itself, and cost seconds.
+  //
+  // `rust`, `web` and `web-unit` used to be here. They are now decided by the
+  // analyzer, which is what lets a documentation change skip them - measured at
+  // 8/30 of recent commits actually requiring `rust`, against 30/30 running it.
+  //
+  // The risk this accepts: a change the analyzer maps to nothing (an IGNORED
+  // path - docs, rules, root markdown) skips compilation entirely. That is the
+  // point; a .md file cannot break a build. Anything NOT in IGNORED that the
+  // rules do not cover turns every suite on (fail-closed), so the hole would be
+  // a path someone deliberately added to IGNORED.
+  //
+  // What stays: these two are the checks that catch the CI wiring being wrong,
+  // which is exactly the failure a "nothing needs to run" decision must not be
+  // able to hide.
   'contracts',
   'spec-coverage',
 ];
@@ -437,11 +449,22 @@ const SELFTEST = [
   // a gate written `result !== 'failure'` passes this one, which is exactly how
   // a path filter or an `if:` becomes a silent hole in the merge gate.
   {
-    name: 'rust skipped',
+    // `contracts` is still HARD_REQUIRED; `rust` is not, because a docs change
+    // legitimately skips it. A skipped hard-required suite must fail.
+    name: 'a hard-required suite skipped',
     because: 'skipped',
-    needs: { ...ALL_OWNED_GREEN, rust: 'skipped' },
+    needs: { ...ALL_OWNED_GREEN, contracts: 'skipped' },
     impact: ALL_SUITES_OFF,
     want: 'FAIL',
+  },
+  {
+    // And the counterpart: `rust` skipped is now LEGITIMATE when the analyzer did
+    // not require it. If this ever fails, someone re-added rust to HARD_REQUIRED
+    // without meaning to - or the analyzer stopped mapping .md to nothing.
+    name: 'rust skipped on a change that does not require it',
+    needs: { ...ALL_OWNED_GREEN, rust: 'skipped' },
+    impact: ALL_SUITES_OFF,
+    want: 'PASS',
   },
   // A required suite CANCELLED -> fail, and classified as failed rather than
   // skipped: the job started and was interrupted, which is not the same as
@@ -504,7 +527,7 @@ const SELFTEST = [
   {
     name: 'real shape: a skipped object is still skipped, not a pass',
     because: 'skipped',
-    needs: Object.fromEntries(Object.entries({ ...ALL_OWNED_GREEN, rust: 'skipped' }).map(([j, r]) => [j, { result: r, outputs: {} }])),
+    needs: Object.fromEntries(Object.entries({ ...ALL_OWNED_GREEN, contracts: 'skipped' }).map(([j, r]) => [j, { result: r, outputs: {} }])),
     impact: ALL_SUITES_OFF,
     want: 'FAIL',
   },

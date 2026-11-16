@@ -330,5 +330,119 @@ for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// GATED JOBS: every job whose `if:` reads the scope job must still be reachable.
+//
+// `ci.yml` now skips seven jobs unless `impact.mjs` asks for their suite. That is
+// the biggest cost saving in this file's history and the biggest new way to lose
+// coverage: if the analyzer stops mapping a path to a gated suite, the job
+// silently stops running for it, and nothing is red - there is no check to be red.
+//
+// The check: for the paths that job exists to cover, the analyzer must still
+// require its suite. `GATED_COVERAGE` names the job, the suite, and one path per
+// thing the job is there for. A gated job with no entry here is an error, so
+// adding one forces someone to say what it covers.
+// ---------------------------------------------------------------------------
+const GATED_COVERAGE = [
+  // job id                          suite                   paths that must keep it on
+  ['rust', 'rust', ['apps/kernel/src/gateway.rs', 'crates/bundle/src/lib.rs']],
+  ['web', 'web', ['apps/platform-console/src/main.tsx', 'apps/ops-web/src/main.tsx']],
+  ['web-unit', 'web-unit', ['packages/ui/src/button.tsx']],
+  [
+    'platform-image-build', 'platform-image-build',
+    // Everything the Dockerfile compiles: apps/, crates/, contracts/, both web apps.
+    ['apps/kernel/src/gateway.rs', 'apps/node/src/agent.rs', 'crates/bundle/src/lib.rs',
+      'contracts/x.json', 'apps/ops-web/src/main.tsx'],
+  ],
+  [
+    'runtime-image-build', 'platform-image-build',
+    // The full image additionally ships the pipeline worker and both bundles.
+    ['apps/pipeline-worker/src/main.rs', 'apps/ops-web/src/main.tsx',
+      'apps/platform-console/src/main.tsx'],
+  ],
+  [
+    'g13a1-gateway', 'g12-acceptance',
+    ['apps/kernel/src/gateway.rs', 'apps/kernel/src/capabilities.rs'],
+  ],
+];
+
+for (const [job, suite, paths] of GATED_COVERAGE) {
+  for (const file of paths) {
+    if (!analyse([file]).suites[suite]) {
+      errors += 1;
+      process.stdout.write(`ERROR gated job ${job}: ${file} no longer requires ${suite}, so the job would be skipped for it\n`);
+      process.stdout.write(`        the job is now conditional on that suite; a change to ${file} would not build it\n`);
+    }
+  }
+}
+
+// A workflow edit must require the suites that workflow produces. This is the
+// defect PR #125 hit: ci.yml defines the rust/web/image/acceptance jobs, but an
+// edit to it was mapped to `spec-coverage` alone, so the jobs it defines were
+// skipped by the very change that could break them.
+const WORKFLOW_EDIT_COVERAGE = [
+  ['.github/workflows/ci.yml', ['rust', 'web', 'platform-image-build']],
+  ['.github/workflows/data-foundation.yml', ['data-foundation']],
+  ['.github/workflows/g12-acceptance.yml', ['g12-acceptance']],
+  ['.github/workflows/platform-linux-acceptance.yml', ['linux-runtime']],
+  ['.github/workflows/plugin-lifecycle.yml', ['plugin-lifecycle']],
+  ['.github/workflows/reliability.yml', ['quality-faults']],
+  ['.github/workflows/runtime-conformance.yml', ['runtime-conformance']],
+];
+for (const [file, suites] of WORKFLOW_EDIT_COVERAGE) {
+  const got = analyse([file]).suites;
+  for (const suite of suites) {
+    if (!got[suite]) {
+      errors += 1;
+      process.stdout.write(`ERROR ${file} is edited but does not require ${suite}, the suite its jobs produce\n`);
+      process.stdout.write(`        a change to the file defining that job would skip it\n`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// THE OTHER DIRECTION: a required suite must have a workflow that will START.
+//
+// `ci-gate` fails on `delegated-absent` - a suite the analyzer required whose
+// workflow produced no check. That is correct behaviour, and it means an analyzer
+// rule can make a PR unmergeable by demanding a suite whose own `paths` filter
+// does not match the file being edited.
+//
+// This happened: `.github/workflows/ci.yml` was mapped to `[...SUITES]`, and
+// ci-gate then reported `delegated-absent: g12-acceptance` and
+// `delegated-absent: plugin-lifecycle` on PR #125, because those workflows do not
+// watch `ci.yml`. The gate was right; the rule asked for something that could not
+// exist.
+//
+// So: for every workflow file, every suite it requires must be produced by a
+// workflow whose `pull_request.paths` matches that file - or by `ci.yml`, which is
+// unfiltered. This is the static twin of the gate's runtime check.
+// ---------------------------------------------------------------------------
+const CI_OWNED_SUITES = new Set([
+  'rust', 'web', 'web-unit', 'contracts', 'spec-coverage', 'platform-only',
+  'platform-image-build', 'linux-runtime', 'quality-faults',
+]);
+
+for (const workflow of Object.keys({ ...SUITE_WORKFLOW, 'ci.yml': null })) {
+  const file = `.github/workflows/${workflow}`;
+  if (workflow === 'platform-linux-acceptance.yml' || workflow === 'reliability.yml') {
+    // These have no pull_request.paths, so they run for any PR.
+    continue;
+  }
+  const required = analyse([file]).suites;
+  for (const suite of Object.keys(required).filter((k) => required[k])) {
+    if (CI_OWNED_SUITES.has(suite)) continue;
+    const producer = SUITE_WORKFLOW[suite];
+    if (!producer) continue;
+    let filters;
+    try { filters = pathsFor(producer, 'pull_request'); } catch { continue; }
+    if (filters.length === 0) continue; // unfiltered, always starts
+    if (filters.some((f) => f.re.test(file))) continue;
+    errors += 1;
+    process.stdout.write(`ERROR editing ${file} requires ${suite}, but ${producer} does not start for ${file}\n`);
+    process.stdout.write(`        ci-gate will report delegated-absent and fail the PR\n`);
+  }
+}
+
 process.stdout.write(`\nimpact/filter consistency: ${errors} error(s), ${warnings} warning(s)\n`);
 if (errors > 0 || (strict && warnings > 0)) process.exit(1);
