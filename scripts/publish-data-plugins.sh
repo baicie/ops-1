@@ -103,10 +103,27 @@ done
 # --- 1. version -------------------------------------------------------------
 # Everything the bundle carries, so a UI-only change is a new version. `sort`
 # keeps the hash stable across filesystem ordering.
+# Everything that changes what the bundle CONTAINS.
+#
+# A version that ignores some inputs is worse than no version: the deploy sees
+# the same version, concludes the plugin is already installed, and skips it - so
+# the change is never published, and nothing reports a problem.
+#
+# The first version of this hashed only `backend/*.mjs` and the web dist. Editing
+# `manifest.template.json` (the capabilities a plugin declares), the Dockerfile
+# (how its image is built) or its lockfile (what it runs) all produced the SAME
+# version, and the "already installed" check below would then keep serving the
+# old plugin forever.
+#
+# What is deliberately NOT here: the registry host, the build date, the git SHA.
+# Those change without changing the artifact, and including them would make every
+# deploy publish a new version of an unchanged plugin.
 src_hash="$(
   {
-    cat "$SRC"/plugins/data-catalog/backend/*.mjs "$SRC"/plugins/data-integration/backend/*.mjs
-    find "$SRC"/plugins/*/web/dist -type f | sort | xargs cat
+    find "$SRC"/plugins/*/backend -maxdepth 1 -type f \( -name '*.mjs' -o -name '*.json' -o -name 'Dockerfile' \) \
+      -print0 | sort -z | xargs -0 cat
+    find "$SRC"/plugins/*/web/dist -type f -print0 | sort -z | xargs -0 cat
+    cat "$SRC"/plugins/*/manifest.template.json
   } | sha256sum | cut -c1-12
 )"
 version="0.0.$(( 0x$src_hash % 100000 ))"
