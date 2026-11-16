@@ -400,5 +400,49 @@ for (const [file, suites] of WORKFLOW_EDIT_COVERAGE) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// THE OTHER DIRECTION: a required suite must have a workflow that will START.
+//
+// `ci-gate` fails on `delegated-absent` - a suite the analyzer required whose
+// workflow produced no check. That is correct behaviour, and it means an analyzer
+// rule can make a PR unmergeable by demanding a suite whose own `paths` filter
+// does not match the file being edited.
+//
+// This happened: `.github/workflows/ci.yml` was mapped to `[...SUITES]`, and
+// ci-gate then reported `delegated-absent: g12-acceptance` and
+// `delegated-absent: plugin-lifecycle` on PR #125, because those workflows do not
+// watch `ci.yml`. The gate was right; the rule asked for something that could not
+// exist.
+//
+// So: for every workflow file, every suite it requires must be produced by a
+// workflow whose `pull_request.paths` matches that file - or by `ci.yml`, which is
+// unfiltered. This is the static twin of the gate's runtime check.
+// ---------------------------------------------------------------------------
+const CI_OWNED_SUITES = new Set([
+  'rust', 'web', 'web-unit', 'contracts', 'spec-coverage', 'platform-only',
+  'platform-image-build', 'linux-runtime', 'quality-faults',
+]);
+
+for (const workflow of Object.keys({ ...SUITE_WORKFLOW, 'ci.yml': null })) {
+  const file = `.github/workflows/${workflow}`;
+  if (workflow === 'platform-linux-acceptance.yml' || workflow === 'reliability.yml') {
+    // These have no pull_request.paths, so they run for any PR.
+    continue;
+  }
+  const required = analyse([file]).suites;
+  for (const suite of Object.keys(required).filter((k) => required[k])) {
+    if (CI_OWNED_SUITES.has(suite)) continue;
+    const producer = SUITE_WORKFLOW[suite];
+    if (!producer) continue;
+    let filters;
+    try { filters = pathsFor(producer, 'pull_request'); } catch { continue; }
+    if (filters.length === 0) continue; // unfiltered, always starts
+    if (filters.some((f) => f.re.test(file))) continue;
+    errors += 1;
+    process.stdout.write(`ERROR editing ${file} requires ${suite}, but ${producer} does not start for ${file}\n`);
+    process.stdout.write(`        ci-gate will report delegated-absent and fail the PR\n`);
+  }
+}
+
 process.stdout.write(`\nimpact/filter consistency: ${errors} error(s), ${warnings} warning(s)\n`);
 if (errors > 0 || (strict && warnings > 0)) process.exit(1);

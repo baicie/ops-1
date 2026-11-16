@@ -177,7 +177,17 @@ const RULES = [
   // Per-file is the accurate statement: each entry names one workflow and the
   // suites its jobs produce. A workflow not listed here produces no suite a gate
   // reads, so `spec-coverage` is the whole answer for it.
-  { glob: '.github/workflows/ci.yml', suites: [...SUITES] },
+  // `ci.yml` defines ten suites, but only six are produced ENTIRELY here. The
+  // other four (data-foundation, g12-acceptance, plugin-lifecycle,
+  // runtime-conformance) have the rest of their coverage in workflows whose
+  // `pull_request.paths` do not match `ci.yml` - so demanding them would make the
+  // gate require a check no workflow will produce. Measured on PR #125: ci-gate
+  // reported `delegated-absent: g12-acceptance` and `delegated-absent:
+  // plugin-lifecycle` for exactly this reason.
+  //
+  // The six below are fully determined by ci.yml's own jobs (its `JOB_TO_SUITE`
+  // in tests/ci/ci-gate.mjs), so a change to ci.yml genuinely can break them.
+  { glob: '.github/workflows/ci.yml', suites: ['rust', 'web', 'web-unit', 'contracts', 'spec-coverage', 'platform-only', 'platform-image-build'] },
   { glob: '.github/workflows/data-foundation.yml', suites: ['data-foundation', 'browser-e2e'] },
   { glob: '.github/workflows/g12-acceptance.yml', suites: ['g12-acceptance'] },
   { glob: '.github/workflows/platform-linux-acceptance.yml', suites: ['linux-runtime'] },
