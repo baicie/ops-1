@@ -191,3 +191,37 @@ Daemon。同一 Runner 上并发运行两个 workflow 时，这两者会互相�
 | 6 | `full` 层级只能 `workflow_dispatch` 到达 | 已加每日 certification 产生数据，但不提升为 PR 阻塞——没有基线就阻塞是错误顺序 |
 | 7 | `ci.yml` 与 `platform-linux-acceptance.yml` 各构建一次相同镜像 | 实测：artifact 传递（60–90 MB `docker save`）与重建同量级（345s vs 469s），不划算 |
 | 9 | 同一 job 内 `build-plugins.sh` 被调用两次 | 两次针对不同 registry，是刻意的隔离；Docker layer cache 已让第二次变便宜 |
+
+## 9. 第三轮：合入之后 `main` 第一次变红
+
+#120 合入后 `ci-gate` 在 `main` 上失败。**它的判决是对的**，底下有三个缺陷，两个是仓库原有的。
+
+| 位置 | 缺陷 | 怎么发现的 |
+|---|---|---|
+| `data-foundation.yml` | 七个 suite workflow 里**唯一**没有 `push` 触发的一个。所以每次合入后 `main` 的这个 suite 从未被验证过 | 列出全部 workflow 的 trigger 做对比 |
+| `ci-gate` 的改动集 | push 事件上 `BASE_SHA` 为空 → `CHANGED` 为空 → 塞 `__unavailable__` → 14 个 suite 全开。这不是 fail-closed，是 fail-noisy：改动集一直在 commit 里 | 用 `git diff-tree` 回放合并提交，27 个文件、0 未匹配 |
+| `ci.yml` 的 ci-gate 步骤 | `node ... > file` 在 `set -e` 下失败会直接退出，`GATE_RC=$?` 永不执行，摘要不写。**最需要解释的那次运行没有解释** | 日志里只有 `##[error]Process completed with exit code 1`，没有 verdict |
+
+三者关系值得记下来：第一个缺陷制造了失败，第二个缺陷让失败**范围过大**（本该 3 个 suite，
+报了 14 个），第三个让失败**无法阅读**。任一单独存在都不足以让人看懂发生了什么。
+
+### 已修（PR #121，已合入）
+
+- `data-foundation.yml` 加 `push: [main]`，push 侧刻意**不加** `paths:`——在主分支上跑的意义
+  就是知道主分支绿不绿，在那里用路径过滤等于用 gate 不信任的那张表来判定「这个改动不会
+  破坏它」。
+- push 用 `git diff-tree -r $GITHUB_SHA`，与 GitHub 路径过滤器看到的是同一个集合。
+- `GATE_RC=0; node ... || GATE_RC=$?`，摘要先写，再失败。
+- `check-impact-consistency.mjs` 增加静态检查：每个产出 suite 的 workflow 必须有 `push`
+  触发。变异测试确认能抓到。
+
+合入后实测（`main @ 9bec290`）：
+
+```
+no pull-request base; using the commit's own diff for 9bec290
+suites required by this change: spec-coverage linux-runtime data-foundation
+verdict: PASS
+delegated-pending: data-foundation (golden-path: in_progress, legacy-regression: in_progress)
+```
+
+`data-foundation` 第一次在 `main` 上启动。
