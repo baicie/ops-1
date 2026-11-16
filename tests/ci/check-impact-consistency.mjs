@@ -163,7 +163,7 @@ export function triggersFor(workflow) {
   ], { encoding: 'utf8' }));
 }
 
-export function pathsFor(workflow) {
+export function pathsFor(workflow, event = 'pull_request') {
   const path = `.github/workflows/${workflow}`;
   const lines = readFileSync(path, 'utf8').split('\n');
   const indent = (l) => l.match(/^ */)[0].length;
@@ -177,10 +177,10 @@ export function pathsFor(workflow) {
     if (trimmed === '' || trimmed.startsWith('#')) continue;
 
     if (prIndent === null) {
-      if (/^pull_request:\s*(#.*)?$/.test(trimmed)) prIndent = indent(line);
+      if (new RegExp(`^${event}:\\s*(#.*)?$`).test(trimmed)) prIndent = indent(line);
       continue;
     }
-    // Left the pull_request block.
+    // Left the trigger block.
     if (indent(line) <= prIndent) { prIndent = null; pathsIndent = null; continue; }
 
     if (pathsIndent === null) {
@@ -283,6 +283,50 @@ for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
     errors += 1;
     process.stdout.write(`ERROR ${workflow}: produces suite ${suite} but has no push trigger, so main is unverified for it\n`);
     process.stdout.write(`        ci-gate runs on push and will demand ${suite} with no check to find\n`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PUSH FILTERS: the same question, asked of the other event.
+//
+// `ci.yml` is unfiltered on push on purpose - it carries HARD_REQUIRED, which is
+// what catches a docs commit that broke the build. The heavy suites are filtered
+// on both events, and those filters are generated from impact.mjs. If they drift,
+// a push can start a suite the analyzer did not require (wasted minutes) or skip
+// one it did (main unverified for it, with no red check to notice).
+//
+// Only the dangerous direction is an error here, same as above.
+// ---------------------------------------------------------------------------
+const UNFILTERED_ON_PUSH = new Set(['ci.yml']);
+
+for (const [suite, workflow] of Object.entries(SUITE_WORKFLOW)) {
+  if (UNFILTERED_ON_PUSH.has(workflow)) continue;
+  let filters;
+  try {
+    filters = pathsFor(workflow, 'push');
+  } catch (err) {
+    errors += 1;
+    process.stdout.write(`ERROR ${workflow}: could not read its push filter: ${err.message}\n`);
+    continue;
+  }
+  if (filters.length === 0) {
+    // No push filter at all means it runs for everything, which is safe but
+    // expensive. Report it rather than silently accepting the cost.
+    warnings += 1;
+    process.stdout.write(`warn  ${suite}: ${workflow} has no push paths filter, so it runs on every commit to main\n`);
+    continue;
+  }
+  for (const [file, why] of PROBES) {
+    const needed = analyse([file]).suites[suite];
+    const starts = filters.some((f) => f.re.test(file));
+    if (needed && !starts) {
+      errors += 1;
+      process.stdout.write(`ERROR ${suite}: ${file} requires it (${why}) but ${workflow} does not start for it on push\n`);
+      process.stdout.write(`        main would be unverified for ${suite} after that merge\n`);
+    } else if (!needed && starts) {
+      warnings += 1;
+      process.stdout.write(`warn  ${suite}: ${workflow} starts on push for ${file} (${why}) but the analyzer does not require ${suite}\n`);
+    }
   }
 }
 
