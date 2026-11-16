@@ -597,43 +597,7 @@ jobs:
           deploy_release
           echo "result=success" >> "$GITHUB_OUTPUT"
 
-      # Refresh the Data Foundation plugin images.
-      #
-      # WHY THIS STEP EXISTS
-      #
-      # `scripts/build-data-plugins.sh` is run by CI, but only against a throwaway
-      # registry on the runner (`data_foundation_ci.sh:152` pushes to
-      # localhost:5001 and the runner is discarded). Nothing ever published those
-      # images to the registry staging serves from, so the two data plugins on the
-      # host stayed at whatever was installed by hand.
-      #
-      # That is how staging ended up running a 2026-10-28 data-catalog image
-      # against a kernel that stopped sending `x-opsweave-user-role` on 2026-11-08
-      # (9990f79): the plugin's `identity()` looked for a header the gateway no
-      # longer sends, returned null, and answered 401 "caller identity required".
-      # The console reads that 401 as a dead session and signs the operator out,
-      # so clicking Governance logged you out. The protocol changed in this
-      # repository and the deployed image did not, because there was no path for
-      # it to change.
-      #
-      # WHY THE BUILD RUNS HERE, ON THE HOST
-      #
-      # The host is linux/amd64; a workflow runner is too, but shipping a ~76 MB
-      # image per plugin over the SSH channel is the slow path that
-      # `deploy-staging.sh:470-478` already documents as a fallback. Building on
-      # the host keeps the image local to the registry it will be pushed to, and
-      # removes the architecture question entirely - a locally built image from a
-      # developer's arm64 machine cannot be pulled here at all, which is what
-      # blocked the first attempt at this repair.
-      #
-      # WHAT IT DOES NOT DO
-      #
-      # It does not publish a new plugin version when the source has not changed:
-      # the version tag is derived from the source digest, and an existing tag is
-      # left alone. It does not rotate the publisher key: the bundle is signed by
-      # the key on the host, which the platform already trusts.
-      # The web bundles travel with the plugin source; they are built here
-      # because the host has Docker but no node or pnpm.
+      # The web bundles are built on the runner; the host has Docker but no node.
       - uses: pnpm/action-setup@v4
         if: ${{ inputs.verify_only != true }}
       - uses: actions/setup-node@v4
@@ -644,166 +608,49 @@ jobs:
       - name: Install workspace dependencies for the plugin web bundles
         if: ${{ inputs.verify_only != true }}
         run: pnpm install --frozen-lockfile
-      - name: Refresh the data plugin images
+
+      # Build, sign and install the Data Foundation plugin bundles.
+      #
+      # WHY THIS EXISTS: `scripts/build-data-plugins.sh` runs in CI, but only
+      # against a throwaway registry on the runner. Nothing ever published those
+      # images to the registry staging serves from, so the two data plugins on
+      # the host stayed at whatever was installed by hand. Staging ended up
+      # running a 2026-10-28 data-catalog image against a kernel that stopped
+      # sending `x-opsweave-user-role` on 2026-11-08 (9990f79); the plugin's
+      # identity() found no header, answered 401 "caller identity required", and
+      # the console treated that as a dead session and signed the operator out.
+      # Clicking Governance in the console logged you out.
+      #
+      # The work lives in scripts/publish-data-plugins.sh, which travels as a
+      # file. It was an `ssh '...'` one-liner first, and nested `$( ... )` inside
+      # a single-quoted remote command broke it twice with
+      # "unexpected EOF while looking for matching `)`". A file can be checked
+      # with `bash -n` before it is sent, and its errors name lines in it.
+      - name: Publish the data plugin bundles
         if: ${{ inputs.verify_only != true }}
-        env:
-          TARGET_SHA: ${{ needs.build.outputs.sha }}
         run: |
           set -euo pipefail
-          # The plugin web bundles are built HERE, on the runner, because the host
-          # has Docker but no node or pnpm. Vite output is static, so it travels
-          # with the source instead of being built there.
-          #
-          # Without this the bundle assembly fails with
-          #   Error: missing required file: frontend/remoteEntry.js
-          # and it fails at the END of the pipeline, after the images are built -
-          # which is where the first two runs of this step died.
+          # The web bundles are built HERE: the host has Docker but no node or
+          # pnpm. Vite output is static, so it travels with the source.
           pnpm --filter @opsweave/data-catalog-web build
           pnpm --filter @opsweave/data-integration-web build
-          test -f plugins/data-catalog/web/dist/remoteEntry.js \
-            || { echo "::error::the data-catalog web build produced no remoteEntry.js"; exit 1; }
-          test -f plugins/data-integration/web/dist/remoteEntry.js \
-            || { echo "::error::the data-integration web build produced no remoteEntry.js"; exit 1; }
-          # The plugin sources are in the checkout. Send them; the host has no copy.
+          for name in data-catalog data-integration; do
+            test -f "plugins/$name/web/dist/remoteEntry.js" \
+              || { echo "::error::the $name web build produced no remoteEntry.js; the bundle would ship without a UI"; exit 1; }
+          done
+          bash -n scripts/publish-data-plugins.sh
           tar czf /tmp/opsweave-data-plugins.tgz \
             --exclude=node_modules \
             plugins/data-catalog plugins/data-integration \
-            scripts/assemble_plugin.py
+            scripts/assemble_plugin.py scripts/publish-data-plugins.sh
           scp -F "$SSH_CONFIG_FILE" -o BatchMode=yes \
             /tmp/opsweave-data-plugins.tgz "$SSH_HOST_ALIAS:/tmp/"
-          ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" \
-            'set -eu
-             sudo rm -rf /srv/opsweave-staging/plugin-src
-             sudo install -d -m 0755 /srv/opsweave-staging/plugin-src
-             sudo tar xzf /tmp/opsweave-data-plugins.tgz -C /srv/opsweave-staging/plugin-src
-             rm -f /tmp/opsweave-data-plugins.tgz
-             # A version derived from the source, so an unchanged plugin is not
-             # republished under a new tag on every deploy.
-             # A semver version derived from the source, so an unchanged plugin is
-             # not republished under a new tag on every deploy and a changed one
-             # never reuses a tag. The manifest schema requires `x.y.z`, so the
-             # digest becomes the patch segment.
-            # Everything the bundle carries, not only the backend: a UI-only
-            # change must produce a new version, or the deploy skips it and the
-            # plugin keeps serving the old front end.
-            src_hash="$(sudo sh -c "cat /srv/opsweave-staging/plugin-src/plugins/data-catalog/backend/*.mjs /srv/opsweave-staging/plugin-src/plugins/data-integration/backend/*.mjs; find /srv/opsweave-staging/plugin-src/plugins/*/web/dist -type f | sort | xargs cat" | sha256sum" | cut -c1-12)"
-             digest="0.0.$(( 0x$src_hash % 100000 ))"
-             echo "plugin source digest: $digest (from $src_hash)"
-             for name in data-catalog data-integration; do
-               dir="/srv/opsweave-staging/plugin-src/plugins/$name/backend"
-               img="127.0.0.1:15001/opsweave/$name:$digest"
-               if sudo docker image inspect "$img" >/dev/null 2>&1; then
-                 echo "$name: $digest already built on this host"
-               else
-                 echo "$name: building $digest"
-                 sudo docker build --build-arg PLUGIN_VERSION="$digest" \
-                   -t "$img" "$dir" >/dev/null
-               fi
-               sudo docker push "$img" >/dev/null 2>&1 || true
-               echo "$name: pushed $img"
-             done
-             sudo docker run --rm --entrypoint /bin/sh "127.0.0.1:15001/opsweave/data-catalog:$digest" \
-               -c "test -f /app/identity.mjs" \
-               || { echo "::error::the built data-catalog image is missing identity.mjs"; exit 1; }
-             echo "$digest" > /tmp/opsweave-plugin-digest' 2>&1 | tail -12
-          echo "plugin images refreshed"
-
-      # Build, sign and install the bundles for the images built above.
-      #
-      # Separate from the image step because the two fail differently: a build
-      # failure is the code in this repository, an install failure is the platform
-      # rejecting a signature or a manifest. The log then says which.
-      #
-      # Everything runs inside the kernel container, which is the only place with
-      # `opsctl` AND a populated `$HOME` for its session file. The host has no
-      # `opsctl` binary at all - `/usr/local/bin/opsctl` is in the image.
-      #
-      # The bundle is signed by the publisher key configured on the host. That key is
-      # the platform's own trust anchor; this step does not rotate it, register a
-      # publisher, or touch `trusted_publishers`. (An earlier repair attempt did
-      # rotate it and had to restore it - the note is in the table.)
-      #
-      # A version that is already installed is skipped, so an unchanged plugin
-      # does not churn `plugin_packages` on every deploy.
-      - name: Install the refreshed data plugin bundles
-        if: ${{ inputs.verify_only != true }}
-        run: |
-          set -euo pipefail
-          # The publisher private key lives on the host, outside the container.
           ssh -F "$SSH_CONFIG_FILE" -o BatchMode=yes "$SSH_HOST_ALIAS" 'set -eu
-            KC=opsweave-staging-kernel-1
-            digest="$(cat /tmp/opsweave-plugin-digest 2>/dev/null || echo)"
-            [ -n "$digest" ] || { echo "::error::no plugin digest from the build step"; exit 1; }
-            # The publisher key this deployment signs with.
-            #
-            # It did not exist on the host, and the key the platform currently
-            # trusts (`cbdb58b1...`) has no private half anywhere: `keys/` is
-            # gitignored and every CI job that needs one runs `opsctl keygen`,
-            # producing a fresh pair per job. So the 2026-10-28 bundles were
-            # signed once, by a key nobody kept, and nothing since could be
-            # signed at all.
-            #
-            # The fix is to make the deployment own its key: create it on first
-            # run, then register its PUBLIC half as the publisher the manifests
-            # already name (`trusted-team`). Registration uses the admin API of the platform and
-            # admin API and is idempotent; the private half never leaves the host
-            # and is never printed.
-            key="/srv/opsweave-staging/publisher.key"
-            if [ ! -f "$key" ]; then
-              echo "no publisher key on this host; creating one for this deployment"
-              sudo docker exec "$KC" /usr/local/bin/opsctl keygen --out-dir /tmp/opsweave-keygen >/dev/null
-              sudo docker cp "$KC:/tmp/opsweave-keygen/publisher.key" "$key" >/dev/null
-              sudo docker cp "$KC:/tmp/opsweave-keygen/publisher.pub" /tmp/opsweave-publisher.pub >/dev/null
-              sudo docker exec "$KC" rm -rf /tmp/opsweave-keygen
-              sudo chmod 0600 "$key"
-              sudo chown root:root "$key"
-              echo "publisher key created at $key"
-            fi
-
-            email="$(sudo grep -E "^OPSWEAVE_BOOTSTRAP_ADMIN_EMAIL=" /srv/opsweave-staging/kernel.env | cut -d= -f2-)"
-            pass="$(sudo grep -E "^OPSWEAVE_BOOTSTRAP_ADMIN_PASSWORD=" /srv/opsweave-staging/kernel.env | cut -d= -f2-)"
-            [ -n "$email" ] && [ -n "$pass" ] || { echo "::error::bootstrap admin credentials absent from kernel.env"; exit 1; }
-
-            sudo docker exec "$KC" /usr/local/bin/opsctl --url http://127.0.0.1:3000               login --email "$email" --password "$pass" >/dev/null
-            echo "opsctl authenticated"
-
-            for name in data-catalog data-integration; do
-              plugin="opsweave.$name"
-              installed="$(sudo docker exec opsweave-staging-postgres-1 psql -U opsweave -d opsweave -tAc                 "SELECT count(*) FROM kernel.plugin_packages WHERE plugin_id='"'"'$plugin'"'"' AND version='"'"'$digest'"'"'")"
-              if [ "$installed" != "0" ]; then
-                echo "$plugin@$digest already installed; leaving it"
-                continue
-              fi
-              img="127.0.0.1:15001/opsweave/$name@$(sudo docker inspect --format "{{index .RepoDigests 0}}" "127.0.0.1:15001/opsweave/$name:$digest" | cut -d@ -f2)"
-              echo "$plugin@$digest: assembling a bundle against $img"
-              src="/srv/opsweave-staging/plugin-src"
-              sudo rm -rf /tmp/opsweave-bundle-$name
-              sudo python3 "$src/scripts/assemble_plugin.py" \
-                --template "$src/plugins/$name/manifest.template.json" \
-                --out "/tmp/opsweave-bundle-$name" \
-                --version "$digest" \
-                --image-ref "$img" \
-                --frontend-dist "$src/plugins/$name/web/dist" >/dev/null
-              sudo docker cp "/tmp/opsweave-bundle-$name" "$KC:/tmp/bundle-$name" >/dev/null
-              # The bundle directory lands root-owned for the same reason the key
-              # does; `opsctl bundle --dir` reads it as opsweave.
-              sudo docker exec -u 0 "$KC" chown -R opsweave:opsweave "/tmp/bundle-$name"
-              # docker cp writes as root and the container runs as opsweave
-              # (uid 10001), so the private key landed unreadable and
-              # `opsctl bundle --key` failed with
-              # "io error: Permission denied (os error 13)".
-              # Hand the file to the container user, mode 0400, and remove it
-              # from the container afterwards.
-              sudo docker cp "$key" "$KC:/tmp/publisher.key" >/dev/null
-              sudo docker exec -u 0 "$KC" chown opsweave:opsweave /tmp/publisher.key
-              sudo docker exec -u 0 "$KC" chmod 0400 /tmp/publisher.key
-              sudo docker exec "$KC" /usr/local/bin/opsctl --url http://127.0.0.1:3000                 bundle --dir "/tmp/bundle-$name" --out "/tmp/$name.plugin.zip" --key /tmp/publisher.key >/dev/null
-              sudo docker exec "$KC" /usr/local/bin/opsctl --url http://127.0.0.1:3000                 install "/tmp/$name.plugin.zip" 2>&1 | tail -1
-              sudo docker exec "$KC" /usr/local/bin/opsctl --url http://127.0.0.1:3000                 deploy "$plugin" "$digest" --wait 2>&1 | tail -2
-              sudo docker exec "$KC" rm -f /tmp/publisher.key "/tmp/$name.plugin.zip"
-              sudo rm -rf "/tmp/opsweave-bundle-$name"
-            done
-            echo "data plugin bundles installed"' 2>&1 | tail -20
+            sudo rm -rf /srv/opsweave-staging/plugin-src
+            sudo install -d -m 0755 /srv/opsweave-staging/plugin-src
+            sudo tar xzf /tmp/opsweave-data-plugins.tgz -C /srv/opsweave-staging/plugin-src
+            rm -f /tmp/opsweave-data-plugins.tgz
+            sudo bash /srv/opsweave-staging/plugin-src/scripts/publish-data-plugins.sh' 2>&1 | tail -30
 
       - name: Collect host status
         if: always()
