@@ -160,6 +160,32 @@ const RULES = [
 
   // --- The CI definitions themselves ----------------------------------------
   // Editing a workflow must not be the one change that runs nothing.
+  // Editing a workflow must run every suite THAT WORKFLOW produces, plus the
+  // coverage check. Not every suite in the repository.
+  //
+  // The rule said only `spec-coverage`, which was invisible while every ci.yml job
+  // ran unconditionally. This branch made the heavy jobs conditional, and the hole
+  // became real: PR #125 edits ci.yml - the file that defines the `rust` job - and
+  // `rust` was skipped.
+  //
+  // The first fix was `[...SUITES]`, and `check-impact-consistency.mjs` rejected
+  // it immediately: a workflow's push filter is its own paths, so demanding all
+  // fourteen suites for every workflow edit says "editing g12-acceptance.yml
+  // requires runtime-conformance", which that workflow never starts for. Broad was
+  // as wrong as narrow, in the other direction.
+  //
+  // Per-file is the accurate statement: each entry names one workflow and the
+  // suites its jobs produce. A workflow not listed here produces no suite a gate
+  // reads, so `spec-coverage` is the whole answer for it.
+  { glob: '.github/workflows/ci.yml', suites: [...SUITES] },
+  { glob: '.github/workflows/data-foundation.yml', suites: ['data-foundation', 'browser-e2e'] },
+  { glob: '.github/workflows/g12-acceptance.yml', suites: ['g12-acceptance'] },
+  { glob: '.github/workflows/platform-linux-acceptance.yml', suites: ['linux-runtime'] },
+  { glob: '.github/workflows/plugin-lifecycle.yml', suites: ['plugin-lifecycle'] },
+  { glob: '.github/workflows/reliability.yml', suites: ['quality-faults'] },
+  { glob: '.github/workflows/runtime-conformance.yml', suites: ['runtime-conformance'] },
+  { glob: '.github/workflows/typed-pipeline-contracts.yml', suites: ['contracts'] },
+  // Any OTHER workflow file: the coverage check is the thing that reads it.
   { glob: '.github/workflows/**', suites: ['spec-coverage'] },
   { glob: 'tests/ci/check-spec-coverage.mjs', suites: ['spec-coverage'] },
 ];

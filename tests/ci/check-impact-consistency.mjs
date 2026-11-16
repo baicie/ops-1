@@ -376,5 +376,29 @@ for (const [job, suite, paths] of GATED_COVERAGE) {
   }
 }
 
+// A workflow edit must require the suites that workflow produces. This is the
+// defect PR #125 hit: ci.yml defines the rust/web/image/acceptance jobs, but an
+// edit to it was mapped to `spec-coverage` alone, so the jobs it defines were
+// skipped by the very change that could break them.
+const WORKFLOW_EDIT_COVERAGE = [
+  ['.github/workflows/ci.yml', ['rust', 'web', 'platform-image-build']],
+  ['.github/workflows/data-foundation.yml', ['data-foundation']],
+  ['.github/workflows/g12-acceptance.yml', ['g12-acceptance']],
+  ['.github/workflows/platform-linux-acceptance.yml', ['linux-runtime']],
+  ['.github/workflows/plugin-lifecycle.yml', ['plugin-lifecycle']],
+  ['.github/workflows/reliability.yml', ['quality-faults']],
+  ['.github/workflows/runtime-conformance.yml', ['runtime-conformance']],
+];
+for (const [file, suites] of WORKFLOW_EDIT_COVERAGE) {
+  const got = analyse([file]).suites;
+  for (const suite of suites) {
+    if (!got[suite]) {
+      errors += 1;
+      process.stdout.write(`ERROR ${file} is edited but does not require ${suite}, the suite its jobs produce\n`);
+      process.stdout.write(`        a change to the file defining that job would skip it\n`);
+    }
+  }
+}
+
 process.stdout.write(`\nimpact/filter consistency: ${errors} error(s), ${warnings} warning(s)\n`);
 if (errors > 0 || (strict && warnings > 0)) process.exit(1);
