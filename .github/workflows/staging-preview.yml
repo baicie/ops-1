@@ -650,6 +650,20 @@ jobs:
           TARGET_SHA: ${{ needs.build.outputs.sha }}
         run: |
           set -euo pipefail
+          # The plugin web bundles are built HERE, on the runner, because the host
+          # has Docker but no node or pnpm. Vite output is static, so it travels
+          # with the source instead of being built there.
+          #
+          # Without this the bundle assembly fails with
+          #   Error: missing required file: frontend/remoteEntry.js
+          # and it fails at the END of the pipeline, after the images are built -
+          # which is where the first two runs of this step died.
+          pnpm --filter @opsweave/data-catalog-web build
+          pnpm --filter @opsweave/data-integration-web build
+          test -f plugins/data-catalog/web/dist/remoteEntry.js \
+            || { echo "::error::the data-catalog web build produced no remoteEntry.js"; exit 1; }
+          test -f plugins/data-integration/web/dist/remoteEntry.js \
+            || { echo "::error::the data-integration web build produced no remoteEntry.js"; exit 1; }
           # The plugin sources are in the checkout. Send them; the host has no copy.
           tar czf /tmp/opsweave-data-plugins.tgz \
             --exclude=node_modules \
@@ -669,7 +683,10 @@ jobs:
              # not republished under a new tag on every deploy and a changed one
              # never reuses a tag. The manifest schema requires `x.y.z`, so the
              # digest becomes the patch segment.
-             src_hash="$(sudo sh -c "cat /srv/opsweave-staging/plugin-src/plugins/data-catalog/backend/*.mjs /srv/opsweave-staging/plugin-src/plugins/data-integration/backend/*.mjs | sha256sum" | cut -c1-12)"
+            # Everything the bundle carries, not only the backend: a UI-only
+            # change must produce a new version, or the deploy skips it and the
+            # plugin keeps serving the old front end.
+            src_hash="$(sudo sh -c "cat /srv/opsweave-staging/plugin-src/plugins/data-catalog/backend/*.mjs /srv/opsweave-staging/plugin-src/plugins/data-integration/backend/*.mjs; find /srv/opsweave-staging/plugin-src/plugins/*/web/dist -type f | sort | xargs cat" | sha256sum" | cut -c1-12)"
              digest="0.0.$(( 0x$src_hash % 100000 ))"
              echo "plugin source digest: $digest (from $src_hash)"
              for name in data-catalog data-integration; do
@@ -768,6 +785,9 @@ jobs:
                 --image-ref "$img" \
                 --frontend-dist "$src/plugins/$name/web/dist" >/dev/null
               sudo docker cp "/tmp/opsweave-bundle-$name" "$KC:/tmp/bundle-$name" >/dev/null
+              # The bundle directory lands root-owned for the same reason the key
+              # does; `opsctl bundle --dir` reads it as opsweave.
+              sudo docker exec -u 0 "$KC" chown -R opsweave:opsweave "/tmp/bundle-$name"
               # docker cp writes as root and the container runs as opsweave
               # (uid 10001), so the private key landed unreadable and
               # `opsctl bundle --key` failed with
