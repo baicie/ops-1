@@ -2859,12 +2859,23 @@ mod tests {
             assert_eq!(restarts2, restarts1);
 
             // And it now occupies its slot again: the row is a live attempt.
+            //
+            // SCOPED TO THIS DEPLOYMENT, and that is the whole point of the
+            // assertion. The first version counted every instance on the node:
+            //
+            //     WHERE node_id=$1 AND desired_action='START' ...
+            //
+            // and asserted the result was 1. It passed locally and failed in CI
+            // with `left: 2` - because `reconcile_once` reconciles EVERY
+            // deployment in the database, and the other tests in this module
+            // share it. A count of "the node" is not a count of "this test's
+            // slot", so the assertion was measuring other tests' traffic.
             let count: i64 = sqlx::query_scalar(
                 "SELECT count(*)::bigint FROM kernel.plugin_instances
-                 WHERE node_id=$1 AND desired_action='START'
+                 WHERE deployment_id=$1 AND desired_action='START'
                    AND NOT (state IN ('UNHEALTHY','UNREACHABLE') AND container_id IS NULL)",
             )
-            .bind(node_id)
+            .bind(deployment_id)
             .fetch_one(&pool)
             .await
             .expect("count reads back");
